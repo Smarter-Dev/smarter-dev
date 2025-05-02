@@ -244,7 +244,7 @@ p {
 
 /* Hero Section */
 .hero {
-    padding: calc(var(--spacing-3xl) + 70px) 0 var(--spacing-3xl) 0; /* Added extra top padding for navbar */
+    padding: calc(var(--spacing-3xl) + 70px) 0 calc(var(--spacing-3xl) * 2) 0; /* Added extra top and bottom padding */
     position: relative;
     overflow: hidden;
     margin-top: 0; /* Ensure no margin at top */
@@ -443,7 +443,7 @@ p {
 
 /* About Section */
 .about {
-    padding: var(--spacing-3xl) 0;
+    padding: var(--spacing-3xl) 0 calc(var(--spacing-3xl) * 2); /* Doubled bottom padding */
     background-color: var(--gray-900); /* Even darker background */
     position: relative;
     overflow: hidden; /* For background effects */
@@ -576,37 +576,87 @@ p {
 
 /* CTA Section */
 .cta-section {
-    padding: var(--spacing-3xl) 0;
-    background-color: var(--primary);
-    background-image: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    padding: calc(var(--spacing-3xl) * 2) 0 calc(var(--spacing-3xl) * 2); /* Doubled top and bottom padding */
+    background-color: var(--dark-bg); /* Darker background */
     color: var(--white);
     text-align: center;
+    position: relative;
+    overflow: hidden;
+    border-top: 1px solid rgba(59, 130, 246, 0.1);
+    border-bottom: 1px solid rgba(59, 130, 246, 0.1);
+}
+
+.cta-section::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: radial-gradient(circle at center, rgba(59, 130, 246, 0.15) 0%, transparent 70%);
+    z-index: 0;
+}
+
+.cta-section::after {
+    content: '';
+    position: absolute;
+    width: 200px;
+    height: 200px;
+    background: radial-gradient(circle, rgba(34, 197, 94, 0.15), transparent 70%);
+    top: -100px;
+    right: -100px;
+    border-radius: 50%;
+    z-index: 0;
 }
 
 .cta-content {
     max-width: 700px;
     margin: 0 auto;
+    position: relative;
+    z-index: 1;
 }
 
 .cta-section h2 {
     color: var(--white);
     margin-bottom: var(--spacing-md);
+    font-size: 2.2rem;
+    position: relative;
+    display: inline-block;
+}
+
+.cta-section h2::after {
+    content: '';
+    position: absolute;
+    bottom: -10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60px;
+    height: 3px;
+    background: linear-gradient(to right, var(--primary), var(--accent));
+    border-radius: var(--radius-full);
 }
 
 .cta-section p {
-    margin-bottom: var(--spacing-xl);
+    margin: var(--spacing-lg) 0 var(--spacing-xl);
     opacity: 0.9;
+    font-size: 1.1rem;
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .cta-section .cta-button.primary {
-    background: var(--white);
-    color: var(--primary);
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+    color: var(--white);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    border: none;
+    padding: 1rem 2rem;
+    font-size: 1.1rem;
 }
 
 .cta-section .cta-button.primary:hover {
-    background: var(--white);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4), 0 0 20px rgba(59, 130, 246, 0.4);
 }
 
 /* Coming Soon Section */
@@ -688,7 +738,7 @@ p {
 
 /* Footer */
 footer {
-    padding: var(--spacing-3xl) 0 var(--spacing-2xl);
+    padding: calc(var(--spacing-3xl) * 2) 0 var(--spacing-2xl); /* Doubled top padding */
     background-color: var(--gray-900);
     color: var(--gray-300);
     position: relative;
