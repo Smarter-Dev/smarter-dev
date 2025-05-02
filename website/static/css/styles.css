@@ -1,10 +1,10 @@
 :root {
     /* Color Palette - Dark Gray Theme */
-    --primary: #3b82f6; /* Blue - better match with orange */
+    --primary: #3b82f6; /* Blue */
     --primary-dark: #2563eb;
     --primary-light: #60a5fa;
     --secondary: #10b981; /* Green */
-    --accent: #f97316;   /* Orange */
+    --accent: #22c55e;   /* Green accent - replacing orange */
     --background: #1a1a1a; /* Dark gray */
     --dark-bg: #121212;   /* Darker gray */
     --text: #e2e8f0;      /* Light gray */
@@ -295,7 +295,7 @@ p {
 }
 
 .keyword {
-    color: #ff79c6;
+    color: #60a5fa; /* Light blue */
 }
 
 .function {
@@ -307,7 +307,7 @@ p {
 }
 
 .string {
-    color: #f1fa8c;
+    color: #4ade80; /* Light green */
 }
 
 .class {
@@ -356,6 +356,7 @@ p {
     bottom: -200px;
     right: -100px;
     animation: float 10s ease-in-out infinite;
+    opacity: 0.15; /* Slightly less visible for green */
 }
 
 .shape-3 {
