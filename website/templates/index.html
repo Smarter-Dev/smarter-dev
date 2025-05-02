@@ -27,12 +27,12 @@
                     <pre><code>
 <span class="keyword">function</span> <span class="function">joinCommunity</span>() {
   <span class="keyword">const</span> <span class="variable">developer</span> = <span class="keyword">new</span> <span class="class">Developer</span>(<span class="string">'you'</span>);
-  
+
   <span class="class">SmarterDev</span>.<span class="function">welcome</span>(developer);
   developer.<span class="function">learn</span>();
   developer.<span class="function">share</span>();
   developer.<span class="function">grow</span>();
-  
+
   <span class="keyword">return</span> <span class="variable">developer</span>.<span class="property">success</span>;
 }
 
@@ -101,77 +101,9 @@
     </div>
 </section>
 
-<section class="coming-soon">
-    <div class="container">
-        <h2 class="section-title">Coming <span class="accent">Soon</span></h2>
-        <div class="coming-soon-grid">
-            <div class="coming-soon-item">
-                <h3>Tutorials & Resources</h3>
-                <p>Curated learning paths and resources for developers at all levels.</p>
-            </div>
-            <div class="coming-soon-item">
-                <h3>Mentorship Program</h3>
-                <p>Connect with experienced developers for personalized guidance.</p>
-            </div>
-            <div class="coming-soon-item">
-                <h3>Code Reviews</h3>
-                <p>Get feedback on your code from peers and experienced developers.</p>
-            </div>
-            <div class="coming-soon-item">
-                <h3>Community Events</h3>
-                <p>Virtual workshops, hackathons, and coding sessions.</p>
-            </div>
-        </div>
-    </div>
-</section>
 
-<section class="newsletter">
-    <div class="container">
-        <div class="newsletter-content">
-            <h2>Stay Updated</h2>
-            <p>Subscribe to our newsletter to get updates on new features and community events.</p>
-            <form id="subscribe-form" class="newsletter-form">
-                <input type="email" name="email" placeholder="Your email address" required>
-                <button type="submit" class="cta-button primary">Subscribe</button>
-            </form>
-            <div id="subscribe-message" class="subscribe-message"></div>
-        </div>
-    </div>
-</section>
 {% endblock %}
 
 {% block extra_js %}
-<script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const form = document.getElementById('subscribe-form');
-        const message = document.getElementById('subscribe-message');
-        
-        form.addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            const formData = new FormData(form);
-            
-            try {
-                const response = await fetch('/api/subscribe', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    message.textContent = data.message;
-                    message.className = 'subscribe-message success';
-                    form.reset();
-                } else {
-                    message.textContent = data.message;
-                    message.className = 'subscribe-message error';
-                }
-            } catch (error) {
-                message.textContent = 'An error occurred. Please try again.';
-                message.className = 'subscribe-message error';
-            }
-        });
-    });
-</script>
+<!-- Additional JavaScript can be added here in the future -->
 {% endblock %}
