@@ -71,6 +71,11 @@ a:hover {
     color: var(--primary-dark);
 }
 
+main {
+    display: block;
+    padding-top: 0; /* No additional padding needed as we added it to hero */
+}
+
 .container {
     width: 100%;
     max-width: 1200px;
@@ -113,12 +118,16 @@ p {
 /* Navbar */
 .navbar {
     padding: var(--spacing-md) 0;
-    position: sticky;
+    position: fixed; /* Changed from sticky to fixed */
     top: 0;
-    background-color: rgba(26, 26, 26, 0.9); /* Dark gray background with transparency */
-    backdrop-filter: blur(10px);
+    left: 0;
+    right: 0;
+    background-color: rgba(26, 26, 26, 0.5); /* More transparent for glass effect */
+    backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px); /* For Safari */
     z-index: 100;
-    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.2);
+    transition: background-color 0.3s ease, backdrop-filter 0.3s ease;
 }
 
 .navbar .container {
@@ -188,9 +197,13 @@ p {
 
 /* Hero Section */
 .hero {
-    padding: var(--spacing-3xl) 0;
+    padding: calc(var(--spacing-3xl) + 70px) 0 var(--spacing-3xl) 0; /* Added extra top padding for navbar */
     position: relative;
     overflow: hidden;
+    margin-top: 0; /* Ensure no margin at top */
+    min-height: 66vh; /* Minimum height of 2/3 of the viewport height */
+    display: flex;
+    align-items: center;
 }
 
 .hero .container {
@@ -198,6 +211,7 @@ p {
     grid-template-columns: 1fr 1fr;
     gap: var(--spacing-2xl);
     align-items: center;
+    width: 100%;
 }
 
 .hero-title {
@@ -579,6 +593,10 @@ footer {
 
     h2 {
         font-size: 2rem;
+    }
+
+    .hero {
+        min-height: 75vh; /* Slightly taller on smaller screens */
     }
 
     .hero .container {

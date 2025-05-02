@@ -1,4 +1,23 @@
 document.addEventListener('DOMContentLoaded', function() {
+    // Navbar scroll effect
+    const navbar = document.querySelector('.navbar');
+
+    const handleScroll = () => {
+        if (window.scrollY > 50) {
+            navbar.style.backgroundColor = 'rgba(26, 26, 26, 0.7)';
+            navbar.style.backdropFilter = 'blur(15px)';
+            navbar.style.webkitBackdropFilter = 'blur(15px)';
+            navbar.style.boxShadow = '0 2px 10px rgba(0, 0, 0, 0.3), 0 0 20px rgba(59, 130, 246, 0.1)';
+        } else {
+            navbar.style.backgroundColor = 'rgba(26, 26, 26, 0.5)';
+            navbar.style.backdropFilter = 'blur(12px)';
+            navbar.style.webkitBackdropFilter = 'blur(12px)';
+            navbar.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.2)';
+        }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    handleScroll(); // Run once on load
     // Animate elements when they come into view
     const animateOnScroll = function() {
         const elements = document.querySelectorAll('.feature-card, .coming-soon-item, .hero-image, .hero-content');
