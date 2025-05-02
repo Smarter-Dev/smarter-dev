@@ -223,7 +223,7 @@ p {
     position: relative;
     overflow: hidden;
     margin-top: 0; /* Ensure no margin at top */
-    min-height: 66vh; /* Minimum height of 2/3 of the viewport height */
+    min-height: 100vh; /* Full viewport height */
     display: flex;
     align-items: center;
 }
@@ -484,20 +484,14 @@ p {
 }
 
 .feature-card:hover {
-    transform: translateY(-5px);
-    box-shadow: var(--shadow-lg), 0 0 15px rgba(59, 130, 246, 0.4);
+    transform: translateY(-3px); /* Reduced lift effect */
+    box-shadow: var(--shadow-lg), 0 0 10px rgba(59, 130, 246, 0.2); /* Reduced glow */
     border-color: var(--primary);
-    background-color: var(--gray-100);
 }
 
-.feature-card:hover::before {
-    width: 100%;
-    opacity: 0.05;
-}
+/* Removed the expanding gradient effect */
 
-.feature-card:hover::after {
-    opacity: 1;
-}
+/* Removed the radial gradient effect */
 
 .feature-icon {
     width: 48px;
@@ -524,18 +518,18 @@ p {
 }
 
 .feature-card:hover .feature-icon::before {
-    transform: scale(1.5);
-    opacity: 0.9;
+    transform: scale(1.2); /* Reduced scale effect */
+    opacity: 0.8;
 }
 
 .feature-icon svg {
     width: 100%;
     height: 100%;
-    transition: transform 0.3s ease, color 0.3s ease;
+    transition: color 0.3s ease;
 }
 
 .feature-card:hover .feature-icon svg {
-    transform: scale(1.1);
+    /* Removed scaling */
     color: var(--primary-light);
 }
 
@@ -546,19 +540,14 @@ p {
     transition: color 0.3s ease;
 }
 
-.feature-card:hover h3 {
-    color: var(--primary-light);
-}
+/* Removed h3 color change on hover */
 
 .feature-card p {
     color: var(--text-light);
     margin-bottom: 0;
-    transition: color 0.3s ease;
 }
 
-.feature-card:hover p {
-    color: var(--text);
-}
+/* Removed p color change on hover */
 
 /* CTA Section */
 .cta-section {
@@ -723,7 +712,7 @@ footer {
     }
 
     .hero {
-        min-height: 75vh; /* Slightly taller on smaller screens */
+        min-height: 100vh; /* Keep full height on smaller screens */
     }
 
     .hero .container {
