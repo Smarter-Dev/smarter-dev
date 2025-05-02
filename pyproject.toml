@@ -1,0 +1,17 @@
+[project]
+name = "smarter-dev"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "hikari>=2.3.1",
+    "hikari-lightbulb>=3.0.0a19",
+    "httpx>=0.28.1",
+    "itsdangerous>=2.2.0",
+    "jinja2>=3.1.6",
+    "python-multipart>=0.0.20",
+    "sqlalchemy>=2.0.40",
+    "starlette>=0.46.2",
+    "uvicorn[standard]>=0.34.2",
+]
