@@ -1,25 +1,25 @@
 :root {
-    /* Color Palette */
-    --primary: #6366f1;
-    --primary-dark: #4f46e5;
-    --primary-light: #818cf8;
-    --secondary: #10b981;
-    --accent: #f97316;
-    --background: #f8fafc;
-    --dark-bg: #0f172a;
-    --text: #1e293b;
-    --text-light: #64748b;
+    /* Color Palette - Dark Theme */
+    --primary: #8b5cf6; /* Purple */
+    --primary-dark: #7c3aed;
+    --primary-light: #a78bfa;
+    --secondary: #10b981; /* Green */
+    --accent: #f97316;   /* Orange */
+    --background: #0f172a; /* Dark blue/black */
+    --dark-bg: #020617;   /* Darker blue/black */
+    --text: #e2e8f0;      /* Light gray */
+    --text-light: #94a3b8; /* Medium gray */
     --white: #ffffff;
-    --gray-100: #f1f5f9;
-    --gray-200: #e2e8f0;
-    --gray-300: #cbd5e1;
-    --gray-800: #1e293b;
-    --gray-900: #0f172a;
-    
+    --gray-100: #1e293b;   /* Dark gray (for backgrounds) */
+    --gray-200: #334155;   /* Medium dark gray */
+    --gray-300: #64748b;   /* Medium gray */
+    --gray-800: #0f172a;   /* Very dark blue */
+    --gray-900: #020617;   /* Almost black */
+
     /* Typography */
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
-    
+
     /* Spacing */
     --spacing-xs: 0.25rem;
     --spacing-sm: 0.5rem;
@@ -28,17 +28,18 @@
     --spacing-xl: 2rem;
     --spacing-2xl: 3rem;
     --spacing-3xl: 4rem;
-    
+
     /* Borders */
     --radius-sm: 0.25rem;
     --radius-md: 0.5rem;
     --radius-lg: 1rem;
     --radius-full: 9999px;
-    
+
     /* Shadows */
-    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+    --glow-primary: 0 0 15px rgba(139, 92, 246, 0.5);
 }
 
 /* Reset & Base Styles */
@@ -114,10 +115,10 @@ p {
     padding: var(--spacing-md) 0;
     position: sticky;
     top: 0;
-    background-color: rgba(248, 250, 252, 0.9);
+    background-color: rgba(15, 23, 42, 0.9); /* Dark background with transparency */
     backdrop-filter: blur(10px);
     z-index: 100;
-    box-shadow: var(--shadow-sm);
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
 }
 
 .navbar .container {
@@ -175,12 +176,13 @@ p {
 }
 
 .cta-button.secondary {
-    background-color: var(--gray-100);
+    background-color: var(--gray-200);
     color: var(--text);
+    border: 1px solid var(--primary-light);
 }
 
 .cta-button.secondary:hover {
-    background-color: var(--gray-200);
+    background-color: var(--gray-100);
     transform: translateY(-2px);
 }
 
@@ -224,13 +226,15 @@ p {
     background-color: var(--dark-bg);
     border-radius: var(--radius-md);
     overflow: hidden;
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--shadow-lg), var(--glow-primary);
     transform: perspective(1000px) rotateY(-5deg) rotateX(5deg);
-    transition: transform 0.5s ease;
+    transition: transform 0.5s ease, box-shadow 0.5s ease;
+    border: 1px solid rgba(139, 92, 246, 0.3);
 }
 
 .code-window:hover {
     transform: perspective(1000px) rotateY(0deg) rotateX(0deg);
+    box-shadow: var(--shadow-lg), 0 0 20px rgba(139, 92, 246, 0.7);
 }
 
 .code-header {
@@ -324,7 +328,7 @@ p {
     position: absolute;
     border-radius: var(--radius-full);
     filter: blur(60px);
-    opacity: 0.15;
+    opacity: 0.2; /* Slightly more visible in dark mode */
 }
 
 .shape-1 {
@@ -369,7 +373,7 @@ p {
 /* About Section */
 .about {
     padding: var(--spacing-3xl) 0;
-    background-color: var(--gray-100);
+    background-color: var(--gray-800); /* Darker background */
 }
 
 .features {
@@ -379,16 +383,18 @@ p {
 }
 
 .feature-card {
-    background-color: var(--white);
+    background-color: var(--gray-100); /* Dark card background */
     padding: var(--spacing-xl);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-md);
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -1px rgba(0, 0, 0, 0.1);
     transition: transform 0.3s ease, box-shadow 0.3s ease;
+    border: 1px solid var(--gray-200);
 }
 
 .feature-card:hover {
     transform: translateY(-5px);
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--shadow-lg), 0 0 10px rgba(139, 92, 246, 0.3);
+    border-color: var(--primary);
 }
 
 .feature-icon {
@@ -451,6 +457,7 @@ p {
     border: 1px solid var(--gray-200);
     border-radius: var(--radius-md);
     transition: all 0.3s ease;
+    background-color: var(--gray-100);
 }
 
 .coming-soon-item:hover {
@@ -466,7 +473,7 @@ p {
 /* Newsletter Section */
 .newsletter {
     padding: var(--spacing-3xl) 0;
-    background-color: var(--gray-100);
+    background-color: var(--gray-800); /* Darker background */
 }
 
 .newsletter-content {
@@ -488,6 +495,8 @@ p {
     border-radius: var(--radius-md);
     font-family: var(--font-sans);
     font-size: 1rem;
+    background-color: var(--gray-100);
+    color: var(--text);
 }
 
 .newsletter-form input:focus {
@@ -556,24 +565,24 @@ footer {
     h1 {
         font-size: 3rem;
     }
-    
+
     h2 {
         font-size: 2rem;
     }
-    
+
     .hero .container {
         grid-template-columns: 1fr;
     }
-    
+
     .hero-image {
         order: -1;
         margin-bottom: var(--spacing-xl);
     }
-    
+
     .code-window {
         transform: none;
     }
-    
+
     .footer-content {
         grid-template-columns: 1fr;
         gap: var(--spacing-xl);
@@ -584,15 +593,15 @@ footer {
     .hero-title {
         font-size: 2.5rem;
     }
-    
+
     .hero-cta {
         flex-direction: column;
     }
-    
+
     .newsletter-form {
         flex-direction: column;
     }
-    
+
     .newsletter-form input,
     .newsletter-form button {
         width: 100%;
@@ -604,7 +613,7 @@ footer {
         flex-direction: column;
         gap: var(--spacing-md);
     }
-    
+
     .nav-links {
         width: 100%;
         justify-content: center;
