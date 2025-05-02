@@ -1,20 +1,20 @@
 :root {
-    /* Color Palette - Dark Theme */
-    --primary: #8b5cf6; /* Purple */
-    --primary-dark: #7c3aed;
-    --primary-light: #a78bfa;
+    /* Color Palette - Dark Gray Theme */
+    --primary: #3b82f6; /* Blue - better match with orange */
+    --primary-dark: #2563eb;
+    --primary-light: #60a5fa;
     --secondary: #10b981; /* Green */
     --accent: #f97316;   /* Orange */
-    --background: #0f172a; /* Dark blue/black */
-    --dark-bg: #020617;   /* Darker blue/black */
+    --background: #1a1a1a; /* Dark gray */
+    --dark-bg: #121212;   /* Darker gray */
     --text: #e2e8f0;      /* Light gray */
     --text-light: #94a3b8; /* Medium gray */
     --white: #ffffff;
-    --gray-100: #1e293b;   /* Dark gray (for backgrounds) */
-    --gray-200: #334155;   /* Medium dark gray */
-    --gray-300: #64748b;   /* Medium gray */
-    --gray-800: #0f172a;   /* Very dark blue */
-    --gray-900: #020617;   /* Almost black */
+    --gray-100: #2a2a2a;   /* Dark gray (for backgrounds) */
+    --gray-200: #333333;   /* Medium dark gray */
+    --gray-300: #666666;   /* Medium gray */
+    --gray-800: #1a1a1a;   /* Very dark gray */
+    --gray-900: #121212;   /* Almost black */
 
     /* Typography */
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
@@ -39,7 +39,7 @@
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
     --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
     --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
-    --glow-primary: 0 0 15px rgba(139, 92, 246, 0.5);
+    --glow-primary: 0 0 15px rgba(59, 130, 246, 0.5);
 }
 
 /* Reset & Base Styles */
@@ -115,7 +115,7 @@ p {
     padding: var(--spacing-md) 0;
     position: sticky;
     top: 0;
-    background-color: rgba(15, 23, 42, 0.9); /* Dark background with transparency */
+    background-color: rgba(26, 26, 26, 0.9); /* Dark gray background with transparency */
     backdrop-filter: blur(10px);
     z-index: 100;
     box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.3);
@@ -229,12 +229,12 @@ p {
     box-shadow: var(--shadow-lg), var(--glow-primary);
     transform: perspective(1000px) rotateY(-5deg) rotateX(5deg);
     transition: transform 0.5s ease, box-shadow 0.5s ease;
-    border: 1px solid rgba(139, 92, 246, 0.3);
+    border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
 .code-window:hover {
     transform: perspective(1000px) rotateY(0deg) rotateX(0deg);
-    box-shadow: var(--shadow-lg), 0 0 20px rgba(139, 92, 246, 0.7);
+    box-shadow: var(--shadow-lg), 0 0 20px rgba(59, 130, 246, 0.7);
 }
 
 .code-header {
@@ -393,7 +393,7 @@ p {
 
 .feature-card:hover {
     transform: translateY(-5px);
-    box-shadow: var(--shadow-lg), 0 0 10px rgba(139, 92, 246, 0.3);
+    box-shadow: var(--shadow-lg), 0 0 10px rgba(59, 130, 246, 0.3);
     border-color: var(--primary);
 }
 
@@ -413,6 +413,7 @@ p {
 .cta-section {
     padding: var(--spacing-3xl) 0;
     background-color: var(--primary);
+    background-image: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
     color: var(--white);
     text-align: center;
 }
