@@ -31,7 +31,7 @@
                 <div class="stat-value">{{ stats.total_views }}</div>
             </div>
         </div>
-        
+
         <div class="stat-card">
             <div class="stat-icon">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -46,7 +46,7 @@
                 <div class="stat-value">{{ stats.unique_visitors }}</div>
             </div>
         </div>
-        
+
         <div class="stat-card">
             <div class="stat-icon">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -60,7 +60,7 @@
                 <div class="stat-value">{{ stats.total_errors }}</div>
             </div>
         </div>
-        
+
         <div class="stat-card">
             <div class="stat-icon">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -75,7 +75,7 @@
             </div>
         </div>
     </div>
-    
+
     <div class="chart-grid">
         <div class="chart-card">
             <h3 class="chart-title">Page Views Over Time</h3>
@@ -83,7 +83,7 @@
                 <canvas id="viewsChart"></canvas>
             </div>
         </div>
-        
+
         <div class="chart-card">
             <h3 class="chart-title">Top Pages</h3>
             <div class="chart-container">
@@ -91,7 +91,7 @@
             </div>
         </div>
     </div>
-    
+
     <div class="data-section">
         <h3 class="section-title">Recent Page Views</h3>
         <div class="table-container">
@@ -101,6 +101,7 @@
                         <th>Path</th>
                         <th>Time</th>
                         <th>IP Address</th>
+                        <th>User Agent</th>
                         <th>Response Time</th>
                         <th>Status</th>
                     </tr>
@@ -111,6 +112,7 @@
                         <td class="truncate">{{ view.path }}</td>
                         <td>{{ view.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                         <td>{{ view.ip_address or 'Unknown' }}</td>
+                        <td class="truncate user-agent-cell" title="{{ view.user_agent }}">{{ view.user_agent or 'Unknown' }}</td>
                         <td>{{ "%.3f"|format(view.response_time) }}s</td>
                         <td>
                             <span class="status-badge {% if view.status_code < 400 %}active{% else %}inactive{% endif %}">
@@ -119,17 +121,17 @@
                         </td>
                     </tr>
                     {% endfor %}
-                    
+
                     {% if not recent_page_views %}
                     <tr>
-                        <td colspan="5" class="empty-table">No page views recorded yet.</td>
+                        <td colspan="6" class="empty-table">No page views recorded yet.</td>
                     </tr>
                     {% endif %}
                 </tbody>
             </table>
         </div>
     </div>
-    
+
     <div class="data-section">
         <h3 class="section-title">Recent Errors</h3>
         <div class="table-container">
@@ -138,6 +140,7 @@
                     <tr>
                         <th>Path</th>
                         <th>Time</th>
+                        <th>IP Address</th>
                         <th>Error Type</th>
                         <th>Message</th>
                         <th>Actions</th>
@@ -148,6 +151,7 @@
                     <tr>
                         <td class="truncate">{{ error.path }}</td>
                         <td>{{ error.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>{{ error.ip_address or 'Unknown' }}</td>
                         <td>{{ error.error_type }}</td>
                         <td class="truncate">{{ error.error_message }}</td>
                         <td>
@@ -157,10 +161,10 @@
                         </td>
                     </tr>
                     {% endfor %}
-                    
+
                     {% if not recent_route_errors %}
                     <tr>
-                        <td colspan="5" class="empty-table">No errors recorded yet.</td>
+                        <td colspan="6" class="empty-table">No errors recorded yet.</td>
                     </tr>
                     {% endif %}
                 </tbody>
@@ -168,6 +172,17 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .user-agent-cell {
+        max-width: 200px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+</style>
 {% endblock %}
 
 {% block extra_js %}
@@ -212,7 +227,7 @@
                 }
             }
         });
-        
+
         // Top pages chart
         const topPagesCtx = document.getElementById('topPagesChart').getContext('2d');
         const topPagesChart = new Chart(topPagesCtx, {
