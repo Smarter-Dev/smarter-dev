@@ -1,0 +1,205 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Dashboard - Smarter.Dev Admin{% endblock %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 8h1a4 4 0 0 1 0 8h-1"></path>
+                    <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path>
+                    <line x1="6" y1="1" x2="6" y2="4"></line>
+                    <line x1="10" y1="1" x2="10" y2="4"></line>
+                    <line x1="14" y1="1" x2="14" y2="4"></line>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <h3 class="stat-title">Total Redirects</h3>
+                <div class="stat-value">{{ stats.total_redirects }}</div>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <h3 class="stat-title">Total Clicks</h3>
+                <div class="stat-value">{{ stats.total_clicks }}</div>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <h3 class="stat-title">Today's Clicks</h3>
+                <div class="stat-value">{{ stats.today_clicks }}</div>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="9" cy="7" r="4"></circle>
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <h3 class="stat-title">Unique Visitors</h3>
+                <div class="stat-value">{{ stats.unique_visitors }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="chart-grid">
+        <div class="chart-card">
+            <h3 class="chart-title">Clicks Over Time</h3>
+            <div class="chart-container">
+                <canvas id="clicksChart"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <h3 class="chart-title">Top Redirects</h3>
+            <div class="chart-container">
+                <canvas id="topRedirectsChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="recent-section">
+        <h3 class="section-title">Recent Redirects</h3>
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Target URL</th>
+                        <th>Clicks</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for redirect in recent_redirects %}
+                    <tr>
+                        <td>{{ redirect[0].name }}</td>
+                        <td class="truncate">{{ redirect[0].target_url }}</td>
+                        <td>{{ redirect[1] }}</td>
+                        <td>{{ redirect[0].created_at.strftime('%Y-%m-%d') }}</td>
+                        <td>
+                            <div class="actions">
+                                <a href="/admin/redirects/{{ redirect[0].id }}" class="btn btn-sm btn-outline">View</a>
+                                <a href="/admin/redirects/{{ redirect[0].id }}/edit" class="btn btn-sm btn-outline">Edit</a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Clicks over time chart
+        const clicksCtx = document.getElementById('clicksChart').getContext('2d');
+        const clicksChart = new Chart(clicksCtx, {
+            type: 'line',
+            data: {
+                labels: {{ chart_data.dates|tojson }},
+                datasets: [{
+                    label: 'Clicks',
+                    data: {{ chart_data.clicks|tojson }},
+                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                    borderColor: 'rgba(59, 130, 246, 1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)'
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+
+        // Top redirects chart
+        const topRedirectsCtx = document.getElementById('topRedirectsChart').getContext('2d');
+        const topRedirectsChart = new Chart(topRedirectsCtx, {
+            type: 'bar',
+            data: {
+                labels: {{ chart_data.top_redirects_names|tojson }},
+                datasets: [{
+                    label: 'Clicks',
+                    data: {{ chart_data.top_redirects_clicks|tojson }},
+                    backgroundColor: [
+                        'rgba(59, 130, 246, 0.7)',
+                        'rgba(16, 185, 129, 0.7)',
+                        'rgba(249, 115, 22, 0.7)',
+                        'rgba(139, 92, 246, 0.7)',
+                        'rgba(236, 72, 153, 0.7)'
+                    ],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)'
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}

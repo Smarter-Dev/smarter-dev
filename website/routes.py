@@ -13,12 +13,6 @@ templates = Jinja2Templates(directory="website/templates")
 async def home(request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-# Discord redirect route
-async def discord_redirect(request):
-    # Replace with your actual Discord invite link
-    discord_invite_url = "https://discord.gg/your-invite-link"
-    return RedirectResponse(url=discord_invite_url)
-
 # API route for subscribing (for future use)
 async def subscribe(request):
     form_data = await request.form()
