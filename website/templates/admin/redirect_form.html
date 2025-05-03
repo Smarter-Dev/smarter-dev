@@ -1,0 +1,108 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ 'New' if is_new else 'Edit' }} Redirect - Smarter.Dev Admin{% endblock %}
+
+{% block page_title %}{{ 'New' if is_new else 'Edit' }} Redirect{% endblock %}
+
+{% block content %}
+<div class="form-page">
+    <form method="post" class="admin-form">
+        <div class="form-group">
+            <label for="name">Redirect Name</label>
+            <input type="text" id="name" name="name" value="{{ redirect.name if redirect else '' }}" required {% if not is_new %}readonly{% endif %}>
+            <div class="form-help">
+                URL-safe name for the redirect (e.g., "twitter" for smarter.dev/twitter)
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label for="target_url">Target URL</label>
+            <input type="url" id="target_url" name="target_url" value="{{ redirect.target_url if redirect else '' }}" required>
+            <div class="form-help">
+                The full URL where users will be redirected to
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label for="description">Description (Optional)</label>
+            <textarea id="description" name="description" rows="3">{{ redirect.description if redirect else '' }}</textarea>
+            <div class="form-help">
+                Internal notes about this redirect
+            </div>
+        </div>
+        
+        <div class="form-group checkbox-group">
+            <label class="checkbox-label">
+                <input type="checkbox" name="is_active" {% if not redirect or redirect.is_active %}checked{% endif %}>
+                <span>Active</span>
+            </label>
+            <div class="form-help">
+                If unchecked, the redirect will not work
+            </div>
+        </div>
+        
+        <div class="form-actions">
+            <a href="/admin/redirects" class="btn btn-outline">Cancel</a>
+            <button type="submit" class="btn btn-primary">Save Redirect</button>
+        </div>
+    </form>
+    
+    {% if not is_new %}
+    <div class="redirect-preview">
+        <h3>Redirect Preview</h3>
+        <div class="preview-box">
+            <div class="preview-url">
+                <span class="domain">https://smarter.dev/</span><span class="path">{{ redirect.name }}</span>
+            </div>
+            <div class="preview-arrow">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                    <polyline points="12 5 19 12 12 19"></polyline>
+                </svg>
+            </div>
+            <div class="preview-target truncate">
+                {{ redirect.target_url }}
+            </div>
+        </div>
+        <div class="preview-actions">
+            <a href="/{{ redirect.name }}" target="_blank" class="btn btn-sm btn-outline">Test Redirect</a>
+            <button class="btn btn-sm btn-outline copy-btn" data-clipboard="{{ request.base_url }}{{ redirect.name }}">
+                Copy URL
+            </button>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Name field formatting
+        const nameField = document.getElementById('name');
+        if (nameField) {
+            nameField.addEventListener('input', function() {
+                // Convert to lowercase and replace spaces with hyphens
+                this.value = this.value.toLowerCase().replace(/\s+/g, '-');
+                // Remove special characters
+                this.value = this.value.replace(/[^a-z0-9-]/g, '');
+            });
+        }
+        
+        // Copy URL functionality
+        const copyButtons = document.querySelectorAll('.copy-btn');
+        copyButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const textToCopy = this.getAttribute('data-clipboard');
+                navigator.clipboard.writeText(textToCopy).then(() => {
+                    const originalText = this.textContent;
+                    this.textContent = 'Copied!';
+                    setTimeout(() => {
+                        this.textContent = originalText;
+                    }, 2000);
+                });
+            });
+        });
+    });
+</script>
+{% endblock %}

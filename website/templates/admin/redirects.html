@@ -1,0 +1,64 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Redirects - Smarter.Dev Admin{% endblock %}
+
+{% block page_title %}Redirects{% endblock %}
+
+{% block content %}
+<div class="redirects-page">
+    <div class="page-actions">
+        <a href="/admin/redirects/new" class="btn btn-primary">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            New Redirect
+        </a>
+    </div>
+
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Target URL</th>
+                    <th>Clicks</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for redirect in redirects %}
+                <tr>
+                    <td>{{ redirect[0].name }}</td>
+                    <td class="truncate">{{ redirect[0].target_url }}</td>
+                    <td>{{ redirect[1] }}</td>
+                    <td>
+                        <span class="status-badge {% if redirect[0].is_active %}active{% else %}inactive{% endif %}">
+                            {{ 'Active' if redirect[0].is_active else 'Inactive' }}
+                        </span>
+                    </td>
+                    <td>{{ redirect[0].created_at.strftime('%Y-%m-%d') }}</td>
+                    <td>
+                        <div class="actions">
+                            <a href="/admin/redirects/{{ redirect[0].id }}" class="btn btn-sm btn-outline">View</a>
+                            <a href="/admin/redirects/{{ redirect[0].id }}/edit" class="btn btn-sm btn-outline">Edit</a>
+                            <form method="post" action="/admin/redirects/{{ redirect[0].id }}/delete" class="inline-form" onsubmit="return confirm('Are you sure you want to delete this redirect?');">
+                                <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+
+                {% if not redirects %}
+                <tr>
+                    <td colspan="6" class="empty-table">No redirects found. <a href="/admin/redirects/new">Create your first redirect</a>.</td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
