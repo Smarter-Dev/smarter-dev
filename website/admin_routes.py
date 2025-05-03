@@ -410,6 +410,33 @@ async def admin_analytics(request):
         desc('view_count')
     ).limit(10).all()
 
+    # Get errors per page
+    errors_per_page = db.query(
+        RouteError.path,
+        func.count(RouteError.id).label('error_count')
+    ).filter(
+        RouteError.timestamp >= time_range
+    ).group_by(
+        RouteError.path
+    ).order_by(
+        desc('error_count')
+    ).limit(10).all()
+
+    # Get average response times per page (only for pages with at least 5 views)
+    response_times_per_page = db.query(
+        PageView.path,
+        func.avg(PageView.response_time).label('avg_response_time'),
+        func.count(PageView.id).label('view_count')
+    ).filter(
+        PageView.timestamp >= time_range
+    ).group_by(
+        PageView.path
+    ).having(
+        func.count(PageView.id) >= 5  # Only include pages with at least 5 views
+    ).order_by(
+        desc('avg_response_time')
+    ).limit(10).all()
+
     # Get page views over time (by day)
     views_by_day = db.query(
         func.date(PageView.timestamp).label('date'),
@@ -420,15 +447,29 @@ async def admin_analytics(request):
         func.date(PageView.timestamp)
     ).all()
 
+    # Get errors over time (by day)
+    errors_by_day = db.query(
+        func.date(RouteError.timestamp).label('date'),
+        func.count(RouteError.id).label('count')
+    ).filter(
+        RouteError.timestamp >= time_range
+    ).group_by(
+        func.date(RouteError.timestamp)
+    ).all()
+
     # Format dates and counts for chart
     dates = []
     views = []
+    errors = []
 
     # Create a dict with all dates in the range
     date_dict = {}
+    error_dict = {}
     for i in range(days):
         date = (datetime.now() - timedelta(days=i)).date()
-        date_dict[date.isoformat()] = 0
+        date_key = date.isoformat()
+        date_dict[date_key] = 0
+        error_dict[date_key] = 0
 
     # Fill in actual view counts
     for date_obj, count in views_by_day:
@@ -451,10 +492,32 @@ async def admin_analytics(request):
             print(f"Error processing date {date_obj}: {e}")
             continue
 
+    # Fill in actual error counts
+    for date_obj, count in errors_by_day:
+        try:
+            # Try to convert to string if it's a date object
+            if hasattr(date_obj, 'isoformat'):
+                date_key = date_obj.isoformat()
+            # If it's already a string, use it directly
+            elif isinstance(date_obj, str):
+                date_key = date_obj
+            else:
+                # Convert to string using str() as a fallback
+                date_key = str(date_obj)
+
+            # Update the count if the date exists in our dictionary
+            if date_key in error_dict:
+                error_dict[date_key] = count
+        except Exception as e:
+            # Log the error and continue with the next date
+            print(f"Error processing date {date_obj}: {e}")
+            continue
+
     # Sort by date and extract lists for the chart
     for date, count in sorted(date_dict.items()):
         dates.append(date)
         views.append(count)
+        errors.append(error_dict.get(date, 0))
 
     # Get recent page views
     recent_page_views = db.query(PageView).order_by(
@@ -478,8 +541,14 @@ async def admin_analytics(request):
     chart_data = {
         "dates": dates,
         "views": views,
+        "errors": errors,
         "top_pages": [p[0] for p in top_pages],
-        "top_pages_counts": [p[1] for p in top_pages]
+        "top_pages_counts": [p[1] for p in top_pages],
+        "errors_per_page": [p[0] for p in errors_per_page],
+        "errors_per_page_counts": [p[1] for p in errors_per_page],
+        "slow_pages": [p[0] for p in response_times_per_page],
+        "slow_pages_times": [round(float(p[1]), 3) for p in response_times_per_page],
+        "slow_pages_counts": [p[2] for p in response_times_per_page]
     }
 
     return templates.TemplateResponse(
