@@ -4,18 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Admin - Smarter.Dev{% endblock %}</title>
-    
+
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-    
+
     <!-- Chart.js for graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    
+
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ request.url_for('static', path='/css/admin.css') }}">
-    
+
     {% block extra_css %}{% endblock %}
 </head>
 <body>
@@ -47,13 +47,19 @@
                     </svg>
                     Redirects
                 </a>
-                <a href="/admin/analytics" class="nav-item {% if request.url.path.startswith('/admin/analytics') %}active{% endif %}">
+                <a href="/admin/analytics" class="nav-item {% if request.url.path == '/admin/analytics' %}active{% endif %}">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
                         <line x1="18" y1="20" x2="18" y2="10"></line>
                         <line x1="12" y1="20" x2="12" y2="4"></line>
                         <line x1="6" y1="20" x2="6" y2="14"></line>
                     </svg>
-                    Analytics
+                    User Analytics
+                </a>
+                <a href="/admin/bot-analytics" class="nav-item {% if request.url.path == '/admin/bot-analytics' %}active{% endif %}">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
+                        <path d="M18 10h-4V4h4v6zm-6 0H8V4h4v6zM6 10H2V4h4v6zm12 8h-4v-6h4v6zm-6 0H8v-6h4v6zm-6 0H2v-6h4v6z"></path>
+                    </svg>
+                    Bot Traffic
                 </a>
                 <a href="/admin/settings" class="nav-item {% if request.url.path.startswith('/admin/settings') %}active{% endif %}">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
@@ -74,7 +80,7 @@
                 </a>
             </div>
         </aside>
-        
+
         <main class="content">
             <header class="content-header">
                 <h1 class="page-title">{% block page_title %}Dashboard{% endblock %}</h1>
@@ -82,7 +88,7 @@
                     <span class="username">{{ request.user.display_name }}</span>
                 </div>
             </header>
-            
+
             <div class="content-body">
                 {% if messages %}
                 <div class="messages">
@@ -93,12 +99,12 @@
                     {% endfor %}
                 </div>
                 {% endif %}
-                
+
                 {% block content %}{% endblock %}
             </div>
         </main>
     </div>
-    
+
     {% block extra_js %}{% endblock %}
 </body>
 </html>

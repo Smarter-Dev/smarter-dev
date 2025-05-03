@@ -77,6 +77,7 @@ class PageView(Base):
     referer = Column(String, nullable=True)  # Store referer URL
     response_time = Column(Float, nullable=True)  # Response time in seconds
     status_code = Column(Integer, nullable=True)  # HTTP status code
+    is_bot = Column(Boolean, default=False)  # Flag to indicate if the view is from a bot
     timestamp = Column(DateTime, default=func.now())
 
     def __repr__(self):

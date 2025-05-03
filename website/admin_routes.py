@@ -383,15 +383,19 @@ async def admin_analytics(request):
     days = int(request.query_params.get('days', 7))
     time_range = datetime.now() - timedelta(days=days)
 
-    # Get page view stats
-    total_views = db.query(func.count(PageView.id)).scalar()
+    # Get page view stats (excluding bots)
+    total_views = db.query(func.count(PageView.id)).filter(
+        PageView.is_bot == False
+    ).scalar()
     recent_views = db.query(func.count(PageView.id)).filter(
-        PageView.timestamp >= time_range
+        PageView.timestamp >= time_range,
+        PageView.is_bot == False
     ).scalar()
 
-    # Get unique visitors (approximation based on IP)
+    # Get unique visitors (approximation based on IP, excluding bots)
     unique_visitors = db.query(func.count(func.distinct(PageView.ip_address))).filter(
-        PageView.timestamp >= time_range
+        PageView.timestamp >= time_range,
+        PageView.is_bot == False
     ).scalar()
 
     # Get error stats
@@ -400,10 +404,12 @@ async def admin_analytics(request):
         RouteError.timestamp >= time_range
     ).scalar()
 
-    # Get top pages
+    # Get top pages (excluding bots)
     top_pages = db.query(
         PageView.path,
         func.count(PageView.id).label('view_count')
+    ).filter(
+        PageView.is_bot == False
     ).group_by(
         PageView.path
     ).order_by(
@@ -422,7 +428,7 @@ async def admin_analytics(request):
         desc('error_count')
     ).limit(10).all()
 
-    # Get response time statistics per page (only for pages with at least 5 views)
+    # Get response time statistics per page (only for pages with at least 5 views, excluding bots)
     response_times_per_page = db.query(
         PageView.path,
         func.min(PageView.response_time).label('min_response_time'),
@@ -430,7 +436,8 @@ async def admin_analytics(request):
         func.max(PageView.response_time).label('max_response_time'),
         func.count(PageView.id).label('view_count')
     ).filter(
-        PageView.timestamp >= time_range
+        PageView.timestamp >= time_range,
+        PageView.is_bot == False
     ).group_by(
         PageView.path
     ).having(
@@ -439,12 +446,13 @@ async def admin_analytics(request):
         desc(func.max(PageView.response_time) - func.min(PageView.response_time))  # Order by range (max-min)
     ).limit(10).all()
 
-    # Get page views over time (by day)
+    # Get page views over time (by day, excluding bots)
     views_by_day = db.query(
         func.date(PageView.timestamp).label('date'),
         func.count(PageView.id).label('count')
     ).filter(
-        PageView.timestamp >= time_range
+        PageView.timestamp >= time_range,
+        PageView.is_bot == False
     ).group_by(
         func.date(PageView.timestamp)
     ).all()
@@ -521,8 +529,10 @@ async def admin_analytics(request):
         views.append(count)
         errors.append(error_dict.get(date, 0))
 
-    # Get recent page views
-    recent_page_views = db.query(PageView).order_by(
+    # Get recent page views (excluding bots)
+    recent_page_views = db.query(PageView).filter(
+        PageView.is_bot == False
+    ).order_by(
         desc(PageView.timestamp)
     ).limit(20).all()
 
@@ -573,6 +583,136 @@ async def admin_analytics(request):
             "chart_data": chart_data,
             "recent_page_views": recent_page_views,
             "recent_route_errors": recent_route_errors,
+            "days": days
+        }
+    )
+
+# Admin bot traffic analytics route
+async def admin_bot_analytics(request):
+    # Get DB session
+    db = next(get_db())
+
+    # Get time range from query params (default to last 7 days)
+    days = int(request.query_params.get('days', 7))
+    time_range = datetime.now() - timedelta(days=days)
+
+    # Get bot traffic stats
+    total_bot_views = db.query(func.count(PageView.id)).filter(
+        PageView.is_bot == True
+    ).scalar()
+    recent_bot_views = db.query(func.count(PageView.id)).filter(
+        PageView.timestamp >= time_range,
+        PageView.is_bot == True
+    ).scalar()
+
+    # Get unique bot visitors (approximation based on IP)
+    unique_bot_visitors = db.query(func.count(func.distinct(PageView.ip_address))).filter(
+        PageView.timestamp >= time_range,
+        PageView.is_bot == True
+    ).scalar()
+
+    # Get top bot user agents
+    top_bots = db.query(
+        PageView.user_agent,
+        func.count(PageView.id).label('view_count')
+    ).filter(
+        PageView.is_bot == True
+    ).group_by(
+        PageView.user_agent
+    ).order_by(
+        desc('view_count')
+    ).limit(10).all()
+
+    # Get top pages visited by bots
+    top_bot_pages = db.query(
+        PageView.path,
+        func.count(PageView.id).label('view_count')
+    ).filter(
+        PageView.is_bot == True
+    ).group_by(
+        PageView.path
+    ).order_by(
+        desc('view_count')
+    ).limit(10).all()
+
+    # Get bot views over time (by day)
+    bot_views_by_day = db.query(
+        func.date(PageView.timestamp).label('date'),
+        func.count(PageView.id).label('count')
+    ).filter(
+        PageView.timestamp >= time_range,
+        PageView.is_bot == True
+    ).group_by(
+        func.date(PageView.timestamp)
+    ).all()
+
+    # Format dates and counts for chart
+    dates = []
+    bot_views = []
+
+    # Create a dict with all dates in the range
+    date_dict = {}
+    for i in range(days):
+        date = (datetime.now() - timedelta(days=i)).date()
+        date_key = date.isoformat()
+        date_dict[date_key] = 0
+
+    # Fill in actual bot view counts
+    for date_obj, count in bot_views_by_day:
+        try:
+            # Try to convert to string if it's a date object
+            if hasattr(date_obj, 'isoformat'):
+                date_key = date_obj.isoformat()
+            # If it's already a string, use it directly
+            elif isinstance(date_obj, str):
+                date_key = date_obj
+            else:
+                # Convert to string using str() as a fallback
+                date_key = str(date_obj)
+
+            # Update the count if the date exists in our dictionary
+            if date_key in date_dict:
+                date_dict[date_key] = count
+        except Exception as e:
+            # Log the error and continue with the next date
+            print(f"Error processing date {date_obj}: {e}")
+            continue
+
+    # Sort by date and extract lists for the chart
+    for date, count in sorted(date_dict.items()):
+        dates.append(date)
+        bot_views.append(count)
+
+    # Get recent bot views
+    recent_bot_views_list = db.query(PageView).filter(
+        PageView.is_bot == True
+    ).order_by(
+        desc(PageView.timestamp)
+    ).limit(20).all()
+
+    # Prepare data for template
+    stats = {
+        "total_bot_views": total_bot_views,
+        "recent_bot_views": recent_bot_views,
+        "unique_bot_visitors": unique_bot_visitors
+    }
+
+    chart_data = {
+        "dates": dates,
+        "bot_views": bot_views,
+        "top_bots": [b[0] for b in top_bots],
+        "top_bots_counts": [b[1] for b in top_bots],
+        "top_bot_pages": [p[0] for p in top_bot_pages],
+        "top_bot_pages_counts": [p[1] for p in top_bot_pages]
+    }
+
+    return templates.TemplateResponse(
+        "admin/bot_analytics.html",
+        {
+            "request": request,
+            "stats": stats,
+            "chart_data": chart_data,
+            "recent_bot_views": recent_bot_views_list,
             "days": days
         }
     )

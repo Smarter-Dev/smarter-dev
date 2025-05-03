@@ -12,7 +12,7 @@ from .routes import home, subscribe
 from .admin_routes import (
     admin_login, admin_logout, admin_dashboard, admin_redirects,
     admin_new_redirect, admin_edit_redirect, admin_delete_redirect,
-    admin_redirect_detail, admin_analytics, admin_error_detail, init_admin
+    admin_redirect_detail, admin_analytics, admin_bot_analytics, admin_error_detail, init_admin
 )
 from .redirect_handler import handle_redirect
 from .auth import AdminAuthBackend, AdminAuthMiddleware
@@ -38,6 +38,7 @@ routes = [
     Route("/admin/redirects/{id:int}/edit", admin_edit_redirect, methods=["GET", "POST"]),
     Route("/admin/redirects/{id:int}/delete", admin_delete_redirect, methods=["POST"]),
     Route("/admin/analytics", admin_analytics, methods=["GET"]),
+    Route("/admin/bot-analytics", admin_bot_analytics, methods=["GET"]),
     Route("/admin/errors/{id:int}", admin_error_detail, methods=["GET"]),
 
     # Static files - must be before the catch-all redirect handler
