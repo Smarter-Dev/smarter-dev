@@ -1,0 +1,265 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Analytics - Smarter.Dev Admin{% endblock %}
+
+{% block page_title %}Analytics{% endblock %}
+
+{% block content %}
+<div class="analytics-page">
+    <div class="time-filter">
+        <form method="get" class="inline-form">
+            <label for="days">Time Range:</label>
+            <select id="days" name="days" onchange="this.form.submit()">
+                <option value="1" {% if days == 1 %}selected{% endif %}>Last 24 Hours</option>
+                <option value="7" {% if days == 7 %}selected{% endif %}>Last 7 Days</option>
+                <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 Days</option>
+                <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 Days</option>
+            </select>
+        </form>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <h3 class="stat-title">Total Page Views</h3>
+                <div class="stat-value">{{ stats.total_views }}</div>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                    <circle cx="9" cy="7" r="4"></circle>
+                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                    <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <h3 class="stat-title">Unique Visitors</h3>
+                <div class="stat-value">{{ stats.unique_visitors }}</div>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <h3 class="stat-title">Total Errors</h3>
+                <div class="stat-value">{{ stats.total_errors }}</div>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                    <line x1="8" y1="21" x2="16" y2="21"></line>
+                    <line x1="12" y1="17" x2="12" y2="21"></line>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <h3 class="stat-title">Recent Views</h3>
+                <div class="stat-value">{{ stats.recent_views }}</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="chart-grid">
+        <div class="chart-card">
+            <h3 class="chart-title">Page Views Over Time</h3>
+            <div class="chart-container">
+                <canvas id="viewsChart"></canvas>
+            </div>
+        </div>
+        
+        <div class="chart-card">
+            <h3 class="chart-title">Top Pages</h3>
+            <div class="chart-container">
+                <canvas id="topPagesChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <div class="data-section">
+        <h3 class="section-title">Recent Page Views</h3>
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Path</th>
+                        <th>Time</th>
+                        <th>IP Address</th>
+                        <th>Response Time</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for view in recent_page_views %}
+                    <tr>
+                        <td class="truncate">{{ view.path }}</td>
+                        <td>{{ view.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>{{ view.ip_address or 'Unknown' }}</td>
+                        <td>{{ "%.3f"|format(view.response_time) }}s</td>
+                        <td>
+                            <span class="status-badge {% if view.status_code < 400 %}active{% else %}inactive{% endif %}">
+                                {{ view.status_code }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    
+                    {% if not recent_page_views %}
+                    <tr>
+                        <td colspan="5" class="empty-table">No page views recorded yet.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    <div class="data-section">
+        <h3 class="section-title">Recent Errors</h3>
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Path</th>
+                        <th>Time</th>
+                        <th>Error Type</th>
+                        <th>Message</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for error in recent_route_errors %}
+                    <tr>
+                        <td class="truncate">{{ error.path }}</td>
+                        <td>{{ error.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>{{ error.error_type }}</td>
+                        <td class="truncate">{{ error.error_message }}</td>
+                        <td>
+                            <div class="actions">
+                                <a href="/admin/errors/{{ error.id }}" class="btn btn-sm btn-outline">View Details</a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    
+                    {% if not recent_route_errors %}
+                    <tr>
+                        <td colspan="5" class="empty-table">No errors recorded yet.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Page views over time chart
+        const viewsCtx = document.getElementById('viewsChart').getContext('2d');
+        const viewsChart = new Chart(viewsCtx, {
+            type: 'line',
+            data: {
+                labels: {{ chart_data.dates|tojson }},
+                datasets: [{
+                    label: 'Page Views',
+                    data: {{ chart_data.views|tojson }},
+                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                    borderColor: 'rgba(59, 130, 246, 1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)'
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+        
+        // Top pages chart
+        const topPagesCtx = document.getElementById('topPagesChart').getContext('2d');
+        const topPagesChart = new Chart(topPagesCtx, {
+            type: 'bar',
+            data: {
+                labels: {{ chart_data.top_pages|tojson }},
+                datasets: [{
+                    label: 'Views',
+                    data: {{ chart_data.top_pages_counts|tojson }},
+                    backgroundColor: [
+                        'rgba(59, 130, 246, 0.7)',
+                        'rgba(16, 185, 129, 0.7)',
+                        'rgba(249, 115, 22, 0.7)',
+                        'rgba(139, 92, 246, 0.7)',
+                        'rgba(236, 72, 153, 0.7)',
+                        'rgba(14, 165, 233, 0.7)',
+                        'rgba(20, 184, 166, 0.7)',
+                        'rgba(245, 158, 11, 0.7)',
+                        'rgba(168, 85, 247, 0.7)',
+                        'rgba(244, 63, 94, 0.7)'
+                    ],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)'
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}

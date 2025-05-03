@@ -6,17 +6,19 @@ from starlette.staticfiles import StaticFiles
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.authentication import AuthenticationMiddleware
+from starlette.middleware.errors import ServerErrorMiddleware
 
 from .routes import home, subscribe
 from .admin_routes import (
     admin_login, admin_logout, admin_dashboard, admin_redirects,
     admin_new_redirect, admin_edit_redirect, admin_delete_redirect,
-    admin_redirect_detail, init_admin
+    admin_redirect_detail, admin_analytics, admin_error_detail, init_admin
 )
 from .redirect_handler import handle_redirect
 from .auth import AdminAuthBackend, AdminAuthMiddleware
 from .database import engine, get_db
 from .models import Base
+from .tracking import track_middleware, track_page_view
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -35,6 +37,8 @@ routes = [
     Route("/admin/redirects/{id:int}", admin_redirect_detail, methods=["GET"]),
     Route("/admin/redirects/{id:int}/edit", admin_edit_redirect, methods=["GET", "POST"]),
     Route("/admin/redirects/{id:int}/delete", admin_delete_redirect, methods=["POST"]),
+    Route("/admin/analytics", admin_analytics, methods=["GET"]),
+    Route("/admin/errors/{id:int}", admin_error_detail, methods=["GET"]),
 
     # Static files - must be before the catch-all redirect handler
     Mount("/static", app=StaticFiles(directory="website/static"), name="static"),
@@ -45,9 +49,11 @@ routes = [
 
 # Middleware
 middleware = [
+    Middleware(ServerErrorMiddleware, debug=True),  # Add error middleware to catch exceptions
     Middleware(SessionMiddleware, secret_key="smarter-dev-secret-key"),
     Middleware(AuthenticationMiddleware, backend=AdminAuthBackend()),
     Middleware(AdminAuthMiddleware)
+    # We'll add our tracking middleware after app creation
 ]
 
 # Create Starlette application
@@ -56,6 +62,20 @@ app = Starlette(
     routes=routes,
     middleware=middleware
 )
+
+# Apply tracking middleware
+app.add_middleware(track_middleware)
+
+# Apply tracking decorator to routes
+# Note: This is an alternative to using middleware. You can use either approach.
+# Uncomment these lines if you prefer using decorators instead of middleware.
+#
+# # Apply tracking decorator to non-admin routes
+# app.routes = [
+#     Route(route.path, track_page_view(route.endpoint), methods=route.methods, name=route.name)
+#     if not route.path.startswith('/admin') and not isinstance(route, Mount) else route
+#     for route in app.routes
+# ]
 
 # We're using middleware classes instead of this custom middleware function
 # The SessionMiddleware and AuthenticationMiddleware are already in the middleware stack
