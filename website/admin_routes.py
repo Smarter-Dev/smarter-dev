@@ -7,7 +7,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, JSONResponse
 from starlette.templating import Jinja2Templates
 
-from .models import AdminUser, Redirect, RedirectClick
+from .models import AdminUser, Redirect, RedirectClick, PageView, RouteError
 from .auth import verify_password, get_password_hash, create_admin_user
 from .database import get_db
 
@@ -372,6 +372,143 @@ async def admin_redirect_detail(request):
             "chart_data": chart_data,
             "recent_clicks": recent_clicks
         }
+    )
+
+# Admin analytics route
+async def admin_analytics(request):
+    # Get DB session
+    db = next(get_db())
+
+    # Get time range from query params (default to last 7 days)
+    days = int(request.query_params.get('days', 7))
+    time_range = datetime.now() - timedelta(days=days)
+
+    # Get page view stats
+    total_views = db.query(func.count(PageView.id)).scalar()
+    recent_views = db.query(func.count(PageView.id)).filter(
+        PageView.timestamp >= time_range
+    ).scalar()
+
+    # Get unique visitors (approximation based on IP)
+    unique_visitors = db.query(func.count(func.distinct(PageView.ip_address))).filter(
+        PageView.timestamp >= time_range
+    ).scalar()
+
+    # Get error stats
+    total_errors = db.query(func.count(RouteError.id)).scalar()
+    recent_errors = db.query(func.count(RouteError.id)).filter(
+        RouteError.timestamp >= time_range
+    ).scalar()
+
+    # Get top pages
+    top_pages = db.query(
+        PageView.path,
+        func.count(PageView.id).label('view_count')
+    ).group_by(
+        PageView.path
+    ).order_by(
+        desc('view_count')
+    ).limit(10).all()
+
+    # Get page views over time (by day)
+    views_by_day = db.query(
+        func.date(PageView.timestamp).label('date'),
+        func.count(PageView.id).label('count')
+    ).filter(
+        PageView.timestamp >= time_range
+    ).group_by(
+        func.date(PageView.timestamp)
+    ).all()
+
+    # Format dates and counts for chart
+    dates = []
+    views = []
+
+    # Create a dict with all dates in the range
+    date_dict = {}
+    for i in range(days):
+        date = (datetime.now() - timedelta(days=i)).date()
+        date_dict[date.isoformat()] = 0
+
+    # Fill in actual view counts
+    for date_obj, count in views_by_day:
+        try:
+            # Try to convert to string if it's a date object
+            if hasattr(date_obj, 'isoformat'):
+                date_key = date_obj.isoformat()
+            # If it's already a string, use it directly
+            elif isinstance(date_obj, str):
+                date_key = date_obj
+            else:
+                # Convert to string using str() as a fallback
+                date_key = str(date_obj)
+
+            # Update the count if the date exists in our dictionary
+            if date_key in date_dict:
+                date_dict[date_key] = count
+        except Exception as e:
+            # Log the error and continue with the next date
+            print(f"Error processing date {date_obj}: {e}")
+            continue
+
+    # Sort by date and extract lists for the chart
+    for date, count in sorted(date_dict.items()):
+        dates.append(date)
+        views.append(count)
+
+    # Get recent page views
+    recent_page_views = db.query(PageView).order_by(
+        desc(PageView.timestamp)
+    ).limit(20).all()
+
+    # Get recent errors
+    recent_route_errors = db.query(RouteError).order_by(
+        desc(RouteError.timestamp)
+    ).limit(10).all()
+
+    # Prepare data for template
+    stats = {
+        "total_views": total_views,
+        "recent_views": recent_views,
+        "unique_visitors": unique_visitors,
+        "total_errors": total_errors,
+        "recent_errors": recent_errors
+    }
+
+    chart_data = {
+        "dates": dates,
+        "views": views,
+        "top_pages": [p[0] for p in top_pages],
+        "top_pages_counts": [p[1] for p in top_pages]
+    }
+
+    return templates.TemplateResponse(
+        "admin/analytics.html",
+        {
+            "request": request,
+            "stats": stats,
+            "chart_data": chart_data,
+            "recent_page_views": recent_page_views,
+            "recent_route_errors": recent_route_errors,
+            "days": days
+        }
+    )
+
+# Admin error details route
+async def admin_error_detail(request):
+    error_id = request.path_params["id"]
+
+    # Get DB session
+    db = next(get_db())
+
+    # Get error
+    error = db.query(RouteError).filter(RouteError.id == error_id).first()
+    if not error:
+        return RedirectResponse(url="/admin/analytics", status_code=302)
+
+    return templates.TemplateResponse(
+        "admin/error_detail.html",
+        {"request": request, "error": error}
     )
 
 # Initialize admin user

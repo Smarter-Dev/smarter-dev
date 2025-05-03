@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, func
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Float, func
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -64,3 +64,38 @@ class RedirectClick(Base):
 
     def __repr__(self):
         return f"<RedirectClick for {self.redirect_id} at {self.timestamp}>"
+
+# Page view tracking model
+class PageView(Base):
+    __tablename__ = "page_views"
+
+    id = Column(Integer, primary_key=True, index=True)
+    path = Column(String)  # URL path
+    method = Column(String)  # HTTP method (GET, POST, etc.)
+    ip_address = Column(String, nullable=True)  # Store IP address (consider privacy implications)
+    user_agent = Column(String, nullable=True)  # Store user agent
+    referer = Column(String, nullable=True)  # Store referer URL
+    response_time = Column(Float, nullable=True)  # Response time in seconds
+    status_code = Column(Integer, nullable=True)  # HTTP status code
+    timestamp = Column(DateTime, default=func.now())
+
+    def __repr__(self):
+        return f"<PageView {self.path} at {self.timestamp}>"
+
+# Route error tracking model
+class RouteError(Base):
+    __tablename__ = "route_errors"
+
+    id = Column(Integer, primary_key=True, index=True)
+    path = Column(String)  # URL path
+    method = Column(String)  # HTTP method (GET, POST, etc.)
+    ip_address = Column(String, nullable=True)  # Store IP address
+    user_agent = Column(String, nullable=True)  # Store user agent
+    error_type = Column(String)  # Exception type
+    error_message = Column(Text)  # Exception message
+    error_details = Column(Text, nullable=True)  # Full traceback
+    response_time = Column(Float, nullable=True)  # Response time in seconds
+    timestamp = Column(DateTime, default=func.now())
+
+    def __repr__(self):
+        return f"<RouteError {self.error_type} at {self.path}>"
