@@ -101,7 +101,7 @@
         </div>
 
         <div class="chart-card">
-            <h3 class="chart-title">Slowest Pages (Avg Response Time)</h3>
+            <h3 class="chart-title">Page Response Times (Min, Avg, Max)</h3>
             <div class="chart-container">
                 <canvas id="slowPagesChart"></canvas>
             </div>
@@ -373,23 +373,18 @@
         const slowPagesCtx = document.getElementById('slowPagesChart').getContext('2d');
         const slowPagesChart = new Chart(slowPagesCtx, {
             type: 'bar',
+            indexAxis: 'y',
             data: {
                 labels: {{ chart_data.slow_pages|tojson }},
                 datasets: [{
-                    label: 'Response Time (s)',
-                    data: {{ chart_data.slow_pages_times|tojson }},
-                    backgroundColor: [
-                        'rgba(234, 179, 8, 0.7)',
-                        'rgba(249, 115, 22, 0.7)',
-                        'rgba(239, 68, 68, 0.7)',
-                        'rgba(236, 72, 153, 0.7)',
-                        'rgba(217, 70, 239, 0.7)',
-                        'rgba(168, 85, 247, 0.7)',
-                        'rgba(79, 70, 229, 0.7)',
-                        'rgba(59, 130, 246, 0.7)',
-                        'rgba(16, 185, 129, 0.7)',
-                        'rgba(101, 163, 13, 0.7)'
-                    ],
+                    label: 'Min to Avg',
+                    data: {{ chart_data.slow_pages_min_times|tojson }},
+                    backgroundColor: 'rgba(16, 185, 129, 0.7)', // Green
+                    borderWidth: 0
+                }, {
+                    label: 'Avg to Max',
+                    data: {{ chart_data.slow_pages_avg_to_max|tojson }},
+                    backgroundColor: 'rgba(239, 68, 68, 0.7)', // Red
                     borderWidth: 0
                 }]
             },
@@ -402,27 +397,40 @@
                         grid: {
                             color: 'rgba(255, 255, 255, 0.05)'
                         },
+                        stacked: true
+                    },
+                    x: {
+                        beginAtZero: true,
+                        grid: {
+                            display: false
+                        },
+                        stacked: true,
                         ticks: {
                             callback: function(value) {
                                 return value.toFixed(3) + 's';
                             }
                         }
-                    },
-                    x: {
-                        grid: {
-                            display: false
-                        }
                     }
                 },
                 plugins: {
                     legend: {
-                        display: false
+                        display: true,
+                        position: 'top'
                     },
                     tooltip: {
                         callbacks: {
                             label: function(context) {
                                 const counts = {{ chart_data.slow_pages_counts|tojson }};
-                                return `Avg Response Time: ${context.raw}s (${counts[context.dataIndex]} views)`;
+                                const mins = {{ chart_data.slow_pages_min_times|tojson }};
+                                const avgs = {{ chart_data.slow_pages_avg_times|tojson }};
+                                const maxs = {{ chart_data.slow_pages_max_times|tojson }};
+                                const index = context.dataIndex;
+
+                                if (context.dataset.label === 'Min to Avg') {
+                                    return `Min: ${mins[index]}s, Avg: ${avgs[index]}s (${counts[index]} views)`;
+                                } else {
+                                    return `Avg: ${avgs[index]}s, Max: ${maxs[index]}s (${counts[index]} views)`;
+                                }
                             }
                         }
                     }

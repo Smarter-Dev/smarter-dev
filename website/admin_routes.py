@@ -422,10 +422,12 @@ async def admin_analytics(request):
         desc('error_count')
     ).limit(10).all()
 
-    # Get average response times per page (only for pages with at least 5 views)
+    # Get response time statistics per page (only for pages with at least 5 views)
     response_times_per_page = db.query(
         PageView.path,
+        func.min(PageView.response_time).label('min_response_time'),
         func.avg(PageView.response_time).label('avg_response_time'),
+        func.max(PageView.response_time).label('max_response_time'),
         func.count(PageView.id).label('view_count')
     ).filter(
         PageView.timestamp >= time_range
@@ -434,7 +436,7 @@ async def admin_analytics(request):
     ).having(
         func.count(PageView.id) >= 5  # Only include pages with at least 5 views
     ).order_by(
-        desc('avg_response_time')
+        desc(func.max(PageView.response_time) - func.min(PageView.response_time))  # Order by range (max-min)
     ).limit(10).all()
 
     # Get page views over time (by day)
@@ -538,6 +540,15 @@ async def admin_analytics(request):
         "recent_errors": recent_errors
     }
 
+    # Calculate the difference between avg and max for stacked bar chart
+    avg_to_max_diffs = []
+    for p in response_times_per_page:
+        avg_time = float(p[2])
+        max_time = float(p[3])
+        # Calculate the difference between avg and max
+        diff = round(max_time - avg_time, 3)
+        avg_to_max_diffs.append(diff)
+
     chart_data = {
         "dates": dates,
         "views": views,
@@ -547,8 +558,11 @@ async def admin_analytics(request):
         "errors_per_page": [p[0] for p in errors_per_page],
         "errors_per_page_counts": [p[1] for p in errors_per_page],
         "slow_pages": [p[0] for p in response_times_per_page],
-        "slow_pages_times": [round(float(p[1]), 3) for p in response_times_per_page],
-        "slow_pages_counts": [p[2] for p in response_times_per_page]
+        "slow_pages_min_times": [round(float(p[1]), 3) for p in response_times_per_page],
+        "slow_pages_avg_times": [round(float(p[2]), 3) for p in response_times_per_page],
+        "slow_pages_max_times": [round(float(p[3]), 3) for p in response_times_per_page],
+        "slow_pages_avg_to_max": avg_to_max_diffs,
+        "slow_pages_counts": [p[4] for p in response_times_per_page]
     }
 
     return templates.TemplateResponse(
