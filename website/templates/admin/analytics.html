@@ -78,7 +78,7 @@
 
     <div class="chart-grid">
         <div class="chart-card">
-            <h3 class="chart-title">Page Views Over Time</h3>
+            <h3 class="chart-title">Page Views & Errors Over Time</h3>
             <div class="chart-container">
                 <canvas id="viewsChart"></canvas>
             </div>
@@ -88,6 +88,22 @@
             <h3 class="chart-title">Top Pages</h3>
             <div class="chart-container">
                 <canvas id="topPagesChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="chart-grid">
+        <div class="chart-card">
+            <h3 class="chart-title">Errors Per Page</h3>
+            <div class="chart-container">
+                <canvas id="errorsPerPageChart"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-card">
+            <h3 class="chart-title">Slowest Pages (Avg Response Time)</h3>
+            <div class="chart-container">
+                <canvas id="slowPagesChart"></canvas>
             </div>
         </div>
     </div>
@@ -182,6 +198,19 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
+
+    .chart-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1.5rem;
+        margin-bottom: 2rem;
+    }
+
+    @media (max-width: 1024px) {
+        .chart-grid {
+            grid-template-columns: 1fr;
+        }
+    }
 </style>
 {% endblock %}
 
@@ -199,6 +228,14 @@
                     data: {{ chart_data.views|tojson }},
                     backgroundColor: 'rgba(59, 130, 246, 0.2)',
                     borderColor: 'rgba(59, 130, 246, 1)',
+                    borderWidth: 2,
+                    tension: 0.3,
+                    fill: true
+                }, {
+                    label: 'Errors',
+                    data: {{ chart_data.errors|tojson }},
+                    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                    borderColor: 'rgba(239, 68, 68, 1)',
                     borderWidth: 2,
                     tension: 0.3,
                     fill: true
@@ -222,7 +259,8 @@
                 },
                 plugins: {
                     legend: {
-                        display: false
+                        display: true,
+                        position: 'top'
                     }
                 }
             }
@@ -271,6 +309,122 @@
                 plugins: {
                     legend: {
                         display: false
+                    }
+                }
+            }
+        });
+
+        // Errors per page chart
+        const errorsPerPageCtx = document.getElementById('errorsPerPageChart').getContext('2d');
+        const errorsPerPageChart = new Chart(errorsPerPageCtx, {
+            type: 'bar',
+            data: {
+                labels: {{ chart_data.errors_per_page|tojson }},
+                datasets: [{
+                    label: 'Errors',
+                    data: {{ chart_data.errors_per_page_counts|tojson }},
+                    backgroundColor: [
+                        'rgba(239, 68, 68, 0.7)',
+                        'rgba(249, 115, 22, 0.7)',
+                        'rgba(245, 158, 11, 0.7)',
+                        'rgba(236, 72, 153, 0.7)',
+                        'rgba(217, 70, 239, 0.7)',
+                        'rgba(168, 85, 247, 0.7)',
+                        'rgba(79, 70, 229, 0.7)',
+                        'rgba(59, 130, 246, 0.7)',
+                        'rgba(16, 185, 129, 0.7)',
+                        'rgba(101, 163, 13, 0.7)'
+                    ],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)'
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return `Errors: ${context.raw}`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Slow pages chart
+        const slowPagesCtx = document.getElementById('slowPagesChart').getContext('2d');
+        const slowPagesChart = new Chart(slowPagesCtx, {
+            type: 'bar',
+            data: {
+                labels: {{ chart_data.slow_pages|tojson }},
+                datasets: [{
+                    label: 'Response Time (s)',
+                    data: {{ chart_data.slow_pages_times|tojson }},
+                    backgroundColor: [
+                        'rgba(234, 179, 8, 0.7)',
+                        'rgba(249, 115, 22, 0.7)',
+                        'rgba(239, 68, 68, 0.7)',
+                        'rgba(236, 72, 153, 0.7)',
+                        'rgba(217, 70, 239, 0.7)',
+                        'rgba(168, 85, 247, 0.7)',
+                        'rgba(79, 70, 229, 0.7)',
+                        'rgba(59, 130, 246, 0.7)',
+                        'rgba(16, 185, 129, 0.7)',
+                        'rgba(101, 163, 13, 0.7)'
+                    ],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)'
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return value.toFixed(3) + 's';
+                            }
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const counts = {{ chart_data.slow_pages_counts|tojson }};
+                                return `Avg Response Time: ${context.raw}s (${counts[context.dataIndex]} views)`;
+                            }
+                        }
                     }
                 }
             }
