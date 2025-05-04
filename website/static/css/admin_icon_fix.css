@@ -1,0 +1,176 @@
+/*
+ * Admin Icon Size Fix
+ * This CSS fixes the issue with SVG icons being too large in the admin Discord pages
+ */
+
+/* General SVG icon size constraints */
+.stat-icon svg,
+.alert-icon svg,
+.info-icon svg,
+.warning-icon svg,
+.warning-content svg,
+.btn-icon svg,
+.search-icon svg {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+    min-height: 24px;
+    max-width: 24px;
+    max-height: 24px;
+}
+
+/* Smaller icons for buttons and search */
+.btn-icon svg,
+.search-icon svg {
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    min-height: 16px;
+    max-width: 16px;
+    max-height: 16px;
+}
+
+/* Ensure icon containers don't expand beyond their intended size */
+.stat-icon,
+.alert-icon,
+.info-icon,
+.warning-icon,
+.warning-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    overflow: hidden;
+}
+
+/* Fix for search icon positioning */
+.search-box {
+    position: relative;
+}
+
+.search-box .search-icon {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: var(--text-light);
+}
+
+/* Fix for button icons alignment */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Ensure button icons stay the right size */
+.btn svg {
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    min-height: 16px;
+    max-width: 16px;
+    max-height: 16px;
+    margin-right: var(--spacing-sm);
+}
+
+/* Ensure SVGs don't overflow their containers */
+svg {
+    max-width: 100%;
+    max-height: 100%;
+}
+
+/* Global fix for SVGs in the admin pages (excluding navigation) */
+.admin-layout svg:not(.nav-icon):not(.nav-item svg) {
+    width: auto;
+    height: auto;
+}
+
+/* Fix for navigation icons in the sidebar */
+.sidebar-nav .nav-icon,
+.sidebar-nav svg.nav-icon,
+.nav-item svg {
+    width: 18px !important;
+    height: 18px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+    max-width: 18px !important;
+    max-height: 18px !important;
+    margin-right: var(--spacing-md);
+}
+
+/* Special case for warning box in API key created page */
+.warning-box {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-md);
+}
+
+.warning-box .warning-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    overflow: hidden;
+    color: var(--warning);
+}
+
+.warning-box .warning-content {
+    flex: 1;
+    width: auto;
+    max-width: none;
+}
+
+/* Special case for alert box in API key created page */
+.alert {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-md);
+}
+
+.alert .alert-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    overflow: hidden;
+    color: var(--success);
+}
+
+.alert .alert-content {
+    flex: 1;
+}
+
+/* Special case for info box in API keys page */
+.info-box {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-xl);
+}
+
+.info-box .info-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    max-width: 40px;
+    overflow: hidden;
+    color: var(--info);
+}
+
+.info-box .info-content {
+    flex: 1;
+}
