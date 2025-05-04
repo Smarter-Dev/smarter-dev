@@ -1,3 +1,4 @@
+import os
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy import func, desc
@@ -29,7 +30,16 @@ async def api_token(request):
                     status_code=400
                 )
 
-            # Verify API key
+            # Check for local development mode with TESTING key
+            if os.environ.get("SMARTER_DEV_LOCAL") == "1" and api_key == "TESTING":
+                # Generate a token with a dummy key ID and name for testing
+                token = create_jwt_token(999, "Testing API Key")
+                return JSONResponse({
+                    "token": token,
+                    "expires_in": 3600  # 1 hour
+                })
+
+            # Verify API key in database
             db = next(get_db())
             key = verify_api_key(api_key, db)
 
