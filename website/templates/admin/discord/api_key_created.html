@@ -1,0 +1,82 @@
+{% extends "admin/base.html" %}
+
+{% block title %}API Key Created - Smarter.Dev Admin{% endblock %}
+
+{% block page_title %}API Key Created{% endblock %}
+
+{% block content %}
+<div class="api-key-created">
+    <div class="alert alert-success">
+        <div class="alert-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+        </div>
+        <div class="alert-content">
+            <h3>API Key Created Successfully</h3>
+            <p>Your new API key has been created. <strong>Copy the key value now</strong> - it will only be shown once!</p>
+        </div>
+    </div>
+    
+    <div class="api-key-details">
+        <div class="detail-row">
+            <div class="detail-label">Name:</div>
+            <div class="detail-value">{{ api_key.name }}</div>
+        </div>
+        <div class="detail-row">
+            <div class="detail-label">Created:</div>
+            <div class="detail-value">{{ api_key.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</div>
+        </div>
+        <div class="detail-row key-value">
+            <div class="detail-label">Key Value:</div>
+            <div class="detail-value">
+                <div class="key-display">
+                    <code id="api-key-value">{{ key_value }}</code>
+                    <button id="copy-button" class="btn btn-sm btn-outline" onclick="copyApiKey()">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                        Copy
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="warning-box">
+        <div class="warning-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+            </svg>
+        </div>
+        <div class="warning-content">
+            <h3>Important Security Notice</h3>
+            <p>This API key provides access to your Discord bot data. Keep it secure and never share it publicly.</p>
+        </div>
+    </div>
+    
+    <div class="form-actions">
+        <a href="/admin/discord/api-keys" class="btn btn-primary">Return to API Keys</a>
+    </div>
+</div>
+
+<script>
+    function copyApiKey() {
+        const keyElement = document.getElementById('api-key-value');
+        const keyText = keyElement.textContent;
+        
+        navigator.clipboard.writeText(keyText).then(() => {
+            const copyButton = document.getElementById('copy-button');
+            copyButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><polyline points="20 6 9 17 4 12"></polyline></svg> Copied!';
+            
+            setTimeout(() => {
+                copyButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg> Copy';
+            }, 2000);
+        });
+    }
+</script>
+{% endblock %}

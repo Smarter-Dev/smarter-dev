@@ -1,0 +1,93 @@
+{% extends "admin/base.html" %}
+
+{% block title %}API Keys - Smarter.Dev Admin{% endblock %}
+
+{% block page_title %}API Keys{% endblock %}
+
+{% block content %}
+<div class="api-keys-page">
+    <div class="page-actions">
+        <a href="/admin/discord/api-keys/new" class="btn btn-primary">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            New API Key
+        </a>
+    </div>
+
+    <div class="info-box">
+        <div class="info-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+            </svg>
+        </div>
+        <div class="info-content">
+            <h3>API Keys for Discord Bot</h3>
+            <p>API keys are used to authenticate the Discord bot with this server. Create a new key for each bot instance. The key value will only be shown once when created.</p>
+        </div>
+    </div>
+
+    <div class="data-section">
+        <h3 class="section-title">Active API Keys</h3>
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Created</th>
+                        <th>Last Used</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for key in api_keys %}
+                    <tr>
+                        <td>{{ key.name }}</td>
+                        <td>{{ key.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>{{ key.last_used_at.strftime('%Y-%m-%d %H:%M:%S') if key.last_used_at else 'Never' }}</td>
+                        <td>
+                            <span class="status-badge {% if key.is_active %}active{% else %}inactive{% endif %}">
+                                {{ 'Active' if key.is_active else 'Inactive' }}
+                            </span>
+                        </td>
+                        <td>
+                            <div class="actions">
+                                <form method="post" action="/admin/discord/api-keys/{{ key.id }}/delete" onsubmit="return confirm('Are you sure you want to delete this API key? This action cannot be undone.');">
+                                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not api_keys %}
+                    <tr>
+                        <td colspan="5" class="empty-table">No API keys found. Create one using the button above.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="api-usage">
+        <h3 class="section-title">API Usage Instructions</h3>
+        <div class="code-block">
+            <pre><code>// Step 1: Get a JWT token using your API key
+POST /api/auth/token
+Content-Type: application/json
+
+{
+  "api_key": "your-api-key-here"
+}
+
+// Step 2: Use the JWT token in subsequent requests
+GET /api/users
+Authorization: Bearer your-jwt-token-here</code></pre>
+        </div>
+    </div>
+</div>
+{% endblock %}

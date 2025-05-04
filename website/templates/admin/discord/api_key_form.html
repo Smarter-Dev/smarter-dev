@@ -1,0 +1,30 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Create API Key - Smarter.Dev Admin{% endblock %}
+
+{% block page_title %}Create API Key{% endblock %}
+
+{% block content %}
+<div class="form-page">
+    <form method="post" class="admin-form">
+        <div class="form-group">
+            <label for="name">API Key Name</label>
+            <input type="text" id="name" name="name" required>
+            <div class="form-help">
+                A descriptive name to identify this API key (e.g., "Production Bot", "Development Bot")
+            </div>
+        </div>
+        
+        {% if error %}
+        <div class="form-error">
+            {{ error }}
+        </div>
+        {% endif %}
+        
+        <div class="form-actions">
+            <a href="/admin/discord/api-keys" class="btn btn-outline">Cancel</a>
+            <button type="submit" class="btn btn-primary">Create API Key</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
