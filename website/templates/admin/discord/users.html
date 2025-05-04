@@ -1,0 +1,82 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Discord Users - Smarter.Dev Admin{% endblock %}
+
+{% block page_title %}Discord Users{% endblock %}
+
+{% block content %}
+<div class="users-page">
+    <div class="filters">
+        <div class="search-box">
+            <input type="text" id="user-search" placeholder="Search users..." onkeyup="filterUsers()">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="search-icon">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+        </div>
+    </div>
+
+    <div class="data-section">
+        <div class="table-container">
+            <table class="data-table" id="users-table">
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Discord ID</th>
+                        <th>Kudos</th>
+                        <th>Warnings</th>
+                        <th>Joined</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr>
+                        <td>{{ user.username }}</td>
+                        <td>{{ user.discord_id }}</td>
+                        <td>{{ user_stats[user.id].kudos_received }}</td>
+                        <td>{{ user_stats[user.id].warnings }}</td>
+                        <td>{{ user.created_at.strftime('%Y-%m-%d') }}</td>
+                        <td>
+                            <div class="actions">
+                                <a href="/admin/discord/users/{{ user.id }}" class="btn btn-sm btn-outline">View</a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not users %}
+                    <tr>
+                        <td colspan="6" class="empty-table">No users found.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    function filterUsers() {
+        const input = document.getElementById('user-search');
+        const filter = input.value.toUpperCase();
+        const table = document.getElementById('users-table');
+        const rows = table.getElementsByTagName('tr');
+        
+        for (let i = 1; i < rows.length; i++) {
+            const username = rows[i].getElementsByTagName('td')[0];
+            const discordId = rows[i].getElementsByTagName('td')[1];
+            
+            if (username || discordId) {
+                const usernameText = username.textContent || username.innerText;
+                const discordIdText = discordId.textContent || discordId.innerText;
+                
+                if (usernameText.toUpperCase().indexOf(filter) > -1 || discordIdText.indexOf(filter) > -1) {
+                    rows[i].style.display = '';
+                } else {
+                    rows[i].style.display = 'none';
+                }
+            }
+        }
+    }
+</script>
+{% endblock %}

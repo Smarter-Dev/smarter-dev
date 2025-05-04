@@ -1,0 +1,144 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Moderation Cases - Smarter.Dev Admin{% endblock %}
+
+{% block page_title %}Moderation Cases{% endblock %}
+
+{% block content %}
+<div class="moderation-page">
+    <div class="filters">
+        <div class="search-box">
+            <input type="text" id="case-search" placeholder="Search cases..." onkeyup="filterCases()">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="search-icon">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+        </div>
+        <div class="filter-options">
+            <select id="status-filter" onchange="filterCases()">
+                <option value="all">All Status</option>
+                <option value="active">Active</option>
+                <option value="resolved">Resolved</option>
+            </select>
+            <select id="action-filter" onchange="filterCases()">
+                <option value="all">All Actions</option>
+                <option value="ban">Ban</option>
+                <option value="mute">Mute</option>
+                <option value="kick">Kick</option>
+                <option value="timeout">Timeout</option>
+                <option value="warn">Warn</option>
+                <option value="softban">Softban</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="data-section">
+        <div class="table-container">
+            <table class="data-table" id="cases-table">
+                <thead>
+                    <tr>
+                        <th>Case #</th>
+                        <th>User</th>
+                        <th>Action</th>
+                        <th>Moderator</th>
+                        <th>Server</th>
+                        <th>Reason</th>
+                        <th>Date</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for case in cases %}
+                    <tr data-action="{{ case.action.lower() }}" data-status="{{ 'resolved' if case.resolved_at else 'active' }}">
+                        <td>{{ case.case_number }}</td>
+                        <td>
+                            <a href="/admin/discord/users/{{ case.user_id }}">
+                                {{ usernames.get(case.user_id, 'Unknown') }}
+                            </a>
+                        </td>
+                        <td>{{ case.action }}</td>
+                        <td>{{ usernames.get(case.mod_id, 'Unknown') }}</td>
+                        <td>{{ guild_names.get(case.guild_id, 'Unknown') }}</td>
+                        <td class="truncate">{{ case.reason or 'No reason provided' }}</td>
+                        <td>{{ case.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>
+                            <span class="status-badge {% if case.resolved_at %}resolved{% else %}active{% endif %}">
+                                {{ 'Resolved' if case.resolved_at else 'Active' }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not cases %}
+                    <tr>
+                        <td colspan="8" class="empty-table">No moderation cases found.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    function filterCases() {
+        const input = document.getElementById('case-search');
+        const filter = input.value.toUpperCase();
+        const statusFilter = document.getElementById('status-filter').value;
+        const actionFilter = document.getElementById('action-filter').value;
+        const table = document.getElementById('cases-table');
+        const rows = table.getElementsByTagName('tr');
+        
+        for (let i = 1; i < rows.length; i++) {
+            const row = rows[i];
+            
+            // Skip rows that are already empty-table messages
+            if (row.classList.contains('empty-table')) continue;
+            
+            const user = row.getElementsByTagName('td')[1];
+            const action = row.getElementsByTagName('td')[2];
+            const moderator = row.getElementsByTagName('td')[3];
+            const server = row.getElementsByTagName('td')[4];
+            const reason = row.getElementsByTagName('td')[5];
+            
+            // Apply text filter
+            let textMatch = false;
+            if (user && action && moderator && server && reason) {
+                const userText = user.textContent || user.innerText;
+                const actionText = action.textContent || action.innerText;
+                const modText = moderator.textContent || moderator.innerText;
+                const serverText = server.textContent || server.innerText;
+                const reasonText = reason.textContent || reason.innerText;
+                
+                if (
+                    userText.toUpperCase().indexOf(filter) > -1 || 
+                    actionText.toUpperCase().indexOf(filter) > -1 ||
+                    modText.toUpperCase().indexOf(filter) > -1 ||
+                    serverText.toUpperCase().indexOf(filter) > -1 ||
+                    reasonText.toUpperCase().indexOf(filter) > -1
+                ) {
+                    textMatch = true;
+                }
+            }
+            
+            // Apply status filter
+            let statusMatch = true;
+            if (statusFilter !== 'all') {
+                statusMatch = row.getAttribute('data-status') === statusFilter;
+            }
+            
+            // Apply action filter
+            let actionMatch = true;
+            if (actionFilter !== 'all') {
+                actionMatch = row.getAttribute('data-action') === actionFilter.toLowerCase();
+            }
+            
+            // Show/hide row based on all filters
+            if (textMatch && statusMatch && actionMatch) {
+                row.style.display = '';
+            } else {
+                row.style.display = 'none';
+            }
+        }
+    }
+</script>
+{% endblock %}

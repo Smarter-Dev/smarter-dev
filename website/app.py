@@ -14,8 +14,22 @@ from .admin_routes import (
     admin_new_redirect, admin_edit_redirect, admin_delete_redirect,
     admin_redirect_detail, admin_analytics, admin_bot_analytics, admin_error_detail, init_admin
 )
+from .discord_admin_routes import (
+    admin_discord_dashboard, admin_discord_users, admin_discord_user_detail,
+    admin_discord_warnings, admin_discord_kudos, admin_discord_moderation,
+    admin_discord_api_keys, admin_discord_api_key_create, admin_discord_api_key_delete
+)
+from .api_routes import (
+    api_token, guild_list, guild_detail, guild_create, guild_update,
+    user_list, user_detail, user_create, user_update,
+    kudos_list, kudos_detail, kudos_create,
+    warning_list, warning_detail, warning_create,
+    moderation_case_list, moderation_case_detail, moderation_case_create, moderation_case_update,
+    api_key_list, api_key_create, api_key_delete
+)
 from .redirect_handler import handle_redirect
 from .auth import AdminAuthBackend, AdminAuthMiddleware
+from .api_auth import APIAuthBackend, api_auth_middleware
 from .database import engine, get_db
 from .models import Base
 from .tracking import track_middleware, track_page_view
@@ -26,6 +40,27 @@ Base.metadata.create_all(bind=engine)
 # Define routes
 routes = [
     Route("/", home, methods=["GET"]),
+
+    # API routes
+    Route("/api/auth/token", api_token, methods=["POST"]),
+    Route("/api/guilds", guild_list, methods=["GET"]),
+    Route("/api/guilds/{guild_id:int}", guild_detail, methods=["GET"]),
+    Route("/api/guilds", guild_create, methods=["POST"]),
+    Route("/api/guilds/{guild_id:int}", guild_update, methods=["PUT"]),
+    Route("/api/users", user_list, methods=["GET"]),
+    Route("/api/users/{user_id:int}", user_detail, methods=["GET"]),
+    Route("/api/users", user_create, methods=["POST"]),
+    Route("/api/users/{user_id:int}", user_update, methods=["PUT"]),
+    Route("/api/kudos", kudos_list, methods=["GET"]),
+    Route("/api/kudos/{kudos_id:int}", kudos_detail, methods=["GET"]),
+    Route("/api/kudos", kudos_create, methods=["POST"]),
+    Route("/api/warnings", warning_list, methods=["GET"]),
+    Route("/api/warnings/{warning_id:int}", warning_detail, methods=["GET"]),
+    Route("/api/warnings", warning_create, methods=["POST"]),
+    Route("/api/moderation-cases", moderation_case_list, methods=["GET"]),
+    Route("/api/moderation-cases/{case_id:int}", moderation_case_detail, methods=["GET"]),
+    Route("/api/moderation-cases", moderation_case_create, methods=["POST"]),
+    Route("/api/moderation-cases/{case_id:int}", moderation_case_update, methods=["PUT"]),
     Route("/api/subscribe", subscribe, methods=["POST"]),
 
     # Admin routes
@@ -41,6 +76,17 @@ routes = [
     Route("/admin/bot-analytics", admin_bot_analytics, methods=["GET"]),
     Route("/admin/errors/{id:int}", admin_error_detail, methods=["GET"]),
 
+    # Discord admin routes
+    Route("/admin/discord", admin_discord_dashboard, methods=["GET"]),
+    Route("/admin/discord/users", admin_discord_users, methods=["GET"]),
+    Route("/admin/discord/users/{id:int}", admin_discord_user_detail, methods=["GET"]),
+    Route("/admin/discord/warnings", admin_discord_warnings, methods=["GET"]),
+    Route("/admin/discord/kudos", admin_discord_kudos, methods=["GET"]),
+    Route("/admin/discord/moderation", admin_discord_moderation, methods=["GET"]),
+    Route("/admin/discord/api-keys", admin_discord_api_keys, methods=["GET"]),
+    Route("/admin/discord/api-keys/new", admin_discord_api_key_create, methods=["GET", "POST"]),
+    Route("/admin/discord/api-keys/{id:int}/delete", admin_discord_api_key_delete, methods=["POST"]),
+
     # Static files - must be before the catch-all redirect handler
     Mount("/static", app=StaticFiles(directory="website/static"), name="static"),
 
@@ -54,7 +100,7 @@ middleware = [
     Middleware(SessionMiddleware, secret_key="smarter-dev-secret-key"),
     Middleware(AuthenticationMiddleware, backend=AdminAuthBackend()),
     Middleware(AdminAuthMiddleware)
-    # We'll add our tracking middleware after app creation
+    # We'll add our tracking middleware and API auth middleware after app creation
 ]
 
 # Create Starlette application
@@ -66,6 +112,11 @@ app = Starlette(
 
 # Apply tracking middleware
 app.add_middleware(track_middleware)
+
+# Create a wrapper for the API authentication middleware
+@app.middleware("http")
+async def api_auth_middleware_wrapper(request, call_next):
+    return await api_auth_middleware(request, call_next)
 
 # Apply tracking decorator to routes
 # Note: This is an alternative to using middleware. You can use either approach.
