@@ -11,3 +11,4 @@ wheels/
 .python-version
 .idea
 /smarter_dev.db
+.env

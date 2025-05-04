@@ -1,8 +1,28 @@
-# Smarter Dev Bot API Client
+# Smarter Dev Discord Bot
 
-This directory contains the API client for the Smarter Dev API, which is used by the Discord bot to interact with the website's API.
+This directory contains both the Discord bot implementation and the API client for the Smarter Dev API, which is used by the Discord bot to interact with the website's API.
 
-## Features
+## Discord Bot
+
+The Discord bot is implemented using Hikari and Hikari Lightbulb. It provides a simple interface for users to interact with the Smarter Dev community through Discord.
+
+### Running the Bot
+
+To run the bot, you need to set the `SMARTER_DEV_BOT_TOKEN` environment variable with your Discord bot token:
+
+```bash
+# Set the bot token
+export SMARTER_DEV_BOT_TOKEN="your_discord_bot_token"
+
+# Run the bot
+python -m bot.run_bot
+```
+
+### Available Commands
+
+- `!ping`: Checks if the bot is alive and responds with the latency
+
+## API Client Features
 
 - Automatic token management with refresh
 - Typed interfaces for all API endpoints
