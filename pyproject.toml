@@ -13,6 +13,7 @@ dependencies = [
     "itsdangerous",
     "jinja2",
     "passlib",
+    "pyjwt>=2.10.1",
     "python-multipart",
     "sqlalchemy>=2.0.38",
     "starlette",
