@@ -263,6 +263,10 @@ async def admin_discord_user_detail(request):
     # Map guild IDs to names
     guild_names = {g.id: g.name for g in guilds}
 
+    # Get all guilds for the bytes form
+    all_guilds = db.query(Guild).all()
+    all_guild_names = {g.id: g.name for g in all_guilds}
+
     return templates.TemplateResponse(
         "admin/discord/user_detail.html",
         {
@@ -270,13 +274,74 @@ async def admin_discord_user_detail(request):
             "user": user,
             "kudos_received": kudos_received,
             "kudos_given": kudos_given,
+            "bytes_received": bytes_received,
+            "bytes_given": bytes_given,
+            "bytes_balance": user.bytes_balance,
             "warnings": warnings,
             "notes": notes,
             "mod_cases": mod_cases,
             "memberships": memberships,
-            "guild_names": guild_names
+            "guild_names": all_guild_names
         }
     )
+
+# Give bytes to a user
+async def admin_discord_give_bytes(request):
+    """
+    Give bytes to a user from the admin interface
+    """
+    user_id = request.path_params["id"]
+
+    # Get form data
+    form_data = await request.form()
+    amount = int(form_data.get("amount", 10))
+    reason = form_data.get("reason", "Admin award")
+    guild_id = int(form_data.get("guild_id"))
+
+    # Get DB session
+    db = next(get_db())
+
+    # Get user
+    user = db.query(DiscordUser).filter(DiscordUser.id == user_id).first()
+    if not user:
+        return RedirectResponse(url="/admin/discord/users", status_code=302)
+
+    # Get admin user (use a system user with discord_id of 0 for admin actions)
+    admin_user = db.query(DiscordUser).filter(DiscordUser.discord_id == 0).first()
+    if not admin_user:
+        # Create a system user if it doesn't exist
+        admin_user = DiscordUser(
+            discord_id=0,
+            username="System",
+            bytes_balance=999999  # System user has unlimited bytes
+        )
+        db.add(admin_user)
+        db.commit()
+        db.refresh(admin_user)
+
+    # Create bytes transaction
+    bytes_obj = Bytes(
+        giver_id=admin_user.id,
+        receiver_id=user.id,
+        guild_id=guild_id,
+        amount=amount,
+        reason=f"[Admin] {reason}",
+        awarded_at=datetime.now()
+    )
+
+    # Update user's bytes balance
+    user.bytes_balance += amount
+
+    # Save to database
+    db.add(bytes_obj)
+    db.commit()
+
+    # Print debug information
+    print(f"Admin gave {amount} bytes to {user.username} (ID: {user.id})")
+    print(f"New balance: {user.bytes_balance}")
+
+    # Redirect back to user detail page
+    return RedirectResponse(url=f"/admin/discord/users/{user_id}", status_code=302)
 
 # Discord warnings list
 async def admin_discord_warnings(request):

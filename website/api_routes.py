@@ -188,10 +188,27 @@ async def guild_update(request):
 @api_error_handler
 async def user_list(request):
     """
-    List all users
+    List all users, with optional filtering by discord_id
     """
     db = next(get_db())
-    users = db.query(DiscordUser).all()
+
+    # Initialize query
+    query = db.query(DiscordUser)
+
+    # Filter by discord_id if provided
+    discord_id = request.query_params.get("discord_id")
+    if discord_id:
+        try:
+            discord_id = int(discord_id)
+            query = query.filter(DiscordUser.discord_id == discord_id)
+            print(f"Filtering users by discord_id: {discord_id}")
+        except ValueError:
+            # If discord_id is not a valid integer, ignore the filter
+            print(f"Invalid discord_id parameter: {discord_id}")
+
+    # Execute query
+    users = query.all()
+
     return JSONResponse({
         "users": [model_to_dict(user) for user in users]
     })
@@ -816,11 +833,30 @@ async def user_bytes_balance(request):
     if not user:
         return JSONResponse({"error": "User not found"}, status_code=404)
 
-    # Get bytes received
+    # Get bytes received (including from system admin)
     bytes_received = db.query(func.sum(Bytes.amount)).filter(Bytes.receiver_id == user_id).scalar() or 0
 
-    # Get bytes given
+    # Get bytes given to other users
     bytes_given = db.query(func.sum(Bytes.amount)).filter(Bytes.giver_id == user_id).scalar() or 0
+
+    # Special case for system admin user (discord_id=0)
+    # This user has an artificial balance and doesn't follow normal accounting rules
+    if user.discord_id == 0:
+        # Don't update the balance for the system user
+        pass
+    else:
+        # Calculate the expected balance based on transactions
+        # This should match the bytes_balance field in the user model
+        expected_balance = bytes_received - bytes_given
+
+        # If there's a discrepancy between the stored balance and calculated balance,
+        # update the stored balance to match the calculated balance
+        if user.bytes_balance != expected_balance:
+            print(f"Fixing bytes balance discrepancy for user {user.username} (ID: {user.id}): "
+                  f"Stored: {user.bytes_balance}, Calculated: {expected_balance}")
+            user.bytes_balance = expected_balance
+            db.commit()
+            db.refresh(user)  # Refresh the user object to ensure it has the updated balance
 
     # Get guild roles if guild_id is provided
     guild_id = request.query_params.get("guild_id")
@@ -859,25 +895,28 @@ async def bytes_leaderboard(request):
     except ValueError:
         limit = 10
 
-    # Get users with highest bytes balance in this guild
-    users = db.query(DiscordUser).order_by(desc(DiscordUser.bytes_balance)).limit(limit).all()
+    # Get users with bytes in this guild (either received or given)
+    users_with_bytes = db.query(DiscordUser).join(
+        Bytes,
+        ((Bytes.receiver_id == DiscordUser.id) | (Bytes.giver_id == DiscordUser.id))
+    ).filter(
+        Bytes.guild_id == guild_id
+    ).distinct().all()
 
     # Format the response
     leaderboard = []
-    for user in users:
-        # Only include users who have received bytes in this guild
-        bytes_in_guild = db.query(func.sum(Bytes.amount)).filter(
-            Bytes.receiver_id == user.id,
-            Bytes.guild_id == guild_id
-        ).scalar() or 0
-
-        if bytes_in_guild > 0:
+    for user in users_with_bytes:
+        # Include all users with a bytes balance
+        if user.bytes_balance > 0:
             leaderboard.append({
                 "user_id": user.id,
                 "username": user.username,
                 "bytes_balance": user.bytes_balance,
                 "avatar_url": user.avatar_url
             })
+
+    # Sort by bytes balance
+    leaderboard = sorted(leaderboard, key=lambda x: x["bytes_balance"], reverse=True)[:limit]
 
     return JSONResponse({
         "guild_id": int(guild_id),

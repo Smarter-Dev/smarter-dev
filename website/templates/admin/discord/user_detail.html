@@ -5,6 +5,45 @@
 {% block page_title %}User Details{% endblock %}
 
 {% block content %}
+<style>
+    .bytes-action-section {
+        background-color: var(--card-bg);
+        border-radius: 8px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .bytes-form {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        align-items: end;
+    }
+
+    .bytes-form .form-group {
+        margin-bottom: 0;
+    }
+
+    .bytes-form label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+    }
+
+    .bytes-form input, .bytes-form select {
+        width: 100%;
+        padding: 0.5rem;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background-color: var(--input-bg);
+        color: var(--text-color);
+    }
+
+    .bytes-form button {
+        padding: 0.5rem 1rem;
+        height: 38px;
+    }
+</style>
 <div class="user-detail-page">
     <div class="page-actions">
         <a href="/admin/discord/users" class="btn btn-outline">
@@ -170,7 +209,7 @@
                     <tbody>
                         {% for bytes in bytes_received %}
                         <tr>
-                            <td>{{ bytes.giver.username if bytes.giver else 'Unknown' }}</td>
+                            <td>{% if bytes.giver and bytes.giver.discord_id == 0 %}System (Admin){% else %}{{ bytes.giver.username if bytes.giver else 'Unknown' }}{% endif %}</td>
                             <td>{{ bytes.amount }}</td>
                             <td class="truncate">{{ bytes.reason or 'No reason provided' }}</td>
                             <td>{{ bytes.awarded_at.strftime('%Y-%m-%d') }}</td>
@@ -183,6 +222,29 @@
                         {% endif %}
                     </tbody>
                 </table>
+            </div>
+
+            <div class="bytes-action-section">
+                <h3 class="section-title">Give Bytes</h3>
+                <form method="POST" action="/admin/discord/users/{{ user.id }}/give-bytes" class="bytes-form">
+                    <div class="form-group">
+                        <label for="amount">Amount:</label>
+                        <input type="number" id="amount" name="amount" min="1" max="1000" value="10" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="reason">Reason:</label>
+                        <input type="text" id="reason" name="reason" placeholder="Reason for giving bytes">
+                    </div>
+                    <div class="form-group">
+                        <label for="guild_id">Server:</label>
+                        <select id="guild_id" name="guild_id" required>
+                            {% for guild_id, guild_name in guild_names.items() %}
+                            <option value="{{ guild_id }}">{{ guild_name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Give Bytes</button>
+                </form>
             </div>
 
             <h3 class="section-title">Bytes Given</h3>
