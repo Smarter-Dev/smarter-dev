@@ -85,7 +85,7 @@ svg {
 }
 
 /* Global fix for SVGs in the admin pages (excluding navigation) */
-.admin-layout svg:not(.nav-icon):not(.nav-item svg) {
+.admin-layout svg:not(.nav-icon):not(.nav-item svg):not(.nav-chevron):not(.nav-group-header svg) {
     width: auto;
     height: auto;
 }
@@ -93,7 +93,8 @@ svg {
 /* Fix for navigation icons in the sidebar */
 .sidebar-nav .nav-icon,
 .sidebar-nav svg.nav-icon,
-.nav-item svg {
+.nav-item svg,
+.nav-group-header svg:not(.nav-chevron) {
     width: 18px !important;
     height: 18px !important;
     min-width: 18px !important;
@@ -101,6 +102,17 @@ svg {
     max-width: 18px !important;
     max-height: 18px !important;
     margin-right: var(--spacing-md);
+}
+
+/* Fix for chevron icon in collapsible navigation */
+.nav-chevron {
+    width: 12px !important;
+    height: 12px !important;
+    min-width: 12px !important;
+    min-height: 12px !important;
+    max-width: 12px !important;
+    max-height: 12px !important;
+    margin-right: 0 !important;
 }
 
 /* Special case for warning box in API key created page */
