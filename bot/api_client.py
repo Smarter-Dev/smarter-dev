@@ -285,6 +285,30 @@ class APIClient:
         result = await self._get_json(response)
         return self._model_from_dict(DiscordUser, result)
 
+    async def batch_create_users(self, users: List[DiscordUser]) -> Dict[str, Any]:
+        """Create multiple users in a single request
+
+        Args:
+            users: List of DiscordUser objects to create or update
+
+        Returns:
+            Dictionary with results including created users and counts
+        """
+        if not users:
+            return {"users": [], "created": 0, "updated": 0, "total": 0}
+
+        # Convert all users to dictionaries
+        data = [self._dict_from_model(user) for user in users]
+
+        # Make the batch request
+        response = await self._request("POST", "/api/users/batch", data=data)
+        result = await self._get_json(response)
+
+        # Convert the returned users to DiscordUser objects
+        result["users"] = [self._model_from_dict(DiscordUser, user) for user in result["users"]]
+
+        return result
+
     # Kudos endpoints
     async def get_kudos(self, guild_id: Optional[int] = None, user_id: Optional[int] = None,
                       giver_id: Optional[int] = None, receiver_id: Optional[int] = None) -> List[Kudos]:

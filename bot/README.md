@@ -14,13 +14,49 @@ To run the bot, you need to set the `SMARTER_DEV_BOT_TOKEN` environment variable
 # Set the bot token
 export SMARTER_DEV_BOT_TOKEN="your_discord_bot_token"
 
-# Run the bot
-python -m bot.run_bot
+# Run the bot with optimization level 1 (recommended for production)
+python -O -m bot.run_bot
 ```
+
+### Privileged Intents
+
+This bot uses privileged intents (`GUILD_MEMBERS` and `GUILD_PRESENCES`) to track user joins, updates, and presence changes. You need to enable these intents in the Discord Developer Portal:
+
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+2. Select your application
+3. Go to the "Bot" tab
+4. Scroll down to "Privileged Gateway Intents"
+5. Enable "SERVER MEMBERS INTENT" and "PRESENCE INTENT"
+6. Save changes
 
 ### Available Commands
 
 - `!ping`: Checks if the bot is alive and responds with the latency
+- `!sync`: Manually syncs the current guild and its members with the API (bot owner only)
+
+### API Synchronization
+
+The bot automatically synchronizes Discord guilds and users with the website API:
+
+- When the bot joins a new guild, the guild is added to the website
+- When a guild is updated (name, icon), the changes are synced to the website
+- When a user joins a guild, their information is added to the website
+- When a user updates their profile (username, avatar), the changes are synced to the website
+
+#### Batch Processing
+
+The bot uses batch processing to efficiently sync large numbers of users:
+
+- When joining a new guild, all members are synced in batches of 100 users
+- The `!sync` command also processes members in batches of 100 for better performance
+- Progress updates are provided during batch processing
+
+### Environment Variables
+
+- `SMARTER_DEV_BOT_TOKEN`: Discord bot token
+- `SMARTER_DEV_API_URL`: URL of the Smarter Dev API (default: http://localhost:8000)
+- `SMARTER_DEV_API_KEY`: API key for authentication
+- `SMARTER_DEV_LOCAL`: Set to "1" for local development mode (uses "TESTING" as API key)
 
 ## API Client Features
 

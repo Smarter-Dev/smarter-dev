@@ -21,7 +21,7 @@ from .discord_admin_routes import (
 )
 from .api_routes import (
     api_token, guild_list, guild_detail, guild_create, guild_update,
-    user_list, user_detail, user_create, user_update,
+    user_list, user_detail, user_create, user_update, users_batch_create,
     kudos_list, kudos_detail, kudos_create,
     warning_list, warning_detail, warning_create,
     moderation_case_list, moderation_case_detail, moderation_case_create, moderation_case_update,
@@ -51,6 +51,7 @@ routes = [
     Route("/api/users/{user_id:int}", user_detail, methods=["GET"]),
     Route("/api/users", user_create, methods=["POST"]),
     Route("/api/users/{user_id:int}", user_update, methods=["PUT"]),
+    Route("/api/users/batch", users_batch_create, methods=["POST"]),
     Route("/api/kudos", kudos_list, methods=["GET"]),
     Route("/api/kudos/{kudos_id:int}", kudos_detail, methods=["GET"]),
     Route("/api/kudos", kudos_create, methods=["POST"]),
