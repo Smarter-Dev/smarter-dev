@@ -7,8 +7,9 @@ each other bytes as a form of recognition and earn roles based on their bytes ba
 
 import asyncio
 import logging
+import math
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 import hikari
 import lightbulb
@@ -20,6 +21,44 @@ from bot.api_models import Bytes, BytesConfig, BytesRole, BytesCooldown, Discord
 # Create plugin
 bytes_plugin = lightbulb.Plugin("Bytes")
 logger = logging.getLogger("bot.plugins.bytes")
+
+
+def format_bytes(bytes_amount: int) -> str:
+    """
+    Format bytes into a human-readable format (KB/MB/GB) and a formatted string with commas.
+
+    Args:
+        bytes_amount: The amount of bytes to format
+
+    Returns:
+        A tuple containing (formatted_unit_string, formatted_bytes_string)
+    """
+    # Format the raw bytes with commas
+    formatted_bytes = f"{bytes_amount:,}"
+
+    # Convert to KB/MB/GB as appropriate
+    if bytes_amount < 512:  # Less than 0.5 KB
+        power = 0
+        symbol = "bytes"
+
+    elif bytes_amount < 512 * 2**10:  # Less than 0.5 MB
+        power = 10
+        symbol = "KB"
+
+    elif bytes_amount < 512 * 2**20:  # Less than 0.5 GB
+        power = 20
+        symbol = "MB"
+
+    else:  # GB or larger
+        power = 30
+        symbol = "GB"
+
+    value = bytes_amount / 2**power
+    formatted_output = f"{value:.2f} {symbol}"
+    if int(round(value, 2) * 2 ** power) != bytes_amount:
+        formatted_output += f" ({formatted_bytes})"
+
+    return formatted_output
 
 # Cache for bytes configs to avoid frequent API calls
 # Format: {guild_id: (config, timestamp)}
@@ -208,7 +247,8 @@ async def give_bytes(ctx: context.SlashContext) -> None:
 
         # Check if giver has enough bytes
         if giver["bytes_balance"] < amount:
-            await ctx.respond(f"You don't have enough bytes! Your balance: {giver['bytes_balance']} bytes", flags=hikari.MessageFlag.EPHEMERAL)
+            balance_formatted = format_bytes(giver['bytes_balance'])
+            await ctx.respond(f"You don't have enough bytes! Your balance: {balance_formatted}", flags=hikari.MessageFlag.EPHEMERAL)
             return
 
         # Create bytes transaction
@@ -227,15 +267,20 @@ async def give_bytes(ctx: context.SlashContext) -> None:
         # Check for earned roles
         earned_roles = result.get("earned_roles", [])
 
+        # Format the bytes values
+        amount_formatted = format_bytes(amount)
+        giver_balance_formatted = format_bytes(result['giver_balance'])
+        receiver_balance_formatted = format_bytes(result['receiver_balance'])
+
         # Create response message
         embed = hikari.Embed(
             title="Bytes Transferred!",
-            description=f"You sent **{amount}** bytes to {receiver.mention}!",
+            description=f"You sent **{amount_formatted}** to {receiver.mention}!",
             color=hikari.Color.from_rgb(87, 242, 135)  # Green color
         )
         embed.add_field(name="Reason", value=reason)
-        embed.add_field(name="Your New Balance", value=f"{result['giver_balance']} bytes")
-        embed.add_field(name=f"{receiver.username}'s New Balance", value=f"{result['receiver_balance']} bytes")
+        embed.add_field(name="Your New Balance", value=giver_balance_formatted)
+        embed.add_field(name=f"{receiver.username}'s New Balance", value=receiver_balance_formatted)
 
         # Add cooldown info
         config = await get_bytes_config(client, guild_id)
@@ -321,21 +366,28 @@ async def check_bytes(ctx: context.SlashContext) -> None:
         bytes_info = await get_user_bytes_info(client, user_id, guild_id)
         logger.info(f"Bytes info response: {bytes_info}")
 
+        # Try multiple approaches to get the user's display name
+        guild = ctx.get_guild()
+        member = guild.get_member(target_user.id)
+
         # Create embed
         embed = hikari.Embed(
-            title=f"{target_user.username}'s Bytes",
+            title=f"{member.display_name}'s Bytes",
             color=hikari.Color.from_rgb(87, 242, 135)  # Green color
         )
 
         # The API returns bytes_received as the sum of all bytes received by the user
         # and bytes_given as the sum of all bytes given by the user
-        embed.add_field(name="Balance", value=f"{bytes_info['bytes_balance']} bytes", inline=True)
-        embed.add_field(name="Received", value=f"{bytes_info['bytes_received']} bytes", inline=True)
-        embed.add_field(name="Given Away", value=f"{bytes_info['bytes_given']} bytes", inline=True)
 
-        # Add user avatar
-        if target_user.avatar_url:
-            embed.set_thumbnail(target_user.avatar_url)
+        # Format the bytes values
+        balance_formatted = format_bytes(bytes_info['bytes_balance'])
+        received_formatted = format_bytes(bytes_info['bytes_received'])
+        given_formatted = format_bytes(bytes_info['bytes_given'])
+
+        # Add fields with formatted values - set inline=False to stack them
+        embed.add_field(name="Balance", value=balance_formatted, inline=False)
+        embed.add_field(name="Received", value=received_formatted, inline=False)
+        embed.add_field(name="Given Away", value=given_formatted, inline=False)
 
         # Add earned roles
         if bytes_info.get("earned_roles"):
@@ -370,9 +422,10 @@ async def check_bytes(ctx: context.SlashContext) -> None:
                     role = ctx.get_guild().get_role(role_id)
                     if role:
                         bytes_needed = next_role["bytes_required"] - bytes_info["bytes_balance"]
+                        bytes_needed_formatted = format_bytes(bytes_needed)
                         embed.add_field(
                             name="Next Role",
-                            value=f"{role.mention} ({bytes_needed} more bytes needed)",
+                            value=f"{role.mention} ({bytes_needed_formatted} more needed)",
                             inline=False
                         )
         except Exception as e:
@@ -428,7 +481,10 @@ async def bytes_leaderboard(ctx: context.SlashContext) -> None:
             username = entry["username"]
             balance = entry["bytes_balance"]
 
-            leaderboard_text += f"{medal} **{username}**: {balance} bytes\n"
+            # Format the balance
+            balance_formatted = format_bytes(balance)
+
+            leaderboard_text += f"{medal} **{username}**: {balance_formatted}\n"
 
         embed.description = leaderboard_text
 
