@@ -22,6 +22,14 @@ from bot.api_models import Bytes, BytesConfig, BytesRole, BytesCooldown, Discord
 bytes_plugin = lightbulb.Plugin("Bytes")
 logger = logging.getLogger("bot.plugins.bytes")
 
+# Create a bytes command group
+@bytes_plugin.command
+@lightbulb.command("bytes", "Commands for managing bytes")
+@lightbulb.implements(commands.SlashCommandGroup)
+async def bytes_group(ctx: context.Context) -> None:
+    # This is just a command group and doesn't do anything on its own
+    pass
+
 
 def format_bytes(bytes_amount: int) -> str:
     """
@@ -54,7 +62,7 @@ def format_bytes(bytes_amount: int) -> str:
         symbol = "GB"
 
     value = bytes_amount / 2**power
-    formatted_output = f"{value:.2f} {symbol}"
+    formatted_output = f"{value:.2f} {symbol}" if power > 0 else f"{bytes_amount} {symbol}"
     if int(round(value, 2) * 2 ** power) != bytes_amount:
         formatted_output += f" ({formatted_bytes})"
 
@@ -170,13 +178,13 @@ async def get_leaderboard(client: APIClient, guild_id: int, limit: int = 10) -> 
         }
 
 
-@bytes_plugin.command
-@lightbulb.option("amount", "Amount of bytes to give", type=int, min_value=1, required=True)
-@lightbulb.option("user", "User to give bytes to", type=hikari.User, required=True)
-@lightbulb.option("reason", "Reason for giving bytes", type=str, required=False)
-@lightbulb.command("give", "Give some of your bytes to another user")
-@lightbulb.implements(lightbulb.SlashCommand)
-async def give_bytes(ctx: context.SlashContext) -> None:
+@bytes_group.child
+@lightbulb.option("amount", "Amount of bytes to send", type=int, min_value=1, required=True)
+@lightbulb.option("user", "User to send bytes to", type=hikari.User, required=True)
+@lightbulb.option("reason", "Reason for sending bytes", type=str, required=False)
+@lightbulb.command("send", "Send your bytes")
+@lightbulb.implements(lightbulb.SlashSubCommand)
+async def bytes_give(ctx: context.SlashContext) -> None:
     """
     Give bytes to another user.
     """
@@ -186,7 +194,7 @@ async def give_bytes(ctx: context.SlashContext) -> None:
     # Get parameters
     receiver = ctx.options.user
     amount = ctx.options.amount
-    reason = ctx.options.reason or "No reason provided"
+    reason = ctx.options.reason
 
     # Check if user is trying to give bytes to themselves
     if receiver.id == ctx.author.id:
@@ -224,7 +232,10 @@ async def give_bytes(ctx: context.SlashContext) -> None:
         else:
             time_str = f"{minutes} minute{'s' if minutes != 1 else ''}"
 
-        await ctx.respond(f"You're on cooldown! You can give bytes again in {time_str}.", flags=hikari.MessageFlag.EPHEMERAL)
+        await ctx.respond(
+            f"You're on cooldown! You can send bytes again in {time_str}.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
         return
 
     # Get user info
@@ -241,7 +252,7 @@ async def give_bytes(ctx: context.SlashContext) -> None:
         receiver_response = await client._request("GET", f"/api/users?discord_id={receiver.id}")
         receiver_data = await client._get_json(receiver_response)
         if not receiver_data.get("users"):
-            await ctx.respond(f"Error: User {receiver.username} was not found. They may need to interact with the bot first.", flags=hikari.MessageFlag.EPHEMERAL)
+            await ctx.respond(f"Error: User {receiver.username} was not found.", flags=hikari.MessageFlag.EPHEMERAL)
             return
         receiver_user = receiver_data["users"][0]
 
@@ -257,7 +268,7 @@ async def give_bytes(ctx: context.SlashContext) -> None:
             receiver_id=receiver_user["id"],
             guild_id=int(guild_id),
             amount=amount,
-            reason=reason
+            reason=reason or "No reason provided"
         )
 
         # Send transaction to API
@@ -270,34 +281,22 @@ async def give_bytes(ctx: context.SlashContext) -> None:
         # Format the bytes values
         amount_formatted = format_bytes(amount)
         giver_balance_formatted = format_bytes(result['giver_balance'])
-        receiver_balance_formatted = format_bytes(result['receiver_balance'])
 
-        # Create response message
-        embed = hikari.Embed(
-            title="Bytes Transferred!",
-            description=f"You sent **{amount_formatted}** to {receiver.mention}!",
-            color=hikari.Color.from_rgb(87, 242, 135)  # Green color
-        )
-        embed.add_field(name="Reason", value=reason)
-        embed.add_field(name="Your New Balance", value=giver_balance_formatted)
-        embed.add_field(name=f"{receiver.username}'s New Balance", value=receiver_balance_formatted)
+        # Create ephemeral confirmation message for the sender
+        confirmation_message = f"Transaction confirmed! You sent {amount_formatted} to {receiver.username}. Your new balance: {giver_balance_formatted}"
 
-        # Add cooldown info
-        config = await get_bytes_config(client, guild_id)
-        cooldown_hours = config.cooldown_minutes // 60
-        cooldown_minutes = config.cooldown_minutes % 60
+        # Send ephemeral confirmation to the sender
+        await ctx.respond(confirmation_message, flags=hikari.MessageFlag.EPHEMERAL)
 
-        if cooldown_hours > 0:
-            cooldown_str = f"{cooldown_hours} hour{'s' if cooldown_hours != 1 else ''}"
-            if cooldown_minutes > 0:
-                cooldown_str += f" and {cooldown_minutes} minute{'s' if cooldown_minutes != 1 else ''}"
+        # Create public notification message for the receiver
+        # Include reason if provided
+        if reason:
+            notification_message = f"{receiver.mention} {ctx.author.mention} sent you {amount_formatted} for {reason}"
         else:
-            cooldown_str = f"{cooldown_minutes} minute{'s' if cooldown_minutes != 1 else ''}"
+            notification_message = f"{receiver.mention} {ctx.author.mention} sent you {amount_formatted}"
 
-        embed.set_footer(text=f"Cooldown: {cooldown_str}")
-
-        # Send response
-        await ctx.respond(embed=embed)
+        # Send public notification
+        await ctx.get_channel().send(notification_message)
 
         # If user earned new roles, send a separate message
         if earned_roles:
@@ -327,13 +326,13 @@ async def give_bytes(ctx: context.SlashContext) -> None:
         await ctx.respond("An error occurred while giving bytes. Please try again later.", flags=hikari.MessageFlag.EPHEMERAL)
 
 
-@bytes_plugin.command
-@lightbulb.option("user", "User to check bytes for", type=hikari.User, required=False)
-@lightbulb.command("bytes", "Check a user's bytes balance")
-@lightbulb.implements(lightbulb.SlashCommand)
-async def check_bytes(ctx: context.SlashContext) -> None:
+@bytes_group.child
+@lightbulb.option("user", "User to read bytes details for", type=hikari.User, required=False)
+@lightbulb.command("read", "Read a details of a user's bytes")
+@lightbulb.implements(lightbulb.SlashSubCommand)
+async def bytes_lookup(ctx: context.SlashContext) -> None:
     """
-    Check a user's bytes balance.
+    Check a user's bytes cache.
     """
     # Get API client
     client = ctx.bot.d.api_client
@@ -385,9 +384,9 @@ async def check_bytes(ctx: context.SlashContext) -> None:
         given_formatted = format_bytes(bytes_info['bytes_given'])
 
         # Add fields with formatted values - set inline=False to stack them
-        embed.add_field(name="Balance", value=balance_formatted, inline=False)
+        embed.add_field(name="In Cache", value=balance_formatted, inline=False)
         embed.add_field(name="Received", value=received_formatted, inline=False)
-        embed.add_field(name="Given Away", value=given_formatted, inline=False)
+        embed.add_field(name="Sent", value=given_formatted, inline=False)
 
         # Add earned roles
         if bytes_info.get("earned_roles"):
@@ -438,10 +437,10 @@ async def check_bytes(ctx: context.SlashContext) -> None:
         await ctx.respond("An error occurred while checking bytes. Please try again later.", flags=hikari.MessageFlag.EPHEMERAL)
 
 
-@bytes_plugin.command
+@bytes_group.child
 @lightbulb.option("limit", "Number of users to show", type=int, min_value=1, max_value=25, default=10, required=False)
-@lightbulb.command("leaderboard", "Show the bytes leaderboard")
-@lightbulb.implements(lightbulb.SlashCommand)
+@lightbulb.command("heap", "Show the user's with the largest bytes cache")
+@lightbulb.implements(lightbulb.SlashSubCommand)
 async def bytes_leaderboard(ctx: context.SlashContext) -> None:
     """
     Show the bytes leaderboard.
@@ -468,8 +467,8 @@ async def bytes_leaderboard(ctx: context.SlashContext) -> None:
 
         # Create embed
         embed = hikari.Embed(
-            title="Bytes Leaderboard",
-            description=f"Top {len(leaderboard_data['leaderboard'])} users by bytes balance",
+            title="Bytes Heap",
+            description=f"Top {len(leaderboard_data['leaderboard'])} users by bytes cache",
             color=hikari.Color.from_rgb(87, 242, 135)  # Green color
         )
 
@@ -497,7 +496,10 @@ async def bytes_leaderboard(ctx: context.SlashContext) -> None:
 
     except Exception as e:
         logger.error(f"Error getting leaderboard: {e}")
-        await ctx.respond("An error occurred while getting the leaderboard. Please try again later.", flags=hikari.MessageFlag.EPHEMERAL)
+        await ctx.respond(
+            "An error occurred while getting the bytes heap. Please try again later.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
 
 
 def load(bot: lightbulb.BotApp) -> None:
