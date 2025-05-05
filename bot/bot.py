@@ -7,11 +7,13 @@ This module contains the main bot implementation with command handlers.
 import os
 import logging
 from datetime import datetime
+from pathlib import Path
 
 import hikari
 import lightbulb
 
 from bot.api_sync import create_synchronizer
+from bot.api_client import APIClient
 
 # Configure logging
 logging.basicConfig(
@@ -60,6 +62,14 @@ def create_bot() -> lightbulb.BotApp:
 
     # Create API synchronizer
     api_sync = create_synchronizer()
+
+    # Create API client and store it in the bot
+    api_url = os.environ.get("SMARTER_DEV_API_URL", "http://localhost:8000")
+    api_key = os.environ.get("SMARTER_DEV_API_KEY", "TESTING")
+    bot.d.api_client = APIClient(api_url, api_key)
+
+    # Load plugins
+    bot.load_extensions_from(Path(__file__).parent / "plugins")
 
     # Register event listeners
     @bot.listen(hikari.StartedEvent)

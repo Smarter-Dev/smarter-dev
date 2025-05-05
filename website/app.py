@@ -17,12 +17,16 @@ from .admin_routes import (
 from .discord_admin_routes import (
     admin_discord_dashboard, admin_discord_users, admin_discord_user_detail,
     admin_discord_warnings, admin_discord_kudos, admin_discord_moderation,
-    admin_discord_api_keys, admin_discord_api_key_create, admin_discord_api_key_delete
+    admin_discord_api_keys, admin_discord_api_key_create, admin_discord_api_key_delete,
+    admin_discord_bytes, admin_discord_bytes_config, admin_discord_bytes_roles
 )
 from .api_routes import (
     api_token, guild_list, guild_detail, guild_create, guild_update,
     user_list, user_detail, user_create, user_update, users_batch_create,
     kudos_list, kudos_detail, kudos_create,
+    bytes_list, bytes_detail, bytes_create, bytes_config_get, bytes_config_create, bytes_config_update,
+    bytes_roles_list, bytes_role_create, bytes_role_update, bytes_role_delete,
+    bytes_cooldown_get, user_bytes_balance, bytes_leaderboard,
     warning_list, warning_detail, warning_create,
     moderation_case_list, moderation_case_detail, moderation_case_create, moderation_case_update,
     api_key_list, api_key_create, api_key_delete
@@ -55,6 +59,20 @@ routes = [
     Route("/api/kudos", kudos_list, methods=["GET"]),
     Route("/api/kudos/{kudos_id:int}", kudos_detail, methods=["GET"]),
     Route("/api/kudos", kudos_create, methods=["POST"]),
+    # Bytes routes
+    Route("/api/bytes", bytes_list, methods=["GET"]),
+    Route("/api/bytes/{bytes_id:int}", bytes_detail, methods=["GET"]),
+    Route("/api/bytes", bytes_create, methods=["POST"]),
+    Route("/api/bytes/config/{guild_id:int}", bytes_config_get, methods=["GET"]),
+    Route("/api/bytes/config", bytes_config_create, methods=["POST"]),
+    Route("/api/bytes/config/{guild_id:int}", bytes_config_update, methods=["PUT"]),
+    Route("/api/bytes/roles/{guild_id:int}", bytes_roles_list, methods=["GET"]),
+    Route("/api/bytes/roles", bytes_role_create, methods=["POST"]),
+    Route("/api/bytes/roles/{role_id:int}", bytes_role_update, methods=["PUT"]),
+    Route("/api/bytes/roles/{role_id:int}", bytes_role_delete, methods=["DELETE"]),
+    Route("/api/bytes/cooldown/{user_id:int}/{guild_id:int}", bytes_cooldown_get, methods=["GET"]),
+    Route("/api/bytes/balance/{user_id:int}", user_bytes_balance, methods=["GET"]),
+    Route("/api/bytes/leaderboard/{guild_id:int}", bytes_leaderboard, methods=["GET"]),
     Route("/api/warnings", warning_list, methods=["GET"]),
     Route("/api/warnings/{warning_id:int}", warning_detail, methods=["GET"]),
     Route("/api/warnings", warning_create, methods=["POST"]),
@@ -83,6 +101,9 @@ routes = [
     Route("/admin/discord/users/{id:int}", admin_discord_user_detail, methods=["GET"]),
     Route("/admin/discord/warnings", admin_discord_warnings, methods=["GET"]),
     Route("/admin/discord/kudos", admin_discord_kudos, methods=["GET"]),
+    Route("/admin/discord/bytes", admin_discord_bytes, methods=["GET"]),
+    Route("/admin/discord/bytes/config", admin_discord_bytes_config, methods=["GET", "POST"]),
+    Route("/admin/discord/bytes/roles", admin_discord_bytes_roles, methods=["GET", "POST"]),
     Route("/admin/discord/moderation", admin_discord_moderation, methods=["GET"]),
     Route("/admin/discord/api-keys", admin_discord_api_keys, methods=["GET"]),
     Route("/admin/discord/api-keys/new", admin_discord_api_key_create, methods=["GET", "POST"]),
