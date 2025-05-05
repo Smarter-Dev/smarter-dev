@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse
 from .models import (
     APIKey, Guild, DiscordUser, GuildMember, Kudos, UserNote,
     UserWarning, ModerationCase, PersistentRole, TemporaryRole,
-    ChannelLock, BumpStat, CommandUsage
+    ChannelLock, BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown
 )
 from .database import get_db
 from .api_auth import create_jwt_token, verify_api_key, generate_api_key
@@ -355,7 +355,21 @@ def parse_datetime(dt_str):
     return dt_str
 
 
-# Kudos API endpoints
+# Helper function to convert model to dictionary
+def model_to_dict(model):
+    """
+    Convert a SQLAlchemy model to a dictionary
+    """
+    result = {}
+    for column in model.__table__.columns:
+        value = getattr(model, column.name)
+        if isinstance(value, datetime):
+            value = value.isoformat()
+        result[column.name] = value
+    return result
+
+
+# Kudos API endpoints (legacy)
 @api_error_handler
 async def kudos_list(request):
     """
@@ -437,6 +451,438 @@ async def kudos_create(request):
     db.refresh(kudos)
 
     return JSONResponse(model_to_dict(kudos), status_code=201)
+
+
+# Bytes API endpoints
+@api_error_handler
+async def bytes_list(request):
+    """
+    List all bytes, with optional filtering
+    """
+    db = next(get_db())
+    query = db.query(Bytes)
+
+    # Filter by guild
+    guild_id = request.query_params.get("guild_id")
+    if guild_id:
+        query = query.filter(Bytes.guild_id == guild_id)
+
+    # Filter by user (giver or receiver)
+    user_id = request.query_params.get("user_id")
+    if user_id:
+        query = query.filter(
+            (Bytes.giver_id == user_id) | (Bytes.receiver_id == user_id)
+        )
+
+    # Filter by receiver only
+    receiver_id = request.query_params.get("receiver_id")
+    if receiver_id:
+        query = query.filter(Bytes.receiver_id == receiver_id)
+
+    # Filter by giver only
+    giver_id = request.query_params.get("giver_id")
+    if giver_id:
+        query = query.filter(Bytes.giver_id == giver_id)
+
+    # Order by most recent
+    bytes_list = query.order_by(desc(Bytes.awarded_at)).all()
+
+    return JSONResponse({
+        "bytes": [model_to_dict(b) for b in bytes_list]
+    })
+
+@api_error_handler
+async def bytes_detail(request):
+    """
+    Get bytes details
+    """
+    bytes_id = request.path_params["bytes_id"]
+    db = next(get_db())
+
+    bytes_obj = db.query(Bytes).filter(Bytes.id == bytes_id).first()
+    if not bytes_obj:
+        return JSONResponse({"error": "Bytes not found"}, status_code=404)
+
+    return JSONResponse(model_to_dict(bytes_obj))
+
+@api_error_handler
+async def bytes_create(request):
+    """
+    Create a new bytes award
+    """
+    data = await request.json()
+    db = next(get_db())
+
+    # Validate required fields
+    required_fields = ["giver_id", "receiver_id", "guild_id"]
+    for field in required_fields:
+        if field not in data:
+            return JSONResponse({"error": f"Missing required field: {field}"}, status_code=400)
+
+    # Get the users
+    giver = db.query(DiscordUser).filter(DiscordUser.id == data["giver_id"]).first()
+    receiver = db.query(DiscordUser).filter(DiscordUser.id == data["receiver_id"]).first()
+
+    if not giver or not receiver:
+        return JSONResponse({"error": "Giver or receiver not found"}, status_code=404)
+
+    # Check if giver has enough bytes
+    amount = data.get("amount", 1)
+    if giver.bytes_balance < amount:
+        return JSONResponse({"error": "Insufficient bytes balance"}, status_code=400)
+
+    # Check cooldown
+    cooldown = db.query(BytesCooldown).filter(
+        BytesCooldown.user_id == data["giver_id"],
+        BytesCooldown.guild_id == data["guild_id"]
+    ).first()
+
+    # Get guild config
+    config = db.query(BytesConfig).filter(BytesConfig.guild_id == data["guild_id"]).first()
+    if not config:
+        # Create default config
+        config = BytesConfig(guild_id=data["guild_id"])
+        db.add(config)
+        db.commit()
+        db.refresh(config)
+
+    # Check if cooldown has passed
+    if cooldown:
+        cooldown_minutes = config.cooldown_minutes
+        cooldown_delta = datetime.now() - cooldown.last_given_at
+        if cooldown_delta.total_seconds() < cooldown_minutes * 60:
+            minutes_left = cooldown_minutes - (cooldown_delta.total_seconds() / 60)
+            return JSONResponse({
+                "error": f"Cooldown still active. Try again in {int(minutes_left)} minutes.",
+                "minutes_left": int(minutes_left)
+            }, status_code=400)
+
+        # Update cooldown
+        cooldown.last_given_at = datetime.now()
+    else:
+        # Create new cooldown
+        cooldown = BytesCooldown(
+            user_id=data["giver_id"],
+            guild_id=data["guild_id"],
+            last_given_at=datetime.now()
+        )
+        db.add(cooldown)
+
+    # Create new bytes transaction
+    bytes_obj = Bytes(
+        giver_id=data["giver_id"],
+        receiver_id=data["receiver_id"],
+        guild_id=data["guild_id"],
+        amount=amount,
+        reason=data.get("reason"),
+        awarded_at=parse_datetime(data.get("awarded_at")) or datetime.now()
+    )
+
+    # Update balances
+    giver.bytes_balance -= amount
+    receiver.bytes_balance += amount
+
+    db.add(bytes_obj)
+    db.commit()
+    db.refresh(bytes_obj)
+
+    # Check if receiver has earned any roles
+    roles = db.query(BytesRole).filter(
+        BytesRole.guild_id == data["guild_id"],
+        BytesRole.bytes_required <= receiver.bytes_balance
+    ).order_by(BytesRole.bytes_required.desc()).all()
+
+    earned_roles = []
+    if roles:
+        earned_roles = [model_to_dict(role) for role in roles]
+
+    return JSONResponse({
+        "bytes": model_to_dict(bytes_obj),
+        "giver_balance": giver.bytes_balance,
+        "receiver_balance": receiver.bytes_balance,
+        "earned_roles": earned_roles
+    }, status_code=201)
+
+@api_error_handler
+async def bytes_config_get(request):
+    """
+    Get bytes configuration for a guild
+    """
+    guild_id = request.path_params["guild_id"]
+    db = next(get_db())
+
+    config = db.query(BytesConfig).filter(BytesConfig.guild_id == guild_id).first()
+    if not config:
+        # Return default config
+        config = BytesConfig(guild_id=int(guild_id))
+        db.add(config)
+        db.commit()
+        db.refresh(config)
+
+    return JSONResponse(model_to_dict(config))
+
+@api_error_handler
+async def bytes_config_create(request):
+    """
+    Create or update bytes configuration
+    """
+    data = await request.json()
+    db = next(get_db())
+
+    # Validate required fields
+    if "guild_id" not in data:
+        return JSONResponse({"error": "Missing required field: guild_id"}, status_code=400)
+
+    # Check if config already exists
+    config = db.query(BytesConfig).filter(BytesConfig.guild_id == data["guild_id"]).first()
+    if config:
+        # Update existing config
+        if "starting_balance" in data:
+            config.starting_balance = data["starting_balance"]
+        if "daily_earning" in data:
+            config.daily_earning = data["daily_earning"]
+        if "max_give_amount" in data:
+            config.max_give_amount = data["max_give_amount"]
+        if "cooldown_minutes" in data:
+            config.cooldown_minutes = data["cooldown_minutes"]
+    else:
+        # Create new config
+        config = BytesConfig(
+            guild_id=data["guild_id"],
+            starting_balance=data.get("starting_balance", 100),
+            daily_earning=data.get("daily_earning", 10),
+            max_give_amount=data.get("max_give_amount", 50),
+            cooldown_minutes=data.get("cooldown_minutes", 1440)
+        )
+        db.add(config)
+
+    db.commit()
+    db.refresh(config)
+
+    return JSONResponse(model_to_dict(config), status_code=201)
+
+@api_error_handler
+async def bytes_config_update(request):
+    """
+    Update bytes configuration
+    """
+    guild_id = request.path_params["guild_id"]
+    data = await request.json()
+    db = next(get_db())
+
+    config = db.query(BytesConfig).filter(BytesConfig.guild_id == guild_id).first()
+    if not config:
+        return JSONResponse({"error": "Config not found"}, status_code=404)
+
+    # Update fields
+    if "starting_balance" in data:
+        config.starting_balance = data["starting_balance"]
+    if "daily_earning" in data:
+        config.daily_earning = data["daily_earning"]
+    if "max_give_amount" in data:
+        config.max_give_amount = data["max_give_amount"]
+    if "cooldown_minutes" in data:
+        config.cooldown_minutes = data["cooldown_minutes"]
+
+    db.commit()
+    db.refresh(config)
+
+    return JSONResponse(model_to_dict(config))
+
+@api_error_handler
+async def bytes_roles_list(request):
+    """
+    List all bytes roles for a guild
+    """
+    guild_id = request.path_params["guild_id"]
+    db = next(get_db())
+
+    roles = db.query(BytesRole).filter(BytesRole.guild_id == guild_id).order_by(BytesRole.bytes_required).all()
+
+    return JSONResponse({
+        "roles": [model_to_dict(role) for role in roles]
+    })
+
+@api_error_handler
+async def bytes_role_create(request):
+    """
+    Create a new bytes role
+    """
+    data = await request.json()
+    db = next(get_db())
+
+    # Validate required fields
+    required_fields = ["guild_id", "role_id", "role_name", "bytes_required"]
+    for field in required_fields:
+        if field not in data:
+            return JSONResponse({"error": f"Missing required field: {field}"}, status_code=400)
+
+    # Create new role
+    role = BytesRole(
+        guild_id=data["guild_id"],
+        role_id=data["role_id"],
+        role_name=data["role_name"],
+        bytes_required=data["bytes_required"]
+    )
+
+    db.add(role)
+    db.commit()
+    db.refresh(role)
+
+    return JSONResponse(model_to_dict(role), status_code=201)
+
+@api_error_handler
+async def bytes_role_update(request):
+    """
+    Update a bytes role
+    """
+    role_id = request.path_params["role_id"]
+    data = await request.json()
+    db = next(get_db())
+
+    role = db.query(BytesRole).filter(BytesRole.id == role_id).first()
+    if not role:
+        return JSONResponse({"error": "Role not found"}, status_code=404)
+
+    # Update fields
+    if "role_name" in data:
+        role.role_name = data["role_name"]
+    if "bytes_required" in data:
+        role.bytes_required = data["bytes_required"]
+
+    db.commit()
+    db.refresh(role)
+
+    return JSONResponse(model_to_dict(role))
+
+@api_error_handler
+async def bytes_role_delete(request):
+    """
+    Delete a bytes role
+    """
+    role_id = request.path_params["role_id"]
+    db = next(get_db())
+
+    role = db.query(BytesRole).filter(BytesRole.id == role_id).first()
+    if not role:
+        return JSONResponse({"error": "Role not found"}, status_code=404)
+
+    db.delete(role)
+    db.commit()
+
+    return JSONResponse({"success": True})
+
+@api_error_handler
+async def bytes_cooldown_get(request):
+    """
+    Get bytes cooldown for a user in a guild
+    """
+    user_id = request.path_params["user_id"]
+    guild_id = request.path_params["guild_id"]
+    db = next(get_db())
+
+    cooldown = db.query(BytesCooldown).filter(
+        BytesCooldown.user_id == user_id,
+        BytesCooldown.guild_id == guild_id
+    ).first()
+
+    if not cooldown:
+        return JSONResponse({"error": "Cooldown not found"}, status_code=404)
+
+    # Get guild config for cooldown minutes
+    config = db.query(BytesConfig).filter(BytesConfig.guild_id == guild_id).first()
+    cooldown_minutes = config.cooldown_minutes if config else 1440
+
+    # Calculate time left
+    cooldown_delta = datetime.now() - cooldown.last_given_at
+    minutes_passed = cooldown_delta.total_seconds() / 60
+    minutes_left = max(0, cooldown_minutes - minutes_passed)
+
+    cooldown_data = model_to_dict(cooldown)
+    cooldown_data["minutes_left"] = int(minutes_left)
+    cooldown_data["cooldown_active"] = minutes_left > 0
+
+    return JSONResponse(cooldown_data)
+
+@api_error_handler
+async def user_bytes_balance(request):
+    """
+    Get a user's bytes balance
+    """
+    user_id = request.path_params["user_id"]
+    db = next(get_db())
+
+    user = db.query(DiscordUser).filter(DiscordUser.id == user_id).first()
+    if not user:
+        return JSONResponse({"error": "User not found"}, status_code=404)
+
+    # Get bytes received
+    bytes_received = db.query(func.sum(Bytes.amount)).filter(Bytes.receiver_id == user_id).scalar() or 0
+
+    # Get bytes given
+    bytes_given = db.query(func.sum(Bytes.amount)).filter(Bytes.giver_id == user_id).scalar() or 0
+
+    # Get guild roles if guild_id is provided
+    guild_id = request.query_params.get("guild_id")
+    earned_roles = []
+
+    if guild_id:
+        roles = db.query(BytesRole).filter(
+            BytesRole.guild_id == guild_id,
+            BytesRole.bytes_required <= user.bytes_balance
+        ).order_by(BytesRole.bytes_required.desc()).all()
+
+        if roles:
+            earned_roles = [model_to_dict(role) for role in roles]
+
+    return JSONResponse({
+        "user_id": user.id,
+        "username": user.username,
+        "bytes_balance": user.bytes_balance,
+        "bytes_received": bytes_received,
+        "bytes_given": bytes_given,
+        "earned_roles": earned_roles
+    })
+
+@api_error_handler
+async def bytes_leaderboard(request):
+    """
+    Get bytes leaderboard for a guild
+    """
+    guild_id = request.path_params["guild_id"]
+    db = next(get_db())
+
+    # Get limit from query params, default to 10
+    limit = request.query_params.get("limit", "10")
+    try:
+        limit = int(limit)
+    except ValueError:
+        limit = 10
+
+    # Get users with highest bytes balance in this guild
+    users = db.query(DiscordUser).order_by(desc(DiscordUser.bytes_balance)).limit(limit).all()
+
+    # Format the response
+    leaderboard = []
+    for user in users:
+        # Only include users who have received bytes in this guild
+        bytes_in_guild = db.query(func.sum(Bytes.amount)).filter(
+            Bytes.receiver_id == user.id,
+            Bytes.guild_id == guild_id
+        ).scalar() or 0
+
+        if bytes_in_guild > 0:
+            leaderboard.append({
+                "user_id": user.id,
+                "username": user.username,
+                "bytes_balance": user.bytes_balance,
+                "avatar_url": user.avatar_url
+            })
+
+    return JSONResponse({
+        "guild_id": int(guild_id),
+        "leaderboard": leaderboard
+    })
 
 
 # Warning API endpoints

@@ -1,0 +1,189 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Bytes Configuration - Smarter.Dev Admin{% endblock %}
+
+{% block page_title %}Bytes Configuration{% endblock %}
+
+{% block content %}
+<div class="bytes-config-page">
+    <div class="config-section">
+        <h2>Current Configurations</h2>
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Server</th>
+                        <th>Starting Balance</th>
+                        <th>Daily Earning</th>
+                        <th>Max Give Amount</th>
+                        <th>Cooldown (minutes)</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for config in configs %}
+                    <tr>
+                        <td>{{ guild_names.get(config.guild_id, 'Unknown') }}</td>
+                        <td>{{ config.starting_balance }}</td>
+                        <td>{{ config.daily_earning }}</td>
+                        <td>{{ config.max_give_amount }}</td>
+                        <td>{{ config.cooldown_minutes }}</td>
+                        <td>
+                            <button class="edit-btn" onclick="editConfig({{ config.guild_id }}, {{ config.starting_balance }}, {{ config.daily_earning }}, {{ config.max_give_amount }}, {{ config.cooldown_minutes }})">Edit</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not configs %}
+                    <tr>
+                        <td colspan="6" class="empty-table">No configurations found.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <h2 id="form-title">Create New Configuration</h2>
+        <form method="POST" action="/admin/discord/bytes/config">
+            <div class="form-group">
+                <label for="guild_id">Server:</label>
+                <select id="guild_id" name="guild_id" required>
+                    <option value="">Select a server</option>
+                    {% for guild in guilds %}
+                    <option value="{{ guild.id }}">{{ guild.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="starting_balance">Starting Balance:</label>
+                <input type="number" id="starting_balance" name="starting_balance" value="100" min="0" required>
+                <span class="help-text">Default bytes for new users</span>
+            </div>
+            <div class="form-group">
+                <label for="daily_earning">Daily Earning:</label>
+                <input type="number" id="daily_earning" name="daily_earning" value="10" min="0" required>
+                <span class="help-text">Bytes earned daily for activity</span>
+            </div>
+            <div class="form-group">
+                <label for="max_give_amount">Max Give Amount:</label>
+                <input type="number" id="max_give_amount" name="max_give_amount" value="50" min="1" required>
+                <span class="help-text">Maximum bytes a user can give at once</span>
+            </div>
+            <div class="form-group">
+                <label for="cooldown_minutes">Cooldown (minutes):</label>
+                <input type="number" id="cooldown_minutes" name="cooldown_minutes" value="1440" min="1" required>
+                <span class="help-text">Cooldown period between giving bytes (1440 = 24 hours)</span>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="primary-btn">Save Configuration</button>
+                <button type="button" class="secondary-btn" onclick="resetForm()">Reset</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function editConfig(guildId, startingBalance, dailyEarning, maxGiveAmount, cooldownMinutes) {
+        document.getElementById('form-title').innerText = 'Edit Configuration';
+        document.getElementById('guild_id').value = guildId;
+        document.getElementById('starting_balance').value = startingBalance;
+        document.getElementById('daily_earning').value = dailyEarning;
+        document.getElementById('max_give_amount').value = maxGiveAmount;
+        document.getElementById('cooldown_minutes').value = cooldownMinutes;
+        
+        // Disable guild selection when editing
+        document.getElementById('guild_id').disabled = true;
+        
+        // Scroll to form
+        document.querySelector('.form-section').scrollIntoView({ behavior: 'smooth' });
+    }
+    
+    function resetForm() {
+        document.getElementById('form-title').innerText = 'Create New Configuration';
+        document.getElementById('guild_id').value = '';
+        document.getElementById('starting_balance').value = '100';
+        document.getElementById('daily_earning').value = '10';
+        document.getElementById('max_give_amount').value = '50';
+        document.getElementById('cooldown_minutes').value = '1440';
+        
+        // Enable guild selection
+        document.getElementById('guild_id').disabled = false;
+    }
+</script>
+
+<style>
+    .bytes-config-page {
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+    }
+    
+    .config-section, .form-section {
+        background-color: var(--card-bg);
+        border-radius: 8px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+    
+    .form-group {
+        margin-bottom: 1rem;
+    }
+    
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+    }
+    
+    .form-group input, .form-group select {
+        width: 100%;
+        padding: 0.5rem;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background-color: var(--input-bg);
+        color: var(--text-color);
+    }
+    
+    .help-text {
+        display: block;
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-top: 0.25rem;
+    }
+    
+    .form-actions {
+        display: flex;
+        gap: 1rem;
+        margin-top: 1.5rem;
+    }
+    
+    .primary-btn, .secondary-btn {
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 500;
+    }
+    
+    .primary-btn {
+        background-color: var(--primary-color);
+        color: white;
+        border: none;
+    }
+    
+    .secondary-btn {
+        background-color: transparent;
+        color: var(--text-color);
+        border: 1px solid var(--border-color);
+    }
+    
+    .edit-btn {
+        background-color: var(--primary-color);
+        color: white;
+        border: none;
+        padding: 0.25rem 0.5rem;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+</style>
+{% endblock %}

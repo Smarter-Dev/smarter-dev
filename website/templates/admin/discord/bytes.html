@@ -1,0 +1,95 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Bytes - Smarter.Dev Admin{% endblock %}
+
+{% block page_title %}Bytes{% endblock %}
+
+{% block content %}
+<div class="bytes-page">
+    <div class="filters">
+        <div class="search-box">
+            <input type="text" id="bytes-search" placeholder="Search bytes..." onkeyup="filterBytes()">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="search-icon">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+        </div>
+    </div>
+
+    <div class="data-section">
+        <div class="table-container">
+            <table class="data-table" id="bytes-table">
+                <thead>
+                    <tr>
+                        <th>From</th>
+                        <th>To</th>
+                        <th>Server</th>
+                        <th>Amount</th>
+                        <th>Reason</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for b in bytes %}
+                    <tr>
+                        <td>
+                            <a href="/admin/discord/users/{{ b.giver_id }}">
+                                {{ usernames.get(b.giver_id, 'Unknown') }}
+                            </a>
+                        </td>
+                        <td>
+                            <a href="/admin/discord/users/{{ b.receiver_id }}">
+                                {{ usernames.get(b.receiver_id, 'Unknown') }}
+                            </a>
+                        </td>
+                        <td>{{ guild_names.get(b.guild_id, 'Unknown') }}</td>
+                        <td>{{ b.amount }}</td>
+                        <td class="truncate">{{ b.reason or 'No reason provided' }}</td>
+                        <td>{{ b.awarded_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    </tr>
+                    {% endfor %}
+                    {% if not bytes %}
+                    <tr>
+                        <td colspan="6" class="empty-table">No bytes found.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    function filterBytes() {
+        const input = document.getElementById('bytes-search');
+        const filter = input.value.toUpperCase();
+        const table = document.getElementById('bytes-table');
+        const rows = table.getElementsByTagName('tr');
+        
+        for (let i = 1; i < rows.length; i++) {
+            const from = rows[i].getElementsByTagName('td')[0];
+            const to = rows[i].getElementsByTagName('td')[1];
+            const server = rows[i].getElementsByTagName('td')[2];
+            const reason = rows[i].getElementsByTagName('td')[4];
+            
+            if (from && to && server && reason) {
+                const fromText = from.textContent || from.innerText;
+                const toText = to.textContent || to.innerText;
+                const serverText = server.textContent || server.innerText;
+                const reasonText = reason.textContent || reason.innerText;
+                
+                if (
+                    fromText.toUpperCase().indexOf(filter) > -1 ||
+                    toText.toUpperCase().indexOf(filter) > -1 ||
+                    serverText.toUpperCase().indexOf(filter) > -1 ||
+                    reasonText.toUpperCase().indexOf(filter) > -1
+                ) {
+                    rows[i].style.display = "";
+                } else {
+                    rows[i].style.display = "none";
+                }
+            }
+        }
+    }
+</script>
+{% endblock %}

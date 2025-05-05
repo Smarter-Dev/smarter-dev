@@ -54,6 +54,20 @@
         <div class="stat-card">
             <div class="stat-icon">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+            </div>
+            <div class="stat-content">
+                <h3 class="stat-title">Total Bytes</h3>
+                <div class="stat-value">{{ stats.total_bytes }}</div>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"></path>
                     <line x1="4" y1="22" x2="4" y2="15"></line>
                 </svg>
@@ -135,6 +149,13 @@
                 <canvas id="topKudosChart"></canvas>
             </div>
         </div>
+
+        <div class="chart-card">
+            <h3 class="chart-title">Top Bytes Balances</h3>
+            <div class="chart-container">
+                <canvas id="topBytesChart"></canvas>
+            </div>
+        </div>
     </div>
 
     <div class="recent-section">
@@ -180,6 +201,9 @@
             <a href="/admin/discord/users" class="btn btn-primary">Manage Users</a>
             <a href="/admin/discord/warnings" class="btn btn-primary">View Warnings</a>
             <a href="/admin/discord/kudos" class="btn btn-primary">View Kudos</a>
+            <a href="/admin/discord/bytes" class="btn btn-primary">View Bytes</a>
+            <a href="/admin/discord/bytes/config" class="btn btn-primary">Bytes Config</a>
+            <a href="/admin/discord/bytes/roles" class="btn btn-primary">Bytes Roles</a>
             <a href="/admin/discord/api-keys" class="btn btn-primary">Manage API Keys</a>
         </div>
     </div>
@@ -243,6 +267,39 @@
                     data: {{ chart_data.top_kudos_counts|tojson }},
                     backgroundColor: 'rgba(16, 185, 129, 0.7)',
                     borderColor: 'rgba(16, 185, 129, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.05)'
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
+                        }
+                    }
+                }
+            }
+        });
+
+        // Top bytes balances chart
+        const topBytesCtx = document.getElementById('topBytesChart').getContext('2d');
+        const topBytesChart = new Chart(topBytesCtx, {
+            type: 'bar',
+            data: {
+                labels: {{ chart_data.top_bytes_users|tojson }},
+                datasets: [{
+                    label: 'Bytes Balance',
+                    data: {{ chart_data.top_bytes_counts|tojson }},
+                    backgroundColor: 'rgba(139, 92, 246, 0.7)',
+                    borderColor: 'rgba(139, 92, 246, 1)',
                     borderWidth: 1
                 }]
             },

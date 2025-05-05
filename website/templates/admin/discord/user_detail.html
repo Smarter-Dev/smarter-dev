@@ -44,6 +44,18 @@
                 <div class="stat-label">Kudos Given</div>
             </div>
             <div class="stat-item">
+                <div class="stat-value">{{ bytes_balance }}</div>
+                <div class="stat-label">Bytes Balance</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">{{ bytes_received|length }}</div>
+                <div class="stat-label">Bytes Received</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">{{ bytes_given|length }}</div>
+                <div class="stat-label">Bytes Given</div>
+            </div>
+            <div class="stat-item">
                 <div class="stat-value">{{ warnings|length }}</div>
                 <div class="stat-label">Warnings</div>
             </div>
@@ -77,6 +89,7 @@
     <div class="tabs">
         <div class="tab-header">
             <button class="tab-button active" onclick="openTab(event, 'kudos-tab')">Kudos</button>
+            <button class="tab-button" onclick="openTab(event, 'bytes-tab')">Bytes</button>
             <button class="tab-button" onclick="openTab(event, 'warnings-tab')">Warnings</button>
             <button class="tab-button" onclick="openTab(event, 'notes-tab')">Notes</button>
             <button class="tab-button" onclick="openTab(event, 'cases-tab')">Mod Cases</button>
@@ -106,6 +119,95 @@
                         {% if not kudos_received %}
                         <tr>
                             <td colspan="4" class="empty-table">No kudos received.</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 class="section-title">Kudos Given</h3>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>To</th>
+                            <th>Amount</th>
+                            <th>Reason</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for kudos in kudos_given %}
+                        <tr>
+                            <td>{{ kudos.receiver.username if kudos.receiver else 'Unknown' }}</td>
+                            <td>{{ kudos.amount }}</td>
+                            <td class="truncate">{{ kudos.reason or 'No reason provided' }}</td>
+                            <td>{{ kudos.awarded_at.strftime('%Y-%m-%d') }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if not kudos_given %}
+                        <tr>
+                            <td colspan="4" class="empty-table">No kudos given.</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="bytes-tab" class="tab-content">
+            <h3 class="section-title">Bytes Received</h3>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>From</th>
+                            <th>Amount</th>
+                            <th>Reason</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for bytes in bytes_received %}
+                        <tr>
+                            <td>{{ bytes.giver.username if bytes.giver else 'Unknown' }}</td>
+                            <td>{{ bytes.amount }}</td>
+                            <td class="truncate">{{ bytes.reason or 'No reason provided' }}</td>
+                            <td>{{ bytes.awarded_at.strftime('%Y-%m-%d') }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if not bytes_received %}
+                        <tr>
+                            <td colspan="4" class="empty-table">No bytes received.</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 class="section-title">Bytes Given</h3>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>To</th>
+                            <th>Amount</th>
+                            <th>Reason</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for bytes in bytes_given %}
+                        <tr>
+                            <td>{{ bytes.receiver.username if bytes.receiver else 'Unknown' }}</td>
+                            <td>{{ bytes.amount }}</td>
+                            <td class="truncate">{{ bytes.reason or 'No reason provided' }}</td>
+                            <td>{{ bytes.awarded_at.strftime('%Y-%m-%d') }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if not bytes_given %}
+                        <tr>
+                            <td colspan="4" class="empty-table">No bytes given.</td>
                         </tr>
                         {% endif %}
                     </tbody>
@@ -208,13 +310,13 @@
         for (let i = 0; i < tabContents.length; i++) {
             tabContents[i].classList.remove('active');
         }
-        
+
         // Remove active class from all tab buttons
         const tabButtons = document.getElementsByClassName('tab-button');
         for (let i = 0; i < tabButtons.length; i++) {
             tabButtons[i].classList.remove('active');
         }
-        
+
         // Show the selected tab content and mark the button as active
         document.getElementById(tabName).classList.add('active');
         evt.currentTarget.classList.add('active');

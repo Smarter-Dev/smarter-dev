@@ -19,7 +19,7 @@ from httpx import Limits, TransportError
 from .api_models import (
     Guild, DiscordUser, GuildMember, Kudos, UserNote, UserWarning,
     ModerationCase, PersistentRole, TemporaryRole, ChannelLock,
-    BumpStat, CommandUsage
+    BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown
 )
 
 # Type variable for generic response handling
@@ -309,7 +309,7 @@ class APIClient:
 
         return result
 
-    # Kudos endpoints
+    # Kudos endpoints (legacy)
     async def get_kudos(self, guild_id: Optional[int] = None, user_id: Optional[int] = None,
                       giver_id: Optional[int] = None, receiver_id: Optional[int] = None) -> List[Kudos]:
         """Get kudos with optional filtering"""
@@ -339,6 +339,94 @@ class APIClient:
         response = await self._request("POST", "/api/kudos", data=data)
         result = await self._get_json(response)
         return self._model_from_dict(Kudos, result)
+
+    # Bytes endpoints
+    async def get_bytes(self, guild_id: Optional[int] = None, user_id: Optional[int] = None,
+                      giver_id: Optional[int] = None, receiver_id: Optional[int] = None) -> List[Bytes]:
+        """Get bytes with optional filtering"""
+        params = {}
+        if guild_id:
+            params["guild_id"] = guild_id
+        if user_id:
+            params["user_id"] = user_id
+        if giver_id:
+            params["giver_id"] = giver_id
+        if receiver_id:
+            params["receiver_id"] = receiver_id
+
+        response = await self._request("GET", "/api/bytes", params=params)
+        data = await self._get_json(response)
+        return [self._model_from_dict(Bytes, b) for b in data["bytes"]]
+
+    async def get_bytes_detail(self, bytes_id: int) -> Bytes:
+        """Get bytes details"""
+        response = await self._request("GET", f"/api/bytes/{bytes_id}")
+        data = await self._get_json(response)
+        return self._model_from_dict(Bytes, data)
+
+    async def create_bytes(self, bytes_obj: Bytes) -> Bytes:
+        """Create new bytes transaction"""
+        data = self._dict_from_model(bytes_obj)
+        response = await self._request("POST", "/api/bytes", data=data)
+        result = await self._get_json(response)
+        return self._model_from_dict(Bytes, result)
+
+    # Bytes Config endpoints
+    async def get_bytes_config(self, guild_id: int) -> BytesConfig:
+        """Get bytes configuration for a guild"""
+        response = await self._request("GET", f"/api/bytes/config/{guild_id}")
+        data = await self._get_json(response)
+        return self._model_from_dict(BytesConfig, data)
+
+    async def create_bytes_config(self, config: BytesConfig) -> BytesConfig:
+        """Create or update bytes configuration"""
+        data = self._dict_from_model(config)
+        response = await self._request("POST", "/api/bytes/config", data=data)
+        result = await self._get_json(response)
+        return self._model_from_dict(BytesConfig, result)
+
+    async def update_bytes_config(self, config: BytesConfig) -> BytesConfig:
+        """Update bytes configuration"""
+        data = self._dict_from_model(config)
+        response = await self._request("PUT", f"/api/bytes/config/{config.guild_id}", data=data)
+        result = await self._get_json(response)
+        return self._model_from_dict(BytesConfig, result)
+
+    # Bytes Role endpoints
+    async def get_bytes_roles(self, guild_id: int) -> List[BytesRole]:
+        """Get bytes roles for a guild"""
+        response = await self._request("GET", f"/api/bytes/roles/{guild_id}")
+        data = await self._get_json(response)
+        return [self._model_from_dict(BytesRole, r) for r in data["roles"]]
+
+    async def create_bytes_role(self, role: BytesRole) -> BytesRole:
+        """Create a new bytes role"""
+        data = self._dict_from_model(role)
+        response = await self._request("POST", "/api/bytes/roles", data=data)
+        result = await self._get_json(response)
+        return self._model_from_dict(BytesRole, result)
+
+    async def update_bytes_role(self, role: BytesRole) -> BytesRole:
+        """Update a bytes role"""
+        data = self._dict_from_model(role)
+        response = await self._request("PUT", f"/api/bytes/roles/{role.id}", data=data)
+        result = await self._get_json(response)
+        return self._model_from_dict(BytesRole, result)
+
+    async def delete_bytes_role(self, role_id: int) -> Dict[str, Any]:
+        """Delete a bytes role"""
+        response = await self._request("DELETE", f"/api/bytes/roles/{role_id}")
+        return await self._get_json(response)
+
+    # Bytes Cooldown endpoints
+    async def get_bytes_cooldown(self, user_id: int, guild_id: int) -> Optional[BytesCooldown]:
+        """Get bytes cooldown for a user in a guild"""
+        try:
+            response = await self._request("GET", f"/api/bytes/cooldown/{user_id}/{guild_id}")
+            data = await self._get_json(response)
+            return self._model_from_dict(BytesCooldown, data)
+        except Exception:
+            return None
 
     # Warning endpoints
     async def get_warnings(self, guild_id: Optional[int] = None, user_id: Optional[int] = None,

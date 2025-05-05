@@ -135,6 +135,8 @@ class Guild(Base):
     channel_locks = relationship("ChannelLock", back_populates="guild")
     bump_stats = relationship("BumpStat", back_populates="guild")
     command_usage = relationship("CommandUsage", back_populates="guild")
+    bytes_config = relationship("BytesConfig", back_populates="guild", uselist=False)
+    bytes_roles = relationship("BytesRole", back_populates="guild")
 
     def __repr__(self):
         return f"<Guild {self.name} ({self.discord_id})>"
@@ -150,11 +152,14 @@ class DiscordUser(Base):
     discriminator = Column(String, nullable=True)  # May be null for newer Discord accounts
     avatar_url = Column(String, nullable=True)
     created_at = Column(DateTime, default=func.now())
+    bytes_balance = Column(Integer, default=0, nullable=False)  # Current bytes balance
 
     # Relationships
     guild_memberships = relationship("GuildMember", back_populates="user")
     given_kudos = relationship("Kudos", foreign_keys="Kudos.giver_id", back_populates="giver")
     received_kudos = relationship("Kudos", foreign_keys="Kudos.receiver_id", back_populates="receiver")
+    given_bytes = relationship("Bytes", foreign_keys="Bytes.giver_id", back_populates="giver")
+    received_bytes = relationship("Bytes", foreign_keys="Bytes.receiver_id", back_populates="receiver")
     notes = relationship("UserNote", foreign_keys="UserNote.user_id", back_populates="user")
     warnings = relationship("UserWarning", foreign_keys="UserWarning.user_id", back_populates="user")
     moderation_cases = relationship("ModerationCase", foreign_keys="ModerationCase.user_id", back_populates="user")
@@ -163,6 +168,7 @@ class DiscordUser(Base):
     temporary_roles = relationship("TemporaryRole", back_populates="user")
     bump_stats = relationship("BumpStat", back_populates="user")
     command_usage = relationship("CommandUsage", back_populates="user")
+    bytes_cooldowns = relationship("BytesCooldown", back_populates="user")
 
     def __repr__(self):
         return f"<DiscordUser {self.username} ({self.discord_id})>"
@@ -370,3 +376,81 @@ class CommandUsage(Base):
 
     def __repr__(self):
         return f"<CommandUsage {self.command_name} by {self.user_id}: {self.usage_count}>"
+
+
+# Bytes model (renamed from Kudos)
+class Bytes(Base):
+    __tablename__ = "bytes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    giver_id = Column(Integer, ForeignKey("discord_users.id"), nullable=False)
+    receiver_id = Column(Integer, ForeignKey("discord_users.id"), nullable=False)
+    guild_id = Column(Integer, ForeignKey("guilds.id"), nullable=False)
+    amount = Column(Integer, default=1, nullable=False)
+    reason = Column(Text, nullable=True)
+    awarded_at = Column(DateTime, default=func.now())
+
+    # Relationships
+    giver = relationship("DiscordUser", foreign_keys=[giver_id], back_populates="given_bytes")
+    receiver = relationship("DiscordUser", foreign_keys=[receiver_id], back_populates="received_bytes")
+    guild = relationship("Guild")
+
+    def __repr__(self):
+        return f"<Bytes from {self.giver_id} to {self.receiver_id}>"
+
+
+# Bytes Configuration model
+class BytesConfig(Base):
+    __tablename__ = "bytes_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(Integer, ForeignKey("guilds.id"), unique=True, nullable=False)
+    starting_balance = Column(Integer, default=100, nullable=False)  # Default bytes for new users
+    daily_earning = Column(Integer, default=10, nullable=False)  # Daily bytes earned for activity
+    max_give_amount = Column(Integer, default=50, nullable=False)  # Maximum bytes a user can give at once
+    cooldown_minutes = Column(Integer, default=1440, nullable=False)  # Default: 24 hours (1440 minutes)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Relationships
+    guild = relationship("Guild", back_populates="bytes_config")
+
+    def __repr__(self):
+        return f"<BytesConfig for guild {self.guild_id}>"
+
+
+# Bytes Role Rewards model
+class BytesRole(Base):
+    __tablename__ = "bytes_roles"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(Integer, ForeignKey("guilds.id"), nullable=False)
+    role_id = Column(BigInteger, nullable=False)
+    role_name = Column(String, nullable=False)
+    bytes_required = Column(Integer, nullable=False)  # Bytes required to earn this role
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Relationships
+    guild = relationship("Guild", back_populates="bytes_roles")
+
+    def __repr__(self):
+        return f"<BytesRole {self.role_name} ({self.bytes_required} bytes)>"
+
+
+# Bytes Cooldown tracking model
+class BytesCooldown(Base):
+    __tablename__ = "bytes_cooldowns"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("discord_users.id"), nullable=False)
+    guild_id = Column(Integer, ForeignKey("guilds.id"), nullable=False)
+    last_given_at = Column(DateTime, default=func.now())
+
+    # Relationships
+    user = relationship("DiscordUser", back_populates="bytes_cooldowns")
+    guild = relationship("Guild")
+
+    def __repr__(self):
+        return f"<BytesCooldown for user {self.user_id} in guild {self.guild_id}>"
+

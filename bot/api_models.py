@@ -29,6 +29,7 @@ class DiscordUser:
     discriminator: Optional[str] = None
     avatar_url: Optional[str] = None
     created_at: Optional[datetime] = None
+    bytes_balance: int = 0
 
 
 @dataclass
@@ -149,3 +150,49 @@ class CommandUsage:
     command_name: str = ""
     usage_count: int = 1
     last_used_at: Optional[datetime] = None
+
+
+@dataclass
+class Bytes:
+    """Bytes model (renamed from Kudos)"""
+    id: Optional[int] = None  # Optional for creation
+    giver_id: int = 0
+    receiver_id: int = 0
+    guild_id: int = 0
+    amount: int = 1
+    reason: Optional[str] = None
+    awarded_at: Optional[datetime] = None
+
+
+@dataclass
+class BytesConfig:
+    """Bytes Configuration model"""
+    id: Optional[int] = None  # Optional for creation
+    guild_id: int = 0
+    starting_balance: int = 100
+    daily_earning: int = 10
+    max_give_amount: int = 50
+    cooldown_minutes: int = 1440  # Default: 24 hours
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+@dataclass
+class BytesRole:
+    """Bytes Role Rewards model"""
+    id: Optional[int] = None  # Optional for creation
+    guild_id: int = 0
+    role_id: int = 0
+    role_name: str = ""
+    bytes_required: int = 0
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+@dataclass
+class BytesCooldown:
+    """Bytes Cooldown tracking model"""
+    id: Optional[int] = None  # Optional for creation
+    user_id: int = 0
+    guild_id: int = 0
+    last_given_at: Optional[datetime] = None
