@@ -18,7 +18,8 @@ from .discord_admin_routes import (
     admin_discord_dashboard, admin_discord_users, admin_discord_user_detail,
     admin_discord_warnings, admin_discord_kudos, admin_discord_moderation,
     admin_discord_api_keys, admin_discord_api_key_create, admin_discord_api_key_delete,
-    admin_discord_bytes, admin_discord_bytes_config, admin_discord_bytes_roles
+    admin_discord_bytes, admin_discord_bytes_config, admin_discord_bytes_roles,
+    admin_discord_give_bytes
 )
 from .api_routes import (
     api_token, guild_list, guild_detail, guild_create, guild_update,
@@ -99,6 +100,7 @@ routes = [
     Route("/admin/discord", admin_discord_dashboard, methods=["GET"]),
     Route("/admin/discord/users", admin_discord_users, methods=["GET"]),
     Route("/admin/discord/users/{id:int}", admin_discord_user_detail, methods=["GET"]),
+    Route("/admin/discord/users/{id:int}/give-bytes", admin_discord_give_bytes, methods=["POST"]),
     Route("/admin/discord/warnings", admin_discord_warnings, methods=["GET"]),
     Route("/admin/discord/kudos", admin_discord_kudos, methods=["GET"]),
     Route("/admin/discord/bytes", admin_discord_bytes, methods=["GET"]),

@@ -1,5 +1,6 @@
 import jwt
 import time
+import os
 from datetime import datetime, timedelta
 from starlette.authentication import AuthCredentials, AuthenticationBackend, SimpleUser
 from starlette.requests import Request
@@ -56,18 +57,18 @@ class APIAuthBackend(AuthenticationBackend):
             return None
 
         auth = request.headers["Authorization"]
-        
+
         # Check for Bearer token
         if not auth.startswith("Bearer "):
             return None
-        
+
         token = auth.replace("Bearer ", "")
-        
+
         # Decode token
         payload = decode_jwt_token(token)
         if not payload:
             return None
-        
+
         # Return credentials
         return AuthCredentials(["authenticated", "api"]), SimpleUser(payload["name"])
 
@@ -78,29 +79,34 @@ async def api_auth_middleware(request, call_next):
     # Skip auth for non-API routes
     if not request.url.path.startswith("/api/"):
         return await call_next(request)
-    
+
     # Skip auth for API key validation endpoint
     if request.url.path == "/api/auth/token":
         return await call_next(request)
-    
+
+    # Skip auth for bytes balance endpoint in local development mode
+    if request.url.path.startswith("/api/bytes/balance/") and os.environ.get("SMARTER_DEV_LOCAL") == "1":
+        print("Skipping auth for bytes balance endpoint in local development mode")
+        return await call_next(request)
+
     # Check for Authorization header
     if "Authorization" not in request.headers:
         return JSONResponse(
             {"error": "Missing Authorization header"},
             status_code=401
         )
-    
+
     auth = request.headers["Authorization"]
-    
+
     # Check for Bearer token
     if not auth.startswith("Bearer "):
         return JSONResponse(
             {"error": "Invalid Authorization header format"},
             status_code=401
         )
-    
+
     token = auth.replace("Bearer ", "")
-    
+
     # Decode token
     payload = decode_jwt_token(token)
     if not payload:
@@ -108,7 +114,7 @@ async def api_auth_middleware(request, call_next):
             {"error": "Invalid or expired token"},
             status_code=401
         )
-    
+
     # Continue with the request
     return await call_next(request)
 

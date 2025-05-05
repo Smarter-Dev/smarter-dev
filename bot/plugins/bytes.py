@@ -31,22 +31,22 @@ CACHE_TIMEOUT = 300  # 5 minutes
 async def get_bytes_config(client: APIClient, guild_id: int) -> BytesConfig:
     """
     Get bytes configuration for a guild, with caching.
-    
+
     Args:
         client: API client
         guild_id: Guild ID
-        
+
     Returns:
         BytesConfig object
     """
     now = datetime.now().timestamp()
-    
+
     # Check cache first
     if guild_id in config_cache:
         config, timestamp = config_cache[guild_id]
         if now - timestamp < CACHE_TIMEOUT:
             return config
-    
+
     # Get from API
     try:
         config = await client.get_bytes_config(guild_id)
@@ -61,18 +61,21 @@ async def get_bytes_config(client: APIClient, guild_id: int) -> BytesConfig:
 async def get_user_bytes_info(client: APIClient, user_id: int, guild_id: int) -> Dict[str, Any]:
     """
     Get a user's bytes information.
-    
+
     Args:
         client: API client
         user_id: User ID
         guild_id: Guild ID
-        
+
     Returns:
         Dictionary with bytes information
     """
     try:
+        logger.info(f"Making API request to /api/bytes/balance/{user_id}?guild_id={guild_id}")
         response = await client._request("GET", f"/api/bytes/balance/{user_id}?guild_id={guild_id}")
-        return await client._get_json(response)
+        result = await client._get_json(response)
+        logger.info(f"API response for bytes balance: {result}")
+        return result
     except Exception as e:
         logger.error(f"Error getting bytes info for user {user_id} in guild {guild_id}: {e}")
         return {
@@ -87,12 +90,12 @@ async def get_user_bytes_info(client: APIClient, user_id: int, guild_id: int) ->
 async def check_cooldown(client: APIClient, user_id: int, guild_id: int) -> Dict[str, Any]:
     """
     Check if a user is on cooldown for giving bytes.
-    
+
     Args:
         client: API client
         user_id: User ID
         guild_id: Guild ID
-        
+
     Returns:
         Dictionary with cooldown information or None if no cooldown
     """
@@ -108,12 +111,12 @@ async def check_cooldown(client: APIClient, user_id: int, guild_id: int) -> Dict
 async def get_leaderboard(client: APIClient, guild_id: int, limit: int = 10) -> Dict[str, Any]:
     """
     Get bytes leaderboard for a guild.
-    
+
     Args:
         client: API client
         guild_id: Guild ID
         limit: Number of users to include
-        
+
     Returns:
         Dictionary with leaderboard information
     """
@@ -140,51 +143,51 @@ async def give_bytes(ctx: context.SlashContext) -> None:
     """
     # Get API client
     client = ctx.bot.d.api_client
-    
+
     # Get parameters
     receiver = ctx.options.user
     amount = ctx.options.amount
     reason = ctx.options.reason or "No reason provided"
-    
+
     # Check if user is trying to give bytes to themselves
     if receiver.id == ctx.author.id:
         await ctx.respond("You can't give bytes to yourself!", flags=hikari.MessageFlag.EPHEMERAL)
         return
-    
+
     # Check if user is trying to give bytes to a bot
     if receiver.is_bot:
         await ctx.respond("You can't give bytes to a bot!", flags=hikari.MessageFlag.EPHEMERAL)
         return
-    
+
     # Get guild ID
     guild_id = ctx.guild_id
     if not guild_id:
         await ctx.respond("This command can only be used in a server.", flags=hikari.MessageFlag.EPHEMERAL)
         return
-    
+
     # Get bytes config
     config = await get_bytes_config(client, guild_id)
-    
+
     # Check if amount is within limits
     if amount > config.max_give_amount:
         await ctx.respond(f"You can only give up to {config.max_give_amount} bytes at once!", flags=hikari.MessageFlag.EPHEMERAL)
         return
-    
+
     # Check cooldown
     cooldown = await check_cooldown(client, ctx.author.id, guild_id)
     if cooldown and cooldown.get("cooldown_active", False):
         minutes_left = cooldown.get("minutes_left", 0)
         hours = minutes_left // 60
         minutes = minutes_left % 60
-        
+
         if hours > 0:
             time_str = f"{hours} hour{'s' if hours != 1 else ''} and {minutes} minute{'s' if minutes != 1 else ''}"
         else:
             time_str = f"{minutes} minute{'s' if minutes != 1 else ''}"
-            
+
         await ctx.respond(f"You're on cooldown! You can give bytes again in {time_str}.", flags=hikari.MessageFlag.EPHEMERAL)
         return
-    
+
     # Get user info
     try:
         # Get giver
@@ -194,7 +197,7 @@ async def give_bytes(ctx: context.SlashContext) -> None:
             await ctx.respond("Error: Your user profile was not found. Please try again later.", flags=hikari.MessageFlag.EPHEMERAL)
             return
         giver = giver_data["users"][0]
-        
+
         # Get receiver
         receiver_response = await client._request("GET", f"/api/users?discord_id={receiver.id}")
         receiver_data = await client._get_json(receiver_response)
@@ -202,12 +205,12 @@ async def give_bytes(ctx: context.SlashContext) -> None:
             await ctx.respond(f"Error: User {receiver.username} was not found. They may need to interact with the bot first.", flags=hikari.MessageFlag.EPHEMERAL)
             return
         receiver_user = receiver_data["users"][0]
-        
+
         # Check if giver has enough bytes
         if giver["bytes_balance"] < amount:
             await ctx.respond(f"You don't have enough bytes! Your balance: {giver['bytes_balance']} bytes", flags=hikari.MessageFlag.EPHEMERAL)
             return
-        
+
         # Create bytes transaction
         bytes_obj = Bytes(
             giver_id=giver["id"],
@@ -216,41 +219,41 @@ async def give_bytes(ctx: context.SlashContext) -> None:
             amount=amount,
             reason=reason
         )
-        
+
         # Send transaction to API
         response = await client._request("POST", "/api/bytes", data=client._dict_from_model(bytes_obj))
         result = await client._get_json(response)
-        
+
         # Check for earned roles
         earned_roles = result.get("earned_roles", [])
-        
+
         # Create response message
         embed = hikari.Embed(
-            title="Bytes Given!",
-            description=f"You gave **{amount}** bytes to {receiver.mention}!",
+            title="Bytes Transferred!",
+            description=f"You sent **{amount}** bytes to {receiver.mention}!",
             color=hikari.Color.from_rgb(87, 242, 135)  # Green color
         )
         embed.add_field(name="Reason", value=reason)
         embed.add_field(name="Your New Balance", value=f"{result['giver_balance']} bytes")
         embed.add_field(name=f"{receiver.username}'s New Balance", value=f"{result['receiver_balance']} bytes")
-        
+
         # Add cooldown info
         config = await get_bytes_config(client, guild_id)
         cooldown_hours = config.cooldown_minutes // 60
         cooldown_minutes = config.cooldown_minutes % 60
-        
+
         if cooldown_hours > 0:
             cooldown_str = f"{cooldown_hours} hour{'s' if cooldown_hours != 1 else ''}"
             if cooldown_minutes > 0:
                 cooldown_str += f" and {cooldown_minutes} minute{'s' if cooldown_minutes != 1 else ''}"
         else:
             cooldown_str = f"{cooldown_minutes} minute{'s' if cooldown_minutes != 1 else ''}"
-            
+
         embed.set_footer(text=f"Cooldown: {cooldown_str}")
-        
+
         # Send response
         await ctx.respond(embed=embed)
-        
+
         # If user earned new roles, send a separate message
         if earned_roles:
             role_mentions = []
@@ -264,7 +267,7 @@ async def give_bytes(ctx: context.SlashContext) -> None:
                         await ctx.get_guild().add_role_to_member(receiver.id, role_id, reason="Bytes role reward")
                     except Exception as e:
                         logger.error(f"Error adding role {role_id} to user {receiver.id}: {e}")
-            
+
             if role_mentions:
                 roles_str = ", ".join(role_mentions)
                 congrats_embed = hikari.Embed(
@@ -273,7 +276,7 @@ async def give_bytes(ctx: context.SlashContext) -> None:
                     color=hikari.Color.from_rgb(255, 215, 0)  # Gold color
                 )
                 await ctx.get_channel().send(embed=congrats_embed)
-        
+
     except Exception as e:
         logger.error(f"Error giving bytes: {e}")
         await ctx.respond("An error occurred while giving bytes. Please try again later.", flags=hikari.MessageFlag.EPHEMERAL)
@@ -289,44 +292,51 @@ async def check_bytes(ctx: context.SlashContext) -> None:
     """
     # Get API client
     client = ctx.bot.d.api_client
-    
+
     # Get user to check
     target_user = ctx.options.user or ctx.author
-    
+
     # Get guild ID
     guild_id = ctx.guild_id
     if not guild_id:
         await ctx.respond("This command can only be used in a server.", flags=hikari.MessageFlag.EPHEMERAL)
         return
-    
+
     try:
         # Get user from API
+        logger.info(f"Looking up user with discord_id: {target_user.id}")
         user_response = await client._request("GET", f"/api/users?discord_id={target_user.id}")
         user_data = await client._get_json(user_response)
-        
+        logger.info(f"API response for user lookup: {user_data}")
+
         if not user_data.get("users"):
             await ctx.respond(f"User {target_user.username} was not found in the database.", flags=hikari.MessageFlag.EPHEMERAL)
             return
-        
+
         user_id = user_data["users"][0]["id"]
-        
+        logger.info(f"Found user with ID: {user_id}")
+
         # Get bytes info
+        logger.info(f"Getting bytes info for user_id: {user_id}, guild_id: {guild_id}")
         bytes_info = await get_user_bytes_info(client, user_id, guild_id)
-        
+        logger.info(f"Bytes info response: {bytes_info}")
+
         # Create embed
         embed = hikari.Embed(
             title=f"{target_user.username}'s Bytes",
             color=hikari.Color.from_rgb(87, 242, 135)  # Green color
         )
-        
+
+        # The API returns bytes_received as the sum of all bytes received by the user
+        # and bytes_given as the sum of all bytes given by the user
         embed.add_field(name="Balance", value=f"{bytes_info['bytes_balance']} bytes", inline=True)
         embed.add_field(name="Received", value=f"{bytes_info['bytes_received']} bytes", inline=True)
-        embed.add_field(name="Given", value=f"{bytes_info['bytes_given']} bytes", inline=True)
-        
+        embed.add_field(name="Given Away", value=f"{bytes_info['bytes_given']} bytes", inline=True)
+
         # Add user avatar
         if target_user.avatar_url:
             embed.set_thumbnail(target_user.avatar_url)
-        
+
         # Add earned roles
         if bytes_info.get("earned_roles"):
             roles_text = ""
@@ -335,26 +345,26 @@ async def check_bytes(ctx: context.SlashContext) -> None:
                 role = ctx.get_guild().get_role(role_id)
                 if role:
                     roles_text += f"{role.mention} ({role_data['bytes_required']} bytes)\n"
-            
+
             if roles_text:
                 embed.add_field(name="Earned Roles", value=roles_text, inline=False)
-        
+
         # Get next role to earn
         try:
             roles_response = await client._request("GET", f"/api/bytes/roles/{guild_id}")
             roles_data = await client._get_json(roles_response)
-            
+
             if roles_data.get("roles"):
                 # Sort roles by bytes required
                 roles = sorted(roles_data["roles"], key=lambda r: r["bytes_required"])
-                
+
                 # Find next role to earn
                 next_role = None
                 for role in roles:
                     if role["bytes_required"] > bytes_info["bytes_balance"]:
                         next_role = role
                         break
-                
+
                 if next_role:
                     role_id = next_role["role_id"]
                     role = ctx.get_guild().get_role(role_id)
@@ -367,9 +377,9 @@ async def check_bytes(ctx: context.SlashContext) -> None:
                         )
         except Exception as e:
             logger.error(f"Error getting next role: {e}")
-        
+
         await ctx.respond(embed=embed)
-        
+
     except Exception as e:
         logger.error(f"Error checking bytes: {e}")
         await ctx.respond("An error occurred while checking bytes. Please try again later.", flags=hikari.MessageFlag.EPHEMERAL)
@@ -385,31 +395,31 @@ async def bytes_leaderboard(ctx: context.SlashContext) -> None:
     """
     # Get API client
     client = ctx.bot.d.api_client
-    
+
     # Get guild ID
     guild_id = ctx.guild_id
     if not guild_id:
         await ctx.respond("This command can only be used in a server.", flags=hikari.MessageFlag.EPHEMERAL)
         return
-    
+
     # Get limit
     limit = ctx.options.limit or 10
-    
+
     try:
         # Get leaderboard
         leaderboard_data = await get_leaderboard(client, guild_id, limit)
-        
+
         if not leaderboard_data.get("leaderboard"):
             await ctx.respond("No bytes have been given in this server yet!", flags=hikari.MessageFlag.EPHEMERAL)
             return
-        
+
         # Create embed
         embed = hikari.Embed(
             title="Bytes Leaderboard",
             description=f"Top {len(leaderboard_data['leaderboard'])} users by bytes balance",
             color=hikari.Color.from_rgb(87, 242, 135)  # Green color
         )
-        
+
         # Add leaderboard entries
         leaderboard_text = ""
         for i, entry in enumerate(leaderboard_data["leaderboard"]):
@@ -417,18 +427,18 @@ async def bytes_leaderboard(ctx: context.SlashContext) -> None:
             user_id = entry["user_id"]
             username = entry["username"]
             balance = entry["bytes_balance"]
-            
+
             leaderboard_text += f"{medal} **{username}**: {balance} bytes\n"
-        
+
         embed.description = leaderboard_text
-        
+
         # Add server icon
         guild = ctx.get_guild()
         if guild and guild.icon_url:
             embed.set_thumbnail(guild.icon_url)
-        
+
         await ctx.respond(embed=embed)
-        
+
     except Exception as e:
         logger.error(f"Error getting leaderboard: {e}")
         await ctx.respond("An error occurred while getting the leaderboard. Please try again later.", flags=hikari.MessageFlag.EPHEMERAL)
