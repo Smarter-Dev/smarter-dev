@@ -143,11 +143,14 @@ async def guild_create(request):
         return JSONResponse(model_to_dict(existing))
 
     # Create new guild
+    # Use the parse_datetime helper for joined_at
+    joined_at = parse_datetime(data.get("joined_at")) or datetime.now()
+
     guild = Guild(
         discord_id=data["discord_id"],
         name=data["name"],
         icon_url=data.get("icon_url"),
-        joined_at=datetime.now() if "joined_at" not in data else data["joined_at"]
+        joined_at=joined_at
     )
 
     db.add(guild)
@@ -225,7 +228,9 @@ async def user_create(request):
         discord_id=data["discord_id"],
         username=data["username"],
         discriminator=data.get("discriminator"),
-        avatar_url=data.get("avatar_url")
+        avatar_url=data.get("avatar_url"),
+        # Handle any datetime fields
+        created_at=parse_datetime(data.get("created_at"))
     )
 
     db.add(user)
@@ -233,6 +238,80 @@ async def user_create(request):
     db.refresh(user)
 
     return JSONResponse(model_to_dict(user), status_code=201)
+
+@api_error_handler
+async def users_batch_create(request):
+    """
+    Create multiple users in a single request
+    """
+    data = await request.json()
+    db = next(get_db())
+
+    if not isinstance(data, list):
+        return JSONResponse({"error": "Expected a list of users"}, status_code=400)
+
+    if len(data) > 500:  # Limit batch size to prevent abuse
+        return JSONResponse({"error": "Batch size exceeds maximum of 500 users"}, status_code=400)
+
+    created_users = []
+    updated_users = []
+
+    for user_data in data:
+        # Validate required fields
+        if "discord_id" not in user_data or "username" not in user_data:
+            return JSONResponse({"error": "Missing required fields: discord_id, username"}, status_code=400)
+
+        # Check if user already exists
+        existing = db.query(DiscordUser).filter(DiscordUser.discord_id == user_data["discord_id"]).first()
+
+        if existing:
+            # Update fields if needed
+            updated = False
+
+            if "username" in user_data and existing.username != user_data["username"]:
+                existing.username = user_data["username"]
+                updated = True
+
+            if "discriminator" in user_data and existing.discriminator != user_data.get("discriminator"):
+                existing.discriminator = user_data.get("discriminator")
+                updated = True
+
+            if "avatar_url" in user_data and existing.avatar_url != user_data.get("avatar_url"):
+                existing.avatar_url = user_data.get("avatar_url")
+                updated = True
+
+            if updated:
+                updated_users.append(existing)
+
+            created_users.append(existing)
+        else:
+            # Create new user
+            user = DiscordUser(
+                discord_id=user_data["discord_id"],
+                username=user_data["username"],
+                discriminator=user_data.get("discriminator"),
+                avatar_url=user_data.get("avatar_url"),
+                # Handle any datetime fields
+                created_at=parse_datetime(user_data.get("created_at"))
+            )
+
+            db.add(user)
+            created_users.append(user)
+
+    # Commit all changes at once for better performance
+    db.commit()
+
+    # Refresh all created users to get their IDs
+    for user in created_users:
+        if not hasattr(user, 'id') or user.id is None:
+            db.refresh(user)
+
+    return JSONResponse({
+        "users": [model_to_dict(user) for user in created_users],
+        "created": len(created_users) - len(updated_users),
+        "updated": len(updated_users),
+        "total": len(created_users)
+    }, status_code=201)
 
 @api_error_handler
 async def user_update(request):
@@ -259,6 +338,21 @@ async def user_update(request):
     db.refresh(user)
 
     return JSONResponse(model_to_dict(user))
+
+
+# Helper function to parse datetime strings
+def parse_datetime(dt_str):
+    """
+    Parse a datetime string to a datetime object
+    """
+    if not dt_str:
+        return None
+    if isinstance(dt_str, str):
+        try:
+            return datetime.fromisoformat(dt_str)
+        except ValueError:
+            return datetime.now()
+    return dt_str
 
 
 # Kudos API endpoints
@@ -333,7 +427,9 @@ async def kudos_create(request):
         receiver_id=data["receiver_id"],
         guild_id=data["guild_id"],
         amount=data.get("amount", 1),
-        reason=data.get("reason")
+        reason=data.get("reason"),
+        # Handle datetime fields
+        awarded_at=parse_datetime(data.get("awarded_at"))
     )
 
     db.add(kudos)
@@ -407,7 +503,9 @@ async def warning_create(request):
         user_id=data["user_id"],
         mod_id=data["mod_id"],
         guild_id=data["guild_id"],
-        reason=data.get("reason")
+        reason=data.get("reason"),
+        # Handle datetime fields
+        warned_at=parse_datetime(data.get("warned_at"))
     )
 
     db.add(warning)
@@ -506,7 +604,11 @@ async def moderation_case_create(request):
         mod_id=data["mod_id"],
         action=data["action"],
         reason=data.get("reason"),
-        duration_sec=data.get("duration_sec")
+        duration_sec=data.get("duration_sec"),
+        # Handle datetime fields
+        created_at=parse_datetime(data.get("created_at")),
+        resolved_at=parse_datetime(data.get("resolved_at")),
+        resolution_note=data.get("resolution_note")
     )
 
     db.add(case)
@@ -530,7 +632,7 @@ async def moderation_case_update(request):
 
     # Update fields
     if "resolved_at" in data:
-        case.resolved_at = data["resolved_at"]
+        case.resolved_at = parse_datetime(data["resolved_at"])
     elif "resolve" in data and data["resolve"]:
         case.resolved_at = datetime.now()
 

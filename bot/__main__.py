@@ -21,6 +21,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger("bot.run")
 
+# Check if running with optimization
+if __debug__:  # __debug__ is True when running without -O flag
+    logger.warning(
+        "Running without optimization. For better performance in production, "
+        "run with optimization level 1 or higher: python -O -m bot"
+    )
+
 try:
     # Create and run the bot
     logger.info("Starting Smarter Dev Discord Bot...")
