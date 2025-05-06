@@ -156,8 +156,6 @@ class DiscordUser(Base):
 
     # Relationships
     guild_memberships = relationship("GuildMember", back_populates="user")
-    given_kudos = relationship("Kudos", foreign_keys="Kudos.giver_id", back_populates="giver")
-    received_kudos = relationship("Kudos", foreign_keys="Kudos.receiver_id", back_populates="receiver")
     given_bytes = relationship("Bytes", foreign_keys="Bytes.giver_id", back_populates="giver")
     received_bytes = relationship("Bytes", foreign_keys="Bytes.receiver_id", back_populates="receiver")
     notes = relationship("UserNote", foreign_keys="UserNote.user_id", back_populates="user")
@@ -193,26 +191,6 @@ class GuildMember(Base):
     def __repr__(self):
         return f"<GuildMember {self.user_id} in {self.guild_id}>"
 
-
-# Kudos model
-class Kudos(Base):
-    __tablename__ = "kudos"
-
-    id = Column(Integer, primary_key=True, index=True)
-    giver_id = Column(Integer, ForeignKey("discord_users.id"), nullable=False)
-    receiver_id = Column(Integer, ForeignKey("discord_users.id"), nullable=False)
-    guild_id = Column(Integer, ForeignKey("guilds.id"), nullable=False)
-    amount = Column(Integer, default=1, nullable=False)
-    reason = Column(Text, nullable=True)
-    awarded_at = Column(DateTime, default=func.now())
-
-    # Relationships
-    giver = relationship("DiscordUser", foreign_keys=[giver_id], back_populates="given_kudos")
-    receiver = relationship("DiscordUser", foreign_keys=[receiver_id], back_populates="received_kudos")
-    guild = relationship("Guild")
-
-    def __repr__(self):
-        return f"<Kudos from {self.giver_id} to {self.receiver_id}>"
 
 
 # User Notes model

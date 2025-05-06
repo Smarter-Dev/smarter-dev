@@ -16,7 +16,7 @@ from .admin_routes import (
 )
 from .discord_admin_routes import (
     admin_discord_dashboard, admin_discord_users, admin_discord_user_detail,
-    admin_discord_warnings, admin_discord_kudos, admin_discord_moderation,
+    admin_discord_warnings, admin_discord_moderation,
     admin_discord_api_keys, admin_discord_api_key_create, admin_discord_api_key_delete,
     admin_discord_bytes, admin_discord_bytes_config, admin_discord_bytes_roles,
     admin_discord_give_bytes
@@ -24,7 +24,6 @@ from .discord_admin_routes import (
 from .api_routes import (
     api_token, guild_list, guild_detail, guild_create, guild_update,
     user_list, user_detail, user_create, user_update, users_batch_create,
-    kudos_list, kudos_detail, kudos_create,
     bytes_list, bytes_detail, bytes_create, bytes_config_get, bytes_config_create, bytes_config_update,
     bytes_roles_list, bytes_role_create, bytes_role_update, bytes_role_delete,
     bytes_cooldown_get, user_bytes_balance, bytes_leaderboard,
@@ -57,9 +56,7 @@ routes = [
     Route("/api/users", user_create, methods=["POST"]),
     Route("/api/users/{user_id:int}", user_update, methods=["PUT"]),
     Route("/api/users/batch", users_batch_create, methods=["POST"]),
-    Route("/api/kudos", kudos_list, methods=["GET"]),
-    Route("/api/kudos/{kudos_id:int}", kudos_detail, methods=["GET"]),
-    Route("/api/kudos", kudos_create, methods=["POST"]),
+
     # Bytes routes
     Route("/api/bytes", bytes_list, methods=["GET"]),
     Route("/api/bytes/{bytes_id:int}", bytes_detail, methods=["GET"]),
@@ -102,7 +99,7 @@ routes = [
     Route("/admin/discord/users/{id:int}", admin_discord_user_detail, methods=["GET"]),
     Route("/admin/discord/users/{id:int}/give-bytes", admin_discord_give_bytes, methods=["POST"]),
     Route("/admin/discord/warnings", admin_discord_warnings, methods=["GET"]),
-    Route("/admin/discord/kudos", admin_discord_kudos, methods=["GET"]),
+
     Route("/admin/discord/bytes", admin_discord_bytes, methods=["GET"]),
     Route("/admin/discord/bytes/config", admin_discord_bytes_config, methods=["GET", "POST"]),
     Route("/admin/discord/bytes/roles", admin_discord_bytes_roles, methods=["GET", "POST"]),

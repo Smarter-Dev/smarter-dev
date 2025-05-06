@@ -17,7 +17,7 @@ import httpx
 from httpx import Limits, TransportError
 
 from .api_models import (
-    Guild, DiscordUser, GuildMember, Kudos, UserNote, UserWarning,
+    Guild, DiscordUser, GuildMember, UserNote, UserWarning,
     ModerationCase, PersistentRole, TemporaryRole, ChannelLock,
     BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown
 )
@@ -309,36 +309,7 @@ class APIClient:
 
         return result
 
-    # Kudos endpoints (legacy)
-    async def get_kudos(self, guild_id: Optional[int] = None, user_id: Optional[int] = None,
-                      giver_id: Optional[int] = None, receiver_id: Optional[int] = None) -> List[Kudos]:
-        """Get kudos with optional filtering"""
-        params = {}
-        if guild_id:
-            params["guild_id"] = guild_id
-        if user_id:
-            params["user_id"] = user_id
-        if giver_id:
-            params["giver_id"] = giver_id
-        if receiver_id:
-            params["receiver_id"] = receiver_id
 
-        response = await self._request("GET", "/api/kudos", params=params)
-        data = await self._get_json(response)
-        return [self._model_from_dict(Kudos, k) for k in data["kudos"]]
-
-    async def get_kudos_detail(self, kudos_id: int) -> Kudos:
-        """Get kudos details"""
-        response = await self._request("GET", f"/api/kudos/{kudos_id}")
-        data = await self._get_json(response)
-        return self._model_from_dict(Kudos, data)
-
-    async def create_kudos(self, kudos: Kudos) -> Kudos:
-        """Create new kudos"""
-        data = self._dict_from_model(kudos)
-        response = await self._request("POST", "/api/kudos", data=data)
-        result = await self._get_json(response)
-        return self._model_from_dict(Kudos, result)
 
     # Bytes endpoints
     async def get_bytes(self, guild_id: Optional[int] = None, user_id: Optional[int] = None,

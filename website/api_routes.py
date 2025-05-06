@@ -7,7 +7,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from .models import (
-    APIKey, Guild, DiscordUser, GuildMember, Kudos, UserNote,
+    APIKey, Guild, DiscordUser, GuildMember, UserNote,
     UserWarning, ModerationCase, PersistentRole, TemporaryRole,
     ChannelLock, BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown
 )
@@ -386,88 +386,7 @@ def model_to_dict(model):
     return result
 
 
-# Kudos API endpoints (legacy)
-@api_error_handler
-async def kudos_list(request):
-    """
-    List all kudos, with optional filtering
-    """
-    db = next(get_db())
-    query = db.query(Kudos)
 
-    # Filter by guild
-    guild_id = request.query_params.get("guild_id")
-    if guild_id:
-        query = query.filter(Kudos.guild_id == guild_id)
-
-    # Filter by user (giver or receiver)
-    user_id = request.query_params.get("user_id")
-    if user_id:
-        query = query.filter(
-            (Kudos.giver_id == user_id) | (Kudos.receiver_id == user_id)
-        )
-
-    # Filter by receiver only
-    receiver_id = request.query_params.get("receiver_id")
-    if receiver_id:
-        query = query.filter(Kudos.receiver_id == receiver_id)
-
-    # Filter by giver only
-    giver_id = request.query_params.get("giver_id")
-    if giver_id:
-        query = query.filter(Kudos.giver_id == giver_id)
-
-    # Order by most recent
-    kudos = query.order_by(desc(Kudos.awarded_at)).all()
-
-    return JSONResponse({
-        "kudos": [model_to_dict(k) for k in kudos]
-    })
-
-@api_error_handler
-async def kudos_detail(request):
-    """
-    Get kudos details
-    """
-    kudos_id = request.path_params["kudos_id"]
-    db = next(get_db())
-
-    kudos = db.query(Kudos).filter(Kudos.id == kudos_id).first()
-    if not kudos:
-        return JSONResponse({"error": "Kudos not found"}, status_code=404)
-
-    return JSONResponse(model_to_dict(kudos))
-
-@api_error_handler
-async def kudos_create(request):
-    """
-    Create a new kudos award
-    """
-    data = await request.json()
-    db = next(get_db())
-
-    # Validate required fields
-    required_fields = ["giver_id", "receiver_id", "guild_id"]
-    for field in required_fields:
-        if field not in data:
-            return JSONResponse({"error": f"Missing required field: {field}"}, status_code=400)
-
-    # Create new kudos
-    kudos = Kudos(
-        giver_id=data["giver_id"],
-        receiver_id=data["receiver_id"],
-        guild_id=data["guild_id"],
-        amount=data.get("amount", 1),
-        reason=data.get("reason"),
-        # Handle datetime fields
-        awarded_at=parse_datetime(data.get("awarded_at"))
-    )
-
-    db.add(kudos)
-    db.commit()
-    db.refresh(kudos)
-
-    return JSONResponse(model_to_dict(kudos), status_code=201)
 
 
 # Bytes API endpoints

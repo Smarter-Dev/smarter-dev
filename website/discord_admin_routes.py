@@ -8,7 +8,7 @@ from starlette.responses import RedirectResponse, JSONResponse
 from starlette.templating import Jinja2Templates
 
 from .models import (
-    APIKey, Guild, DiscordUser, GuildMember, Kudos, UserNote,
+    APIKey, Guild, DiscordUser, GuildMember, UserNote,
     UserWarning, ModerationCase, PersistentRole, TemporaryRole,
     ChannelLock, BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown
 )
@@ -30,7 +30,6 @@ async def admin_discord_dashboard(request):
     total_users = db.query(func.count(DiscordUser.id)).scalar() or 0
     total_guilds = db.query(func.count(Guild.id)).scalar() or 0
     total_warnings = db.query(func.count(UserWarning.id)).scalar() or 0
-    total_kudos = db.query(func.count(Kudos.id)).scalar() or 0
     total_bytes = db.query(func.count(Bytes.id)).scalar() or 0
     total_cases = db.query(func.count(ModerationCase.id)).scalar() or 0
 
@@ -43,10 +42,6 @@ async def admin_discord_dashboard(request):
         UserWarning.warned_at >= time_range
     ).scalar() or 0
 
-    recent_kudos = db.query(func.count(Kudos.id)).filter(
-        Kudos.awarded_at >= time_range
-    ).scalar() or 0
-
     recent_bytes = db.query(func.count(Bytes.id)).filter(
         Bytes.awarded_at >= time_range
     ).scalar() or 0
@@ -55,18 +50,7 @@ async def admin_discord_dashboard(request):
         ModerationCase.created_at >= time_range
     ).scalar() or 0
 
-    # Get top users by kudos received
-    top_kudos_users = db.query(
-        DiscordUser.id,
-        DiscordUser.username,
-        func.count(Kudos.id).label('kudos_count')
-    ).join(
-        Kudos, Kudos.receiver_id == DiscordUser.id
-    ).group_by(
-        DiscordUser.id
-    ).order_by(
-        desc('kudos_count')
-    ).limit(5).all()
+
 
     # Get top users by bytes balance
     top_bytes_users = db.query(
@@ -96,25 +80,11 @@ async def admin_discord_dashboard(request):
     ).limit(10).all()
 
     # Prepare data for charts
-    # Kudos over time (last 30 days)
-    kudos_dates = []
-    kudos_counts = []
-
-    time_range_30d = datetime.now() - timedelta(days=30)
-
-    # Get kudos per day
+    # Dates for the last 30 days
+    dates = []
     for i in range(30):
         date = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
-        day_start = datetime.now() - timedelta(days=i, hours=datetime.now().hour, minutes=datetime.now().minute, seconds=datetime.now().second)
-        day_end = day_start + timedelta(days=1)
-
-        count = db.query(func.count(Kudos.id)).filter(
-            Kudos.awarded_at >= day_start,
-            Kudos.awarded_at < day_end
-        ).scalar() or 0
-
-        kudos_dates.insert(0, date)
-        kudos_counts.insert(0, count)
+        dates.insert(0, date)
 
     # Warnings over time (last 30 days)
     warning_counts = []
@@ -136,20 +106,15 @@ async def admin_discord_dashboard(request):
         "total_users": total_users,
         "total_guilds": total_guilds,
         "total_warnings": total_warnings,
-        "total_kudos": total_kudos,
         "total_cases": total_cases,
         "recent_warnings": recent_warnings,
-        "recent_kudos": recent_kudos,
         "recent_cases": recent_cases
     }
 
     # Prepare chart data
     chart_data = {
-        "kudos_dates": kudos_dates,
-        "kudos_counts": kudos_counts,
+        "dates": dates,
         "warning_counts": warning_counts,
-        "top_kudos_users": [user.username for user in top_kudos_users],
-        "top_kudos_counts": [user.kudos_count for user in top_kudos_users],
         "top_bytes_users": [user.username for user in top_bytes_users],
         "top_bytes_counts": [user.bytes_balance for user in top_bytes_users],
         "top_warned_users": [user.username for user in top_warned_users],
@@ -180,10 +145,6 @@ async def admin_discord_users(request):
     # Get additional stats for each user
     user_stats = {}
     for user in users:
-        kudos_received = db.query(func.count(Kudos.id)).filter(
-            Kudos.receiver_id == user.id
-        ).scalar() or 0
-
         bytes_received = db.query(func.sum(Bytes.amount)).filter(
             Bytes.receiver_id == user.id
         ).scalar() or 0
@@ -193,7 +154,6 @@ async def admin_discord_users(request):
         ).scalar() or 0
 
         user_stats[user.id] = {
-            "kudos_received": kudos_received,
             "bytes_received": bytes_received,
             "bytes_balance": user.bytes_balance,
             "warnings": warnings
@@ -223,14 +183,7 @@ async def admin_discord_user_detail(request):
     if not user:
         return RedirectResponse(url="/admin/discord/users", status_code=302)
 
-    # Get user stats
-    kudos_received = db.query(Kudos).filter(
-        Kudos.receiver_id == user.id
-    ).order_by(desc(Kudos.awarded_at)).all()
 
-    kudos_given = db.query(Kudos).filter(
-        Kudos.giver_id == user.id
-    ).order_by(desc(Kudos.awarded_at)).all()
 
     bytes_received = db.query(Bytes).filter(
         Bytes.receiver_id == user.id
@@ -272,8 +225,6 @@ async def admin_discord_user_detail(request):
         {
             "request": request,
             "user": user,
-            "kudos_received": kudos_received,
-            "kudos_given": kudos_given,
             "bytes_received": bytes_received,
             "bytes_given": bytes_given,
             "bytes_balance": user.bytes_balance,
@@ -378,40 +329,7 @@ async def admin_discord_warnings(request):
         }
     )
 
-# Discord kudos list
-async def admin_discord_kudos(request):
-    """
-    List all kudos
-    """
-    # Get DB session
-    db = next(get_db())
 
-    # Get kudos
-    kudos = db.query(Kudos).order_by(desc(Kudos.awarded_at)).all()
-
-    # Get user info
-    user_ids = set([k.giver_id for k in kudos] + [k.receiver_id for k in kudos])
-    users = db.query(DiscordUser).filter(DiscordUser.id.in_(user_ids)).all()
-
-    # Map user IDs to usernames
-    usernames = {u.id: u.username for u in users}
-
-    # Get guild info
-    guild_ids = set([k.guild_id for k in kudos])
-    guilds = db.query(Guild).filter(Guild.id.in_(guild_ids)).all()
-
-    # Map guild IDs to names
-    guild_names = {g.id: g.name for g in guilds}
-
-    return templates.TemplateResponse(
-        "admin/discord/kudos.html",
-        {
-            "request": request,
-            "kudos": kudos,
-            "usernames": usernames,
-            "guild_names": guild_names
-        }
-    )
 
 # Discord moderation cases
 async def admin_discord_moderation(request):

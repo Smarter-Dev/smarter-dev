@@ -23,7 +23,6 @@
                     <tr>
                         <th>Username</th>
                         <th>Discord ID</th>
-                        <th>Kudos</th>
                         <th>Bytes</th>
                         <th>Warnings</th>
                         <th>Joined</th>
@@ -35,7 +34,6 @@
                     <tr>
                         <td>{{ user.username }}</td>
                         <td>{{ user.discord_id }}</td>
-                        <td>{{ user_stats[user.id].kudos_received }}</td>
                         <td>{{ user_stats[user.id].bytes_balance }}</td>
                         <td>{{ user_stats[user.id].warnings }}</td>
                         <td>{{ user.created_at.strftime('%Y-%m-%d') }}</td>
