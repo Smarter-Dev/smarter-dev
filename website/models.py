@@ -432,3 +432,48 @@ class BytesCooldown(Base):
     def __repr__(self):
         return f"<BytesCooldown for user {self.user_id} in guild {self.guild_id}>"
 
+
+# Auto Moderation Regex Rule model
+class AutoModRegexRule(Base):
+    __tablename__ = "automod_regex_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(Integer, ForeignKey("guilds.id"), nullable=False)
+    pattern = Column(String, nullable=False)  # Regex pattern to match
+    description = Column(Text, nullable=True)  # Description of what this rule catches
+    action = Column(String, nullable=False, default="ban")  # Action to take: ban, kick, timeout
+    require_no_avatar = Column(Boolean, default=False)  # Only apply to users without custom avatars
+    max_account_age_days = Column(Integer, nullable=True)  # Only apply to accounts newer than this
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Relationships
+    guild = relationship("Guild")
+
+    def __repr__(self):
+        return f"<AutoModRegexRule {self.pattern} in guild {self.guild_id}>"
+
+
+# Auto Moderation Rate Limit model
+class AutoModRateLimit(Base):
+    __tablename__ = "automod_rate_limits"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(Integer, ForeignKey("guilds.id"), nullable=False)
+    name = Column(String, nullable=False)  # Name of this rate limit rule
+    limit_type = Column(String, nullable=False)  # Type: message_count, duplicate_messages, channel_count
+    count = Column(Integer, nullable=False)  # Number of messages/channels
+    time_period_seconds = Column(Integer, nullable=False)  # Time period in seconds
+    action = Column(String, nullable=False, default="timeout")  # Action: timeout, warn, mute
+    action_duration_seconds = Column(Integer, nullable=True)  # Duration of timeout/mute in seconds
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Relationships
+    guild = relationship("Guild")
+
+    def __repr__(self):
+        return f"<AutoModRateLimit {self.name} in guild {self.guild_id}>"
+

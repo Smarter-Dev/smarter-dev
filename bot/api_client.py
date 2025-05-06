@@ -19,7 +19,8 @@ from httpx import Limits, TransportError
 from .api_models import (
     Guild, DiscordUser, GuildMember, UserNote, UserWarning,
     ModerationCase, PersistentRole, TemporaryRole, ChannelLock,
-    BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown
+    BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown,
+    AutoModRegexRule, AutoModRateLimit
 )
 
 # Type variable for generic response handling
@@ -468,3 +469,42 @@ class APIClient:
         response = await self._request("PUT", f"/api/moderation-cases/{case.id}", data=data)
         result = await self._get_json(response)
         return self._model_from_dict(ModerationCase, result)
+
+    # Auto Moderation endpoints
+    async def get_automod_regex_rules(self, guild_id: Optional[int] = None, is_active: Optional[bool] = None) -> List[AutoModRegexRule]:
+        """Get auto moderation regex rules with optional filtering"""
+        params = {}
+        if guild_id:
+            params["guild_id"] = guild_id
+        if is_active is not None:
+            params["is_active"] = str(is_active).lower()
+
+        response = await self._request("GET", "/api/automod/regex-rules", params=params)
+        data = await self._get_json(response)
+        return [self._model_from_dict(AutoModRegexRule, r) for r in data["rules"]]
+
+    async def get_automod_regex_rule(self, rule_id: int) -> AutoModRegexRule:
+        """Get auto moderation regex rule details"""
+        response = await self._request("GET", f"/api/automod/regex-rules/{rule_id}")
+        data = await self._get_json(response)
+        return self._model_from_dict(AutoModRegexRule, data)
+
+    async def get_automod_rate_limits(self, guild_id: Optional[int] = None, is_active: Optional[bool] = None, limit_type: Optional[str] = None) -> List[AutoModRateLimit]:
+        """Get auto moderation rate limits with optional filtering"""
+        params = {}
+        if guild_id:
+            params["guild_id"] = guild_id
+        if is_active is not None:
+            params["is_active"] = str(is_active).lower()
+        if limit_type:
+            params["limit_type"] = limit_type
+
+        response = await self._request("GET", "/api/automod/rate-limits", params=params)
+        data = await self._get_json(response)
+        return [self._model_from_dict(AutoModRateLimit, l) for l in data["limits"]]
+
+    async def get_automod_rate_limit(self, limit_id: int) -> AutoModRateLimit:
+        """Get auto moderation rate limit details"""
+        response = await self._request("GET", f"/api/automod/rate-limits/{limit_id}")
+        data = await self._get_json(response)
+        return self._model_from_dict(AutoModRateLimit, data)

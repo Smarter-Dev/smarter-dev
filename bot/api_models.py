@@ -185,3 +185,34 @@ class BytesCooldown:
     user_id: int = 0
     guild_id: int = 0
     last_given_at: Optional[datetime] = None
+
+
+@dataclass
+class AutoModRegexRule:
+    """Auto Moderation Regex Rule model"""
+    id: Optional[int] = None  # Optional for creation
+    guild_id: int = 0
+    pattern: str = ""
+    description: Optional[str] = None
+    action: str = "ban"  # ban, kick, timeout
+    require_no_avatar: bool = False
+    max_account_age_days: Optional[int] = None
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+@dataclass
+class AutoModRateLimit:
+    """Auto Moderation Rate Limit model"""
+    id: Optional[int] = None  # Optional for creation
+    guild_id: int = 0
+    name: str = ""
+    limit_type: str = "message_count"  # message_count, duplicate_messages, channel_count
+    count: int = 0
+    time_period_seconds: int = 0
+    action: str = "timeout"  # timeout, warn, mute
+    action_duration_seconds: Optional[int] = None
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
