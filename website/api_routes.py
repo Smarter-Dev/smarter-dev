@@ -1120,17 +1120,30 @@ async def automod_regex_rules_list(request):
     """
     List all auto moderation regex rules, with optional filtering
     """
+    print("Received request for automod regex rules")
     db = next(get_db())
     query = db.query(AutoModRegexRule)
 
     # Filter by guild
     guild_id = request.query_params.get("guild_id")
     if guild_id:
-        query = query.filter(AutoModRegexRule.guild_id == guild_id)
+        try:
+            guild_id_int = int(guild_id)
+            print(f"Filtering by guild_id: {guild_id_int}")
+            query = query.filter(AutoModRegexRule.guild_id == guild_id_int)
+
+            # Debug: Print all rules in the database
+            all_rules = db.query(AutoModRegexRule).all()
+            print(f"All rules in database: {len(all_rules)}")
+            for rule in all_rules:
+                print(f"Rule {rule.id}: guild_id={rule.guild_id}, pattern={rule.pattern}, is_active={rule.is_active}")
+        except ValueError:
+            print(f"Invalid guild_id parameter: {guild_id}")
 
     # Filter by active status
     is_active = request.query_params.get("is_active")
     if is_active is not None:
+        print(f"Filtering by is_active: {is_active}")
         if is_active.lower() == "true":
             query = query.filter(AutoModRegexRule.is_active == True)
         elif is_active.lower() == "false":
@@ -1138,10 +1151,15 @@ async def automod_regex_rules_list(request):
 
     # Order by guild and creation date
     rules = query.order_by(AutoModRegexRule.guild_id, AutoModRegexRule.created_at).all()
+    print(f"Found {len(rules)} rules")
+    for rule in rules:
+        print(f"Rule: {rule.id}, guild_id: {rule.guild_id}, pattern: {rule.pattern}, is_active: {rule.is_active}")
 
-    return JSONResponse({
+    response_data = {
         "rules": [model_to_dict(r) for r in rules]
-    })
+    }
+    print(f"Returning response: {response_data}")
+    return JSONResponse(response_data)
 
 @api_error_handler
 async def automod_regex_rule_detail(request):

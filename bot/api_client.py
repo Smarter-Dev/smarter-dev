@@ -474,13 +474,15 @@ class APIClient:
     async def get_automod_regex_rules(self, guild_id: Optional[int] = None, is_active: Optional[bool] = None) -> List[AutoModRegexRule]:
         """Get auto moderation regex rules with optional filtering"""
         params = {}
-        if guild_id:
-            params["guild_id"] = guild_id
+        if guild_id is not None:
+            params["guild_id"] = str(guild_id)  # Convert to string to ensure proper URL encoding
         if is_active is not None:
             params["is_active"] = str(is_active).lower()
 
+        print(f"Requesting automod regex rules with params: {params}")
         response = await self._request("GET", "/api/automod/regex-rules", params=params)
         data = await self._get_json(response)
+        print(f"Received automod regex rules response: {data}")
         return [self._model_from_dict(AutoModRegexRule, r) for r in data["rules"]]
 
     async def get_automod_regex_rule(self, rule_id: int) -> AutoModRegexRule:
