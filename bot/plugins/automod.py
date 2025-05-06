@@ -48,7 +48,31 @@ async def get_regex_rules(client: APIClient, guild_id: int) -> List[AutoModRegex
 
     # Get rules from API
     try:
-        rules = await client.get_automod_regex_rules(guild_id=guild_id, is_active=True)
+        # First, we need to get the database ID for this guild
+        guild_response = await client._request("GET", f"/api/guilds?discord_id={guild_id}")
+        guild_data = await client._get_json(guild_response)
+
+        if not guild_data.get("guilds"):
+            logger.error(f"Guild with discord_id {guild_id} not found in database")
+            return []
+
+        # Find the exact match for the Discord guild ID
+        db_guild_id = None
+        for guild in guild_data["guilds"]:
+            if str(guild["discord_id"]) == str(guild_id):
+                db_guild_id = guild["id"]
+                break
+
+        if db_guild_id is None:
+            logger.error(f"Could not find exact match for guild with discord_id {guild_id}")
+            return []
+
+        logger.info(f"Fetching regex rules for guild {guild_id} (DB ID: {db_guild_id})")
+
+        # Now get the rules using the database ID
+        rules = await client.get_automod_regex_rules(guild_id=db_guild_id, is_active=True)
+        logger.info(f"Received {len(rules)} regex rules for guild {guild_id}")
+
         # Update cache
         regex_rules_cache[guild_id] = (rules, now)
         return rules
@@ -59,9 +83,9 @@ async def get_regex_rules(client: APIClient, guild_id: int) -> List[AutoModRegex
 
 
 async def check_username_against_rules(
-    client: APIClient, 
-    user: hikari.User, 
-    guild_id: int, 
+    client: APIClient,
+    user: hikari.User,
+    guild_id: int,
     bot: lightbulb.BotApp
 ) -> Optional[Tuple[AutoModRegexRule, re.Match]]:
     """
@@ -78,21 +102,28 @@ async def check_username_against_rules(
     """
     # Get rules
     rules = await get_regex_rules(client, guild_id)
+    logger.info(f"Retrieved {len(rules)} regex rules for guild {guild_id}")
     if not rules:
+        logger.info(f"No regex rules found for guild {guild_id}")
         return None
 
     # Get user account age
     user_created_at = user.created_at
     account_age_days = (datetime.now(user_created_at.tzinfo) - user_created_at).days
+    logger.info(f"User {user.username} account age: {account_age_days} days, has avatar: {bool(user.avatar_url)}")
 
     # Check each rule
     for rule in rules:
+        logger.info(f"Checking rule {rule.id}: pattern='{rule.pattern}', require_no_avatar={rule.require_no_avatar}, max_account_age_days={rule.max_account_age_days}")
+
         # Skip if rule requires no avatar but user has one
         if rule.require_no_avatar and user.avatar_url:
+            logger.info(f"Skipping rule {rule.id} because user has an avatar")
             continue
 
         # Skip if rule has max account age and user's account is older
         if rule.max_account_age_days and account_age_days > rule.max_account_age_days:
+            logger.info(f"Skipping rule {rule.id} because user's account is too old ({account_age_days} days > {rule.max_account_age_days} days)")
             continue
 
         # Check regex pattern
@@ -100,7 +131,10 @@ async def check_username_against_rules(
             pattern = re.compile(rule.pattern, re.IGNORECASE)
             match = pattern.search(user.username)
             if match:
+                logger.info(f"Rule {rule.id} matched username '{user.username}' with pattern '{rule.pattern}'")
                 return (rule, match)
+            else:
+                logger.info(f"Rule {rule.id} did not match username '{user.username}'")
         except re.error as e:
             logger.error(f"Invalid regex pattern in rule {rule.id}: {e}")
             continue
@@ -129,24 +163,24 @@ async def apply_moderation_action(
     """
     # Get bot user for moderation actions
     bot_user = bot.get_me()
-    
+
     # Get guild for logging
     guild = await bot.rest.fetch_guild(guild_id)
-    
+
     # Prepare reason
     reason = f"Auto-moderation: Username matches pattern '{rule.pattern}'"
     if rule.description:
         reason += f" ({rule.description})"
-    
+
     # Log the action
     logger.info(f"Auto-mod action: {rule.action} for user {user.username} ({user.id}) in guild {guild.name} ({guild_id})")
     logger.info(f"Reason: {reason}")
-    
+
     try:
         # Get or create bot user in database
         bot_user_response = await client._request("GET", f"/api/users?discord_id={bot_user.id}")
         bot_user_data = await client._get_json(bot_user_response)
-        
+
         if not bot_user_data.get("users"):
             # Create bot user
             bot_user_obj = DiscordUser(
@@ -161,11 +195,11 @@ async def apply_moderation_action(
             bot_user_id = bot_user_data["id"]
         else:
             bot_user_id = bot_user_data["users"][0]["id"]
-        
+
         # Get or create target user in database
         user_response = await client._request("GET", f"/api/users?discord_id={user.id}")
         user_data = await client._get_json(user_response)
-        
+
         if not user_data.get("users"):
             # Create user
             user_obj = DiscordUser(
@@ -180,7 +214,7 @@ async def apply_moderation_action(
             user_id = user_data["id"]
         else:
             user_id = user_data["users"][0]["id"]
-        
+
         # Apply the action
         if rule.action == "ban":
             # Ban the user
@@ -195,7 +229,7 @@ async def apply_moderation_action(
             timeout_duration = datetime.now() + timedelta(days=1)
             await bot.rest.edit_member(guild_id, user.id, communication_disabled_until=timeout_duration, reason=reason)
             duration_sec = 86400  # 1 day in seconds
-        
+
         # Create moderation case
         case = ModerationCase(
             guild_id=guild_id,
@@ -205,9 +239,9 @@ async def apply_moderation_action(
             reason=reason,
             duration_sec=duration_sec
         )
-        
+
         await client.create_moderation_case(case)
-        
+
     except Exception as e:
         logger.error(f"Error applying moderation action: {e}")
 
@@ -220,14 +254,20 @@ async def on_member_join(event: hikari.MemberCreateEvent) -> None:
     """
     # Get API client
     client = event.app.d.api_client
-    
+
+    logger.info(f"User {event.user.username} ({event.user.id}) joined guild {event.guild_id}")
+
     # Check username against rules
+    logger.info(f"Checking username '{event.user.username}' against regex rules")
     result = await check_username_against_rules(client, event.user, event.guild_id, event.app)
-    
+
     if result:
         rule, match = result
+        logger.info(f"Username '{event.user.username}' matched rule: {rule.pattern}")
         # Apply moderation action
         await apply_moderation_action(client, event.app, event.guild_id, event.user, rule, match)
+    else:
+        logger.info(f"Username '{event.user.username}' did not match any rules")
 
 
 def load(bot: lightbulb.BotApp) -> None:
