@@ -108,7 +108,6 @@ SMARTER_DEV_LOCAL=1 python your_script.py
 - `Guild`: Discord Guild model
 - `DiscordUser`: Discord User model
 - `GuildMember`: Guild Member model
-- `Kudos`: Kudos model
 - `UserNote`: User Note model
 - `UserWarning`: User Warning model
 - `ModerationCase`: Moderation Case model
@@ -132,10 +131,6 @@ SMARTER_DEV_LOCAL=1 python your_script.py
 - `create_user(user)`: Create a new user
 - `update_user(user)`: Update a user
 
-#### Kudos
-- `get_kudos(guild_id, user_id, giver_id, receiver_id)`: Get kudos with optional filtering
-- `get_kudos_detail(kudos_id)`: Get kudos details
-- `create_kudos(kudos)`: Create new kudos
 
 #### Warnings
 - `get_warnings(guild_id, user_id, mod_id)`: Get warnings with optional filtering

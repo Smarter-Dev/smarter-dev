@@ -74,14 +74,7 @@
         </div>
 
         <div class="user-stats">
-            <div class="stat-item">
-                <div class="stat-value">{{ kudos_received|length }}</div>
-                <div class="stat-label">Kudos Received</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-value">{{ kudos_given|length }}</div>
-                <div class="stat-label">Kudos Given</div>
-            </div>
+
             <div class="stat-item">
                 <div class="stat-value">{{ bytes_balance }}</div>
                 <div class="stat-label">Bytes Balance</div>
@@ -127,74 +120,15 @@
 
     <div class="tabs">
         <div class="tab-header">
-            <button class="tab-button active" onclick="openTab(event, 'kudos-tab')">Kudos</button>
-            <button class="tab-button" onclick="openTab(event, 'bytes-tab')">Bytes</button>
+            <button class="tab-button active" onclick="openTab(event, 'bytes-tab')">Bytes</button>
             <button class="tab-button" onclick="openTab(event, 'warnings-tab')">Warnings</button>
             <button class="tab-button" onclick="openTab(event, 'notes-tab')">Notes</button>
             <button class="tab-button" onclick="openTab(event, 'cases-tab')">Mod Cases</button>
         </div>
 
-        <div id="kudos-tab" class="tab-content active">
-            <h3 class="section-title">Kudos Received</h3>
-            <div class="table-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>From</th>
-                            <th>Amount</th>
-                            <th>Reason</th>
-                            <th>Date</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for kudos in kudos_received %}
-                        <tr>
-                            <td>{{ kudos.giver.username if kudos.giver else 'Unknown' }}</td>
-                            <td>{{ kudos.amount }}</td>
-                            <td class="truncate">{{ kudos.reason or 'No reason provided' }}</td>
-                            <td>{{ kudos.awarded_at.strftime('%Y-%m-%d') }}</td>
-                        </tr>
-                        {% endfor %}
-                        {% if not kudos_received %}
-                        <tr>
-                            <td colspan="4" class="empty-table">No kudos received.</td>
-                        </tr>
-                        {% endif %}
-                    </tbody>
-                </table>
-            </div>
 
-            <h3 class="section-title">Kudos Given</h3>
-            <div class="table-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>To</th>
-                            <th>Amount</th>
-                            <th>Reason</th>
-                            <th>Date</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for kudos in kudos_given %}
-                        <tr>
-                            <td>{{ kudos.receiver.username if kudos.receiver else 'Unknown' }}</td>
-                            <td>{{ kudos.amount }}</td>
-                            <td class="truncate">{{ kudos.reason or 'No reason provided' }}</td>
-                            <td>{{ kudos.awarded_at.strftime('%Y-%m-%d') }}</td>
-                        </tr>
-                        {% endfor %}
-                        {% if not kudos_given %}
-                        <tr>
-                            <td colspan="4" class="empty-table">No kudos given.</td>
-                        </tr>
-                        {% endif %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
 
-        <div id="bytes-tab" class="tab-content">
+        <div id="bytes-tab" class="tab-content active">
             <h3 class="section-title">Bytes Received</h3>
             <div class="table-container">
                 <table class="data-table">
@@ -383,5 +317,12 @@
         document.getElementById(tabName).classList.add('active');
         evt.currentTarget.classList.add('active');
     }
+
+    // Initialize with bytes tab active
+    document.addEventListener('DOMContentLoaded', function() {
+        // Make sure bytes tab is active by default
+        document.getElementById('bytes-tab').classList.add('active');
+        document.querySelector('.tab-button[onclick="openTab(event, \'bytes-tab\')"]').classList.add('active');
+    });
 </script>
 {% endblock %}

@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from bot.api_client import APIClient
 from bot.api_models import (
-    Guild, DiscordUser, GuildMember, Kudos, UserNote, UserWarning,
+    Guild, DiscordUser, GuildMember, UserNote, UserWarning,
     ModerationCase, PersistentRole, TemporaryRole, ChannelLock,
     BumpStat, CommandUsage
 )
@@ -28,7 +28,7 @@ API_KEY = "TESTING"
 async def test_get_guilds():
     """Test getting all guilds"""
     client = APIClient(BASE_URL, API_KEY)
-    
+
     # Mock the token response
     token_response = AsyncMock()
     token_response.status_code = 200
@@ -37,7 +37,7 @@ async def test_get_guilds():
         "token": "test-token",
         "expires_in": 3600
     })
-    
+
     # Mock the API response
     api_response = AsyncMock()
     api_response.status_code = 200
@@ -65,14 +65,14 @@ async def test_get_guilds():
             }
         ]
     })
-    
+
     try:
         # First mock the token request
         with patch.object(client.client, 'post', new=AsyncMock(return_value=token_response)):
             # Then mock the API request
             with patch.object(client.client, 'request', new=AsyncMock(return_value=api_response)):
                 guilds = await client.get_guilds()
-                
+
                 # Check that we got the expected guilds
                 assert len(guilds) == 1
                 assert guilds[0].id == 1
@@ -88,7 +88,7 @@ async def test_get_guilds():
 async def test_create_guild():
     """Test creating a guild"""
     client = APIClient(BASE_URL, API_KEY)
-    
+
     # Create a guild to send
     guild = Guild(
         id=None,  # No ID for creation
@@ -96,7 +96,7 @@ async def test_create_guild():
         name="Test Guild",
         icon_url="https://example.com/icon.png"
     )
-    
+
     # Mock the token response
     token_response = AsyncMock()
     token_response.status_code = 200
@@ -105,7 +105,7 @@ async def test_create_guild():
         "token": "test-token",
         "expires_in": 3600
     })
-    
+
     # Mock the API response
     api_response = AsyncMock()
     api_response.status_code = 201
@@ -125,14 +125,14 @@ async def test_create_guild():
         "joined_at": "2023-01-01T00:00:00",
         "created_at": "2023-01-01T00:00:00"
     })
-    
+
     try:
         # First mock the token request
         with patch.object(client.client, 'post', new=AsyncMock(return_value=token_response)):
             # Then mock the API request
             with patch.object(client.client, 'request', new=AsyncMock(return_value=api_response)):
                 created_guild = await client.create_guild(guild)
-                
+
                 # Check that we got the expected guild back
                 assert created_guild.id == 1
                 assert created_guild.discord_id == 123456789
@@ -147,7 +147,7 @@ async def test_create_guild():
 async def test_get_users():
     """Test getting all users"""
     client = APIClient(BASE_URL, API_KEY)
-    
+
     # Mock the token response
     token_response = AsyncMock()
     token_response.status_code = 200
@@ -156,7 +156,7 @@ async def test_get_users():
         "token": "test-token",
         "expires_in": 3600
     })
-    
+
     # Mock the API response
     api_response = AsyncMock()
     api_response.status_code = 200
@@ -184,14 +184,14 @@ async def test_get_users():
             }
         ]
     })
-    
+
     try:
         # First mock the token request
         with patch.object(client.client, 'post', new=AsyncMock(return_value=token_response)):
             # Then mock the API request
             with patch.object(client.client, 'request', new=AsyncMock(return_value=api_response)):
                 users = await client.get_users()
-                
+
                 # Check that we got the expected users
                 assert len(users) == 1
                 assert users[0].id == 1
@@ -203,74 +203,13 @@ async def test_get_users():
     finally:
         await client.close()
 
-@pytest.mark.asyncio
-async def test_create_kudos():
-    """Test creating kudos"""
-    client = APIClient(BASE_URL, API_KEY)
-    
-    # Create kudos to send
-    kudos = Kudos(
-        giver_id=1,
-        receiver_id=2,
-        guild_id=3,
-        amount=5,
-        reason="For being awesome"
-    )
-    
-    # Mock the token response
-    token_response = AsyncMock()
-    token_response.status_code = 200
-    token_response.text = "{'token': 'test-token', 'expires_in': 3600}"
-    token_response.json = AsyncMock(return_value={
-        "token": "test-token",
-        "expires_in": 3600
-    })
-    
-    # Mock the API response
-    api_response = AsyncMock()
-    api_response.status_code = 201
-    api_response.text = json.dumps({
-        "id": 1,
-        "giver_id": 1,
-        "receiver_id": 2,
-        "guild_id": 3,
-        "amount": 5,
-        "reason": "For being awesome",
-        "awarded_at": "2023-01-01T00:00:00"
-    })
-    api_response.json = AsyncMock(return_value={
-        "id": 1,
-        "giver_id": 1,
-        "receiver_id": 2,
-        "guild_id": 3,
-        "amount": 5,
-        "reason": "For being awesome",
-        "awarded_at": "2023-01-01T00:00:00"
-    })
-    
-    try:
-        # First mock the token request
-        with patch.object(client.client, 'post', new=AsyncMock(return_value=token_response)):
-            # Then mock the API request
-            with patch.object(client.client, 'request', new=AsyncMock(return_value=api_response)):
-                created_kudos = await client.create_kudos(kudos)
-                
-                # Check that we got the expected kudos back
-                assert created_kudos.id == 1
-                assert created_kudos.giver_id == 1
-                assert created_kudos.receiver_id == 2
-                assert created_kudos.guild_id == 3
-                assert created_kudos.amount == 5
-                assert created_kudos.reason == "For being awesome"
-                assert isinstance(created_kudos.awarded_at, datetime)
-    finally:
-        await client.close()
+
 
 @pytest.mark.asyncio
 async def test_get_warnings():
     """Test getting warnings with filtering"""
     client = APIClient(BASE_URL, API_KEY)
-    
+
     # Mock the token response
     token_response = AsyncMock()
     token_response.status_code = 200
@@ -279,7 +218,7 @@ async def test_get_warnings():
         "token": "test-token",
         "expires_in": 3600
     })
-    
+
     # Mock the API response
     api_response = AsyncMock()
     api_response.status_code = 200
@@ -307,14 +246,14 @@ async def test_get_warnings():
             }
         ]
     })
-    
+
     try:
         # First mock the token request
         with patch.object(client.client, 'post', new=AsyncMock(return_value=token_response)):
             # Then mock the API request
             with patch.object(client.client, 'request', new=AsyncMock(return_value=api_response)):
                 warnings = await client.get_warnings(guild_id=4, user_id=2)
-                
+
                 # Check that we got the expected warnings
                 assert len(warnings) == 1
                 assert warnings[0].id == 1
@@ -330,7 +269,7 @@ async def test_get_warnings():
 async def test_create_moderation_case():
     """Test creating a moderation case"""
     client = APIClient(BASE_URL, API_KEY)
-    
+
     # Create a case to send
     case = ModerationCase(
         guild_id=1,
@@ -340,7 +279,7 @@ async def test_create_moderation_case():
         reason="Breaking rules",
         duration_sec=3600
     )
-    
+
     # Mock the token response
     token_response = AsyncMock()
     token_response.status_code = 200
@@ -349,7 +288,7 @@ async def test_create_moderation_case():
         "token": "test-token",
         "expires_in": 3600
     })
-    
+
     # Mock the API response
     api_response = AsyncMock()
     api_response.status_code = 201
@@ -379,14 +318,14 @@ async def test_create_moderation_case():
         "resolved_at": None,
         "resolution_note": None
     })
-    
+
     try:
         # First mock the token request
         with patch.object(client.client, 'post', new=AsyncMock(return_value=token_response)):
             # Then mock the API request
             with patch.object(client.client, 'request', new=AsyncMock(return_value=api_response)):
                 created_case = await client.create_moderation_case(case)
-                
+
                 # Check that we got the expected case back
                 assert created_case.id == 1
                 assert created_case.case_number == 1
@@ -406,7 +345,7 @@ async def test_create_moderation_case():
 async def test_update_moderation_case():
     """Test updating a moderation case"""
     client = APIClient(BASE_URL, API_KEY)
-    
+
     # Create a case to update
     case = ModerationCase(
         id=1,
@@ -421,7 +360,7 @@ async def test_update_moderation_case():
         resolved_at=datetime(2023, 1, 2),
         resolution_note="User apologized"
     )
-    
+
     # Mock the token response
     token_response = AsyncMock()
     token_response.status_code = 200
@@ -430,7 +369,7 @@ async def test_update_moderation_case():
         "token": "test-token",
         "expires_in": 3600
     })
-    
+
     # Mock the API response
     api_response = AsyncMock()
     api_response.status_code = 200
@@ -460,14 +399,14 @@ async def test_update_moderation_case():
         "resolved_at": "2023-01-02T00:00:00",
         "resolution_note": "User apologized"
     })
-    
+
     try:
         # First mock the token request
         with patch.object(client.client, 'post', new=AsyncMock(return_value=token_response)):
             # Then mock the API request
             with patch.object(client.client, 'request', new=AsyncMock(return_value=api_response)):
                 updated_case = await client.update_moderation_case(case)
-                
+
                 # Check that we got the expected case back
                 assert updated_case.id == 1
                 assert updated_case.case_number == 1

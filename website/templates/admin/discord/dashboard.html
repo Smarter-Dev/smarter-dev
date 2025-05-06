@@ -37,19 +37,7 @@
             </div>
         </div>
 
-        <div class="stat-card">
-            <div class="stat-icon">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-                    <path d="M2 17l10 5 10-5"></path>
-                    <path d="M2 12l10 5 10-5"></path>
-                </svg>
-            </div>
-            <div class="stat-content">
-                <h3 class="stat-title">Total Kudos</h3>
-                <div class="stat-value">{{ stats.total_kudos }}</div>
-            </div>
-        </div>
+
 
         <div class="stat-card">
             <div class="stat-icon">
@@ -91,20 +79,7 @@
             </div>
         </div>
 
-        <div class="stat-card">
-            <div class="stat-icon">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
-                    <path d="M2 17l10 5 10-5"></path>
-                    <path d="M2 12l10 5 10-5"></path>
-                </svg>
-            </div>
-            <div class="stat-content">
-                <h3 class="stat-title">Recent Kudos</h3>
-                <div class="stat-value">{{ stats.recent_kudos }}</div>
-                <div class="stat-subtitle">Last 7 days</div>
-            </div>
-        </div>
+
 
         <div class="stat-card">
             <div class="stat-icon">
@@ -137,18 +112,13 @@
 
     <div class="chart-grid">
         <div class="chart-card">
-            <h3 class="chart-title">Kudos & Warnings Over Time</h3>
+            <h3 class="chart-title">Warnings Over Time</h3>
             <div class="chart-container">
                 <canvas id="activityChart"></canvas>
             </div>
         </div>
 
-        <div class="chart-card">
-            <h3 class="chart-title">Top Kudos Recipients</h3>
-            <div class="chart-container">
-                <canvas id="topKudosChart"></canvas>
-            </div>
-        </div>
+
 
         <div class="chart-card">
             <h3 class="chart-title">Top Bytes Balances</h3>
@@ -218,16 +188,8 @@
         const activityChart = new Chart(activityCtx, {
             type: 'line',
             data: {
-                labels: {{ chart_data.kudos_dates|tojson }},
+                labels: {{ chart_data.dates|tojson }},
                 datasets: [{
-                    label: 'Kudos',
-                    data: {{ chart_data.kudos_counts|tojson }},
-                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                    borderColor: 'rgba(59, 130, 246, 1)',
-                    borderWidth: 2,
-                    tension: 0.3,
-                    fill: true
-                }, {
                     label: 'Warnings',
                     data: {{ chart_data.warning_counts|tojson }},
                     backgroundColor: 'rgba(239, 68, 68, 0.2)',
@@ -256,38 +218,7 @@
             }
         });
 
-        // Top kudos recipients chart
-        const topKudosCtx = document.getElementById('topKudosChart').getContext('2d');
-        const topKudosChart = new Chart(topKudosCtx, {
-            type: 'bar',
-            data: {
-                labels: {{ chart_data.top_kudos_users|tojson }},
-                datasets: [{
-                    label: 'Kudos Received',
-                    data: {{ chart_data.top_kudos_counts|tojson }},
-                    backgroundColor: 'rgba(16, 185, 129, 0.7)',
-                    borderColor: 'rgba(16, 185, 129, 1)',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        grid: {
-                            color: 'rgba(255, 255, 255, 0.05)'
-                        }
-                    },
-                    x: {
-                        grid: {
-                            display: false
-                        }
-                    }
-                }
-            }
-        });
+
 
         // Top bytes balances chart
         const topBytesCtx = document.getElementById('topBytesChart').getContext('2d');

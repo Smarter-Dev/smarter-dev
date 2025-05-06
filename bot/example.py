@@ -13,7 +13,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from bot.api_client import APIClient
-from bot.api_models import Guild, DiscordUser, Kudos, UserWarning, ModerationCase
+from bot.api_models import Guild, DiscordUser, UserWarning, ModerationCase
 
 async def main():
     """Main function to demonstrate API client usage"""
@@ -62,18 +62,7 @@ async def main():
         created_mod = await client.create_user(mod)
         print(f"Created moderator: {created_mod.username} (ID: {created_mod.id})")
 
-        # Give kudos to the user
-        kudos = Kudos(
-            giver_id=created_mod.id,
-            receiver_id=created_user.id,
-            guild_id=created_guild.id,
-            amount=5,
-            reason="For being an awesome example"
-        )
 
-        print("Giving kudos...")
-        created_kudos = await client.create_kudos(kudos)
-        print(f"Created kudos: {created_kudos.id} (Amount: {created_kudos.amount})")
 
         # Create a warning for the user
         warning = UserWarning(
@@ -122,10 +111,6 @@ async def main():
         users = await client.get_users()
         print(f"Found {len(users)} users")
 
-        # Get all kudos for the user
-        print(f"Getting kudos for user {created_user.username}...")
-        user_kudos = await client.get_kudos(receiver_id=created_user.id)
-        print(f"Found {len(user_kudos)} kudos for user")
 
         # Get all warnings for the user
         print(f"Getting warnings for user {created_user.username}...")

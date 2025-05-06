@@ -44,17 +44,6 @@ class GuildMember:
     created_at: Optional[datetime] = None
 
 
-@dataclass
-class Kudos:
-    """Kudos model"""
-    id: Optional[int] = None  # Optional for creation
-    giver_id: int = 0
-    receiver_id: int = 0
-    guild_id: int = 0
-    amount: int = 1
-    reason: Optional[str] = None
-    awarded_at: Optional[datetime] = None
-
 
 @dataclass
 class UserNote:
