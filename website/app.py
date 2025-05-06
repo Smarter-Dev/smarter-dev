@@ -19,7 +19,7 @@ from .discord_admin_routes import (
     admin_discord_warnings, admin_discord_moderation,
     admin_discord_api_keys, admin_discord_api_key_create, admin_discord_api_key_delete,
     admin_discord_bytes, admin_discord_bytes_config, admin_discord_bytes_roles,
-    admin_discord_give_bytes
+    admin_discord_give_bytes, admin_discord_automod
 )
 from .api_routes import (
     api_token, guild_list, guild_detail, guild_create, guild_update,
@@ -29,7 +29,9 @@ from .api_routes import (
     bytes_cooldown_get, user_bytes_balance, bytes_leaderboard,
     warning_list, warning_detail, warning_create,
     moderation_case_list, moderation_case_detail, moderation_case_create, moderation_case_update,
-    api_key_list, api_key_create, api_key_delete
+    api_key_list, api_key_create, api_key_delete,
+    automod_regex_rules_list, automod_regex_rule_detail,
+    automod_rate_limits_list, automod_rate_limit_detail
 )
 from .redirect_handler import handle_redirect
 from .auth import AdminAuthBackend, AdminAuthMiddleware
@@ -78,6 +80,10 @@ routes = [
     Route("/api/moderation-cases/{case_id:int}", moderation_case_detail, methods=["GET"]),
     Route("/api/moderation-cases", moderation_case_create, methods=["POST"]),
     Route("/api/moderation-cases/{case_id:int}", moderation_case_update, methods=["PUT"]),
+    Route("/api/automod/regex-rules", automod_regex_rules_list, methods=["GET"]),
+    Route("/api/automod/regex-rules/{rule_id:int}", automod_regex_rule_detail, methods=["GET"]),
+    Route("/api/automod/rate-limits", automod_rate_limits_list, methods=["GET"]),
+    Route("/api/automod/rate-limits/{limit_id:int}", automod_rate_limit_detail, methods=["GET"]),
     Route("/api/subscribe", subscribe, methods=["POST"]),
 
     # Admin routes
@@ -107,6 +113,7 @@ routes = [
     Route("/admin/discord/api-keys", admin_discord_api_keys, methods=["GET"]),
     Route("/admin/discord/api-keys/new", admin_discord_api_key_create, methods=["GET", "POST"]),
     Route("/admin/discord/api-keys/{id:int}/delete", admin_discord_api_key_delete, methods=["POST"]),
+    Route("/admin/discord/automod", admin_discord_automod, methods=["GET", "POST"]),
 
     # Static files - must be before the catch-all redirect handler
     Mount("/static", app=StaticFiles(directory="website/static"), name="static"),

@@ -10,7 +10,8 @@ from starlette.templating import Jinja2Templates
 from .models import (
     APIKey, Guild, DiscordUser, GuildMember, UserNote,
     UserWarning, ModerationCase, PersistentRole, TemporaryRole,
-    ChannelLock, BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown
+    ChannelLock, BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown,
+    AutoModRegexRule, AutoModRateLimit
 )
 from .database import get_db
 from .api_auth import generate_api_key
@@ -591,3 +592,115 @@ async def admin_discord_api_key_delete(request):
         return RedirectResponse(url="/admin/discord/api-keys", status_code=302)
 
     return RedirectResponse(url="/admin/discord/api-keys", status_code=302)
+
+
+# Auto Moderation
+async def admin_discord_automod(request):
+    """
+    Manage auto moderation settings
+    """
+    # Get DB session
+    db = next(get_db())
+
+    # Handle form submission for regex rules
+    if request.method == "POST":
+        form_data = await request.form()
+        action = form_data.get("action")
+        section = form_data.get("section")
+
+        # Handle regex rule actions
+        if section == "regex":
+            if action == "create":
+                # Create new regex rule
+                rule = AutoModRegexRule(
+                    guild_id=int(form_data.get("guild_id")),
+                    pattern=form_data.get("pattern"),
+                    description=form_data.get("description"),
+                    action=form_data.get("action_type", "ban"),
+                    require_no_avatar=form_data.get("require_no_avatar") == "on",
+                    max_account_age_days=int(form_data.get("max_account_age_days") or 0) or None,
+                    is_active=form_data.get("is_active") == "on"
+                )
+                db.add(rule)
+                db.commit()
+            elif action == "delete":
+                # Delete regex rule
+                rule_id = int(form_data.get("rule_id"))
+                rule = db.query(AutoModRegexRule).filter(AutoModRegexRule.id == rule_id).first()
+                if rule:
+                    db.delete(rule)
+                    db.commit()
+            elif action == "update":
+                # Update regex rule
+                rule_id = int(form_data.get("rule_id"))
+                rule = db.query(AutoModRegexRule).filter(AutoModRegexRule.id == rule_id).first()
+                if rule:
+                    rule.pattern = form_data.get("pattern")
+                    rule.description = form_data.get("description")
+                    rule.action = form_data.get("action_type", "ban")
+                    rule.require_no_avatar = form_data.get("require_no_avatar") == "on"
+                    rule.max_account_age_days = int(form_data.get("max_account_age_days") or 0) or None
+                    rule.is_active = form_data.get("is_active") == "on"
+                    db.commit()
+
+        # Handle rate limit actions
+        elif section == "ratelimit":
+            if action == "create":
+                # Create new rate limit
+                rate_limit = AutoModRateLimit(
+                    guild_id=int(form_data.get("guild_id")),
+                    name=form_data.get("name"),
+                    limit_type=form_data.get("limit_type"),
+                    count=int(form_data.get("count")),
+                    time_period_seconds=int(form_data.get("time_period_seconds")),
+                    action=form_data.get("action_type", "timeout"),
+                    action_duration_seconds=int(form_data.get("action_duration_seconds") or 0) or None,
+                    is_active=form_data.get("is_active") == "on"
+                )
+                db.add(rate_limit)
+                db.commit()
+            elif action == "delete":
+                # Delete rate limit
+                rate_limit_id = int(form_data.get("rate_limit_id"))
+                rate_limit = db.query(AutoModRateLimit).filter(AutoModRateLimit.id == rate_limit_id).first()
+                if rate_limit:
+                    db.delete(rate_limit)
+                    db.commit()
+            elif action == "update":
+                # Update rate limit
+                rate_limit_id = int(form_data.get("rate_limit_id"))
+                rate_limit = db.query(AutoModRateLimit).filter(AutoModRateLimit.id == rate_limit_id).first()
+                if rate_limit:
+                    rate_limit.name = form_data.get("name")
+                    rate_limit.limit_type = form_data.get("limit_type")
+                    rate_limit.count = int(form_data.get("count"))
+                    rate_limit.time_period_seconds = int(form_data.get("time_period_seconds"))
+                    rate_limit.action = form_data.get("action_type", "timeout")
+                    rate_limit.action_duration_seconds = int(form_data.get("action_duration_seconds") or 0) or None
+                    rate_limit.is_active = form_data.get("is_active") == "on"
+                    db.commit()
+
+        return RedirectResponse(url="/admin/discord/automod", status_code=302)
+
+    # Get all regex rules
+    regex_rules = db.query(AutoModRegexRule).order_by(AutoModRegexRule.guild_id, AutoModRegexRule.created_at).all()
+
+    # Get all rate limits
+    rate_limits = db.query(AutoModRateLimit).order_by(AutoModRateLimit.guild_id, AutoModRateLimit.created_at).all()
+
+    # Get guild info
+    guilds = db.query(Guild).all()
+
+    # Map guild IDs to names
+    guild_names = {g.id: g.name for g in guilds}
+
+    return templates.TemplateResponse(
+        "admin/discord/automod.html",
+        {
+            "request": request,
+            "regex_rules": regex_rules,
+            "rate_limits": rate_limits,
+            "guilds": guilds,
+            "guild_names": guild_names
+        }
+    )

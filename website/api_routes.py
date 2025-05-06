@@ -9,7 +9,8 @@ from starlette.responses import JSONResponse
 from .models import (
     APIKey, Guild, DiscordUser, GuildMember, UserNote,
     UserWarning, ModerationCase, PersistentRole, TemporaryRole,
-    ChannelLock, BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown
+    ChannelLock, BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown,
+    AutoModRegexRule, AutoModRateLimit
 )
 from .database import get_db
 from .api_auth import create_jwt_token, verify_api_key, generate_api_key
@@ -1111,3 +1112,96 @@ async def api_key_delete(request):
     db.commit()
 
     return JSONResponse({"success": True})
+
+
+# Auto Moderation Regex Rules API endpoints
+@api_error_handler
+async def automod_regex_rules_list(request):
+    """
+    List all auto moderation regex rules, with optional filtering
+    """
+    db = next(get_db())
+    query = db.query(AutoModRegexRule)
+
+    # Filter by guild
+    guild_id = request.query_params.get("guild_id")
+    if guild_id:
+        query = query.filter(AutoModRegexRule.guild_id == guild_id)
+
+    # Filter by active status
+    is_active = request.query_params.get("is_active")
+    if is_active is not None:
+        if is_active.lower() == "true":
+            query = query.filter(AutoModRegexRule.is_active == True)
+        elif is_active.lower() == "false":
+            query = query.filter(AutoModRegexRule.is_active == False)
+
+    # Order by guild and creation date
+    rules = query.order_by(AutoModRegexRule.guild_id, AutoModRegexRule.created_at).all()
+
+    return JSONResponse({
+        "rules": [model_to_dict(r) for r in rules]
+    })
+
+@api_error_handler
+async def automod_regex_rule_detail(request):
+    """
+    Get auto moderation regex rule details
+    """
+    rule_id = request.path_params["rule_id"]
+    db = next(get_db())
+
+    rule = db.query(AutoModRegexRule).filter(AutoModRegexRule.id == rule_id).first()
+    if not rule:
+        return JSONResponse({"error": "Auto moderation regex rule not found"}, status_code=404)
+
+    return JSONResponse(model_to_dict(rule))
+
+
+# Auto Moderation Rate Limits API endpoints
+@api_error_handler
+async def automod_rate_limits_list(request):
+    """
+    List all auto moderation rate limits, with optional filtering
+    """
+    db = next(get_db())
+    query = db.query(AutoModRateLimit)
+
+    # Filter by guild
+    guild_id = request.query_params.get("guild_id")
+    if guild_id:
+        query = query.filter(AutoModRateLimit.guild_id == guild_id)
+
+    # Filter by active status
+    is_active = request.query_params.get("is_active")
+    if is_active is not None:
+        if is_active.lower() == "true":
+            query = query.filter(AutoModRateLimit.is_active == True)
+        elif is_active.lower() == "false":
+            query = query.filter(AutoModRateLimit.is_active == False)
+
+    # Filter by limit type
+    limit_type = request.query_params.get("limit_type")
+    if limit_type:
+        query = query.filter(AutoModRateLimit.limit_type == limit_type)
+
+    # Order by guild and creation date
+    limits = query.order_by(AutoModRateLimit.guild_id, AutoModRateLimit.created_at).all()
+
+    return JSONResponse({
+        "limits": [model_to_dict(l) for l in limits]
+    })
+
+@api_error_handler
+async def automod_rate_limit_detail(request):
+    """
+    Get auto moderation rate limit details
+    """
+    limit_id = request.path_params["limit_id"]
+    db = next(get_db())
+
+    limit = db.query(AutoModRateLimit).filter(AutoModRateLimit.id == limit_id).first()
+    if not limit:
+        return JSONResponse({"error": "Auto moderation rate limit not found"}, status_code=404)
+
+    return JSONResponse(model_to_dict(limit))

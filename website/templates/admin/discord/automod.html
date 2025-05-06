@@ -1,0 +1,463 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Auto Moderation - Smarter.Dev Admin{% endblock %}
+
+{% block page_title %}Auto Moderation{% endblock %}
+
+{% block content %}
+<div class="automod-page">
+    <div class="tabs">
+        <button class="tab-button active" data-tab="regex-tab">Username Regex Rules</button>
+        <button class="tab-button" data-tab="ratelimit-tab">Rate Limits</button>
+    </div>
+
+    <div id="regex-tab" class="tab-content active">
+        <div class="section-header">
+            <h3 class="section-title">Username Regex Rules</h3>
+            <button class="btn btn-primary" id="add-regex-rule-btn">Add Rule</button>
+        </div>
+
+        <div class="form-container" id="regex-form-container" style="display: none;">
+            <form class="admin-form" method="POST" action="/admin/discord/automod">
+                <input type="hidden" name="section" value="regex">
+                <input type="hidden" name="action" value="create">
+                <input type="hidden" name="rule_id" id="regex-rule-id" value="">
+
+                <div class="form-group">
+                    <label for="guild_id">Server</label>
+                    <select name="guild_id" id="guild_id" required>
+                        {% for guild in guilds %}
+                        <option value="{{ guild.id }}">{{ guild.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="pattern">Regex Pattern</label>
+                    <input type="text" name="pattern" id="pattern" required>
+                    <div class="form-help">Regular expression pattern to match against usernames</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="description">Description</label>
+                    <textarea name="description" id="description" rows="2"></textarea>
+                    <div class="form-help">Description of what this rule catches</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="action_type">Action</label>
+                    <select name="action_type" id="action_type">
+                        <option value="ban">Ban</option>
+                        <option value="kick">Kick</option>
+                        <option value="timeout">Timeout</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="require_no_avatar" id="require_no_avatar">
+                            Only apply to users without custom avatars
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="max_account_age_days">Max Account Age (days)</label>
+                    <input type="number" name="max_account_age_days" id="max_account_age_days" min="0">
+                    <div class="form-help">Only apply to accounts newer than this (leave empty for no limit)</div>
+                </div>
+
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="is_active" id="is_active" checked>
+                            Active
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" id="cancel-regex-btn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="data-section">
+            <div class="table-container">
+                <table class="data-table" id="regex-rules-table">
+                    <thead>
+                        <tr>
+                            <th>Server</th>
+                            <th>Pattern</th>
+                            <th>Description</th>
+                            <th>Action</th>
+                            <th>No Avatar</th>
+                            <th>Max Age</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for rule in regex_rules %}
+                        <tr>
+                            <td>{{ guild_names.get(rule.guild_id, 'Unknown') }}</td>
+                            <td>{{ rule.pattern }}</td>
+                            <td>{{ rule.description or 'No description' }}</td>
+                            <td>{{ rule.action }}</td>
+                            <td>{{ 'Yes' if rule.require_no_avatar else 'No' }}</td>
+                            <td>{{ rule.max_account_age_days or 'No limit' }}</td>
+                            <td>{{ 'Active' if rule.is_active else 'Inactive' }}</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn btn-sm btn-primary edit-regex-btn" 
+                                        data-id="{{ rule.id }}"
+                                        data-guild-id="{{ rule.guild_id }}"
+                                        data-pattern="{{ rule.pattern }}"
+                                        data-description="{{ rule.description or '' }}"
+                                        data-action="{{ rule.action }}"
+                                        data-require-no-avatar="{{ rule.require_no_avatar }}"
+                                        data-max-account-age-days="{{ rule.max_account_age_days or '' }}"
+                                        data-is-active="{{ rule.is_active }}">
+                                        Edit
+                                    </button>
+                                    <form method="POST" action="/admin/discord/automod" style="display: inline;">
+                                        <input type="hidden" name="section" value="regex">
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="rule_id" value="{{ rule.id }}">
+                                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this rule?')">Delete</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% if not regex_rules %}
+                        <tr>
+                            <td colspan="8" class="empty-table">No regex rules found.</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="ratelimit-tab" class="tab-content">
+        <div class="section-header">
+            <h3 class="section-title">Rate Limits</h3>
+            <button class="btn btn-primary" id="add-ratelimit-btn">Add Rate Limit</button>
+        </div>
+
+        <div class="form-container" id="ratelimit-form-container" style="display: none;">
+            <form class="admin-form" method="POST" action="/admin/discord/automod">
+                <input type="hidden" name="section" value="ratelimit">
+                <input type="hidden" name="action" value="create">
+                <input type="hidden" name="rate_limit_id" id="rate-limit-id" value="">
+
+                <div class="form-group">
+                    <label for="rl_guild_id">Server</label>
+                    <select name="guild_id" id="rl_guild_id" required>
+                        {% for guild in guilds %}
+                        <option value="{{ guild.id }}">{{ guild.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="name">Name</label>
+                    <input type="text" name="name" id="name" required>
+                    <div class="form-help">Name for this rate limit rule</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="limit_type">Limit Type</label>
+                    <select name="limit_type" id="limit_type">
+                        <option value="message_count">Message Count</option>
+                        <option value="duplicate_messages">Duplicate Messages</option>
+                        <option value="channel_count">Channel Count</option>
+                    </select>
+                    <div class="form-help">Type of rate limit to apply</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="count">Count</label>
+                    <input type="number" name="count" id="count" min="1" required>
+                    <div class="form-help">Number of messages/channels that trigger this limit</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="time_period_seconds">Time Period (seconds)</label>
+                    <input type="number" name="time_period_seconds" id="time_period_seconds" min="1" required>
+                    <div class="form-help">Time period in seconds for this rate limit</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="rl_action_type">Action</label>
+                    <select name="action_type" id="rl_action_type">
+                        <option value="timeout">Timeout</option>
+                        <option value="warn">Warn</option>
+                        <option value="mute">Mute</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="action_duration_seconds">Action Duration (seconds)</label>
+                    <input type="number" name="action_duration_seconds" id="action_duration_seconds" min="0">
+                    <div class="form-help">Duration of timeout/mute in seconds (leave empty for permanent)</div>
+                </div>
+
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="is_active" id="rl_is_active" checked>
+                            Active
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" id="cancel-ratelimit-btn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="data-section">
+            <div class="table-container">
+                <table class="data-table" id="ratelimit-table">
+                    <thead>
+                        <tr>
+                            <th>Server</th>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Count</th>
+                            <th>Time Period</th>
+                            <th>Action</th>
+                            <th>Duration</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for limit in rate_limits %}
+                        <tr>
+                            <td>{{ guild_names.get(limit.guild_id, 'Unknown') }}</td>
+                            <td>{{ limit.name }}</td>
+                            <td>{{ limit.limit_type }}</td>
+                            <td>{{ limit.count }}</td>
+                            <td>{{ limit.time_period_seconds }}s</td>
+                            <td>{{ limit.action }}</td>
+                            <td>{{ limit.action_duration_seconds or 'Permanent' }}</td>
+                            <td>{{ 'Active' if limit.is_active else 'Inactive' }}</td>
+                            <td>
+                                <div class="action-buttons">
+                                    <button class="btn btn-sm btn-primary edit-ratelimit-btn" 
+                                        data-id="{{ limit.id }}"
+                                        data-guild-id="{{ limit.guild_id }}"
+                                        data-name="{{ limit.name }}"
+                                        data-limit-type="{{ limit.limit_type }}"
+                                        data-count="{{ limit.count }}"
+                                        data-time-period-seconds="{{ limit.time_period_seconds }}"
+                                        data-action="{{ limit.action }}"
+                                        data-action-duration-seconds="{{ limit.action_duration_seconds or '' }}"
+                                        data-is-active="{{ limit.is_active }}">
+                                        Edit
+                                    </button>
+                                    <form method="POST" action="/admin/discord/automod" style="display: inline;">
+                                        <input type="hidden" name="section" value="ratelimit">
+                                        <input type="hidden" name="action" value="delete">
+                                        <input type="hidden" name="rate_limit_id" value="{{ limit.id }}">
+                                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Are you sure you want to delete this rate limit?')">Delete</button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                        {% if not rate_limits %}
+                        <tr>
+                            <td colspan="9" class="empty-table">No rate limits found.</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .tabs {
+        display: flex;
+        margin-bottom: 1.5rem;
+        border-bottom: 1px solid var(--border);
+    }
+    
+    .tab-button {
+        padding: 0.75rem 1.5rem;
+        background: none;
+        border: none;
+        color: var(--text-light);
+        cursor: pointer;
+        font-weight: 500;
+        border-bottom: 2px solid transparent;
+        transition: all 0.2s ease;
+    }
+    
+    .tab-button.active {
+        color: var(--primary);
+        border-bottom-color: var(--primary);
+    }
+    
+    .tab-content {
+        display: none;
+    }
+    
+    .tab-content.active {
+        display: block;
+    }
+    
+    .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+    
+    .form-container {
+        margin-bottom: 2rem;
+    }
+</style>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Tab switching
+        const tabButtons = document.querySelectorAll('.tab-button');
+        const tabContents = document.querySelectorAll('.tab-content');
+        
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const tabId = button.dataset.tab;
+                
+                // Deactivate all tabs
+                tabButtons.forEach(btn => btn.classList.remove('active'));
+                tabContents.forEach(content => content.classList.remove('active'));
+                
+                // Activate selected tab
+                button.classList.add('active');
+                document.getElementById(tabId).classList.add('active');
+            });
+        });
+        
+        // Regex rule form handling
+        const regexFormContainer = document.getElementById('regex-form-container');
+        const addRegexRuleBtn = document.getElementById('add-regex-rule-btn');
+        const cancelRegexBtn = document.getElementById('cancel-regex-btn');
+        const regexRuleIdInput = document.getElementById('regex-rule-id');
+        const regexForm = regexFormContainer.querySelector('form');
+        
+        addRegexRuleBtn.addEventListener('click', () => {
+            // Reset form for new rule
+            regexForm.reset();
+            regexRuleIdInput.value = '';
+            regexForm.querySelector('input[name="action"]').value = 'create';
+            document.getElementById('is_active').checked = true;
+            regexFormContainer.style.display = 'block';
+            addRegexRuleBtn.style.display = 'none';
+        });
+        
+        cancelRegexBtn.addEventListener('click', () => {
+            regexFormContainer.style.display = 'none';
+            addRegexRuleBtn.style.display = 'block';
+        });
+        
+        // Edit regex rule buttons
+        const editRegexBtns = document.querySelectorAll('.edit-regex-btn');
+        editRegexBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.id;
+                const guildId = btn.dataset.guildId;
+                const pattern = btn.dataset.pattern;
+                const description = btn.dataset.description;
+                const action = btn.dataset.action;
+                const requireNoAvatar = btn.dataset.requireNoAvatar === 'True';
+                const maxAccountAgeDays = btn.dataset.maxAccountAgeDays;
+                const isActive = btn.dataset.isActive === 'True';
+                
+                // Fill form with rule data
+                regexRuleIdInput.value = id;
+                document.getElementById('guild_id').value = guildId;
+                document.getElementById('pattern').value = pattern;
+                document.getElementById('description').value = description;
+                document.getElementById('action_type').value = action;
+                document.getElementById('require_no_avatar').checked = requireNoAvatar;
+                document.getElementById('max_account_age_days').value = maxAccountAgeDays;
+                document.getElementById('is_active').checked = isActive;
+                
+                // Change form action to update
+                regexForm.querySelector('input[name="action"]').value = 'update';
+                
+                // Show form
+                regexFormContainer.style.display = 'block';
+                addRegexRuleBtn.style.display = 'none';
+            });
+        });
+        
+        // Rate limit form handling
+        const ratelimitFormContainer = document.getElementById('ratelimit-form-container');
+        const addRatelimitBtn = document.getElementById('add-ratelimit-btn');
+        const cancelRatelimitBtn = document.getElementById('cancel-ratelimit-btn');
+        const rateLimitIdInput = document.getElementById('rate-limit-id');
+        const ratelimitForm = ratelimitFormContainer.querySelector('form');
+        
+        addRatelimitBtn.addEventListener('click', () => {
+            // Reset form for new rate limit
+            ratelimitForm.reset();
+            rateLimitIdInput.value = '';
+            ratelimitForm.querySelector('input[name="action"]').value = 'create';
+            document.getElementById('rl_is_active').checked = true;
+            ratelimitFormContainer.style.display = 'block';
+            addRatelimitBtn.style.display = 'none';
+        });
+        
+        cancelRatelimitBtn.addEventListener('click', () => {
+            ratelimitFormContainer.style.display = 'none';
+            addRatelimitBtn.style.display = 'block';
+        });
+        
+        // Edit rate limit buttons
+        const editRatelimitBtns = document.querySelectorAll('.edit-ratelimit-btn');
+        editRatelimitBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const id = btn.dataset.id;
+                const guildId = btn.dataset.guildId;
+                const name = btn.dataset.name;
+                const limitType = btn.dataset.limitType;
+                const count = btn.dataset.count;
+                const timePeriodSeconds = btn.dataset.timePeriodSeconds;
+                const action = btn.dataset.action;
+                const actionDurationSeconds = btn.dataset.actionDurationSeconds;
+                const isActive = btn.dataset.isActive === 'True';
+                
+                // Fill form with rate limit data
+                rateLimitIdInput.value = id;
+                document.getElementById('rl_guild_id').value = guildId;
+                document.getElementById('name').value = name;
+                document.getElementById('limit_type').value = limitType;
+                document.getElementById('count').value = count;
+                document.getElementById('time_period_seconds').value = timePeriodSeconds;
+                document.getElementById('rl_action_type').value = action;
+                document.getElementById('action_duration_seconds').value = actionDurationSeconds;
+                document.getElementById('rl_is_active').checked = isActive;
+                
+                // Change form action to update
+                ratelimitForm.querySelector('input[name="action"]').value = 'update';
+                
+                // Show form
+                ratelimitFormContainer.style.display = 'block';
+                addRatelimitBtn.style.display = 'none';
+            });
+        });
+    });
+</script>
+{% endblock %}
