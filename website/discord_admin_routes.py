@@ -52,11 +52,13 @@ async def admin_discord_dashboard(request):
 
 
 
-    # Get top users by bytes balance
+    # Get top users by bytes balance (excluding system user with discord_id=0)
     top_bytes_users = db.query(
         DiscordUser.id,
         DiscordUser.username,
         DiscordUser.bytes_balance.label('bytes_balance')
+    ).filter(
+        DiscordUser.discord_id != 0  # Exclude system user
     ).order_by(
         desc('bytes_balance')
     ).limit(5).all()
