@@ -465,8 +465,8 @@ class AutoModRateLimit(Base):
     limit_type = Column(String, nullable=False)  # Type: message_count, duplicate_messages, channel_count
     count = Column(Integer, nullable=False)  # Number of messages/channels
     time_period_seconds = Column(Integer, nullable=False)  # Time period in seconds
-    action = Column(String, nullable=False, default="timeout")  # Action: timeout, warn, mute
-    action_duration_seconds = Column(Integer, nullable=True)  # Duration of timeout/mute in seconds
+    action = Column(String, nullable=False, default="timeout")  # Action: timeout, warn
+    action_duration_seconds = Column(Integer, nullable=True)  # Duration of timeout in seconds
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
@@ -476,4 +476,3 @@ class AutoModRateLimit(Base):
 
     def __repr__(self):
         return f"<AutoModRateLimit {self.name} in guild {self.guild_id}>"
-

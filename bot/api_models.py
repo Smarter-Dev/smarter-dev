@@ -211,7 +211,7 @@ class AutoModRateLimit:
     limit_type: str = "message_count"  # message_count, duplicate_messages, channel_count
     count: int = 0
     time_period_seconds: int = 0
-    action: str = "timeout"  # timeout, warn, mute
+    action: str = "timeout"  # timeout, warn
     action_duration_seconds: Optional[int] = None
     is_active: bool = True
     created_at: Optional[datetime] = None

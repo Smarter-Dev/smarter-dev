@@ -197,14 +197,13 @@
                     <select name="action_type" id="rl_action_type">
                         <option value="timeout">Timeout</option>
                         <option value="warn">Warn</option>
-                        <option value="mute">Mute</option>
                     </select>
                 </div>
 
                 <div class="form-group">
                     <label for="action_duration_seconds">Action Duration (seconds)</label>
                     <input type="number" name="action_duration_seconds" id="action_duration_seconds" min="0">
-                    <div class="form-help">Duration of timeout/mute in seconds (leave empty for permanent)</div>
+                    <div class="form-help">Duration of timeout in seconds (leave empty for permanent)</div>
                 </div>
 
                 <div class="form-group">
@@ -292,7 +291,7 @@
         margin-bottom: 1.5rem;
         border-bottom: 1px solid var(--border);
     }
-    
+
     .tab-button {
         padding: 0.75rem 1.5rem;
         background: none;
@@ -303,27 +302,27 @@
         border-bottom: 2px solid transparent;
         transition: all 0.2s ease;
     }
-    
+
     .tab-button.active {
         color: var(--primary);
         border-bottom-color: var(--primary);
     }
-    
+
     .tab-content {
         display: none;
     }
-    
+
     .tab-content.active {
         display: block;
     }
-    
+
     .section-header {
         display: flex;
         justify-content: space-between;
         align-items: center;
         margin-bottom: 1.5rem;
     }
-    
+
     .form-container {
         margin-bottom: 2rem;
     }
@@ -334,28 +333,28 @@
         // Tab switching
         const tabButtons = document.querySelectorAll('.tab-button');
         const tabContents = document.querySelectorAll('.tab-content');
-        
+
         tabButtons.forEach(button => {
             button.addEventListener('click', () => {
                 const tabId = button.dataset.tab;
-                
+
                 // Deactivate all tabs
                 tabButtons.forEach(btn => btn.classList.remove('active'));
                 tabContents.forEach(content => content.classList.remove('active'));
-                
+
                 // Activate selected tab
                 button.classList.add('active');
                 document.getElementById(tabId).classList.add('active');
             });
         });
-        
+
         // Regex rule form handling
         const regexFormContainer = document.getElementById('regex-form-container');
         const addRegexRuleBtn = document.getElementById('add-regex-rule-btn');
         const cancelRegexBtn = document.getElementById('cancel-regex-btn');
         const regexRuleIdInput = document.getElementById('regex-rule-id');
         const regexForm = regexFormContainer.querySelector('form');
-        
+
         addRegexRuleBtn.addEventListener('click', () => {
             // Reset form for new rule
             regexForm.reset();
@@ -365,12 +364,12 @@
             regexFormContainer.style.display = 'block';
             addRegexRuleBtn.style.display = 'none';
         });
-        
+
         cancelRegexBtn.addEventListener('click', () => {
             regexFormContainer.style.display = 'none';
             addRegexRuleBtn.style.display = 'block';
         });
-        
+
         // Edit regex rule buttons
         const editRegexBtns = document.querySelectorAll('.edit-regex-btn');
         editRegexBtns.forEach(btn => {
@@ -383,7 +382,7 @@
                 const requireNoAvatar = btn.dataset.requireNoAvatar === 'True';
                 const maxAccountAgeDays = btn.dataset.maxAccountAgeDays;
                 const isActive = btn.dataset.isActive === 'True';
-                
+
                 // Fill form with rule data
                 regexRuleIdInput.value = id;
                 document.getElementById('guild_id').value = guildId;
@@ -393,23 +392,23 @@
                 document.getElementById('require_no_avatar').checked = requireNoAvatar;
                 document.getElementById('max_account_age_days').value = maxAccountAgeDays;
                 document.getElementById('is_active').checked = isActive;
-                
+
                 // Change form action to update
                 regexForm.querySelector('input[name="action"]').value = 'update';
-                
+
                 // Show form
                 regexFormContainer.style.display = 'block';
                 addRegexRuleBtn.style.display = 'none';
             });
         });
-        
+
         // Rate limit form handling
         const ratelimitFormContainer = document.getElementById('ratelimit-form-container');
         const addRatelimitBtn = document.getElementById('add-ratelimit-btn');
         const cancelRatelimitBtn = document.getElementById('cancel-ratelimit-btn');
         const rateLimitIdInput = document.getElementById('rate-limit-id');
         const ratelimitForm = ratelimitFormContainer.querySelector('form');
-        
+
         addRatelimitBtn.addEventListener('click', () => {
             // Reset form for new rate limit
             ratelimitForm.reset();
@@ -419,12 +418,12 @@
             ratelimitFormContainer.style.display = 'block';
             addRatelimitBtn.style.display = 'none';
         });
-        
+
         cancelRatelimitBtn.addEventListener('click', () => {
             ratelimitFormContainer.style.display = 'none';
             addRatelimitBtn.style.display = 'block';
         });
-        
+
         // Edit rate limit buttons
         const editRatelimitBtns = document.querySelectorAll('.edit-ratelimit-btn');
         editRatelimitBtns.forEach(btn => {
@@ -438,7 +437,7 @@
                 const action = btn.dataset.action;
                 const actionDurationSeconds = btn.dataset.actionDurationSeconds;
                 const isActive = btn.dataset.isActive === 'True';
-                
+
                 // Fill form with rate limit data
                 rateLimitIdInput.value = id;
                 document.getElementById('rl_guild_id').value = guildId;
@@ -449,10 +448,10 @@
                 document.getElementById('rl_action_type').value = action;
                 document.getElementById('action_duration_seconds').value = actionDurationSeconds;
                 document.getElementById('rl_is_active').checked = isActive;
-                
+
                 // Change form action to update
                 ratelimitForm.querySelector('input[name="action"]').value = 'update';
-                
+
                 // Show form
                 ratelimitFormContainer.style.display = 'block';
                 addRatelimitBtn.style.display = 'none';
