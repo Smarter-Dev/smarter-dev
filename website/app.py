@@ -12,7 +12,8 @@ from .routes import home, subscribe
 from .admin_routes import (
     admin_login, admin_logout, admin_dashboard, admin_redirects,
     admin_new_redirect, admin_edit_redirect, admin_delete_redirect,
-    admin_redirect_detail, admin_analytics, admin_bot_analytics, admin_error_detail, init_admin
+    admin_redirect_detail, admin_analytics, admin_bot_analytics, admin_error_detail,
+    admin_db_maintenance, init_admin
 )
 from .discord_admin_routes import (
     admin_discord_dashboard, admin_discord_users, admin_discord_user_detail,
@@ -36,7 +37,7 @@ from .api_routes import (
 from .redirect_handler import handle_redirect
 from .auth import AdminAuthBackend, AdminAuthMiddleware
 from .api_auth import APIAuthBackend, api_auth_middleware
-from .database import engine, get_db
+from .database import engine, get_db, dispose_engine_connections
 from .models import Base
 from .tracking import track_middleware, track_page_view
 
@@ -98,6 +99,7 @@ routes = [
     Route("/admin/analytics", admin_analytics, methods=["GET"]),
     Route("/admin/bot-analytics", admin_bot_analytics, methods=["GET"]),
     Route("/admin/errors/{id:int}", admin_error_detail, methods=["GET"]),
+    Route("/admin/db-maintenance", admin_db_maintenance, methods=["GET", "POST"]),
 
     # Discord admin routes
     Route("/admin/discord", admin_discord_dashboard, methods=["GET"]),
@@ -172,6 +174,12 @@ def startup_event():
     admin_password = os.environ.get("ADMIN_PASSWORD", "smarterdev2024")
 
     init_admin(db, admin_username, admin_email, admin_password)
+
+# Clean up database connections on shutdown
+@app.on_event("shutdown")
+def shutdown_event():
+    # Dispose of all connections in the pool
+    dispose_engine_connections()
 
 # Run the application if executed directly
 if __name__ == "__main__":

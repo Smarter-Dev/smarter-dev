@@ -9,7 +9,7 @@ from starlette.templating import Jinja2Templates
 
 from .models import AdminUser, Redirect, RedirectClick, PageView, RouteError
 from .auth import verify_password, get_password_hash, create_admin_user
-from .database import get_db
+from .database import get_db, dispose_engine_connections
 
 # Set up templates
 templates = Jinja2Templates(directory="website/templates")
@@ -732,6 +732,29 @@ async def admin_error_detail(request):
     return templates.TemplateResponse(
         "admin/error_detail.html",
         {"request": request, "error": error}
+    )
+
+# Admin route to manually dispose of database connections
+async def admin_db_maintenance(request):
+    # Check if user is authenticated and is admin
+    if not request.user.is_authenticated:
+        return RedirectResponse(url="/admin/login", status_code=302)
+
+    if request.method == "POST":
+        form_data = await request.form()
+        action = form_data.get("action")
+
+        if action == "dispose_connections":
+            # Dispose all connections
+            dispose_engine_connections()
+            return templates.TemplateResponse(
+                "admin/db_maintenance.html",
+                {"request": request, "message": "All database connections have been disposed."}
+            )
+
+    return templates.TemplateResponse(
+        "admin/db_maintenance.html",
+        {"request": request}
     )
 
 # Initialize admin user
