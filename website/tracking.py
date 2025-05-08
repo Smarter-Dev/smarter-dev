@@ -3,11 +3,12 @@ import traceback
 import time
 import re
 from datetime import datetime
+from contextlib import contextmanager
 from starlette.requests import Request
 from starlette.responses import Response
 from sqlalchemy.orm import Session
 
-from .database import get_db
+from .database import get_db, SessionLocal
 from .models import PageView, RouteError
 
 # List of common bot/crawler user agent patterns
@@ -69,6 +70,18 @@ def is_bot(user_agent):
 
     return False
 
+
+@contextmanager
+def get_db_session():
+    """
+    Context manager for database sessions to ensure proper cleanup.
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 def track_page_view(route_func):
     """
     Decorator to track page views for non-admin routes.
@@ -93,26 +106,25 @@ def track_page_view(route_func):
                 # Get user agent
                 user_agent = request.headers.get("user-agent")
 
-                # Get DB session
-                db = next(get_db())
-
                 # Check if it's a bot
                 is_bot_request = is_bot(user_agent)
 
-                # Create page view record
-                page_view = PageView(
-                    path=request.url.path,
-                    method=request.method,
-                    ip_address=request.client.host if request.client else None,
-                    user_agent=user_agent,
-                    referer=request.headers.get("referer"),
-                    response_time=response_time,
-                    status_code=response.status_code,
-                    is_bot=is_bot_request
-                )
+                # Use context manager for DB session
+                with get_db_session() as db:
+                    # Create page view record
+                    page_view = PageView(
+                        path=request.url.path,
+                        method=request.method,
+                        ip_address=request.client.host if request.client else None,
+                        user_agent=user_agent,
+                        referer=request.headers.get("referer"),
+                        response_time=response_time,
+                        status_code=response.status_code,
+                        is_bot=is_bot_request
+                    )
 
-                db.add(page_view)
-                db.commit()
+                    db.add(page_view)
+                    db.commit()
 
             return response
 
@@ -123,23 +135,26 @@ def track_page_view(route_func):
             # Log the error
             error_details = traceback.format_exc()
 
-            # Get DB session
-            db = next(get_db())
+            # Use context manager for DB session
+            try:
+                with get_db_session() as db:
+                    # Create error record
+                    route_error = RouteError(
+                        path=request.url.path,
+                        method=request.method,
+                        ip_address=request.client.host if request.client else None,
+                        user_agent=request.headers.get("user-agent"),
+                        error_type=type(e).__name__,
+                        error_message=str(e),
+                        error_details=error_details,
+                        response_time=response_time
+                    )
 
-            # Create error record
-            route_error = RouteError(
-                path=request.url.path,
-                method=request.method,
-                ip_address=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent"),
-                error_type=type(e).__name__,
-                error_message=str(e),
-                error_details=error_details,
-                response_time=response_time
-            )
-
-            db.add(route_error)
-            db.commit()
+                    db.add(route_error)
+                    db.commit()
+            except Exception as db_error:
+                # Log the database error but don't prevent the original exception from being raised
+                print(f"Error logging route error: {db_error}")
 
             # Re-raise the exception to let the framework handle it
             raise
@@ -186,26 +201,25 @@ def track_middleware(app):
                 # Get user agent
                 user_agent = request.headers.get("user-agent")
 
-                # Get DB session
-                db = next(get_db())
-
                 # Check if it's a bot
                 is_bot_request = is_bot(user_agent)
 
-                # Create page view record
-                page_view = PageView(
-                    path=request.url.path,
-                    method=request.method,
-                    ip_address=request.client.host if request.client else None,
-                    user_agent=user_agent,
-                    referer=request.headers.get("referer"),
-                    response_time=response_time,
-                    status_code=response_status["status_code"],
-                    is_bot=is_bot_request
-                )
+                # Use context manager for DB session
+                with get_db_session() as db:
+                    # Create page view record
+                    page_view = PageView(
+                        path=request.url.path,
+                        method=request.method,
+                        ip_address=request.client.host if request.client else None,
+                        user_agent=user_agent,
+                        referer=request.headers.get("referer"),
+                        response_time=response_time,
+                        status_code=response_status["status_code"],
+                        is_bot=is_bot_request
+                    )
 
-                db.add(page_view)
-                db.commit()
+                    db.add(page_view)
+                    db.commit()
 
         except Exception as e:
             # Calculate response time even for errors
@@ -214,23 +228,26 @@ def track_middleware(app):
             # Log the error
             error_details = traceback.format_exc()
 
-            # Get DB session
-            db = next(get_db())
+            # Use context manager for DB session
+            try:
+                with get_db_session() as db:
+                    # Create error record
+                    route_error = RouteError(
+                        path=request.url.path,
+                        method=request.method,
+                        ip_address=request.client.host if request.client else None,
+                        user_agent=request.headers.get("user-agent"),
+                        error_type=type(e).__name__,
+                        error_message=str(e),
+                        error_details=error_details,
+                        response_time=response_time
+                    )
 
-            # Create error record
-            route_error = RouteError(
-                path=request.url.path,
-                method=request.method,
-                ip_address=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent"),
-                error_type=type(e).__name__,
-                error_message=str(e),
-                error_details=error_details,
-                response_time=response_time
-            )
-
-            db.add(route_error)
-            db.commit()
+                    db.add(route_error)
+                    db.commit()
+            except Exception as db_error:
+                # Log the database error but don't prevent the original exception from being raised
+                print(f"Error logging route error: {db_error}")
 
             # Re-raise the exception to let the framework handle it
             raise
