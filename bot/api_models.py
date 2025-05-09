@@ -219,3 +219,26 @@ class AutoModRateLimit:
     is_active: bool = True
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+@dataclass
+class Squad:
+    """Squad model"""
+    id: Optional[int] = None  # Optional for creation
+    guild_id: int = 0
+    role_id: int = 0
+    name: str = ""
+    description: Optional[str] = None
+    bytes_required: int = 0
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+@dataclass
+class SquadMember:
+    """Squad Member model"""
+    id: Optional[int] = None  # Optional for creation
+    squad_id: int = 0
+    user_id: int = 0
+    joined_at: Optional[datetime] = None

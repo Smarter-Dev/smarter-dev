@@ -137,6 +137,7 @@ class Guild(Base):
     command_usage = relationship("CommandUsage", back_populates="guild")
     bytes_config = relationship("BytesConfig", back_populates="guild", uselist=False)
     bytes_roles = relationship("BytesRole", back_populates="guild")
+    squads = relationship("Squad", back_populates="guild")
 
     def __repr__(self):
         return f"<Guild {self.name} ({self.discord_id})>"
@@ -167,6 +168,7 @@ class DiscordUser(Base):
     bump_stats = relationship("BumpStat", back_populates="user")
     command_usage = relationship("CommandUsage", back_populates="user")
     bytes_cooldowns = relationship("BytesCooldown", back_populates="user")
+    squad_memberships = relationship("SquadMember", back_populates="user")
 
     def __repr__(self):
         return f"<DiscordUser {self.username} ({self.discord_id})>"
@@ -479,3 +481,42 @@ class AutoModRateLimit(Base):
 
     def __repr__(self):
         return f"<AutoModRateLimit {self.name} in guild {self.guild_id}>"
+
+
+# Squad model
+class Squad(Base):
+    __tablename__ = "squads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    guild_id = Column(Integer, ForeignKey("guilds.id"), nullable=False)
+    role_id = Column(BigInteger, nullable=False)  # Discord role ID
+    name = Column(String, nullable=False)  # Squad name
+    description = Column(Text, nullable=True)  # Squad description
+    bytes_required = Column(Integer, nullable=False)  # Bytes required to join this squad
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Relationships
+    guild = relationship("Guild", back_populates="squads")
+    members = relationship("SquadMember", back_populates="squad", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Squad {self.name} ({self.bytes_required} bytes)>"
+
+
+# Squad Member model
+class SquadMember(Base):
+    __tablename__ = "squad_members"
+
+    id = Column(Integer, primary_key=True, index=True)
+    squad_id = Column(Integer, ForeignKey("squads.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("discord_users.id"), nullable=False)
+    joined_at = Column(DateTime, default=func.now())
+
+    # Relationships
+    squad = relationship("Squad", back_populates="members")
+    user = relationship("DiscordUser", back_populates="squad_memberships")
+
+    def __repr__(self):
+        return f"<SquadMember {self.user_id} in squad {self.squad_id}>"

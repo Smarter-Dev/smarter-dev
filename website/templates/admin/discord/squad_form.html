@@ -1,0 +1,54 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{% if squad %}Edit Squad{% else %}Create Squad{% endif %}{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>{% if squad %}Edit Squad{% else %}Create Squad{% endif %}</h1>
+    <p>{% if squad %}Edit an existing squad{% else %}Create a new squad{% endif %} for a Discord server.</p>
+
+    <form method="POST" class="form">
+        <div class="form-group">
+            <label for="guild_id">Server</label>
+            <select name="guild_id" id="guild_id" class="form-control" required>
+                <option value="">Select a server</option>
+                {% for guild in guilds %}
+                <option value="{{ guild.id }}" {% if squad and squad.guild_id == guild.id %}selected{% endif %}>{{ guild.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="role_id">Role ID</label>
+            <input type="number" name="role_id" id="role_id" class="form-control" value="{{ squad.role_id if squad else '' }}" required>
+            <small class="form-text text-muted">The Discord role ID for this squad.</small>
+        </div>
+
+        <div class="form-group">
+            <label for="name">Name</label>
+            <input type="text" name="name" id="name" class="form-control" value="{{ squad.name if squad else '' }}" required>
+        </div>
+
+        <div class="form-group">
+            <label for="description">Description</label>
+            <textarea name="description" id="description" class="form-control" rows="3">{{ squad.description if squad else '' }}</textarea>
+        </div>
+
+        <div class="form-group">
+            <label for="bytes_required">Bytes Required</label>
+            <input type="number" name="bytes_required" id="bytes_required" class="form-control" value="{{ squad.bytes_required if squad else '' }}" required>
+            <small class="form-text text-muted">The number of bytes a user must have received to join this squad.</small>
+        </div>
+
+        <div class="form-check">
+            <input type="checkbox" name="is_active" id="is_active" class="form-check-input" {% if squad is none or squad.is_active %}checked{% endif %}>
+            <label for="is_active" class="form-check-label">Active</label>
+        </div>
+
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save</button>
+            <a href="/admin/discord/squads" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

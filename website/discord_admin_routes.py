@@ -11,13 +11,181 @@ from .models import (
     APIKey, Guild, DiscordUser, GuildMember, UserNote,
     UserWarning, ModerationCase, PersistentRole, TemporaryRole,
     ChannelLock, BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown,
-    AutoModRegexRule, AutoModRateLimit
+    AutoModRegexRule, AutoModRateLimit, Squad, SquadMember
 )
 from .database import get_db
 from .api_auth import generate_api_key
 
 # Set up templates
 templates = Jinja2Templates(directory="website/templates")
+
+# Squad management routes
+async def admin_discord_squads(request):
+    """
+    List all squads
+    """
+    # Get DB session
+    db = next(get_db())
+
+    # Get all squads
+    squads = db.query(Squad).order_by(Squad.guild_id, Squad.bytes_required).all()
+
+    # Get guild info
+    guild_ids = set([s.guild_id for s in squads])
+    guilds = db.query(Guild).all()
+
+    # Map guild IDs to names
+    guild_names = {g.id: g.name for g in guilds}
+
+    return templates.TemplateResponse(
+        "admin/discord/squads.html",
+        {
+            "request": request,
+            "squads": squads,
+            "guilds": guilds,
+            "guild_names": guild_names
+        }
+    )
+
+async def admin_discord_squad_create(request):
+    """
+    Create a new squad
+    """
+    # Get DB session
+    db = next(get_db())
+
+    # Get all guilds for the form
+    guilds = db.query(Guild).order_by(Guild.name).all()
+
+    if request.method == "POST":
+        form_data = await request.form()
+        guild_id = int(form_data.get("guild_id"))
+        role_id = int(form_data.get("role_id"))
+        name = form_data.get("name")
+        description = form_data.get("description")
+        bytes_required = int(form_data.get("bytes_required"))
+        is_active = form_data.get("is_active") == "on"
+
+        # Create new squad
+        squad = Squad(
+            guild_id=guild_id,
+            role_id=role_id,
+            name=name,
+            description=description,
+            bytes_required=bytes_required,
+            is_active=is_active
+        )
+
+        db.add(squad)
+        db.commit()
+
+        # Redirect to squads list
+        return RedirectResponse(url="/admin/discord/squads", status_code=303)
+
+    return templates.TemplateResponse(
+        "admin/discord/squad_form.html",
+        {
+            "request": request,
+            "guilds": guilds,
+            "squad": None
+        }
+    )
+
+async def admin_discord_squad_edit(request):
+    """
+    Edit a squad
+    """
+    squad_id = request.path_params["id"]
+    db = next(get_db())
+
+    # Get the squad
+    squad = db.query(Squad).filter(Squad.id == squad_id).first()
+    if not squad:
+        return RedirectResponse(url="/admin/discord/squads", status_code=303)
+
+    # Get all guilds for the form
+    guilds = db.query(Guild).order_by(Guild.name).all()
+
+    if request.method == "POST":
+        form_data = await request.form()
+        guild_id = int(form_data.get("guild_id"))
+        role_id = int(form_data.get("role_id"))
+        name = form_data.get("name")
+        description = form_data.get("description")
+        bytes_required = int(form_data.get("bytes_required"))
+        is_active = form_data.get("is_active") == "on"
+
+        # Update squad
+        squad.guild_id = guild_id
+        squad.role_id = role_id
+        squad.name = name
+        squad.description = description
+        squad.bytes_required = bytes_required
+        squad.is_active = is_active
+
+        db.commit()
+
+        # Redirect to squads list
+        return RedirectResponse(url="/admin/discord/squads", status_code=303)
+
+    return templates.TemplateResponse(
+        "admin/discord/squad_form.html",
+        {
+            "request": request,
+            "guilds": guilds,
+            "squad": squad
+        }
+    )
+
+async def admin_discord_squad_delete(request):
+    """
+    Delete a squad
+    """
+    squad_id = request.path_params["id"]
+    db = next(get_db())
+
+    if request.method == "POST":
+        # Get the squad
+        squad = db.query(Squad).filter(Squad.id == squad_id).first()
+        if squad:
+            # Delete all squad members first
+            db.query(SquadMember).filter(SquadMember.squad_id == squad.id).delete()
+            # Then delete the squad
+            db.delete(squad)
+            db.commit()
+
+    # Redirect to squads list
+    return RedirectResponse(url="/admin/discord/squads", status_code=303)
+
+async def admin_discord_squad_members(request):
+    """
+    List all members of a squad
+    """
+    squad_id = request.path_params["id"]
+    db = next(get_db())
+
+    # Get the squad
+    squad = db.query(Squad).filter(Squad.id == squad_id).first()
+    if not squad:
+        return RedirectResponse(url="/admin/discord/squads", status_code=303)
+
+    # Get the guild
+    guild = db.query(Guild).filter(Guild.id == squad.guild_id).first()
+
+    # Get all members with user details
+    members = db.query(SquadMember, DiscordUser).join(
+        DiscordUser, SquadMember.user_id == DiscordUser.id
+    ).filter(SquadMember.squad_id == squad.id).all()
+
+    return templates.TemplateResponse(
+        "admin/discord/squad_members.html",
+        {
+            "request": request,
+            "squad": squad,
+            "guild": guild,
+            "members": members
+        }
+    )
 
 # Discord dashboard
 async def admin_discord_dashboard(request):
