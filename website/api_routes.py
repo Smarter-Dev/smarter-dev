@@ -1579,7 +1579,7 @@ async def squad_list(request):
             query = query.filter(Squad.is_active == False)
 
     # Execute query
-    squads = query.order_by(Squad.bytes_required).all()
+    squads = query.order_by(Squad.name).all()
 
     return JSONResponse({
         "squads": [model_to_dict(squad) for squad in squads]
@@ -1606,35 +1606,39 @@ async def squad_detail(request):
 
     return JSONResponse(squad_data)
 
-@api_error_handler
 async def squad_create(request):
     """
     Create a new squad
     """
-    data = await request.json()
-    db = next(get_db())
+    try:
+        data = await request.json()
+        db = next(get_db())
 
-    # Validate required fields
-    required_fields = ["guild_id", "role_id", "name", "bytes_required"]
-    for field in required_fields:
-        if field not in data:
-            return JSONResponse({"error": f"Missing required field: {field}"}, status_code=400)
+        # Validate required fields
+        required_fields = ["guild_id", "role_id", "name"]
+        for field in required_fields:
+            if field not in data:
+                return JSONResponse({"error": f"Missing required field: {field}"}, status_code=400)
 
-    # Create new squad
-    squad = Squad(
-        guild_id=data["guild_id"],
-        role_id=data["role_id"],
-        name=data["name"],
-        description=data.get("description"),
-        bytes_required=data["bytes_required"],
-        is_active=data.get("is_active", True)
-    )
+        # Create new squad
+        squad = Squad(
+            guild_id=data["guild_id"],
+            role_id=data["role_id"],
+            name=data["name"],
+            description=data.get("description"),
+            is_active=data.get("is_active", True)
+        )
 
-    db.add(squad)
-    db.commit()
-    db.refresh(squad)
+        db.add(squad)
+        db.commit()
+        db.refresh(squad)
 
-    return JSONResponse(model_to_dict(squad), status_code=201)
+        return JSONResponse(model_to_dict(squad), status_code=201)
+    except Exception as e:
+        import traceback
+        print(f"Error creating squad: {e}")
+        print(traceback.format_exc())
+        return JSONResponse({"error": f"Error creating squad: {str(e)}"}, status_code=500)
 
 @api_error_handler
 async def squad_update(request):
@@ -1654,8 +1658,6 @@ async def squad_update(request):
         squad.name = data["name"]
     if "description" in data:
         squad.description = data["description"]
-    if "bytes_required" in data:
-        squad.bytes_required = data["bytes_required"]
     if "is_active" in data:
         squad.is_active = data["is_active"]
 
@@ -1747,11 +1749,20 @@ async def squad_member_add(request):
         # If user_id is not a valid integer, return error
         return JSONResponse({"error": "Invalid user ID"}, status_code=400)
 
-    # Check if user already has enough bytes
+    # Get guild's bytes config
+    bytes_config = db.query(BytesConfig).filter(BytesConfig.guild_id == squad.guild_id).first()
+    if not bytes_config:
+        # Create default config if it doesn't exist
+        bytes_config = BytesConfig(guild_id=squad.guild_id)
+        db.add(bytes_config)
+        db.commit()
+        db.refresh(bytes_config)
+
+    # Check if user has enough bytes to use the squad join command
     bytes_received = db.query(func.sum(Bytes.amount)).filter(Bytes.receiver_id == user.id).scalar() or 0
-    if bytes_received < squad.bytes_required:
+    if bytes_received < bytes_config.squad_join_bytes_required:
         return JSONResponse({
-            "error": f"User does not have enough bytes to join this squad. Required: {squad.bytes_required}, User has: {bytes_received}"
+            "error": f"You need at least {bytes_config.squad_join_bytes_required} total bytes received to use the squad join command. You have: {bytes_received}"
         }, status_code=400)
 
     # Check if user is already a member
@@ -1893,9 +1904,27 @@ async def user_eligible_squads(request):
     # Get user's bytes received
     bytes_received = db.query(func.sum(Bytes.amount)).filter(Bytes.receiver_id == user.id).scalar() or 0
 
+    # Get guild's bytes config
+    bytes_config = None
+    if internal_guild_id:
+        bytes_config = db.query(BytesConfig).filter(BytesConfig.guild_id == internal_guild_id).first()
+        if not bytes_config:
+            # Create default config if it doesn't exist
+            bytes_config = BytesConfig(guild_id=internal_guild_id)
+            db.add(bytes_config)
+            db.commit()
+            db.refresh(bytes_config)
+
+    # Check if user has enough bytes to use the squad join command
+    if bytes_config and bytes_received < bytes_config.squad_join_bytes_required:
+        return JSONResponse({
+            "error": f"You need at least {bytes_config.squad_join_bytes_required} total bytes received to use the squad join command. You have: {bytes_received}",
+            "bytes_received": bytes_received,
+            "squads": []
+        })
+
     # Get all squads the user is eligible to join
     query = db.query(Squad).filter(
-        Squad.bytes_required <= bytes_received,
         Squad.is_active == True
     )
 
@@ -1912,7 +1941,7 @@ async def user_eligible_squads(request):
         query = query.filter(~Squad.id.in_(member_squad_ids))
 
     # Execute query
-    eligible_squads = query.order_by(Squad.bytes_required.desc()).all()
+    eligible_squads = query.order_by(Squad.name).all()
 
     return JSONResponse({
         "squads": [model_to_dict(squad) for squad in eligible_squads],

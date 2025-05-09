@@ -68,13 +68,13 @@ async def squads_list(ctx: context.SlashContext) -> None:
             role = ctx.get_guild().get_role(role_id)
             role_mention = role.mention if role else f"Role ID: {role_id}"
 
-            bytes_required = format_bytes(squad["bytes_required"])
+            # Squads no longer have bytes requirements
 
             # Add description if available
             description = squad.get("description", "No description")
 
             embed.add_field(
-                name=f"{squad['name']} ({bytes_required})",
+                name=squad['name'],
                 value=f"{description}\nRole: {role_mention}",
                 inline=False
             )
@@ -92,6 +92,7 @@ async def squads_list(ctx: context.SlashContext) -> None:
 async def squads_join(ctx: context.SlashContext) -> None:
     """
     Show squads the user is eligible to join and let them select one.
+    Users need a minimum number of total bytes received to use this command, which is set by server admins.
     """
     # Get API client
     client = ctx.bot.d.api_client
@@ -107,40 +108,28 @@ async def squads_join(ctx: context.SlashContext) -> None:
         response = await client._request("GET", f"/api/users/{ctx.author.id}/eligible-squads?guild_id={guild_id}")
         data = await client._get_json(response)
 
+        # Check for error message (not enough bytes to use the command)
+        if "error" in data:
+            await ctx.respond(data["error"], flags=hikari.MessageFlag.EPHEMERAL)
+            return
+
         if not data.get("squads"):
-            # If no eligible squads, check if user has enough bytes for any squad
-            bytes_received = data.get("bytes_received", 0)
-
-            # Get all squads to find the minimum bytes required
-            all_squads_response = await client._request("GET", f"/api/squads?guild_id={guild_id}&is_active=true")
-            all_squads_data = await client._get_json(all_squads_response)
-
-            if not all_squads_data.get("squads"):
-                await ctx.respond("No squads are available in this server.", flags=hikari.MessageFlag.EPHEMERAL)
-                return
-
-            # Find the minimum bytes required for any squad
-            min_bytes = min(squad["bytes_required"] for squad in all_squads_data["squads"])
-            bytes_needed = min_bytes - bytes_received
-
-            await ctx.respond(
-                f"You don't have enough bytes to join any squads yet. You need {format_bytes(bytes_needed)} more bytes.",
-                flags=hikari.MessageFlag.EPHEMERAL
-            )
+            await ctx.respond("No squads are available in this server.", flags=hikari.MessageFlag.EPHEMERAL)
             return
 
         # Create action row with buttons for each squad
-        action_row = ctx.bot.rest.build_action_row()
+        action_row = ctx.bot.rest.build_message_action_row()
         for i, squad in enumerate(data["squads"]):
             # Limit to 5 buttons per action row (Discord limit)
             if i >= 5:
                 break
 
             # Create a button for each squad
-            action_row.add_button(
+            action_row.add_interactive_button(
                 hikari.ButtonStyle.PRIMARY,
                 f"join_squad_{squad['id']}",  # Custom ID for the button
-            ).set_label(squad["name"]).add_to_container()
+                label=squad["name"]
+            )
 
         # Create embed
         embed = hikari.Embed(
@@ -155,13 +144,13 @@ async def squads_join(ctx: context.SlashContext) -> None:
             role = ctx.get_guild().get_role(role_id)
             role_mention = role.mention if role else f"Role ID: {role_id}"
 
-            bytes_required = format_bytes(squad["bytes_required"])
+            # Squads no longer have bytes requirements
 
             # Add description if available
             description = squad.get("description", "No description")
 
             embed.add_field(
-                name=f"{squad['name']} ({bytes_required})",
+                name=squad['name'],
                 value=f"{description}\nRole: {role_mention}",
                 inline=False
             )
@@ -285,17 +274,18 @@ async def squads_leave(ctx: context.SlashContext) -> None:
             return
 
         # Create action row with buttons for each squad
-        action_row = ctx.bot.rest.build_action_row()
+        action_row = ctx.bot.rest.build_message_action_row()
         for i, squad in enumerate(guild_squads):
             # Limit to 5 buttons per action row (Discord limit)
             if i >= 5:
                 break
 
             # Create a button for each squad
-            action_row.add_button(
+            action_row.add_interactive_button(
                 hikari.ButtonStyle.DANGER,
                 f"leave_squad_{squad['id']}",  # Custom ID for the button
-            ).set_label(squad["name"]).add_to_container()
+                label=squad["name"]
+            )
 
         # Create embed
         embed = hikari.Embed(
@@ -431,7 +421,7 @@ async def squads_info(ctx: context.SlashContext) -> None:
         # Create embed
         embed = hikari.Embed(
             title=f"{target_user.username}'s Squads",
-            description=f"Bytes: {format_bytes(bytes_balance)} (Total received: {format_bytes(bytes_received)})",
+            description=f"Total bytes received: {format_bytes(bytes_received)} (Current balance: {format_bytes(bytes_balance)})",
             color=hikari.Color.from_rgb(114, 137, 218)  # Discord blurple
         )
 
@@ -535,7 +525,7 @@ async def squads_members(ctx: context.SlashContext) -> None:
         # Create embed
         embed = hikari.Embed(
             title=f"{squad['name']} Squad Members",
-            description=f"Bytes required: {format_bytes(squad['bytes_required'])}",
+            description=squad.get('description', 'No description'),
             color=hikari.Color.from_rgb(114, 137, 218)  # Discord blurple
         )
 
