@@ -183,6 +183,9 @@ class GuildMember(Base):
     joined_at = Column(DateTime, nullable=True)
     is_active = Column(Boolean, default=True)  # False if user has left the guild
     created_at = Column(DateTime, default=func.now())
+    last_active_day = Column(String, nullable=True)  # Last day the user was active in this guild (YYYY-MM-DD)
+    streak_count = Column(Integer, default=0, nullable=False)  # Current streak count in this guild
+    last_daily_bytes = Column(DateTime, nullable=True)  # Last time the user received daily bytes in this guild
 
     # Relationships
     user = relationship("DiscordUser", back_populates="guild_memberships")

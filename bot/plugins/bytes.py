@@ -8,7 +8,7 @@ each other bytes as a form of recognition and earn roles based on their bytes ba
 import asyncio
 import logging
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from typing import Optional, List, Dict, Any, Tuple
 
 import hikari
@@ -16,7 +16,7 @@ import lightbulb
 from lightbulb import commands, context
 
 from bot.api_client import APIClient
-from bot.api_models import Bytes, BytesConfig, BytesRole, BytesCooldown, DiscordUser
+from bot.api_models import Bytes, BytesConfig, BytesRole, BytesCooldown, DiscordUser, GuildMember
 
 # Create plugin
 bytes_plugin = lightbulb.Plugin("Bytes")
@@ -111,7 +111,7 @@ async def get_user_bytes_info(client: APIClient, user_id: int, guild_id: int) ->
 
     Args:
         client: API client
-        user_id: User ID
+        user_id: Discord user ID
         guild_id: Guild ID
 
     Returns:
@@ -134,13 +134,96 @@ async def get_user_bytes_info(client: APIClient, user_id: int, guild_id: int) ->
         }
 
 
+async def check_for_earned_roles(client: APIClient, bot: lightbulb.BotApp, user_id: int, guild_id: int, channel_id: Optional[int] = None) -> None:
+    """
+    Check if a user has earned any roles based on their bytes balance and add them.
+
+    Args:
+        client: API client
+        bot: Bot instance
+        user_id: Discord user ID
+        guild_id: Guild ID
+        channel_id: Optional channel ID to send the award message to (defaults to system channel)
+    """
+    try:
+        # Get the user's bytes info
+        bytes_info = await get_user_bytes_info(client, user_id, guild_id)
+
+        # Check if there are any earned roles
+        earned_roles = bytes_info.get("earned_roles", [])
+        if not earned_roles:
+            logger.info(f"No earned roles found for user {user_id} in guild {guild_id}")
+            return
+
+        # Get the guild
+        guild = await bot.rest.fetch_guild(guild_id)
+        if not guild:
+            logger.error(f"Could not fetch guild {guild_id}")
+            return
+
+        # Get the user details from the API to get the Discord user ID
+        try:
+            # Get the user from Discord API using the Discord user ID
+            user = await bot.rest.fetch_user(user_id)
+            if not user:
+                logger.error(f"Could not fetch user with Discord ID {user_id}")
+                return
+        except Exception as e:
+            logger.error(f"Error fetching user {user_id}: {e}")
+            return
+
+        # Add roles to user
+        role_mentions = []
+        for role_data in earned_roles:
+            role_id = role_data["role_id"]
+            role = guild.get_role(role_id)
+            if role:
+                # Check if user already has the role
+                try:
+                    member = await bot.rest.fetch_member(guild_id, user.id)
+                    if role_id not in member.role_ids:
+                        role_mentions.append(role.mention)
+                        # Add role to user
+                        try:
+                            await bot.rest.add_role_to_member(guild_id, user.id, role_id, reason="Bytes role reward")
+                            logger.info(f"Added role {role_id} to user {user.id}")
+                        except Exception as e:
+                            logger.error(f"Error adding role {role_id} to user {user.id}: {e}")
+                    else:
+                        logger.info(f"User {user.id} already has role {role_id}, not sending award message")
+                except Exception as e:
+                    logger.error(f"Error checking if user {user.id} has role {role_id}: {e}")
+
+        # If roles were added, send a message
+        if role_mentions:
+            roles_str = ", ".join(role_mentions)
+            congrats_embed = hikari.Embed(
+                title="🎉 New Role Earned!",
+                description=f"{user.mention} has earned new role{'s' if len(role_mentions) > 1 else ''}: {roles_str}",
+                color=hikari.Color.from_rgb(255, 215, 0)  # Gold color
+            )
+            try:
+                # Use the provided channel_id if available, otherwise fall back to system channel
+                message_channel_id = channel_id if channel_id else guild.system_channel_id
+                if message_channel_id:
+                    await bot.rest.create_message(message_channel_id, embed=congrats_embed)
+                    logger.info(f"Sent role earned message to channel {message_channel_id}")
+                else:
+                    logger.info("No channel available to send role earned message")
+            except Exception as e:
+                logger.error(f"Error sending role earned message: {e}")
+
+    except Exception as e:
+        logger.error(f"Error checking for earned roles: {e}")
+
+
 async def check_cooldown(client: APIClient, user_id: int, guild_id: int) -> Dict[str, Any]:
     """
     Check if a user is on cooldown for giving bytes.
 
     Args:
         client: API client
-        user_id: User ID
+        user_id: Discord user ID
         guild_id: Guild ID
 
     Returns:
@@ -264,8 +347,8 @@ async def bytes_give(ctx: context.SlashContext) -> None:
 
         # Create bytes transaction
         bytes_obj = Bytes(
-            giver_id=giver["id"],
-            receiver_id=receiver_user["id"],
+            giver_id=ctx.author.id,  # Use Discord user ID
+            receiver_id=receiver.id,  # Use Discord user ID
             guild_id=int(guild_id),
             amount=amount,
             reason=reason or "No reason provided"
@@ -298,28 +381,9 @@ async def bytes_give(ctx: context.SlashContext) -> None:
         # Send public notification
         await ctx.get_channel().send(notification_message)
 
-        # If user earned new roles, send a separate message
-        if earned_roles:
-            role_mentions = []
-            for role_data in earned_roles:
-                role_id = role_data["role_id"]
-                role = ctx.get_guild().get_role(role_id)
-                if role:
-                    role_mentions.append(role.mention)
-                    # Add role to user
-                    try:
-                        await ctx.get_guild().add_role_to_member(receiver.id, role_id, reason="Bytes role reward")
-                    except Exception as e:
-                        logger.error(f"Error adding role {role_id} to user {receiver.id}: {e}")
-
-            if role_mentions:
-                roles_str = ", ".join(role_mentions)
-                congrats_embed = hikari.Embed(
-                    title="🎉 New Role Earned!",
-                    description=f"{receiver.mention} has earned new role{'s' if len(role_mentions) > 1 else ''}: {roles_str}",
-                    color=hikari.Color.from_rgb(255, 215, 0)  # Gold color
-                )
-                await ctx.get_channel().send(embed=congrats_embed)
+        # Check for earned roles and add them to the user
+        # Pass the current channel ID so the award message is sent in the same channel
+        await check_for_earned_roles(client, ctx.bot, receiver.id, guild_id, ctx.channel_id)
 
     except Exception as e:
         logger.error(f"Error giving bytes: {e}")
@@ -438,6 +502,52 @@ async def bytes_lookup(ctx: context.SlashContext) -> None:
 
 
 @bytes_group.child
+@lightbulb.option("user", "User to check roles for", type=hikari.User, required=False)
+@lightbulb.command("awards", "Check if a user has earned any roles based on their bytes cache")
+@lightbulb.implements(lightbulb.SlashSubCommand)
+async def bytes_check_roles(ctx: context.SlashContext) -> None:
+    """
+    Check if a user has earned any roles based on their bytes balance.
+    """
+    # Get API client
+    client = ctx.bot.d.api_client
+
+    # Get user to check
+    target_user = ctx.options.user or ctx.author
+
+    # Get guild ID
+    guild_id = ctx.guild_id
+    if not guild_id:
+        await ctx.respond("This command can only be used in a server.", flags=hikari.MessageFlag.EPHEMERAL)
+        return
+
+    try:
+        # Get user from API
+        logger.info(f"Looking up user with discord_id: {target_user.id}")
+        user_response = await client._request("GET", f"/api/users?discord_id={target_user.id}")
+        user_data = await client._get_json(user_response)
+        logger.info(f"API response for user lookup: {user_data}")
+
+        if not user_data.get("users"):
+            await ctx.respond(f"User {target_user.username} was not found in the database.", flags=hikari.MessageFlag.EPHEMERAL)
+            return
+
+        user_id = user_data["users"][0]["id"]
+        logger.info(f"Found user with ID: {user_id}")
+
+        # Check for earned roles
+        # Pass the current channel ID so the award message is sent in the same channel
+        await check_for_earned_roles(client, ctx.bot, target_user.id, guild_id, ctx.channel_id)
+
+        # Respond with success message
+        await ctx.respond(f"Checked roles for {target_user.mention}. Any earned roles have been assigned.", flags=hikari.MessageFlag.EPHEMERAL)
+
+    except Exception as e:
+        logger.error(f"Error checking roles: {e}")
+        await ctx.respond("An error occurred while checking roles. Please try again later.", flags=hikari.MessageFlag.EPHEMERAL)
+
+
+@bytes_group.child
 @lightbulb.option("limit", "Number of users to show", type=int, min_value=1, max_value=25, default=10, required=False)
 @lightbulb.command("heap", "Show the user's with the largest bytes cache")
 @lightbulb.implements(lightbulb.SlashSubCommand)
@@ -505,6 +615,391 @@ async def bytes_leaderboard(ctx: context.SlashContext) -> None:
 def load(bot: lightbulb.BotApp) -> None:
     """Load the bytes plugin."""
     bot.add_plugin(bytes_plugin)
+
+
+async def update_user_streak(client: APIClient, user_id: int, guild_id: int) -> Dict[str, Any]:
+    """
+    Update a user's messaging streak in a specific guild.
+
+    Args:
+        client: API client
+        user_id: Discord user ID
+        guild_id: Guild ID
+
+    Returns:
+        Dictionary with updated guild member information
+    """
+    try:
+        # Get the current UTC day in format YYYY-MM-DD
+        now = datetime.now(UTC)
+        current_day = now.strftime("%Y-%m-%d")
+
+        # Get user from API to ensure they exist
+        logger.info(f"Looking up user with discord_id: {user_id}")
+        user_response = await client._request("GET", f"/api/users?discord_id={user_id}")
+        user_data = await client._get_json(user_response)
+
+        if not user_data.get("users"):
+            logger.error(f"User {user_id} not found in database")
+            return None
+
+        user = user_data["users"][0]
+        user_id_internal = user["id"]
+
+        # Get guild member for this user in this guild
+        logger.info(f"Looking up guild member for user {user_id} in guild {guild_id}")
+        guild_member = await client.get_guild_member(user_id, guild_id)
+
+        # If guild member doesn't exist, create it
+        if not guild_member:
+            logger.info(f"Guild member not found for user {user_id} in guild {guild_id}, creating new record")
+            # Create a new guild member record
+            guild_member_data = {
+                "user_id": user_id_internal,
+                "guild_id": guild_id,
+                "is_active": True
+            }
+            guild_member_response = await client._request(
+                "POST",
+                f"/api/users/{user_id}/guilds",
+                data=guild_member_data
+            )
+            guild_member = await client._get_json(guild_member_response)
+
+        # Get the guild member's last active day and streak count
+        last_active_day = guild_member.get("last_active_day") if hasattr(guild_member, "get") else getattr(guild_member, "last_active_day", None)
+        streak_count = guild_member.get("streak_count", 0) if hasattr(guild_member, "get") else getattr(guild_member, "streak_count", 0)
+
+        logger.info(f"Guild member {user_id} in guild {guild_id} last_active_day: {last_active_day}, current_day: {current_day}")
+
+        # Calculate previous day
+        yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        logger.info(f"Yesterday was: {yesterday}")
+
+        # Update streak count
+        if last_active_day == yesterday:
+            # User was active yesterday in this guild, increment streak
+            streak_count += 1
+            logger.info(f"User {user_id} was active in guild {guild_id} yesterday, incrementing streak to {streak_count}")
+        elif last_active_day != current_day:
+            # User was not active yesterday and not already active today in this guild, reset streak
+            streak_count = 1
+            logger.info(f"User {user_id} was not active in guild {guild_id} recently, resetting streak to 1")
+        else:
+            logger.info(f"User {user_id} was already active in guild {guild_id} today, keeping streak at {streak_count}")
+
+        # Update guild member's last active day and streak count
+        guild_member_update = {
+            "last_active_day": current_day,
+            "streak_count": streak_count
+        }
+
+        # Update guild member in API
+        update_response = await client._request(
+            "PUT",
+            f"/api/users/{user_id}/guilds/{guild_id}",
+            data=guild_member_update
+        )
+        updated_guild_member = await client._get_json(update_response)
+
+        # Determine if this is a new day for the user in this guild
+        # If last_active_day is the current day, then it's not a new day
+        # This prevents users from getting daily bytes multiple times on the same day
+        is_new_day = last_active_day != current_day
+
+        # Log the determination
+        logger.info(f"User {user_id} in guild {guild_id} is_new_day determined as: {is_new_day} (last_active_day: {last_active_day}, current_day: {current_day})")
+
+        # CRITICAL CHECK: Has the user already received daily bytes today in this guild?
+        # This is essential to prevent duplicate awards
+        last_daily_bytes = updated_guild_member.get("last_daily_bytes") if hasattr(updated_guild_member, "get") else getattr(updated_guild_member, "last_daily_bytes", None)
+
+        if is_new_day and last_daily_bytes:
+            try:
+                if isinstance(last_daily_bytes, str):
+                    last_daily_bytes = datetime.fromisoformat(last_daily_bytes)
+
+                last_daily_bytes_day = last_daily_bytes.strftime("%Y-%m-%d")
+
+                # If last_daily_bytes is from today, user has already received daily bytes today in this guild
+                # Override is_new_day to False
+                if last_daily_bytes_day == current_day:
+                    logger.info(f"User {user_id} already received daily bytes in guild {guild_id} today, overriding is_new_day to False")
+                    is_new_day = False
+
+                # Double-check: If it's been less than 24 hours, also set is_new_day to False
+                time_since_last = (now - last_daily_bytes).total_seconds()
+                if time_since_last < 24 * 60 * 60:  # Less than 24 hours
+                    logger.info(f"User {user_id} received daily bytes in guild {guild_id} less than 24 hours ago, overriding is_new_day to False")
+                    is_new_day = False
+            except (ValueError, TypeError, AttributeError) as e:
+                logger.error(f"Error checking last_daily_bytes for user {user_id} in guild {guild_id}: {e}")
+
+        # Log the final determination
+        if is_new_day:
+            logger.info(f"User {user_id} is active for the first time today in guild {guild_id} and has not received daily bytes today, setting is_new_day to True")
+        else:
+            logger.info(f"User {user_id} was already active today in guild {guild_id} or has already received daily bytes today, setting is_new_day to False")
+
+        return {
+            "guild_member": updated_guild_member,
+            "user": user,
+            "streak_count": streak_count,
+            "is_new_day": is_new_day
+        }
+    except Exception as e:
+        logger.error(f"Error updating user streak: {e}")
+        return None
+
+
+
+@bytes_plugin.listener(hikari.GuildMessageCreateEvent)
+async def on_message(event: hikari.GuildMessageCreateEvent) -> None:
+    """
+    Listen for messages and update user streaks and award daily bytes.
+
+    Rules:
+    1. Every consecutive day (UTC) a user sends a message increases their streak by 1
+    2. Missing a day resets the streak to 1
+    3. Users receive daily bytes for their first message in a 24-hour period
+    4. Streak multipliers are applied based on streak milestones (8, 16, 32, 64)
+    """
+    # Ignore bot messages
+    if event.is_bot:
+        return
+
+    # Get API client
+    client = event.app.d.api_client
+
+    # Get user and guild IDs
+    user_id = event.author_id
+    guild_id = event.guild_id
+
+    try:
+        # Get current time in UTC
+        now = datetime.now(UTC)
+        current_day_str = now.strftime("%Y-%m-%d")
+
+        # CRITICAL CHECK: Has the user already received daily bytes today in this guild?
+        # First check if we can get the guild member record
+        guild_member = await client.get_guild_member(user_id, guild_id)
+
+        if guild_member:
+            # Check if the guild member has received daily bytes today
+            last_daily_bytes = getattr(guild_member, "last_daily_bytes", None)
+
+            if last_daily_bytes:
+                try:
+                    # If it's a string, parse it to a datetime
+                    if isinstance(last_daily_bytes, str):
+                        last_daily_bytes = datetime.fromisoformat(last_daily_bytes)
+
+                    last_daily_bytes_day = last_daily_bytes.strftime("%Y-%m-%d")
+
+                    # If last_daily_bytes is from today, user has already received daily bytes today in this guild
+                    if last_daily_bytes_day == current_day_str:
+                        logger.info(f"on_message: ABORT - User {user_id} already received daily bytes in guild {guild_id} today")
+                        # Still update streak to maintain it
+                        await update_user_streak(client, user_id, guild_id)
+                        return
+
+                    # If it's been less than 24 hours but not from today, still check the time
+                    time_since_last = (now - last_daily_bytes).total_seconds()
+                    if time_since_last < 24 * 60 * 60:  # Less than 24 hours
+                        logger.info(f"on_message: ABORT - User {user_id} already received daily bytes in guild {guild_id} in the last 24 hours")
+                        # Still update streak to maintain it
+                        await update_user_streak(client, user_id, guild_id)
+                        return
+
+                    logger.info(f"on_message: It's been {time_since_last/3600:.2f} hours since user {user_id} last received daily bytes in guild {guild_id}")
+                except (ValueError, TypeError, AttributeError) as e:
+                    logger.error(f"on_message: Error checking last_daily_bytes for user {user_id} in guild {guild_id}: {e}")
+
+        # STEP 2: Update the user's streak and check if this is the first message of the day
+        streak_info = await update_user_streak(client, user_id, guild_id)
+        if not streak_info:
+            logger.error(f"on_message: Failed to update streak for user {user_id}")
+            return
+
+        # STEP 3: Only award daily bytes for the first message of the day
+        if not streak_info["is_new_day"]:
+            logger.info(f"on_message: User {user_id} has already been active today, not eligible for daily bytes")
+            return
+
+        # STEP 4: User is eligible for daily bytes - award them
+        logger.info(f"on_message: User {user_id} is eligible for daily bytes with streak {streak_info['streak_count']}")
+
+        # Get bytes config
+        config = await get_bytes_config(client, guild_id)
+        daily_amount = config.daily_earning
+
+        # Calculate multiplier based on streak
+        streak_count = streak_info["streak_count"]
+        multiplier = 1
+        multiplier_text = ""
+
+        if streak_count % 64 == 0:  # long (64-bit)
+            multiplier = 256
+            multiplier_text = f"🔥 **LONG STREAK (x{multiplier})** 🔥"
+        elif streak_count % 32 == 0:  # int (32-bit)
+            multiplier = 16
+            multiplier_text = f"🔥 **INT STREAK (x{multiplier})** 🔥"
+        elif streak_count % 16 == 0:  # short (16-bit)
+            multiplier = 4
+            multiplier_text = f"🔥 **SHORT STREAK (x{multiplier})** 🔥"
+        elif streak_count % 8 == 0:  # char (8-bit)
+            multiplier = 2
+            multiplier_text = f"🔥 **CHAR STREAK (x{multiplier})** 🔥"
+
+        # Calculate final amount
+        amount = daily_amount * multiplier
+
+        # Create bytes transaction from system to user
+        # First get or create system user (discord_id=0)
+        system_response = await client._request("GET", "/api/users?discord_id=0")
+        system_data = await client._get_json(system_response)
+
+        if not system_data.get("users"):
+            # Create system user
+            system_user = {
+                "discord_id": 0,
+                "username": "System"
+            }
+            system_create = await client._request("POST", "/api/users", data=system_user)
+            system_data = await client._get_json(system_create)
+            system_user_id = system_data["id"]
+        else:
+            system_user_id = system_data["users"][0]["id"]
+
+        # Create bytes transaction
+        bytes_obj = Bytes(
+            giver_id=0,  # System user
+            receiver_id=user_id,
+            guild_id=int(guild_id),
+            amount=amount,
+            reason=f"Daily bytes for {streak_count} day streak"
+        )
+
+        # Send transaction to API
+        response = await client._request("POST", "/api/bytes", data=client._dict_from_model(bytes_obj))
+        result = await client._get_json(response)
+
+        # CRITICAL: Update the guild member's last_daily_bytes timestamp
+        # This is essential to prevent duplicate awards
+        now_iso = now.isoformat()
+
+        # Get the guild member again to ensure we have the latest data
+        guild_member = await client.get_guild_member(user_id, guild_id)
+
+        if guild_member:
+            # Update the guild member's last_daily_bytes field
+            guild_member_update = {
+                "last_daily_bytes": now_iso
+            }
+
+            update_response = await client._request(
+                "PUT",
+                f"/api/users/{user_id}/guilds/{guild_id}",
+                data=guild_member_update
+            )
+
+            # Verify the update was successful
+            if hasattr(update_response, 'status_code') and update_response.status_code >= 400:
+                logger.error(f"on_message: Failed to update guild member {user_id} in guild {guild_id} last_daily_bytes: {update_response.status_code}")
+                return
+
+            logger.info(f"on_message: Successfully updated guild member {user_id} in guild {guild_id} last_daily_bytes to {now_iso}")
+        else:
+            logger.error(f"on_message: Could not find guild member {user_id} in guild {guild_id} to update last_daily_bytes")
+            return
+
+        # Send award message
+        try:
+            # Get the user from Discord API
+            discord_user = await event.app.rest.fetch_user(user_id)
+            if not discord_user:
+                logger.error(f"on_message: Could not fetch Discord user {user_id}")
+                return
+
+            # Get the guild from Discord API
+            guild = await event.app.rest.fetch_guild(guild_id)
+            if not guild:
+                logger.error(f"on_message: Could not fetch guild {guild_id}")
+                return
+
+            # Format the bytes amount in a human-readable way
+            amount_formatted = format_bytes(amount)
+            streak_text = f"{streak_count} day{'s' if streak_count != 1 else ''}"
+
+            # Create embed for daily bytes award
+            daily_embed = hikari.Embed(
+                title="🎁 Daily Bytes Awarded!",
+                color=hikari.Color.from_rgb(87, 242, 135)  # Green color
+            )
+
+            if multiplier > 1:
+                daily_embed.description = f"{discord_user.mention} received {amount_formatted} for maintaining a **{streak_text}** streak!\n\n{multiplier_text}"
+            else:
+                daily_embed.description = f"{discord_user.mention} received {amount_formatted} for maintaining a **{streak_text}** streak!"
+
+            # Add streak info
+            daily_embed.add_field(
+                name="Current Streak",
+                value=f"{streak_count} day{'s' if streak_count != 1 else ''}",
+                inline=True
+            )
+
+            # Add next milestone info
+            next_milestone = 0
+            if streak_count < 8:
+                next_milestone = 8
+                milestone_type = "CHAR"
+                milestone_multiplier = 2
+            elif streak_count < 16:
+                next_milestone = 16
+                milestone_type = "SHORT"
+                milestone_multiplier = 4
+            elif streak_count < 32:
+                next_milestone = 32
+                milestone_type = "INT"
+                milestone_multiplier = 16
+            elif streak_count < 64:
+                next_milestone = 64
+                milestone_type = "LONG"
+                milestone_multiplier = 256
+            else:
+                next_milestone = ((streak_count // 64) + 1) * 64
+                milestone_type = "LONG"
+                milestone_multiplier = 256
+
+            days_to_milestone = next_milestone - streak_count
+            daily_embed.add_field(
+                name="Next Milestone",
+                value=f"{days_to_milestone} day{'s' if days_to_milestone != 1 else ''} to {milestone_type} (x{milestone_multiplier})",
+                inline=True
+            )
+
+            # Add footer
+            daily_embed.set_footer(text="Keep your streak going by sending a message every day!")
+
+            # Determine which channel to send the message to
+            target_channel_id = event.channel_id or guild.system_channel_id
+            if not target_channel_id:
+                logger.error(f"on_message: No target channel found for guild {guild_id}")
+                return
+
+            # Send the message
+            await event.app.rest.create_message(target_channel_id, embed=daily_embed)
+            logger.info(f"on_message: Sent daily bytes award message to channel {target_channel_id}")
+
+            # Check for earned roles and add them to the user
+            await check_for_earned_roles(client, event.app, user_id, guild_id)
+        except Exception as e:
+            logger.error(f"on_message: Error sending award message: {e}")
+    except Exception as e:
+        logger.error(f"Error in on_message handler: {e}")
+        # If there's an error, don't check daily bytes to avoid potential duplicate awards
+        return
 
 
 def unload(bot: lightbulb.BotApp) -> None:

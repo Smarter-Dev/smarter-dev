@@ -272,6 +272,15 @@ class APIClient:
         data = await self._get_json(response)
         return self._model_from_dict(DiscordUser, data)
 
+    async def get_guild_member(self, user_id: int, guild_id: int) -> Optional[GuildMember]:
+        """Get a guild member by user ID and guild ID"""
+        try:
+            response = await self._request("GET", f"/api/users/{user_id}/guilds/{guild_id}")
+            data = await self._get_json(response)
+            return self._model_from_dict(GuildMember, data)
+        except Exception:
+            return None
+
     async def create_user(self, user: DiscordUser) -> DiscordUser:
         """Create a new user"""
         data = self._dict_from_model(user)
