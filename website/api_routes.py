@@ -10,7 +10,7 @@ from .models import (
     APIKey, Guild, DiscordUser, GuildMember, UserNote,
     UserWarning, ModerationCase, PersistentRole, TemporaryRole,
     ChannelLock, BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown,
-    AutoModRegexRule, AutoModRateLimit
+    AutoModRegexRule, AutoModRateLimit, Squad, SquadMember
 )
 from .database import get_db
 from .api_auth import create_jwt_token, verify_api_key, generate_api_key
@@ -1540,3 +1540,381 @@ async def automod_rate_limit_detail(request):
         return JSONResponse({"error": "Auto moderation rate limit not found"}, status_code=404)
 
     return JSONResponse(model_to_dict(limit))
+
+
+# Squad API endpoints
+@api_error_handler
+async def squad_list(request):
+    """
+    List all squads for a guild
+    """
+    guild_id = request.query_params.get("guild_id")
+    db = next(get_db())
+
+    # Initialize query
+    query = db.query(Squad)
+
+    # Filter by guild_id if provided
+    if guild_id:
+        try:
+            # Check if guild_id is a Discord guild ID (usually a large number)
+            discord_guild_id = int(guild_id)
+            guild = db.query(Guild).filter(Guild.discord_id == discord_guild_id).first()
+            if guild:
+                # Use the internal database guild ID
+                query = query.filter(Squad.guild_id == guild.id)
+            else:
+                # If no guild found with this Discord ID, assume it's already an internal ID
+                query = query.filter(Squad.guild_id == discord_guild_id)
+        except ValueError:
+            # If guild_id is not a valid integer, return error
+            return JSONResponse({"error": "Invalid guild ID"}, status_code=400)
+
+    # Filter by active status if provided
+    is_active = request.query_params.get("is_active")
+    if is_active is not None:
+        if is_active.lower() == "true":
+            query = query.filter(Squad.is_active == True)
+        elif is_active.lower() == "false":
+            query = query.filter(Squad.is_active == False)
+
+    # Execute query
+    squads = query.order_by(Squad.bytes_required).all()
+
+    return JSONResponse({
+        "squads": [model_to_dict(squad) for squad in squads]
+    })
+
+@api_error_handler
+async def squad_detail(request):
+    """
+    Get squad details
+    """
+    squad_id = request.path_params["squad_id"]
+    db = next(get_db())
+
+    squad = db.query(Squad).filter(Squad.id == squad_id).first()
+    if not squad:
+        return JSONResponse({"error": "Squad not found"}, status_code=404)
+
+    # Get members count
+    members_count = db.query(SquadMember).filter(SquadMember.squad_id == squad.id).count()
+
+    # Convert to dict and add members count
+    squad_data = model_to_dict(squad)
+    squad_data["members_count"] = members_count
+
+    return JSONResponse(squad_data)
+
+@api_error_handler
+async def squad_create(request):
+    """
+    Create a new squad
+    """
+    data = await request.json()
+    db = next(get_db())
+
+    # Validate required fields
+    required_fields = ["guild_id", "role_id", "name", "bytes_required"]
+    for field in required_fields:
+        if field not in data:
+            return JSONResponse({"error": f"Missing required field: {field}"}, status_code=400)
+
+    # Create new squad
+    squad = Squad(
+        guild_id=data["guild_id"],
+        role_id=data["role_id"],
+        name=data["name"],
+        description=data.get("description"),
+        bytes_required=data["bytes_required"],
+        is_active=data.get("is_active", True)
+    )
+
+    db.add(squad)
+    db.commit()
+    db.refresh(squad)
+
+    return JSONResponse(model_to_dict(squad), status_code=201)
+
+@api_error_handler
+async def squad_update(request):
+    """
+    Update a squad
+    """
+    squad_id = request.path_params["squad_id"]
+    data = await request.json()
+    db = next(get_db())
+
+    squad = db.query(Squad).filter(Squad.id == squad_id).first()
+    if not squad:
+        return JSONResponse({"error": "Squad not found"}, status_code=404)
+
+    # Update fields
+    if "name" in data:
+        squad.name = data["name"]
+    if "description" in data:
+        squad.description = data["description"]
+    if "bytes_required" in data:
+        squad.bytes_required = data["bytes_required"]
+    if "is_active" in data:
+        squad.is_active = data["is_active"]
+
+    db.commit()
+    db.refresh(squad)
+
+    return JSONResponse(model_to_dict(squad))
+
+@api_error_handler
+async def squad_delete(request):
+    """
+    Delete a squad
+    """
+    squad_id = request.path_params["squad_id"]
+    db = next(get_db())
+
+    squad = db.query(Squad).filter(Squad.id == squad_id).first()
+    if not squad:
+        return JSONResponse({"error": "Squad not found"}, status_code=404)
+
+    # Delete all squad members first
+    db.query(SquadMember).filter(SquadMember.squad_id == squad.id).delete()
+
+    # Then delete the squad
+    db.delete(squad)
+    db.commit()
+
+    return JSONResponse({"success": True})
+
+@api_error_handler
+async def squad_member_list(request):
+    """
+    List all members of a squad
+    """
+    squad_id = request.path_params["squad_id"]
+    db = next(get_db())
+
+    squad = db.query(Squad).filter(Squad.id == squad_id).first()
+    if not squad:
+        return JSONResponse({"error": "Squad not found"}, status_code=404)
+
+    # Get all members with user details
+    members = db.query(SquadMember, DiscordUser).join(
+        DiscordUser, SquadMember.user_id == DiscordUser.id
+    ).filter(SquadMember.squad_id == squad.id).all()
+
+    # Format the response
+    result = []
+    for member, user in members:
+        member_data = model_to_dict(member)
+        member_data["user"] = model_to_dict(user)
+        result.append(member_data)
+
+    return JSONResponse({
+        "members": result
+    })
+
+@api_error_handler
+async def squad_member_add(request):
+    """
+    Add a user to a squad
+    """
+    squad_id = request.path_params["squad_id"]
+    data = await request.json()
+    db = next(get_db())
+
+    # Validate required fields
+    if "user_id" not in data:
+        return JSONResponse({"error": "Missing required field: user_id"}, status_code=400)
+
+    # Get the squad
+    squad = db.query(Squad).filter(Squad.id == squad_id).first()
+    if not squad:
+        return JSONResponse({"error": "Squad not found"}, status_code=404)
+
+    # Get the user
+    user_id = data["user_id"]
+    try:
+        user_id_int = int(user_id)
+        # First try to find user by Discord ID (preferred method)
+        user = db.query(DiscordUser).filter(DiscordUser.discord_id == user_id_int).first()
+
+        # If not found, fall back to internal ID for backward compatibility
+        if not user:
+            user = db.query(DiscordUser).filter(DiscordUser.id == user_id_int).first()
+            if not user:
+                return JSONResponse({"error": "User not found"}, status_code=404)
+    except ValueError:
+        # If user_id is not a valid integer, return error
+        return JSONResponse({"error": "Invalid user ID"}, status_code=400)
+
+    # Check if user already has enough bytes
+    bytes_received = db.query(func.sum(Bytes.amount)).filter(Bytes.receiver_id == user.id).scalar() or 0
+    if bytes_received < squad.bytes_required:
+        return JSONResponse({
+            "error": f"User does not have enough bytes to join this squad. Required: {squad.bytes_required}, User has: {bytes_received}"
+        }, status_code=400)
+
+    # Check if user is already a member
+    existing_member = db.query(SquadMember).filter(
+        SquadMember.squad_id == squad.id,
+        SquadMember.user_id == user.id
+    ).first()
+
+    if existing_member:
+        return JSONResponse(model_to_dict(existing_member))
+
+    # Add user to squad
+    member = SquadMember(
+        squad_id=squad.id,
+        user_id=user.id
+    )
+
+    db.add(member)
+    db.commit()
+    db.refresh(member)
+
+    return JSONResponse(model_to_dict(member), status_code=201)
+
+@api_error_handler
+async def squad_member_remove(request):
+    """
+    Remove a user from a squad
+    """
+    squad_id = request.path_params["squad_id"]
+    user_id = request.path_params["user_id"]
+    db = next(get_db())
+
+    # Get the squad
+    squad = db.query(Squad).filter(Squad.id == squad_id).first()
+    if not squad:
+        return JSONResponse({"error": "Squad not found"}, status_code=404)
+
+    # Get the user
+    try:
+        user_id_int = int(user_id)
+        # First try to find user by Discord ID (preferred method)
+        user = db.query(DiscordUser).filter(DiscordUser.discord_id == user_id_int).first()
+
+        # If not found, fall back to internal ID for backward compatibility
+        if not user:
+            user = db.query(DiscordUser).filter(DiscordUser.id == user_id_int).first()
+            if not user:
+                return JSONResponse({"error": "User not found"}, status_code=404)
+    except ValueError:
+        # If user_id is not a valid integer, return error
+        return JSONResponse({"error": "Invalid user ID"}, status_code=400)
+
+    # Check if user is a member
+    member = db.query(SquadMember).filter(
+        SquadMember.squad_id == squad.id,
+        SquadMember.user_id == user.id
+    ).first()
+
+    if not member:
+        return JSONResponse({"error": "User is not a member of this squad"}, status_code=404)
+
+    # Remove user from squad
+    db.delete(member)
+    db.commit()
+
+    return JSONResponse({"success": True})
+
+@api_error_handler
+async def user_squads(request):
+    """
+    Get all squads a user is a member of
+    """
+    user_id = request.path_params["user_id"]
+    db = next(get_db())
+
+    # Get the user
+    try:
+        user_id_int = int(user_id)
+        # First try to find user by Discord ID (preferred method)
+        user = db.query(DiscordUser).filter(DiscordUser.discord_id == user_id_int).first()
+
+        # If not found, fall back to internal ID for backward compatibility
+        if not user:
+            user = db.query(DiscordUser).filter(DiscordUser.id == user_id_int).first()
+            if not user:
+                return JSONResponse({"error": "User not found"}, status_code=404)
+    except ValueError:
+        # If user_id is not a valid integer, return error
+        return JSONResponse({"error": "Invalid user ID"}, status_code=400)
+
+    # Get all squads the user is a member of
+    squads = db.query(Squad).join(
+        SquadMember, Squad.id == SquadMember.squad_id
+    ).filter(SquadMember.user_id == user.id).all()
+
+    return JSONResponse({
+        "squads": [model_to_dict(squad) for squad in squads]
+    })
+
+@api_error_handler
+async def user_eligible_squads(request):
+    """
+    Get all squads a user is eligible to join
+    """
+    user_id = request.path_params["user_id"]
+    guild_id = request.query_params.get("guild_id")
+    db = next(get_db())
+
+    # Get the user
+    try:
+        user_id_int = int(user_id)
+        # First try to find user by Discord ID (preferred method)
+        user = db.query(DiscordUser).filter(DiscordUser.discord_id == user_id_int).first()
+
+        # If not found, fall back to internal ID for backward compatibility
+        if not user:
+            user = db.query(DiscordUser).filter(DiscordUser.id == user_id_int).first()
+            if not user:
+                return JSONResponse({"error": "User not found"}, status_code=404)
+    except ValueError:
+        # If user_id is not a valid integer, return error
+        return JSONResponse({"error": "Invalid user ID"}, status_code=400)
+
+    # Get the guild if provided
+    internal_guild_id = None
+    if guild_id:
+        try:
+            guild_id_int = int(guild_id)
+            guild = db.query(Guild).filter(Guild.discord_id == guild_id_int).first()
+            if guild:
+                internal_guild_id = guild.id
+            else:
+                # If no guild found with this Discord ID, assume it's already an internal ID
+                internal_guild_id = guild_id_int
+        except ValueError:
+            # If guild_id is not a valid integer, return error
+            return JSONResponse({"error": "Invalid guild ID"}, status_code=400)
+
+    # Get user's bytes received
+    bytes_received = db.query(func.sum(Bytes.amount)).filter(Bytes.receiver_id == user.id).scalar() or 0
+
+    # Get all squads the user is eligible to join
+    query = db.query(Squad).filter(
+        Squad.bytes_required <= bytes_received,
+        Squad.is_active == True
+    )
+
+    # Filter by guild if provided
+    if internal_guild_id:
+        query = query.filter(Squad.guild_id == internal_guild_id)
+
+    # Get squads the user is already a member of
+    member_squad_ids = db.query(SquadMember.squad_id).filter(SquadMember.user_id == user.id).all()
+    member_squad_ids = [id[0] for id in member_squad_ids]  # Extract IDs from result tuples
+
+    # Exclude squads the user is already a member of
+    if member_squad_ids:
+        query = query.filter(~Squad.id.in_(member_squad_ids))
+
+    # Execute query
+    eligible_squads = query.order_by(Squad.bytes_required.desc()).all()
+
+    return JSONResponse({
+        "squads": [model_to_dict(squad) for squad in eligible_squads],
+        "bytes_received": bytes_received
+    })

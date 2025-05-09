@@ -20,7 +20,9 @@ from .discord_admin_routes import (
     admin_discord_warnings, admin_discord_moderation,
     admin_discord_api_keys, admin_discord_api_key_create, admin_discord_api_key_delete,
     admin_discord_bytes, admin_discord_bytes_config, admin_discord_bytes_roles,
-    admin_discord_give_bytes, admin_discord_automod
+    admin_discord_give_bytes, admin_discord_automod,
+    admin_discord_squads, admin_discord_squad_create, admin_discord_squad_edit,
+    admin_discord_squad_delete, admin_discord_squad_members
 )
 from .api_routes import (
     api_token, guild_list, guild_detail, guild_create, guild_update,
@@ -33,7 +35,11 @@ from .api_routes import (
     moderation_case_list, moderation_case_detail, moderation_case_create, moderation_case_update,
     api_key_list, api_key_create, api_key_delete,
     automod_regex_rules_list, automod_regex_rule_detail,
-    automod_rate_limits_list, automod_rate_limit_detail
+    automod_rate_limits_list, automod_rate_limit_detail,
+    # Squad endpoints
+    squad_list, squad_detail, squad_create, squad_update, squad_delete,
+    squad_member_list, squad_member_add, squad_member_remove,
+    user_squads, user_eligible_squads
 )
 from .redirect_handler import handle_redirect
 from .auth import AdminAuthBackend, AdminAuthMiddleware
@@ -92,6 +98,18 @@ routes = [
     Route("/api/automod/rate-limits/{limit_id:int}", automod_rate_limit_detail, methods=["GET"]),
     Route("/api/subscribe", subscribe, methods=["POST"]),
 
+    # Squad routes
+    Route("/api/squads", squad_list, methods=["GET"]),
+    Route("/api/squads/{squad_id:int}", squad_detail, methods=["GET"]),
+    Route("/api/squads", squad_create, methods=["POST"]),
+    Route("/api/squads/{squad_id:int}", squad_update, methods=["PUT"]),
+    Route("/api/squads/{squad_id:int}", squad_delete, methods=["DELETE"]),
+    Route("/api/squads/{squad_id:int}/members", squad_member_list, methods=["GET"]),
+    Route("/api/squads/{squad_id:int}/members", squad_member_add, methods=["POST"]),
+    Route("/api/squads/{squad_id:int}/members/{user_id}", squad_member_remove, methods=["DELETE"]),
+    Route("/api/users/{user_id}/squads", user_squads, methods=["GET"]),
+    Route("/api/users/{user_id}/eligible-squads", user_eligible_squads, methods=["GET"]),
+
     # Admin routes
     Route("/admin/login", admin_login, methods=["GET", "POST"]),
     Route("/admin/logout", admin_logout, methods=["GET"]),
@@ -121,6 +139,13 @@ routes = [
     Route("/admin/discord/api-keys/new", admin_discord_api_key_create, methods=["GET", "POST"]),
     Route("/admin/discord/api-keys/{id:int}/delete", admin_discord_api_key_delete, methods=["POST"]),
     Route("/admin/discord/automod", admin_discord_automod, methods=["GET", "POST"]),
+
+    # Squad admin routes
+    Route("/admin/discord/squads", admin_discord_squads, methods=["GET"]),
+    Route("/admin/discord/squads/new", admin_discord_squad_create, methods=["GET", "POST"]),
+    Route("/admin/discord/squads/{id:int}/edit", admin_discord_squad_edit, methods=["GET", "POST"]),
+    Route("/admin/discord/squads/{id:int}/delete", admin_discord_squad_delete, methods=["POST"]),
+    Route("/admin/discord/squads/{id:int}/members", admin_discord_squad_members, methods=["GET"]),
 
     # Static files - must be before the catch-all redirect handler
     Mount("/static", app=StaticFiles(directory="website/static"), name="static"),
