@@ -17,7 +17,7 @@ from starlette.testclient import TestClient
 # Add the parent directory to the path so we can import the models
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from website.models import Base, DiscordUser, Guild, Squad, SquadMember, Bytes
+from website.models import Base, DiscordUser, Guild, Squad, SquadMember, Bytes, BytesConfig
 from website.database import get_db, engine
 from website.api_auth import create_jwt_token
 from website.app import app
@@ -90,12 +90,15 @@ async def test_squad_create_and_list(async_client, test_db, api_token):
     # Use the client as a context manager to ensure it's closed properly
     async with async_client as client:
         # Create test data
-        test_guild = Guild(
-            discord_id=987654321,
-            name="test_guild"
-        )
-        test_db.add(test_guild)
-        test_db.commit()
+        # Check if guild already exists
+        test_guild = test_db.query(Guild).filter(Guild.discord_id == 987654321).first()
+        if not test_guild:
+            test_guild = Guild(
+                discord_id=987654321,
+                name="test_guild"
+            )
+            test_db.add(test_guild)
+            test_db.commit()
 
         try:
             # Create a squad
@@ -107,7 +110,6 @@ async def test_squad_create_and_list(async_client, test_db, api_token):
                     "role_id": 123456789,
                     "name": "Test Squad",
                     "description": "A test squad",
-                    "bytes_required": 100,
                     "is_active": True
                 },
                 headers=headers
@@ -115,7 +117,7 @@ async def test_squad_create_and_list(async_client, test_db, api_token):
             assert response.status_code == 201
             data = response.json()
             assert data["name"] == "Test Squad"
-            assert data["bytes_required"] == 100
+            assert "bytes_required" not in data
 
             # List squads
             response = await client.get(
@@ -140,23 +142,32 @@ async def test_squad_detail_and_update(async_client, test_db, api_token):
     # Use the client as a context manager to ensure it's closed properly
     async with async_client as client:
         # Create test data
-        test_guild = Guild(
-            discord_id=987654321,
-            name="test_guild"
-        )
-        test_db.add(test_guild)
-        test_db.commit()
+        # Check if guild already exists
+        test_guild = test_db.query(Guild).filter(Guild.discord_id == 987654321).first()
+        if not test_guild:
+            test_guild = Guild(
+                discord_id=987654321,
+                name="test_guild"
+            )
+            test_db.add(test_guild)
+            test_db.commit()
 
-        test_squad = Squad(
-            guild_id=test_guild.id,
-            role_id=123456789,
-            name="Test Squad",
-            description="A test squad",
-            bytes_required=100,
-            is_active=True
+        # Create a squad using the API instead of directly in the database
+        headers = {"Authorization": f"Bearer {api_token}"}
+        response = await client.post(
+            "/api/squads",
+            json={
+                "guild_id": test_guild.id,
+                "role_id": 123456789,
+                "name": "Test Squad",
+                "description": "A test squad",
+                "is_active": True
+            },
+            headers=headers
         )
-        test_db.add(test_squad)
-        test_db.commit()
+        assert response.status_code == 201
+        test_squad_data = response.json()
+        test_squad = test_db.query(Squad).filter(Squad.id == test_squad_data["id"]).first()
 
         try:
             # Get squad details
@@ -168,22 +179,20 @@ async def test_squad_detail_and_update(async_client, test_db, api_token):
             assert response.status_code == 200
             data = response.json()
             assert data["name"] == "Test Squad"
-            assert data["bytes_required"] == 100
+            assert "bytes_required" not in data
             assert data["members_count"] == 0
 
             # Update squad
             response = await client.put(
                 f"/api/squads/{test_squad.id}",
                 json={
-                    "name": "Updated Squad",
-                    "bytes_required": 200
+                    "name": "Updated Squad"
                 },
                 headers=headers
             )
             assert response.status_code == 200
             data = response.json()
             assert data["name"] == "Updated Squad"
-            assert data["bytes_required"] == 200
 
             # Verify update
             response = await client.get(
@@ -193,7 +202,6 @@ async def test_squad_detail_and_update(async_client, test_db, api_token):
             assert response.status_code == 200
             data = response.json()
             assert data["name"] == "Updated Squad"
-            assert data["bytes_required"] == 200
 
         finally:
             # Clean up test data
@@ -208,20 +216,26 @@ async def test_squad_members(async_client, test_db, api_token):
     # Use the client as a context manager to ensure it's closed properly
     async with async_client as client:
         # Create test data
-        test_guild = Guild(
-            discord_id=987654321,
-            name="test_guild"
-        )
-        test_db.add(test_guild)
-        test_db.commit()
+        # Check if guild already exists
+        test_guild = test_db.query(Guild).filter(Guild.discord_id == 987654321).first()
+        if not test_guild:
+            test_guild = Guild(
+                discord_id=987654321,
+                name="test_guild"
+            )
+            test_db.add(test_guild)
+            test_db.commit()
 
-        test_user = DiscordUser(
-            discord_id=123456789,
-            username="test_user",
-            bytes_balance=200
-        )
-        test_db.add(test_user)
-        test_db.commit()
+        # Check if user already exists
+        test_user = test_db.query(DiscordUser).filter(DiscordUser.discord_id == 123456789).first()
+        if not test_user:
+            test_user = DiscordUser(
+                discord_id=123456789,
+                username="test_user",
+                bytes_balance=200
+            )
+            test_db.add(test_user)
+            test_db.commit()
 
         # Create a system user for giving bytes
         system_user = test_db.query(DiscordUser).filter(DiscordUser.discord_id == 0).first()
@@ -245,16 +259,32 @@ async def test_squad_members(async_client, test_db, api_token):
         test_db.add(bytes_transaction)
         test_db.commit()
 
-        test_squad = Squad(
-            guild_id=test_guild.id,
-            role_id=123456789,
-            name="Test Squad",
-            description="A test squad",
-            bytes_required=100,
-            is_active=True
+        # Check if bytes config already exists
+        bytes_config = test_db.query(BytesConfig).filter(BytesConfig.guild_id == test_guild.id).first()
+        if not bytes_config:
+            bytes_config = BytesConfig(
+                guild_id=test_guild.id,
+                squad_join_bytes_required=100
+            )
+            test_db.add(bytes_config)
+            test_db.commit()
+
+        # Create a squad using the API instead of directly in the database
+        headers = {"Authorization": f"Bearer {api_token}"}
+        response = await client.post(
+            "/api/squads",
+            json={
+                "guild_id": test_guild.id,
+                "role_id": 123456789,
+                "name": "Test Squad",
+                "description": "A test squad",
+                "is_active": True
+            },
+            headers=headers
         )
-        test_db.add(test_squad)
-        test_db.commit()
+        assert response.status_code == 201
+        test_squad_data = response.json()
+        test_squad = test_db.query(Squad).filter(Squad.id == test_squad_data["id"]).first()
 
         try:
             # Add user to squad
@@ -314,6 +344,7 @@ async def test_squad_members(async_client, test_db, api_token):
             test_db.query(SquadMember).filter(SquadMember.squad_id == test_squad.id).delete()
             test_db.query(Bytes).filter(Bytes.receiver_id == test_user.id).delete()
             test_db.query(Squad).filter(Squad.id == test_squad.id).delete()
+            test_db.query(BytesConfig).filter(BytesConfig.guild_id == test_guild.id).delete()
             test_db.query(DiscordUser).filter(DiscordUser.id == test_user.id).delete()
             system_user = test_db.query(DiscordUser).filter(DiscordUser.discord_id == 0).first()
             if system_user:
@@ -328,20 +359,26 @@ async def test_user_eligible_squads(async_client, test_db, api_token):
     # Use the client as a context manager to ensure it's closed properly
     async with async_client as client:
         # Create test data
-        test_guild = Guild(
-            discord_id=987654321,
-            name="test_guild"
-        )
-        test_db.add(test_guild)
-        test_db.commit()
+        # Check if guild already exists
+        test_guild = test_db.query(Guild).filter(Guild.discord_id == 987654321).first()
+        if not test_guild:
+            test_guild = Guild(
+                discord_id=987654321,
+                name="test_guild"
+            )
+            test_db.add(test_guild)
+            test_db.commit()
 
-        test_user = DiscordUser(
-            discord_id=123456789,
-            username="test_user",
-            bytes_balance=200
-        )
-        test_db.add(test_user)
-        test_db.commit()
+        # Check if user already exists
+        test_user = test_db.query(DiscordUser).filter(DiscordUser.discord_id == 123456789).first()
+        if not test_user:
+            test_user = DiscordUser(
+                discord_id=123456789,
+                username="test_user",
+                bytes_balance=200
+            )
+            test_db.add(test_user)
+            test_db.commit()
 
         # Create a system user for giving bytes
         system_user = test_db.query(DiscordUser).filter(DiscordUser.discord_id == 0).first()
@@ -365,30 +402,63 @@ async def test_user_eligible_squads(async_client, test_db, api_token):
         test_db.add(bytes_transaction)
         test_db.commit()
 
-        # Create squads with different byte requirements
-        squad1 = Squad(
-            guild_id=test_guild.id,
-            role_id=111222333,
-            name="Bronze Squad",
-            bytes_required=100,
-            is_active=True
+        # Check if bytes config already exists
+        bytes_config = test_db.query(BytesConfig).filter(BytesConfig.guild_id == test_guild.id).first()
+        if not bytes_config:
+            bytes_config = BytesConfig(
+                guild_id=test_guild.id,
+                squad_join_bytes_required=100
+            )
+            test_db.add(bytes_config)
+            test_db.commit()
+
+        # Create squads using the API instead of directly in the database
+        headers = {"Authorization": f"Bearer {api_token}"}
+
+        # Create Bronze Squad
+        response = await client.post(
+            "/api/squads",
+            json={
+                "guild_id": test_guild.id,
+                "role_id": 111222333,
+                "name": "Bronze Squad",
+                "is_active": True
+            },
+            headers=headers
         )
-        squad2 = Squad(
-            guild_id=test_guild.id,
-            role_id=444555666,
-            name="Silver Squad",
-            bytes_required=200,
-            is_active=True
+        assert response.status_code == 201
+        squad1_data = response.json()
+        squad1 = test_db.query(Squad).filter(Squad.id == squad1_data["id"]).first()
+
+        # Create Silver Squad
+        response = await client.post(
+            "/api/squads",
+            json={
+                "guild_id": test_guild.id,
+                "role_id": 444555666,
+                "name": "Silver Squad",
+                "is_active": True
+            },
+            headers=headers
         )
-        squad3 = Squad(
-            guild_id=test_guild.id,
-            role_id=777888999,
-            name="Gold Squad",
-            bytes_required=300,
-            is_active=True
+        assert response.status_code == 201
+        squad2_data = response.json()
+        squad2 = test_db.query(Squad).filter(Squad.id == squad2_data["id"]).first()
+
+        # Create Gold Squad
+        response = await client.post(
+            "/api/squads",
+            json={
+                "guild_id": test_guild.id,
+                "role_id": 777888999,
+                "name": "Gold Squad",
+                "is_active": True
+            },
+            headers=headers
         )
-        test_db.add_all([squad1, squad2, squad3])
-        test_db.commit()
+        assert response.status_code == 201
+        squad3_data = response.json()
+        squad3 = test_db.query(Squad).filter(Squad.id == squad3_data["id"]).first()
 
         try:
             # Get eligible squads
@@ -399,7 +469,7 @@ async def test_user_eligible_squads(async_client, test_db, api_token):
             )
             assert response.status_code == 200
             data = response.json()
-            assert len(data["squads"]) == 2  # Should be eligible for Bronze and Silver
+            assert len(data["squads"]) == 3  # Should be eligible for all squads
             assert data["bytes_received"] == 200  # Bytes received from the transaction
 
             # Add user to Bronze Squad
@@ -419,14 +489,15 @@ async def test_user_eligible_squads(async_client, test_db, api_token):
             )
             assert response.status_code == 200
             data = response.json()
-            assert len(data["squads"]) == 1  # Should only be eligible for Silver now
-            assert data["squads"][0]["name"] == "Silver Squad"
+            assert len(data["squads"]) == 2  # Should be eligible for Silver and Gold now
+            assert "Bronze Squad" not in [s["name"] for s in data["squads"]]  # Bronze should not be in the list
 
         finally:
             # Clean up test data
             test_db.query(SquadMember).filter(SquadMember.squad_id.in_([squad1.id, squad2.id, squad3.id])).delete()
             test_db.query(Bytes).filter(Bytes.receiver_id == test_user.id).delete()
             test_db.query(Squad).filter(Squad.guild_id == test_guild.id).delete()
+            test_db.query(BytesConfig).filter(BytesConfig.guild_id == test_guild.id).delete()
             test_db.query(DiscordUser).filter(DiscordUser.id == test_user.id).delete()
             system_user = test_db.query(DiscordUser).filter(DiscordUser.discord_id == 0).first()
             if system_user:

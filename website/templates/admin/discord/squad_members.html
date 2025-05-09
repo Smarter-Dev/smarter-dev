@@ -9,7 +9,7 @@
 
     <div class="squad-details">
         <p><strong>Role ID:</strong> {{ squad.role_id }}</p>
-        <p><strong>Bytes Required:</strong> {{ squad.bytes_required }}</p>
+
         <p><strong>Status:</strong> {% if squad.is_active %}Active{% else %}Inactive{% endif %}</p>
         {% if squad.description %}
         <p><strong>Description:</strong> {{ squad.description }}</p>

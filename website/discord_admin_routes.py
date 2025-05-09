@@ -28,7 +28,7 @@ async def admin_discord_squads(request):
     db = next(get_db())
 
     # Get all squads
-    squads = db.query(Squad).order_by(Squad.guild_id, Squad.bytes_required).all()
+    squads = db.query(Squad).order_by(Squad.guild_id, Squad.name).all()
 
     # Get guild info
     guild_ids = set([s.guild_id for s in squads])
@@ -63,7 +63,6 @@ async def admin_discord_squad_create(request):
         role_id = int(form_data.get("role_id"))
         name = form_data.get("name")
         description = form_data.get("description")
-        bytes_required = int(form_data.get("bytes_required"))
         is_active = form_data.get("is_active") == "on"
 
         # Create new squad
@@ -72,7 +71,6 @@ async def admin_discord_squad_create(request):
             role_id=role_id,
             name=name,
             description=description,
-            bytes_required=bytes_required,
             is_active=is_active
         )
 
@@ -112,7 +110,6 @@ async def admin_discord_squad_edit(request):
         role_id = int(form_data.get("role_id"))
         name = form_data.get("name")
         description = form_data.get("description")
-        bytes_required = int(form_data.get("bytes_required"))
         is_active = form_data.get("is_active") == "on"
 
         # Update squad
@@ -120,7 +117,6 @@ async def admin_discord_squad_edit(request):
         squad.role_id = role_id
         squad.name = name
         squad.description = description
-        squad.bytes_required = bytes_required
         squad.is_active = is_active
 
         db.commit()
@@ -596,6 +592,7 @@ async def admin_discord_bytes_config(request):
         config.daily_earning = int(form_data.get("daily_earning", 10))
         config.max_give_amount = int(form_data.get("max_give_amount", 50))
         config.cooldown_minutes = int(form_data.get("cooldown_minutes", 1440))
+        config.squad_join_bytes_required = int(form_data.get("squad_join_bytes_required", 100))
 
         db.commit()
         return RedirectResponse(url="/admin/discord/bytes/config", status_code=302)

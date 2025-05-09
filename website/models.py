@@ -392,6 +392,7 @@ class BytesConfig(Base):
     daily_earning = Column(Integer, default=10, nullable=False)  # Daily bytes earned for activity
     max_give_amount = Column(Integer, default=50, nullable=False)  # Maximum bytes a user can give at once
     cooldown_minutes = Column(Integer, default=1440, nullable=False)  # Default: 24 hours (1440 minutes)
+    squad_join_bytes_required = Column(Integer, default=100, nullable=False)  # Minimum bytes required to use squad join command
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
@@ -492,7 +493,6 @@ class Squad(Base):
     role_id = Column(BigInteger, nullable=False)  # Discord role ID
     name = Column(String, nullable=False)  # Squad name
     description = Column(Text, nullable=True)  # Squad description
-    bytes_required = Column(Integer, nullable=False)  # Bytes required to join this squad
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
@@ -502,7 +502,7 @@ class Squad(Base):
     members = relationship("SquadMember", back_populates="squad", cascade="all, delete-orphan")
 
     def __repr__(self):
-        return f"<Squad {self.name} ({self.bytes_required} bytes)>"
+        return f"<Squad {self.name}>"
 
 
 # Squad Member model

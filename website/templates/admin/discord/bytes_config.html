@@ -17,6 +17,7 @@
                         <th>Daily Earning</th>
                         <th>Max Give Amount</th>
                         <th>Cooldown (minutes)</th>
+                        <th>Squad Join Min Bytes</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -28,14 +29,15 @@
                         <td>{{ config.daily_earning }}</td>
                         <td>{{ config.max_give_amount }}</td>
                         <td>{{ config.cooldown_minutes }}</td>
+                        <td>{{ config.squad_join_bytes_required }}</td>
                         <td>
-                            <button class="edit-btn" onclick="editConfig({{ config.guild_id }}, {{ config.starting_balance }}, {{ config.daily_earning }}, {{ config.max_give_amount }}, {{ config.cooldown_minutes }})">Edit</button>
+                            <button class="edit-btn" onclick="editConfig({{ config.guild_id }}, {{ config.starting_balance }}, {{ config.daily_earning }}, {{ config.max_give_amount }}, {{ config.cooldown_minutes }}, {{ config.squad_join_bytes_required }})">Edit</button>
                         </td>
                     </tr>
                     {% endfor %}
                     {% if not configs %}
                     <tr>
-                        <td colspan="6" class="empty-table">No configurations found.</td>
+                        <td colspan="7" class="empty-table">No configurations found.</td>
                     </tr>
                     {% endif %}
                 </tbody>
@@ -75,6 +77,11 @@
                 <input type="number" id="cooldown_minutes" name="cooldown_minutes" value="1440" min="1" required>
                 <span class="help-text">Cooldown period between giving bytes (1440 = 24 hours)</span>
             </div>
+            <div class="form-group">
+                <label for="squad_join_bytes_required">Squad Join Min Bytes:</label>
+                <input type="number" id="squad_join_bytes_required" name="squad_join_bytes_required" value="100" min="0" required>
+                <span class="help-text">Minimum total bytes received required to use the squad join command</span>
+            </div>
             <div class="form-actions">
                 <button type="submit" class="primary-btn">Save Configuration</button>
                 <button type="button" class="secondary-btn" onclick="resetForm()">Reset</button>
@@ -84,21 +91,22 @@
 </div>
 
 <script>
-    function editConfig(guildId, startingBalance, dailyEarning, maxGiveAmount, cooldownMinutes) {
+    function editConfig(guildId, startingBalance, dailyEarning, maxGiveAmount, cooldownMinutes, squadJoinBytesRequired) {
         document.getElementById('form-title').innerText = 'Edit Configuration';
         document.getElementById('guild_id').value = guildId;
         document.getElementById('starting_balance').value = startingBalance;
         document.getElementById('daily_earning').value = dailyEarning;
         document.getElementById('max_give_amount').value = maxGiveAmount;
         document.getElementById('cooldown_minutes').value = cooldownMinutes;
-        
+        document.getElementById('squad_join_bytes_required').value = squadJoinBytesRequired;
+
         // Disable guild selection when editing
         document.getElementById('guild_id').disabled = true;
-        
+
         // Scroll to form
         document.querySelector('.form-section').scrollIntoView({ behavior: 'smooth' });
     }
-    
+
     function resetForm() {
         document.getElementById('form-title').innerText = 'Create New Configuration';
         document.getElementById('guild_id').value = '';
@@ -106,7 +114,8 @@
         document.getElementById('daily_earning').value = '10';
         document.getElementById('max_give_amount').value = '50';
         document.getElementById('cooldown_minutes').value = '1440';
-        
+        document.getElementById('squad_join_bytes_required').value = '100';
+
         // Enable guild selection
         document.getElementById('guild_id').disabled = false;
     }
@@ -118,24 +127,24 @@
         flex-direction: column;
         gap: 2rem;
     }
-    
+
     .config-section, .form-section {
         background-color: var(--card-bg);
         border-radius: 8px;
         padding: 1.5rem;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     }
-    
+
     .form-group {
         margin-bottom: 1rem;
     }
-    
+
     .form-group label {
         display: block;
         margin-bottom: 0.5rem;
         font-weight: 500;
     }
-    
+
     .form-group input, .form-group select {
         width: 100%;
         padding: 0.5rem;
@@ -144,39 +153,39 @@
         background-color: var(--input-bg);
         color: var(--text-color);
     }
-    
+
     .help-text {
         display: block;
         font-size: 0.8rem;
         color: var(--text-muted);
         margin-top: 0.25rem;
     }
-    
+
     .form-actions {
         display: flex;
         gap: 1rem;
         margin-top: 1.5rem;
     }
-    
+
     .primary-btn, .secondary-btn {
         padding: 0.5rem 1rem;
         border-radius: 4px;
         cursor: pointer;
         font-weight: 500;
     }
-    
+
     .primary-btn {
         background-color: var(--primary-color);
         color: white;
         border: none;
     }
-    
+
     .secondary-btn {
         background-color: transparent;
         color: var(--text-color);
         border: 1px solid var(--border-color);
     }
-    
+
     .edit-btn {
         background-color: var(--primary-color);
         color: white;

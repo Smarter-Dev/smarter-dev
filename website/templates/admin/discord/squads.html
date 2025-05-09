@@ -5,7 +5,7 @@
 {% block content %}
 <div class="container">
     <h1>Discord Squads</h1>
-    <p>Manage squads for Discord servers. Squads are roles that users can join if they have enough bytes.</p>
+    <p>Manage squads for Discord servers. Squads are roles that users can join. Users need a minimum number of total bytes received to use the squad join command, which is set in the Bytes Config.</p>
 
     <div class="action-buttons">
         <a href="/admin/discord/squads/new" class="btn btn-primary">Create New Squad</a>
@@ -18,7 +18,6 @@
                     <th>Server</th>
                     <th>Name</th>
                     <th>Role ID</th>
-                    <th>Bytes Required</th>
                     <th>Status</th>
                     <th>Members</th>
                     <th>Actions</th>
@@ -30,7 +29,6 @@
                     <td>{{ guild_names.get(squad.guild_id, 'Unknown') }}</td>
                     <td>{{ squad.name }}</td>
                     <td>{{ squad.role_id }}</td>
-                    <td>{{ squad.bytes_required }}</td>
                     <td>{% if squad.is_active %}Active{% else %}Inactive{% endif %}</td>
                     <td><a href="/admin/discord/squads/{{ squad.id }}/members">View Members</a></td>
                     <td>
