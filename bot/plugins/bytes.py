@@ -10,6 +10,7 @@ import logging
 import math
 from datetime import datetime, timedelta, UTC
 from typing import Optional, List, Dict, Any, Tuple
+from collections import defaultdict
 
 import hikari
 import lightbulb
@@ -21,6 +22,32 @@ from bot.api_models import Bytes, BytesConfig, BytesRole, BytesCooldown, Discord
 # Create plugin
 bytes_plugin = lightbulb.Plugin("Bytes")
 logger = logging.getLogger("bot.plugins.bytes")
+
+# Cache for bytes configuration to avoid frequent API calls
+# Format: {guild_id: (config, timestamp)}
+bytes_config_cache: Dict[int, tuple] = {}
+
+# Cache for guild members to avoid frequent API calls
+# Format: {(user_id, guild_id): (member, timestamp)}
+guild_member_cache: Dict[Tuple[int, int], tuple] = {}
+
+# Cache for user data to avoid frequent API calls
+# Format: {user_id: (user, timestamp)}
+user_cache: Dict[int, tuple] = {}
+
+# Cache for bytes balance to avoid frequent API calls
+# Format: {(user_id, guild_id): (balance_info, timestamp)}
+bytes_balance_cache: Dict[Tuple[int, int], tuple] = {}
+
+# Cache for daily bytes eligibility to avoid frequent API calls
+# Format: {(user_id, guild_id): (next_eligible_timestamp, timestamp)}
+daily_bytes_eligibility_cache: Dict[Tuple[int, int], tuple] = {}
+
+# Cache timeout in seconds
+CACHE_TIMEOUT = 300  # 5 minutes
+
+# System user ID cache
+system_user_id: Optional[int] = None
 
 # Create a bytes command group
 @bytes_plugin.command
@@ -68,13 +95,6 @@ def format_bytes(bytes_amount: int) -> str:
 
     return formatted_output
 
-# Cache for bytes configs to avoid frequent API calls
-# Format: {guild_id: (config, timestamp)}
-config_cache: Dict[int, tuple] = {}
-# Cache timeout in seconds
-CACHE_TIMEOUT = 300  # 5 minutes
-
-
 async def get_bytes_config(client: APIClient, guild_id: int) -> BytesConfig:
     """
     Get bytes configuration for a guild, with caching.
@@ -89,15 +109,15 @@ async def get_bytes_config(client: APIClient, guild_id: int) -> BytesConfig:
     now = datetime.now().timestamp()
 
     # Check cache first
-    if guild_id in config_cache:
-        config, timestamp = config_cache[guild_id]
+    if guild_id in bytes_config_cache:
+        config, timestamp = bytes_config_cache[guild_id]
         if now - timestamp < CACHE_TIMEOUT:
             return config
 
     # Get from API
     try:
         config = await client.get_bytes_config(guild_id)
-        config_cache[guild_id] = (config, now)
+        bytes_config_cache[guild_id] = (config, now)
         return config
     except Exception as e:
         logger.error(f"Error getting bytes config for guild {guild_id}: {e}")
@@ -107,7 +127,7 @@ async def get_bytes_config(client: APIClient, guild_id: int) -> BytesConfig:
 
 async def get_user_bytes_info(client: APIClient, user_id: int, guild_id: int) -> Dict[str, Any]:
     """
-    Get a user's bytes information.
+    Get a user's bytes information, with caching.
 
     Args:
         client: API client
@@ -117,21 +137,40 @@ async def get_user_bytes_info(client: APIClient, user_id: int, guild_id: int) ->
     Returns:
         Dictionary with bytes information
     """
+    now = datetime.now().timestamp()
+    cache_key = (user_id, guild_id)
+
+    # Check cache first
+    if cache_key in bytes_balance_cache:
+        balance_info, timestamp = bytes_balance_cache[cache_key]
+        if now - timestamp < CACHE_TIMEOUT:
+            logger.info(f"Using cached bytes balance for user {user_id} in guild {guild_id}")
+            return balance_info
+
     try:
         logger.info(f"Making API request to /api/bytes/balance/{user_id}?guild_id={guild_id}")
         response = await client._request("GET", f"/api/bytes/balance/{user_id}?guild_id={guild_id}")
         result = await client._get_json(response)
         logger.info(f"API response for bytes balance: {result}")
+
+        # Update cache
+        bytes_balance_cache[cache_key] = (result, now)
+
         return result
     except Exception as e:
         logger.error(f"Error getting bytes info for user {user_id} in guild {guild_id}: {e}")
-        return {
+        default_result = {
             "user_id": user_id,
             "bytes_balance": 0,
             "bytes_received": 0,
             "bytes_given": 0,
             "earned_roles": []
         }
+
+        # Cache the default result to avoid repeated failed requests
+        bytes_balance_cache[cache_key] = (default_result, now)
+
+        return default_result
 
 
 async def check_for_earned_roles(client: APIClient, bot: lightbulb.BotApp, user_id: int, guild_id: int, channel_id: Optional[int] = None) -> None:
@@ -617,6 +656,182 @@ def load(bot: lightbulb.BotApp) -> None:
     bot.add_plugin(bytes_plugin)
 
 
+async def get_cached_user(client: APIClient, user_id: int) -> Optional[Dict[str, Any]]:
+    """
+    Get a user from cache or API.
+
+    Args:
+        client: API client
+        user_id: Discord user ID
+
+    Returns:
+        User data or None if not found
+    """
+    now = datetime.now().timestamp()
+
+    # Check cache first
+    if user_id in user_cache:
+        user, timestamp = user_cache[user_id]
+        if now - timestamp < CACHE_TIMEOUT:
+            logger.info(f"Using cached user data for user {user_id}")
+            return user
+
+    # Get from API
+    try:
+        logger.info(f"Looking up user with discord_id: {user_id}")
+        user_response = await client._request("GET", f"/api/users?discord_id={user_id}")
+        user_data = await client._get_json(user_response)
+
+        if not user_data.get("users"):
+            logger.error(f"User {user_id} not found in database")
+            return None
+
+        # Get the user's data
+        user = user_data["users"][0]
+
+        # Update cache
+        user_cache[user_id] = (user, now)
+
+        return user
+    except Exception as e:
+        logger.error(f"Error getting user {user_id}: {e}")
+        return None
+
+
+async def get_cached_guild_member(client: APIClient, user_id: int, guild_id: int) -> Optional[GuildMember]:
+    """
+    Get a guild member from cache or API.
+
+    Args:
+        client: API client
+        user_id: Discord user ID
+        guild_id: Guild ID
+
+    Returns:
+        GuildMember or None if not found
+    """
+    now = datetime.now().timestamp()
+    cache_key = (user_id, guild_id)
+
+    # Check cache first
+    if cache_key in guild_member_cache:
+        member, timestamp = guild_member_cache[cache_key]
+        if now - timestamp < CACHE_TIMEOUT:
+            logger.info(f"Using cached guild member data for user {user_id} in guild {guild_id}")
+            return member
+
+    # Get from API
+    try:
+        logger.info(f"Getting guild member for user {user_id} in guild {guild_id}")
+        guild_member = await client.get_guild_member(user_id, guild_id)
+
+        if guild_member:
+            # Update cache
+            guild_member_cache[cache_key] = (guild_member, now)
+
+        return guild_member
+    except Exception as e:
+        logger.error(f"Error getting guild member for user {user_id} in guild {guild_id}: {e}")
+        return None
+
+
+async def check_daily_bytes_eligibility(client: APIClient, user_id: int, guild_id: int) -> Tuple[bool, Optional[datetime]]:
+    """
+    Check if a user is eligible for daily bytes in a guild, with caching.
+
+    This function checks if a user is eligible to receive daily bytes and returns
+    a tuple with (is_eligible, next_eligible_time). If the user is eligible now,
+    next_eligible_time will be None.
+
+    Args:
+        client: API client
+        user_id: Discord user ID
+        guild_id: Guild ID
+
+    Returns:
+        Tuple of (is_eligible, next_eligible_time)
+    """
+    now = datetime.now(UTC)
+    now_ts = now.timestamp()
+    cache_key = (user_id, guild_id)
+
+    # Check cache first to avoid API calls
+    if cache_key in daily_bytes_eligibility_cache:
+        next_eligible_ts, cache_ts = daily_bytes_eligibility_cache[cache_key]
+
+        # If next eligible time is in the future, user is not eligible yet
+        # We use a much longer timeout for negative results (24 hours) since we know exactly when they'll be eligible
+        if next_eligible_ts > now_ts:
+            next_eligible_time = datetime.fromtimestamp(next_eligible_ts, UTC)
+            logger.info(f"User {user_id} in guild {guild_id} is not eligible for daily bytes yet (cached). Next eligible: {next_eligible_time}")
+            return False, next_eligible_time
+        elif now_ts - cache_ts < CACHE_TIMEOUT:
+            # Cache says they're eligible and the cache is still valid
+            logger.info(f"User {user_id} in guild {guild_id} is eligible for daily bytes (cached)")
+            return True, None
+        else:
+            # Cache says they're eligible but it's expired, we need to verify with the API
+            logger.info(f"User {user_id} in guild {guild_id} might be eligible for daily bytes (cache expired)")
+            # Let the function continue to check with the API
+
+    # Cache miss or expired, check with the API
+    try:
+        # Get guild member to check last_daily_bytes
+        guild_member = await get_cached_guild_member(client, user_id, guild_id)
+
+        if not guild_member:
+            # If no guild member record, user is eligible (new user)
+            logger.info(f"No guild member record for user {user_id} in guild {guild_id}, assuming eligible for daily bytes")
+            return True, None
+
+        # Check last_daily_bytes
+        last_daily_bytes = getattr(guild_member, "last_daily_bytes", None)
+
+        # For debugging
+        logger.debug(f"last_daily_bytes from guild_member: {last_daily_bytes}")
+
+        if last_daily_bytes is None:
+            # If no last_daily_bytes, user is eligible
+            logger.info(f"No last_daily_bytes for user {user_id} in guild {guild_id}, eligible for daily bytes")
+            return True, None
+
+        # Parse last_daily_bytes if it's a string
+        if isinstance(last_daily_bytes, str):
+            last_daily_bytes = datetime.fromisoformat(last_daily_bytes)
+
+        # Ensure both datetimes have timezone info
+        if last_daily_bytes.tzinfo is None:
+            last_daily_bytes = last_daily_bytes.replace(tzinfo=UTC)
+
+        # Check if it's been at least 24 hours
+        time_since_last = (now - last_daily_bytes).total_seconds()
+
+        # For debugging (using logger.debug so it doesn't clutter logs in production)
+        logger.debug(f"time_since_last: {time_since_last} seconds, {time_since_last/3600:.2f} hours")
+        logger.debug(f"now: {now}, last_daily_bytes: {last_daily_bytes}")
+        logger.debug(f"24 hours in seconds: {24 * 60 * 60}")
+
+        # Check if it's been at least 24 hours
+        if time_since_last >= 24 * 60 * 60:  # 24 hours or more
+            # User is eligible - it's been more than 24 hours
+            logger.info(f"User {user_id} in guild {guild_id} is eligible for daily bytes (last received {time_since_last/3600:.2f} hours ago)")
+            return True, None
+        else:
+            # Calculate next eligible time
+            next_eligible_time = last_daily_bytes + timedelta(hours=24)
+            next_eligible_ts = next_eligible_time.timestamp()
+
+            # Update cache
+            daily_bytes_eligibility_cache[cache_key] = (next_eligible_ts, now_ts)
+
+            logger.info(f"User {user_id} in guild {guild_id} is not eligible for daily bytes yet. Next eligible: {next_eligible_time}")
+            return False, next_eligible_time
+    except Exception as e:
+        logger.error(f"Error checking daily bytes eligibility for user {user_id} in guild {guild_id}: {e}")
+        # Default to eligible in case of error to avoid blocking users
+        return True, None
+
+
 async def update_user_streak(client: APIClient, user_id: int, guild_id: int) -> Dict[str, Any]:
     """
     Update a user's messaging streak in a specific guild.
@@ -634,21 +849,16 @@ async def update_user_streak(client: APIClient, user_id: int, guild_id: int) -> 
         now = datetime.now(UTC)
         current_day = now.strftime("%Y-%m-%d")
 
-        # Get user from API to ensure they exist
-        logger.info(f"Looking up user with discord_id: {user_id}")
-        user_response = await client._request("GET", f"/api/users?discord_id={user_id}")
-        user_data = await client._get_json(user_response)
-
-        if not user_data.get("users"):
+        # Get user from cache or API to ensure they exist
+        user = await get_cached_user(client, user_id)
+        if not user:
             logger.error(f"User {user_id} not found in database")
             return None
 
-        user = user_data["users"][0]
         user_id_internal = user["id"]
 
-        # Get guild member for this user in this guild
-        logger.info(f"Looking up guild member for user {user_id} in guild {guild_id}")
-        guild_member = await client.get_guild_member(user_id, guild_id)
+        # Get guild member from cache or API
+        guild_member = await get_cached_guild_member(client, user_id, guild_id)
 
         # If guild member doesn't exist, create it
         if not guild_member:
@@ -701,6 +911,10 @@ async def update_user_streak(client: APIClient, user_id: int, guild_id: int) -> 
             data=guild_member_update
         )
         updated_guild_member = await client._get_json(update_response)
+
+        # Update the cache with the new guild member data
+        cache_key = (user_id, guild_id)
+        guild_member_cache[cache_key] = (updated_guild_member, datetime.now().timestamp())
 
         # Determine if this is a new day for the user in this guild
         # If last_active_day is the current day, then it's not a new day
@@ -776,46 +990,21 @@ async def on_message(event: hikari.GuildMessageCreateEvent) -> None:
     guild_id = event.guild_id
 
     try:
-        # Get current time in UTC
-        now = datetime.now(UTC)
-        current_day_str = now.strftime("%Y-%m-%d")
+        # STEP 1: Check if user is eligible for daily bytes using our cached eligibility function
+        is_eligible, next_eligible_time = await check_daily_bytes_eligibility(client, user_id, guild_id)
 
-        # CRITICAL CHECK: Has the user already received daily bytes today in this guild?
-        # First check if we can get the guild member record
-        guild_member = await client.get_guild_member(user_id, guild_id)
+        if not is_eligible:
+            # User is not eligible yet, log when they will be eligible
+            if next_eligible_time:
+                time_until_eligible = (next_eligible_time - datetime.now(UTC)).total_seconds() / 3600
+                logger.info(f"on_message: User {user_id} is not eligible for daily bytes in guild {guild_id} yet. "
+                           f"Next eligible in {time_until_eligible:.2f} hours")
 
-        if guild_member:
-            # Check if the guild member has received daily bytes today
-            last_daily_bytes = getattr(guild_member, "last_daily_bytes", None)
+            # Skip updating streak - we know they're not eligible for daily bytes
+            # This is the key optimization to avoid unnecessary API calls
+            return
 
-            if last_daily_bytes:
-                try:
-                    # If it's a string, parse it to a datetime
-                    if isinstance(last_daily_bytes, str):
-                        last_daily_bytes = datetime.fromisoformat(last_daily_bytes)
-
-                    last_daily_bytes_day = last_daily_bytes.strftime("%Y-%m-%d")
-
-                    # If last_daily_bytes is from today, user has already received daily bytes today in this guild
-                    if last_daily_bytes_day == current_day_str:
-                        logger.info(f"on_message: ABORT - User {user_id} already received daily bytes in guild {guild_id} today")
-                        # Still update streak to maintain it
-                        await update_user_streak(client, user_id, guild_id)
-                        return
-
-                    # If it's been less than 24 hours but not from today, still check the time
-                    time_since_last = (now - last_daily_bytes).total_seconds()
-                    if time_since_last < 24 * 60 * 60:  # Less than 24 hours
-                        logger.info(f"on_message: ABORT - User {user_id} already received daily bytes in guild {guild_id} in the last 24 hours")
-                        # Still update streak to maintain it
-                        await update_user_streak(client, user_id, guild_id)
-                        return
-
-                    logger.info(f"on_message: It's been {time_since_last/3600:.2f} hours since user {user_id} last received daily bytes in guild {guild_id}")
-                except (ValueError, TypeError, AttributeError) as e:
-                    logger.error(f"on_message: Error checking last_daily_bytes for user {user_id} in guild {guild_id}: {e}")
-
-        # STEP 2: Update the user's streak and check if this is the first message of the day
+        # STEP 2: If we get here, the user might be eligible, so update their streak
         streak_info = await update_user_streak(client, user_id, guild_id)
         if not streak_info:
             logger.error(f"on_message: Failed to update streak for user {user_id}")
@@ -854,22 +1043,27 @@ async def on_message(event: hikari.GuildMessageCreateEvent) -> None:
         # Calculate final amount
         amount = daily_amount * multiplier
 
-        # Create bytes transaction from system to user
-        # First get or create system user (discord_id=0)
-        system_response = await client._request("GET", "/api/users?discord_id=0")
-        system_data = await client._get_json(system_response)
+        # Create bytes transaction from system user to user
+        # Use cached system user ID if available
+        if system_user_id is None:
+            # First get or create system user (discord_id=0)
+            system_response = await client._request("GET", "/api/users?discord_id=0")
+            system_data = await client._get_json(system_response)
 
-        if not system_data.get("users"):
-            # Create system user
-            system_user = {
-                "discord_id": 0,
-                "username": "System"
-            }
-            system_create = await client._request("POST", "/api/users", data=system_user)
-            system_data = await client._get_json(system_create)
-            system_user_id = system_data["id"]
-        else:
-            system_user_id = system_data["users"][0]["id"]
+            if not system_data.get("users"):
+                # Create system user
+                system_user = {
+                    "discord_id": 0,
+                    "username": "System"
+                }
+                system_create = await client._request("POST", "/api/users", data=system_user)
+                system_data = await client._get_json(system_create)
+                system_user_id = system_data["id"]
+            else:
+                system_user_id = system_data["users"][0]["id"]
+
+            # Cache the system user ID globally
+            globals()["system_user_id"] = system_user_id
 
         # Create bytes transaction
         bytes_obj = Bytes(
@@ -888,30 +1082,35 @@ async def on_message(event: hikari.GuildMessageCreateEvent) -> None:
         # This is essential to prevent duplicate awards
         now_iso = now.isoformat()
 
-        # Get the guild member again to ensure we have the latest data
-        guild_member = await client.get_guild_member(user_id, guild_id)
+        # Update the guild member's last_daily_bytes field
+        guild_member_update = {
+            "last_daily_bytes": now_iso
+        }
 
-        if guild_member:
-            # Update the guild member's last_daily_bytes field
-            guild_member_update = {
-                "last_daily_bytes": now_iso
-            }
+        update_response = await client._request(
+            "PUT",
+            f"/api/users/{user_id}/guilds/{guild_id}",
+            data=guild_member_update
+        )
 
-            update_response = await client._request(
-                "PUT",
-                f"/api/users/{user_id}/guilds/{guild_id}",
-                data=guild_member_update
-            )
-
-            # Verify the update was successful
-            if hasattr(update_response, 'status_code') and update_response.status_code >= 400:
-                logger.error(f"on_message: Failed to update guild member {user_id} in guild {guild_id} last_daily_bytes: {update_response.status_code}")
-                return
-
-            logger.info(f"on_message: Successfully updated guild member {user_id} in guild {guild_id} last_daily_bytes to {now_iso}")
-        else:
-            logger.error(f"on_message: Could not find guild member {user_id} in guild {guild_id} to update last_daily_bytes")
+        # Verify the update was successful
+        if hasattr(update_response, 'status_code') and update_response.status_code >= 400:
+            logger.error(f"on_message: Failed to update guild member {user_id} in guild {guild_id} last_daily_bytes: {update_response.status_code}")
             return
+
+        # Update the cache with the new guild member data
+        updated_guild_member = await client._get_json(update_response)
+        cache_key = (user_id, guild_id)
+        guild_member_cache[cache_key] = (updated_guild_member, datetime.now().timestamp())
+
+        # Update the daily bytes eligibility cache with the next eligible time (24 hours from now)
+        # This is the critical part that prevents unnecessary API calls for the next 24 hours
+        next_eligible_time = now + timedelta(hours=24)
+        next_eligible_ts = next_eligible_time.timestamp()
+        daily_bytes_eligibility_cache[cache_key] = (next_eligible_ts, now.timestamp())
+
+        logger.info(f"on_message: Successfully updated guild member {user_id} in guild {guild_id} last_daily_bytes to {now_iso}. "
+                   f"Next eligible at {next_eligible_time}")
 
         # Send award message
         try:

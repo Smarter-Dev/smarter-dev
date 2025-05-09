@@ -28,6 +28,9 @@ regex_rules_cache: Dict[int, tuple] = {}
 # Cache for rate limits to avoid frequent API calls
 # Format: {guild_id: (limits, timestamp)}
 rate_limits_cache: Dict[int, tuple] = {}
+# Cache for guild database IDs to avoid frequent API calls
+# Format: {discord_guild_id: (db_guild_id, timestamp)}
+guild_id_cache: Dict[int, tuple] = {}
 # Cache timeout in seconds
 CACHE_TIMEOUT = 300  # 5 minutes
 
@@ -70,23 +73,10 @@ async def get_regex_rules(client: APIClient, guild_id: int) -> List[AutoModRegex
 
     # Get rules from API
     try:
-        # First, we need to get the database ID for this guild
-        guild_response = await client._request("GET", f"/api/guilds?discord_id={guild_id}")
-        guild_data = await client._get_json(guild_response)
-
-        if not guild_data.get("guilds"):
-            logger.error(f"Guild with discord_id {guild_id} not found in database")
-            return []
-
-        # Find the exact match for the Discord guild ID
-        db_guild_id = None
-        for guild in guild_data["guilds"]:
-            if str(guild["discord_id"]) == str(guild_id):
-                db_guild_id = guild["id"]
-                break
-
+        # Get the database ID for this guild using our helper function
+        db_guild_id = await get_db_guild_id(client, guild_id)
         if db_guild_id is None:
-            logger.error(f"Could not find exact match for guild with discord_id {guild_id}")
+            logger.error(f"Could not get database ID for guild {guild_id}")
             return []
 
         logger.info(f"Fetching regex rules for guild {guild_id} (DB ID: {db_guild_id})")
@@ -124,23 +114,10 @@ async def get_rate_limits(client: APIClient, guild_id: int) -> List[AutoModRateL
 
     # Get limits from API
     try:
-        # First, we need to get the database ID for this guild
-        guild_response = await client._request("GET", f"/api/guilds?discord_id={guild_id}")
-        guild_data = await client._get_json(guild_response)
-
-        if not guild_data.get("guilds"):
-            logger.error(f"Guild with discord_id {guild_id} not found in database")
-            return []
-
-        # Find the exact match for the Discord guild ID
-        db_guild_id = None
-        for guild in guild_data["guilds"]:
-            if str(guild["discord_id"]) == str(guild_id):
-                db_guild_id = guild["id"]
-                break
-
+        # Get the database ID for this guild using our helper function
+        db_guild_id = await get_db_guild_id(client, guild_id)
         if db_guild_id is None:
-            logger.error(f"Could not find exact match for guild with discord_id {guild_id}")
+            logger.error(f"Could not get database ID for guild {guild_id}")
             return []
 
         logger.info(f"Fetching rate limits for guild {guild_id} (DB ID: {db_guild_id})")
@@ -433,6 +410,55 @@ async def on_member_join(event: hikari.MemberCreateEvent) -> None:
             await apply_regex_rule_action(client, event.app, event.guild_id, event.user, rule, match)
     else:
         logger.info(f"Username '{event.user.username}' did not match any rules")
+
+
+async def get_db_guild_id(client: APIClient, discord_guild_id: int) -> Optional[int]:
+    """
+    Get the database ID for a Discord guild ID, with caching.
+
+    Args:
+        client: API client
+        discord_guild_id: Discord guild ID
+
+    Returns:
+        Database guild ID or None if not found
+    """
+    now = datetime.now().timestamp()
+
+    # Check cache first
+    if discord_guild_id in guild_id_cache:
+        db_guild_id, timestamp = guild_id_cache[discord_guild_id]
+        if now - timestamp < CACHE_TIMEOUT:
+            return db_guild_id
+
+    # Get from API
+    try:
+        # Get the database ID for this guild
+        guild_response = await client._request("GET", f"/api/guilds?discord_id={discord_guild_id}")
+        guild_data = await client._get_json(guild_response)
+
+        if not guild_data.get("guilds"):
+            logger.error(f"Guild with discord_id {discord_guild_id} not found in database")
+            return None
+
+        # Find the exact match for the Discord guild ID
+        db_guild_id = None
+        for guild in guild_data["guilds"]:
+            if str(guild["discord_id"]) == str(discord_guild_id):
+                db_guild_id = guild["id"]
+                break
+
+        if db_guild_id is None:
+            logger.error(f"Could not find exact match for guild with discord_id {discord_guild_id}")
+            return None
+
+        # Update cache
+        guild_id_cache[discord_guild_id] = (db_guild_id, now)
+
+        return db_guild_id
+    except Exception as e:
+        logger.error(f"Error getting database ID for guild {discord_guild_id}: {e}")
+        return None
 
 
 def hash_message_content(content: str) -> str:
