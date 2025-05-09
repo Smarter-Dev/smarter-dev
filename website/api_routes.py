@@ -1,6 +1,6 @@
 import os
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 from starlette.requests import Request
@@ -1095,7 +1095,7 @@ async def user_bytes_balance(request):
 @api_error_handler
 async def bytes_leaderboard(request):
     """
-    Get bytes leaderboard for a guild
+    Get bytes leaderboard for a guild, only considering bytes from the past 180 days
     """
     guild_id = request.path_params["guild_id"]
     db = next(get_db())
@@ -1107,7 +1107,10 @@ async def bytes_leaderboard(request):
     except ValueError:
         limit = 10
 
-    # Get users with bytes in this guild (either received or given)
+    # Calculate the date 180 days ago
+    cutoff_date = datetime.now() - timedelta(days=180)
+
+    # Get all users in this guild
     users_with_bytes = db.query(DiscordUser).join(
         Bytes,
         ((Bytes.receiver_id == DiscordUser.id) | (Bytes.giver_id == DiscordUser.id))
@@ -1118,13 +1121,30 @@ async def bytes_leaderboard(request):
     # Format the response
     leaderboard = []
     for user in users_with_bytes:
-        # Include all users with a bytes balance
-        if user.bytes_balance > 0:
+        # Calculate bytes received in the past 180 days
+        bytes_received = db.query(func.sum(Bytes.amount)).filter(
+            Bytes.receiver_id == user.id,
+            Bytes.guild_id == guild_id,
+            Bytes.awarded_at >= cutoff_date
+        ).scalar() or 0
+
+        # Calculate bytes given in the past 180 days
+        bytes_given = db.query(func.sum(Bytes.amount)).filter(
+            Bytes.giver_id == user.id,
+            Bytes.guild_id == guild_id,
+            Bytes.awarded_at >= cutoff_date
+        ).scalar() or 0
+
+        # Calculate the balance for the past 180 days
+        bytes_balance = bytes_received - bytes_given
+
+        # Include all users with a positive bytes balance in the past 180 days
+        if bytes_balance > 0:
             leaderboard.append({
                 "user_id": user.id,
                 "discord_id": user.discord_id,
                 "username": user.username,
-                "bytes_balance": user.bytes_balance,
+                "bytes_balance": bytes_balance,
                 "avatar_url": user.avatar_url
             })
 
