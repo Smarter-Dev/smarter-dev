@@ -2,7 +2,7 @@
 Bytes plugin for the Smarter Dev Discord bot.
 
 This plugin provides commands for the Bytes system, which allows users to give
-each other bytes as a form of recognition and earn roles based on their bytes balance.
+each other bytes as a form of recognition and earn roles based on their total bytes received.
 """
 
 import asyncio
@@ -488,7 +488,7 @@ async def bytes_lookup(ctx: context.SlashContext) -> None:
 
         # Add fields with formatted values - set inline=False to stack them
         embed.add_field(name="In Cache", value=balance_formatted, inline=False)
-        embed.add_field(name="Received", value=received_formatted, inline=False)
+        embed.add_field(name="Received", value=received_formatted, inline=False) # Roles are based on this value
         embed.add_field(name="Sent", value=given_formatted, inline=False)
 
         # Add earned roles
@@ -512,10 +512,10 @@ async def bytes_lookup(ctx: context.SlashContext) -> None:
                 # Sort roles by bytes required
                 roles = sorted(roles_data["roles"], key=lambda r: r["bytes_required"])
 
-                # Find next role to earn
+                # Find next role to earn based on bytes_received
                 next_role = None
                 for role in roles:
-                    if role["bytes_required"] > bytes_info["bytes_balance"]:
+                    if role["bytes_required"] > bytes_info["bytes_received"]:
                         next_role = role
                         break
 
@@ -523,7 +523,7 @@ async def bytes_lookup(ctx: context.SlashContext) -> None:
                     role_id = next_role["role_id"]
                     role = ctx.get_guild().get_role(role_id)
                     if role:
-                        bytes_needed = next_role["bytes_required"] - bytes_info["bytes_balance"]
+                        bytes_needed = next_role["bytes_required"] - bytes_info["bytes_received"]
                         bytes_needed_formatted = format_bytes(bytes_needed)
                         embed.add_field(
                             name="Next Role",

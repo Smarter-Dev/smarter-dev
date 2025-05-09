@@ -750,13 +750,16 @@ async def bytes_create(request):
     db.commit()
     db.refresh(bytes_obj)
 
-    # Check if receiver has earned any roles
+    # Get total bytes received by the user
+    bytes_received = db.query(func.sum(Bytes.amount)).filter(Bytes.receiver_id == receiver.id).scalar() or 0
+
+    # Check if receiver has earned any roles based on total bytes received
     roles = db.query(BytesRole).filter(
         BytesRole.guild_id == data["guild_id"],
-        BytesRole.bytes_required <= receiver.bytes_balance
+        BytesRole.bytes_required <= bytes_received
     ).order_by(BytesRole.bytes_required.desc()).all()
 
-    print(roles, receiver.bytes_balance, data["guild_id"])
+    print(roles, bytes_received, data["guild_id"])
 
     earned_roles = []
     if roles:
@@ -1074,9 +1077,10 @@ async def user_bytes_balance(request):
         # Convert Discord guild ID to internal database guild ID
         guild = db.query(Guild).filter(Guild.discord_id == guild_id).first()
         if guild:
+            # Use bytes_received instead of bytes_balance for role eligibility
             roles = db.query(BytesRole).filter(
                 BytesRole.guild_id == guild.id,
-                BytesRole.bytes_required <= user.bytes_balance
+                BytesRole.bytes_required <= bytes_received
             ).order_by(BytesRole.bytes_required.desc()).all()
 
             if roles:

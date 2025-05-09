@@ -4,7 +4,7 @@ Test the daily bytes eligibility check function.
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, UTC, time
 
 # Constants for testing
 TEST_USER_ID = 123456789
@@ -30,6 +30,20 @@ def clear_caches():
     user_cache.clear()
     bytes_balance_cache.clear()
     bytes_config_cache.clear()
+
+# Helper function to create a datetime at a specific time on a specific day
+def create_datetime(day_offset=0, hour=0, minute=0, second=0):
+    """Create a datetime object at a specific time."""
+    now = datetime.now(UTC)
+    return datetime(
+        year=now.year,
+        month=now.month,
+        day=now.day,
+        hour=hour,
+        minute=minute,
+        second=second,
+        tzinfo=UTC
+    ) + timedelta(days=day_offset)
 
 @pytest.mark.asyncio
 async def test_check_daily_bytes_eligibility_eligible():
@@ -200,6 +214,237 @@ async def test_check_daily_bytes_eligibility_eligible_after_24_hours():
         # Verify that the user is eligible
         assert is_eligible is True
         assert next_eligible_time is None
+
+@pytest.mark.asyncio
+async def test_edge_case_daily_bytes_at_2359_message_at_0000():
+    """Test edge case: User gets daily bytes at 23:59 UTC and sends a message at 00:00 UTC.
+
+    Expected behavior: User should get streak updated but not get daily bytes.
+    """
+    from bot.plugins.bytes import check_daily_bytes_eligibility, update_user_streak, daily_bytes_eligibility_cache
+
+    # Create mock API client
+    client = AsyncMock()
+
+    # Create a mock guild member with last_daily_bytes at 23:59 yesterday
+    yesterday_2359 = create_datetime(day_offset=-1, hour=23, minute=59)
+    today_0000 = create_datetime(hour=0, minute=0)  # Today at midnight
+
+    # Create a proper dictionary-like object instead of a MagicMock
+    class GuildMember:
+        def __init__(self, last_daily_bytes, last_active_day=None):
+            self.last_daily_bytes = last_daily_bytes
+            self.last_active_day = last_active_day
+            self.streak_count = 5  # Some existing streak
+
+        def get(self, key, default=None):
+            if key == "last_daily_bytes":
+                return self.last_daily_bytes
+            elif key == "last_active_day":
+                return self.last_active_day
+            elif key == "streak_count":
+                return self.streak_count
+            return default
+
+    # Create a mock guild member with last_daily_bytes at 23:59 yesterday
+    # and last_active_day as yesterday
+    yesterday_str = yesterday_2359.strftime("%Y-%m-%d")
+    mock_guild_member = GuildMember(yesterday_2359, yesterday_str)
+
+    # Set up the cache to simulate the user having received daily bytes at 23:59
+    cache_key = (TEST_USER_ID, TEST_GUILD_ID)
+    next_eligible_time = yesterday_2359 + timedelta(hours=24)  # Eligible 24 hours after last daily bytes
+    daily_bytes_eligibility_cache[cache_key] = (next_eligible_time.timestamp(), yesterday_2359.timestamp())
+
+    # Create a mock user for get_cached_user
+    mock_user = {"id": 12345}  # Internal user ID
+
+    # Mock the current time to be 00:00 today
+    with patch('bot.plugins.bytes.datetime') as mock_datetime, \
+         patch('bot.plugins.bytes.get_cached_guild_member', return_value=mock_guild_member), \
+         patch('bot.plugins.bytes.get_cached_user', return_value=mock_user):
+        mock_datetime.now.return_value = today_0000
+        mock_datetime.fromisoformat.side_effect = datetime.fromisoformat
+        mock_datetime.UTC = UTC
+
+        # 1. First check eligibility - should not be eligible for daily bytes
+        is_eligible, returned_next_eligible_time = await check_daily_bytes_eligibility(client, TEST_USER_ID, TEST_GUILD_ID)
+
+        # Verify not eligible for daily bytes (less than 24 hours since last daily bytes)
+        assert is_eligible is False
+        assert returned_next_eligible_time is not None
+
+        # 2. Now simulate updating streak
+        # Mock the API response for updating the guild member
+        updated_guild_member = GuildMember(yesterday_2359, today_0000.strftime("%Y-%m-%d"))
+        updated_guild_member.streak_count = 6  # Streak incremented
+
+        # Mock the API request to return the updated guild member
+        client._request = AsyncMock()
+        client._get_json = AsyncMock(return_value=updated_guild_member)
+
+        # Call update_user_streak
+        streak_info = await update_user_streak(client, TEST_USER_ID, TEST_GUILD_ID)
+
+        # Verify streak was updated but is_new_day is False for daily bytes
+        assert streak_info is not None
+        assert streak_info["streak_count"] == 6  # Streak incremented
+        assert streak_info["is_new_day"] is False  # Not eligible for daily bytes
+
+
+@pytest.mark.asyncio
+async def test_edge_case_daily_bytes_at_0000_message_at_2359_same_day():
+    """Test edge case: User gets daily bytes at 00:00 UTC and sends a message at 23:59 UTC the same day.
+
+    Expected behavior: User should not get streak updated or daily bytes.
+    """
+    from bot.plugins.bytes import check_daily_bytes_eligibility, update_user_streak, daily_bytes_eligibility_cache
+
+    # Create mock API client
+    client = AsyncMock()
+
+    # Create a mock guild member with last_daily_bytes at 00:00 today
+    today_0000 = create_datetime(hour=0, minute=0)  # Today at midnight
+    today_2359 = create_datetime(hour=23, minute=59)  # Today at 23:59
+
+    # Create a proper dictionary-like object instead of a MagicMock
+    class GuildMember:
+        def __init__(self, last_daily_bytes, last_active_day=None):
+            self.last_daily_bytes = last_daily_bytes
+            self.last_active_day = last_active_day
+            self.streak_count = 5  # Some existing streak
+
+        def get(self, key, default=None):
+            if key == "last_daily_bytes":
+                return self.last_daily_bytes
+            elif key == "last_active_day":
+                return self.last_active_day
+            elif key == "streak_count":
+                return self.streak_count
+            return default
+
+    # Create a mock guild member with last_daily_bytes at 00:00 today
+    # and last_active_day as today
+    today_str = today_0000.strftime("%Y-%m-%d")
+    mock_guild_member = GuildMember(today_0000, today_str)
+
+    # Set up the cache to simulate the user having received daily bytes at 00:00
+    cache_key = (TEST_USER_ID, TEST_GUILD_ID)
+    next_eligible_time = today_0000 + timedelta(hours=24)  # Eligible 24 hours after last daily bytes
+    daily_bytes_eligibility_cache[cache_key] = (next_eligible_time.timestamp(), today_0000.timestamp())
+
+    # Create a mock user for get_cached_user
+    mock_user = {"id": 12345}  # Internal user ID
+
+    # Mock the current time to be 23:59 today
+    with patch('bot.plugins.bytes.datetime') as mock_datetime, \
+         patch('bot.plugins.bytes.get_cached_guild_member', return_value=mock_guild_member), \
+         patch('bot.plugins.bytes.get_cached_user', return_value=mock_user):
+        mock_datetime.now.return_value = today_2359
+        mock_datetime.fromisoformat.side_effect = datetime.fromisoformat
+        mock_datetime.UTC = UTC
+
+        # 1. First check eligibility - should not be eligible for daily bytes
+        is_eligible, returned_next_eligible_time = await check_daily_bytes_eligibility(client, TEST_USER_ID, TEST_GUILD_ID)
+
+        # Verify not eligible for daily bytes (less than 24 hours since last daily bytes)
+        assert is_eligible is False
+        assert returned_next_eligible_time is not None
+
+        # 2. Now simulate updating streak
+        # Mock the API response for updating the guild member
+        updated_guild_member = GuildMember(today_0000, today_str)  # Same day, no streak update
+        updated_guild_member.streak_count = 5  # Streak unchanged
+
+        # Mock the API request to return the updated guild member
+        client._request = AsyncMock()
+        client._get_json = AsyncMock(return_value=updated_guild_member)
+
+        # Call update_user_streak
+        streak_info = await update_user_streak(client, TEST_USER_ID, TEST_GUILD_ID)
+
+        # Verify streak was not updated and is_new_day is False for daily bytes
+        assert streak_info is not None
+        assert streak_info["streak_count"] == 5  # Streak unchanged
+        assert streak_info["is_new_day"] is False  # Not eligible for daily bytes
+
+
+@pytest.mark.asyncio
+async def test_edge_case_daily_bytes_at_0000_message_at_0000_next_day():
+    """Test edge case: User gets daily bytes at 00:00 UTC and sends a message at 00:00 UTC the next day.
+
+    Expected behavior: User should get streak updated and get daily bytes.
+    """
+    from bot.plugins.bytes import check_daily_bytes_eligibility, update_user_streak, daily_bytes_eligibility_cache
+
+    # Create mock API client
+    client = AsyncMock()
+
+    # Create a mock guild member with last_daily_bytes at 00:00 yesterday
+    yesterday_0000 = create_datetime(day_offset=-1, hour=0, minute=0)  # Yesterday at midnight
+    today_0000 = create_datetime(hour=0, minute=0)  # Today at midnight
+
+    # Create a proper dictionary-like object instead of a MagicMock
+    class GuildMember:
+        def __init__(self, last_daily_bytes, last_active_day=None):
+            self.last_daily_bytes = last_daily_bytes
+            self.last_active_day = last_active_day
+            self.streak_count = 5  # Some existing streak
+
+        def get(self, key, default=None):
+            if key == "last_daily_bytes":
+                return self.last_daily_bytes
+            elif key == "last_active_day":
+                return self.last_active_day
+            elif key == "streak_count":
+                return self.streak_count
+            return default
+
+    # Create a mock guild member with last_daily_bytes at 00:00 yesterday
+    # and last_active_day as yesterday
+    yesterday_str = yesterday_0000.strftime("%Y-%m-%d")
+    mock_guild_member = GuildMember(yesterday_0000, yesterday_str)
+
+    # Set up the cache to simulate the user having received daily bytes at 00:00 yesterday
+    cache_key = (TEST_USER_ID, TEST_GUILD_ID)
+    next_eligible_time = yesterday_0000 + timedelta(hours=24)  # Eligible 24 hours after last daily bytes
+    daily_bytes_eligibility_cache[cache_key] = (next_eligible_time.timestamp(), yesterday_0000.timestamp())
+
+    # Create a mock user for get_cached_user
+    mock_user = {"id": 12345}  # Internal user ID
+
+    # Mock the current time to be 00:00 today
+    with patch('bot.plugins.bytes.datetime') as mock_datetime, \
+         patch('bot.plugins.bytes.get_cached_guild_member', return_value=mock_guild_member), \
+         patch('bot.plugins.bytes.get_cached_user', return_value=mock_user):
+        mock_datetime.now.return_value = today_0000
+        mock_datetime.fromisoformat.side_effect = datetime.fromisoformat
+        mock_datetime.UTC = UTC
+
+        # 1. First check eligibility - should be eligible for daily bytes
+        is_eligible, returned_next_eligible_time = await check_daily_bytes_eligibility(client, TEST_USER_ID, TEST_GUILD_ID)
+
+        # Verify eligible for daily bytes (exactly 24 hours since last daily bytes)
+        assert is_eligible is True
+        assert returned_next_eligible_time is None
+
+        # 2. Now simulate updating streak
+        # Mock the API response for updating the guild member
+        updated_guild_member = GuildMember(yesterday_0000, today_0000.strftime("%Y-%m-%d"))
+        updated_guild_member.streak_count = 6  # Streak incremented
+
+        # Mock the API request to return the updated guild member
+        client._request = AsyncMock()
+        client._get_json = AsyncMock(return_value=updated_guild_member)
+
+        # Call update_user_streak
+        streak_info = await update_user_streak(client, TEST_USER_ID, TEST_GUILD_ID)
+
+        # Verify streak was updated and is_new_day is True for daily bytes
+        assert streak_info is not None
+        assert streak_info["streak_count"] == 6  # Streak incremented
+        assert streak_info["is_new_day"] is True  # Eligible for daily bytes
+
 
 if __name__ == "__main__":
     pytest.main(["-xvs", __file__])
