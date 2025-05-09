@@ -1765,7 +1765,7 @@ async def squad_member_add(request):
             "error": f"You need at least {bytes_config.squad_join_bytes_required} total bytes received to use the squad join command. You have: {bytes_received}"
         }, status_code=400)
 
-    # Check if user is already a member
+    # Check if user is already a member of this squad
     existing_member = db.query(SquadMember).filter(
         SquadMember.squad_id == squad.id,
         SquadMember.user_id == user.id
@@ -1774,7 +1774,19 @@ async def squad_member_add(request):
     if existing_member:
         return JSONResponse(model_to_dict(existing_member))
 
-    # Add user to squad
+    # Check if user is already a member of another squad in the same guild
+    existing_memberships = db.query(SquadMember).join(
+        Squad, SquadMember.squad_id == Squad.id
+    ).filter(
+        Squad.guild_id == squad.guild_id,
+        SquadMember.user_id == user.id
+    ).all()
+
+    # Remove user from any existing squads in this guild
+    for membership in existing_memberships:
+        db.delete(membership)
+
+    # Add user to the new squad
     member = SquadMember(
         squad_id=squad.id,
         user_id=user.id
