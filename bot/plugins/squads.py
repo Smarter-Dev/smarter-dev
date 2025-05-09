@@ -117,6 +117,14 @@ async def squads_join(ctx: context.SlashContext) -> None:
             await ctx.respond("No squads are available in this server.", flags=hikari.MessageFlag.EPHEMERAL)
             return
 
+        # Get the user's current squads BEFORE joining a new one
+        previous_squads_response = await client._request(
+            "GET",
+            f"/api/users/{ctx.author.id}/squads?guild_id={guild_id}"
+        )
+        previous_squads_data = await client._get_json(previous_squads_response)
+        previous_squad_ids = [s["id"] for s in previous_squads_data.get("squads", [])]
+
         # Create action row with buttons for each squad
         action_row = ctx.bot.rest.build_message_action_row()
         for i, squad in enumerate(data["squads"]):
@@ -195,7 +203,44 @@ async def squads_join(ctx: context.SlashContext) -> None:
                     )
 
                     if join_response.status_code == 201:
-                        # Add the role to the user
+                        # Get the user's current squads after joining the new one
+                        current_squads_response = await client._request(
+                            "GET",
+                            f"/api/users/{ctx.author.id}/squads?guild_id={guild_id}"
+                        )
+
+                        if current_squads_response.status_code == 200:
+                            current_squads_data = await client._get_json(current_squads_response)
+                            current_squad_ids = [s["id"] for s in current_squads_data.get("squads", [])]
+
+                            # Find squads the user was removed from (in previous_squad_ids but not in current_squad_ids)
+                            removed_squad_ids = [sid for sid in previous_squad_ids if sid not in current_squad_ids]
+
+                            if removed_squad_ids:
+                                # Get all squads in this guild to find the roles to remove
+                                all_squads_response = await client._request(
+                                    "GET",
+                                    f"/api/squads?guild_id={guild_id}"
+                                )
+
+                                if all_squads_response.status_code == 200:
+                                    all_squads_data = await client._get_json(all_squads_response)
+
+                                    # Remove roles for squads the user was removed from
+                                    for other_squad in all_squads_data.get("squads", []):
+                                        if other_squad["id"] in removed_squad_ids:
+                                            try:
+                                                await ctx.bot.rest.remove_role_from_member(
+                                                    guild_id,
+                                                    ctx.author.id,
+                                                    other_squad["role_id"],
+                                                    reason=f"Left squad: {other_squad['name']} (joined {squad['name']})"
+                                                )
+                                                logger.info(f"Removed role {other_squad['role_id']} from user {ctx.author.id} when joining new squad")
+                                            except Exception as e:
+                                                logger.error(f"Error removing role {other_squad['role_id']} from user {ctx.author.id}: {e}")
+
+                        # Add the role for the new squad
                         role_id = squad["role_id"]
                         try:
                             await ctx.bot.rest.add_role_to_member(
