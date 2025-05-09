@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "aiofiles",
+    "alembic>=1.15.2",
     "bcrypt",
     "hikari",
     "hikari-lightbulb",

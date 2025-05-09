@@ -25,7 +25,8 @@ from .discord_admin_routes import (
 from .api_routes import (
     api_token, guild_list, guild_detail, guild_create, guild_update,
     user_list, user_detail, user_create, user_update, users_batch_create,
-    bytes_list, bytes_detail, bytes_create, bytes_config_get, bytes_config_create, bytes_config_update,
+    guild_member_get, guild_member_create, guild_member_update,
+    bytes_list, bytes_recent, bytes_detail, bytes_create, bytes_config_get, bytes_config_create, bytes_config_update,
     bytes_roles_list, bytes_role_create, bytes_role_update, bytes_role_delete,
     bytes_cooldown_get, user_bytes_balance, bytes_leaderboard,
     warning_list, warning_detail, warning_create,
@@ -59,9 +60,13 @@ routes = [
     Route("/api/users", user_create, methods=["POST"]),
     Route("/api/users/{user_id:int}", user_update, methods=["PUT"]),
     Route("/api/users/batch", users_batch_create, methods=["POST"]),
+    Route("/api/users/{user_id}/guilds/{guild_id}", guild_member_get, methods=["GET"]),
+    Route("/api/users/{user_id}/guilds", guild_member_create, methods=["POST"]),
+    Route("/api/users/{user_id}/guilds/{guild_id}", guild_member_update, methods=["PUT"]),
 
     # Bytes routes
     Route("/api/bytes", bytes_list, methods=["GET"]),
+    Route("/api/bytes/recent", bytes_recent, methods=["GET"]),
     Route("/api/bytes/{bytes_id:int}", bytes_detail, methods=["GET"]),
     Route("/api/bytes", bytes_create, methods=["POST"]),
     Route("/api/bytes/config/{guild_id:int}", bytes_config_get, methods=["GET"]),

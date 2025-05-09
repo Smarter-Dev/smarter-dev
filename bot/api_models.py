@@ -42,6 +42,9 @@ class GuildMember:
     joined_at: Optional[datetime] = None
     is_active: bool = True
     created_at: Optional[datetime] = None
+    last_active_day: Optional[str] = None
+    streak_count: int = 0
+    last_daily_bytes: Optional[datetime] = None
 
 
 

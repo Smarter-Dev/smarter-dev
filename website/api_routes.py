@@ -210,9 +210,11 @@ async def user_list(request):
     # Execute query
     users = query.all()
 
-    return JSONResponse({
+    user_data = {
         "users": [model_to_dict(user) for user in users]
-    })
+    }
+    print(f"\n\nUser data: {user_data}\n\n")
+    return JSONResponse(user_data)
 
 @api_error_handler
 async def user_detail(request):
@@ -351,11 +353,180 @@ async def user_update(request):
         user.discriminator = data["discriminator"]
     if "avatar_url" in data:
         user.avatar_url = data["avatar_url"]
+    if "last_active_day" in data:
+        user.last_active_day = data["last_active_day"]
+    if "streak_count" in data:
+        user.streak_count = data["streak_count"]
+    if "last_daily_bytes" in data:
+        user.last_daily_bytes = parse_datetime(data["last_daily_bytes"])
 
     db.commit()
     db.refresh(user)
 
     return JSONResponse(model_to_dict(user))
+
+
+@api_error_handler
+async def guild_member_get(request):
+    """
+    Get a guild member
+    """
+    user_id = request.path_params["user_id"]
+    guild_id = request.path_params["guild_id"]
+    db = next(get_db())
+
+    # Get the user by ID
+    user = db.query(DiscordUser).filter(DiscordUser.id == user_id).first()
+    if not user:
+        # Try by Discord ID
+        user = db.query(DiscordUser).filter(DiscordUser.discord_id == user_id).first()
+        if not user:
+            return JSONResponse({"error": "User not found"}, status_code=404)
+
+    # Get the guild by ID
+    guild = db.query(Guild).filter(Guild.id == guild_id).first()
+    if not guild:
+        # Try by Discord ID
+        guild = db.query(Guild).filter(Guild.discord_id == guild_id).first()
+        if not guild:
+            return JSONResponse({"error": "Guild not found"}, status_code=404)
+
+    # Get the guild member
+    guild_member = db.query(GuildMember).filter(
+        GuildMember.user_id == user.id,
+        GuildMember.guild_id == guild.id
+    ).first()
+
+    if not guild_member:
+        return JSONResponse({"error": "Guild member not found"}, status_code=404)
+
+    return JSONResponse(model_to_dict(guild_member))
+
+
+@api_error_handler
+async def guild_member_create(request):
+    """
+    Create a new guild member
+    """
+    try:
+        user_id = request.path_params["user_id"]
+        data = await request.json()
+        db = next(get_db())
+
+        # Get the user by ID
+        user = db.query(DiscordUser).filter(DiscordUser.id == user_id).first()
+        if not user:
+            # Try by Discord ID
+            user = db.query(DiscordUser).filter(DiscordUser.discord_id == user_id).first()
+            if not user:
+                return JSONResponse({"error": "User not found"}, status_code=404)
+
+        # Get the guild by ID
+        guild_id = data.get("guild_id")
+        if not guild_id:
+            return JSONResponse({"error": "Missing required field: guild_id"}, status_code=400)
+
+        guild = db.query(Guild).filter(Guild.id == guild_id).first()
+        if not guild:
+            # Try by Discord ID
+            guild = db.query(Guild).filter(Guild.discord_id == guild_id).first()
+            if not guild:
+                # Create the guild if it doesn't exist
+                guild = Guild(
+                    discord_id=guild_id,
+                    name=f"Guild {guild_id}",  # Default name
+                    joined_at=datetime.now()
+                )
+                db.add(guild)
+                db.commit()
+                db.refresh(guild)
+
+        # Check if guild member already exists
+        existing = db.query(GuildMember).filter(
+            GuildMember.user_id == user.id,
+            GuildMember.guild_id == guild.id
+        ).first()
+
+        if existing:
+            return JSONResponse(model_to_dict(existing))
+
+        # Create new guild member
+        guild_member = GuildMember(
+            user_id=user.id,
+            guild_id=guild.id,
+            nickname=data.get("nickname"),
+            joined_at=parse_datetime(data.get("joined_at")),
+            is_active=data.get("is_active", True),
+            last_active_day=data.get("last_active_day"),
+            streak_count=data.get("streak_count", 0),
+            last_daily_bytes=parse_datetime(data.get("last_daily_bytes"))
+        )
+
+        db.add(guild_member)
+        db.commit()
+        db.refresh(guild_member)
+
+        return JSONResponse(model_to_dict(guild_member), status_code=201)
+    except Exception as e:
+        print(f"Error creating guild member: {e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse({"error": f"Internal server error: {str(e)}"}, status_code=500)
+
+
+@api_error_handler
+async def guild_member_update(request):
+    """
+    Update a guild member
+    """
+    user_id = request.path_params["user_id"]
+    guild_id = request.path_params["guild_id"]
+    data = await request.json()
+    db = next(get_db())
+
+    # Get the user by ID
+    user = db.query(DiscordUser).filter(DiscordUser.id == user_id).first()
+    if not user:
+        # Try by Discord ID
+        user = db.query(DiscordUser).filter(DiscordUser.discord_id == user_id).first()
+        if not user:
+            return JSONResponse({"error": "User not found"}, status_code=404)
+
+    # Get the guild by ID
+    guild = db.query(Guild).filter(Guild.id == guild_id).first()
+    if not guild:
+        # Try by Discord ID
+        guild = db.query(Guild).filter(Guild.discord_id == guild_id).first()
+        if not guild:
+            return JSONResponse({"error": "Guild not found"}, status_code=404)
+
+    # Get the guild member
+    guild_member = db.query(GuildMember).filter(
+        GuildMember.user_id == user.id,
+        GuildMember.guild_id == guild.id
+    ).first()
+
+    if not guild_member:
+        return JSONResponse({"error": "Guild member not found"}, status_code=404)
+
+    # Update fields
+    if "nickname" in data:
+        guild_member.nickname = data["nickname"]
+    if "joined_at" in data:
+        guild_member.joined_at = parse_datetime(data["joined_at"])
+    if "is_active" in data:
+        guild_member.is_active = data["is_active"]
+    if "last_active_day" in data:
+        guild_member.last_active_day = data["last_active_day"]
+    if "streak_count" in data:
+        guild_member.streak_count = data["streak_count"]
+    if "last_daily_bytes" in data:
+        guild_member.last_daily_bytes = parse_datetime(data["last_daily_bytes"])
+
+    db.commit()
+    db.refresh(guild_member)
+
+    return JSONResponse(model_to_dict(guild_member))
 
 
 # Helper function to parse datetime strings
@@ -429,6 +600,58 @@ async def bytes_list(request):
     })
 
 @api_error_handler
+async def bytes_recent(request):
+    """
+    Get recent bytes transactions with advanced filtering
+
+    Query parameters:
+    - receiver_id: Filter by receiver Discord ID
+    - guild_id: Filter by guild ID
+    - since: Filter by transactions after this timestamp (ISO format)
+    - reason: Filter by reason (partial match)
+    """
+    db = next(get_db())
+    query = db.query(Bytes)
+
+    # Filter by receiver Discord ID
+    receiver_discord_id = request.query_params.get("receiver_id")
+    if receiver_discord_id:
+        # First get the internal user ID from the Discord ID
+        receiver = db.query(DiscordUser).filter(DiscordUser.discord_id == receiver_discord_id).first()
+        if receiver:
+            query = query.filter(Bytes.receiver_id == receiver.id)
+        else:
+            # If user not found, return empty result
+            return JSONResponse({"transactions": []})
+
+    # Filter by guild ID
+    guild_id = request.query_params.get("guild_id")
+    if guild_id:
+        query = query.filter(Bytes.guild_id == guild_id)
+
+    # Filter by timestamp
+    since = request.query_params.get("since")
+    if since:
+        try:
+            since_dt = parse_datetime(since)
+            query = query.filter(Bytes.awarded_at >= since_dt)
+        except (ValueError, TypeError):
+            # If invalid timestamp, ignore this filter
+            pass
+
+    # Filter by reason (partial match)
+    reason = request.query_params.get("reason")
+    if reason:
+        query = query.filter(Bytes.reason.like(f"%{reason}%"))
+
+    # Order by most recent and limit to 100 results
+    transactions = query.order_by(desc(Bytes.awarded_at)).limit(100).all()
+
+    return JSONResponse({
+        "transactions": [model_to_dict(t) for t in transactions]
+    })
+
+@api_error_handler
 async def bytes_detail(request):
     """
     Get bytes details
@@ -456,12 +679,16 @@ async def bytes_create(request):
         if field not in data:
             return JSONResponse({"error": f"Missing required field: {field}"}, status_code=400)
 
-    # Get the users
-    giver = db.query(DiscordUser).filter(DiscordUser.id == data["giver_id"]).first()
-    receiver = db.query(DiscordUser).filter(DiscordUser.id == data["receiver_id"]).first()
+    # Get the users by Discord ID
+    giver = db.query(DiscordUser).filter(DiscordUser.discord_id == data["giver_id"]).first()
+    receiver = db.query(DiscordUser).filter(DiscordUser.discord_id == data["receiver_id"]).first()
 
     if not giver or not receiver:
         return JSONResponse({"error": "Giver or receiver not found"}, status_code=404)
+
+    # Convert Discord IDs to internal IDs for database operations
+    internal_giver_id = giver.id
+    internal_receiver_id = receiver.id
 
     # Check if giver has enough bytes
     amount = data.get("amount", 1)
@@ -470,7 +697,7 @@ async def bytes_create(request):
 
     # Check cooldown
     cooldown = db.query(BytesCooldown).filter(
-        BytesCooldown.user_id == data["giver_id"],
+        BytesCooldown.user_id == internal_giver_id,
         BytesCooldown.guild_id == data["guild_id"]
     ).first()
 
@@ -484,7 +711,7 @@ async def bytes_create(request):
         db.refresh(config)
 
     # Check if cooldown has passed
-    if cooldown:
+    if cooldown and False:
         cooldown_minutes = config.cooldown_minutes
         cooldown_delta = datetime.now() - cooldown.last_given_at
         if cooldown_delta.total_seconds() < cooldown_minutes * 60:
@@ -499,7 +726,7 @@ async def bytes_create(request):
     else:
         # Create new cooldown
         cooldown = BytesCooldown(
-            user_id=data["giver_id"],
+            user_id=internal_giver_id,
             guild_id=data["guild_id"],
             last_given_at=datetime.now()
         )
@@ -507,8 +734,8 @@ async def bytes_create(request):
 
     # Create new bytes transaction
     bytes_obj = Bytes(
-        giver_id=data["giver_id"],
-        receiver_id=data["receiver_id"],
+        giver_id=internal_giver_id,
+        receiver_id=internal_receiver_id,
         guild_id=data["guild_id"],
         amount=amount,
         reason=data.get("reason"),
@@ -528,6 +755,8 @@ async def bytes_create(request):
         BytesRole.guild_id == data["guild_id"],
         BytesRole.bytes_required <= receiver.bytes_balance
     ).order_by(BytesRole.bytes_required.desc()).all()
+
+    print(roles, receiver.bytes_balance, data["guild_id"])
 
     earned_roles = []
     if roles:
@@ -634,7 +863,22 @@ async def bytes_roles_list(request):
     guild_id = request.path_params["guild_id"]
     db = next(get_db())
 
-    roles = db.query(BytesRole).filter(BytesRole.guild_id == guild_id).order_by(BytesRole.bytes_required).all()
+    # Convert Discord guild ID to internal database guild ID if needed
+    try:
+        # Check if guild_id is a Discord guild ID (usually a large number)
+        discord_guild_id = int(guild_id)
+        guild = db.query(Guild).filter(Guild.discord_id == discord_guild_id).first()
+        if guild:
+            # Use the internal database guild ID
+            internal_guild_id = guild.id
+        else:
+            # If no guild found with this Discord ID, assume it's already an internal ID
+            internal_guild_id = discord_guild_id
+    except ValueError:
+        # If guild_id is not a valid integer, use it as is
+        internal_guild_id = guild_id
+
+    roles = db.query(BytesRole).filter(BytesRole.guild_id == internal_guild_id).order_by(BytesRole.bytes_required).all()
 
     return JSONResponse({
         "roles": [model_to_dict(role) for role in roles]
@@ -718,16 +962,48 @@ async def bytes_cooldown_get(request):
     guild_id = request.path_params["guild_id"]
     db = next(get_db())
 
+    # Try to parse user_id as integer (could be either internal ID or Discord ID)
+    try:
+        user_id_int = int(user_id)
+        # First try to find user by Discord ID (preferred method)
+        user = db.query(DiscordUser).filter(DiscordUser.discord_id == user_id_int).first()
+
+        # If not found, fall back to internal ID for backward compatibility
+        if not user:
+            user = db.query(DiscordUser).filter(DiscordUser.id == user_id_int).first()
+            if user:
+                internal_user_id = user.id
+            else:
+                return JSONResponse({"error": "User not found"}, status_code=404)
+        else:
+            internal_user_id = user.id
+    except ValueError:
+        # If user_id is not a valid integer, return error
+        return JSONResponse({"error": "Invalid user ID"}, status_code=400)
+
+    # Try to convert guild_id to internal ID if it's a Discord guild ID
+    try:
+        guild_id_int = int(guild_id)
+        guild = db.query(Guild).filter(Guild.discord_id == guild_id_int).first()
+        if guild:
+            internal_guild_id = guild.id
+        else:
+            # If no guild found with this Discord ID, assume it's already an internal ID
+            internal_guild_id = guild_id_int
+    except ValueError:
+        # If guild_id is not a valid integer, return error
+        return JSONResponse({"error": "Invalid guild ID"}, status_code=400)
+
     cooldown = db.query(BytesCooldown).filter(
-        BytesCooldown.user_id == user_id,
-        BytesCooldown.guild_id == guild_id
+        BytesCooldown.user_id == internal_user_id,
+        BytesCooldown.guild_id == internal_guild_id
     ).first()
 
     if not cooldown:
         return JSONResponse({"error": "Cooldown not found"}, status_code=404)
 
     # Get guild config for cooldown minutes
-    config = db.query(BytesConfig).filter(BytesConfig.guild_id == guild_id).first()
+    config = db.query(BytesConfig).filter(BytesConfig.guild_id == internal_guild_id).first()
     cooldown_minutes = config.cooldown_minutes if config else 1440
 
     # Calculate time left
@@ -749,15 +1025,27 @@ async def user_bytes_balance(request):
     user_id = request.path_params["user_id"]
     db = next(get_db())
 
-    user = db.query(DiscordUser).filter(DiscordUser.id == user_id).first()
+    # Try to parse user_id as integer (could be either internal ID or Discord ID)
+    try:
+        user_id_int = int(user_id)
+        # First try to find user by Discord ID (preferred method)
+        user = db.query(DiscordUser).filter(DiscordUser.discord_id == user_id_int).first()
+
+        # If not found, fall back to internal ID for backward compatibility
+        if not user:
+            user = db.query(DiscordUser).filter(DiscordUser.id == user_id_int).first()
+    except ValueError:
+        # If user_id is not a valid integer, return error
+        return JSONResponse({"error": "Invalid user ID"}, status_code=400)
+
     if not user:
         return JSONResponse({"error": "User not found"}, status_code=404)
 
     # Get bytes received (including from system admin)
-    bytes_received = db.query(func.sum(Bytes.amount)).filter(Bytes.receiver_id == user_id).scalar() or 0
+    bytes_received = db.query(func.sum(Bytes.amount)).filter(Bytes.receiver_id == user.id).scalar() or 0
 
     # Get bytes given to other users
-    bytes_given = db.query(func.sum(Bytes.amount)).filter(Bytes.giver_id == user_id).scalar() or 0
+    bytes_given = db.query(func.sum(Bytes.amount)).filter(Bytes.giver_id == user.id).scalar() or 0
 
     # Special case for system admin user (discord_id=0)
     # This user has an artificial balance and doesn't follow normal accounting rules
@@ -783,16 +1071,20 @@ async def user_bytes_balance(request):
     earned_roles = []
 
     if guild_id:
-        roles = db.query(BytesRole).filter(
-            BytesRole.guild_id == guild_id,
-            BytesRole.bytes_required <= user.bytes_balance
-        ).order_by(BytesRole.bytes_required.desc()).all()
+        # Convert Discord guild ID to internal database guild ID
+        guild = db.query(Guild).filter(Guild.discord_id == guild_id).first()
+        if guild:
+            roles = db.query(BytesRole).filter(
+                BytesRole.guild_id == guild.id,
+                BytesRole.bytes_required <= user.bytes_balance
+            ).order_by(BytesRole.bytes_required.desc()).all()
 
-        if roles:
-            earned_roles = [model_to_dict(role) for role in roles]
+            if roles:
+                earned_roles = [model_to_dict(role) for role in roles]
 
     return JSONResponse({
         "user_id": user.id,
+        "discord_id": user.discord_id,
         "username": user.username,
         "bytes_balance": user.bytes_balance,
         "bytes_received": bytes_received,
@@ -830,6 +1122,7 @@ async def bytes_leaderboard(request):
         if user.bytes_balance > 0:
             leaderboard.append({
                 "user_id": user.id,
+                "discord_id": user.discord_id,
                 "username": user.username,
                 "bytes_balance": user.bytes_balance,
                 "avatar_url": user.avatar_url
