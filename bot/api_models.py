@@ -166,6 +166,7 @@ class BytesConfig:
     max_give_amount: int = 50
     cooldown_minutes: int = 1440  # Default: 24 hours
     squad_join_bytes_required: int = 100  # Minimum bytes required to use squad join command
+    squad_switch_cost: int = 50  # Cost in bytes to switch squads
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

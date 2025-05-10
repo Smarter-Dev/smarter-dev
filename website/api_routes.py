@@ -750,16 +750,13 @@ async def bytes_create(request):
     db.commit()
     db.refresh(bytes_obj)
 
-    # Get total bytes received by the user
-    bytes_received = db.query(func.sum(Bytes.amount)).filter(Bytes.receiver_id == receiver.id).scalar() or 0
-
-    # Check if receiver has earned any roles based on total bytes received
+    # Check if receiver has earned any roles based on their bytes balance
     roles = db.query(BytesRole).filter(
         BytesRole.guild_id == data["guild_id"],
-        BytesRole.bytes_required <= bytes_received
+        BytesRole.bytes_required <= receiver.bytes_balance
     ).order_by(BytesRole.bytes_required.desc()).all()
 
-    print(roles, bytes_received, data["guild_id"])
+    print(roles, receiver.bytes_balance, data["guild_id"])
 
     earned_roles = []
     if roles:
@@ -1077,10 +1074,10 @@ async def user_bytes_balance(request):
         # Convert Discord guild ID to internal database guild ID
         guild = db.query(Guild).filter(Guild.discord_id == guild_id).first()
         if guild:
-            # Use bytes_received instead of bytes_balance for role eligibility
+            # Use bytes_balance instead of bytes_received for role eligibility
             roles = db.query(BytesRole).filter(
                 BytesRole.guild_id == guild.id,
-                BytesRole.bytes_required <= bytes_received
+                BytesRole.bytes_required <= user.bytes_balance
             ).order_by(BytesRole.bytes_required.desc()).all()
 
             if roles:
@@ -1759,10 +1756,9 @@ async def squad_member_add(request):
         db.refresh(bytes_config)
 
     # Check if user has enough bytes to use the squad join command
-    bytes_received = db.query(func.sum(Bytes.amount)).filter(Bytes.receiver_id == user.id).scalar() or 0
-    if bytes_received < bytes_config.squad_join_bytes_required:
+    if user.bytes_balance < bytes_config.squad_join_bytes_required:
         return JSONResponse({
-            "error": f"You need at least {bytes_config.squad_join_bytes_required} total bytes received to use the squad join command. You have: {bytes_received}"
+            "error": f"You need at least {bytes_config.squad_join_bytes_required} bytes to use the squad join command. You have: {user.bytes_balance} bytes."
         }, status_code=400)
 
     # Check if user is already a member of this squad
@@ -1781,6 +1777,41 @@ async def squad_member_add(request):
         Squad.guild_id == squad.guild_id,
         SquadMember.user_id == user.id
     ).all()
+
+    # If user is already in a squad, charge bytes for switching
+    if existing_memberships:
+        # Check if user has enough bytes to pay the squad switch cost
+        if user.bytes_balance < bytes_config.squad_switch_cost:
+            return JSONResponse({
+                "error": f"You need {bytes_config.squad_switch_cost} bytes to switch squads. You have: {user.bytes_balance} bytes."
+            }, status_code=400)
+
+        # Deduct the cost from the user's balance
+        user.bytes_balance -= bytes_config.squad_switch_cost
+
+        # Create a bytes transaction record for the squad switch
+        # Use a transaction from user to system (ID 0) to avoid affecting received bytes
+        # Get the system user (ID 0) or create it if it doesn't exist
+        system_user = db.query(DiscordUser).filter(DiscordUser.discord_id == 0).first()
+        if not system_user:
+            system_user = DiscordUser(
+                discord_id=0,
+                username="System",
+                bytes_balance=0  # System user has unlimited bytes
+            )
+            db.add(system_user)
+            db.commit()
+            db.refresh(system_user)
+
+        bytes_transaction = Bytes(
+            giver_id=user.id,
+            receiver_id=system_user.id,  # Transaction to system user
+            guild_id=squad.guild_id,
+            amount=bytes_config.squad_switch_cost,  # Positive amount
+            reason=f"Squad switch to {squad.name}"
+        )
+        db.add(bytes_transaction)
+        db.commit()  # Commit the bytes transaction immediately
 
     # Remove user from any existing squads in this guild
     for membership in existing_memberships:
@@ -1913,9 +1944,6 @@ async def user_eligible_squads(request):
             # If guild_id is not a valid integer, return error
             return JSONResponse({"error": "Invalid guild ID"}, status_code=400)
 
-    # Get user's bytes received
-    bytes_received = db.query(func.sum(Bytes.amount)).filter(Bytes.receiver_id == user.id).scalar() or 0
-
     # Get guild's bytes config
     bytes_config = None
     if internal_guild_id:
@@ -1928,10 +1956,10 @@ async def user_eligible_squads(request):
             db.refresh(bytes_config)
 
     # Check if user has enough bytes to use the squad join command
-    if bytes_config and bytes_received < bytes_config.squad_join_bytes_required:
+    if bytes_config and user.bytes_balance < bytes_config.squad_join_bytes_required:
         return JSONResponse({
-            "error": f"You need at least {bytes_config.squad_join_bytes_required} total bytes received to use the squad join command. You have: {bytes_received}",
-            "bytes_received": bytes_received,
+            "error": f"You need at least {bytes_config.squad_join_bytes_required} bytes to use the squad join command. You have: {user.bytes_balance} bytes.",
+            "bytes_balance": user.bytes_balance,
             "squads": []
         })
 
@@ -1957,5 +1985,5 @@ async def user_eligible_squads(request):
 
     return JSONResponse({
         "squads": [model_to_dict(squad) for squad in eligible_squads],
-        "bytes_received": bytes_received
+        "bytes_balance": user.bytes_balance
     })

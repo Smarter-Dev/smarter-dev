@@ -393,6 +393,7 @@ class BytesConfig(Base):
     max_give_amount = Column(Integer, default=50, nullable=False)  # Maximum bytes a user can give at once
     cooldown_minutes = Column(Integer, default=1440, nullable=False)  # Default: 24 hours (1440 minutes)
     squad_join_bytes_required = Column(Integer, default=100, nullable=False)  # Minimum bytes required to use squad join command
+    squad_switch_cost = Column(Integer, default=50, nullable=False)  # Cost in bytes to switch squads
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
