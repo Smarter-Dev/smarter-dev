@@ -173,6 +173,43 @@ async def get_user_bytes_info(client: APIClient, user_id: int, guild_id: int) ->
         return default_result
 
 
+async def get_user_bytes_info_fresh(client: APIClient, user_id: int, guild_id: int) -> Dict[str, Any]:
+    """
+    Get a user's bytes information directly from the API without using cache.
+    Use this when you need the most up-to-date information.
+
+    Args:
+        client: API client
+        user_id: Discord user ID
+        guild_id: Guild ID
+
+    Returns:
+        Dictionary with bytes information
+    """
+    try:
+        logger.info(f"Making fresh API request to /api/bytes/balance/{user_id}?guild_id={guild_id}")
+        response = await client._request("GET", f"/api/bytes/balance/{user_id}?guild_id={guild_id}")
+        result = await client._get_json(response)
+        logger.info(f"Fresh API response for bytes balance: {result}")
+
+        # Update the cache with this fresh data
+        now = datetime.now().timestamp()
+        cache_key = (user_id, guild_id)
+        bytes_balance_cache[cache_key] = (result, now)
+
+        return result
+    except Exception as e:
+        logger.error(f"Error getting fresh bytes info for user {user_id} in guild {guild_id}: {e}")
+        default_result = {
+            "user_id": user_id,
+            "bytes_balance": 0,
+            "bytes_received": 0,
+            "bytes_given": 0,
+            "earned_roles": []
+        }
+        return default_result
+
+
 async def check_for_earned_roles(client: APIClient, bot: lightbulb.BotApp, user_id: int, guild_id: int, channel_id: Optional[int] = None) -> None:
     """
     Check if a user has earned any roles based on their bytes balance and add them.
@@ -431,11 +468,11 @@ async def bytes_give(ctx: context.SlashContext) -> None:
 
 @bytes_group.child
 @lightbulb.option("user", "User to read bytes details for", type=hikari.User, required=False)
-@lightbulb.command("read", "Read a details of a user's bytes")
+@lightbulb.command("read", "Read the latest details of a user's bytes")
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def bytes_lookup(ctx: context.SlashContext) -> None:
     """
-    Check a user's bytes cache.
+    Check a user's latest bytes information directly from the database.
     """
     # Get API client
     client = ctx.bot.d.api_client
@@ -463,10 +500,10 @@ async def bytes_lookup(ctx: context.SlashContext) -> None:
         user_id = user_data["users"][0]["id"]
         logger.info(f"Found user with ID: {user_id}")
 
-        # Get bytes info
-        logger.info(f"Getting bytes info for user_id: {user_id}, guild_id: {guild_id}")
-        bytes_info = await get_user_bytes_info(client, user_id, guild_id)
-        logger.info(f"Bytes info response: {bytes_info}")
+        # Get bytes info - always use fresh data for the read command
+        logger.info(f"Getting fresh bytes info for user_id: {user_id}, guild_id: {guild_id}")
+        bytes_info = await get_user_bytes_info_fresh(client, user_id, guild_id)
+        logger.info(f"Fresh bytes info response: {bytes_info}")
 
         # Try multiple approaches to get the user's display name
         guild = ctx.get_guild()
@@ -487,7 +524,7 @@ async def bytes_lookup(ctx: context.SlashContext) -> None:
         given_formatted = format_bytes(bytes_info['bytes_given'])
 
         # Add fields with formatted values - set inline=False to stack them
-        embed.add_field(name="In Cache", value=balance_formatted, inline=False)
+        embed.add_field(name="Balance", value=balance_formatted, inline=False)
         embed.add_field(name="Received", value=received_formatted, inline=False) # Roles are based on this value
         embed.add_field(name="Sent", value=given_formatted, inline=False)
 
