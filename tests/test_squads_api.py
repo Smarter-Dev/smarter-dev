@@ -470,7 +470,7 @@ async def test_user_eligible_squads(async_client, test_db, api_token):
             assert response.status_code == 200
             data = response.json()
             assert len(data["squads"]) == 3  # Should be eligible for all squads
-            assert data["bytes_received"] == 200  # Bytes received from the transaction
+            assert data["bytes_balance"] == 200  # User's bytes balance
 
             # Add user to Bronze Squad
             response = await client.post(

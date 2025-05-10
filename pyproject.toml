@@ -8,6 +8,7 @@ dependencies = [
     "aiofiles",
     "alembic>=1.15.2",
     "bcrypt",
+    "fastapi>=0.115.12",
     "hikari",
     "hikari-lightbulb",
     "httpx",

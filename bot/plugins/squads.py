@@ -92,7 +92,7 @@ async def squads_list(ctx: context.SlashContext) -> None:
 async def squads_join(ctx: context.SlashContext) -> None:
     """
     Show squads the user is eligible to join and let them select one.
-    Users need a minimum number of total bytes received to use this command, which is set by server admins.
+    Users need a minimum bytes balance to use this command, which is set by server admins.
     """
     # Get API client
     client = ctx.bot.d.api_client
@@ -123,7 +123,24 @@ async def squads_join(ctx: context.SlashContext) -> None:
             f"/api/users/{ctx.author.id}/squads?guild_id={guild_id}"
         )
         previous_squads_data = await client._get_json(previous_squads_response)
-        previous_squad_ids = [s["id"] for s in previous_squads_data.get("squads", [])]
+        previous_squads = previous_squads_data.get("squads", [])
+        previous_squad_ids = [s["id"] for s in previous_squads]
+
+        # Get the bytes config to check the squad switch cost
+        bytes_config_response = await client._request(
+            "GET",
+            f"/api/bytes/config/{guild_id}"
+        )
+        bytes_config_data = await client._get_json(bytes_config_response)
+        squad_switch_cost = bytes_config_data.get("squad_switch_cost", 50)
+
+        # Get user's bytes balance
+        bytes_balance_response = await client._request(
+            "GET",
+            f"/api/bytes/balance/{ctx.author.id}?guild_id={guild_id}"
+        )
+        bytes_balance_data = await client._get_json(bytes_balance_response)
+        bytes_balance = bytes_balance_data.get("bytes_balance", 0)
 
         # Create action row with buttons for each squad
         action_row = ctx.bot.rest.build_message_action_row()
@@ -145,6 +162,15 @@ async def squads_join(ctx: context.SlashContext) -> None:
             description="Select a squad to join:",
             color=hikari.Color.from_rgb(114, 137, 218)  # Discord blurple
         )
+
+        # If user is already in a squad, inform them about the cost to switch
+        if previous_squads:
+            current_squad_name = previous_squads[0]["name"]
+            embed.add_field(
+                name="Squad Switch Cost",
+                value=f"You are currently in the **{current_squad_name}** squad. Switching to a new squad will cost **{squad_switch_cost} bytes**. You have **{bytes_balance} bytes**.",
+                inline=False
+            )
 
         # Add squads to embed
         for squad in data["squads"]:
@@ -194,6 +220,74 @@ async def squads_join(ctx: context.SlashContext) -> None:
                             flags=hikari.MessageFlag.EPHEMERAL
                         )
                         continue
+
+                    # If user is already in a squad and there's a cost to switch, show confirmation
+                    if previous_squads and squad_switch_cost > 0:
+                        # Check if user has enough bytes
+                        if bytes_balance < squad_switch_cost:
+                            await event.interaction.create_initial_response(
+                                hikari.ResponseType.MESSAGE_CREATE,
+                                f"You don't have enough bytes to switch squads. You need {squad_switch_cost} bytes, but you only have {bytes_balance} bytes.",
+                                flags=hikari.MessageFlag.EPHEMERAL
+                            )
+                            continue
+
+                        # Create confirmation buttons
+                        confirm_row = ctx.bot.rest.build_message_action_row()
+                        confirm_row.add_interactive_button(
+                            hikari.ButtonStyle.SUCCESS,
+                            f"confirm_join_{squad_id}",
+                            label="Confirm"
+                        )
+                        confirm_row.add_interactive_button(
+                            hikari.ButtonStyle.DANGER,
+                            "cancel_join",
+                            label="Cancel"
+                        )
+
+                        # Send confirmation message
+                        confirm_message = await event.interaction.create_initial_response(
+                            hikari.ResponseType.MESSAGE_CREATE,
+                            f"Switching from **{previous_squads[0]['name']}** to **{squad['name']}** will cost **{squad_switch_cost} bytes**. Do you want to proceed?",
+                            component=confirm_row,
+                            flags=hikari.MessageFlag.EPHEMERAL
+                        )
+
+                        # Wait for confirmation
+                        try:
+                            with ctx.bot.stream(hikari.InteractionCreateEvent, timeout=60.0) as confirm_stream:
+                                async for confirm_event in confirm_stream:
+                                    # Make sure it's a button interaction from the same user
+                                    if not isinstance(confirm_event.interaction, hikari.ComponentInteraction):
+                                        continue
+                                    if confirm_event.interaction.user.id != ctx.author.id:
+                                        continue
+
+                                    # Check which button was clicked
+                                    if confirm_event.interaction.custom_id == f"confirm_join_{squad_id}":
+                                        # User confirmed, proceed with join
+                                        # Store the confirmation interaction to use later
+                                        confirmation_interaction = confirm_event.interaction
+                                        # Acknowledge the interaction immediately to prevent "interaction failed" errors
+                                        await confirmation_interaction.create_initial_response(
+                                            hikari.ResponseType.DEFERRED_MESSAGE_CREATE,
+                                            flags=hikari.MessageFlag.EPHEMERAL
+                                        )
+                                        break
+                                    elif confirm_event.interaction.custom_id == "cancel_join":
+                                        # User cancelled
+                                        await confirm_event.interaction.create_initial_response(
+                                            hikari.ResponseType.MESSAGE_CREATE,
+                                            "Squad join cancelled.",
+                                            flags=hikari.MessageFlag.EPHEMERAL
+                                        )
+                                        return
+                                    else:
+                                        continue
+                        except asyncio.TimeoutError:
+                            # Handle timeout
+                            await ctx.respond("Squad join timed out.", flags=hikari.MessageFlag.EPHEMERAL)
+                            return
 
                     # Join the squad
                     join_response = await client._request(
@@ -252,12 +346,30 @@ async def squads_join(ctx: context.SlashContext) -> None:
                         except Exception as e:
                             logger.error(f"Error adding role {role_id} to user {ctx.author.id}: {e}")
 
-                        # Send success message
-                        await event.interaction.create_initial_response(
-                            hikari.ResponseType.MESSAGE_CREATE,
-                            f"You have joined the {squad['name']} squad!",
-                            flags=hikari.MessageFlag.EPHEMERAL
-                        )
+                        # Send success message - use the confirmation interaction if available
+                        if 'confirmation_interaction' in locals():
+                            try:
+                                # For confirmation interaction, use create_followup_message since we've already acknowledged it
+                                await confirmation_interaction.create_followup_message(
+                                    f"You have joined the {squad['name']} squad!",
+                                    flags=hikari.MessageFlag.EPHEMERAL
+                                )
+                            except Exception as e:
+                                logger.error(f"Error sending followup message: {e}")
+                                # Just log the error and continue
+                                logger.error(f"Failed to send success message to user {ctx.author.id}")
+                        else:
+                            try:
+                                # For the original interaction, use create_initial_response
+                                await event.interaction.create_initial_response(
+                                    hikari.ResponseType.MESSAGE_CREATE,
+                                    f"You have joined the {squad['name']} squad!",
+                                    flags=hikari.MessageFlag.EPHEMERAL
+                                )
+                            except Exception as e:
+                                logger.error(f"Error responding to interaction: {e}")
+                                # Just log the error and continue
+                                logger.error(f"Failed to send success message to user {ctx.author.id}")
 
                         # Also send a public message
                         role = ctx.get_guild().get_role(role_id)
@@ -269,11 +381,30 @@ async def squads_join(ctx: context.SlashContext) -> None:
                     else:
                         # Handle error
                         error_data = await client._get_json(join_response)
-                        await event.interaction.create_initial_response(
-                            hikari.ResponseType.MESSAGE_CREATE,
-                            f"Error joining squad: {error_data.get('error', 'Unknown error')}",
-                            flags=hikari.MessageFlag.EPHEMERAL
-                        )
+
+                        if 'confirmation_interaction' in locals():
+                            try:
+                                # For confirmation interaction, use create_followup_message since we've already acknowledged it
+                                await confirmation_interaction.create_followup_message(
+                                    f"Error joining squad: {error_data.get('error', 'Unknown error')}",
+                                    flags=hikari.MessageFlag.EPHEMERAL
+                                )
+                            except Exception as e:
+                                logger.error(f"Error sending followup message: {e}")
+                                # Just log the error and continue
+                                logger.error(f"Failed to send error message to user {ctx.author.id}")
+                        else:
+                            try:
+                                # For the original interaction, use create_initial_response
+                                await event.interaction.create_initial_response(
+                                    hikari.ResponseType.MESSAGE_CREATE,
+                                    f"Error joining squad: {error_data.get('error', 'Unknown error')}",
+                                    flags=hikari.MessageFlag.EPHEMERAL
+                                )
+                            except Exception as e:
+                                logger.error(f"Error responding to interaction: {e}")
+                                # Just log the error and continue
+                                logger.error(f"Failed to send error message to user {ctx.author.id}")
 
                     # Break out of the loop after handling the interaction
                     break
