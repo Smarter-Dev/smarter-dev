@@ -38,30 +38,8 @@
                     </svg>
                     Dashboard
                 </a>
-                <a href="/admin/redirects" class="nav-item {% if request.url.path.startswith('/admin/redirects') %}active{% endif %}">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
-                        <path d="M18 8h1a4 4 0 0 1 0 8h-1"></path>
-                        <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path>
-                        <line x1="6" y1="1" x2="6" y2="4"></line>
-                        <line x1="10" y1="1" x2="10" y2="4"></line>
-                        <line x1="14" y1="1" x2="14" y2="4"></line>
-                    </svg>
-                    Redirects
-                </a>
-                <a href="/admin/analytics" class="nav-item {% if request.url.path == '/admin/analytics' %}active{% endif %}">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
-                        <line x1="18" y1="20" x2="18" y2="10"></line>
-                        <line x1="12" y1="20" x2="12" y2="4"></line>
-                        <line x1="6" y1="20" x2="6" y2="14"></line>
-                    </svg>
-                    User Analytics
-                </a>
-                <a href="/admin/bot-analytics" class="nav-item {% if request.url.path == '/admin/bot-analytics' %}active{% endif %}">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
-                        <path d="M18 10h-4V4h4v6zm-6 0H8V4h4v6zM6 10H2V4h4v6zm12 8h-4v-6h4v6zm-6 0H8v-6h4v6zm-6 0H2v-6h4v6z"></path>
-                    </svg>
-                    Bot Traffic
-                </a>
+
+                <!-- Discord Section -->
                 <div class="nav-group {% if request.url.path.startswith('/admin/discord') %}active{% endif %}">
                     <div class="nav-group-header" id="discord-nav-toggle">
                         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
@@ -73,21 +51,64 @@
                         </svg>
                     </div>
                     <div class="nav-group-items {% if request.url.path.startswith('/admin/discord') %}expanded{% endif %}">
-                        <a href="/admin/discord" class="nav-subitem {% if request.url.path == '/admin/discord' %}active{% endif %}">Dashboard</a>
-                        <a href="/admin/discord/guilds" class="nav-subitem {% if request.url.path.startswith('/admin/discord/guilds') %}active{% endif %}">Guilds</a>
-                        <a href="/admin/discord/users" class="nav-subitem {% if request.url.path.startswith('/admin/discord/users') %}active{% endif %}">Users</a>
-                        <a href="/admin/discord/warnings" class="nav-subitem {% if request.url.path == '/admin/discord/warnings' %}active{% endif %}">Warnings</a>
+                        <a href="/admin/discord" class="nav-subitem {% if request.url.path == '/admin/discord' %}active{% endif %}">Overview</a>
+                        
+                        <!-- Server Management -->
+                        <div class="nav-subgroup">
+                            <div class="nav-subgroup-header">Server Management</div>
+                            <a href="/admin/discord/guilds" class="nav-subitem {% if request.url.path.startswith('/admin/discord/guilds') %}active{% endif %}">Servers</a>
+                            <a href="/admin/discord/users" class="nav-subitem {% if request.url.path.startswith('/admin/discord/users') %}active{% endif %}">Users</a>
+                            <a href="/admin/discord/warnings" class="nav-subitem {% if request.url.path == '/admin/discord/warnings' %}active{% endif %}">Warnings</a>
+                        </div>
 
-                        <a href="/admin/discord/bytes" class="nav-subitem {% if request.url.path == '/admin/discord/bytes' %}active{% endif %}">Bytes</a>
-                        <a href="/admin/discord/bytes/config" class="nav-subitem {% if request.url.path == '/admin/discord/bytes/config' %}active{% endif %}">Bytes Config</a>
-                        <a href="/admin/discord/bytes/roles" class="nav-subitem {% if request.url.path == '/admin/discord/bytes/roles' %}active{% endif %}">Bytes Roles</a>
-                        <a href="/admin/discord/squads" class="nav-subitem {% if request.url.path.startswith('/admin/discord/squads') %}active{% endif %}">Squads</a>
-                        <a href="/admin/discord/automod" class="nav-subitem {% if request.url.path == '/admin/discord/automod' %}active{% endif %}">Auto Moderation</a>
-                        <a href="/admin/discord/file-extensions" class="nav-subitem {% if request.url.path == '/admin/discord/file-extensions' %}active{% endif %}">File Extensions</a>
-                        <a href="/admin/discord/file-attachments" class="nav-subitem {% if request.url.path == '/admin/discord/file-attachments' %}active{% endif %}">File History</a>
-                        <a href="/admin/discord/api-keys" class="nav-subitem {% if request.url.path == '/admin/discord/api-keys' %}active{% endif %}">API Keys</a>
+                        <!-- Auto Moderation -->
+                        <div class="nav-subgroup">
+                            <div class="nav-subgroup-header">Auto Moderation</div>
+                            <a href="/admin/discord/automod" class="nav-subitem {% if request.url.path == '/admin/discord/automod' %}active{% endif %}">Word Filter</a>
+                            <a href="/admin/discord/file-extensions" class="nav-subitem {% if request.url.path == '/admin/discord/file-extensions' %}active{% endif %}">File Extensions</a>
+                        </div>
+
+                        <!-- Bytes System -->
+                        <div class="nav-subgroup">
+                            <div class="nav-subgroup-header">Bytes System</div>
+                            <a href="/admin/discord/bytes" class="nav-subitem {% if request.url.path == '/admin/discord/bytes' %}active{% endif %}">Overview</a>
+                            <a href="/admin/discord/bytes/config" class="nav-subitem {% if request.url.path == '/admin/discord/bytes/config' %}active{% endif %}">Configuration</a>
+                            <a href="/admin/discord/bytes/roles" class="nav-subitem {% if request.url.path == '/admin/discord/bytes/roles' %}active{% endif %}">Roles</a>
+                        </div>
+
+                        <!-- Squads -->
+                        <div class="nav-subgroup">
+                            <div class="nav-subgroup-header">Squads</div>
+                            <a href="/admin/discord/squads" class="nav-subitem {% if request.url.path.startswith('/admin/discord/squads') %}active{% endif %}">Manage Squads</a>
+                        </div>
+
+                        <!-- API -->
+                        <div class="nav-subgroup">
+                            <div class="nav-subgroup-header">API</div>
+                            <a href="/admin/discord/api-keys" class="nav-subitem {% if request.url.path == '/admin/discord/api-keys' %}active{% endif %}">API Keys</a>
+                        </div>
                     </div>
                 </div>
+
+                <!-- Website Section -->
+                <div class="nav-group {% if request.url.path.startswith('/admin/website') %}active{% endif %}">
+                    <div class="nav-group-header" id="website-nav-toggle">
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"></path>
+                        </svg>
+                        <span>Website</span>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-chevron">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </div>
+                    <div class="nav-group-items {% if request.url.path.startswith('/admin/website') %}expanded{% endif %}">
+                        <a href="/admin/redirects" class="nav-subitem {% if request.url.path.startswith('/admin/redirects') %}active{% endif %}">Redirects</a>
+                        <a href="/admin/analytics" class="nav-subitem {% if request.url.path == '/admin/analytics' %}active{% endif %}">User Analytics</a>
+                        <a href="/admin/bot-analytics" class="nav-subitem {% if request.url.path == '/admin/bot-analytics' %}active{% endif %}">Bot Traffic</a>
+                    </div>
+                </div>
+
+                <!-- Settings -->
                 <a href="/admin/settings" class="nav-item {% if request.url.path.startswith('/admin/settings') %}active{% endif %}">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="nav-icon">
                         <circle cx="12" cy="12" r="3"></circle>
@@ -110,9 +131,13 @@
 
         <main class="content">
             <header class="content-header">
-                <h1 class="page-title">{% block page_title %}Dashboard{% endblock %}</h1>
-                <div class="user-info">
-                    <span class="username">{{ request.user.display_name }}</span>
+                <div class="header-left">
+                    {% block header_actions %}{% endblock %}
+                </div>
+                <div class="header-right">
+                    <div class="user-info">
+                        <span class="username">{{ request.user.display_name }}</span>
+                    </div>
                 </div>
             </header>
 
@@ -134,14 +159,15 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            // Discord navigation toggle
-            const discordNavToggle = document.getElementById('discord-nav-toggle');
-            const discordNavGroup = discordNavToggle.closest('.nav-group');
-            const discordNavItems = discordNavGroup.querySelector('.nav-group-items');
-
-            discordNavToggle.addEventListener('click', function() {
-                discordNavItems.classList.toggle('expanded');
-                discordNavGroup.classList.toggle('active');
+            // Navigation toggles
+            const navToggles = document.querySelectorAll('.nav-group-header');
+            navToggles.forEach(toggle => {
+                toggle.addEventListener('click', function() {
+                    const navGroup = this.closest('.nav-group');
+                    const navItems = navGroup.querySelector('.nav-group-items');
+                    navItems.classList.toggle('expanded');
+                    navGroup.classList.toggle('active');
+                });
             });
         });
     </script>
