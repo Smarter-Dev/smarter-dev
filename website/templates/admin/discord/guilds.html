@@ -1,0 +1,234 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Discord Guilds - Smarter.Dev Admin{% endblock %}
+
+{% block page_title %}Discord Guilds{% endblock %}
+
+{% block content %}
+<div class="guilds-page">
+    <div class="section-header">
+        <h3 class="section-title">Guild Settings</h3>
+    </div>
+
+    <div class="data-section">
+        <div class="table-container">
+            <table class="data-table" id="guilds-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Moderator Role</th>
+                        <th>Joined</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for guild in guilds %}
+                    <tr>
+                        <td>{{ guild.name }}</td>
+                        <td>{% if guild.moderator_role_id %}{{ role_names.get(guild.moderator_role_id, 'Unknown role') }}{% else %}Not set{% endif %}</td>
+                        <td>{{ guild.joined_at_humanized }}</td>
+                        <td>
+                            <button class="btn btn-sm btn-secondary edit-guild-btn"
+                                data-id="{{ guild.id }}"
+                                data-name="{{ guild.name }}"
+                                data-discord-id="{{ guild.discord_id }}"
+                                data-moderator-role-id="{{ guild.moderator_role_id or '' }}">
+                                Edit
+                            </button>
+                            <a href="/admin/discord/guilds/{{ guild.id }}/roles" class="btn btn-sm btn-primary">View Roles</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    {% if not guilds %}
+                    <tr>
+                        <td colspan="4" class="empty-table">No guilds found.</td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="modal" id="edit-guild-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Edit Guild</h3>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="edit-guild-form" method="POST">
+                    <input type="hidden" id="guild_id" name="guild_id">
+
+                    <div class="form-group">
+                        <label for="name">Guild Name:</label>
+                        <input type="text" id="name" name="name" required>
+                    </div>
+
+                    <input type="hidden" id="discord_id" name="discord_id">
+
+                    <div class="form-group">
+                        <label for="moderator_role_id">Moderator Role ID:</label>
+                        <input type="text" id="moderator_role_id" name="moderator_role_id">
+                        <span class="help-text">Set this to the Discord role ID for moderators, or leave blank to clear</span>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Save Changes</button>
+                        <button type="button" class="btn btn-secondary" id="cancel-edit">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Get the modal
+    const modal = document.getElementById('edit-guild-modal');
+    const editForm = document.getElementById('edit-guild-form');
+
+    // Get all edit buttons
+    const editButtons = document.querySelectorAll('.edit-guild-btn');
+
+    // Get the close button
+    const closeBtn = document.querySelector('.close');
+    const cancelBtn = document.getElementById('cancel-edit');
+
+    // When the user clicks on an edit button, open the modal
+    editButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const id = this.getAttribute('data-id');
+            const name = this.getAttribute('data-name');
+            const discordId = this.getAttribute('data-discord-id');
+            const moderatorRoleId = this.getAttribute('data-moderator-role-id');
+
+            // Set form values
+            document.getElementById('guild_id').value = id;
+            document.getElementById('name').value = name;
+            document.getElementById('discord_id').value = discordId;
+            document.getElementById('moderator_role_id').value = moderatorRoleId;
+
+            // Set form action
+            editForm.action = `/admin/discord/guilds/${id}/edit`;
+
+            // Show the modal
+            modal.style.display = 'block';
+        });
+    });
+
+    // When the user clicks on the close button or cancel, close the modal
+    closeBtn.addEventListener('click', function() {
+        modal.style.display = 'none';
+    });
+
+    cancelBtn.addEventListener('click', function() {
+        modal.style.display = 'none';
+    });
+
+    // When the user clicks anywhere outside of the modal, close it
+    window.addEventListener('click', function(event) {
+        if (event.target == modal) {
+            modal.style.display = 'none';
+        }
+    });
+</script>
+
+<style>
+    .guilds-page {
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+    }
+
+    .section-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+
+    .data-section {
+        background-color: var(--card-bg);
+        border-radius: 8px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    /* Modal styles */
+    .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-content {
+        background-color: var(--card-bg);
+        margin: 10% auto;
+        padding: 0;
+        border-radius: 8px;
+        width: 500px;
+        max-width: 90%;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .modal-body {
+        padding: 1.5rem;
+    }
+
+    .close {
+        color: var(--text-muted);
+        font-size: 1.5rem;
+        font-weight: bold;
+        cursor: pointer;
+    }
+
+    .close:hover {
+        color: var(--text-color);
+    }
+
+    .form-group {
+        margin-bottom: 1rem;
+    }
+
+    .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+    }
+
+    .form-group input {
+        width: 100%;
+        padding: 0.5rem;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        background-color: var(--input-bg);
+        color: var(--text-color);
+    }
+
+    .help-text {
+        display: block;
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-top: 0.25rem;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 1rem;
+        margin-top: 1.5rem;
+    }
+</style>
+{% endblock %}
