@@ -9,7 +9,7 @@ dependencies = [
     "alembic>=1.15.2",
     "bcrypt",
     "fastapi>=0.115.12",
-    "hikari",
+    "hikari[server]",
     "hikari-lightbulb",
     "httpx",
     "itsdangerous",
@@ -22,6 +22,7 @@ dependencies = [
     "starlette",
     "starlette-testclient>=0.4.1",
     "uvicorn[standard]",
+    "humanize>=4.12.3",
 ]
 
 [dependency-groups]
