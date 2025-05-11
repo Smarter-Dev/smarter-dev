@@ -128,6 +128,7 @@ class Guild(Base):
     icon_url = Column(String, nullable=True)
     joined_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=func.now())
+    moderator_role_id = Column(BigInteger, nullable=True)  # Discord role ID for moderators
 
     # Relationships
     users = relationship("GuildMember", back_populates="guild")

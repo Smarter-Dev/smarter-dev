@@ -1,5 +1,10 @@
 import uvicorn
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 from starlette.applications import Starlette
 from starlette.routing import Route, Mount
 from starlette.staticfiles import StaticFiles
@@ -22,7 +27,8 @@ from .discord_admin_routes import (
     admin_discord_bytes, admin_discord_bytes_config, admin_discord_bytes_roles,
     admin_discord_give_bytes, admin_discord_automod,
     admin_discord_squads, admin_discord_squad_create, admin_discord_squad_edit,
-    admin_discord_squad_delete, admin_discord_squad_members
+    admin_discord_squad_delete, admin_discord_squad_members,
+    admin_discord_guilds, admin_discord_guild_edit, admin_discord_guild_roles
 )
 from .api_routes import (
     api_token, guild_list, guild_detail, guild_create, guild_update,
@@ -126,6 +132,9 @@ routes = [
 
     # Discord admin routes
     Route("/admin/discord", admin_discord_dashboard, methods=["GET"]),
+    Route("/admin/discord/guilds", admin_discord_guilds, methods=["GET"]),
+    Route("/admin/discord/guilds/{id:int}/edit", admin_discord_guild_edit, methods=["POST"]),
+    Route("/admin/discord/guilds/{id:int}/roles", admin_discord_guild_roles, methods=["GET"]),
     Route("/admin/discord/users", admin_discord_users, methods=["GET"]),
     Route("/admin/discord/users/{id:int}", admin_discord_user_detail, methods=["GET"]),
     Route("/admin/discord/users/{id:int}/give-bytes", admin_discord_give_bytes, methods=["POST"]),
