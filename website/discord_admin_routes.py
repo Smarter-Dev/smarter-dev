@@ -1,11 +1,17 @@
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Union
 import json
+import httpx
+import os
+import hikari
+import humanize
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, JSONResponse
 from starlette.templating import Jinja2Templates
+
+from .discord_rest import get_guild_roles, get_role_name
 
 from .models import (
     APIKey, Guild, DiscordUser, GuildMember, UserNote,
@@ -180,6 +186,112 @@ async def admin_discord_squad_members(request):
             "squad": squad,
             "guild": guild,
             "members": members
+        }
+    )
+
+# Discord Guilds management
+async def admin_discord_guilds(request):
+    """
+    Manage Discord guilds
+    """
+
+    # Get DB session
+    db = next(get_db())
+
+    # Get all guilds
+    guilds = db.query(Guild).order_by(Guild.name).all()
+
+    # Create a mapping of role IDs to role names
+    role_names = {}
+    for guild in guilds:
+        if guild.moderator_role_id:
+            try:
+                # Fetch role name
+                role_name = await get_role_name(guild.discord_id, guild.moderator_role_id)
+                if role_name:
+                    role_names[guild.moderator_role_id] = role_name
+            except Exception as e:
+                print(f"Error fetching role name for guild {guild.discord_id}: {e}")
+
+    # Format dates with humanize
+    for guild in guilds:
+        if guild.joined_at:
+            guild.joined_at_humanized = humanize.naturaltime(guild.joined_at)
+        else:
+            guild.joined_at_humanized = "Unknown"
+
+    return templates.TemplateResponse(
+        "admin/discord/guilds.html",
+        {
+            "request": request,
+            "guilds": guilds,
+            "role_names": role_names
+        }
+    )
+
+async def admin_discord_guild_edit(request):
+    """
+    Edit a guild
+    """
+    guild_id = request.path_params["id"]
+    db = next(get_db())
+
+    # Get the guild
+    guild = db.query(Guild).filter(Guild.id == guild_id).first()
+    if not guild:
+        return RedirectResponse(url="/admin/discord/guilds", status_code=303)
+
+    if request.method == "POST":
+        form_data = await request.form()
+        name = form_data.get("name")
+        moderator_role_id = form_data.get("moderator_role_id")
+
+        # Update guild
+        guild.name = name
+        if moderator_role_id:
+            guild.moderator_role_id = int(moderator_role_id)
+        else:
+            guild.moderator_role_id = None
+
+        db.commit()
+
+        # Redirect to guilds list
+        return RedirectResponse(url="/admin/discord/guilds", status_code=303)
+
+    return RedirectResponse(url="/admin/discord/guilds", status_code=303)
+
+async def admin_discord_guild_roles(request):
+    """
+    View roles for a guild
+    """
+
+    guild_id = request.path_params["id"]
+    db = next(get_db())
+
+    # Get the guild
+    guild = db.query(Guild).filter(Guild.id == guild_id).first()
+    if not guild:
+        return RedirectResponse(url="/admin/discord/guilds", status_code=303)
+
+    # Fetch roles from Discord
+    roles = []
+    error_message = None
+    try:
+        print(f"Fetching roles for guild ID: {guild_id}, discord_id: {guild.discord_id}")
+        roles = await get_guild_roles(guild.discord_id)
+        if not roles:
+            error_message = "No roles found or unable to fetch roles from Discord."
+    except Exception as e:
+        error_message = f"Error fetching roles: {e}"
+        print(error_message)
+
+    return templates.TemplateResponse(
+        "admin/discord/guild_roles.html",
+        {
+            "request": request,
+            "guild": guild,
+            "roles": roles,
+            "error_message": error_message
         }
     )
 
