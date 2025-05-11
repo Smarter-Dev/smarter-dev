@@ -12,3 +12,4 @@ wheels/
 .idea
 /smarter_dev.db
 .env
+smarter_dev.db
