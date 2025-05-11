@@ -18,11 +18,12 @@ engine = create_engine(
     SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False},
     poolclass=QueuePool,
-    pool_size=5,  # Default size
-    max_overflow=10,  # Default overflow
-    pool_timeout=30,  # Default timeout
-    pool_recycle=1800,  # Recycle connections after 30 minutes
-    pool_pre_ping=True  # Check connection validity before using it
+    pool_size=20,  # Increased from 5
+    max_overflow=20,  # Increased from 10
+    pool_timeout=60,  # Increased from 30
+    pool_recycle=300,  # Reduced from 1800 to recycle connections more frequently
+    pool_pre_ping=True,  # Keep this to check connection validity
+    echo=False  # Set to True for debugging SQL queries
 )
 
 # Add event listeners for connection pool monitoring
@@ -36,14 +37,22 @@ def checkin_connection(dbapi_connection, connection_record):
     if checkout_time is not None:
         connection_record.info.pop('checkout_time')
         total_time = time.time() - checkout_time
-        if total_time > 5:  # Log slow connections (more than 5 seconds)
+        if total_time > 3:  # Reduced from 5 to catch slower connections earlier
             logger.warning(f"Connection held for {total_time:.2f} seconds")
+
+@event.listens_for(engine, "connect")
+def connect(dbapi_connection, connection_record):
+    logger.debug("New database connection established")
+
+@event.listens_for(engine, "reset")
+def reset_connection(dbapi_connection, connection_record):
+    logger.debug("Connection reset")
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
 
-# Dependency to get DB session
+# Dependency to get DB session with timeout
 def get_db():
     db = SessionLocal()
     try:
