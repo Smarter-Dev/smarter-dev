@@ -96,9 +96,20 @@ def create_bot() -> lightbulb.BotApp:
         # Sync the guild with the API
         await api_sync.sync_guild(event.guild)
 
-        # Fetch and sync all members in batches of 100
+        # For large guilds, we don't want to sync all members at once
+        # Instead, we'll sync them on-demand as they interact with the bot
         try:
-            logger.info(f"Fetching members for guild {event.guild_id}...")
+            # Get guild member count to decide how to proceed
+            guild = await bot.rest.fetch_guild(event.guild_id)
+            member_count = guild.approximate_member_count or 0
+
+            if member_count > 1000:
+                logger.info(f"Large guild detected with {member_count} members. Will sync users on-demand.")
+                # For large guilds, we'll only sync active users as they interact with the bot
+                return
+
+            # For smaller guilds, proceed with syncing all members in batches
+            logger.info(f"Fetching members for guild {event.guild_id} (approx. {member_count} members)...")
 
             # Get all members
             members = await bot.rest.fetch_members(event.guild_id)
@@ -193,6 +204,7 @@ def create_bot() -> lightbulb.BotApp:
     # Add a sync command for admins to manually trigger synchronization
     @bot.command
     @lightbulb.add_checks(lightbulb.owner_only)
+    @lightbulb.option("force", "Force sync all members even for large guilds", type=bool, required=False, default=False)
     @lightbulb.command("sync", "Manually sync the current guild with the API")
     @lightbulb.implements(lightbulb.PrefixCommand, lightbulb.SlashCommand)
     async def sync_command(ctx: lightbulb.Context) -> None:
@@ -204,7 +216,7 @@ def create_bot() -> lightbulb.BotApp:
             await ctx.respond("This command can only be used in a guild.")
             return
 
-        await ctx.respond("Syncing guild and members with API...")
+        await ctx.respond("Syncing guild with API...")
 
         # Get the guild
         guild = await bot.rest.fetch_guild(ctx.guild_id)
@@ -212,7 +224,19 @@ def create_bot() -> lightbulb.BotApp:
         # Sync the guild
         await api_sync.sync_guild(guild)
 
+        # Check if this is a large guild
+        member_count = guild.approximate_member_count or 0
+        force_sync = ctx.options.force if hasattr(ctx.options, 'force') else False
+
+        if member_count > 1000 and not force_sync:
+            await ctx.respond(f"This is a large guild with approximately {member_count} members. "
+                             f"Syncing all members would be resource-intensive. "
+                             f"Users will be synced on-demand as they interact with the bot. "
+                             f"Use `/sync force:true` to force a full sync if needed.")
+            return
+
         # Get and sync all members in batches of 100
+        await ctx.respond("Fetching all members...")
         members = await bot.rest.fetch_members(ctx.guild_id)
         member_list = [member for member in members if not member.is_bot]
 
