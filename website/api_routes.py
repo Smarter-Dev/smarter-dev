@@ -10,7 +10,8 @@ from .models import (
     APIKey, Guild, DiscordUser, GuildMember, UserNote,
     UserWarning, ModerationCase, PersistentRole, TemporaryRole,
     ChannelLock, BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown,
-    AutoModRegexRule, AutoModRateLimit, Squad, SquadMember
+    AutoModRegexRule, AutoModRateLimit, Squad, SquadMember,
+    AutoModFileExtensionRule, FileAttachment
 )
 from .database import get_db
 from .api_auth import create_jwt_token, verify_api_key, generate_api_key
@@ -1992,3 +1993,198 @@ async def user_eligible_squads(request):
         "squads": [model_to_dict(squad) for squad in eligible_squads],
         "bytes_balance": user.bytes_balance
     })
+
+# File extension rule endpoints
+@api_error_handler
+async def file_extension_rules_list(request):
+    """
+    List all file extension rules for a guild
+    """
+    guild_id = request.path_params["guild_id"]
+    db = next(get_db())
+
+    rules = db.query(AutoModFileExtensionRule).filter(
+        AutoModFileExtensionRule.guild_id == guild_id
+    ).all()
+
+    return JSONResponse({
+        "rules": [model_to_dict(rule) for rule in rules]
+    })
+
+@api_error_handler
+async def file_extension_rule_detail(request):
+    """
+    Get details of a specific file extension rule
+    """
+    rule_id = request.path_params["rule_id"]
+    db = next(get_db())
+
+    rule = db.query(AutoModFileExtensionRule).filter(
+        AutoModFileExtensionRule.id == rule_id
+    ).first()
+
+    if not rule:
+        return JSONResponse({"error": "Rule not found"}, status_code=404)
+
+    return JSONResponse(model_to_dict(rule))
+
+@api_error_handler
+async def file_extension_rule_create(request):
+    """
+    Create a new file extension rule
+    """
+    data = await request.json()
+    db = next(get_db())
+
+    # Check if rule already exists
+    existing = db.query(AutoModFileExtensionRule).filter_by(
+        guild_id=data["guild_id"],
+        extension=data["extension"]
+    ).first()
+
+    if existing:
+        return JSONResponse({"error": "Rule already exists"}, status_code=400)
+
+    # Create new rule
+    rule = AutoModFileExtensionRule(
+        guild_id=data["guild_id"],
+        extension=data["extension"],
+        is_allowed=data["is_allowed"],
+        warning_message=data.get("warning_message")
+    )
+
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+
+    return JSONResponse(model_to_dict(rule), status_code=201)
+
+@api_error_handler
+async def file_extension_rule_update(request):
+    """
+    Update a file extension rule
+    """
+    rule_id = request.path_params["rule_id"]
+    data = await request.json()
+    db = next(get_db())
+
+    rule = db.query(AutoModFileExtensionRule).filter(
+        AutoModFileExtensionRule.id == rule_id
+    ).first()
+
+    if not rule:
+        return JSONResponse({"error": "Rule not found"}, status_code=404)
+
+    # Update fields
+    if "is_allowed" in data:
+        rule.is_allowed = data["is_allowed"]
+    if "warning_message" in data:
+        rule.warning_message = data["warning_message"]
+
+    db.commit()
+    db.refresh(rule)
+
+    return JSONResponse(model_to_dict(rule))
+
+@api_error_handler
+async def file_extension_rule_delete(request):
+    """
+    Delete a file extension rule
+    """
+    rule_id = request.path_params["rule_id"]
+    db = next(get_db())
+
+    rule = db.query(AutoModFileExtensionRule).filter(
+        AutoModFileExtensionRule.id == rule_id
+    ).first()
+
+    if not rule:
+        return JSONResponse({"error": "Rule not found"}, status_code=404)
+
+    db.delete(rule)
+    db.commit()
+
+    return JSONResponse({"status": "success"})
+
+# File attachment tracking endpoints
+@api_error_handler
+async def file_attachments_list(request):
+    """
+    List recent file attachments for a guild
+    """
+    guild_id = request.path_params["guild_id"]
+    db = next(get_db())
+
+    # Get query parameters
+    limit = int(request.query_params.get("limit", 50))
+    offset = int(request.query_params.get("offset", 0))
+    extension = request.query_params.get("extension")
+    was_allowed = request.query_params.get("was_allowed")
+    was_deleted = request.query_params.get("was_deleted")
+
+    # Build query
+    query = db.query(FileAttachment).filter(
+        FileAttachment.guild_id == guild_id
+    )
+
+    if extension:
+        query = query.filter(FileAttachment.extension == extension)
+    if was_allowed is not None:
+        query = query.filter(FileAttachment.was_allowed == (was_allowed.lower() == "true"))
+    if was_deleted is not None:
+        query = query.filter(FileAttachment.was_deleted == (was_deleted.lower() == "true"))
+
+    # Get total count
+    total = query.count()
+
+    # Get paginated results
+    attachments = query.order_by(FileAttachment.created_at.desc()).offset(offset).limit(limit).all()
+
+    return JSONResponse({
+        "attachments": [model_to_dict(att) for att in attachments],
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    })
+
+@api_error_handler
+async def file_attachment_detail(request):
+    """
+    Get details of a specific file attachment
+    """
+    attachment_id = request.path_params["attachment_id"]
+    db = next(get_db())
+
+    attachment = db.query(FileAttachment).filter(
+        FileAttachment.id == attachment_id
+    ).first()
+
+    if not attachment:
+        return JSONResponse({"error": "Attachment not found"}, status_code=404)
+
+    return JSONResponse(model_to_dict(attachment))
+
+@api_error_handler
+async def file_attachment_create(request):
+    """
+    Create a new file attachment record
+    """
+    data = await request.json()
+    db = next(get_db())
+
+    attachment = FileAttachment(
+        guild_id=data["guild_id"],
+        channel_id=data["channel_id"],
+        message_id=data.get("message_id"),
+        user_id=data["user_id"],
+        extension=data["extension"],
+        attachment_url=data["attachment_url"],
+        was_allowed=data["was_allowed"],
+        was_deleted=data.get("was_deleted", False)
+    )
+
+    db.add(attachment)
+    db.commit()
+    db.refresh(attachment)
+
+    return JSONResponse(model_to_dict(attachment), status_code=201)

@@ -180,6 +180,88 @@ def create_bot() -> lightbulb.BotApp:
             # Sync the user with the API
             await api_sync.sync_user(event.user, event.guild_id)
 
+    @bot.listen(hikari.MessageCreateEvent)
+    async def on_message(event: hikari.MessageCreateEvent) -> None:
+        """
+        Event fired when a message is created.
+        """
+        # Ignore messages from bots
+        if event.is_bot:
+            return
+
+        # Handle file attachments
+        if event.message.attachments:
+            # Get file extension rules for the guild
+            rules = await bot.d.api_client.get_file_extension_rules(event.guild_id)
+            if not rules:
+                return
+
+            # Process each attachment
+            for attachment in event.message.attachments:
+                # Get file extension (without the dot)
+                extension = attachment.filename.split(".")[-1].lower() if "." in attachment.filename else ""
+
+                # Find matching rule
+                rule = next((r for r in rules if r["extension"] == extension), None)
+
+                # If no rule exists, treat as blocked
+                if not rule:
+                    # Track the blocked attachment
+                    await bot.d.api_client.create_file_attachment(
+                        guild_id=event.guild_id,
+                        channel_id=event.channel_id,
+                        message_id=event.message.id,
+                        user_id=event.author.id,
+                        extension=extension,
+                        attachment_url=attachment.url,
+                        was_allowed=False,
+                        was_deleted=True
+                    )
+
+                    # Delete the message
+                    await event.message.delete()
+                    await event.message.respond(
+                        f"File type `.{extension}` is not allowed in this server.",
+                        user_mentions=False
+                    )
+                    return
+
+                # If rule exists but file is not allowed
+                if not rule["is_allowed"]:
+                    # Track the blocked attachment
+                    await bot.d.api_client.create_file_attachment(
+                        guild_id=event.guild_id,
+                        channel_id=event.channel_id,
+                        message_id=event.message.id,
+                        user_id=event.author.id,
+                        extension=extension,
+                        attachment_url=attachment.url,
+                        was_allowed=False,
+                        was_deleted=True
+                    )
+
+                    # Delete the message
+                    await event.message.delete()
+                    warning = rule["warning_message"] or f"File type `.{extension}` is not allowed in this server."
+                    await event.message.respond(warning, user_mentions=False)
+                    return
+
+                # If file is allowed but has a warning message
+                if rule["warning_message"]:
+                    await event.message.respond(rule["warning_message"], user_mentions=False)
+
+                # Track the allowed attachment
+                await bot.d.api_client.create_file_attachment(
+                    guild_id=event.guild_id,
+                    channel_id=event.channel_id,
+                    message_id=event.message.id,
+                    user_id=event.author.id,
+                    extension=extension,
+                    attachment_url=attachment.url,
+                    was_allowed=True,
+                    was_deleted=False
+                )
+
     # Register shutdown handler
     @bot.listen(hikari.StoppingEvent)
     async def on_stopping(event: hikari.StoppingEvent) -> None:

@@ -1,3 +1,4 @@
+import os
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, declarative_base
 from sqlalchemy.pool import QueuePool
@@ -8,8 +9,9 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Using SQLite for simplicity, can be changed to a more robust DB in production
-SQLALCHEMY_DATABASE_URL = "sqlite:///./smarter_dev.db"
+# Use absolute path for the database
+DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), 'smarter_dev.db'))
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 # Configure engine with optimized pool settings
 engine = create_engine(

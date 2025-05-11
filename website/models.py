@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Float, BigInteger, func
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Boolean, Float, BigInteger, func, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import datetime
@@ -139,6 +139,8 @@ class Guild(Base):
     bytes_config = relationship("BytesConfig", back_populates="guild", uselist=False)
     bytes_roles = relationship("BytesRole", back_populates="guild")
     squads = relationship("Squad", back_populates="guild")
+    file_extension_rules = relationship("AutoModFileExtensionRule", back_populates="guild", cascade="all, delete-orphan")
+    file_attachments = relationship("FileAttachment", back_populates="guild", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Guild {self.name} ({self.discord_id})>"
@@ -170,6 +172,7 @@ class DiscordUser(Base):
     command_usage = relationship("CommandUsage", back_populates="user")
     bytes_cooldowns = relationship("BytesCooldown", back_populates="user")
     squad_memberships = relationship("SquadMember", back_populates="user")
+    file_attachments = relationship("FileAttachment", back_populates="user", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<DiscordUser {self.username} ({self.discord_id})>"
@@ -522,3 +525,46 @@ class SquadMember(Base):
 
     def __repr__(self):
         return f"<SquadMember {self.user_id} in squad {self.squad_id}>"
+
+
+class AutoModFileExtensionRule(Base):
+    """
+    Rules for handling file attachments based on their extensions.
+    """
+    __tablename__ = "automod_file_extension_rules"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(BigInteger, ForeignKey("guilds.id"), nullable=False)
+    extension = Column(String, nullable=False)  # File extension without the dot
+    is_allowed = Column(Boolean, nullable=False)  # True if allowed, False if blocked
+    warning_message = Column(String, nullable=True)  # Message to show if extension is warned
+    created_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+
+    # Relationships
+    guild = relationship("Guild", back_populates="file_extension_rules")
+
+    __table_args__ = (
+        UniqueConstraint('guild_id', 'extension', name='uix_guild_extension'),
+    )
+
+class FileAttachment(Base):
+    """
+    Tracks file attachments for review and management.
+    """
+    __tablename__ = "file_attachments"
+
+    id = Column(Integer, primary_key=True)
+    guild_id = Column(BigInteger, ForeignKey("guilds.id"), nullable=False)
+    channel_id = Column(BigInteger, nullable=False)
+    message_id = Column(BigInteger, nullable=True)  # Null if message was deleted
+    user_id = Column(BigInteger, ForeignKey("discord_users.id"), nullable=False)
+    extension = Column(String, nullable=False)
+    attachment_url = Column(String, nullable=False)
+    was_allowed = Column(Boolean, nullable=False)  # Whether the file was allowed
+    was_deleted = Column(Boolean, nullable=False, default=False)  # Whether the message was deleted
+    created_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
+
+    # Relationships
+    guild = relationship("Guild", back_populates="file_attachments")
+    user = relationship("DiscordUser", back_populates="file_attachments")

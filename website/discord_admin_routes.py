@@ -17,7 +17,8 @@ from .models import (
     APIKey, Guild, DiscordUser, GuildMember, UserNote,
     UserWarning, ModerationCase, PersistentRole, TemporaryRole,
     ChannelLock, BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown,
-    AutoModRegexRule, AutoModRateLimit, Squad, SquadMember
+    AutoModRegexRule, AutoModRateLimit, Squad, SquadMember,
+    AutoModFileExtensionRule, FileAttachment
 )
 from .database import get_db
 from .api_auth import generate_api_key
@@ -979,5 +980,157 @@ async def admin_discord_automod(request):
             "rate_limits": rate_limits,
             "guilds": guilds,
             "guild_names": guild_names
+        }
+    )
+
+# File extension management routes
+async def admin_discord_file_extensions(request):
+    """
+    Manage file extension rules
+    """
+    # Get DB session
+    db = next(get_db())
+
+    # Get all guilds for the form
+    guilds = db.query(Guild).order_by(Guild.name).all()
+
+    # Get selected guild
+    guild_id = request.query_params.get("guild_id")
+    selected_guild = None
+    rules = []
+
+    if guild_id:
+        selected_guild = db.query(Guild).filter(Guild.id == guild_id).first()
+        if selected_guild:
+            rules = db.query(AutoModFileExtensionRule).filter(
+                AutoModFileExtensionRule.guild_id == selected_guild.id
+            ).order_by(AutoModFileExtensionRule.extension).all()
+
+    if request.method == "POST":
+        form_data = await request.form()
+        action = form_data.get("action")
+
+        if action == "create":
+            # Create new rule
+            guild_id = int(form_data.get("guild_id"))
+            extension = form_data.get("extension").lower().strip(".")
+            is_allowed = form_data.get("is_allowed") == "on"
+            warning_message = form_data.get("warning_message")
+
+            # Check if rule already exists
+            existing = db.query(AutoModFileExtensionRule).filter_by(
+                guild_id=guild_id,
+                extension=extension
+            ).first()
+
+            if not existing:
+                rule = AutoModFileExtensionRule(
+                    guild_id=guild_id,
+                    extension=extension,
+                    is_allowed=is_allowed,
+                    warning_message=warning_message if not is_allowed else None
+                )
+                db.add(rule)
+                db.commit()
+
+        elif action == "update":
+            # Update existing rule
+            rule_id = int(form_data.get("rule_id"))
+            is_allowed = form_data.get("is_allowed") == "on"
+            warning_message = form_data.get("warning_message")
+
+            rule = db.query(AutoModFileExtensionRule).filter(
+                AutoModFileExtensionRule.id == rule_id
+            ).first()
+
+            if rule:
+                rule.is_allowed = is_allowed
+                rule.warning_message = warning_message if not is_allowed else None
+                db.commit()
+
+        elif action == "delete":
+            # Delete rule
+            rule_id = int(form_data.get("rule_id"))
+            rule = db.query(AutoModFileExtensionRule).filter(
+                AutoModFileExtensionRule.id == rule_id
+            ).first()
+
+            if rule:
+                db.delete(rule)
+                db.commit()
+
+        # Redirect to refresh the page
+        return RedirectResponse(
+            url=f"/admin/discord/file-extensions?guild_id={guild_id}",
+            status_code=303
+        )
+
+    return templates.TemplateResponse(
+        "admin/discord/file_extensions.html",
+        {
+            "request": request,
+            "guilds": guilds,
+            "selected_guild": selected_guild,
+            "rules": rules
+        }
+    )
+
+async def admin_discord_file_attachments(request):
+    """
+    View file attachment history
+    """
+    # Get DB session
+    db = next(get_db())
+
+    # Get all guilds for the form
+    guilds = db.query(Guild).order_by(Guild.name).all()
+
+    # Get selected guild
+    guild_id = request.query_params.get("guild_id")
+    selected_guild = None
+    attachments = []
+    total = 0
+
+    if guild_id:
+        selected_guild = db.query(Guild).filter(Guild.id == guild_id).first()
+        if selected_guild:
+            # Get query parameters
+            limit = int(request.query_params.get("limit", 50))
+            offset = int(request.query_params.get("offset", 0))
+            extension = request.query_params.get("extension")
+            was_allowed = request.query_params.get("was_allowed")
+            was_deleted = request.query_params.get("was_deleted")
+
+            # Build query
+            query = db.query(FileAttachment).filter(
+                FileAttachment.guild_id == selected_guild.id
+            )
+
+            if extension:
+                query = query.filter(FileAttachment.extension == extension)
+            if was_allowed is not None:
+                query = query.filter(FileAttachment.was_allowed == (was_allowed.lower() == "true"))
+            if was_deleted is not None:
+                query = query.filter(FileAttachment.was_deleted == (was_deleted.lower() == "true"))
+
+            # Get total count
+            total = query.count()
+
+            # Get paginated results
+            attachments = query.order_by(FileAttachment.created_at.desc()).offset(offset).limit(limit).all()
+
+    return templates.TemplateResponse(
+        "admin/discord/file_attachments.html",
+        {
+            "request": request,
+            "guilds": guilds,
+            "selected_guild": selected_guild,
+            "attachments": attachments,
+            "total": total,
+            "limit": int(request.query_params.get("limit", 50)),
+            "offset": int(request.query_params.get("offset", 0)),
+            "extension": request.query_params.get("extension"),
+            "was_allowed": request.query_params.get("was_allowed"),
+            "was_deleted": request.query_params.get("was_deleted")
         }
     )

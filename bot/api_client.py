@@ -319,8 +319,6 @@ class APIClient:
 
         return result
 
-
-
     # Bytes endpoints
     async def get_bytes(self, guild_id: Optional[int] = None, user_id: Optional[int] = None,
                       giver_id: Optional[int] = None, receiver_id: Optional[int] = None) -> List[Bytes]:
@@ -519,3 +517,44 @@ class APIClient:
         response = await self._request("GET", f"/api/automod/rate-limits/{limit_id}")
         data = await self._get_json(response)
         return self._model_from_dict(AutoModRateLimit, data)
+
+    async def get_file_extension_rules(self, guild_id: int) -> List[Dict[str, Any]]:
+        """
+        Get file extension rules for a guild.
+        """
+        async with self.client.get(f"{self.base_url}/api/automod/file-extensions/{guild_id}") as response:
+            if response.status == 404:
+                return []
+            response.raise_for_status()
+            data = await response.json()
+            return data["rules"]
+
+    async def create_file_attachment(
+        self,
+        guild_id: int,
+        channel_id: int,
+        message_id: Optional[int],
+        user_id: int,
+        extension: str,
+        attachment_url: str,
+        was_allowed: bool,
+        was_deleted: bool
+    ) -> Dict[str, Any]:
+        """
+        Create a file attachment record.
+        """
+        async with self.client.post(
+            f"{self.base_url}/api/automod/file-attachments",
+            json={
+                "guild_id": guild_id,
+                "channel_id": channel_id,
+                "message_id": message_id,
+                "user_id": user_id,
+                "extension": extension,
+                "attachment_url": attachment_url,
+                "was_allowed": was_allowed,
+                "was_deleted": was_deleted
+            }
+        ) as response:
+            response.raise_for_status()
+            return await response.json()
