@@ -28,7 +28,9 @@ from .discord_admin_routes import (
     admin_discord_give_bytes, admin_discord_automod,
     admin_discord_squads, admin_discord_squad_create, admin_discord_squad_edit,
     admin_discord_squad_delete, admin_discord_squad_members,
-    admin_discord_guilds, admin_discord_guild_edit, admin_discord_guild_roles
+    admin_discord_guilds, admin_discord_guild_edit, admin_discord_guild_roles,
+    # File extension management
+    admin_discord_file_extensions, admin_discord_file_attachments
 )
 from .api_routes import (
     api_token, guild_list, guild_detail, guild_create, guild_update,
@@ -42,6 +44,11 @@ from .api_routes import (
     api_key_list, api_key_create, api_key_delete,
     automod_regex_rules_list, automod_regex_rule_detail,
     automod_rate_limits_list, automod_rate_limit_detail,
+    # File extension rule endpoints
+    file_extension_rules_list, file_extension_rule_detail, file_extension_rule_create,
+    file_extension_rule_update, file_extension_rule_delete,
+    # File attachment tracking endpoints
+    file_attachments_list, file_attachment_detail, file_attachment_create,
     # Squad endpoints
     squad_list, squad_detail, squad_create, squad_update, squad_delete,
     squad_member_list, squad_member_add, squad_member_remove,
@@ -104,6 +111,18 @@ routes = [
     Route("/api/automod/rate-limits/{limit_id:int}", automod_rate_limit_detail, methods=["GET"]),
     Route("/api/subscribe", subscribe, methods=["POST"]),
 
+    # File extension rule routes
+    Route("/api/automod/file-extensions/{guild_id:int}", file_extension_rules_list, methods=["GET"]),
+    Route("/api/automod/file-extensions/{rule_id:int}", file_extension_rule_detail, methods=["GET"]),
+    Route("/api/automod/file-extensions", file_extension_rule_create, methods=["POST"]),
+    Route("/api/automod/file-extensions/{rule_id:int}", file_extension_rule_update, methods=["PUT"]),
+    Route("/api/automod/file-extensions/{rule_id:int}", file_extension_rule_delete, methods=["DELETE"]),
+
+    # File attachment tracking routes
+    Route("/api/automod/file-attachments/{guild_id:int}", file_attachments_list, methods=["GET"]),
+    Route("/api/automod/file-attachments/{attachment_id:int}", file_attachment_detail, methods=["GET"]),
+    Route("/api/automod/file-attachments", file_attachment_create, methods=["POST"]),
+
     # Squad routes
     Route("/api/squads", squad_list, methods=["GET"]),
     Route("/api/squads/{squad_id:int}", squad_detail, methods=["GET"]),
@@ -139,7 +158,6 @@ routes = [
     Route("/admin/discord/users/{id:int}", admin_discord_user_detail, methods=["GET"]),
     Route("/admin/discord/users/{id:int}/give-bytes", admin_discord_give_bytes, methods=["POST"]),
     Route("/admin/discord/warnings", admin_discord_warnings, methods=["GET"]),
-
     Route("/admin/discord/bytes", admin_discord_bytes, methods=["GET"]),
     Route("/admin/discord/bytes/config", admin_discord_bytes_config, methods=["GET", "POST"]),
     Route("/admin/discord/bytes/roles", admin_discord_bytes_roles, methods=["GET", "POST"]),
@@ -148,6 +166,9 @@ routes = [
     Route("/admin/discord/api-keys/new", admin_discord_api_key_create, methods=["GET", "POST"]),
     Route("/admin/discord/api-keys/{id:int}/delete", admin_discord_api_key_delete, methods=["POST"]),
     Route("/admin/discord/automod", admin_discord_automod, methods=["GET", "POST"]),
+    # File extension management routes
+    Route("/admin/discord/file-extensions", admin_discord_file_extensions, methods=["GET", "POST"]),
+    Route("/admin/discord/file-attachments", admin_discord_file_attachments, methods=["GET"]),
 
     # Squad admin routes
     Route("/admin/discord/squads", admin_discord_squads, methods=["GET"]),
