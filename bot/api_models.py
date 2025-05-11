@@ -18,6 +18,7 @@ class Guild:
     icon_url: Optional[str] = None
     joined_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
+    moderator_role_id: Optional[int] = None
 
 
 @dataclass

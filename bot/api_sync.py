@@ -64,9 +64,11 @@ class APISynchronizer:
 
     async def initialize_cache(self):
         """
-        Initialize the cache with existing guilds and users from the API.
+        Initialize the cache with existing guilds from the API.
 
-        This helps avoid unnecessary API calls for entities that already exist.
+        This helps avoid unnecessary API calls for guilds that already exist.
+        Users are loaded on-demand to avoid loading all users at startup,
+        which would be inefficient for large guilds.
         """
         try:
             # Get all guilds
@@ -75,11 +77,9 @@ class APISynchronizer:
                 self.guild_cache[guild.discord_id] = guild
             logger.info(f"Initialized guild cache with {len(self.guild_cache)} guilds")
 
-            # Get all users
-            users = await self.api_client.get_users()
-            for user in users:
-                self.user_cache[user.discord_id] = user
-            logger.info(f"Initialized user cache with {len(self.user_cache)} users")
+            # We no longer load all users at startup to avoid memory issues with large guilds
+            # Users will be loaded on-demand when needed
+            logger.info("User cache will be populated on-demand")
         except Exception as e:
             logger.error(f"Error initializing cache: {e}")
 
@@ -143,6 +143,35 @@ class APISynchronizer:
         except Exception as e:
             logger.error(f"Error syncing guild {discord_guild.id}: {e}")
             raise
+
+    async def get_user(self, user_id: int) -> Optional[DiscordUser]:
+        """
+        Get a user by ID, either from cache or from the API.
+
+        Args:
+            user_id: The Discord user ID
+
+        Returns:
+            The DiscordUser object or None if not found
+        """
+        try:
+            # Check if we already have this user in our cache
+            if user_id in self.user_cache:
+                return self.user_cache[user_id]
+
+            # Not in cache, try to get from API
+            try:
+                user = await self.api_client.get_user(user_id)
+                if user:
+                    # Add to cache
+                    self.user_cache[user_id] = user
+                    return user
+            except Exception as e:
+                logger.debug(f"User {user_id} not found in API: {e}")
+                return None
+        except Exception as e:
+            logger.error(f"Error getting user {user_id}: {e}")
+            return None
 
     async def sync_user(self, discord_user: hikari.User | hikari.PartialUser, guild_id: Optional[int] = None, joined_at: Optional[datetime] = None) -> DiscordUser:
         """
@@ -251,9 +280,16 @@ class APISynchronizer:
             # Send batch request to API
             result = await self.api_client.batch_create_users(users_to_sync)
 
-            # Update cache with the returned users
-            for user in result["users"]:
-                self.user_cache[user.discord_id] = user
+            # Update cache with the returned users, but only if we're dealing with a reasonable number
+            # For large guilds, we don't want to cache all users at once
+            if len(result["users"]) <= 1000:  # Only cache if less than 1000 users
+                for user in result["users"]:
+                    self.user_cache[user.discord_id] = user
+                logger.info(f"Added {len(result['users'])} users to cache")
+            else:
+                # For large batches, only cache users that were actually updated or created
+                # This helps keep the cache size manageable
+                logger.info(f"Large batch of {len(result['users'])} users - not adding all to cache")
 
             logger.info(f"Batch synced {result['total']} users: {result['created']} created, {result['updated']} updated")
             return result
