@@ -46,39 +46,60 @@
     </div>
 
     <div class="form-section">
-        <h2>Create New Role Reward</h2>
-        <form method="POST" action="/admin/discord/bytes/roles">
-            <input type="hidden" name="action" value="create">
-            <div class="form-group">
-                <label for="guild_id">Server:</label>
-                <select id="guild_id" name="guild_id" required>
-                    <option value="">Select a server</option>
-                    {% for guild in guilds %}
-                    <option value="{{ guild.id }}">{{ guild.name }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="role_id">Role ID:</label>
-                <input type="number" id="role_id" name="role_id" required>
-                <span class="help-text">Discord role ID (right-click on role in Discord and select "Copy ID")</span>
-            </div>
-            <div class="form-group">
-                <label for="role_name">Role Name:</label>
-                <input type="text" id="role_name" name="role_name" required>
-                <span class="help-text">Name of the role in Discord</span>
-            </div>
-            <div class="form-group">
-                <label for="bytes_required">Bytes Required:</label>
-                <input type="number" id="bytes_required" name="bytes_required" min="1" required>
-                <span class="help-text">Number of bytes required to earn this role</span>
-            </div>
-            <div class="form-actions">
-                <button type="submit" class="primary-btn">Create Role Reward</button>
-                <button type="reset" class="secondary-btn">Reset</button>
-            </div>
-        </form>
+        <button class="btn btn-primary" onclick="openRoleModal()" type="button">Create New Role Reward</button>
     </div>
+
+    <!-- Role Reward Modal -->
+    <div id="roleModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="roleModalTitle">Create New Role Reward</h3>
+                <button class="btn btn-icon" onclick="closeRoleModal()" type="button">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <form method="POST" action="/admin/discord/bytes/roles">
+                <input type="hidden" name="action" value="create">
+                <div class="form-group">
+                    <label for="guild_id">Server:</label>
+                    <select id="guild_id" name="guild_id" required>
+                        <option value="">Select a server</option>
+                        {% for guild in guilds %}
+                        <option value="{{ guild.id }}">{{ guild.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="role_id">Role ID:</label>
+                    <input type="number" id="role_id" name="role_id" required>
+                    <span class="help-text">Discord role ID (right-click on role in Discord and select "Copy ID")</span>
+                </div>
+                <div class="form-group">
+                    <label for="role_name">Role Name:</label>
+                    <input type="text" id="role_name" name="role_name" required>
+                    <span class="help-text">Name of the role in Discord</span>
+                </div>
+                <div class="form-group">
+                    <label for="bytes_required">Bytes Required:</label>
+                    <input type="number" id="bytes_required" name="bytes_required" min="1" required>
+                    <span class="help-text">Number of bytes required to earn this role</span>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline" onclick="closeRoleModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Role Reward</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+    function openRoleModal() {
+        document.getElementById('roleModal').classList.add('active');
+    }
+    function closeRoleModal() {
+        document.getElementById('roleModal').classList.remove('active');
+    }
+    </script>
 </div>
 
 <style>
