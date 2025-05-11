@@ -151,7 +151,8 @@ async def guild_create(request):
         discord_id=data["discord_id"],
         name=data["name"],
         icon_url=data.get("icon_url"),
-        joined_at=joined_at
+        joined_at=joined_at,
+        moderator_role_id=data.get("moderator_role_id")
     )
 
     db.add(guild)
@@ -178,11 +179,15 @@ async def guild_update(request):
         guild.name = data["name"]
     if "icon_url" in data:
         guild.icon_url = data["icon_url"]
+    if "moderator_role_id" in data:
+        guild.moderator_role_id = data["moderator_role_id"]
 
     db.commit()
     db.refresh(guild)
 
     return JSONResponse(model_to_dict(guild))
+
+
 
 
 # User API endpoints

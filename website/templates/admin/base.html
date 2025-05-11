@@ -74,6 +74,7 @@
                     </div>
                     <div class="nav-group-items {% if request.url.path.startswith('/admin/discord') %}expanded{% endif %}">
                         <a href="/admin/discord" class="nav-subitem {% if request.url.path == '/admin/discord' %}active{% endif %}">Dashboard</a>
+                        <a href="/admin/discord/guilds" class="nav-subitem {% if request.url.path.startswith('/admin/discord/guilds') %}active{% endif %}">Guilds</a>
                         <a href="/admin/discord/users" class="nav-subitem {% if request.url.path.startswith('/admin/discord/users') %}active{% endif %}">Users</a>
                         <a href="/admin/discord/warnings" class="nav-subitem {% if request.url.path == '/admin/discord/warnings' %}active{% endif %}">Warnings</a>
 
