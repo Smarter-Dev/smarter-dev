@@ -556,6 +556,9 @@ input[readonly] {
 
 .modal-header {
     margin-bottom: var(--spacing-lg);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
 }
 
 .modal-title {
@@ -930,4 +933,27 @@ input[readonly] {
     top: 50%;
     transform: translateY(-50%);
     display: block;
+}
+
+.btn-icon {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: var(--spacing-xs);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.btn-icon:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-hover);
+}
+
+.btn-icon span {
+    font-size: 1.5rem;
+    line-height: 1;
 }
