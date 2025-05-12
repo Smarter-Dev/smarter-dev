@@ -29,6 +29,7 @@ from .discord_admin_routes import (
     admin_discord_squads, admin_discord_squad_create, admin_discord_squad_edit,
     admin_discord_squad_delete, admin_discord_squad_members,
     admin_discord_guilds, admin_discord_guild_edit, admin_discord_guild_roles,
+    admin_discord_guild_delete,
     # File extension management
     admin_discord_file_extensions, admin_discord_file_attachments
 )
@@ -153,6 +154,7 @@ routes = [
     Route("/admin/discord", admin_discord_dashboard, methods=["GET"]),
     Route("/admin/discord/guilds", admin_discord_guilds, methods=["GET"]),
     Route("/admin/discord/guilds/{id:int}/edit", admin_discord_guild_edit, methods=["POST"]),
+    Route("/admin/discord/guilds/{id:int}/delete", admin_discord_guild_delete, methods=["POST"]),
     Route("/admin/discord/guilds/{id:int}/roles", admin_discord_guild_roles, methods=["GET"]),
     Route("/admin/discord/users", admin_discord_users, methods=["GET"]),
     Route("/admin/discord/users/{id:int}", admin_discord_user_detail, methods=["GET"]),

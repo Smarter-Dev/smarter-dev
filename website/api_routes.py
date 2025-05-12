@@ -157,6 +157,20 @@ async def guild_create(request):
     )
 
     db.add(guild)
+    db.flush()  # Flush to get the guild ID
+
+    # Create default bytes configuration
+    bytes_config = BytesConfig(
+        guild_id=guild.id,
+        starting_balance=100,
+        daily_earning=10,
+        max_give_amount=50,
+        cooldown_minutes=1440,  # 24 hours
+        squad_join_bytes_required=100,
+        squad_switch_cost=50
+    )
+    db.add(bytes_config)
+
     db.commit()
     db.refresh(guild)
 
