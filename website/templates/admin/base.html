@@ -10,6 +10,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
     <!-- Chart.js for graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
@@ -64,16 +67,13 @@
                         <!-- Auto Moderation -->
                         <div class="nav-subgroup">
                             <div class="nav-subgroup-header">Auto Moderation</div>
-                            <a href="/admin/discord/automod" class="nav-subitem {% if request.url.path == '/admin/discord/automod' %}active{% endif %}">Word Filter</a>
-                            <a href="/admin/discord/file-extensions" class="nav-subitem {% if request.url.path == '/admin/discord/file-extensions' %}active{% endif %}">File Extensions</a>
+                            <a href="/admin/discord/automod" class="nav-subitem {% if request.url.path == '/admin/discord/automod' %}active{% endif %}">Automod</a>
                         </div>
 
                         <!-- Bytes System -->
                         <div class="nav-subgroup">
-                            <div class="nav-subgroup-header">Bytes System</div>
-                            <a href="/admin/discord/bytes" class="nav-subitem {% if request.url.path == '/admin/discord/bytes' %}active{% endif %}">Overview</a>
-                            <a href="/admin/discord/bytes/config" class="nav-subitem {% if request.url.path == '/admin/discord/bytes/config' %}active{% endif %}">Configuration</a>
-                            <a href="/admin/discord/bytes/roles" class="nav-subitem {% if request.url.path == '/admin/discord/bytes/roles' %}active{% endif %}">Roles</a>
+                            <div class="nav-subgroup-header">Bytes</div>
+                            <a href="/admin/discord/bytes" class="nav-subitem {% if request.url.path == '/admin/discord/bytes' %}active{% endif %}">Bytes</a>
                         </div>
 
                         <!-- Squads -->
@@ -130,17 +130,6 @@
         </aside>
 
         <main class="content">
-            <header class="content-header">
-                <div class="header-left">
-                    {% block header_actions %}{% endblock %}
-                </div>
-                <div class="header-right">
-                    <div class="user-info">
-                        <span class="username">{{ request.user.display_name }}</span>
-                    </div>
-                </div>
-            </header>
-
             <div class="content-body">
                 {% if messages %}
                 <div class="messages">

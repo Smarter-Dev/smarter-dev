@@ -296,6 +296,37 @@ async def admin_discord_guild_roles(request):
         }
     )
 
+async def admin_discord_guild_delete(request):
+    """
+    Delete a guild (bot leaves the server)
+    """
+    guild_id = request.path_params["id"]
+    db = next(get_db())
+
+    if request.method == "POST":
+        # Get the guild
+        guild = db.query(Guild).filter(Guild.id == guild_id).first()
+        if guild:
+            # Delete all related data first
+            db.query(BytesConfig).filter(BytesConfig.guild_id == guild.id).delete()
+            db.query(BytesRole).filter(BytesRole.guild_id == guild.id).delete()
+            db.query(BytesCooldown).filter(BytesCooldown.guild_id == guild.id).delete()
+            db.query(AutoModRegexRule).filter(AutoModRegexRule.guild_id == guild.id).delete()
+            db.query(AutoModRateLimit).filter(AutoModRateLimit.guild_id == guild.id).delete()
+            db.query(AutoModFileExtensionRule).filter(AutoModFileExtensionRule.guild_id == guild.id).delete()
+            db.query(FileAttachment).filter(FileAttachment.guild_id == guild.id).delete()
+            db.query(Squad).filter(Squad.guild_id == guild.id).delete()
+            db.query(GuildMember).filter(GuildMember.guild_id == guild.id).delete()
+            
+            # Delete the guild
+            db.delete(guild)
+            db.commit()
+
+            # TODO: Add Discord API call to leave the server
+            # This would require the bot token and Discord API integration
+
+    return RedirectResponse(url="/admin/discord/guilds", status_code=303)
+
 # Discord dashboard
 async def admin_discord_dashboard(request):
     """

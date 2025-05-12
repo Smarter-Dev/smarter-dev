@@ -2,8 +2,6 @@
 
 {% block title %}Discord Guilds - Smarter.Dev Admin{% endblock %}
 
-{% block page_title %}Discord Guilds{% endblock %}
-
 {% block content %}
 <div class="guilds-page">
     <div class="section-header">
@@ -17,31 +15,41 @@
                     <tr>
                         <th>Name</th>
                         <th>Moderator Role</th>
-                        <th>Joined</th>
-                        <th>Actions</th>
+                        <th>Bot Added</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for guild in guilds %}
                     <tr>
-                        <td>{{ guild.name }}</td>
+                        <td>
+                            <div>{{ guild.name }}</div>
+                            <div class="action-buttons">
+                                <a href="/admin/discord/users?guild_id={{ guild.id }}" class="btn btn-sm btn-outline"><i class="fas fa-users"></i>Users</a>
+                                <button class="btn btn-sm btn-outline edit-guild-btn"
+                                    data-guild='{{ {
+                                        "id": guild.id,
+                                        "name": guild.name,
+                                        "discord_id": guild.discord_id,
+                                        "moderator_role_id": guild.moderator_role_id or ""
+                                    }|tojson|safe }}'>
+                                    <i class="fas fa-edit"></i>Edit
+                                </button>
+                                <button class="btn btn-sm btn-outline btn-danger leave-guild-btn"
+                                    data-guild='{{ {
+                                        "id": guild.id,
+                                        "name": guild.name
+                                    }|tojson|safe }}'>
+                                    <i class="fas fa-sign-out-alt"></i>Leave
+                                </button>
+                            </div>
+                        </td>
                         <td>{% if guild.moderator_role_id %}{{ role_names.get(guild.moderator_role_id, 'Unknown role') }}{% else %}Not set{% endif %}</td>
                         <td>{{ guild.joined_at_humanized }}</td>
-                        <td>
-                            <button class="btn btn-sm btn-secondary edit-guild-btn"
-                                data-id="{{ guild.id }}"
-                                data-name="{{ guild.name }}"
-                                data-discord-id="{{ guild.discord_id }}"
-                                data-moderator-role-id="{{ guild.moderator_role_id or '' }}">
-                                Edit
-                            </button>
-                            <a href="/admin/discord/guilds/{{ guild.id }}/roles" class="btn btn-sm btn-primary">View Roles</a>
-                        </td>
                     </tr>
                     {% endfor %}
                     {% if not guilds %}
                     <tr>
-                        <td colspan="4" class="empty-table">No guilds found.</td>
+                        <td colspan="3" class="empty-table">No guilds found.</td>
                     </tr>
                     {% endif %}
                 </tbody>
@@ -80,55 +88,113 @@
             </div>
         </div>
     </div>
+
+    <div class="modal" id="leave-guild-modal">
+        <div class="modal-content">
+            <div class="modal-header danger-header">
+                <h3>Leave Server</h3>
+                <span class="close">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to leave <strong id="leave-guild-name"></strong>?</p>
+                <p class="text-danger">This action cannot be undone. All server data will be permanently deleted.</p>
+                <form id="leave-guild-form" method="POST">
+                    <div class="form-group">
+                        <label for="confirm_guild_name">Type the server name to confirm:</label>
+                        <input type="text" id="confirm_guild_name" name="confirm_guild_name" required>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-danger" id="confirm-leave-btn" disabled>Leave Server</button>
+                        <button type="button" class="btn btn-secondary" id="cancel-leave">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
-    // Get the modal
-    const modal = document.getElementById('edit-guild-modal');
+    // Get the modals
+    const editModal = document.getElementById('edit-guild-modal');
+    const leaveModal = document.getElementById('leave-guild-modal');
     const editForm = document.getElementById('edit-guild-form');
+    const leaveForm = document.getElementById('leave-guild-form');
 
     // Get all edit buttons
     const editButtons = document.querySelectorAll('.edit-guild-btn');
+    const leaveButtons = document.querySelectorAll('.leave-guild-btn');
 
-    // Get the close button
-    const closeBtn = document.querySelector('.close');
-    const cancelBtn = document.getElementById('cancel-edit');
+    // Get the close buttons
+    const closeBtns = document.querySelectorAll('.close');
+    const cancelEditBtn = document.getElementById('cancel-edit');
+    const cancelLeaveBtn = document.getElementById('cancel-leave');
+    const confirmLeaveBtn = document.getElementById('confirm-leave-btn');
+    const confirmGuildNameInput = document.getElementById('confirm_guild_name');
 
-    // When the user clicks on an edit button, open the modal
+    // When the user clicks on an edit button, open the edit modal
     editButtons.forEach(button => {
         button.addEventListener('click', function() {
-            const id = this.getAttribute('data-id');
-            const name = this.getAttribute('data-name');
-            const discordId = this.getAttribute('data-discord-id');
-            const moderatorRoleId = this.getAttribute('data-moderator-role-id');
+            const guildData = JSON.parse(this.getAttribute('data-guild'));
 
             // Set form values
-            document.getElementById('guild_id').value = id;
-            document.getElementById('name').value = name;
-            document.getElementById('discord_id').value = discordId;
-            document.getElementById('moderator_role_id').value = moderatorRoleId;
+            document.getElementById('guild_id').value = guildData.id;
+            document.getElementById('name').value = guildData.name;
+            document.getElementById('discord_id').value = guildData.discord_id;
+            document.getElementById('moderator_role_id').value = guildData.moderator_role_id;
 
             // Set form action
-            editForm.action = `/admin/discord/guilds/${id}/edit`;
+            editForm.action = `/admin/discord/guilds/${guildData.id}/edit`;
 
             // Show the modal
-            modal.style.display = 'block';
+            editModal.style.display = 'block';
         });
     });
 
-    // When the user clicks on the close button or cancel, close the modal
-    closeBtn.addEventListener('click', function() {
-        modal.style.display = 'none';
+    // When the user clicks on a leave button, open the leave modal
+    leaveButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const guildData = JSON.parse(this.getAttribute('data-guild'));
+
+            // Set form values
+            document.getElementById('leave-guild-name').textContent = guildData.name;
+            leaveForm.action = `/admin/discord/guilds/${guildData.id}/delete`;
+            confirmGuildNameInput.value = '';
+            confirmLeaveBtn.disabled = true;
+
+            // Show the modal
+            leaveModal.style.display = 'block';
+        });
     });
 
-    cancelBtn.addEventListener('click', function() {
-        modal.style.display = 'none';
+    // Enable/disable confirm button based on guild name match
+    confirmGuildNameInput.addEventListener('input', function() {
+        const guildName = document.getElementById('leave-guild-name').textContent;
+        confirmLeaveBtn.disabled = this.value.toLowerCase() !== guildName.toLowerCase();
     });
 
-    // When the user clicks anywhere outside of the modal, close it
+    // When the user clicks on any close button, close the modals
+    closeBtns.forEach(btn => {
+        btn.addEventListener('click', function() {
+            editModal.style.display = 'none';
+            leaveModal.style.display = 'none';
+        });
+    });
+
+    cancelEditBtn.addEventListener('click', function() {
+        editModal.style.display = 'none';
+    });
+
+    cancelLeaveBtn.addEventListener('click', function() {
+        leaveModal.style.display = 'none';
+    });
+
+    // When the user clicks anywhere outside of the modals, close them
     window.addEventListener('click', function(event) {
-        if (event.target == modal) {
-            modal.style.display = 'none';
+        if (event.target == editModal) {
+            editModal.style.display = 'none';
+        }
+        if (event.target == leaveModal) {
+            leaveModal.style.display = 'none';
         }
     });
 </script>
@@ -154,6 +220,22 @@
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     }
 
+    .data-table td {
+        vertical-align: top;
+        padding-top: 1rem;
+    }
+
+    .action-buttons {
+        margin-top: 0.5rem;
+        display: flex;
+        gap: 0.5rem;
+    }
+
+    .action-buttons .btn {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.875rem;
+    }
+
     /* Modal styles */
     .modal {
         display: none;
@@ -163,11 +245,11 @@
         top: 0;
         width: 100%;
         height: 100%;
-        background-color: rgba(0, 0, 0, 0.5);
+        background-color: rgba(0, 0, 0, 0.75);
     }
 
     .modal-content {
-        background-color: var(--card-bg);
+        background-color: var(--bg-secondary);
         margin: 10% auto;
         padding: 0;
         border-radius: 8px;
@@ -182,6 +264,17 @@
         align-items: center;
         padding: 1rem 1.5rem;
         border-bottom: 1px solid var(--border-color);
+        border-radius: 8px 8px 0 0;
+    }
+
+    #leave-guild-modal .modal-header {
+        background-color: #dc2626 !important;  /* Red-600 */
+        border-bottom: none;
+    }
+
+    #leave-guild-modal .modal-header h3,
+    #leave-guild-modal .modal-header .close {
+        color: white !important;
     }
 
     .modal-body {
@@ -228,7 +321,12 @@
     .form-actions {
         display: flex;
         gap: 1rem;
-        margin-top: 1.5rem;
+        margin-top: 1rem;
+        border-top: none;
+    }
+
+    .text-danger {
+        color: var(--danger-color);
     }
 </style>
 {% endblock %}

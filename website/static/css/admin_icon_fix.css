@@ -22,12 +22,12 @@
 /* Smaller icons for buttons and search */
 .btn-icon svg,
 .search-icon svg {
-    width: 16px;
-    height: 16px;
-    min-width: 16px;
-    min-height: 16px;
-    max-width: 16px;
-    max-height: 16px;
+    width: 14px;
+    height: 14px;
+    min-width: 14px;
+    min-height: 14px;
+    max-width: 14px;
+    max-height: 14px;
 }
 
 /* Ensure icon containers don't expand beyond their intended size */
@@ -185,4 +185,20 @@ svg {
 
 .info-box .info-content {
     flex: 1;
+}
+
+/* Universal fix for all search icons in search fields */
+.search-box .search-icon,
+.search-box .search-icon svg,
+.search-box svg.search-icon,
+.search-box input[type="search"] + svg,
+.search-box input[type="text"] + svg {
+    width: 14px !important;
+    height: 14px !important;
+    min-width: 14px !important;
+    min-height: 14px !important;
+    max-width: 14px !important;
+    max-height: 14px !important;
+    display: block;
+    color: var(--text-secondary);
 }
