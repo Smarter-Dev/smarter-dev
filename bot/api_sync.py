@@ -13,7 +13,7 @@ from typing import Optional, Dict, Any, List
 import hikari
 
 from bot.api_client import APIClient
-from bot.api_models import Guild, DiscordUser
+from bot.api_models import Guild, DiscordUser, BytesConfig
 
 # Configure logging
 logger = logging.getLogger("bot.api_sync")
@@ -138,6 +138,23 @@ class APISynchronizer:
                 created_guild = await self.api_client.create_guild(new_guild)
                 self.guild_cache[discord_guild.id] = created_guild
                 logger.info(f"Created guild in API: {created_guild.name} ({created_guild.discord_id})")
+
+                # Create default bytes configuration
+                try:
+                    bytes_config = BytesConfig(
+                        guild_id=created_guild.id,
+                        starting_balance=100,
+                        daily_earning=10,
+                        max_give_amount=50,
+                        cooldown_minutes=1440,  # 24 hours
+                        squad_join_bytes_required=100,
+                        squad_switch_cost=50
+                    )
+                    await self.api_client.create_bytes_config(bytes_config)
+                    logger.info(f"Created default bytes configuration for guild {created_guild.name}")
+                except Exception as e:
+                    logger.error(f"Error creating default bytes configuration for guild {created_guild.name}: {e}")
+
                 return created_guild
 
         except Exception as e:

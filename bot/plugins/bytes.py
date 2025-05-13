@@ -101,7 +101,7 @@ async def get_bytes_config(client: APIClient, guild_id: int) -> BytesConfig:
 
     Args:
         client: API client
-        guild_id: Guild ID
+        guild_id: Discord guild ID
 
     Returns:
         BytesConfig object
@@ -116,7 +116,27 @@ async def get_bytes_config(client: APIClient, guild_id: int) -> BytesConfig:
 
     # Get from API
     try:
-        config = await client.get_bytes_config(guild_id)
+        # First get the internal guild ID
+        guild_response = await client._request("GET", f"/api/guilds?discord_id={guild_id}")
+        guild_data = await client._get_json(guild_response)
+
+        if not guild_data.get("guilds"):
+            logger.error(f"Guild with discord_id {guild_id} not found in database")
+            return BytesConfig(guild_id=guild_id)
+
+        # Find the exact match for the Discord guild ID
+        internal_guild_id = None
+        for guild in guild_data["guilds"]:
+            if str(guild["discord_id"]) == str(guild_id):
+                internal_guild_id = guild["id"]
+                break
+
+        if internal_guild_id is None:
+            logger.error(f"Could not find exact match for guild with discord_id {guild_id}")
+            return BytesConfig(guild_id=guild_id)
+
+        # Now get the bytes config using the internal guild ID
+        config = await client.get_bytes_config(internal_guild_id)
         bytes_config_cache[guild_id] = (config, now)
         return config
     except Exception as e:
@@ -132,7 +152,7 @@ async def get_user_bytes_info(client: APIClient, user_id: int, guild_id: int) ->
     Args:
         client: API client
         user_id: Discord user ID
-        guild_id: Guild ID
+        guild_id: Discord guild ID
 
     Returns:
         Dictionary with bytes information
@@ -148,8 +168,44 @@ async def get_user_bytes_info(client: APIClient, user_id: int, guild_id: int) ->
             return balance_info
 
     try:
-        logger.info(f"Making API request to /api/bytes/balance/{user_id}?guild_id={guild_id}")
-        response = await client._request("GET", f"/api/bytes/balance/{user_id}?guild_id={guild_id}")
+        # First get the internal guild ID
+        guild_response = await client._request("GET", f"/api/guilds?discord_id={guild_id}")
+        guild_data = await client._get_json(guild_response)
+
+        if not guild_data.get("guilds"):
+            logger.error(f"Guild with discord_id {guild_id} not found in database")
+            default_result = {
+                "user_id": user_id,
+                "bytes_balance": 0,
+                "bytes_received": 0,
+                "bytes_given": 0,
+                "earned_roles": []
+            }
+            bytes_balance_cache[cache_key] = (default_result, now)
+            return default_result
+
+        # Find the exact match for the Discord guild ID
+        internal_guild_id = None
+        for guild in guild_data["guilds"]:
+            if str(guild["discord_id"]) == str(guild_id):
+                internal_guild_id = guild["id"]
+                break
+
+        if internal_guild_id is None:
+            logger.error(f"Could not find exact match for guild with discord_id {guild_id}")
+            default_result = {
+                "user_id": user_id,
+                "bytes_balance": 0,
+                "bytes_received": 0,
+                "bytes_given": 0,
+                "earned_roles": []
+            }
+            bytes_balance_cache[cache_key] = (default_result, now)
+            return default_result
+
+        # Now get the bytes balance using the internal guild ID
+        logger.info(f"Making API request to /api/bytes/balance/{user_id}?guild_id={internal_guild_id}")
+        response = await client._request("GET", f"/api/bytes/balance/{user_id}?guild_id={internal_guild_id}")
         result = await client._get_json(response)
         logger.info(f"API response for bytes balance: {result}")
 
@@ -181,14 +237,46 @@ async def get_user_bytes_info_fresh(client: APIClient, user_id: int, guild_id: i
     Args:
         client: API client
         user_id: Discord user ID
-        guild_id: Guild ID
+        guild_id: Discord guild ID
 
     Returns:
         Dictionary with bytes information
     """
     try:
-        logger.info(f"Making fresh API request to /api/bytes/balance/{user_id}?guild_id={guild_id}")
-        response = await client._request("GET", f"/api/bytes/balance/{user_id}?guild_id={guild_id}")
+        # First get the internal guild ID
+        guild_response = await client._request("GET", f"/api/guilds?discord_id={guild_id}")
+        guild_data = await client._get_json(guild_response)
+
+        if not guild_data.get("guilds"):
+            logger.error(f"Guild with discord_id {guild_id} not found in database")
+            return {
+                "user_id": user_id,
+                "bytes_balance": 0,
+                "bytes_received": 0,
+                "bytes_given": 0,
+                "earned_roles": []
+            }
+
+        # Find the exact match for the Discord guild ID
+        internal_guild_id = None
+        for guild in guild_data["guilds"]:
+            if str(guild["discord_id"]) == str(guild_id):
+                internal_guild_id = guild["id"]
+                break
+
+        if internal_guild_id is None:
+            logger.error(f"Could not find exact match for guild with discord_id {guild_id}")
+            return {
+                "user_id": user_id,
+                "bytes_balance": 0,
+                "bytes_received": 0,
+                "bytes_given": 0,
+                "earned_roles": []
+            }
+
+        # Now get the bytes balance using the internal guild ID
+        logger.info(f"Making fresh API request to /api/bytes/balance/{user_id}?guild_id={internal_guild_id}")
+        response = await client._request("GET", f"/api/bytes/balance/{user_id}?guild_id={internal_guild_id}")
         result = await client._get_json(response)
         logger.info(f"Fresh API response for bytes balance: {result}")
 
@@ -200,14 +288,13 @@ async def get_user_bytes_info_fresh(client: APIClient, user_id: int, guild_id: i
         return result
     except Exception as e:
         logger.error(f"Error getting fresh bytes info for user {user_id} in guild {guild_id}: {e}")
-        default_result = {
+        return {
             "user_id": user_id,
             "bytes_balance": 0,
             "bytes_received": 0,
             "bytes_given": 0,
             "earned_roles": []
         }
-        return default_result
 
 
 async def check_for_earned_roles(client: APIClient, bot: lightbulb.BotApp, user_id: int, guild_id: int, channel_id: Optional[int] = None) -> None:

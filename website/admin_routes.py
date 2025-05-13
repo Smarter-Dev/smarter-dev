@@ -6,10 +6,13 @@ from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, JSONResponse
 from starlette.templating import Jinja2Templates
+import httpx
+import os
 
-from .models import AdminUser, Redirect, RedirectClick, PageView, RouteError
+from .models import AdminUser, Redirect, RedirectClick, PageView, RouteError, APIKey
 from .auth import verify_password, get_password_hash, create_admin_user
 from .database import get_db, dispose_engine_connections
+from .api_auth import generate_api_key
 
 # Set up templates
 templates = Jinja2Templates(directory="website/templates")
@@ -27,6 +30,35 @@ async def admin_login(request):
         # Check credentials
         user = db.query(AdminUser).filter(AdminUser.username == username).first()
         if user and verify_password(password, user.hashed_password):
+            # Get or create admin API key
+            admin_key = db.query(APIKey).filter(APIKey.name == "Admin Interface").first()
+            if not admin_key:
+                # Create new API key for admin interface
+                key_value = generate_api_key()
+                admin_key = APIKey(
+                    key=key_value,
+                    name="Admin Interface",
+                    is_active=True
+                )
+                db.add(admin_key)
+                db.commit()
+                db.refresh(admin_key)
+            
+            # Get API token using admin API key
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "http://localhost:8000/api/auth/token",
+                    json={"api_key": admin_key.key}
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    request.session["api_token"] = data["token"]
+                else:
+                    return templates.TemplateResponse(
+                        "admin/login.html",
+                        {"request": request, "error": "Failed to get API token"}
+                    )
+
             # Set session
             request.session["admin_user_id"] = user.id
             return RedirectResponse(url="/admin", status_code=302)
@@ -42,6 +74,7 @@ async def admin_login(request):
 # Admin logout route
 async def admin_logout(request):
     request.session.pop("admin_user_id", None)
+    request.session.pop("api_token", None)
     return RedirectResponse(url="/admin/login", status_code=302)
 
 # Admin dashboard route

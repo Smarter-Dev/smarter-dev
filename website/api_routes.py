@@ -5,13 +5,14 @@ from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+import httpx
 
 from .models import (
     APIKey, Guild, DiscordUser, GuildMember, UserNote,
     UserWarning, ModerationCase, PersistentRole, TemporaryRole,
     ChannelLock, BumpStat, CommandUsage, Bytes, BytesConfig, BytesRole, BytesCooldown,
     AutoModRegexRule, AutoModRateLimit, Squad, SquadMember,
-    AutoModFileExtensionRule, FileAttachment
+    AutoModFileExtensionRule, FileAttachment, BotStatus
 )
 from .database import get_db
 from .api_auth import create_jwt_token, verify_api_key, generate_api_key
@@ -2014,11 +2015,16 @@ async def file_extension_rules_list(request):
     """
     List all file extension rules for a guild
     """
-    guild_id = request.path_params["guild_id"]
+    discord_guild_id = int(request.path_params["guild_id"])
     db = next(get_db())
 
+    # Find the internal guild by Discord ID
+    guild = db.query(Guild).filter(Guild.discord_id == discord_guild_id).first()
+    if not guild:
+        return JSONResponse({"rules": []})
+
     rules = db.query(AutoModFileExtensionRule).filter(
-        AutoModFileExtensionRule.guild_id == guild_id
+        AutoModFileExtensionRule.guild_id == guild.id
     ).all()
 
     return JSONResponse({
@@ -2048,11 +2054,19 @@ async def file_extension_rule_create(request):
     Create a new file extension rule
     """
     data = await request.json()
+    print()
+    print()
+    print(data)
     db = next(get_db())
+
+    # Find the internal guild by Discord ID
+    guild = db.query(Guild).filter(Guild.discord_id == data["guild_id"]).first()
+    if not guild:
+        return JSONResponse({"error": "Guild not found"}, status_code=404)
 
     # Check if rule already exists
     existing = db.query(AutoModFileExtensionRule).filter_by(
-        guild_id=data["guild_id"],
+        guild_id=guild.id,
         extension=data["extension"]
     ).first()
 
@@ -2061,7 +2075,7 @@ async def file_extension_rule_create(request):
 
     # Create new rule
     rule = AutoModFileExtensionRule(
-        guild_id=data["guild_id"],
+        guild_id=guild.id,
         extension=data["extension"],
         is_allowed=data["is_allowed"],
         warning_message=data.get("warning_message")
@@ -2076,24 +2090,30 @@ async def file_extension_rule_create(request):
 @api_error_handler
 async def file_extension_rule_update(request):
     """
-    Update a file extension rule
+    Update an existing file extension rule
     """
     rule_id = request.path_params["rule_id"]
     data = await request.json()
     db = next(get_db())
 
-    rule = db.query(AutoModFileExtensionRule).filter(
-        AutoModFileExtensionRule.id == rule_id
+    # Find the internal guild by Discord ID
+    guild = db.query(Guild).filter(Guild.discord_id == data["guild_id"]).first()
+    if not guild:
+        return JSONResponse({"error": "Guild not found"}, status_code=404)
+
+    # Find the rule
+    rule = db.query(AutoModFileExtensionRule).filter_by(
+        id=rule_id,
+        guild_id=guild.id
     ).first()
 
     if not rule:
         return JSONResponse({"error": "Rule not found"}, status_code=404)
 
-    # Update fields
-    if "is_allowed" in data:
-        rule.is_allowed = data["is_allowed"]
-    if "warning_message" in data:
-        rule.warning_message = data["warning_message"]
+    # Update rule
+    rule.extension = data["extension"]
+    rule.is_allowed = data["is_allowed"]
+    rule.warning_message = data.get("warning_message")
 
     db.commit()
     db.refresh(rule)
@@ -2106,10 +2126,21 @@ async def file_extension_rule_delete(request):
     Delete a file extension rule
     """
     rule_id = request.path_params["rule_id"]
+    guild_id = request.query_params.get("guild_id")
+    if not guild_id:
+        return JSONResponse({"error": "guild_id is required"}, status_code=400)
+
     db = next(get_db())
 
-    rule = db.query(AutoModFileExtensionRule).filter(
-        AutoModFileExtensionRule.id == rule_id
+    # Find the internal guild by Discord ID
+    guild = db.query(Guild).filter(Guild.discord_id == guild_id).first()
+    if not guild:
+        return JSONResponse({"error": "Guild not found"}, status_code=404)
+
+    # Find and delete the rule
+    rule = db.query(AutoModFileExtensionRule).filter_by(
+        id=rule_id,
+        guild_id=guild.id
     ).first()
 
     if not rule:
@@ -2118,7 +2149,7 @@ async def file_extension_rule_delete(request):
     db.delete(rule)
     db.commit()
 
-    return JSONResponse({"status": "success"})
+    return JSONResponse({"message": "Rule deleted successfully"})
 
 # File attachment tracking endpoints
 @api_error_handler
@@ -2202,3 +2233,73 @@ async def file_attachment_create(request):
     db.refresh(attachment)
 
     return JSONResponse(model_to_dict(attachment), status_code=201)
+
+@api_error_handler
+async def system_status(request):
+    """
+    Get the current status of system components
+    """
+    try:
+        # Check Discord bot status using heartbeat
+        db: Session = next(get_db())
+        status = db.query(BotStatus).first()
+        bot_status = "offline"
+        if status and status.last_heartbeat:
+            delta = datetime.utcnow() - status.last_heartbeat
+            if delta.total_seconds() < 120:  # 2 minutes
+                bot_status = "online"
+
+        # Check website status
+        website_status = "operational"
+        try:
+            db.execute("SELECT 1")
+        except Exception as e:
+            print(f"Website health check failed: {str(e)}")
+            website_status = "degraded"
+
+        # Check API status
+        api_status = "healthy"
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.get("http://localhost:8000/api/health")
+                if response.status_code != 200:
+                    api_status = "degraded"
+        except Exception as e:
+            print(f"API health check failed: {str(e)}")
+            api_status = "degraded"
+
+        return JSONResponse({
+            "status": {
+                "bot": bot_status,
+                "website": website_status,
+                "api": api_status
+            },
+            "last_updated": datetime.now().isoformat()
+        })
+    except Exception as e:
+        print(f"System status check failed: {str(e)}")
+        return JSONResponse({
+            "error": str(e)
+        }, status_code=500)
+
+@api_error_handler
+async def bot_heartbeat(request):
+    """
+    Update the bot's heartbeat timestamp
+    """
+    db = next(get_db())
+    
+    # Get or create the bot status record
+    status = db.query(BotStatus).first()
+    if not status:
+        status = BotStatus()
+        db.add(status)
+    
+    # Update the heartbeat timestamp
+    status.last_heartbeat = datetime.utcnow()
+    db.commit()
+    
+    return JSONResponse({
+        "status": "ok",
+        "last_heartbeat": status.last_heartbeat.isoformat()
+    })

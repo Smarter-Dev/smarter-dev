@@ -31,7 +31,7 @@ from .discord_admin_routes import (
     admin_discord_guilds, admin_discord_guild_edit, admin_discord_guild_roles,
     admin_discord_guild_delete,
     # File extension management
-    admin_discord_file_extensions, admin_discord_file_attachments
+    admin_discord_file_attachments
 )
 from .api_routes import (
     api_token, guild_list, guild_detail, guild_create, guild_update,
@@ -53,7 +53,9 @@ from .api_routes import (
     # Squad endpoints
     squad_list, squad_detail, squad_create, squad_update, squad_delete,
     squad_member_list, squad_member_add, squad_member_remove,
-    user_squads, user_eligible_squads
+    user_squads, user_eligible_squads,
+    # Bot status endpoints
+    bot_heartbeat
 )
 from .redirect_handler import handle_redirect
 from .auth import AdminAuthBackend, AdminAuthMiddleware
@@ -71,6 +73,7 @@ routes = [
 
     # API routes
     Route("/api/auth/token", api_token, methods=["POST"]),
+    Route("/api/bot/heartbeat", bot_heartbeat, methods=["POST"]),
     Route("/api/guilds", guild_list, methods=["GET"]),
     Route("/api/guilds/{guild_id:int}", guild_detail, methods=["GET"]),
     Route("/api/guilds", guild_create, methods=["POST"]),
@@ -113,9 +116,9 @@ routes = [
     Route("/api/subscribe", subscribe, methods=["POST"]),
 
     # File extension rule routes
+    Route("/api/automod/file-extensions", file_extension_rule_create, methods=["POST"]),
     Route("/api/automod/file-extensions/{guild_id:int}", file_extension_rules_list, methods=["GET"]),
     Route("/api/automod/file-extensions/{rule_id:int}", file_extension_rule_detail, methods=["GET"]),
-    Route("/api/automod/file-extensions", file_extension_rule_create, methods=["POST"]),
     Route("/api/automod/file-extensions/{rule_id:int}", file_extension_rule_update, methods=["PUT"]),
     Route("/api/automod/file-extensions/{rule_id:int}", file_extension_rule_delete, methods=["DELETE"]),
 
@@ -169,7 +172,6 @@ routes = [
     Route("/admin/discord/api-keys/{id:int}/delete", admin_discord_api_key_delete, methods=["POST"]),
     Route("/admin/discord/automod", admin_discord_automod, methods=["GET", "POST"]),
     # File extension management routes
-    Route("/admin/discord/file-extensions", admin_discord_file_extensions, methods=["GET", "POST"]),
     Route("/admin/discord/file-attachments", admin_discord_file_attachments, methods=["GET"]),
 
     # Squad admin routes
@@ -210,6 +212,9 @@ app.add_middleware(track_middleware)
 async def api_auth_middleware_wrapper(request, call_next):
     return await api_auth_middleware(request, call_next)
 
+# Explicitly add the problematic route AFTER middleware setup
+# app.add_route("/api/automod/file-extensions", file_extension_rule_create, methods=["POST"], name="file_extension_rule_create_explicit") # Reverted
+
 # Apply tracking decorator to routes
 # Note: This is an alternative to using middleware. You can use either approach.
 # Uncomment these lines if you prefer using decorators instead of middleware.
@@ -236,6 +241,15 @@ def startup_event():
     admin_password = os.environ.get("ADMIN_PASSWORD", "smarterdev2024")
 
     init_admin(db, admin_username, admin_email, admin_password)
+
+    # --- DEBUG: Print routes --- #
+    # print("\n--- Registered Routes ---")
+    # for route in app.routes:
+    #     if hasattr(route, 'path'):
+    #         methods = list(route.methods) if hasattr(route, 'methods') else "(Mount)"
+    #         print(f"Path: {route.path}, Methods: {methods}, Name: {route.name}")
+    # print("--- End Registered Routes ---\n")
+    # --- END DEBUG --- #
 
 # Clean up database connections on shutdown
 @app.on_event("shutdown")

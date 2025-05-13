@@ -8,6 +8,8 @@ import os
 import logging
 from datetime import datetime
 from pathlib import Path
+import asyncio
+import httpx
 
 import hikari
 import lightbulb
@@ -71,7 +73,16 @@ def create_bot() -> lightbulb.BotApp:
     # Load plugins
     bot.load_extensions_from(Path(__file__).parent / "plugins")
 
-    # Register event listeners
+    async def heartbeat_task():
+        api_url = os.environ.get("SMARTER_DEV_API_URL", "http://localhost:8000")
+        while True:
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.post(f"{api_url}/api/bot/heartbeat")
+            except Exception as e:
+                print(f"Heartbeat failed: {e}")
+            await asyncio.sleep(60)
+
     @bot.listen(hikari.StartedEvent)
     async def on_started(event: hikari.StartedEvent) -> None:
         """
@@ -85,6 +96,9 @@ def create_bot() -> lightbulb.BotApp:
         # Log the number of guilds the bot is in
         guilds = await bot.rest.fetch_my_guilds()
         logger.info(f"Bot is in {len(list(guilds))} guilds")
+
+        # Start heartbeat task
+        bot.loop.create_task(heartbeat_task())
 
     @bot.listen(hikari.GuildJoinEvent)
     async def on_guild_join(event: hikari.GuildJoinEvent) -> None:
@@ -189,78 +203,47 @@ def create_bot() -> lightbulb.BotApp:
         if event.is_bot:
             return
 
-        # Handle file attachments
-        if event.message.attachments:
-            # Get file extension rules for the guild
-            rules = await bot.d.api_client.get_file_extension_rules(event.guild_id)
-            if not rules:
-                return
+        # Check file extension rules
+        file_rules = await bot.d.api_client.get_file_extension_rules(event.guild_id)
+        print(f"Checking file rules for guild {event.guild_id}: {file_rules}")  # Debug log
 
-            # Process each attachment
-            for attachment in event.message.attachments:
-                # Get file extension (without the dot)
-                extension = attachment.filename.split(".")[-1].lower() if "." in attachment.filename else ""
+        blocked_attachments = []
+        for attachment in event.message.attachments:
+            # Get file extension (without the dot)
+            extension = os.path.splitext(attachment.filename)[1].lower().lstrip('.')
+            if not extension:
+                continue
 
-                # Find matching rule
-                rule = next((r for r in rules if r["extension"] == extension), None)
+            # Find matching rule
+            matching_rule = next((rule for rule in file_rules if rule["extension"].lower() == extension), None)
+            print(f"Checking extension {extension} against rules: {matching_rule}")  # Debug log
 
-                # If no rule exists, treat as blocked
-                if not rule:
-                    # Track the blocked attachment
-                    await bot.d.api_client.create_file_attachment(
-                        guild_id=event.guild_id,
-                        channel_id=event.channel_id,
-                        message_id=event.message.id,
-                        user_id=event.author.id,
-                        extension=extension,
-                        attachment_url=attachment.url,
-                        was_allowed=False,
-                        was_deleted=True
-                    )
+            if matching_rule:
+                if not matching_rule["is_allowed"]:
+                    blocked_attachments.append(attachment)
+                    # Send warning message if the file is blocked and a message exists
+                    if matching_rule["warning_message"]:
+                        await bot.rest.create_message(event.channel_id, matching_rule["warning_message"])
+                elif matching_rule["is_allowed"] and matching_rule["warning_message"]:
+                    # File is allowed, but has a warning message - reply to the original message
+                    formatted_warning = f"-# ⚠️ {matching_rule['warning_message']}"
+                    await event.message.respond(formatted_warning, reply=True)
+            else:
+                # No rule exists for this extension, block it by default
+                blocked_attachments.append(attachment)
+                await bot.rest.create_message(event.channel_id, f"File extension `.{extension}` is not allowed in this server.")
 
-                    # Delete the message
-                    await event.message.delete()
-                    await event.message.respond(
-                        f"File type `.{extension}` is not allowed in this server.",
-                        user_mentions=False
-                    )
-                    return
-
-                # If rule exists but file is not allowed
-                if not rule["is_allowed"]:
-                    # Track the blocked attachment
-                    await bot.d.api_client.create_file_attachment(
-                        guild_id=event.guild_id,
-                        channel_id=event.channel_id,
-                        message_id=event.message.id,
-                        user_id=event.author.id,
-                        extension=extension,
-                        attachment_url=attachment.url,
-                        was_allowed=False,
-                        was_deleted=True
-                    )
-
-                    # Delete the message
-                    await event.message.delete()
-                    warning = rule["warning_message"] or f"File type `.{extension}` is not allowed in this server."
-                    await event.message.respond(warning, user_mentions=False)
-                    return
-
-                # If file is allowed but has a warning message
-                if rule["warning_message"]:
-                    await event.message.respond(rule["warning_message"], user_mentions=False)
-
-                # Track the allowed attachment
-                await bot.d.api_client.create_file_attachment(
-                    guild_id=event.guild_id,
-                    channel_id=event.channel_id,
-                    message_id=event.message.id,
-                    user_id=event.author.id,
-                    extension=extension,
-                    attachment_url=attachment.url,
-                    was_allowed=True,
-                    was_deleted=False
-                )
+        # Delete message if any attachments were blocked
+        if blocked_attachments:
+            try:
+                await event.message.delete()
+            except hikari.NotFound:
+                pass  # Message was already deleted
+            except hikari.Forbidden:
+                await bot.rest.create_message(event.channel_id, "I don't have permission to delete messages.")
+            except Exception as e:
+                print(f"Error deleting message: {e}")
+                await bot.rest.create_message(event.channel_id, "An error occurred while trying to delete the message.")
 
     # Register shutdown handler
     @bot.listen(hikari.StoppingEvent)

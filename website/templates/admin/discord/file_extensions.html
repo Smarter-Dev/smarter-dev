@@ -286,7 +286,7 @@ async function handleRuleSubmit(event) {
     };
 
     try {
-        const response = await fetch('/api/discord/file-extensions', {
+        const response = await fetch('/api/automod/file-extensions', {
             method: currentRule ? 'PUT' : 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -311,7 +311,7 @@ async function deleteRule(extension) {
     }
 
     try {
-        const response = await fetch(`/api/discord/file-extensions/${extension}`, {
+        const response = await fetch(`/api/automod/file-extensions/${extension}`, {
             method: 'DELETE'
         });
 
