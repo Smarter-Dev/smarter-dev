@@ -208,6 +208,9 @@ def create_bot() -> lightbulb.BotApp:
         print(f"Checking file rules for guild {event.guild_id}: {file_rules}")  # Debug log
 
         blocked_attachments = []
+        allowed_warnings = [] # Collect warnings for allowed files
+        block_reasons = [] # Collect reasons for blocking
+
         for attachment in event.message.attachments:
             # Get file extension (without the dot)
             extension = os.path.splitext(attachment.filename)[1].lower().lstrip('.')
@@ -221,29 +224,44 @@ def create_bot() -> lightbulb.BotApp:
             if matching_rule:
                 if not matching_rule["is_allowed"]:
                     blocked_attachments.append(attachment)
-                    # Send warning message if the file is blocked and a message exists
-                    if matching_rule["warning_message"]:
-                        await bot.rest.create_message(event.channel_id, matching_rule["warning_message"])
+                    # Use the specific warning message if available, otherwise a default
+                    reason = matching_rule.get("warning_message") or f"File extension `.{extension}` is blocked by a rule."
+                    block_reasons.append(reason)
                 elif matching_rule["is_allowed"] and matching_rule["warning_message"]:
-                    # File is allowed, but has a warning message - reply to the original message
-                    formatted_warning = f"-# ⚠️ {matching_rule['warning_message']}"
-                    await event.message.respond(formatted_warning, reply=True)
+                    # File is allowed, but has a warning message - collect the warning
+                    allowed_warnings.append(matching_rule['warning_message'])
             else:
                 # No rule exists for this extension, block it by default
                 blocked_attachments.append(attachment)
-                await bot.rest.create_message(event.channel_id, f"File extension `.{extension}` is not allowed in this server.")
+                block_reasons.append(f"`.{extension}`")
 
-        # Delete message if any attachments were blocked
+        # Handle blocked attachments OR allowed warnings
         if blocked_attachments:
+            # Format the reasons for deletion
+            *unique_reasons, last_reason = sorted(set(block_reasons))
+            unique_reasons.append(f"& {last_reason}" if len(unique_reasons) > 0 else last_reason)
+            formatted_reasons = ", ".join(unique_reasons) if len(unique_reasons) > 2 else " ".join(unique_reasons)
+            delete_message_content = f"-# <@{event.author.id}> Your message was deleted because the {formatted_reasons} attachement type{'s are' if len(unique_reasons) > 1 else ' is'} blocked for user safety."
+
+            # Send the formatted deletion reason message
+            await bot.rest.create_message(event.channel_id, delete_message_content, user_mentions=True)
+
+            # Delete the original message
             try:
                 await event.message.delete()
             except hikari.NotFound:
                 pass  # Message was already deleted
             except hikari.Forbidden:
-                await bot.rest.create_message(event.channel_id, "I don't have permission to delete messages.")
+                # Maybe send a message indicating lack of perms, but avoid double messaging if delete_message_content already sent.
+                logger.warning(f"Missing permissions to delete message {event.message.id} in guild {event.guild_id}")
             except Exception as e:
-                print(f"Error deleting message: {e}")
-                await bot.rest.create_message(event.channel_id, "An error occurred while trying to delete the message.")
+                logger.error(f"Error deleting message {event.message.id}: {e}")
+                # Avoid sending another error message if the reason message already went through.
+
+        elif allowed_warnings: # Only send warnings for allowed files if the message wasn't deleted
+            unique_warnings = set(allowed_warnings)
+            formatted_warnings = "\\n".join([f"-# {warning}" for warning in unique_warnings])
+            await bot.rest.create_message(event.channel_id, formatted_warnings)
 
     # Register shutdown handler
     @bot.listen(hikari.StoppingEvent)
