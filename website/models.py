@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Bool
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import datetime
+from datetime import datetime, timezone
 
 from .database import Base
 
@@ -538,8 +539,8 @@ class AutoModFileExtensionRule(Base):
     extension = Column(String, nullable=False)  # File extension without the dot
     is_allowed = Column(Boolean, nullable=False)  # True if allowed, False if blocked
     warning_message = Column(String, nullable=True)  # Message to show if extension is warned
-    created_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     guild = relationship("Guild", back_populates="file_extension_rules")
@@ -563,8 +564,13 @@ class FileAttachment(Base):
     attachment_url = Column(String, nullable=False)
     was_allowed = Column(Boolean, nullable=False)  # Whether the file was allowed
     was_deleted = Column(Boolean, nullable=False, default=False)  # Whether the message was deleted
-    created_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     guild = relationship("Guild", back_populates="file_attachments")
     user = relationship("DiscordUser", back_populates="file_attachments")
+
+class BotStatus(Base):
+    __tablename__ = "bot_status"
+    id = Column(Integer, primary_key=True)
+    last_heartbeat = Column(DateTime, default=lambda: datetime.now(timezone.utc))

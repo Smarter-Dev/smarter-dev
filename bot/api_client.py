@@ -522,12 +522,12 @@ class APIClient:
         """
         Get file extension rules for a guild.
         """
-        async with self.client.get(f"{self.base_url}/api/automod/file-extensions/{guild_id}") as response:
-            if response.status == 404:
-                return []
-            response.raise_for_status()
-            data = await response.json()
-            return data["rules"]
+        response = await self._request("GET", f"/api/automod/file-extensions/{guild_id}")
+        if response.status_code == 404:
+            return []
+        data = await self._get_json(response)
+        print(f"File extension rules for guild {guild_id}: {data}")  # Debug log
+        return data.get("rules", [])
 
     async def create_file_attachment(
         self,
@@ -543,18 +543,15 @@ class APIClient:
         """
         Create a file attachment record.
         """
-        async with self.client.post(
-            f"{self.base_url}/api/automod/file-attachments",
-            json={
-                "guild_id": guild_id,
-                "channel_id": channel_id,
-                "message_id": message_id,
-                "user_id": user_id,
-                "extension": extension,
-                "attachment_url": attachment_url,
-                "was_allowed": was_allowed,
-                "was_deleted": was_deleted
-            }
-        ) as response:
-            response.raise_for_status()
-            return await response.json()
+        data = {
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "message_id": message_id,
+            "user_id": user_id,
+            "extension": extension,
+            "attachment_url": attachment_url,
+            "was_allowed": was_allowed,
+            "was_deleted": was_deleted
+        }
+        response = await self._request("POST", "/api/automod/file-attachments", data=data)
+        return await self._get_json(response)

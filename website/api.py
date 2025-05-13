@@ -37,13 +37,19 @@ from .api_routes import (
     # Squad endpoints
     squad_list, squad_detail, squad_create, squad_update, squad_delete,
     squad_member_list, squad_member_add, squad_member_remove,
-    user_squads, user_eligible_squads
+    user_squads, user_eligible_squads,
+
+    # System endpoints
+    system_status
 )
 
 # Define API routes
 api_routes = [
     # Authentication
     Route("/api/auth/token", api_token, methods=["POST"]),
+
+    # System endpoints
+    Route("/api/system/status", system_status, methods=["GET"]),
 
     # Guild endpoints
     Route("/api/guilds", guild_list, methods=["GET"]),

@@ -12,6 +12,10 @@ from starlette.responses import RedirectResponse, JSONResponse
 from starlette.templating import Jinja2Templates
 
 from .discord_rest import get_guild_roles, get_role_name
+from .api_client import APIClient
+
+# Initialize API client with no token - we'll set it per request
+api_client = APIClient()
 
 from .models import (
     APIKey, Guild, DiscordUser, GuildMember, UserNote,
@@ -902,207 +906,117 @@ async def admin_discord_api_key_delete(request):
 
     return RedirectResponse(url="/admin/discord/api-keys", status_code=302)
 
+async def refresh_api_token(request) -> Optional[str]:
+    """
+    Refresh the API token if needed
+    """
+    db = next(get_db())
+    admin_key = db.query(APIKey).filter(APIKey.name == "Admin Interface").first()
+    if not admin_key:
+        return None
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "http://localhost:8000/api/auth/token",
+            json={"api_key": admin_key.key}
+        )
+        if response.status_code == 200:
+            data = response.json()
+            request.session["api_token"] = data["token"]
+            return data["token"]
+    return None
 
 # Auto Moderation
 async def admin_discord_automod(request):
     """
-    Manage auto moderation settings
+    Admin page for Discord auto moderation settings
     """
-    # Get DB session
+    # Get all guilds
     db = next(get_db())
-
-    # Handle form submission for regex rules
-    if request.method == "POST":
-        form_data = await request.form()
-        action = form_data.get("action")
-        section = form_data.get("section")
-
-        # Handle regex rule actions
-        if section == "regex":
-            if action == "create":
-                # Create new regex rule
-                rule = AutoModRegexRule(
-                    guild_id=int(form_data.get("guild_id")),
-                    pattern=form_data.get("pattern"),
-                    description=form_data.get("description"),
-                    action=form_data.get("action_type", "ban"),
-                    require_no_avatar=form_data.get("require_no_avatar") == "on",
-                    max_account_age_days=int(form_data.get("max_account_age_days") or 0) or None,
-                    is_active=form_data.get("is_active") == "on"
-                )
-                db.add(rule)
-                db.commit()
-            elif action == "delete":
-                # Delete regex rule
-                rule_id = int(form_data.get("rule_id"))
-                rule = db.query(AutoModRegexRule).filter(AutoModRegexRule.id == rule_id).first()
-                if rule:
-                    db.delete(rule)
-                    db.commit()
-            elif action == "update":
-                # Update regex rule
-                rule_id = int(form_data.get("rule_id"))
-                rule = db.query(AutoModRegexRule).filter(AutoModRegexRule.id == rule_id).first()
-                if rule:
-                    rule.pattern = form_data.get("pattern")
-                    rule.description = form_data.get("description")
-                    rule.action = form_data.get("action_type", "ban")
-                    rule.require_no_avatar = form_data.get("require_no_avatar") == "on"
-                    rule.max_account_age_days = int(form_data.get("max_account_age_days") or 0) or None
-                    rule.is_active = form_data.get("is_active") == "on"
-                    db.commit()
-
-        # Handle rate limit actions
-        elif section == "ratelimit":
-            if action == "create":
-                # Create new rate limit
-                rate_limit = AutoModRateLimit(
-                    guild_id=int(form_data.get("guild_id")),
-                    name=form_data.get("name"),
-                    limit_type=form_data.get("limit_type"),
-                    count=int(form_data.get("count")),
-                    time_period_seconds=int(form_data.get("time_period_seconds")),
-                    action=form_data.get("action_type", "timeout"),
-                    action_duration_seconds=int(form_data.get("action_duration_seconds") or 0) or None,
-                    is_active=form_data.get("is_active") == "on"
-                )
-                db.add(rate_limit)
-                db.commit()
-            elif action == "delete":
-                # Delete rate limit
-                rate_limit_id = int(form_data.get("rate_limit_id"))
-                rate_limit = db.query(AutoModRateLimit).filter(AutoModRateLimit.id == rate_limit_id).first()
-                if rate_limit:
-                    db.delete(rate_limit)
-                    db.commit()
-            elif action == "update":
-                # Update rate limit
-                rate_limit_id = int(form_data.get("rate_limit_id"))
-                rate_limit = db.query(AutoModRateLimit).filter(AutoModRateLimit.id == rate_limit_id).first()
-                if rate_limit:
-                    rate_limit.name = form_data.get("name")
-                    rate_limit.limit_type = form_data.get("limit_type")
-                    rate_limit.count = int(form_data.get("count"))
-                    rate_limit.time_period_seconds = int(form_data.get("time_period_seconds"))
-                    rate_limit.action = form_data.get("action_type", "timeout")
-                    rate_limit.action_duration_seconds = int(form_data.get("action_duration_seconds") or 0) or None
-                    rate_limit.is_active = form_data.get("is_active") == "on"
-                    db.commit()
-
-        return RedirectResponse(url="/admin/discord/automod", status_code=302)
-
-    # Get all regex rules
-    regex_rules = db.query(AutoModRegexRule).order_by(AutoModRegexRule.guild_id, AutoModRegexRule.created_at).all()
-
-    # Get all rate limits
-    rate_limits = db.query(AutoModRateLimit).order_by(AutoModRateLimit.guild_id, AutoModRateLimit.created_at).all()
-
-    # Get guild info
     guilds = db.query(Guild).all()
 
-    # Map guild IDs to names
-    guild_names = {g.id: g.name for g in guilds}
+    # Get selected guild
+    selected_guild_id = request.query_params.get("guild_id")
+    selected_guild = None
+    if selected_guild_id:
+        selected_guild = db.query(Guild).filter(Guild.id == selected_guild_id).first()
+
+    # Get file extension rules for the selected guild
+    file_extension_rules = []
+    if selected_guild:
+        # Get or refresh API token
+        api_token = request.session.get('api_token')
+        if not api_token:
+            api_token = await refresh_api_token(request)
+            if not api_token:
+                return templates.TemplateResponse(
+                    "admin/discord/automod.html",
+                    {
+                        "request": request,
+                        "guilds": guilds,
+                        "selected_guild": selected_guild,
+                        "file_extension_rules": [],
+                        "rate_limits": [],
+                        "regex_rules": [],
+                        "error": "No API token found. Please log in again."
+                    }
+                )
+
+        # Set API token for this request
+        api_client.api_token = api_token
+
+        # Use the Discord guild ID to fetch rules
+        response = await api_client.get_file_extension_rules(selected_guild.discord_id)
+        if response.status_code == 401:
+            # Token expired, try to refresh
+            api_token = await refresh_api_token(request)
+            if api_token:
+                api_client.api_token = api_token
+                response = await api_client.get_file_extension_rules(selected_guild.discord_id)
+
+        if response.status_code == 200:
+            data = response.json()
+            print("File extension rules response:", data)  # Debug print
+            for rule in data.get("rules", []):
+                # Parse the created_at field from ISO format to datetime
+                if "created_at" in rule:
+                    rule["created_at"] = datetime.fromisoformat(rule["created_at"].replace("Z", "+00:00"))
+                file_extension_rules.append(rule)
+
+    # Get rate limits for the selected guild
+    rate_limits = []
+    if selected_guild:
+        response = await api_client.get_rate_limits(selected_guild.discord_id)
+        if response.status_code == 200:
+            data = response.json()
+            for limit in data.get("limits", []):
+                # Parse the created_at field from ISO format to datetime
+                if "created_at" in limit:
+                    limit["created_at"] = datetime.fromisoformat(limit["created_at"].replace("Z", "+00:00"))
+                rate_limits.append(limit)
+
+    # Get regex rules for the selected guild
+    regex_rules = []
+    if selected_guild:
+        response = await api_client.get_regex_rules(selected_guild.discord_id)
+        if response.status_code == 200:
+            data = response.json()
+            for rule in data.get("rules", []):
+                # Parse the created_at field from ISO format to datetime
+                if "created_at" in rule:
+                    rule["created_at"] = datetime.fromisoformat(rule["created_at"].replace("Z", "+00:00"))
+                regex_rules.append(rule)
 
     return templates.TemplateResponse(
         "admin/discord/automod.html",
         {
             "request": request,
-            "regex_rules": regex_rules,
-            "rate_limits": rate_limits,
-            "guilds": guilds,
-            "guild_names": guild_names
-        }
-    )
-
-# File extension management routes
-async def admin_discord_file_extensions(request):
-    """
-    Manage file extension rules
-    """
-    # Get DB session
-    db = next(get_db())
-
-    # Get all guilds for the form
-    guilds = db.query(Guild).order_by(Guild.name).all()
-
-    # Get selected guild
-    guild_id = request.query_params.get("guild_id")
-    selected_guild = None
-    rules = []
-
-    if guild_id:
-        selected_guild = db.query(Guild).filter(Guild.id == guild_id).first()
-        if selected_guild:
-            rules = db.query(AutoModFileExtensionRule).filter(
-                AutoModFileExtensionRule.guild_id == selected_guild.id
-            ).order_by(AutoModFileExtensionRule.extension).all()
-
-    if request.method == "POST":
-        form_data = await request.form()
-        action = form_data.get("action")
-
-        if action == "create":
-            # Create new rule
-            guild_id = int(form_data.get("guild_id"))
-            extension = form_data.get("extension").lower().strip(".")
-            is_allowed = form_data.get("is_allowed") == "on"
-            warning_message = form_data.get("warning_message")
-
-            # Check if rule already exists
-            existing = db.query(AutoModFileExtensionRule).filter_by(
-                guild_id=guild_id,
-                extension=extension
-            ).first()
-
-            if not existing:
-                rule = AutoModFileExtensionRule(
-                    guild_id=guild_id,
-                    extension=extension,
-                    is_allowed=is_allowed,
-                    warning_message=warning_message if not is_allowed else None
-                )
-                db.add(rule)
-                db.commit()
-
-        elif action == "update":
-            # Update existing rule
-            rule_id = int(form_data.get("rule_id"))
-            is_allowed = form_data.get("is_allowed") == "on"
-            warning_message = form_data.get("warning_message")
-
-            rule = db.query(AutoModFileExtensionRule).filter(
-                AutoModFileExtensionRule.id == rule_id
-            ).first()
-
-            if rule:
-                rule.is_allowed = is_allowed
-                rule.warning_message = warning_message if not is_allowed else None
-                db.commit()
-
-        elif action == "delete":
-            # Delete rule
-            rule_id = int(form_data.get("rule_id"))
-            rule = db.query(AutoModFileExtensionRule).filter(
-                AutoModFileExtensionRule.id == rule_id
-            ).first()
-
-            if rule:
-                db.delete(rule)
-                db.commit()
-
-        # Redirect to refresh the page
-        return RedirectResponse(
-            url=f"/admin/discord/file-extensions?guild_id={guild_id}",
-            status_code=303
-        )
-
-    return templates.TemplateResponse(
-        "admin/discord/file_extensions.html",
-        {
-            "request": request,
             "guilds": guilds,
             "selected_guild": selected_guild,
-            "rules": rules
+            "file_extension_rules": file_extension_rules,
+            "rate_limits": rate_limits,
+            "regex_rules": regex_rules,
+            "api_token": request.session.get('api_token')  # Pass the API token to the template
         }
     )
 

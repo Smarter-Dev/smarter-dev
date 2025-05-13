@@ -4,6 +4,7 @@
 
 {% block content %}
 <div class="dashboard">
+    <!-- Quick Stats -->
     <div class="stats-grid">
         <div class="stat-card">
             <div class="stat-icon">
@@ -18,6 +19,7 @@
             <div class="stat-content">
                 <h3 class="stat-title">Total Redirects</h3>
                 <div class="stat-value">{{ stats.total_redirects }}</div>
+                <div class="stat-subtitle">Active redirects</div>
             </div>
         </div>
 
@@ -30,6 +32,7 @@
             <div class="stat-content">
                 <h3 class="stat-title">Total Clicks</h3>
                 <div class="stat-value">{{ stats.total_clicks }}</div>
+                <div class="stat-subtitle">All time clicks</div>
             </div>
         </div>
 
@@ -43,6 +46,7 @@
             <div class="stat-content">
                 <h3 class="stat-title">Today's Clicks</h3>
                 <div class="stat-value">{{ stats.today_clicks }}</div>
+                <div class="stat-subtitle">Last 24 hours</div>
             </div>
         </div>
 
@@ -58,65 +62,322 @@
             <div class="stat-content">
                 <h3 class="stat-title">Unique Visitors</h3>
                 <div class="stat-value">{{ stats.unique_visitors }}</div>
+                <div class="stat-subtitle">Last 30 days</div>
             </div>
         </div>
     </div>
 
-    <div class="chart-grid">
-        <div class="chart-card">
-            <h3 class="chart-title">Clicks Over Time</h3>
-            <div class="chart-container">
-                <canvas id="clicksChart"></canvas>
+    <!-- Main Content Grid -->
+    <div class="dashboard-grid">
+        <!-- Left Column -->
+        <div class="dashboard-column">
+            <!-- Traffic Overview -->
+            <div class="dashboard-card">
+                <div class="card-header">
+                    <h3 class="card-title">Traffic Overview</h3>
+                    <div class="card-actions">
+                        <select id="trafficPeriod" class="form-select" onchange="updateTrafficChart()">
+                            <option value="7">Last 7 days</option>
+                            <option value="30">Last 30 days</option>
+                            <option value="90">Last 90 days</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="clicksChart"></canvas>
+                </div>
+            </div>
+
+            <!-- Top Redirects -->
+            <div class="dashboard-card">
+                <div class="card-header">
+                    <h3 class="card-title">Top Redirects</h3>
+                    <div class="card-actions">
+                        <button class="btn btn-sm btn-outline" onclick="window.location.href='/admin/redirects'">
+                            View All
+                        </button>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="topRedirectsChart"></canvas>
+                </div>
             </div>
         </div>
 
-        <div class="chart-card">
-            <h3 class="chart-title">Top Redirects</h3>
-            <div class="chart-container">
-                <canvas id="topRedirectsChart"></canvas>
+        <!-- Right Column -->
+        <div class="dashboard-column">
+            <!-- System Status -->
+            <div class="dashboard-card">
+                <div class="card-header">
+                    <h3 class="card-title">System Status</h3>
+                    <div class="card-actions">
+                        <span class="status-indicator online">All Systems Operational</span>
+                    </div>
+                </div>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <div class="status-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20.317 4.492c-1.53-.69-3.17-1.2-4.885-1.49a.075.075 0 0 0-.079.036c-.21.39-.444.885-.608 1.283a18.566 18.566 0 0 0-5.487 0 12.36 12.36 0 0 0-.617-1.283.077.077 0 0 0-.079-.036c-1.714.29-3.354.8-4.885 1.491a.07.07 0 0 0-.032.027C.533 9.093-.32 13.555.099 17.961a.08.08 0 0 0 .031.055 20.03 20.03 0 0 0 5.993 2.98.078.078 0 0 0 .084-.026c.462-.62.874-1.275 1.226-1.963.021-.04.001-.088-.041-.104a13.229 13.229 0 0 1-1.872-.878.075.075 0 0 1-.008-.125c.126-.093.252-.19.372-.287a.075.075 0 0 1 .078-.01c3.927 1.764 8.18 1.764 12.061 0a.075.075 0 0 1 .079.009c.12.098.245.195.372.288a.075.075 0 0 1-.006.125c-.598.344-1.22.635-1.873.877a.075.075 0 0 0-.041.105c.36.687.772 1.341 1.225 1.962a.077.077 0 0 0 .084.028 19.963 19.963 0 0 0 6.002-2.981.076.076 0 0 0 .032-.054c.5-5.094-.838-9.52-3.549-13.442a.06.06 0 0 0-.031-.028z"></path>
+                            </svg>
+                        </div>
+                        <div class="status-content">
+                            <h4>Discord Bot</h4>
+                            <p>Online</p>
+                        </div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"></path>
+                            </svg>
+                        </div>
+                        <div class="status-content">
+                            <h4>Website</h4>
+                            <p>Operational</p>
+                        </div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                            </svg>
+                        </div>
+                        <div class="status-content">
+                            <h4>API</h4>
+                            <p>Healthy</p>
+                        </div>
+                    </div>
+                </div>
             </div>
-        </div>
-    </div>
 
-    <div class="recent-section">
-        <h3 class="section-title">Recent Redirects</h3>
-        <div class="table-container">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Target URL</th>
-                        <th>Clicks</th>
-                        <th>Created</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for redirect in recent_redirects %}
-                    <tr>
-                        <td>{{ redirect[0].name }}</td>
-                        <td class="truncate">{{ redirect[0].target_url }}</td>
-                        <td>{{ redirect[1] }}</td>
-                        <td>{{ redirect[0].created_at.strftime('%Y-%m-%d') }}</td>
-                        <td>
-                            <div class="actions">
-                                <a href="/admin/redirects/{{ redirect[0].id }}" class="btn btn-sm btn-outline">View</a>
-                                <a href="/admin/redirects/{{ redirect[0].id }}/edit" class="btn btn-sm btn-outline">Edit</a>
-                            </div>
-                        </td>
-                    </tr>
+            <!-- Recent Activity -->
+            <div class="dashboard-card">
+                <div class="card-header">
+                    <h3 class="card-title">Recent Activity</h3>
+                    <div class="card-actions">
+                        <button class="btn btn-sm btn-outline" onclick="refreshActivity()">
+                            Refresh
+                        </button>
+                    </div>
+                </div>
+                <div class="activity-list">
+                    {% for activity in recent_activity %}
+                    <div class="activity-item">
+                        <div class="activity-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                        </div>
+                        <div class="activity-content">
+                            <h4>{{ activity.title }}</h4>
+                            <p>{{ activity.description }}</p>
+                            <span class="activity-time">{{ activity.time }}</span>
+                        </div>
+                    </div>
                     {% endfor %}
-                </tbody>
-            </table>
+                </div>
+            </div>
         </div>
     </div>
 </div>
-{% endblock %}
 
-{% block extra_js %}
+<style>
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-lg);
+    margin-top: var(--spacing-lg);
+}
+
+.dashboard-card {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+    border: 1px solid var(--border-color);
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--spacing-lg);
+}
+
+.card-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: var(--spacing-md);
+}
+
+.status-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+}
+
+.status-icon {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-active);
+    border-radius: var(--radius-md);
+    color: var(--primary);
+}
+
+.status-content h4 {
+    font-size: 0.9rem;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+}
+
+.status-content p {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.status-indicator {
+    font-size: 0.8rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-md);
+}
+
+.status-indicator.online {
+    background: var(--success);
+    color: white;
+}
+
+.activity-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
+}
+
+.activity-item {
+    display: flex;
+    gap: var(--spacing-md);
+    padding: var(--spacing-md);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+}
+
+.activity-icon {
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-active);
+    border-radius: var(--radius-md);
+    color: var(--primary);
+}
+
+.activity-content {
+    flex: 1;
+}
+
+.activity-content h4 {
+    font-size: 0.9rem;
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+}
+
+.activity-content p {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.25rem;
+}
+
+.activity-time {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+@media (max-width: 1024px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.status-error {
+    background: var(--error) !important;
+    color: white !important;
+}
+
+.status-error .status-icon {
+    background: rgba(255, 255, 255, 0.1) !important;
+    color: white !important;
+}
+
+.status-indicator.error {
+    background: var(--error);
+    color: white;
+}
+</style>
+
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // Clicks over time chart
+        // Initialize charts
+        initializeCharts();
+        
+        // Fetch initial system status
+        fetchSystemStatus();
+        
+        // Set up periodic status updates
+        setInterval(fetchSystemStatus, 30000); // Update every 30 seconds
+    });
+
+    async function fetchSystemStatus() {
+        try {
+            const response = await fetch('/api/system/status');
+            const data = await response.json();
+            
+            if (data.status) {
+                // Update bot status
+                const botStatus = document.querySelector('.status-item:nth-child(1) p');
+                botStatus.textContent = data.status.bot;
+                botStatus.parentElement.parentElement.classList.toggle('status-error', data.status.bot === 'offline');
+                
+                // Update website status
+                const websiteStatus = document.querySelector('.status-item:nth-child(2) p');
+                websiteStatus.textContent = data.status.website;
+                websiteStatus.parentElement.parentElement.classList.toggle('status-error', data.status.website === 'degraded');
+                
+                // Update API status
+                const apiStatus = document.querySelector('.status-item:nth-child(3) p');
+                apiStatus.textContent = data.status.api;
+                apiStatus.parentElement.parentElement.classList.toggle('status-error', data.status.api === 'degraded');
+                
+                // Update overall status indicator
+                const statusIndicator = document.querySelector('.status-indicator');
+                const allHealthy = Object.values(data.status).every(status => 
+                    status === 'online' || status === 'operational' || status === 'healthy'
+                );
+                
+                statusIndicator.textContent = allHealthy ? 'All Systems Operational' : 'System Issues Detected';
+                statusIndicator.classList.toggle('online', allHealthy);
+                statusIndicator.classList.toggle('error', !allHealthy);
+            }
+        } catch (error) {
+            console.error('Failed to fetch system status:', error);
+        }
+    }
+
+    function initializeCharts() {
+        // Traffic Chart
         const clicksCtx = document.getElementById('clicksChart').getContext('2d');
         const clicksChart = new Chart(clicksCtx, {
             type: 'line',
@@ -125,16 +386,20 @@
                 datasets: [{
                     label: 'Clicks',
                     data: {{ chart_data.clicks|tojson }},
-                    backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                    borderColor: 'rgba(59, 130, 246, 1)',
-                    borderWidth: 2,
-                    tension: 0.3,
+                    borderColor: 'rgb(59, 130, 246)',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    tension: 0.4,
                     fill: true
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                },
                 scales: {
                     y: {
                         beginAtZero: true,
@@ -147,16 +412,11 @@
                             display: false
                         }
                     }
-                },
-                plugins: {
-                    legend: {
-                        display: false
-                    }
                 }
             }
         });
 
-        // Top redirects chart
+        // Top Redirects Chart
         const topRedirectsCtx = document.getElementById('topRedirectsChart').getContext('2d');
         const topRedirectsChart = new Chart(topRedirectsCtx, {
             type: 'bar',
@@ -198,6 +458,15 @@
                 }
             }
         });
-    });
+    }
+
+    function updateTrafficChart() {
+        const period = document.getElementById('trafficPeriod').value;
+        // Add AJAX call to update chart data based on selected period
+    }
+
+    function refreshActivity() {
+        // Add AJAX call to refresh activity list
+    }
 </script>
 {% endblock %}
