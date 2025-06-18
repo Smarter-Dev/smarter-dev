@@ -1,1 +1,0 @@
-Do not kill the server process when using uvicorn's reload mode.
