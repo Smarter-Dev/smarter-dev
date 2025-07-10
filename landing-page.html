@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smarter Dev - Grow Together</title>
     <link href="https://fonts.googleapis.com/css2?family=Bruno+Ace+SC&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css?family=Bungee+Hairline&display=swap" rel="stylesheet">
@@ -40,10 +41,44 @@
             font-family: 'Bruno Ace SC', sans-serif;
         }
 
+        .glow-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: -1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 1em;
+            min-height: 100vh;
+        }
+
+        .glow-heading {
+            position: relative;
+            width: 600px;
+            height: 12rem; /* Approximate height of h1 */
+        }
+
+        .glow-content {
+            position: relative;
+            width: 600px;
+            height: 12rem; /* Approximate height of h2 + paragraphs */
+            opacity: 0.75;
+        }
+
+        .glow-cta {
+            position: relative;
+            width: 600px;
+            height: 14rem; /* Approximate height of CTA button area */
+        }
+
         .dev-glow {
             position: absolute;
             pointer-events: none;
-            top: -75vh; right: -33%;
+            top: -80vh; right: -33%;
             width: 50vh; height: 200vh;
             transform: rotate(-30deg) translate(0, 0);
             background:
@@ -59,7 +94,7 @@
             pointer-events: none;
             top: 0; left: 0;
             width: 100vh; height: 100vh;
-            transform: translate(-35%, -25%);
+            transform: translate(-30%, -40%);
             background:
                 radial-gradient(
                     ellipse 50% 50% at 50% 50%, /* ellipse shape, wide horizontally, narrow vertically */
@@ -132,22 +167,139 @@
             box-shadow: #00E1FF 0 0 92px;
         }
 
-
-
         .btn-primary .button-content {
             display: inline-block;
             max-width: 10ch;
+        }
+
+        @media (max-width: 720px) {
+            .container {
+                padding: 2rem 2rem;
+                justify-content: flex-start;
+                min-height: auto;
+                align-items: flex-start;
+            }
+
+            .glow-layer {
+                justify-content: flex-start;
+                min-height: auto;
+                align-items: flex-start;
+            }
+
+            .heading {
+                text-align: left;
+            }
+
+            .content {
+                text-align: left;
+            }
+
+            .cta-button {
+                align-self: center;
+            }
+
+            .content {
+                width: 100%;
+                max-width: 90vw;
+            }
+
+            .glow-heading {
+                width: 100%;
+                max-width: 90vw;
+            }
+
+            .glow-content {
+                width: 100%;
+                max-width: 90vw;
+            }
+
+            .glow-cta {
+                width: 100%;
+                max-width: 90vw;
+            }
+
+            h1 {
+                font-size: 3.5rem;
+            }
+
+            .content h2 {
+                font-size: 2.5rem;
+            }
+
+            .btn-primary {
+                width: 280px;
+                height: 110px;
+                font-size: 1.25rem;
+            }
+
+            .btn-primary .button-content {
+                transform: translate(-12px, -8px);
+            }
+
+            .btn-primary .cta-button-bg {
+                width: 392px;
+                height: 224px;
+            }
+
+            .dev-glow {
+                width: 40vh;
+                height: 160vh;
+                top: -60vh;
+                transform: rotate(30deg) translate(-50%, 0);
+            }
+
+            .message-glow {
+                width: 100vh;
+                height: 100vh;
+                top: -25vh;
+                transform: translate(-30%, 0);
+            }
+        }
+
+        @media (max-width: 389px) {
+            .container {
+                gap: 0.5em;
+                padding: 1rem 2rem;
+            }
+
+            .glow-layer {
+                gap: 0.5em;
+            }
+
+            h1 {
+                font-size: 2.5rem;
+            }
+
+            .content h2 {
+                font-size: 2rem;
+            }
+
+            .content p {
+                font-size: 0.9rem;
+                line-height: 1.4;
+                margin: 0.5rem 0;
+            }
+
+            .glow-heading {
+                height: 8rem;
+            }
+
+            .glow-content {
+                height: 8rem;
+            }
+
+            .glow-cta {
+                height: 8rem;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="heading">
-            <div class="dev-glow"></div>
             <h1><span class="text-smarter">Smarter</span> <span class="text-dev">Dev</span></h1>
         </div>
         <div class="content">
-            <div class="message-glow"></div>
             <h2>Grow Together</h2>
             <p>Smarter Dev operates on a simple principle: your growth fuels ours, and ours fuels yours.</p>
             <p>Join us on Discord & experience the power of growing together.</p>
@@ -194,6 +346,17 @@
         </div>
     </div>
     <div class="grid-overlay"></div>
+    <div class="glow-layer">
+        <div class="glow-heading">
+            <div class="dev-glow"></div>
+        </div>
+        <div class="glow-content">
+            <div class="message-glow"></div>
+        </div>
+        <div class="glow-cta">
+            <!-- No glow for CTA section -->
+        </div>
+    </div>
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const button = document.querySelector('.btn-primary');
