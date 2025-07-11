@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env
+pip-log.txt
+
+# Development
+.venv
+.pytest_cache
+.coverage
+.mypy_cache
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation
+README.md
+*.md
+
+# Planning
+planning/
+
+# GitHub
+.github/
+
+# Assets not needed in container
+grow-together-landing-page.png
+landing-page.html
+static-logo-icon.png
+static-logo-icon.svg
+logo-icon.afdesign
+resources/Discord*.png
+resources/Discover*.png
+resources/Invite*.png
+resources/smarter-dev*.png
+resources/streak.png
