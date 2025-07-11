@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Smarter Dev{% endblock %}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bruno+Ace+SC&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css?family=Bungee+Hairline&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', Arial, sans-serif;
+            background-color: #02000F;
+            color: white;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 1em;
+            min-height: 100vh;
+        }
+
+        .content {
+            max-width: 600px;
+            opacity: 0.75;
+            position: relative;
+        }
+
+        .content p {
+            font-size: 1.125rem;
+            line-height: 1.6;
+            font-weight: 400;
+        }
+
+        .content h2 {
+            font-size: 3rem;
+            font-family: 'Bruno Ace SC', sans-serif;
+        }
+
+        .glow-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: -1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 1em;
+            min-height: 100vh;
+        }
+
+        .glow-heading {
+            position: relative;
+            width: 600px;
+            height: 12rem;
+        }
+
+        .glow-content {
+            position: relative;
+            width: 600px;
+            height: 12rem;
+            opacity: 0.75;
+        }
+
+        .glow-cta {
+            position: relative;
+            width: 600px;
+            height: 14rem;
+        }
+
+        .dev-glow {
+            position: absolute;
+            pointer-events: none;
+            top: -80vh; right: -33%;
+            width: 50vh; height: 200vh;
+            transform: rotate(-30deg) translate(0, 0);
+            background:
+                radial-gradient(
+                    ellipse 50% 50% at 50% 50%,
+                    rgba(0,225,255,0.17) 0%,
+                    rgba(0,0,0,0) 100%
+                ) no-repeat;
+        }
+
+        .message-glow {
+            position: absolute;
+            pointer-events: none;
+            top: 0; left: 0;
+            width: 100vh; height: 100vh;
+            transform: translate(-30%, -40%);
+            background:
+                radial-gradient(
+                    ellipse 50% 50% at 50% 50%,
+                    rgba(255,225,255,0.17) 0%,
+                    rgba(0,0,0,0) 100%
+                ) no-repeat;
+        }
+
+        .error-glow {
+            position: absolute;
+            pointer-events: none;
+            top: 0; left: 0;
+            width: 100vh; height: 100vh;
+            transform: translate(-50%, -50%);
+            background:
+                radial-gradient(
+                    ellipse 50% 50% at 50% 50%,
+                    rgba(255,255,255,0.15) 0%,
+                    rgba(0,0,0,0) 100%
+                ) no-repeat;
+        }
+        
+        .heading {
+            position: relative;
+        }
+        
+        .grid-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            mix-blend-mode: overlay;
+            background-image: url("/static/resources/bg-grid.svg");
+            opacity: 0.25;
+            z-index: 100;
+        }
+
+        h1 {
+            font-size: 5rem;
+        }
+
+        h1 .text-smarter {
+            text-shadow:
+                rgba(255, 255, 255, 1.0) 0 0 96px,
+                rgba(255, 255, 255, 0.5) 0 0 16px,
+                rgba(255, 255, 255, 0.5) 0 0 8px;
+            font-family: 'Bungee Hairline', sans-serif;
+        }
+
+        h1 .text-dev {
+            color: #00E1FF;
+            opacity: 75%;
+            font-family: 'Bruno Ace SC', sans-serif;
+        }
+
+        .text-error {
+            text-shadow:
+                rgba(255, 255, 255, 1.0) 0 0 96px,
+                rgba(255, 255, 255, 0.5) 0 0 16px,
+                rgba(255, 255, 255, 0.5) 0 0 8px;
+            font-family: 'Bungee Hairline', sans-serif;
+        }
+
+        .text-code {
+            opacity: 75%;
+            font-family: 'Bruno Ace SC', sans-serif;
+        }
+
+        .cta-button {
+            position: relative;
+            margin-top: 8em;
+        }
+
+        .btn-primary {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: white;
+            text-decoration: none;
+            text-align: center;
+            line-height: 1.5;
+            font-family: 'Bruno Ace SC', sans-serif;
+            width: 320px;
+            height: 128px;
+        }
+
+        .btn-primary .cta-button-bg {
+            position: absolute;
+            top: -48px;
+            left: -64px;
+            width: 448px;
+            height: 256px;
+            pointer-events: none;
+        }
+
+        .btn-primary .cta-button-bg rect {
+            box-shadow: #00E1FF 0 0 92px;
+        }
+
+        .btn-primary .button-content {
+            display: inline-block;
+            max-width: 10ch;
+        }
+
+        /* Error page button styles */
+        .btn-simple {
+            display: inline-block;
+            padding: 1rem 2rem;
+            font-size: 1.2rem;
+            color: white;
+            text-decoration: none;
+            text-align: center;
+            line-height: 1.5;
+            font-family: 'Bruno Ace SC', sans-serif;
+            border-radius: 32px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-simple.btn-aqua {
+            border: 2px solid #00E1FF;
+            background: rgba(0, 225, 255, 0.07);
+        }
+
+        .btn-simple.btn-aqua:hover {
+            background: rgba(0, 225, 255, 0.15);
+            box-shadow: 0 0 20px rgba(0, 225, 255, 0.3);
+        }
+
+        .btn-simple.btn-red {
+            border: 2px solid #FF4444;
+            background: rgba(255, 68, 68, 0.07);
+        }
+
+        .btn-simple.btn-red:hover {
+            background: rgba(255, 68, 68, 0.15);
+            box-shadow: 0 0 20px rgba(255, 68, 68, 0.3);
+        }
+
+        @media (max-width: 720px) {
+            .container {
+                padding: 2rem 2rem;
+                justify-content: flex-start;
+                min-height: auto;
+                align-items: flex-start;
+            }
+
+            .glow-layer {
+                justify-content: flex-start;
+                min-height: auto;
+                align-items: flex-start;
+            }
+
+            .heading {
+                text-align: left;
+            }
+
+            .content {
+                text-align: left;
+            }
+
+            .cta-button {
+                align-self: center;
+            }
+
+            .content {
+                width: 100%;
+                max-width: 90vw;
+            }
+
+            .glow-heading {
+                width: 100%;
+                max-width: 90vw;
+            }
+
+            .glow-content {
+                width: 100%;
+                max-width: 90vw;
+            }
+
+            .glow-cta {
+                width: 100%;
+                max-width: 90vw;
+            }
+
+            h1 {
+                font-size: 3.5rem;
+            }
+
+            .content h2 {
+                font-size: 2.5rem;
+            }
+
+            .btn-primary {
+                width: 280px;
+                height: 110px;
+                font-size: 1.25rem;
+            }
+
+            .btn-primary .button-content {
+                transform: translate(-12px, -8px);
+            }
+
+            .btn-primary .cta-button-bg {
+                width: 392px;
+                height: 224px;
+            }
+
+            .dev-glow {
+                width: 40vh;
+                height: 160vh;
+                top: -60vh;
+                transform: rotate(30deg) translate(-50%, 0);
+            }
+
+            .message-glow {
+                width: 100vh;
+                height: 100vh;
+                top: -25vh;
+                transform: translate(-30%, 0);
+            }
+        }
+
+        @media (max-width: 389px) {
+            .container {
+                gap: 0.5em;
+                padding: 1rem 2rem;
+            }
+
+            .glow-layer {
+                gap: 0.5em;
+            }
+
+            h1 {
+                font-size: 2.5rem;
+            }
+
+            .content h2 {
+                font-size: 2rem;
+            }
+
+            .content p {
+                font-size: 1rem;
+                line-height: 1.4;
+                margin: 0.5rem 0;
+            }
+
+            .glow-heading {
+                height: 8rem;
+            }
+
+            .glow-content {
+                height: 8rem;
+            }
+
+            .glow-cta {
+                height: 8rem;
+            }
+        }
+
+        {% block extra_styles %}{% endblock %}
+    </style>
+</head>
+<body>
+        <div class="container">
+        <div class="heading">
+            <h1>{% block heading %}{% endblock %}</h1>
+        </div>
+        <div class="content">
+            <h2>{% block subheading %}{% endblock %}</h2>
+            {% block description %}{% endblock %}
+        </div>
+        <div class="cta-button">
+            {% block cta %}{% endblock %}
+        </div>
+    </div>
+    <div class="grid-overlay"></div>
+    <div class="glow-layer">
+        <div class="glow-heading">
+            <div class="dev-glow"></div>
+        </div>
+        <div class="glow-content">
+            <div class="{% block glow_type %}message-glow{% endblock %}"></div>
+        </div>
+        <div class="glow-cta">
+            <!-- No glow for CTA section -->
+        </div>
+    </div>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>
