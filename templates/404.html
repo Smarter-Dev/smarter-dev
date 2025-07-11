@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+
+{% block title %}Page Not Found - Smarter Dev{% endblock %}
+
+{% block heading %}<span class="text-error">404</span> <span class="text-code">Error</span>{% endblock %}
+
+{% block subheading %}Page Not Found{% endblock %}
+
+{% block description %}
+<p>The page you're looking for doesn't exist. It might have been moved, deleted, or you entered the wrong URL.</p>
+<p>Let's get you back on track.</p>
+{% endblock %}
+
+{% block cta %}
+<a href="/" class="btn btn-primary">
+    <span class="button-content">Go Home</span>
+    <svg width="320" height="128" viewBox="0 0 448 256" fill="none" xmlns="http://www.w3.org/2000/svg" class="cta-button-bg">
+        <g filter="url(#filter0_d_8_14)">
+            <rect x="64" y="48" width="320" height="128" rx="32" fill="#00E1FF" fill-opacity="0.07" shape-rendering="crispEdges"/>
+            <rect x="64.5" y="48.5" width="319" height="127" rx="31.5" stroke="url(#paint0_radial_8_14)" shape-rendering="crispEdges"/>
+        </g>
+        <defs>
+            <filter id="filter0_d_8_14" x="0" y="0" width="448" height="256" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+                <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+                <feOffset dy="16"/>
+                <feGaussianBlur stdDeviation="32"/>
+                <feComposite in2="hardAlpha" operator="out"/>
+                <feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0.883333 0 0 0 0 1 0 0 0 0.1 0"/>
+                <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_8_14"/>
+                <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_8_14" result="shape"/>
+            </filter>
+            <linearGradient id="paint0_radial_8_14" x1="0%" y1="0%" x2="100%" y2="100%" gradientUnits="objectBoundingBox">
+                <stop offset="0%" stop-color="white" stop-opacity="0.4"/>
+                <stop offset="25%" stop-color="white" stop-opacity="0.1"/>
+                <stop offset="50%" stop-color="white" stop-opacity="0.05"/>
+                <stop offset="75%" stop-color="white" stop-opacity="0.1"/>
+                <stop offset="100%" stop-color="white" stop-opacity="0.4"/>
+                <animateTransform
+                    attributeName="gradientTransform"
+                    attributeType="XML"
+                    type="rotate"
+                    from="0 0.5 0.5"
+                    to="360 0.5 0.5"
+                    dur="3s"
+                    repeatCount="indefinite"
+                    begin="indefinite"
+                    id="gradientRotation"/>
+            </linearGradient>
+        </defs>
+    </svg>
+</a>
+{% endblock %}
+
+{% block glow_type %}message-glow{% endblock %}
+
+{% block extra_styles %}
+.text-code {
+    color: #00E1FF;
+}
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const button = document.querySelector('.btn-primary');
+        const animation = document.getElementById('gradientRotation');
+        let isHovering = false;
+        let animationStartTime = 0;
+        const animationDuration = 3000; // 3 seconds in milliseconds
+        
+        button.addEventListener('mouseenter', function() {
+            isHovering = true;
+            animationStartTime = Date.now();
+            animation.beginElement();
+        });
+        
+        button.addEventListener('mouseleave', function() {
+            isHovering = false;
+            const elapsed = Date.now() - animationStartTime;
+            const halfDuration = animationDuration / 2;
+            const remainingTime = halfDuration - (elapsed % halfDuration);
+            
+            setTimeout(() => {
+                if (!isHovering) {
+                    animation.endElement();
+                }
+            }, remainingTime);
+        });
+    });
+</script>
+{% endblock %}
