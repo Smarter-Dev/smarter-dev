@@ -1,0 +1,39 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: smarter-dev-website
+    labels:
+        app: smarter-dev-website
+spec:
+    strategy:
+        type: RollingUpdate
+        rollingUpdate:
+            maxSurge: 2
+            maxUnavailable: 50%
+    selector:
+        matchLabels:
+            app: smarter-dev-website
+            tier: frontend
+    replicas: 2
+    template:
+        metadata:
+            labels:
+                app: smarter-dev-website
+                tier: frontend
+        spec:
+            topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                  matchLabels:
+                      app: smarter-dev-website
+            containers:
+              - name: starlette-site
+                image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+                ports:
+                  - containerPort: 8000
+                resources:
+                    requests:
+                        cpu: 100m
