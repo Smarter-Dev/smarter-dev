@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Smarter Dev{% endblock %}</title>
+    <link rel="icon" type="image/png" href="/resources/favicon.png">
     <link href="https://fonts.googleapis.com/css2?family=Bruno+Ace+SC&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css?family=Bungee+Hairline&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -204,6 +205,17 @@
         .btn-primary .button-content {
             display: inline-block;
             max-width: 10ch;
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Scale effect on hover */
+        .btn-primary {
+            transition: transform 0.2s ease;
+        }
+
+        .btn-primary:hover {
+            transform: scale(1.05);
         }
 
         /* Error page button styles */
