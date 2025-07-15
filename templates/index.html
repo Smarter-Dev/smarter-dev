@@ -56,7 +56,7 @@
 <script>
     document.addEventListener('DOMContentLoaded', function() {
         const button = document.querySelector('.btn-primary');
-        const animation = document.getElementById('gradientRotation');
+        const gradientAnimation = document.getElementById('gradientRotation');
         let isHovering = false;
         let animationStartTime = 0;
         const animationDuration = 3000; // 3 seconds in milliseconds
@@ -64,7 +64,7 @@
         button.addEventListener('mouseenter', function() {
             isHovering = true;
             animationStartTime = Date.now();
-            animation.beginElement();
+            gradientAnimation.beginElement();
         });
         
         button.addEventListener('mouseleave', function() {
@@ -75,7 +75,7 @@
             
             setTimeout(() => {
                 if (!isHovering) {
-                    animation.endElement();
+                    gradientAnimation.endElement();
                 }
             }, remainingTime);
         });
