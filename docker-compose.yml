@@ -1,0 +1,99 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: smarter_dev_postgres
+    environment:
+      POSTGRES_DB: smarter_dev
+      POSTGRES_USER: smarter_dev
+      POSTGRES_PASSWORD: smarter_dev_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smarter_dev -d smarter_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - smarter_dev
+
+  redis:
+    image: redis:7-alpine
+    container_name: smarter_dev_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass smarter_dev_redis_password
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - smarter_dev
+
+  web:
+    build: .
+    container_name: smarter_dev_web
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/smarter_dev
+      - REDIS_URL=redis://:smarter_dev_redis_password@redis:6379/0
+      - ENVIRONMENT=development
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - /app/.venv
+    working_dir: /app
+    command: uv run python main.py
+    restart: unless-stopped
+    networks:
+      - smarter_dev
+
+  bot:
+    build: .
+    container_name: smarter_dev_bot
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/smarter_dev
+      - REDIS_URL=redis://:smarter_dev_redis_password@redis:6379/0
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+      - DISCORD_APPLICATION_ID=${DISCORD_APPLICATION_ID}
+      - API_BASE_URL=http://web:8000/api
+      - API_SECRET_KEY=${API_SECRET_KEY}
+      - ENVIRONMENT=development
+    volumes:
+      - .:/app
+      - /app/.venv
+    working_dir: /app
+    command: uv run python -m smarter_dev.bot
+    restart: unless-stopped
+    networks:
+      - smarter_dev
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  smarter_dev:
+    driver: bridge
