@@ -7,6 +7,9 @@ from starlette.exceptions import HTTPException
 from starlette.requests import Request
 import uvicorn
 
+# Import FastAPI app
+from smarter_dev.web.api.app import api
+
 templates = Jinja2Templates(directory="templates")
 
 async def homepage(request: Request):
@@ -37,6 +40,9 @@ app = Starlette(
 )
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Mount the FastAPI application at /api
+app.mount("/api", api)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
