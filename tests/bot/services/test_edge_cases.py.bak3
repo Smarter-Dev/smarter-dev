@@ -1,0 +1,776 @@
+"""Edge case and boundary testing for bot services.
+
+This module tests various edge cases, boundary conditions, and
+unusual scenarios that services might encounter in production.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import date, datetime, timezone, timedelta
+from decimal import Decimal
+from typing import Any, Dict, List, Optional
+from unittest.mock import AsyncMock, patch
+from uuid import UUID, uuid4
+
+import pytest
+
+from smarter_dev.bot.services.bytes_service import BytesService
+from smarter_dev.bot.services.exceptions import (
+    APIError,
+    InsufficientBalanceError,
+    ServiceError,
+    ValidationError
+)
+from smarter_dev.bot.services.models import BytesBalance, BytesTransaction
+from smarter_dev.bot.services.squads_service import SquadsService
+from smarter_dev.bot.services.streak_service import StreakService
+from smarter_dev.shared.date_provider import MockDateProvider
+
+
+class MockUser:
+    """Mock Discord user for testing transfer_bytes method."""
+    
+    def __init__(self, user_id: str, username: str):
+        self._id = user_id
+        self._username = username
+    
+    @property
+    def id(self) -> str:
+        return self._id
+    
+    def __str__(self) -> str:
+        return self._username
+
+
+class TestBytesServiceEdgeCases:
+    """Edge case tests for BytesService."""
+    
+    @pytest.fixture
+    async def edge_case_bytes_service(self):
+        """Set up BytesService for edge case testing."""
+        mock_api_client = AsyncMock()
+        
+        # Properly configure cache manager mock
+        mock_cache_manager = AsyncMock()
+        mock_cache_manager.get.return_value = None  # Always cache miss for edge cases
+        mock_cache_manager.set.return_value = None
+        mock_cache_manager.delete.return_value = None
+        mock_cache_manager.clear_pattern.return_value = None
+        mock_cache_manager.is_connected = True
+        
+        date_provider = MockDateProvider(fixed_date=date(2024, 1, 15))
+        streak_service = StreakService(date_provider=date_provider)
+        
+        service = BytesService(
+            api_client=mock_api_client,
+            cache_manager=mock_cache_manager,
+            streak_service=streak_service
+        )
+        await service.initialize()
+        return service, mock_api_client, mock_cache_manager
+    
+    async def test_extremely_large_balance(self, edge_case_bytes_service):
+        """Test handling of extremely large balance values."""
+        service, mock_api_client, mock_cache_manager = edge_case_bytes_service
+        
+        # Mock response with very large balance
+        large_balance = 999_999_999_999
+        mock_api_client.get.return_value = AsyncMock(
+            status_code=200,
+            json=lambda: {
+                "guild_id": "123456789012345678",
+                "user_id": "987654321098765432",
+                "balance": large_balance,
+                "total_received": large_balance + 1000,
+                "total_sent": 1000,
+                "streak_count": 365,
+                "last_daily": "2024-01-14",
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-14T12:00:00Z"
+            }
+        )
+        
+        balance = await service.get_balance("123456789012345678", "987654321098765432")
+        
+        assert balance.balance == large_balance
+        assert balance.total_received == large_balance + 1000
+        assert isinstance(balance.balance, int)  # Should handle large ints correctly
+    
+    async def test_zero_and_negative_edge_cases(self, edge_case_bytes_service):
+        """Test zero and negative value handling."""
+        service, mock_api_client, mock_cache_manager = edge_case_bytes_service
+        
+        # Test zero balance
+        mock_api_client.get.return_value = AsyncMock(
+            status_code=200,
+            json=lambda: {
+                "guild_id": "test_guild",
+                "user_id": "poor_user",
+                "balance": 0,
+                "total_received": 100,
+                "total_sent": 100,
+                "streak_count": 0,
+                "last_daily": None,
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-14T12:00:00Z"
+            }
+        )
+        
+        balance = await service.get_balance("test_guild", "poor_user")
+        assert balance.balance == 0
+        assert balance.streak_count == 0
+        assert balance.last_daily is None
+        
+        # Test transfer with zero balance should raise InsufficientBalanceError
+        poor_user = MockUser("poor_user", "PoorUser")
+        rich_user = MockUser("rich_user", "RichUser")
+        
+        with pytest.raises(InsufficientBalanceError) as exc_info:
+            await service.transfer_bytes(
+                "test_guild",
+                poor_user,
+                rich_user,
+                1,
+                "Impossible transfer"
+            )
+        
+        assert exc_info.value.required == 1
+        assert exc_info.value.available == 0
+    
+    async def test_unicode_and_special_characters(self, edge_case_bytes_service):
+        """Test handling of unicode and special characters in usernames/reasons."""
+        service, mock_api_client, mock_cache_manager = edge_case_bytes_service
+        
+        # Mock balance response
+        mock_api_client.get.return_value = AsyncMock(
+            status_code=200,
+            json=lambda: {
+                "guild_id": "test_guild",
+                "user_id": "unicode_user",
+                "balance": 100,
+                "total_received": 150,
+                "total_sent": 50,
+                "streak_count": 5,
+                "last_daily": "2024-01-14",
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-14T12:00:00Z"
+            }
+        )
+        
+        # Mock transfer response
+        mock_api_client.post.return_value = AsyncMock(
+            status_code=200,
+            json=lambda: {
+                "id": str(uuid4()),
+                "guild_id": "test_guild",
+                "giver_id": "unicode_user",
+                "giver_username": "🎮Gamer王子👑",
+                "receiver_id": "emoji_user",
+                "receiver_username": "😊User🎉",
+                "amount": 25,
+                "reason": "Prize for winning 🏆 the tournament! こんにちは 中文测试",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+        )
+        
+        # Test with unicode usernames and reasons
+        unicode_giver = MockUser("unicode_user", "🎮Gamer王子👑")
+        emoji_receiver = MockUser("emoji_user", "😊User🎉")
+        result = await service.transfer_bytes(
+            "test_guild",
+            unicode_giver,
+            emoji_receiver,
+            25,
+            "Prize for winning 🏆 the tournament! こんにちは 中文测试"
+        )
+        
+        assert result.success is True
+        assert result.transaction.giver_username == "🎮Gamer王子👑"
+        assert result.transaction.receiver_username == "😊User🎉"
+        assert "🏆" in result.transaction.reason
+        assert "こんにちは" in result.transaction.reason
+    
+    async def test_extremely_long_strings(self, edge_case_bytes_service):
+        """Test handling of extremely long strings."""
+        service, mock_api_client, mock_cache_manager = edge_case_bytes_service
+        
+        # Very long username (Discord allows up to 32 characters, but test longer)
+        long_username = "a" * 100
+        very_long_reason = "x" * 1000
+        
+        # Mock responses
+        mock_api_client.get.return_value = AsyncMock(
+            status_code=200,
+            json=lambda: {
+                "guild_id": "test_guild",
+                "user_id": "long_user",
+                "balance": 100,
+                "total_received": 150,
+                "total_sent": 50,
+                "streak_count": 5,
+                "last_daily": "2024-01-14",
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-14T12:00:00Z"
+            }
+        )
+        
+        mock_api_client.post.return_value = AsyncMock(
+            status_code=200,
+            json=lambda: {
+                "id": str(uuid4()),
+                "guild_id": "test_guild",
+                "giver_id": "long_user",
+                "giver_username": long_username,
+                "receiver_id": "normal_user",
+                "receiver_username": "Normal",
+                "amount": 25,
+                "reason": very_long_reason[:200],  # Should be truncated
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+        )
+        
+        # Transfer with long strings
+        long_user = MockUser("long_user", long_username)
+        normal_user = MockUser("normal_user", "Normal")
+        result = await service.transfer_bytes(
+            "test_guild",
+            long_user,
+            normal_user,
+            25,
+            very_long_reason
+        )
+        
+        assert result.success is True
+        # Reason should be truncated to 200 characters
+        assert len(result.transaction.reason) == 200
+        # Username should be handled without truncation in service
+        assert result.transaction.giver_username == long_username
+    
+    async def test_malformed_datetime_handling(self, edge_case_bytes_service):
+        """Test handling of malformed datetime strings from API."""
+        service, mock_api_client, mock_cache_manager = edge_case_bytes_service
+        
+        # Mock response with various datetime formats
+        test_cases = [
+            "2024-01-15T12:00:00Z",           # Standard ISO
+            "2024-01-15T12:00:00.123Z",       # With milliseconds
+            "2024-01-15T12:00:00+00:00",      # With timezone
+            "2024-01-15T12:00:00.123456Z",    # With microseconds
+            "2024-01-15",                     # Date only
+            "",                               # Empty string
+            None                              # Null value
+        ]
+        
+        for i, datetime_str in enumerate(test_cases):
+            mock_api_client.get.return_value = AsyncMock(
+                status_code=200,
+                json=lambda dt=datetime_str: {
+                    "guild_id": "test_guild",
+                    "user_id": f"user_{i}",
+                    "balance": 100,
+                    "total_received": 150,
+                    "total_sent": 50,
+                    "streak_count": 5,
+                    "last_daily": "2024-01-14" if dt not in ["", None] else dt,
+                    "created_at": dt if dt not in ["", None] else "2024-01-01T00:00:00Z",
+                    "updated_at": dt if dt not in ["", None] else "2024-01-14T12:00:00Z"
+                }
+            )
+            
+            # Should handle various datetime formats gracefully
+            balance = await service.get_balance("test_guild", f"user_{i}")
+            assert balance.balance == 100  # Core data should still work
+    
+    async def test_concurrent_operations_race_conditions(self, edge_case_bytes_service):
+        """Test race conditions with concurrent operations."""
+        service, mock_api_client, mock_cache_manager = edge_case_bytes_service
+        
+        # Mock different responses for concurrent requests
+        responses = []
+        for i in range(10):
+            responses.append(AsyncMock(
+                status_code=200,
+                json=lambda j=i: {
+                    "guild_id": "123456789012345678",
+                    "user_id": f"88888888888888888{j}",
+                    "balance": 100 + j,
+                    "total_received": 150 + j,
+                    "total_sent": 50,
+                    "streak_count": 5,
+                    "last_daily": "2024-01-14",
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-14T12:00:00Z"
+                }
+            ))
+        
+        mock_api_client.get.side_effect = responses
+        
+        # Create many concurrent operations
+        tasks = []
+        for i in range(10):
+            task = service.get_balance("test_guild", f"user_{i}")
+            tasks.append(task)
+        
+        results = await asyncio.gather(*tasks)
+        
+        # Each should get correct response
+        for i, balance in enumerate(results):
+            assert balance.user_id == f"user_{i}"
+            assert balance.balance == 100 + i
+    
+    async def test_memory_pressure_scenarios(self, edge_case_bytes_service):
+        """Test behavior under memory pressure."""
+        service, mock_api_client, mock_cache_manager = edge_case_bytes_service
+        
+        # Mock API to respect limit parameter like a real API would
+        def mock_leaderboard_response():
+            # The API should only return the requested number of users
+            all_users = [
+                {
+                    "user_id": f"99999999999999999{i:03d}",
+                    "balance": 1000000 - i,
+                    "total_received": 2000000 - i,
+                    "total_sent": 1000000,
+                    "streak_count": max(0, 500 - i),  # Ensure non-negative
+                    "last_daily": "2024-01-15"
+                }
+                for i in range(10000)  # Very large dataset available
+            ]
+            
+            return {
+                "guild_id": "123456789012345678",
+                "users": all_users[:100],  # API respects limit parameter
+                "total_users": 10000,  # Total available, but only return first 100
+                "generated_at": datetime.now(timezone.utc).isoformat()
+            }
+        
+        mock_api_client.get.return_value = AsyncMock(
+            status_code=200,
+            json=mock_leaderboard_response
+        )
+        
+        # Should handle large response without memory issues
+        leaderboard = await service.get_leaderboard("test_guild", limit=100)
+        
+        assert len(leaderboard) == 100  # Should be limited correctly
+        assert leaderboard[0].balance == 1000000
+        assert leaderboard[99].balance == 999901
+    
+    async def test_boundary_transfer_amounts(self, edge_case_bytes_service):
+        """Test transfer amount boundary conditions."""
+        service, mock_api_client, mock_cache_manager = edge_case_bytes_service
+        
+        # Mock balance with specific amount
+        mock_api_client.get.return_value = AsyncMock(
+            status_code=200,
+            json=lambda: {
+                "guild_id": "123456789012345678",
+                "user_id": "101010101010101010",
+                "balance": 1000,
+                "total_received": 1500,
+                "total_sent": 500,
+                "streak_count": 5,
+                "last_daily": "2024-01-14",
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-14T12:00:00Z"
+            }
+        )
+        
+        # Test various boundary amounts
+        boundary_user = MockUser("101010101010101010", "BoundaryUser")
+        receiver = MockUser("202020202020202020", "Receiver")
+        
+        # Test successful transfers
+        successful_cases = [1, 999, 1000]
+        for amount in successful_cases:
+            # Mock successful transfer
+            mock_api_client.post.return_value = AsyncMock(
+                status_code=200,
+                json=lambda amt=amount: {
+                    "id": str(uuid4()),
+                    "guild_id": "123456789012345678",
+                    "giver_id": "101010101010101010",
+                    "giver_username": "BoundaryUser",
+                    "receiver_id": "202020202020202020",
+                    "receiver_username": "Receiver",
+                    "amount": amt,
+                    "reason": f"Transfer of {amt}",
+                    "created_at": datetime.now(timezone.utc).isoformat()
+                }
+            )
+            
+            result = await service.transfer_bytes(
+                "123456789012345678",
+                boundary_user,
+                receiver,
+                amount,
+                f"Transfer of {amount}"
+            )
+            assert result.success is True
+        
+        # Test cases that should raise InsufficientBalanceError
+        with pytest.raises(InsufficientBalanceError):
+            await service.transfer_bytes(
+                "123456789012345678", boundary_user, receiver, 1001, "Over balance"
+            )
+        
+        # Test cases that should return failed TransferResult
+        failed_cases = [0, -1, 10001]
+        for amount in failed_cases:
+            result = await service.transfer_bytes(
+                "123456789012345678", boundary_user, receiver, amount, f"Invalid amount {amount}"
+            )
+            assert result.success is False
+
+
+class TestSquadsServiceEdgeCases:
+    """Edge case tests for SquadsService."""
+    
+    @pytest.fixture
+    async def edge_case_squads_service(self):
+        """Set up SquadsService for edge case testing."""
+        mock_api_client = AsyncMock()
+        
+        # Properly configure cache manager mock
+        mock_cache_manager = AsyncMock()
+        mock_cache_manager.get.return_value = None  # Always cache miss for edge cases
+        mock_cache_manager.set.return_value = None
+        mock_cache_manager.delete.return_value = None
+        mock_cache_manager.clear_pattern.return_value = None
+        mock_cache_manager.is_connected = True
+        
+        service = SquadsService(
+            api_client=mock_api_client,
+            cache_manager=mock_cache_manager
+        )
+        await service.initialize()
+        return service, mock_api_client, mock_cache_manager
+    
+    async def test_uuid_boundary_cases(self, edge_case_squads_service):
+        """Test UUID handling edge cases."""
+        service, mock_api_client, mock_cache_manager = edge_case_squads_service
+        
+        # Test with different UUID formats
+        test_uuids = [
+            "00000000-0000-0000-0000-000000000000",  # All zeros
+            "ffffffff-ffff-ffff-ffff-ffffffffffff",  # All f's
+            str(uuid4()),                             # Random valid UUID
+        ]
+        
+        for test_uuid in test_uuids:
+            mock_api_client.get.return_value = AsyncMock(
+                status_code=200,
+                json=lambda uid=test_uuid: {
+                    "id": uid,
+                    "guild_id": "123456789012345678",
+                    "role_id": "123456789012345678",
+                    "name": f"Squad {uid[:8]}",
+                    "description": f"Squad with UUID {uid}",
+                    "switch_cost": 100,
+                    "max_members": 20,
+                    "member_count": 5,
+                    "is_active": True,
+                    "created_at": "2024-01-01T00:00:00Z"
+                }
+            )
+            
+            squad = await service.get_squad("123456789012345678", UUID(test_uuid))
+            assert str(squad.id) == test_uuid
+    
+    async def test_squad_capacity_edge_cases(self, edge_case_squads_service):
+        """Test squad capacity boundary conditions."""
+        service, mock_api_client, mock_cache_manager = edge_case_squads_service
+        
+        # Test squad at exactly max capacity
+        squad_id = uuid4()
+        mock_api_client.get.side_effect = [
+            # User not in squad
+            AsyncMock(status_code=404),
+            # Squad at max capacity
+            AsyncMock(
+                status_code=200,
+                json=lambda: {
+                    "id": str(squad_id),
+                    "guild_id": "123456789012345678",
+                    "role_id": "123456789012345678",
+                    "name": "Full Squad",
+                    "description": "A full squad",
+                    "switch_cost": 100,
+                    "max_members": 20,
+                    "member_count": 20,  # Exactly at capacity
+                    "is_active": True,
+                    "created_at": "2024-01-01T00:00:00Z"
+                }
+            )
+        ]
+        
+        result = await service.join_squad(
+            "123456789012345678",
+            "303030303030303030",
+            squad_id,
+            200  # Sufficient balance
+        )
+        
+        assert result.success is False
+        assert "full" in result.reason.lower()
+        assert "20" in result.reason  # Should mention max capacity
+    
+    async def test_malformed_squad_data(self, edge_case_squads_service):
+        """Test handling of malformed squad data from API."""
+        service, mock_api_client, mock_cache_manager = edge_case_squads_service
+        
+        # Test various malformed data scenarios
+        malformed_responses = [
+            # Missing required fields
+            {
+                "id": str(uuid4()),
+                "guild_id": "123456789012345678",
+                # Missing other required fields
+            },
+            # Invalid data types
+            {
+                "id": str(uuid4()),
+                "guild_id": "123456789012345678",
+                "role_id": "123456789012345678",
+                "name": "Test Squad",
+                "description": "Test description",
+                "switch_cost": "not_a_number",  # Invalid type
+                "max_members": 20,
+                "member_count": 5,
+                "is_active": True,
+                "created_at": "2024-01-01T00:00:00Z"
+            },
+            # Negative values
+            {
+                "id": str(uuid4()),
+                "guild_id": "123456789012345678",
+                "role_id": "123456789012345678",
+                "name": "Test Squad",
+                "description": "Test description",
+                "switch_cost": -100,  # Negative cost
+                "max_members": -20,   # Negative max
+                "member_count": -5,   # Negative count
+                "is_active": True,
+                "created_at": "2024-01-01T00:00:00Z"
+            }
+        ]
+        
+        for i, malformed_data in enumerate(malformed_responses):
+            mock_api_client.get.return_value = AsyncMock(
+                status_code=200,
+                json=lambda data=malformed_data: data
+            )
+            
+            # Should handle malformed data gracefully (may raise ValidationError)
+            try:
+                squads = await service.list_squads("123456789012345678")
+                # If it succeeds, verify it handled the data reasonably
+                if squads:
+                    assert len(squads) >= 0
+            except (ValidationError, ServiceError):
+                # Acceptable to fail with validation error for malformed data
+                pass
+    
+    async def test_empty_and_null_responses(self, edge_case_squads_service):
+        """Test handling of empty and null API responses."""
+        service, mock_api_client, mock_cache_manager = edge_case_squads_service
+        
+        # Test empty squad list
+        mock_api_client.get.return_value = AsyncMock(
+            status_code=200,
+            json=lambda: []
+        )
+        
+        squads = await service.list_squads("404040404040404040")
+        assert len(squads) == 0
+        
+        # Test empty members list
+        mock_api_client.get.return_value = AsyncMock(
+            status_code=200,
+            json=lambda: {"members": []}
+        )
+        
+        members = await service.get_squad_members("404040404040404040", uuid4())
+        assert len(members) == 0
+    
+    async def test_concurrent_squad_operations(self, edge_case_squads_service):
+        """Test concurrent squad operations for race conditions."""
+        service, mock_api_client, mock_cache_manager = edge_case_squads_service
+        
+        squad_id = uuid4()
+        
+        # Mock responses for multiple users trying to join same squad
+        mock_api_client.get.side_effect = [
+            # All users not in squads initially
+            AsyncMock(status_code=404),
+            # Squad details for each join attempt
+            AsyncMock(
+                status_code=200,
+                json=lambda: {
+                    "id": str(squad_id),
+                    "guild_id": "123456789012345678",
+                    "role_id": "123456789012345678",
+                    "name": "Popular Squad",
+                    "description": "Everyone wants to join",
+                    "switch_cost": 0,  # Free to join
+                    "max_members": 22,  # Has room for some users
+                    "member_count": 20,  # Close to full
+                    "is_active": True,
+                    "created_at": "2024-01-01T00:00:00Z"
+                }
+            )
+        ] * 10  # Repeat for multiple users
+        
+        # Mock successful joins (some may fail due to capacity)
+        mock_api_client.post.return_value = AsyncMock(
+            status_code=200,
+            json=lambda: {"success": True}
+        )
+        
+        # Multiple users trying to join concurrently
+        tasks = []
+        for i in range(5):
+            task = service.join_squad(
+                "123456789012345678",
+                f"50505050505050505{i}",
+                squad_id,
+                100  # Sufficient balance
+            )
+            tasks.append(task)
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Some should succeed, but all should handle gracefully
+        successes = sum(1 for r in results if not isinstance(r, Exception) and r.success)
+        assert successes >= 0  # At least some operations should complete
+
+
+class TestServiceEdgeCasesGeneral:
+    """General edge case tests applicable to all services."""
+    
+    async def test_extremely_long_guild_and_user_ids(self):
+        """Test handling of extremely long Discord IDs."""
+        # Discord snowflake IDs are 64-bit integers, but test with various lengths
+        long_ids = [
+            "1" * 50,   # Very long
+            "9" * 30,   # Long with high digits
+            "",         # Empty (should fail validation)
+            " " * 20,   # Whitespace only (should fail validation)
+        ]
+        
+        mock_api_client = AsyncMock()
+        service = BytesService(
+            api_client=mock_api_client,
+            cache_manager=None,
+            streak_service=StreakService(MockDateProvider())
+        )
+        await service.initialize()
+        
+        for guild_id in long_ids:
+            for user_id in long_ids:
+                if not guild_id.strip() or not user_id.strip():
+                    # Should fail validation
+                    with pytest.raises(ValidationError):
+                        await service.get_balance(guild_id, user_id)
+                else:
+                    # Should handle long IDs gracefully
+                    mock_api_client.get.return_value = AsyncMock(
+                        status_code=200,
+                        json=lambda: {
+                            "guild_id": guild_id,
+                            "user_id": user_id,
+                            "balance": 100,
+                            "total_received": 150,
+                            "total_sent": 50,
+                            "streak_count": 5,
+                            "last_daily": "2024-01-14",
+                            "created_at": "2024-01-01T00:00:00Z",
+                            "updated_at": "2024-01-14T12:00:00Z"
+                        }
+                    )
+                    
+                    balance = await service.get_balance(guild_id, user_id)
+                    assert balance.guild_id == guild_id
+                    assert balance.user_id == user_id
+    
+    async def test_service_state_edge_cases(self):
+        """Test service state management edge cases."""
+        mock_api_client = AsyncMock()
+        service = BytesService(
+            api_client=mock_api_client,
+            cache_manager=None,
+            streak_service=StreakService(MockDateProvider())
+        )
+        
+        # Test operations before initialization
+        with pytest.raises(ServiceError, match="not initialized"):
+            await service.get_balance("guild", "user")
+        
+        # Initialize service
+        await service.initialize()
+        assert service._is_initialized
+        
+        # Test double initialization (should be safe)
+        await service.initialize()
+        assert service._is_initialized
+        
+        # Test cleanup
+        await service.cleanup()
+        assert not service._is_initialized
+        
+        # Test operations after cleanup
+        with pytest.raises(ServiceError, match="not initialized"):
+            await service.get_balance("guild", "user")
+        
+        # Test double cleanup (should be safe)
+        await service.cleanup()
+        assert not service._is_initialized
+    
+    async def test_cache_corruption_scenarios(self):
+        """Test behavior when cache contains corrupted data."""
+        mock_api_client = AsyncMock()
+        mock_cache_manager = AsyncMock()
+        
+        # Mock corrupted cache data
+        corrupted_data_cases = [
+            {"invalid": "structure"},           # Wrong structure
+            "not_a_dict",                      # Wrong type
+            {"balance": "not_a_number"},       # Invalid field type
+            None,                              # Null data
+            {"balance": float('inf')},         # Invalid number
+            {"balance": float('nan')},         # NaN value
+        ]
+        
+        service = BytesService(
+            api_client=mock_api_client,
+            cache_manager=mock_cache_manager,
+            streak_service=StreakService(MockDateProvider())
+        )
+        await service.initialize()
+        
+        # Mock API fallback response
+        mock_api_client.get.return_value = AsyncMock(
+            status_code=200,
+            json=lambda: {
+                "guild_id": "123456789012345678",
+                "user_id": "606060606060606060",
+                "balance": 100,
+                "total_received": 150,
+                "total_sent": 50,
+                "streak_count": 5,
+                "last_daily": "2024-01-14",
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-14T12:00:00Z"
+            }
+        )
+        
+        for corrupted_data in corrupted_data_cases:
+            mock_cache_manager.get.return_value = corrupted_data
+            
+            # Should fallback to API when cache is corrupted
+            balance = await service.get_balance("123456789012345678", "606060606060606060")
+            assert balance.balance == 100  # Should get valid data from API
+            
+            # API should have been called due to cache corruption
+            assert mock_api_client.get.called

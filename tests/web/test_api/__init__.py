@@ -1,0 +1,1 @@
+"""API tests for the Smarter Dev Discord Bot API."""
