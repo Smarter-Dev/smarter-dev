@@ -185,16 +185,20 @@ class StreakService:
     ) -> int:
         """Calculate the streak bonus multiplier.
         
-        Finds the highest applicable bonus tier for the given streak count.
-        Example: streak_bonuses = {"7": 2, "14": 3, "30": 5}
+        Applies bonus multipliers on days divisible by milestone intervals.
+        This allows streaks to work in perpetuity.
+        Example: streak_bonuses = {"7": 2, "14": 4, "30": 10}
         - streak 6: bonus = 1 (no bonus)
-        - streak 7: bonus = 2
-        - streak 14: bonus = 3
-        - streak 30: bonus = 5
+        - streak 7: bonus = 2 (divisible by 7)
+        - streak 14: bonus = 4 (divisible by 14, higher than 7's bonus)
+        - streak 21: bonus = 2 (divisible by 7)
+        - streak 28: bonus = 4 (divisible by 14)
+        - streak 30: bonus = 10 (divisible by 30)
+        - streak 42: bonus = 4 (divisible by both 7 and 14, takes highest)
         
         Args:
             streak_count: Current streak count
-            streak_bonuses: Dict mapping minimum streak days to multipliers
+            streak_bonuses: Dict mapping milestone intervals to multipliers
             
         Returns:
             int: Bonus multiplier (minimum 1)
@@ -202,13 +206,14 @@ class StreakService:
         if not streak_bonuses or streak_count <= 0:
             return 1
         
-        # Find the highest applicable bonus tier
+        # Find the highest applicable bonus for divisible milestones
         applicable_bonus = 1
         
         try:
-            for streak_day_str, multiplier in streak_bonuses.items():
-                streak_day = int(streak_day_str)
-                if streak_count >= streak_day and multiplier > applicable_bonus:
+            for milestone_str, multiplier in streak_bonuses.items():
+                milestone = int(milestone_str)
+                # Check if streak count is divisible by this milestone
+                if streak_count % milestone == 0 and multiplier > applicable_bonus:
                     applicable_bonus = multiplier
         except (ValueError, TypeError):
             # Handle malformed bonus configuration gracefully

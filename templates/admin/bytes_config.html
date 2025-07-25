@@ -1,0 +1,252 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Bytes Configuration - {{ guild.name }}{% endblock %}
+
+{% block page_title %}Bytes Configuration{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item active">Bytes Config</li>
+{% endblock %}
+
+{% block page_actions %}
+<div class="col-auto ms-auto d-print-none">
+    <a href="/admin/guilds/{{ guild.id }}" class="btn btn-outline-primary">
+        <svg class="icon me-2" width="24" height="24">
+            <use xlink:href="#tabler-arrow-left"></use>
+        </svg>
+        Back to Guild
+    </a>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Guild Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" class="guild-icon me-3">
+                    {% else %}
+                    <div class="guild-icon-placeholder me-3">{{ guild.name[0].upper() }}</div>
+                    {% endif %}
+                    <div>
+                        <h3 class="mb-1">{{ guild.name }}</h3>
+                        <div class="text-muted">Bytes Economy Configuration</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Configuration Form -->
+<form method="post">
+    <div class="row">
+        <div class="col-lg-8">
+            <!-- Basic Settings -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Basic Settings</h3>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label" for="starting_balance">Starting Balance</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="starting_balance" name="starting_balance" 
+                                       value="{{ config.starting_balance }}" min="0" max="10000" required>
+                                <span class="input-group-text">bytes</span>
+                            </div>
+                            <div class="form-hint">Initial balance for new users</div>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label" for="daily_amount">Daily Reward Amount</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="daily_amount" name="daily_amount" 
+                                       value="{{ config.daily_amount }}" min="1" max="1000" required>
+                                <span class="input-group-text">bytes</span>
+                            </div>
+                            <div class="form-hint">Base daily reward before streak bonuses</div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label" for="max_transfer">Maximum Transfer</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="max_transfer" name="max_transfer" 
+                                       value="{{ config.max_transfer }}" min="1" max="100000" required>
+                                <span class="input-group-text">bytes</span>
+                            </div>
+                            <div class="form-hint">Maximum amount per transfer</div>
+                        </div>
+                        
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label" for="transfer_cooldown_hours">Transfer Cooldown</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="transfer_cooldown_hours" name="transfer_cooldown_hours" 
+                                       value="{{ config.transfer_cooldown_hours }}" min="0" max="168">
+                                <span class="input-group-text">hours</span>
+                            </div>
+                            <div class="form-hint">Cooldown between transfers (0 = no cooldown)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Streak Bonuses -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Streak Bonuses</h3>
+                    <div class="card-subtitle">Configure multipliers for daily streak rewards</div>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        {% for days, multiplier in config.streak_bonuses.items() %}
+                        <div class="col-md-3 mb-3">
+                            <label class="form-label">{{ days }} Days</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" name="streak_{{ days }}_bonus" 
+                                       value="{{ multiplier }}" min="1" max="50" step="0.1">
+                                <span class="input-group-text">x</span>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="form-hint">
+                        Multipliers applied to daily rewards based on streak length.
+                        Users with 8+ day streaks get 2x, 16+ get 4x, etc.
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Role Rewards -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Role-Based Rewards</h3>
+                    <div class="card-subtitle">Additional daily bonuses for specific roles</div>
+                </div>
+                <div class="card-body">
+                    {% if config.role_rewards %}
+                    <div class="row">
+                        {% for role_id, bonus in config.role_rewards.items() %}
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Role {{ role_id }}</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" name="role_reward_{{ role_id }}" 
+                                       value="{{ bonus }}" min="0" max="1000">
+                                <span class="input-group-text">bytes</span>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="text-center text-muted py-4">
+                        <p>No role rewards configured.</p>
+                        <small>Role rewards can be configured through the API or by editing the configuration directly.</small>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Configuration Preview -->
+        <div class="col-lg-4">
+            <div class="card position-sticky top-0">
+                <div class="card-header">
+                    <h3 class="card-title">Configuration Preview</h3>
+                </div>
+                <div class="card-body">
+                    <div class="list-group list-group-flush">
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>New user balance</span>
+                            <span class="badge bg-blue" id="preview-starting">{{ config.starting_balance }}</span>
+                        </div>
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>Daily base reward</span>
+                            <span class="badge bg-green" id="preview-daily">{{ config.daily_amount }}</span>
+                        </div>
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>Max transfer</span>
+                            <span class="badge bg-yellow" id="preview-max">{{ config.max_transfer }}</span>
+                        </div>
+                        <div class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>Transfer cooldown</span>
+                            <span class="badge bg-orange" id="preview-cooldown">
+                                {% if config.transfer_cooldown_hours %}
+                                {{ config.transfer_cooldown_hours }}h
+                                {% else %}
+                                None
+                                {% endif %}
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    
+                    <h5>Streak Examples</h5>
+                    <div class="list-group list-group-flush">
+                        {% for days, multiplier in config.streak_bonuses.items() %}
+                        <div class="list-group-item d-flex justify-content-between align-items-center py-2">
+                            <span class="small">{{ days }} days</span>
+                            <span class="badge bg-purple">{{ config.daily_amount * multiplier|int }} bytes</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <svg class="icon me-2" width="24" height="24">
+                            <use xlink:href="#tabler-device-floppy"></use>
+                        </svg>
+                        Save Configuration
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Live preview updates
+document.addEventListener('DOMContentLoaded', function() {
+    const inputs = ['starting_balance', 'daily_amount', 'max_transfer', 'transfer_cooldown_hours'];
+    
+    inputs.forEach(inputName => {
+        const input = document.getElementById(inputName);
+        if (input) {
+            input.addEventListener('input', updatePreview);
+        }
+    });
+    
+    function updatePreview() {
+        const starting = document.getElementById('starting_balance').value;
+        const daily = document.getElementById('daily_amount').value;
+        const maxTransfer = document.getElementById('max_transfer').value;
+        const cooldown = document.getElementById('transfer_cooldown_hours').value;
+        
+        document.getElementById('preview-starting').textContent = starting;
+        document.getElementById('preview-daily').textContent = daily;
+        document.getElementById('preview-max').textContent = maxTransfer;
+        document.getElementById('preview-cooldown').textContent = cooldown ? cooldown + 'h' : 'None';
+        
+        // Update streak examples
+        const streakElements = document.querySelectorAll('.list-group-flush .badge.bg-purple');
+        const multipliers = [{{ config.streak_bonuses.values() | join(', ') }}];
+        
+        streakElements.forEach((element, index) => {
+            if (multipliers[index]) {
+                element.textContent = (daily * multipliers[index]) + ' bytes';
+            }
+        });
+    }
+});
+</script>
+{% endblock %}
