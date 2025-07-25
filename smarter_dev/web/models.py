@@ -148,6 +148,14 @@ class BytesTransaction(Base):
         doc="Optional reason for the transaction"
     )
     
+    # Timestamp fields
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the transaction was created"
+    )
+    
     # Indexes for common queries - as per specification
     __table_args__ = (
         Index("ix_bytes_transactions_guild_id", "guild_id"),
@@ -236,6 +244,26 @@ class BytesConfig(Base):
         kwargs.setdefault('transfer_cooldown_hours', 0)
         kwargs.setdefault('role_rewards', {})
         super().__init__(**kwargs)
+    
+    @classmethod
+    def get_defaults(cls, guild_id: str) -> 'BytesConfig':
+        """Get default configuration for a guild.
+        
+        Args:
+            guild_id: Discord guild ID
+            
+        Returns:
+            BytesConfig instance with default values
+        """
+        return cls(
+            guild_id=guild_id,
+            starting_balance=100,
+            daily_amount=10,
+            streak_bonuses={8: 2, 16: 4, 32: 8, 64: 16},
+            max_transfer=1000,
+            transfer_cooldown_hours=0,
+            role_rewards={}
+        )
 
 
 class Squad(Base):
