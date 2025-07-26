@@ -132,7 +132,8 @@ class APIClient(APIClientProtocol):
                 },
                 limits=self._limits,
                 timeout=httpx.Timeout(self._default_timeout),
-                http2=True  # Enable HTTP/2 for better performance
+                http2=False,  # Disable HTTP/2 for now (requires h2 package)
+                follow_redirects=True  # Enable redirect following
             )
     
     async def get(
@@ -231,6 +232,7 @@ class APIClient(APIClientProtocol):
     async def delete(
         self,
         path: str,
+        json_data: Optional[Dict[str, Any]] = None,
         params: Optional[Dict[str, Any]] = None,
         headers: Optional[Dict[str, str]] = None,
         timeout: Optional[float] = None
@@ -239,6 +241,7 @@ class APIClient(APIClientProtocol):
         
         Args:
             path: API endpoint path
+            json_data: JSON request body
             params: Query parameters
             headers: Additional headers
             timeout: Request timeout in seconds
@@ -252,6 +255,7 @@ class APIClient(APIClientProtocol):
         return await self._request(
             "DELETE",
             path,
+            json_data=json_data,
             params=params,
             headers=headers,
             timeout=timeout
@@ -288,7 +292,7 @@ class APIClient(APIClientProtocol):
         await self._handle_rate_limit()
         
         # Prepare request
-        url = f"/api{path}" if not path.startswith('/') else f"/api{path}"
+        url = f"{self._base_url}{path}" if path.startswith('/') else f"{self._base_url}/{path}"
         request_headers = headers or {}
         request_timeout = timeout or self._default_timeout
         
@@ -374,6 +378,11 @@ class APIClient(APIClientProtocol):
                     response_body=e.response.text
                 )
                 self._error_count += 1
+                
+            except (APIError, AuthenticationError, RateLimitError) as e:
+                # Don't retry client errors like validation errors (400), auth errors (401), etc.
+                # Re-raise immediately without retrying
+                raise
                 
             except Exception as e:
                 # Handle FastAPI HTTPException that might be re-raised
@@ -505,7 +514,16 @@ class APIClient(APIClientProtocol):
         
         try:
             error_data = response.json()
-            error_message = error_data.get("detail", f"HTTP {status_code}")
+            
+            # Extract error message from nested structure if needed
+            detail = error_data.get("detail", f"HTTP {status_code}")
+            if isinstance(detail, dict):
+                # Error response is nested (ErrorResponse object)
+                error_message = detail.get("detail", f"HTTP {status_code}")
+            else:
+                # Error response is a simple string
+                error_message = detail
+                
         except (json.JSONDecodeError, KeyError):
             error_message = f"HTTP {status_code}: {response.text}"
         

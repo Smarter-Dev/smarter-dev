@@ -135,7 +135,16 @@ async def send_command(ctx: lightbulb.Context) -> None:
             if result.is_cooldown_error:
                 embed = create_cooldown_embed(result.reason, result.cooldown_end_timestamp)
             else:
-                embed = create_error_embed(result.reason)
+                # Check for transfer limit error and provide specific title
+                if "exceeds maximum limit" in result.reason.lower():
+                    embed = hikari.Embed(
+                        title="💰 Transfer Limit Exceeded",
+                        description=result.reason,
+                        color=hikari.Color(0xef4444),
+                        timestamp=datetime.now(timezone.utc)
+                    )
+                else:
+                    embed = create_error_embed(result.reason)
             await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
             return
         
@@ -165,12 +174,30 @@ async def send_command(ctx: lightbulb.Context) -> None:
     except ServiceError as e:
         logger.error(f"Service error in send command: {e}")
         embed = create_error_embed("Transfer failed. Please try again later.")
-        await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        try:
+            await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        except hikari.BadRequestError as discord_err:
+            if "already been acknowledged" in str(discord_err):
+                logger.warning("Interaction already acknowledged, skipping response")
+            else:
+                logger.error(f"Discord API error: {discord_err}")
+        return
+    except hikari.BadRequestError as e:
+        if "already been acknowledged" in str(e):
+            logger.warning("Interaction already acknowledged during transfer, skipping error response")
+        else:
+            logger.error(f"Discord interaction error in send command: {e}")
         return
     except Exception as e:
         logger.exception(f"Unexpected error in send command: {e}")
         embed = create_error_embed("An unexpected error occurred. Please try again later.")
-        await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        try:
+            await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        except hikari.BadRequestError as discord_err:
+            if "already been acknowledged" in str(discord_err):
+                logger.warning("Interaction already acknowledged, skipping error response")
+            else:
+                logger.error(f"Discord API error during error handling: {discord_err}")
         return
 
 

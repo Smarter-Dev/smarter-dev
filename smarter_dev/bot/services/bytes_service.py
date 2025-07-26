@@ -481,7 +481,16 @@ class BytesService(BaseService):
             
             if response.status_code >= 400:
                 error_data = response.json()
-                error_message = error_data.get("detail", f"Transfer failed: {response.status_code}")
+                
+                # Extract error message from nested structure if needed
+                if isinstance(error_data.get("detail"), dict):
+                    # Error response is nested (ErrorResponse object)
+                    error_message = error_data["detail"].get("detail", f"Transfer failed: {response.status_code}")
+                    self._logger.info(f"PARSED NESTED ERROR: {error_message}")
+                else:
+                    # Error response is a simple string
+                    error_message = error_data.get("detail", f"Transfer failed: {response.status_code}")
+                    self._logger.info(f"PARSED SIMPLE ERROR: {error_message}")
                 
                 # DEBUG: Log the full error response and message
                 self._logger.debug(f"API Error Response - Status: {response.status_code}")
@@ -494,6 +503,13 @@ class BytesService(BaseService):
                         required=amount,
                         available=giver_balance.balance,
                         operation="transfer"
+                    )
+                
+                # Check for transfer limit errors
+                if "exceeds maximum limit" in error_message.lower():
+                    return TransferResult(
+                        success=False,
+                        reason=error_message
                     )
                 
                 # Check for cooldown errors (MAIN PATH)
