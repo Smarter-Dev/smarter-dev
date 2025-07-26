@@ -204,6 +204,12 @@ class BytesService(BaseService):
             if response.status_code == 404:
                 raise ResourceNotFoundError("user_balance", f"{guild_id}:{user_id}")
             
+            # Check if response was successful before parsing
+            if response.status_code != 200:
+                error_data = response.json()
+                error_message = error_data.get('detail', 'Unknown API error')
+                raise APIError(f"API error: {error_message}", status_code=response.status_code)
+            
             balance_data = response.json()
             balance = self._parse_balance_data(balance_data)
             
@@ -319,7 +325,15 @@ class BytesService(BaseService):
             
             return result
             
-        except (AlreadyClaimedError, ValidationError, APIError):
+        except APIError as e:
+            # Check if this is actually a 409 "already claimed" error
+            if e.status_code == 409 or "already been claimed" in str(e).lower():
+                raise AlreadyClaimedError(
+                    context={"guild_id": guild_id, "user_id": user_id}
+                )
+            # Re-raise other API errors
+            raise
+        except (AlreadyClaimedError, ValidationError):
             raise
         except Exception as e:
             self._log_error("claim_daily", e, guild_id=guild_id, user_id=user_id)
@@ -350,9 +364,9 @@ class BytesService(BaseService):
         """
         return await self.transfer_bytes_by_id(
             guild_id=guild_id,
-            giver_id=giver.id,
+            giver_id=str(giver.id),
             giver_username=str(giver),
-            receiver_id=receiver.id,
+            receiver_id=str(receiver.id),
             receiver_username=str(receiver),
             amount=amount,
             reason=reason
@@ -389,12 +403,16 @@ class BytesService(BaseService):
         """
         self._ensure_initialized()
         
-        # Validate inputs
-        if not guild_id or not guild_id.strip():
+        # Validate inputs - convert Snowflake objects to strings
+        guild_id_str = str(guild_id) if guild_id else ""
+        giver_id_str = str(giver_id) if giver_id else ""
+        receiver_id_str = str(receiver_id) if receiver_id else ""
+        
+        if not guild_id_str or not guild_id_str.strip():
             raise ValidationError("guild_id", "Guild ID is required")
-        if not giver_id or not giver_id.strip():
+        if not giver_id_str or not giver_id_str.strip():
             raise ValidationError("giver_id", "Giver ID is required")
-        if not receiver_id or not receiver_id.strip():
+        if not receiver_id_str or not receiver_id_str.strip():
             raise ValidationError("receiver_id", "Receiver ID is required")
         if not giver_username or not giver_username.strip():
             raise ValidationError("giver_username", "Giver username is required")
@@ -402,7 +420,7 @@ class BytesService(BaseService):
             raise ValidationError("receiver_username", "Receiver username is required")
         
         # Validate transfer rules
-        if giver_id == receiver_id:
+        if giver_id_str == receiver_id_str:
             return TransferResult(
                 success=False,
                 reason="You can't send bytes to yourself!"
@@ -425,15 +443,15 @@ class BytesService(BaseService):
             
             self._log_operation(
                 "transfer_bytes",
-                guild_id=guild_id,
-                giver_id=giver_id,
-                receiver_id=receiver_id,
+                guild_id=guild_id_str,
+                giver_id=giver_id_str,
+                receiver_id=receiver_id_str,
                 amount=amount,
                 reason=reason
             )
             
             # Check giver's balance before attempting transfer
-            giver_balance = await self.get_balance(guild_id, giver_id, use_cache=False)
+            giver_balance = await self.get_balance(guild_id_str, giver_id_str, use_cache=False)
             
             if giver_balance.balance < amount:
                 raise InsufficientBalanceError(
@@ -444,9 +462,9 @@ class BytesService(BaseService):
             
             # Prepare transfer request
             transfer_data = {
-                "giver_id": giver_id,
+                "giver_id": giver_id_str,
                 "giver_username": giver_username,
-                "receiver_id": receiver_id,
+                "receiver_id": receiver_id_str,
                 "receiver_username": receiver_username,
                 "amount": amount
             }
@@ -456,7 +474,7 @@ class BytesService(BaseService):
             
             # Execute transfer
             response = await self._api_client.post(
-                f"/guilds/{guild_id}/bytes/transactions",
+                f"/guilds/{guild_id_str}/bytes/transactions",
                 json_data=transfer_data,
                 timeout=15.0
             )
@@ -464,6 +482,11 @@ class BytesService(BaseService):
             if response.status_code >= 400:
                 error_data = response.json()
                 error_message = error_data.get("detail", f"Transfer failed: {response.status_code}")
+                
+                # DEBUG: Log the full error response and message
+                self._logger.debug(f"API Error Response - Status: {response.status_code}")
+                self._logger.debug(f"API Error Data: {error_data}")
+                self._logger.debug(f"API Error Message: {error_message}")
                 
                 # Handle specific error cases
                 if "insufficient balance" in error_message.lower():
@@ -473,6 +496,43 @@ class BytesService(BaseService):
                         operation="transfer"
                     )
                 
+                # Check for cooldown errors (MAIN PATH)
+                if "cooldown active" in error_message.lower():
+                    cooldown_msg = error_message
+                    cooldown_timestamp = None
+                    
+                    self._logger.debug(f"Processing main path cooldown error: {error_message}")
+                    
+                    # Parse enhanced message format: "message|timestamp"
+                    if "|" in error_message:
+                        # Split message and timestamp
+                        msg_part, timestamp_part = error_message.rsplit("|", 1)
+                        try:
+                            cooldown_timestamp = int(timestamp_part)
+                            cooldown_msg = msg_part
+                            self._logger.debug(f"Parsed main path cooldown timestamp: {cooldown_timestamp}")
+                        except ValueError:
+                            # Fall back to original message if timestamp parsing fails
+                            self._logger.warning(f"Failed to parse main path cooldown timestamp: {timestamp_part}")
+                    else:
+                        self._logger.debug("No timestamp found in main path cooldown message")
+                    
+                    # Extract just the user-friendly message if needed
+                    if "Transfer cooldown active." in cooldown_msg:
+                        start = cooldown_msg.find("Transfer cooldown active.")
+                        end = cooldown_msg.find(".", start + 1)
+                        if end != -1:
+                            cooldown_msg = cooldown_msg[start:end + 1]
+                        
+                    self._logger.debug(f"Final main path cooldown result - msg: '{cooldown_msg}', timestamp: {cooldown_timestamp}")
+                        
+                    return TransferResult(
+                        success=False,
+                        reason=cooldown_msg,
+                        is_cooldown_error=True,
+                        cooldown_end_timestamp=cooldown_timestamp
+                    )
+                
                 return TransferResult(
                     success=False,
                     reason=error_message
@@ -480,7 +540,17 @@ class BytesService(BaseService):
             
             # Parse successful transfer
             transaction_data = response.json()
-            transaction = BytesTransaction(**transaction_data)
+            
+            # Create a simple transaction object from API response
+            # Note: We don't need to recreate the full model, just extract what we need
+            class TransactionResult:
+                def __init__(self, data):
+                    self.id = data["id"]
+                    self.amount = data["amount"]
+                    self.giver_id = data["giver_id"]
+                    self.receiver_id = data["receiver_id"]
+                    
+            transaction = TransactionResult(transaction_data)
             
             # Get updated balances
             new_giver_balance = giver_balance.balance - amount
@@ -519,6 +589,61 @@ class BytesService(BaseService):
                         operation="transfer"
                     )
                 
+                # Check for cooldown errors
+                if "cooldown active" in error_message.lower():
+                    # Parse enhanced cooldown message format from API error response
+                    cooldown_msg = error_message
+                    cooldown_timestamp = None
+                    
+                    self._logger.debug(f"Processing cooldown error: {error_message}")
+                    
+                    # The error_message might be a JSON string from the API response
+                    # Try to extract the detail field if it's JSON
+                    try:
+                        import json
+                        # Check if the error message contains JSON-like content
+                        if "'" in error_message and "detail" in error_message:
+                            # Extract just the detail value using string parsing since it's not valid JSON
+                            detail_start = error_message.find("'detail': '")
+                            if detail_start != -1:
+                                detail_start += len("'detail': '")
+                                detail_end = error_message.find("'", detail_start)
+                                if detail_end != -1:
+                                    cooldown_msg = error_message[detail_start:detail_end]
+                    except Exception:
+                        # If parsing fails, use the original message
+                        pass
+                    
+                    # Now parse the enhanced message format: "message|timestamp"
+                    if "|" in cooldown_msg:
+                        # Split message and timestamp
+                        msg_part, timestamp_part = cooldown_msg.rsplit("|", 1)
+                        try:
+                            cooldown_timestamp = int(timestamp_part)
+                            cooldown_msg = msg_part
+                            self._logger.debug(f"Parsed cooldown timestamp: {cooldown_timestamp}")
+                        except ValueError:
+                            # Fall back to original message if timestamp parsing fails
+                            self._logger.warning(f"Failed to parse cooldown timestamp: {timestamp_part}")
+                    else:
+                        self._logger.debug("No timestamp found in cooldown message")
+                    
+                    # Extract just the user-friendly message if needed
+                    if "Transfer cooldown active." in cooldown_msg:
+                        start = cooldown_msg.find("Transfer cooldown active.")
+                        end = cooldown_msg.find(".", start + 1)
+                        if end != -1:
+                            cooldown_msg = cooldown_msg[start:end + 1]
+                        
+                    self._logger.debug(f"Final cooldown result - msg: '{cooldown_msg}', timestamp: {cooldown_timestamp}")
+                        
+                    return TransferResult(
+                        success=False,
+                        reason=cooldown_msg,
+                        is_cooldown_error=True,
+                        cooldown_end_timestamp=cooldown_timestamp
+                    )
+                
                 return TransferResult(
                     success=False,
                     reason=error_message
@@ -528,6 +653,44 @@ class BytesService(BaseService):
         except (ValidationError, InsufficientBalanceError):
             raise
         except Exception as e:
+            # Check if this is actually a validation error that wasn't caught as APIError
+            error_str = str(e)
+            if "cooldown active" in error_str.lower() or "Transfer cooldown active" in error_str:
+                # Extract cooldown message and return as failed result
+                cooldown_msg = "Transfer is currently on cooldown. Please try again later."
+                cooldown_timestamp = None
+                
+                self._logger.debug(f"Processing exception cooldown error: {error_str}")
+                
+                if "Transfer cooldown active." in error_str:
+                    # Find the part with the human-readable message
+                    detail_start = error_str.find("'detail': '")
+                    if detail_start != -1:
+                        detail_start += len("'detail': '")
+                        detail_end = error_str.find("'", detail_start)
+                        if detail_end != -1:
+                            full_detail = error_str[detail_start:detail_end]
+                            
+                            # Parse enhanced message format
+                            if "|" in full_detail:
+                                msg_part, timestamp_part = full_detail.rsplit("|", 1)
+                                try:
+                                    cooldown_timestamp = int(timestamp_part)
+                                    cooldown_msg = msg_part
+                                    self._logger.debug(f"Parsed exception cooldown timestamp: {cooldown_timestamp}")
+                                except ValueError:
+                                    cooldown_msg = full_detail
+                                    self._logger.warning(f"Failed to parse exception cooldown timestamp: {timestamp_part}")
+                            else:
+                                cooldown_msg = full_detail
+                
+                return TransferResult(
+                    success=False,
+                    reason=cooldown_msg,
+                    is_cooldown_error=True,
+                    cooldown_end_timestamp=cooldown_timestamp
+                )
+            
             self._log_error(
                 "transfer_bytes", e,
                 guild_id=guild_id,
@@ -768,7 +931,7 @@ class BytesService(BaseService):
                 for tx in transactions:
                     tx_dict = tx.__dict__.copy()
                     # Convert datetime to ISO string for serialization
-                    if tx_dict.get("created_at"):
+                    if tx_dict.get("created_at") and hasattr(tx_dict["created_at"], "isoformat"):
                         tx_dict["created_at"] = tx_dict["created_at"].isoformat()
                     cache_data.append(tx_dict)
                 
@@ -933,13 +1096,23 @@ class BytesService(BaseService):
         # Parse date fields properly
         if parsed_data.get("last_daily"):
             parsed_data["last_daily"] = date.fromisoformat(parsed_data["last_daily"])
+        
+        # Handle created_at - parse if string, set None if None
         if parsed_data.get("created_at"):
-            parsed_data["created_at"] = datetime.fromisoformat(
-                parsed_data["created_at"].replace('Z', '+00:00')
-            )
+            if isinstance(parsed_data["created_at"], str):
+                parsed_data["created_at"] = datetime.fromisoformat(
+                    parsed_data["created_at"].replace('Z', '+00:00')
+                )
+        else:
+            parsed_data["created_at"] = None
+        
+        # Handle updated_at - parse if string, set None if None
         if parsed_data.get("updated_at"):
-            parsed_data["updated_at"] = datetime.fromisoformat(
-                parsed_data["updated_at"].replace('Z', '+00:00')
-            )
+            if isinstance(parsed_data["updated_at"], str):
+                parsed_data["updated_at"] = datetime.fromisoformat(
+                    parsed_data["updated_at"].replace('Z', '+00:00')
+                )
+        else:
+            parsed_data["updated_at"] = None
         
         return BytesBalance(**parsed_data)

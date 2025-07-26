@@ -79,7 +79,7 @@ async def get_balance(
     validate_discord_id(user_id, "user ID")
     
     bytes_ops = BytesOperations()
-    balance = await bytes_ops.get_balance(db, guild_id, user_id)
+    balance = await bytes_ops.get_or_create_balance(db, guild_id, user_id)
     return BytesBalanceResponse.model_validate(balance)
 
 
@@ -110,18 +110,33 @@ async def claim_daily(
     except NotFoundError:
         config = await config_ops.create_config(db, guild_id)
     
-    # Get current balance
-    balance = await bytes_ops.get_balance(db, guild_id, user_id)
+    # Get or create balance (starts with 0 for new users)
+    try:
+        balance = await bytes_ops.get_balance(db, guild_id, user_id)
+        is_new_user = False
+    except NotFoundError:
+        # Create new user with 0 balance - they'll get their "starting balance" as their first daily reward
+        from smarter_dev.web.models import BytesBalance
+        balance = BytesBalance(
+            guild_id=guild_id,
+            user_id=user_id,
+            balance=0,
+            total_received=0
+        )
+        db.add(balance)
+        await db.flush()  # Ensure timestamps are populated
+        is_new_user = True
     
-    # Use StreakService to calculate complete streak result
+    # Use StreakService to calculate streak result (works for both new and returning users)
+    # For new users, this will be their first "daily" claim which gives them starting balance
     streak_result = streak_service.calculate_streak_result(
         last_daily=balance.last_daily,
         current_streak=balance.streak_count,
-        daily_amount=config.daily_amount,
+        daily_amount=config.starting_balance if is_new_user else config.daily_amount,
         streak_bonuses=config.streak_bonuses
     )
     
-    # Check if user can claim today
+    # Check if user can claim today (works for both new and returning users)
     if not streak_result.can_claim:
         raise create_conflict_error(
             "Daily reward has already been claimed today. Try again tomorrow!",
@@ -131,12 +146,15 @@ async def claim_daily(
     # Get current UTC date for database storage
     current_utc_date = get_date_provider().today()
     
-    # Update balance with daily reward using calculated values
+    # Determine the reward amount (starting balance for new users, daily amount for returning users)
+    reward_amount = config.starting_balance if is_new_user else config.daily_amount
+    
+    # Update balance with reward using calculated values
     updated_balance = await bytes_ops.update_daily_reward(
         db, 
         guild_id, 
         user_id, 
-        config.daily_amount, 
+        reward_amount, 
         streak_result.streak_bonus,
         streak_result.new_streak_count,
         current_utc_date
@@ -148,10 +166,13 @@ async def claim_daily(
         datetime.min.time()
     ).replace(tzinfo=timezone.utc)
     
+    # Serialize model before commit to avoid session detachment issues
+    balance_response = BytesBalanceResponse.model_validate(updated_balance)
+    
     await db.commit()
     
     return DailyClaimResponse(
-        balance=BytesBalanceResponse.model_validate(updated_balance),
+        balance=balance_response,
         reward_amount=streak_result.reward_amount,
         streak_bonus=streak_result.streak_bonus,
         next_claim_at=next_claim_at
@@ -197,6 +218,29 @@ async def create_transaction(
             request
         )
     
+    # Check transfer cooldown if configured
+    if config.transfer_cooldown_hours > 0:
+        from datetime import datetime, timezone, timedelta
+        cooldown_cutoff = datetime.now(timezone.utc) - timedelta(hours=config.transfer_cooldown_hours)
+        
+        # Check for recent transfers from this user
+        recent_transfers = await bytes_ops.get_transaction_history(
+            db,
+            guild_id,
+            user_id=transaction.giver_id,
+            limit=1
+        )
+        
+        if recent_transfers and recent_transfers[0].created_at > cooldown_cutoff:
+            cooldown_end_time = recent_transfers[0].created_at + timedelta(hours=config.transfer_cooldown_hours)
+            time_remaining = (cooldown_end_time - datetime.now(timezone.utc)).total_seconds()
+            hours_remaining = int(time_remaining // 3600)
+            minutes_remaining = int((time_remaining % 3600) // 60)
+            
+            # Include both human-readable text and machine-readable timestamp
+            cooldown_message = f"Transfer cooldown active. You can send bytes again in {hours_remaining}h {minutes_remaining}m.|{int(cooldown_end_time.timestamp())}"
+            raise create_validation_error(cooldown_message, "cooldown", request)
+    
     # Create the transaction
     created_transaction = await bytes_ops.create_transaction(
         db,
@@ -209,8 +253,11 @@ async def create_transaction(
         transaction.reason
     )
     
+    # Serialize model before commit to avoid session detachment issues
+    transaction_response = BytesTransactionResponse.model_validate(created_transaction)
+    
     await db.commit()
-    return BytesTransactionResponse.model_validate(created_transaction)
+    return transaction_response
 
 
 @router.get("/leaderboard", response_model=LeaderboardResponse)
@@ -316,9 +363,13 @@ async def update_config(
         )
     
     updated_config = await config_ops.update_config(db, guild_id, **update_data)
+    
+    # Serialize model before commit to avoid session detachment issues
+    config_response = BytesConfigResponse.model_validate(updated_config)
+    
     await db.commit()
     
-    return BytesConfigResponse.model_validate(updated_config)
+    return config_response
 
 
 @router.delete("/config", response_model=SuccessResponse)
@@ -343,6 +394,7 @@ async def delete_config(
     )
 
 
+
 @router.post("/reset-streak/{user_id}", response_model=BytesBalanceResponse)
 async def reset_streak(
     user_id: str = Path(..., description="Discord user ID"),
@@ -361,6 +413,10 @@ async def reset_streak(
     
     bytes_ops = BytesOperations()
     updated_balance = await bytes_ops.reset_streak(db, guild_id, user_id)
+    
+    # Serialize model before commit to avoid session detachment issues
+    balance_response = BytesBalanceResponse.model_validate(updated_balance)
+    
     await db.commit()
     
-    return BytesBalanceResponse.model_validate(updated_balance)
+    return balance_response

@@ -189,6 +189,8 @@ class TransferResult:
     reason: Optional[str] = None
     new_giver_balance: Optional[int] = None
     new_receiver_balance: Optional[int] = None
+    is_cooldown_error: bool = False
+    cooldown_end_timestamp: Optional[int] = None
     
     def __post_init__(self):
         """Validate transfer result data."""
@@ -277,6 +279,7 @@ class Squad:
     member_count: int = 0
     is_active: bool = True
     created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     
     def __post_init__(self):
         """Validate squad data."""
@@ -481,10 +484,13 @@ class BytesConfig:
     
     guild_id: str
     daily_amount: int
-    max_transfer: int = 10000
-    max_daily_multiplier: int = 20
-    transfer_enabled: bool = True
-    daily_enabled: bool = True
+    starting_balance: int
+    max_transfer: int
+    transfer_cooldown_hours: int
+    streak_bonuses: Dict[int, int]
+    role_rewards: Dict[str, int]
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     
     def __post_init__(self) -> None:
         """Validate config data."""
