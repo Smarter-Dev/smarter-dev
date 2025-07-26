@@ -8,7 +8,7 @@ confirmations, and other UI elements.
 from __future__ import annotations
 
 import hikari
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from smarter_dev.bot.services.models import BytesBalance
@@ -34,7 +34,7 @@ def create_balance_embed(
     embed = hikari.Embed(
         title="💰 Your Bytes Balance",
         color=hikari.Color(0x3b82f6),
-        timestamp=datetime.now()
+        timestamp=datetime.now(timezone.utc)
     )
     
     # Main balance information
@@ -111,7 +111,38 @@ def create_error_embed(message: str) -> hikari.Embed:
         title="❌ Error",
         description=message,
         color=hikari.Color(0xef4444),
-        timestamp=datetime.now()
+        timestamp=datetime.now(timezone.utc)
+    )
+
+
+def create_cooldown_embed(message: str, cooldown_end_timestamp: Optional[int] = None) -> hikari.Embed:
+    """Create a cooldown-specific error embed with Discord timestamp formatting.
+    
+    Args:
+        message: Cooldown message to display
+        cooldown_end_timestamp: Unix timestamp when cooldown expires
+        
+    Returns:
+        Formatted cooldown embed with Discord timestamp
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Build the description with Discord timestamp if available
+    if cooldown_end_timestamp:
+        # Use Discord's relative timestamp format (:R) for "in X hours" display
+        description = f"You can send bytes again <t:{cooldown_end_timestamp}:R>."
+        logger.debug(f"Created cooldown embed with timestamp {cooldown_end_timestamp}: {description}")
+    else:
+        # Fall back to the original message if no timestamp available
+        description = message
+        logger.debug(f"Created cooldown embed without timestamp: {description}")
+    
+    return hikari.Embed(
+        title="⏰ Transfer Cooldown",
+        description=description,
+        color=hikari.Color(0xf59e0b),  # Amber color for warnings
+        timestamp=datetime.now(timezone.utc)
     )
 
 
@@ -129,7 +160,7 @@ def create_success_embed(title: str, description: str) -> hikari.Embed:
         title=title,
         description=description,
         color=hikari.Color(0x22c55e),
-        timestamp=datetime.now()
+        timestamp=datetime.now(timezone.utc)
     )
 
 
@@ -147,7 +178,7 @@ def create_warning_embed(title: str, description: str) -> hikari.Embed:
         title=title,
         description=description,
         color=hikari.Color(0xf59e0b),
-        timestamp=datetime.now()
+        timestamp=datetime.now(timezone.utc)
     )
 
 
@@ -165,16 +196,17 @@ def create_info_embed(title: str, description: str) -> hikari.Embed:
         title=title,
         description=description,
         color=hikari.Color(0x3b82f6),
-        timestamp=datetime.now()
+        timestamp=datetime.now(timezone.utc)
     )
 
 
-def create_leaderboard_embed(entries: list, guild_name: str = "Server") -> hikari.Embed:
+def create_leaderboard_embed(entries: list, guild_name: str = "Server", user_display_names: dict = None) -> hikari.Embed:
     """Create a formatted leaderboard embed.
     
     Args:
         entries: List of leaderboard entries
         guild_name: Name of the guild for the title
+        user_display_names: Optional mapping of user_id to display name
         
     Returns:
         Formatted leaderboard embed
@@ -182,7 +214,7 @@ def create_leaderboard_embed(entries: list, guild_name: str = "Server") -> hikar
     embed = hikari.Embed(
         title="🏆 Bytes Leaderboard",
         color=hikari.Color(0x3b82f6),
-        timestamp=datetime.now()
+        timestamp=datetime.now(timezone.utc)
     )
     
     if not entries:
@@ -194,8 +226,16 @@ def create_leaderboard_embed(entries: list, guild_name: str = "Server") -> hikar
         # Medal for top 3
         medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(entry.rank, "🏅")
         
+        # Use display name from mapping, fall back to username or user_id
+        if user_display_names and entry.user_id in user_display_names:
+            display_name = user_display_names[entry.user_id]
+        elif hasattr(entry, 'username') and entry.username:
+            display_name = entry.username
+        else:
+            display_name = f"User {entry.user_id[:8]}"
+        
         lines.append(
-            f"{medal} **{entry.rank}.** {entry.user_display_name}\n"
+            f"{medal} **{entry.rank}.** {display_name}\n"
             f"    💰 {entry.balance:,} bytes | 📈 {entry.total_received:,} received"
         )
     
@@ -218,7 +258,7 @@ def create_transaction_history_embed(transactions: list, user_id: str) -> hikari
     embed = hikari.Embed(
         title="📊 Your Transaction History",
         color=hikari.Color(0x3b82f6),
-        timestamp=datetime.now()
+        timestamp=datetime.now(timezone.utc)
     )
     
     if not transactions:
@@ -248,6 +288,45 @@ def create_transaction_history_embed(transactions: list, user_id: str) -> hikari
     embed.set_footer(f"Showing {len(transactions)} recent transactions")
     
     return embed
+
+
+def create_daily_claim_embed(
+    earned: int,
+    balance: int,
+    streak: int,
+    multiplier: int,
+    guild_name: str = "Server"
+) -> hikari.Embed:
+    """Create an embed for daily claim notification.
+    
+    Args:
+        earned: Amount of bytes earned
+        balance: User's new total balance
+        streak: Current streak count
+        multiplier: Streak multiplier applied
+        guild_name: Name of the guild for personalization
+        
+    Returns:
+        Formatted embed for daily claim notification
+    """
+    embed = hikari.Embed(
+        title="🎉 Daily Bytes Claimed!",
+        description=f"You've earned **{earned:,} bytes** from your first message today in {guild_name}!",
+        color=hikari.Color(0x22c55e),
+        timestamp=datetime.now(timezone.utc)
+    )
+    
+    embed.add_field("Your Balance", f"**{balance:,}** bytes", inline=True)
+    embed.add_field("Streak", f"**{streak:,}** days", inline=True)
+    
+    if multiplier > 1:
+        embed.add_field("Multiplier", f"**{multiplier}x** streak bonus!", inline=True)
+    
+    embed.set_footer("💡 Send a message each day to maintain your streak!")
+    
+    return embed
+
+
 
 
 def create_squad_list_embed(squads: list, current_squad_id: Optional[str] = None) -> hikari.Embed:
