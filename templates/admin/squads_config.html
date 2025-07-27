@@ -1,0 +1,474 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Squad Management - {{ guild.name }}{% endblock %}
+
+{% block page_title %}Squad Management{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item active">Squads</li>
+{% endblock %}
+
+{% block page_actions %}
+<div class="col-auto ms-auto d-print-none">
+    <div class="btn-list">
+        <a href="/admin/guilds/{{ guild.id }}" class="btn btn-outline-primary">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-arrow-left"></use>
+            </svg>
+            Back to Guild
+        </a>
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createSquadModal">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-plus"></use>
+            </svg>
+            Create Squad
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Guild Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" class="guild-icon me-3">
+                    {% else %}
+                    <div class="guild-icon-placeholder me-3">{{ guild.name[0].upper() }}</div>
+                    {% endif %}
+                    <div>
+                        <h3 class="mb-1">{{ guild.name }}</h3>
+                        <div class="text-muted">Squad Configuration & Management</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Existing Squads -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Current Squads</h3>
+                <div class="card-subtitle">{{ squads|length }} squad{{ 's' if squads|length != 1 else '' }} configured</div>
+            </div>
+            <div class="card-body">
+                {% if squads %}
+                <div class="row">
+                    {% for squad in squads %}
+                    <div class="col-md-6 col-lg-4 mb-4">
+                        <div class="card {% if not squad.is_active %}bg-light opacity-75{% endif %}">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center justify-content-between mb-3">
+                                    <h4 class="mb-0">{{ squad.name }}</h4>
+                                    <div class="dropdown">
+                                        <button class="btn btn-outline-primary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                            Actions
+                                        </button>
+                                        <ul class="dropdown-menu">
+                                            <li><a class="dropdown-item" href="#" onclick="editSquad('{{ squad.id }}')">Edit</a></li>
+                                            <li><a class="dropdown-item" href="#" onclick="toggleSquad('{{ squad.id }}', {{ 'false' if squad.is_active else 'true' }})">
+                                                {{ 'Deactivate' if squad.is_active else 'Activate' }}
+                                            </a></li>
+                                            <li><hr class="dropdown-divider"></li>
+                                            <li><a class="dropdown-item text-danger" href="#" onclick="deleteSquad('{{ squad.id }}')">Delete</a></li>
+                                        </ul>
+                                    </div>
+                                </div>
+                                
+                                {% if not squad.is_active %}
+                                <div class="mb-2">
+                                    <span class="badge bg-secondary">Inactive</span>
+                                </div>
+                                {% endif %}
+                                
+                                {% if squad.description %}
+                                <p class="text-muted mb-3">{{ squad.description }}</p>
+                                {% endif %}
+                                
+                                {% if squad.welcome_message %}
+                                <div class="mb-3">
+                                    <small class="text-secondary fw-bold">Welcome Message:</small>
+                                    <p class="text-muted small mb-0">{{ squad.welcome_message }}</p>
+                                </div>
+                                {% endif %}
+                                
+                                <div class="row mb-3">
+                                    <div class="col-6">
+                                        <div class="text-center">
+                                            <div class="h4 mb-1">{{ squad.member_count }}</div>
+                                            <div class="text-muted small">
+                                                {% if squad.max_members %}
+                                                / {{ squad.max_members }} members
+                                                {% else %}
+                                                members
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="text-center">
+                                            <div class="h4 mb-1">{{ squad.switch_cost }}</div>
+                                            <div class="text-muted small">switch cost</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="small text-muted">
+                                    <strong>Role ID:</strong> {{ squad.role_id }}<br>
+                                    <strong>Created:</strong> {{ squad.created_at.strftime("%Y-%m-%d") }}
+                                    {% if squad.is_full %}
+                                    <br><span class="badge bg-warning">Full</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="empty">
+                    <div class="empty-img">
+                        <svg class="icon" width="48" height="48">
+                            <use xlink:href="#tabler-users"></use>
+                        </svg>
+                    </div>
+                    <p class="empty-title">No squads configured</p>
+                    <p class="empty-subtitle text-muted">
+                        Create your first squad to enable team-based features for this guild.
+                    </p>
+                    <div class="empty-action">
+                        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createSquadModal">
+                            <svg class="icon me-2" width="24" height="24">
+                                <use xlink:href="#tabler-plus"></use>
+                            </svg>
+                            Create First Squad
+                        </button>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Create Squad Modal -->
+<div class="modal modal-blur fade" id="createSquadModal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Create New Squad</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="post">
+                <input type="hidden" name="action" value="create">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-lg-6 mb-3">
+                            <label class="form-label required">Squad Name</label>
+                            <input type="text" class="form-control" name="name" placeholder="Enter squad name" required>
+                            <div class="form-hint">Displayed name for the squad</div>
+                        </div>
+                        <div class="col-lg-6 mb-3">
+                            <label class="form-label required">Discord Role</label>
+                            <select class="form-select" name="role_id" required>
+                                <option value="">Select a role...</option>
+                                {% for role in guild_roles %}
+                                {% if not role.managed and role.name != "@everyone" %}
+                                <option value="{{ role.id }}">
+                                    {{ role.name }}
+                                    {% if role.color %}({{ role.color_hex }}){% endif %}
+                                </option>
+                                {% endif %}
+                                {% endfor %}
+                            </select>
+                            <div class="form-hint">Role that will be assigned to squad members</div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-control" name="description" rows="3" placeholder="Optional squad description"></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Welcome Message</label>
+                        <textarea class="form-control" name="welcome_message" rows="3" maxlength="500" placeholder="Custom welcome message shown when users join this squad..."></textarea>
+                        <div class="form-hint">
+                            <span class="text-muted">Custom message shown to users when they join this squad. Leave empty for default message.</span>
+                            <span class="float-end">
+                                <span id="create_welcome_count">0</span>/500 characters
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-lg-6 mb-3">
+                            <label class="form-label">Switch Cost</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" name="switch_cost" value="50" min="0" max="10000">
+                                <span class="input-group-text">bytes</span>
+                            </div>
+                            <div class="form-hint">Cost to switch to this squad</div>
+                        </div>
+                        <div class="col-lg-6 mb-3">
+                            <label class="form-label">Max Members</label>
+                            <input type="number" class="form-control" name="max_members" placeholder="Unlimited" min="1" max="1000">
+                            <div class="form-hint">Leave empty for unlimited</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <a href="#" class="btn btn-link link-secondary" data-bs-dismiss="modal">Cancel</a>
+                    <button type="submit" class="btn btn-primary ms-auto">
+                        <svg class="icon me-2" width="24" height="24">
+                            <use xlink:href="#tabler-plus"></use>
+                        </svg>
+                        Create Squad
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Squad Modal -->
+<div class="modal modal-blur fade" id="editSquadModal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit Squad</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form method="post" id="editSquadForm">
+                <input type="hidden" name="action" value="update">
+                <input type="hidden" name="squad_id" id="edit_squad_id">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-lg-6 mb-3">
+                            <label class="form-label required">Squad Name</label>
+                            <input type="text" class="form-control" name="name" id="edit_name" required>
+                        </div>
+                        <div class="col-lg-6 mb-3">
+                            <label class="form-label">Switch Cost</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" name="switch_cost" id="edit_switch_cost" min="0" max="10000">
+                                <span class="input-group-text">bytes</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <textarea class="form-control" name="description" id="edit_description" rows="3"></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Welcome Message</label>
+                        <textarea class="form-control" name="welcome_message" id="edit_welcome_message" rows="3" maxlength="500" placeholder="Custom welcome message shown when users join this squad..."></textarea>
+                        <div class="form-hint">
+                            <span class="text-muted">Custom message shown to users when they join this squad. Leave empty for default message.</span>
+                            <span class="float-end">
+                                <span id="edit_welcome_count">0</span>/500 characters
+                            </span>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-lg-6 mb-3">
+                            <label class="form-label">Max Members</label>
+                            <input type="number" class="form-control" name="max_members" id="edit_max_members" min="1" max="1000">
+                            <div class="form-hint">Leave empty for unlimited</div>
+                        </div>
+                        <div class="col-lg-6 mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="is_active" id="edit_is_active">
+                                <label class="form-check-label" for="edit_is_active">
+                                    Squad is active
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <a href="#" class="btn btn-link link-secondary" data-bs-dismiss="modal">Cancel</a>
+                    <button type="submit" class="btn btn-primary ms-auto">
+                        <svg class="icon me-2" width="24" height="24">
+                            <use xlink:href="#tabler-device-floppy"></use>
+                        </svg>
+                        Save Changes
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal modal-blur fade" id="deleteSquadModal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-sm modal-dialog-centered" role="document">
+        <div class="modal-content">
+            <div class="modal-body">
+                <div class="modal-title">Are you sure?</div>
+                <div>This will permanently delete the squad and remove all members.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-link link-secondary me-auto" data-bs-dismiss="modal">Cancel</button>
+                <form method="post" style="display: inline;" id="deleteSquadForm">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="squad_id" id="delete_squad_id">
+                    <button type="submit" class="btn btn-danger">Delete Squad</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Character counter functionality
+function updateCharacterCount(textareaId, counterId) {
+    const textarea = document.getElementById(textareaId);
+    const counter = document.getElementById(counterId);
+    if (textarea && counter) {
+        counter.textContent = textarea.value.length;
+    }
+}
+
+// Squad data for editing
+const squads = {
+    {% for squad in squads %}
+    '{{ squad.id }}': {
+        name: '{{ squad.name }}',
+        description: '{{ squad.description or "" }}',
+        welcome_message: '{{ squad.welcome_message or "" }}',
+        switch_cost: {{ squad.switch_cost }},
+        max_members: {% if squad.max_members %}{{ squad.max_members }}{% else %}null{% endif %},
+        is_active: {{ 'true' if squad.is_active else 'false' }}
+    },
+    {% endfor %}
+};
+
+function editSquad(squadId) {
+    const squad = squads[squadId];
+    if (!squad) {
+        console.error('Squad not found:', squadId);
+        return;
+    }
+    
+    console.log('Editing squad:', squad);
+    
+    document.getElementById('edit_squad_id').value = squadId;
+    document.getElementById('edit_name').value = squad.name;
+    document.getElementById('edit_description').value = squad.description || '';
+    document.getElementById('edit_welcome_message').value = squad.welcome_message || '';
+    document.getElementById('edit_switch_cost').value = squad.switch_cost;
+    document.getElementById('edit_max_members').value = squad.max_members || '';
+    document.getElementById('edit_is_active').checked = squad.is_active;
+    
+    // Update character counters
+    updateCharacterCount('edit_welcome_message', 'edit_welcome_count');
+    
+    // Use Tabler modal approach
+    const modalElement = document.getElementById('editSquadModal');
+    modalElement.classList.add('show');
+    modalElement.style.display = 'block';
+    document.body.classList.add('modal-open');
+    
+    // Add backdrop
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop fade show';
+    backdrop.id = 'editModalBackdrop';
+    document.body.appendChild(backdrop);
+}
+
+function deleteSquad(squadId) {
+    document.getElementById('delete_squad_id').value = squadId;
+    
+    // Use Tabler modal approach
+    const modalElement = document.getElementById('deleteSquadModal');
+    modalElement.classList.add('show');
+    modalElement.style.display = 'block';
+    document.body.classList.add('modal-open');
+    
+    // Add backdrop
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop fade show';
+    backdrop.id = 'deleteModalBackdrop';
+    document.body.appendChild(backdrop);
+}
+
+function toggleSquad(squadId, isActive) {
+    const squad = squads[squadId];
+    if (!squad) return;
+    
+    // Update the squad data
+    squad.is_active = isActive;
+    
+    // Populate the edit form with updated data
+    editSquad(squadId);
+    
+    // Auto-submit the form
+    setTimeout(() => {
+        document.getElementById('editSquadForm').submit();
+    }, 100);
+}
+
+// Modal close functionality
+function closeModal(modalId, backdropId) {
+    const modal = document.getElementById(modalId);
+    const backdrop = document.getElementById(backdropId);
+    
+    modal.classList.remove('show');
+    modal.style.display = 'none';
+    document.body.classList.remove('modal-open');
+    
+    if (backdrop) {
+        backdrop.remove();
+    }
+}
+
+// Add event listeners for modal close buttons
+document.addEventListener('DOMContentLoaded', function() {
+    // Edit modal close
+    document.querySelectorAll('#editSquadModal .btn-close, #editSquadModal [data-bs-dismiss="modal"]').forEach(btn => {
+        btn.addEventListener('click', () => closeModal('editSquadModal', 'editModalBackdrop'));
+    });
+    
+    // Delete modal close
+    document.querySelectorAll('#deleteSquadModal .btn-close, #deleteSquadModal [data-bs-dismiss="modal"]').forEach(btn => {
+        btn.addEventListener('click', () => closeModal('deleteSquadModal', 'deleteModalBackdrop'));
+    });
+    
+    // Close on backdrop click
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('modal-backdrop')) {
+            if (e.target.id === 'editModalBackdrop') {
+                closeModal('editSquadModal', 'editModalBackdrop');
+            } else if (e.target.id === 'deleteModalBackdrop') {
+                closeModal('deleteSquadModal', 'deleteModalBackdrop');
+            }
+        }
+    });
+    
+    // Add character counter listeners
+    document.addEventListener('input', function(e) {
+        if (e.target.name === 'welcome_message') {
+            if (e.target.id === 'edit_welcome_message') {
+                updateCharacterCount('edit_welcome_message', 'edit_welcome_count');
+            } else {
+                updateCharacterCount(e.target.name, 'create_welcome_count');
+            }
+        }
+    });
+});
+</script>
+{% endblock %}

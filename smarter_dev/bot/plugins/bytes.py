@@ -13,8 +13,8 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-# Import only the Discord embed function needed for large history lists
-from smarter_dev.bot.utils.embeds import create_transaction_history_embed
+# Import Discord embed functions needed for fallbacks
+from smarter_dev.bot.utils.embeds import create_transaction_history_embed, create_leaderboard_embed
 from smarter_dev.bot.utils.image_embeds import get_generator
 from smarter_dev.bot.services.exceptions import (
     AlreadyClaimedError,
@@ -58,20 +58,45 @@ async def balance_command(ctx: lightbulb.Context) -> None:
         return
     
     try:
-        # Get current balance
+        # Get current balance (defaults to fresh data)
         balance = await service.get_balance(str(ctx.guild_id), str(ctx.user.id))
         
-        # Create image embed for balance
+        # Create enhanced balance embed
         generator = get_generator()
-        description = f"{balance.balance:,} bytes"
-        if balance.streak_count > 0:
-            description += f"\nStreak: {balance.streak_count} days"
-        if balance.last_daily:
-            # Format last daily as readable date
-            description += f"\nLast Daily: {balance.last_daily.strftime('%B %d, %Y')}"
         
-        image_file = generator.create_simple_embed("YOUR BYTES BALANCE", description, "info")
-        await ctx.respond(attachment=image_file)
+        # Format last daily as readable string
+        last_daily_str = None
+        if balance.last_daily:
+            last_daily_str = balance.last_daily.strftime('%B %d, %Y')
+        
+        # Get username for display
+        username = ctx.user.display_name or ctx.user.username
+        
+        image_file = generator.create_balance_embed(
+            username=username,
+            balance=balance.balance,
+            streak_count=balance.streak_count,
+            last_daily=last_daily_str,
+            total_received=balance.total_received,
+            total_sent=balance.total_sent
+        )
+        
+        # Create share view with balance data
+        from smarter_dev.bot.views.balance_views import BalanceShareView
+        share_view = BalanceShareView(
+            username=username,
+            balance=balance.balance,
+            streak_count=balance.streak_count,
+            last_daily=last_daily_str,
+            total_received=balance.total_received,
+            total_sent=balance.total_sent
+        )
+        
+        await ctx.respond(
+            attachment=image_file,
+            components=share_view.build_components(),
+            flags=hikari.MessageFlag.EPHEMERAL
+        )
         return
             
     except ServiceError as e:
@@ -162,21 +187,25 @@ async def send_command(ctx: lightbulb.Context) -> None:
         # Success image embed
         generator = get_generator()
         
-        # Get user's display name (nickname if set, otherwise username)
+        # Get sender's display name (nickname if set, otherwise username)
         try:
-            member = ctx.get_guild().get_member(user.id)
-            display_name = member.display_name if member else user.username
+            sender_member = ctx.get_guild().get_member(ctx.user.id)
+            sender_display_name = sender_member.display_name if sender_member else ctx.user.username
         except:
-            display_name = user.username
+            sender_display_name = ctx.user.username
         
-        description = f"Successfully sent {amount:,} bytes to {display_name}"
+        # Get receiver's display name (nickname if set, otherwise username)
+        try:
+            receiver_member = ctx.get_guild().get_member(user.id)
+            receiver_display_name = receiver_member.display_name if receiver_member else user.username
+        except:
+            receiver_display_name = user.username
         
-        # Add additional details
+        description = f"{sender_display_name} sent {amount:,} bytes to {receiver_display_name}"
+        
+        # Add reason if provided with 32px spacing (handled by image generator)
         if reason:
-            description += f"\nReason: {reason}"
-        
-        if result.new_giver_balance is not None:
-            description += f"\nYour New Balance: {result.new_giver_balance:,} bytes"
+            description += f"\n\n{reason}"
         
         image_file = generator.create_success_embed("BYTES SENT", description)
         await ctx.respond(attachment=image_file)
@@ -256,9 +285,28 @@ async def leaderboard_command(ctx: lightbulb.Context) -> None:
             except:
                 user_display_names[entry.user_id] = f"User {entry.user_id[:8]}"
         
-        generator = get_generator()
-        image_file = generator.create_leaderboard_embed(entries, ctx.get_guild().name, user_display_names)
-        await ctx.respond(attachment=image_file)
+        # Use image embed for 10 or fewer users, Discord embed for more
+        if limit <= 10:
+            generator = get_generator()
+            image_file = generator.create_leaderboard_embed(entries, ctx.get_guild().name, user_display_names)
+            
+            # Create share view with leaderboard data
+            from smarter_dev.bot.views.leaderboard_views import LeaderboardShareView
+            share_view = LeaderboardShareView(
+                entries=entries,
+                guild_name=ctx.get_guild().name,
+                user_display_names=user_display_names
+            )
+            
+            await ctx.respond(
+                attachment=image_file,
+                components=share_view.build_components(),
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
+        else:
+            # Use standard Discord embed for larger lists
+            embed = create_leaderboard_embed(entries, ctx.get_guild().name, user_display_names)
+            await ctx.respond(embed=embed)
         
     except ServiceError as e:
         logger.error(f"Service error in leaderboard command: {e}")
@@ -304,7 +352,19 @@ async def history_command(ctx: lightbulb.Context) -> None:
         if limit <= 10:
             generator = get_generator()
             image_file = generator.create_history_embed(transactions, str(ctx.user.id))
-            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+            
+            # Create share view with history data
+            from smarter_dev.bot.views.history_views import HistoryShareView
+            share_view = HistoryShareView(
+                transactions=transactions,
+                user_id=str(ctx.user.id)
+            )
+            
+            await ctx.respond(
+                attachment=image_file,
+                components=share_view.build_components(),
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
         else:
             # Use standard Discord embed for larger lists
             embed = create_transaction_history_embed(transactions, str(ctx.user.id))
@@ -323,10 +383,10 @@ async def history_command(ctx: lightbulb.Context) -> None:
 
 
 @bytes_group.child
-@lightbulb.command("config", "View the current bytes economy configuration for this server")
+@lightbulb.command("info", "View the current bytes economy settings for this server")
 @lightbulb.implements(lightbulb.SlashSubCommand)
-async def config_command(ctx: lightbulb.Context) -> None:
-    """Handle config command - show guild bytes configuration."""
+async def info_command(ctx: lightbulb.Context) -> None:
+    """Handle info command - show guild bytes configuration."""
     service: BytesService = getattr(ctx.bot, 'd', {}).get('bytes_service')
     if not service:
         # Fallback to _services dict

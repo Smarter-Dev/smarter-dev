@@ -85,7 +85,6 @@ def mock_squads_service():
         max_members=None,
         member_count=5,
         is_active=True,
-        is_full=False,
         created_at=datetime.now(),
         updated_at=datetime.now()
     )
@@ -103,50 +102,30 @@ def mock_squads_service():
 class TestBytesCommands:
     """Test suite for bytes economy commands."""
     
-    async def test_balance_command_success_with_daily(self, mock_context, mock_bytes_service):
-        """Test successful balance command with daily claim."""
-        mock_context.app.d.bytes_service = mock_bytes_service
+    async def test_balance_command_success(self, mock_context, mock_bytes_service):
+        """Test successful balance command without auto-claiming."""
+        # Setup context with proper service structure (both primary and fallback)
+        mock_context.bot = Mock()
+        mock_context.bot.d = {
+            'bytes_service': mock_bytes_service,
+            '_services': {'bytes_service': mock_bytes_service}
+        }
         
-        # Mock successful daily claim
-        mock_bytes_service.claim_daily.return_value = DailyClaimResult(
-            success=True,
-            balance=mock_bytes_service.get_balance.return_value,
-            earned=20,
-            streak=6,
-            multiplier=2
-        )
+        # Import and test command function directly
+        from smarter_dev.bot.plugins.bytes import balance_command
         
-        # Import and test command
-        from smarter_dev.bot.plugins.bytes import BalanceCommand
+        await balance_command(mock_context)
         
-        command = BalanceCommand()
-        await command.invoke(mock_context)
-        
-        # Verify service calls
+        # Verify service calls - only get_balance, no daily claim
         mock_bytes_service.get_balance.assert_called_once_with("123456789", "987654321")
-        mock_bytes_service.claim_daily.assert_called_once_with("123456789", "987654321", str(mock_context.user))
+        mock_bytes_service.claim_daily.assert_not_called()
         
-        # Verify response
+        # Verify response shows balance only
         mock_context.respond.assert_called_once()
-        embed = mock_context.respond.call_args[1]["embed"]
-        assert "Daily Bytes Claimed!" in embed.title
-    
-    async def test_balance_command_already_claimed(self, mock_context, mock_bytes_service):
-        """Test balance command when daily already claimed."""
-        mock_context.app.d.bytes_service = mock_bytes_service
-        
-        # Mock already claimed error
-        mock_bytes_service.claim_daily.side_effect = AlreadyClaimedError()
-        
-        from smarter_dev.bot.plugins.bytes import BalanceCommand
-        
-        command = BalanceCommand()
-        await command.invoke(mock_context)
-        
-        # Verify response shows balance without daily claim
-        mock_context.respond.assert_called_once()
-        embed = mock_context.respond.call_args[1]["embed"]
+        args, kwargs = mock_context.respond.call_args
+        embed = kwargs["embed"]
         assert "Your Bytes Balance" in embed.title
+    
     
     async def test_send_command_success(self, mock_context, mock_bytes_service):
         """Test successful send command."""
@@ -171,26 +150,54 @@ class TestBytesCommands:
             new_giver_balance=900
         )
         
-        from smarter_dev.bot.plugins.bytes import SendCommand
+        # Setup context with proper service structure
+        mock_context.bot = Mock()
+        mock_context.bot.d = {
+            'bytes_service': mock_bytes_service,
+            '_services': {'bytes_service': mock_bytes_service}
+        }
         
-        command = SendCommand()
-        command.user = Mock(id="111222333", mention="<@111222333>")
-        command.amount = 100
-        command.reason = "Test transfer"
+        # Mock options for the send command
+        mock_context.options = Mock()
+        mock_context.options.user = Mock(id="111222333", mention="<@111222333>")
+        mock_context.options.amount = 100
+        mock_context.options.reason = "Test transfer"
         
-        await command.invoke(mock_context)
+        # Mock guild member lookup
+        member = Mock()
+        mock_context.get_guild().get_member.return_value = member
+        
+        from smarter_dev.bot.plugins.bytes import send_command
+        
+        await send_command(mock_context)
         
         # Verify service call
         mock_bytes_service.transfer_bytes.assert_called_once()
         
         # Verify response
         mock_context.respond.assert_called_once()
-        embed = mock_context.respond.call_args[1]["embed"]
+        args, kwargs = mock_context.respond.call_args
+        embed = kwargs["embed"]
         assert "Bytes Sent!" in embed.title
     
     async def test_send_command_insufficient_balance(self, mock_context, mock_bytes_service):
         """Test send command with insufficient balance."""
-        mock_context.app.d.bytes_service = mock_bytes_service
+        # Setup context with proper service structure
+        mock_context.bot = Mock()
+        mock_context.bot.d = {
+            'bytes_service': mock_bytes_service,
+            '_services': {'bytes_service': mock_bytes_service}
+        }
+        
+        # Mock options for the send command
+        mock_context.options = Mock()
+        mock_context.options.user = Mock(id="111222333", mention="<@111222333>")
+        mock_context.options.amount = 500
+        mock_context.options.reason = None
+        
+        # Mock guild member lookup
+        member = Mock()
+        mock_context.get_guild().get_member.return_value = member
         
         # Mock insufficient balance error
         mock_bytes_service.transfer_bytes.side_effect = InsufficientBalanceError(
@@ -199,20 +206,15 @@ class TestBytesCommands:
             operation="transfer"
         )
         
-        from smarter_dev.bot.plugins.bytes import SendCommand
+        from smarter_dev.bot.plugins.bytes import send_command
         
-        command = SendCommand()
-        command.user = Mock(id="111222333", mention="<@111222333>")
-        command.amount = 500
-        command.reason = None
-        
-        await command.invoke(mock_context)
+        await send_command(mock_context)
         
         # Verify error response
         mock_context.respond.assert_called_once()
-        call_kwargs = mock_context.respond.call_args[1]
-        assert call_kwargs["flags"] == pytest.importorskip("hikari").MessageFlag.EPHEMERAL
-        embed = call_kwargs["embed"]
+        args, kwargs = mock_context.respond.call_args
+        assert kwargs["flags"] == pytest.importorskip("hikari").MessageFlag.EPHEMERAL
+        embed = kwargs["embed"]
         assert "Insufficient balance" in embed.description
     
     async def test_leaderboard_command_success(self, mock_context, mock_bytes_service):
@@ -228,19 +230,28 @@ class TestBytesCommands:
         ]
         mock_bytes_service.get_leaderboard.return_value = entries
         
-        from smarter_dev.bot.plugins.bytes import LeaderboardCommand
+        # Setup context with proper service structure
+        mock_context.bot = Mock()
+        mock_context.bot.d = {
+            'bytes_service': mock_bytes_service,
+            '_services': {'bytes_service': mock_bytes_service}
+        }
         
-        command = LeaderboardCommand()
-        command.limit = 10
+        # Mock options for the leaderboard command
+        mock_context.options = Mock()
+        mock_context.options.limit = 10
         
-        await command.invoke(mock_context)
+        from smarter_dev.bot.plugins.bytes import leaderboard_command
+        
+        await leaderboard_command(mock_context)
         
         # Verify service call
         mock_bytes_service.get_leaderboard.assert_called_once_with("123456789", 10)
         
         # Verify response
         mock_context.respond.assert_called_once()
-        embed = mock_context.respond.call_args[1]["embed"]
+        args, kwargs = mock_context.respond.call_args
+        embed = kwargs["embed"]
         assert "Leaderboard" in embed.title
     
     async def test_history_command_success(self, mock_context, mock_bytes_service):
@@ -263,12 +274,20 @@ class TestBytesCommands:
         ]
         mock_bytes_service.get_transaction_history.return_value = transactions
         
-        from smarter_dev.bot.plugins.bytes import HistoryCommand
+        # Setup context with proper service structure  
+        mock_context.bot = Mock()
+        mock_context.bot.d = {
+            'bytes_service': mock_bytes_service,
+            '_services': {'bytes_service': mock_bytes_service}
+        }
         
-        command = HistoryCommand()
-        command.limit = 10
+        # Mock options for the history command
+        mock_context.options = Mock()
+        mock_context.options.limit = 10
         
-        await command.invoke(mock_context)
+        from smarter_dev.bot.plugins.bytes import history_command
+        
+        await history_command(mock_context)
         
         # Verify service call
         mock_bytes_service.get_transaction_history.assert_called_once_with(
@@ -277,8 +296,8 @@ class TestBytesCommands:
         
         # Verify response
         mock_context.respond.assert_called_once()
-        call_kwargs = mock_context.respond.call_args[1]
-        assert call_kwargs["flags"] == pytest.importorskip("hikari").MessageFlag.EPHEMERAL
+        args, kwargs = mock_context.respond.call_args
+        assert kwargs["flags"] == pytest.importorskip("hikari").MessageFlag.EPHEMERAL
 
 
 class TestSquadCommands:
@@ -288,10 +307,16 @@ class TestSquadCommands:
         """Test successful squad list command."""
         mock_context.app.d.squads_service = mock_squads_service
         
-        from smarter_dev.bot.plugins.squads import ListCommand
+        # Setup context with proper service structure
+        mock_context.bot = Mock()
+        mock_context.bot.d = {
+            'squads_service': mock_squads_service,
+            '_services': {'squads_service': mock_squads_service}
+        }
         
-        command = ListCommand()
-        await command.invoke(mock_context)
+        from smarter_dev.bot.plugins.squads import list_command
+        
+        await list_command(mock_context)
         
         # Verify service calls
         mock_squads_service.list_squads.assert_called_once_with("123456789")
@@ -307,10 +332,20 @@ class TestSquadCommands:
         mock_context.app.d.squads_service = mock_squads_service
         mock_context.app.d.bytes_service = mock_bytes_service
         
-        from smarter_dev.bot.plugins.squads import JoinCommand
+        # Setup context with proper service structure
+        mock_context.bot = Mock()
+        mock_context.bot.d = {
+            'squads_service': mock_squads_service,
+            'bytes_service': mock_bytes_service,
+            '_services': {
+                'squads_service': mock_squads_service,
+                'bytes_service': mock_bytes_service
+            }
+        }
         
-        command = JoinCommand()
-        await command.invoke(mock_context)
+        from smarter_dev.bot.plugins.squads import join_command
+        
+        await join_command(mock_context)
         
         # Verify service calls
         mock_squads_service.list_squads.assert_called_once_with("123456789")
@@ -338,7 +373,6 @@ class TestSquadCommands:
             max_members=None,
             member_count=5,
             is_active=True,
-            is_full=False,
             created_at=datetime.now(),
             updated_at=datetime.now()
         )
@@ -349,10 +383,16 @@ class TestSquadCommands:
             member_since=datetime.now()
         )
         
-        from smarter_dev.bot.plugins.squads import LeaveCommand
+        # Setup context with proper service structure
+        mock_context.bot = Mock()
+        mock_context.bot.d = {
+            'squads_service': mock_squads_service,
+            '_services': {'squads_service': mock_squads_service}
+        }
         
-        command = LeaveCommand()
-        await command.invoke(mock_context)
+        from smarter_dev.bot.plugins.squads import leave_command
+        
+        await leave_command(mock_context)
         
         # Verify service calls
         mock_squads_service.get_user_squad.assert_called_once_with("123456789", "987654321")
@@ -376,10 +416,16 @@ class TestSquadCommands:
             member_since=None
         )
         
-        from smarter_dev.bot.plugins.squads import LeaveCommand
+        # Setup context with proper service structure
+        mock_context.bot = Mock()
+        mock_context.bot.d = {
+            'squads_service': mock_squads_service,
+            '_services': {'squads_service': mock_squads_service}
+        }
         
-        command = LeaveCommand()
-        await command.invoke(mock_context)
+        from smarter_dev.bot.plugins.squads import leave_command
+        
+        await leave_command(mock_context)
         
         # Verify error response
         mock_context.respond.assert_called_once()
@@ -403,7 +449,6 @@ class TestSquadCommands:
             max_members=10,
             member_count=5,
             is_active=True,
-            is_full=False,
             created_at=datetime.now(),
             updated_at=datetime.now()
         )
@@ -422,10 +467,20 @@ class TestSquadCommands:
         ]
         mock_squads_service.get_squad_members.return_value = members
         
-        from smarter_dev.bot.plugins.squads import InfoCommand
+        # Setup context with proper service structure
+        mock_context.bot = Mock()
+        mock_context.bot.d = {
+            'squads_service': mock_squads_service,
+            '_services': {'squads_service': mock_squads_service}
+        }
         
-        command = InfoCommand()
-        await command.invoke(mock_context)
+        # Mock options for info command
+        mock_context.options = Mock()
+        mock_context.options.user = Mock(id="987654321")
+        
+        from smarter_dev.bot.plugins.squads import info_command
+        
+        await info_command(mock_context)
         
         # Verify service calls
         mock_squads_service.get_user_squad.assert_called_once_with("123456789", "987654321")
@@ -444,33 +499,39 @@ class TestCommandErrorHandling:
     
     async def test_bytes_service_unavailable(self, mock_context):
         """Test command behavior when bytes service is unavailable."""
-        mock_context.app.d.bytes_service = None
+        # Setup context with no service
+        mock_context.bot = Mock()
+        mock_context.bot.d = {'_services': {}}
         
-        from smarter_dev.bot.plugins.bytes import BalanceCommand
+        from smarter_dev.bot.plugins.bytes import balance_command
         
-        command = BalanceCommand()
-        await command.invoke(mock_context)
+        await balance_command(mock_context)
         
         # Verify error response
         mock_context.respond.assert_called_once()
-        call_kwargs = mock_context.respond.call_args[1]
-        assert call_kwargs["flags"] == pytest.importorskip("hikari").MessageFlag.EPHEMERAL
-        embed = call_kwargs["embed"]
+        args, kwargs = mock_context.respond.call_args
+        assert kwargs["flags"] == pytest.importorskip("hikari").MessageFlag.EPHEMERAL
+        embed = kwargs["embed"]
         assert "not initialized" in embed.description
     
     async def test_service_error_handling(self, mock_context, mock_bytes_service):
         """Test command behavior when service raises ServiceError."""
-        mock_context.app.d.bytes_service = mock_bytes_service
+        # Setup context with proper service structure
+        mock_context.bot = Mock()
+        mock_context.bot.d = {
+            'bytes_service': mock_bytes_service,
+            '_services': {'bytes_service': mock_bytes_service}
+        }
         
         # Mock service error
         mock_bytes_service.get_balance.side_effect = ServiceError("Service unavailable")
         
-        from smarter_dev.bot.plugins.bytes import BalanceCommand
+        from smarter_dev.bot.plugins.bytes import balance_command
         
-        command = BalanceCommand()
-        await command.invoke(mock_context)
+        await balance_command(mock_context)
         
         # Verify error response
         mock_context.respond.assert_called_once()
-        embed = mock_context.respond.call_args[1]["embed"]
+        args, kwargs = mock_context.respond.call_args
+        embed = kwargs["embed"]
         assert "Failed to retrieve balance" in embed.description

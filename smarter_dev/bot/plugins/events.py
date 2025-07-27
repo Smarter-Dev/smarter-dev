@@ -11,6 +11,9 @@ import logging
 from typing import Dict, Any
 
 from smarter_dev.bot.views.squad_views import SquadSelectView
+from smarter_dev.bot.views.balance_views import BalanceShareView
+from smarter_dev.bot.views.leaderboard_views import LeaderboardShareView
+from smarter_dev.bot.views.history_views import HistoryShareView
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +61,14 @@ async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> 
             await handle_squad_select_interaction(event)
         elif custom_id in ["squad_confirm", "squad_cancel"]:
             await handle_squad_confirm_interaction(event)
+        elif custom_id == "share_balance":
+            await handle_balance_share_interaction(event)
+        elif custom_id == "share_leaderboard":
+            await handle_leaderboard_share_interaction(event)
+        elif custom_id == "share_history":
+            await handle_history_share_interaction(event)
+        elif custom_id == "share_squad_list":
+            await handle_squad_list_share_interaction(event)
         else:
             logger.warning(f"Unhandled component interaction: {custom_id}")
     
@@ -122,6 +133,341 @@ async def handle_squad_confirm_interaction(event: hikari.InteractionCreateEvent)
     
     # Handle confirmation logic here
     # This would typically involve updating the squad membership
+
+
+async def handle_balance_share_interaction(event: hikari.InteractionCreateEvent) -> None:
+    """Handle balance share button interactions.
+    
+    Args:
+        event: The interaction event
+    """
+    if not isinstance(event.interaction, hikari.ComponentInteraction):
+        return
+        
+    user_id = str(event.interaction.user.id)
+    guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
+    
+    if not guild_id:
+        logger.error("Balance share interaction without guild context")
+        return
+    
+    logger.info(f"Balance share interaction from user {user_id} in guild {guild_id}")
+    
+    try:
+        # Get the user's current balance data to regenerate the image
+        from smarter_dev.bot.services.bytes_service import BytesService
+        from smarter_dev.bot.utils.image_embeds import get_generator
+        
+        # Get the bytes service from the bot
+        service = None
+        
+        # Try multiple ways to access the service
+        if hasattr(event.app, 'd') and hasattr(event.app.d, '_services'):
+            service = event.app.d._services.get('bytes_service')
+        elif hasattr(event.app, 'bytes_service'):
+            service = event.app.bytes_service
+        elif hasattr(event.app, 'd') and isinstance(event.app.d, dict):
+            services = event.app.d.get('_services', {})
+            service = services.get('bytes_service')
+        
+        logger.debug(f"Service access result: {service is not None}")
+        
+        if not service:
+            await event.interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_CREATE,
+                content="❌ Service not available. Please try again later.",
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
+            return
+        
+        # Get current balance
+        balance = await service.get_balance(guild_id, user_id)
+        
+        # Format last daily as readable string
+        last_daily_str = None
+        if balance.last_daily:
+            last_daily_str = balance.last_daily.strftime('%B %d, %Y')
+        
+        # Get username for display
+        username = event.interaction.user.display_name or event.interaction.user.username
+        
+        # Generate the balance image
+        generator = get_generator()
+        image_file = generator.create_balance_embed(
+            username=username,
+            balance=balance.balance,
+            streak_count=balance.streak_count,
+            last_daily=last_daily_str,
+            total_received=balance.total_received,
+            total_sent=balance.total_sent
+        )
+        
+        # Send as public message
+        await event.interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_CREATE,
+            attachment=image_file,
+            flags=hikari.MessageFlag.NONE  # Public message
+        )
+        
+    except Exception as e:
+        logger.exception(f"Error in balance share interaction: {e}")
+        
+        # Send error response
+        try:
+            if not event.interaction.is_responded():
+                await event.interaction.create_initial_response(
+                    hikari.ResponseType.MESSAGE_CREATE,
+                    content="❌ Failed to share balance. Please try again later.",
+                    flags=hikari.MessageFlag.EPHEMERAL
+                )
+        except Exception as e2:
+            logger.error(f"Failed to send balance share error response: {e2}")
+
+
+async def handle_leaderboard_share_interaction(event: hikari.InteractionCreateEvent) -> None:
+    """Handle leaderboard share button interactions.
+    
+    Args:
+        event: The interaction event
+    """
+    if not isinstance(event.interaction, hikari.ComponentInteraction):
+        return
+        
+    user_id = str(event.interaction.user.id)
+    guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
+    
+    if not guild_id:
+        logger.error("Leaderboard share interaction without guild context")
+        return
+    
+    logger.info(f"Leaderboard share interaction from user {user_id} in guild {guild_id}")
+    
+    try:
+        # Get the bytes service from the bot
+        service = None
+        
+        # Try multiple ways to access the service
+        if hasattr(event.app, 'd') and hasattr(event.app.d, '_services'):
+            service = event.app.d._services.get('bytes_service')
+        elif hasattr(event.app, 'bytes_service'):
+            service = event.app.bytes_service
+        elif hasattr(event.app, 'd') and isinstance(event.app.d, dict):
+            services = event.app.d.get('_services', {})
+            service = services.get('bytes_service')
+        
+        logger.debug(f"Service access result: {service is not None}")
+        
+        if not service:
+            await event.interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_CREATE,
+                content="❌ Service not available. Please try again later.",
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
+            return
+        
+        # Get leaderboard data (default to 10 entries like the command)
+        entries = await service.get_leaderboard(guild_id, 10)
+        
+        # Create user display names mapping
+        user_display_names = {}
+        for entry in entries:
+            try:
+                member = event.interaction.get_guild().get_member(int(entry.user_id))
+                user_display_names[entry.user_id] = member.display_name if member else f"User {entry.user_id[:8]}"
+            except:
+                user_display_names[entry.user_id] = f"User {entry.user_id[:8]}"
+        
+        # Generate the leaderboard image
+        from smarter_dev.bot.utils.image_embeds import get_generator
+        generator = get_generator()
+        image_file = generator.create_leaderboard_embed(
+            entries, 
+            event.interaction.get_guild().name, 
+            user_display_names
+        )
+        
+        # Send as public message
+        await event.interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_CREATE,
+            attachment=image_file,
+            flags=hikari.MessageFlag.NONE  # Public message
+        )
+        
+    except Exception as e:
+        logger.exception(f"Error in leaderboard share interaction: {e}")
+        
+        # Send error response
+        try:
+            if not event.interaction.is_responded():
+                await event.interaction.create_initial_response(
+                    hikari.ResponseType.MESSAGE_CREATE,
+                    content="❌ Failed to share leaderboard. Please try again later.",
+                    flags=hikari.MessageFlag.EPHEMERAL
+                )
+        except Exception as e2:
+            logger.error(f"Failed to send leaderboard share error response: {e2}")
+
+
+async def handle_history_share_interaction(event: hikari.InteractionCreateEvent) -> None:
+    """Handle history share button interactions.
+    
+    Args:
+        event: The interaction event
+    """
+    if not isinstance(event.interaction, hikari.ComponentInteraction):
+        return
+        
+    user_id = str(event.interaction.user.id)
+    guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
+    
+    if not guild_id:
+        logger.error("History share interaction without guild context")
+        return
+    
+    logger.info(f"History share interaction from user {user_id} in guild {guild_id}")
+    
+    try:
+        # Get the bytes service from the bot
+        service = None
+        
+        # Try multiple ways to access the service
+        if hasattr(event.app, 'd') and hasattr(event.app.d, '_services'):
+            service = event.app.d._services.get('bytes_service')
+        elif hasattr(event.app, 'bytes_service'):
+            service = event.app.bytes_service
+        elif hasattr(event.app, 'd') and isinstance(event.app.d, dict):
+            services = event.app.d.get('_services', {})
+            service = services.get('bytes_service')
+        
+        logger.debug(f"Service access result: {service is not None}")
+        
+        if not service:
+            await event.interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_CREATE,
+                content="❌ Service not available. Please try again later.",
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
+            return
+        
+        # Get transaction history (default to 10 entries like the command)
+        transactions = await service.get_transaction_history(
+            guild_id,
+            user_id=user_id,
+            limit=10
+        )
+        
+        # Generate the history image
+        from smarter_dev.bot.utils.image_embeds import get_generator
+        generator = get_generator()
+        image_file = generator.create_history_embed(transactions, user_id)
+        
+        # Send as public message
+        await event.interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_CREATE,
+            attachment=image_file,
+            flags=hikari.MessageFlag.NONE  # Public message
+        )
+        
+    except Exception as e:
+        logger.exception(f"Error in history share interaction: {e}")
+        
+        # Send error response
+        try:
+            if not event.interaction.is_responded():
+                await event.interaction.create_initial_response(
+                    hikari.ResponseType.MESSAGE_CREATE,
+                    content="❌ Failed to share transaction history. Please try again later.",
+                    flags=hikari.MessageFlag.EPHEMERAL
+                )
+        except Exception as e2:
+            logger.error(f"Failed to send history share error response: {e2}")
+
+
+async def handle_squad_list_share_interaction(event: hikari.InteractionCreateEvent) -> None:
+    """Handle squad list share button interactions.
+    
+    Args:
+        event: The interaction event
+    """
+    if not isinstance(event.interaction, hikari.ComponentInteraction):
+        return
+        
+    user_id = str(event.interaction.user.id)
+    guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
+    
+    if not guild_id:
+        logger.error("Squad list share interaction without guild context")
+        return
+    
+    logger.info(f"Squad list share interaction from user {user_id} in guild {guild_id}")
+    
+    try:
+        # Get the squads service from the bot
+        service = None
+        
+        # Try multiple ways to access the service
+        if hasattr(event.app, 'd') and hasattr(event.app.d, '_services'):
+            service = event.app.d._services.get('squads_service')
+        elif hasattr(event.app, 'squads_service'):
+            service = event.app.squads_service
+        elif hasattr(event.app, 'd') and isinstance(event.app.d, dict):
+            services = event.app.d.get('_services', {})
+            service = services.get('squads_service')
+        
+        logger.debug(f"Service access result: {service is not None}")
+        
+        if not service:
+            await event.interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_CREATE,
+                content="❌ Service not available. Please try again later.",
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
+            return
+        
+        # Get squads data
+        squads = await service.list_squads(guild_id)
+        
+        if not squads:
+            await event.interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_CREATE,
+                content="❌ No squads available.",
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
+            return
+        
+        # Get user's current squad
+        user_squad_response = await service.get_user_squad(guild_id, user_id)
+        current_squad_id = user_squad_response.squad.id if user_squad_response.squad else None
+        
+        # Generate the squad list image
+        from smarter_dev.bot.utils.image_embeds import get_generator
+        generator = get_generator()
+        image_file = generator.create_squad_list_embed(
+            squads, 
+            event.interaction.get_guild().name, 
+            str(current_squad_id) if current_squad_id else None
+        )
+        
+        # Send as public message
+        await event.interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_CREATE,
+            attachment=image_file,
+            flags=hikari.MessageFlag.NONE  # Public message
+        )
+        
+    except Exception as e:
+        logger.exception(f"Error in squad list share interaction: {e}")
+        
+        # Send error response
+        try:
+            if not event.interaction.is_responded():
+                await event.interaction.create_initial_response(
+                    hikari.ResponseType.MESSAGE_CREATE,
+                    content="❌ Failed to share squad list. Please try again later.",
+                    flags=hikari.MessageFlag.EPHEMERAL
+                )
+        except Exception as e2:
+            logger.error(f"Failed to send squad list share error response: {e2}")
 
 
 def setup_interaction_handlers(bot: hikari.GatewayBot) -> None:

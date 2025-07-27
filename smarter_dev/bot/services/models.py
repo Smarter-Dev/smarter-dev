@@ -274,6 +274,7 @@ class Squad:
     role_id: str
     name: str
     description: Optional[str] = None
+    welcome_message: Optional[str] = None
     switch_cost: int = 0
     max_members: Optional[int] = None
     member_count: int = 0

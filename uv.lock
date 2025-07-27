@@ -458,15 +458,6 @@ wheels = [
 ]
 
 [[package]]
-name = "confspec"
-version = "0.0.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f3/59/d236c71e2c4f9c43735f973638c43936658d9139115896316f6b6d300fbc/confspec-0.0.3.tar.gz", hash = "sha256:1d421b4e3342df6ea094119728ad03f89aff06b75b813db37a6726ca63e702fc", size = 59885 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/eb/2a56b42535249452642199adb4c683c3332658762a15dd2e54772f63dfcb/confspec-0.0.3-py3-none-any.whl", hash = "sha256:0deaf3cccefbf55a4a2184bdcf5806fedb8b9343ba19641393f31dfd6fe2e78e", size = 15918 },
-]
-
-[[package]]
 name = "contourpy"
 version = "1.3.2"
 source = { registry = "https://pypi.org/simple" }
@@ -829,7 +820,7 @@ wheels = [
 
 [[package]]
 name = "hikari"
-version = "2.3.5"
+version = "2.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -837,9 +828,9 @@ dependencies = [
     { name = "colorlog" },
     { name = "multidict" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/85/f9/0d0e2767af45b8b8ee378588f22e4e331f6c3823ac08a396319a65805d3a/hikari-2.3.5.tar.gz", hash = "sha256:33ab457680bb36edea93730952d7bda6174c8c26e5dcfdb9a45b91f0548fb089", size = 1892942 }
+sdist = { url = "https://files.pythonhosted.org/packages/a1/8a/97d513c8ee6fa94b1a3cc25d2b5e31132987497c72373d888b6e420483a3/hikari-2.1.1.tar.gz", hash = "sha256:70c3987d87a5eb29db9ab448989ae8e2c65d3f2e44a392bc5c6e1d77db8e146c", size = 442935 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f9/81/9c4bcb9502d6cb7a8aab04b89006bc9d6e2a274f0bf0e17eeb156aa7d632/hikari-2.3.5-py3-none-any.whl", hash = "sha256:8ee60cbecaef34f77977d8bc7f707bf034c2b04f2c480e081d66e1943a6cdab6", size = 578267 },
+    { url = "https://files.pythonhosted.org/packages/de/53/6e0ee541deb4dcce0790d5f03cfa95a96022b44b29bca12029cb10e5d84b/hikari-2.1.1-py3-none-any.whl", hash = "sha256:9633babb36e7be42db386112ca87a8ef2e1f63ce79a352dcc874147801d29a05", size = 545719 },
 ]
 
 [package.optional-dependencies]
@@ -851,17 +842,14 @@ speedups = [
 
 [[package]]
 name = "hikari-lightbulb"
-version = "3.0.1"
+version = "2.3.5.post1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "async-timeout" },
-    { name = "confspec" },
     { name = "hikari" },
-    { name = "linkd" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/72/69/9b9f0b503c96e59930934148305c273e1c19b3bee557204e0b7630482601/hikari_lightbulb-3.0.1.tar.gz", hash = "sha256:546442df248d0daa8ace12964b55995dc53f7b5ad55a19ba6ba18b2883b321f4", size = 131227 }
+sdist = { url = "https://files.pythonhosted.org/packages/ff/8d/0f6e8bd5f155dd672d382f76e07b6ff71bebc50dada1677ff6c65bd39017/hikari_lightbulb-2.3.5.post1.tar.gz", hash = "sha256:89ece6d07a87853c015c8626783ebdb90f9a903c8c03024d71208021adbd9b27", size = 87469 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e7/c7/7a060962d60fdd38e3ef7b0bbb969f292704ed67524970587f0d81c8618e/hikari_lightbulb-3.0.1-py3-none-any.whl", hash = "sha256:684b9190029bcbd05b9af8a27e4fabf8129a1771f36950a0ba63fd79c47abb4b", size = 100235 },
+    { url = "https://files.pythonhosted.org/packages/1f/ce/ee34a508ac6d6eefffe70bb477ce677f36873539bef288ada4976e5e790c/hikari_lightbulb-2.3.5.post1-py3-none-any.whl", hash = "sha256:9d4e6d180e5d38c97c0d89fba2bae5859b5c79d2a848d321fb8866e3b028816f", size = 118212 },
 ]
 
 [[package]]
@@ -958,6 +946,15 @@ wheels = [
 ]
 
 [[package]]
+name = "itsdangerous"
+version = "2.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9c/cb/8ac0172223afbccb63986cc25049b154ecfb5e85932587206f42317be31d/itsdangerous-2.2.0.tar.gz", hash = "sha256:e0050c0b7da1eea53ffaf149c0cfbb5c6e2e2b69c4bef22c81fa6eb73e5f6173", size = 54410 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/04/96/92447566d16df59b2a776c0fb82dbc4d9e07cd95062562af01e408583fc4/itsdangerous-2.2.0-py3-none-any.whl", hash = "sha256:c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef", size = 16234 },
+]
+
+[[package]]
 name = "jinja2"
 version = "3.1.6"
 source = { registry = "https://pypi.org/simple" }
@@ -1033,15 +1030,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/05/f9/27e94c1b3eb29e6933b6986ffc5fa1177d2cd1f0c8efc5f02c91c9ac61de/kiwisolver-1.4.8-cp313-cp313t-musllinux_1_2_ppc64le.whl", hash = "sha256:151dffc4865e5fe6dafce5480fab84f950d14566c480c08a53c663a0020504b6", size = 2390661 },
     { url = "https://files.pythonhosted.org/packages/d9/d4/3c9735faa36ac591a4afcc2980d2691000506050b7a7e80bcfe44048daa7/kiwisolver-1.4.8-cp313-cp313t-musllinux_1_2_s390x.whl", hash = "sha256:577facaa411c10421314598b50413aa1ebcf5126f704f1e5d72d7e4e9f020d90", size = 2546710 },
     { url = "https://files.pythonhosted.org/packages/4c/fa/be89a49c640930180657482a74970cdcf6f7072c8d2471e1babe17a222dc/kiwisolver-1.4.8-cp313-cp313t-musllinux_1_2_x86_64.whl", hash = "sha256:be4816dc51c8a471749d664161b434912eee82f2ea66bd7628bd14583a833e85", size = 2349213 },
-]
-
-[[package]]
-name = "linkd"
-version = "0.0.9"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/df/a7/834b0acff9607624e74eca82f154f52550b1483c71c438b792639fc2ef85/linkd-0.0.9.tar.gz", hash = "sha256:83de433477886f59b26621a46a75cd78c514e7506050a77e1dd99db5180ecd49", size = 42045 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c2/61/bc4ad60aff8ebd805e8ead9005b8c23701fc86e8c118ff380b22090096f1/linkd-0.0.9-py3-none-any.whl", hash = "sha256:916b67c10881a0a70f16ba0aa9c23b6bb8a8d355506a6d89218342b2ca5f0dbe", size = 38049 },
 ]
 
 [[package]]
@@ -1873,6 +1861,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-multipart"
+version = "0.0.20"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/87/f44d7c9f274c7ee665a29b885ec97089ec5dc034c7f3fafa03da9e39a09e/python_multipart-0.0.20.tar.gz", hash = "sha256:8dd0cab45b8e23064ae09147625994d090fa46f5b0d1e13af944c331a7fa9d13", size = 37158 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/45/58/38b5afbc1a800eeea951b9285d3912613f2603bdf897a4ab0f4bd7f405fc/python_multipart-0.0.20-py3-none-any.whl", hash = "sha256:8a62d3a8335e06589fe01f2a3e178cdcc632f3fbe0d492ad9ee0ec35aab1f104", size = 24546 },
+]
+
+[[package]]
 name = "pyyaml"
 version = "6.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2006,6 +2003,8 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "cairosvg" },
+    { name = "hikari-lightbulb" },
+    { name = "itsdangerous" },
     { name = "jinja2" },
     { name = "matplotlib" },
     { name = "numpy" },
@@ -2014,6 +2013,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
+    { name = "python-multipart" },
     { name = "scipy" },
     { name = "starlette" },
     { name = "uvicorn", extra = ["standard"] },
@@ -2062,6 +2062,8 @@ web = [
 [package.metadata]
 requires-dist = [
     { name = "cairosvg", specifier = ">=2.8.2" },
+    { name = "hikari-lightbulb", specifier = "<3.0.0" },
+    { name = "itsdangerous", specifier = ">=2.2.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "matplotlib", specifier = ">=3.10.3" },
     { name = "numpy", specifier = ">=2.2.6" },
@@ -2070,6 +2072,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "python-multipart", specifier = ">=0.0.20" },
     { name = "scipy", specifier = ">=1.16.0" },
     { name = "starlette", specifier = ">=0.47.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35.0" },

@@ -1,0 +1,263 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ guild.name }} - Guild Management{% endblock %}
+
+{% block page_title %}{{ guild.name }}{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item active">{{ guild.name }}</li>
+{% endblock %}
+
+{% block page_actions %}
+<div class="col-auto ms-auto d-print-none">
+    <div class="btn-list">
+        <a href="/admin/guilds/{{ guild.id }}/bytes" class="btn btn-primary">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-coin"></use>
+            </svg>
+            Configure Bytes
+        </a>
+        <a href="/admin/guilds/{{ guild.id }}/squads" class="btn btn-outline-primary">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-users"></use>
+            </svg>
+            Manage Squads
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Guild Info Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" class="rounded me-3" style="width: 64px; height: 64px;">
+                    {% else %}
+                    <div class="avatar avatar-lg me-3">{{ guild.name[0].upper() }}</div>
+                    {% endif %}
+                    <div class="flex-fill">
+                        <h2 class="mb-1">{{ guild.name }}</h2>
+                        <div class="text-muted">
+                            <strong>Guild ID:</strong> {{ guild.id }}
+                            {% if guild.description %}
+                            <br><strong>Description:</strong> {{ guild.description }}
+                            {% endif %}
+                            {% if guild.member_count %}
+                            <br><strong>Members:</strong> {{ "{:,}".format(guild.member_count) }}
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Statistics -->
+<div class="row row-deck row-cards mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="subheader">Active Users</div>
+                </div>
+                <div class="h1 mb-3">{{ "{:,}".format(stats.total_users) }}</div>
+                <div class="text-muted">Users with bytes balance</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="subheader">Total Balance</div>
+                </div>
+                <div class="h1 mb-3">{{ "{:,}".format(stats.total_balance) }}</div>
+                <div class="text-muted">Bytes in circulation</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="subheader">Transactions</div>
+                </div>
+                <div class="h1 mb-3">{{ "{:,}".format(stats.total_transactions) }}</div>
+                <div class="text-muted">Total transfers</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="subheader">Active Squads</div>
+                </div>
+                <div class="h1 mb-3">{{ stats.squad_count }}</div>
+                <div class="text-muted">Team groups</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Top Users -->
+    <div class="col-lg-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Top Users by Balance</h3>
+            </div>
+            <div class="card-body">
+                {% if top_users %}
+                <div class="list-group list-group-flush">
+                    {% for user in top_users %}
+                    <div class="list-group-item d-flex align-items-center">
+                        <div class="me-3">
+                            <span class="badge badge-outline text-blue">{{ user.rank }}</span>
+                        </div>
+                        <div class="flex-fill">
+                            <strong>{{ user.user_display_name or "User #" + user.user_id }}</strong>
+                            <div class="text-muted small">ID: {{ user.user_id }}</div>
+                        </div>
+                        <div class="text-end">
+                            <div class="h4 mb-0">{{ "{:,}".format(user.balance) }}</div>
+                            <div class="text-muted small">bytes</div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-4">
+                    No users found with bytes balances.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Recent Transactions -->
+    <div class="col-lg-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Recent Transactions</h3>
+            </div>
+            <div class="card-body">
+                {% if recent_transactions %}
+                <div class="list-group list-group-flush">
+                    {% for tx in recent_transactions[:10] %}
+                    <div class="list-group-item">
+                        <div class="d-flex align-items-center">
+                            <div class="me-3">
+                                <svg class="icon text-green" width="24" height="24">
+                                    <use xlink:href="#tabler-arrow-right"></use>
+                                </svg>
+                            </div>
+                            <div class="flex-fill">
+                                <div>
+                                    <strong>{{ tx.giver_username or "User #" + tx.giver_id }}</strong>
+                                    <svg class="icon mx-1" width="16" height="16">
+                                        <use xlink:href="#tabler-arrow-right"></use>
+                                    </svg>
+                                    <strong>{{ tx.receiver_username or "User #" + tx.receiver_id }}</strong>
+                                </div>
+                                <div class="text-muted small">
+                                    {{ tx.created_at.strftime("%Y-%m-%d %H:%M") }}
+                                    {% if tx.reason %}
+                                    • {{ tx.reason }}
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="text-end">
+                                <span class="badge bg-green">{{ "{:,}".format(tx.amount) }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-4">
+                    No transactions found for this guild.
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Squads Overview -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Squad Overview</h3>
+                <div class="card-actions">
+                    <a href="/admin/guilds/{{ guild.id }}/squads" class="btn btn-primary btn-sm">
+                        <svg class="icon me-1" width="16" height="16">
+                            <use xlink:href="#tabler-users"></use>
+                        </svg>
+                        Manage Squads
+                    </a>
+                </div>
+            </div>
+            <div class="card-body">
+                {% if squads %}
+                <div class="row">
+                    {% for squad in squads %}
+                    <div class="col-md-6 col-lg-4 mb-3">
+                        <div class="card card-sm {% if not squad.is_active %}opacity-50{% endif %}">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center justify-content-between mb-2">
+                                    <h5 class="mb-0">{{ squad.name }}</h5>
+                                    {% if not squad.is_active %}
+                                    <span class="badge bg-secondary">Inactive</span>
+                                    {% endif %}
+                                </div>
+                                {% if squad.description %}
+                                <p class="text-muted small mb-2">{{ squad.description }}</p>
+                                {% endif %}
+                                <div class="row text-center">
+                                    <div class="col-6">
+                                        <div class="h5 mb-1">{{ squad.member_count }}</div>
+                                        <div class="text-muted small">
+                                            {% if squad.max_members %}
+                                            / {{ squad.max_members }} members
+                                            {% else %}
+                                            members
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="h5 mb-1">{{ squad.switch_cost }}</div>
+                                        <div class="text-muted small">switch cost</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-4">
+                    <svg class="icon mb-3" width="48" height="48">
+                        <use xlink:href="#tabler-users"></use>
+                    </svg>
+                    <p>No squads configured for this guild.</p>
+                    <a href="/admin/guilds/{{ guild.id }}/squads" class="btn btn-primary">
+                        Create First Squad
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

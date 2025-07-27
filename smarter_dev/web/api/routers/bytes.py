@@ -30,6 +30,7 @@ from smarter_dev.web.api.schemas import (
     BytesBalanceResponse,
     BytesTransactionCreate,
     BytesTransactionResponse,
+    DailyClaimRequest,
     DailyClaimResponse,
     BytesConfigResponse,
     BytesConfigUpdate,
@@ -83,10 +84,10 @@ async def get_balance(
     return BytesBalanceResponse.model_validate(balance)
 
 
-@router.post("/daily/{user_id}", response_model=DailyClaimResponse)
+@router.post("/daily", response_model=DailyClaimResponse)
 async def claim_daily(
     request: Request,
-    user_id: str = Path(..., description="Discord user ID"),
+    claim_request: DailyClaimRequest,
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
     token: str = Depends(verify_bot_token),
@@ -97,6 +98,9 @@ async def claim_daily(
     Claims the daily bytes reward for a user. Calculates streak bonuses
     based on consecutive daily claims and applies the appropriate multiplier.
     """
+    user_id = claim_request.user_id
+    username = claim_request.username or f"User {user_id}"
+    
     # Validate user ID format
     validate_discord_id(user_id, "user ID")
     
@@ -113,7 +117,8 @@ async def claim_daily(
     # Get or create balance (starts with 0 for new users)
     try:
         balance = await bytes_ops.get_balance(db, guild_id, user_id)
-        is_new_user = False
+        # Check if this is a new user (never claimed daily before)
+        is_new_user = balance.last_daily is None
     except NotFoundError:
         # Create new user with 0 balance - they'll get their "starting balance" as their first daily reward
         from smarter_dev.web.models import BytesBalance
@@ -154,10 +159,12 @@ async def claim_daily(
         db, 
         guild_id, 
         user_id, 
+        username,
         reward_amount, 
         streak_result.streak_bonus,
         streak_result.new_streak_count,
-        current_utc_date
+        current_utc_date,
+        is_new_member=is_new_user
     )
     
     # Calculate next claim time (midnight UTC tomorrow)
@@ -165,6 +172,9 @@ async def claim_daily(
         streak_result.next_claim_date, 
         datetime.min.time()
     ).replace(tzinfo=timezone.utc)
+    
+    # Refresh the balance to ensure all attributes are loaded
+    await db.refresh(updated_balance)
     
     # Serialize model before commit to avoid session detachment issues
     balance_response = BytesBalanceResponse.model_validate(updated_balance)

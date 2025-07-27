@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Smarter Dev Admin{% endblock %}</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="stylesheet" href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css">
+    <style>
+        .navbar-brand-autodark {
+            color: #fff !important;
+        }
+        .navbar-dark {
+            background-color: #1a1d29 !important;
+        }
+        /* Improve header contrast */
+        .page-header .breadcrumb-item a {
+            color: #fff !important;
+            text-decoration: none;
+        }
+        .page-header .breadcrumb-item a:hover {
+            color: #e1e5e9 !important;
+            text-decoration: underline;
+        }
+        .page-header .breadcrumb-item.active,
+        .page-header .breadcrumb-item {
+            color: #e1e5e9 !important;
+        }
+        .page-header .page-title {
+            color: #fff !important;
+        }
+        .page-header {
+            background: linear-gradient(135deg, #1a1d29 0%, #2c3142 100%);
+            border-bottom: 1px solid #3a3f5c;
+        }
+        .sidebar .nav-link {
+            color: #6c7293;
+        }
+        .sidebar .nav-link.active {
+            background-color: #206bc4;
+            color: #fff;
+        }
+        .card {
+            border: 1px solid #e6e7e9;
+        }
+        .guild-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            object-fit: cover;
+        }
+        .guild-icon-placeholder {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background-color: #667085;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 12px;
+        }
+        .role-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        .config-section {
+            border: 1px solid #e6e7e9;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .config-section h5 {
+            margin-bottom: 1rem;
+            color: #1a1d29;
+            font-weight: 600;
+        }
+        /* Improve alert notifications */
+        .alert {
+            border: 1px solid;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        .alert-success {
+            background-color: #d1f7c4 !important;
+            border-color: #75b85c !important;
+            color: #0f5132 !important;
+        }
+        .alert-danger {
+            background-color: #f8d7da !important;
+            border-color: #f5c2c7 !important;
+            color: #842029 !important;
+        }
+        .alert-warning {
+            background-color: #fff3cd !important;
+            border-color: #ffecb5 !important;
+            color: #664d03 !important;
+        }
+        .alert .alert-icon {
+            flex-shrink: 0;
+            margin-right: 0.75rem;
+        }
+        /* Improve badge contrast */
+        .badge {
+            font-weight: 600;
+            font-size: 0.875rem;
+            padding: 0.375rem 0.75rem;
+        }
+        .badge.bg-blue {
+            background-color: #206bc4 !important;
+            color: #ffffff !important;
+        }
+        .badge.bg-green {
+            background-color: #2fb344 !important;
+            color: #ffffff !important;
+        }
+        .badge.bg-yellow {
+            background-color: #fab005 !important;
+            color: #000000 !important;
+        }
+        .badge.bg-orange {
+            background-color: #fd7e14 !important;
+            color: #ffffff !important;
+        }
+        .badge.bg-purple {
+            background-color: #ae3ec9 !important;
+            color: #ffffff !important;
+        }
+        {% block extra_styles %}{% endblock %}
+    </style>
+</head>
+<body>
+    <!-- Tabler Icons Sprite -->
+    <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+        <defs>
+            <symbol id="tabler-arrow-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path>
+            </symbol>
+            <symbol id="tabler-arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path>
+            </symbol>
+            <symbol id="tabler-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 5v14"></path><path d="M5 12h14"></path>
+            </symbol>
+            <symbol id="tabler-device-floppy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 4h10l4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"></path>
+                <circle cx="12" cy="14" r="2"></circle>
+                <polyline points="14,4 14,8 8,8 8,4"></polyline>
+            </symbol>
+            <symbol id="tabler-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="m22 21-2-2"></path>
+                <circle cx="17" cy="17" r="3"></circle>
+            </symbol>
+            <symbol id="tabler-building-community" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 9l5 5v7h-5v-4m0 4h-5v-7l5-5m1 1v-6a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17h-8"></path>
+                <path d="M13 7h4"></path>
+                <path d="M13 11h4"></path>
+                <path d="M13 15h4"></path>
+            </symbol>
+            <symbol id="tabler-coin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="9"></circle>
+                <path d="M14.5 8a2.5 2.5 0 0 0-2.5-2.5A2.5 2.5 0 0 0 9.5 8"></path>
+                <path d="M14.5 16a2.5 2.5 0 0 1-2.5 2.5A2.5 2.5 0 0 1 9.5 16"></path>
+            </symbol>
+            <symbol id="tabler-dashboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="13" r="2"></circle>
+                <path d="M13.45 11.55 15.5 9.5"></path>
+                <path d="M6.4 20a9 9 0 1 1 11.2 0Z"></path>
+            </symbol>
+            <symbol id="tabler-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 8V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2v-2"></path>
+                <path d="M7 12h14l-3-3m0 6 3-3"></path>
+            </symbol>
+            <symbol id="tabler-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+            </symbol>
+            <symbol id="tabler-external-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15,3 21,3 21,9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+            </symbol>
+            <symbol id="tabler-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+                <path d="M21 3v5h-5"></path>
+                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+                <path d="M3 21v-5h5"></path>
+            </symbol>
+            <symbol id="tabler-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20,6 9,17 4,12"></polyline>
+            </symbol>
+            <symbol id="tabler-alert-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </symbol>
+            <symbol id="tabler-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+                <path d="M12 9v4"></path>
+                <path d="m12 17 .01 0"></path>
+            </symbol>
+            <symbol id="tabler-error-404" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7v4a1 1 0 0 0 1 1h3"></path>
+                <path d="M7 7v10"></path>
+                <path d="M10 8v8a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-2a1 1 0 0 0-1 1z"></path>
+                <path d="M17 7v4a1 1 0 0 0 1 1h3"></path>
+                <path d="M21 7v10"></path>
+            </symbol>
+            <symbol id="tabler-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+            </symbol>
+            <symbol id="tabler-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m9.88 9.88a3 3 0 1 0 4.24 4.24"></path>
+                <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 11 8 11 8a13.16 13.16 0 0 1-1.67 2.68"></path>
+                <path d="M6.61 6.61A13.526 13.526 0 0 0 1 12s4 8 11 8a9.74 9.74 0 0 0 5-1.34"></path>
+                <line x1="2" y1="2" x2="22" y2="22"></line>
+            </symbol>
+        </defs>
+    </svg>
+    
+    <div class="page">
+        <!-- Navigation -->
+        <header class="navbar navbar-expand-md navbar-dark navbar-overlap d-print-none">
+            <div class="container-xl">
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar-menu" aria-controls="navbar-menu" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <h1 class="navbar-brand navbar-brand-autodark d-none-navbar-horizontal pe-0 pe-md-3">
+                    <a href="/admin">
+                        <img src="/static/favicon.png" width="32" height="32" alt="Smarter Dev" class="navbar-brand-image">
+                        Smarter Dev Admin
+                    </a>
+                </h1>
+                <div class="navbar-nav flex-row order-md-last">
+                    <div class="nav-item dropdown">
+                        <a href="#" class="nav-link d-flex lh-1 text-reset p-0" data-bs-toggle="dropdown" aria-label="Open user menu">
+                            <span class="avatar avatar-sm">
+                                {{ request.session.get('username', 'A')[0].upper() }}
+                            </span>
+                            <div class="d-none d-xl-block ps-2">
+                                <div>{{ request.session.get('username', 'Admin') }}</div>
+                                <div class="mt-1 small text-muted">Administrator</div>
+                            </div>
+                        </a>
+                        <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
+                            <form action="/admin/logout" method="post" class="dropdown-item-text">
+                                <button type="submit" class="btn btn-link p-0 text-decoration-none">
+                                    <svg class="icon me-2" width="24" height="24">
+                                        <use xlink:href="#tabler-logout"></use>
+                                    </svg>
+                                    Logout
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                <div class="collapse navbar-collapse" id="navbar-menu">
+                    <div class="navbar-nav pt-lg-3">
+                        <div class="nav-item">
+                            <a class="nav-link {% if request.url.path == '/admin' or request.url.path == '/admin/' %}active{% endif %}" href="/admin">
+                                <span class="nav-link-icon d-md-none d-lg-inline-block">
+                                    <svg class="icon" width="24" height="24">
+                                        <use xlink:href="#tabler-dashboard"></use>
+                                    </svg>
+                                </span>
+                                <span class="nav-link-title">Dashboard</span>
+                            </a>
+                        </div>
+                        <div class="nav-item">
+                            <a class="nav-link {% if '/guilds' in request.url.path %}active{% endif %}" href="/admin/guilds">
+                                <span class="nav-link-icon d-md-none d-lg-inline-block">
+                                    <svg class="icon" width="24" height="24">
+                                        <use xlink:href="#tabler-building-community"></use>
+                                    </svg>
+                                </span>
+                                <span class="nav-link-title">Guilds</span>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+        
+        <!-- Page wrapper -->
+        <div class="page-wrapper">
+            <!-- Page header -->
+            {% block page_header %}
+            <div class="page-header d-print-none">
+                <div class="container-xl">
+                    <div class="row g-2 align-items-center">
+                        <div class="col">
+                            {% block breadcrumb %}
+                            <div class="page-pretitle">
+                                <nav aria-label="breadcrumb">
+                                    <ol class="breadcrumb">
+                                        <li class="breadcrumb-item"><a href="/admin">Admin</a></li>
+                                        {% block breadcrumb_items %}{% endblock %}
+                                    </ol>
+                                </nav>
+                            </div>
+                            {% endblock %}
+                            <h2 class="page-title">
+                                {% block page_title %}Admin Dashboard{% endblock %}
+                            </h2>
+                        </div>
+                        {% block page_actions %}{% endblock %}
+                    </div>
+                </div>
+            </div>
+            {% endblock %}
+            
+            <!-- Page body -->
+            <div class="page-body">
+                <div class="container-xl">
+                    <!-- Flash messages -->
+                    {% if success %}
+                    <div class="alert alert-success alert-dismissible" role="alert">
+                        <div class="d-flex">
+                            <div>
+                                <svg class="icon alert-icon" width="24" height="24">
+                                    <use xlink:href="#tabler-check"></use>
+                                </svg>
+                            </div>
+                            <div>
+                                {{ success }}
+                            </div>
+                        </div>
+                        <a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
+                    </div>
+                    {% endif %}
+                    
+                    {% if error %}
+                    <div class="alert alert-danger alert-dismissible" role="alert">
+                        <div class="d-flex">
+                            <div>
+                                <svg class="icon alert-icon" width="24" height="24">
+                                    <use xlink:href="#tabler-alert-circle"></use>
+                                </svg>
+                            </div>
+                            <div>
+                                {{ error }}
+                            </div>
+                        </div>
+                        <a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
+                    </div>
+                    {% endif %}
+                    
+                    {% if warning %}
+                    <div class="alert alert-warning alert-dismissible" role="alert">
+                        <div class="d-flex">
+                            <div>
+                                <svg class="icon alert-icon" width="24" height="24">
+                                    <use xlink:href="#tabler-alert-triangle"></use>
+                                </svg>
+                            </div>
+                            <div>
+                                {{ warning }}
+                            </div>
+                        </div>
+                        <a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
+                    </div>
+                    {% endif %}
+                    
+                    <!-- Page content -->
+                    {% block content %}{% endblock %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Tabler Core -->
+    <script src="https://unpkg.com/@tabler/core@latest/dist/js/tabler.min.js"></script>
+    
+    <!-- Additional scripts -->
+    {% block scripts %}{% endblock %}
+</body>
+</html>

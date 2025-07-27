@@ -190,7 +190,7 @@ async def join_squad(
     """Join a squad."""
     try:
         squad_ops = SquadOperations()
-        membership = await squad_ops.join_squad(db, guild_id, join_request.user_id, squad_id)
+        membership = await squad_ops.join_squad(db, guild_id, join_request.user_id, squad_id, join_request.username)
         await db.commit()
         
         # Get squad information for response

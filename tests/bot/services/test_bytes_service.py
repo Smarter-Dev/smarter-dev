@@ -860,3 +860,5 @@ class TestBytesServicePlanningCompliance:
         assert bytes_service._calculate_multiplier(30) == 10
         assert bytes_service._calculate_multiplier(60) == 20
         assert bytes_service._calculate_multiplier(100) == 20  # Max multiplier
+
+

@@ -54,7 +54,45 @@ class BytesOperations:
         guild_id: str, 
         user_id: str
     ) -> BytesBalance:
-        """Get or create user balance for a guild.
+        """Get user balance for a guild.
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            user_id: Discord user snowflake ID
+            
+        Returns:
+            BytesBalance: User's balance record
+            
+        Raises:
+            NotFoundError: If balance doesn't exist
+            DatabaseOperationError: If database operation fails
+        """
+        try:
+            stmt = select(BytesBalance).where(
+                BytesBalance.guild_id == guild_id,
+                BytesBalance.user_id == user_id
+            )
+            result = await session.execute(stmt)
+            balance = result.scalar_one_or_none()
+            
+            if balance is None:
+                raise NotFoundError(f"Balance not found for user {user_id} in guild {guild_id}")
+            
+            return balance
+            
+        except NotFoundError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get balance: {e}") from e
+    
+    async def get_or_create_balance(
+        self, 
+        session: AsyncSession, 
+        guild_id: str, 
+        user_id: str
+    ) -> BytesBalance:
+        """Get or create user balance for a guild (used for transactions).
         
         Args:
             session: Database session
@@ -76,20 +114,20 @@ class BytesOperations:
             balance = result.scalar_one_or_none()
             
             if balance is None:
-                # Get guild config to determine starting balance
-                config = await self._get_or_create_config(session, guild_id)
+                # Create new user with 0 balance - they'll get starting balance through daily reward system
                 balance = BytesBalance(
                     guild_id=guild_id,
                     user_id=user_id,
-                    balance=config.starting_balance,
-                    total_received=config.starting_balance
+                    balance=0,
+                    total_received=0
                 )
                 session.add(balance)
+                await session.flush()  # Ensure timestamps are populated
             
             return balance
             
         except Exception as e:
-            raise DatabaseOperationError(f"Failed to get balance: {e}") from e
+            raise DatabaseOperationError(f"Failed to get or create balance: {e}") from e
     
     async def create_transaction(
         self,
@@ -123,8 +161,8 @@ class BytesOperations:
         """
         try:
             # Get or create balances
-            giver_balance = await self.get_balance(session, guild_id, giver_id)
-            receiver_balance = await self.get_balance(session, guild_id, receiver_id)
+            giver_balance = await self.get_or_create_balance(session, guild_id, giver_id)
+            receiver_balance = await self.get_or_create_balance(session, guild_id, receiver_id)
             
             # Check sufficient balance
             if giver_balance.balance < amount:
@@ -151,6 +189,7 @@ class BytesOperations:
             )
             
             session.add(transaction)
+            await session.flush()  # Ensure timestamps are populated
             
             return transaction
             
@@ -158,6 +197,119 @@ class BytesOperations:
             raise
         except Exception as e:
             raise DatabaseOperationError(f"Failed to create transaction: {e}") from e
+    
+    async def create_system_charge(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        user_id: str,
+        username: str,
+        amount: int,
+        reason: str
+    ) -> BytesTransaction:
+        """Create system charge transaction (user pays system/squad).
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            user_id: Discord user ID paying the charge
+            username: Username for audit
+            amount: Amount to charge (positive integer)
+            reason: Reason for the charge (e.g. "Squad join fee")
+            
+        Returns:
+            BytesTransaction: Created transaction record
+            
+        Raises:
+            DatabaseOperationError: If transaction fails
+            ConflictError: If insufficient balance
+        """
+        try:
+            # Get user balance
+            balance = await self.get_or_create_balance(session, guild_id, user_id)
+            
+            # Check sufficient balance
+            if balance.balance < amount:
+                raise ConflictError(
+                    f"Insufficient balance: {balance.balance} < {amount}"
+                )
+            
+            # Update balance
+            balance.balance -= amount
+            balance.total_sent += amount
+            
+            # Create transaction record with system as receiver
+            transaction = BytesTransaction(
+                guild_id=guild_id,
+                giver_id=user_id,
+                giver_username=username,
+                receiver_id="SYSTEM",  # Special receiver for system charges
+                receiver_username="System",
+                amount=amount,
+                reason=reason
+            )
+            
+            session.add(transaction)
+            await session.flush()  # Ensure timestamps are populated
+            
+            return transaction
+            
+        except ConflictError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to create system charge: {e}") from e
+    
+    async def create_system_reward(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        user_id: str,
+        username: str,
+        amount: int,
+        reason: str
+    ) -> BytesTransaction:
+        """Create system reward transaction (system gives user bytes).
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            user_id: Discord user ID receiving the reward
+            username: Username for audit
+            amount: Amount to reward (positive integer)
+            reason: Reason for the reward (e.g. "Daily reward", "New member bonus")
+            
+        Returns:
+            BytesTransaction: Created transaction record
+            
+        Raises:
+            DatabaseOperationError: If transaction fails
+        """
+        try:
+            # Get or create user balance
+            balance = await self.get_or_create_balance(session, guild_id, user_id)
+            
+            # Update balance
+            balance.balance += amount
+            balance.total_received += amount
+            
+            # Create transaction record with system as giver
+            transaction = BytesTransaction(
+                guild_id=guild_id,
+                giver_id="SYSTEM",  # Special giver for system rewards
+                giver_username="System",
+                receiver_id=user_id,
+                receiver_username=username,
+                amount=amount,
+                reason=reason
+            )
+            
+            session.add(transaction)
+            await session.flush()  # Ensure timestamps are populated
+            
+            return transaction
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to create system reward: {e}") from e
     
     async def get_leaderboard(
         self,
@@ -237,21 +389,25 @@ class BytesOperations:
         session: AsyncSession,
         guild_id: str,
         user_id: str,
+        username: str,
         daily_amount: int,
         streak_bonus: int = 1,
         new_streak_count: Optional[int] = None,
-        claim_date: Optional[date] = None
+        claim_date: Optional[date] = None,
+        is_new_member: bool = False
     ) -> BytesBalance:
-        """Update balance with daily reward and streak tracking.
+        """Update balance with daily reward and streak tracking using transaction records.
         
         Args:
             session: Database session
             guild_id: Discord guild snowflake ID
             user_id: Discord user snowflake ID
+            username: Username for transaction audit
             daily_amount: Base daily reward amount
             streak_bonus: Streak multiplier
             new_streak_count: Optional streak count to set, defaults to incrementing existing
             claim_date: UTC date of claim, defaults to today
+            is_new_member: Whether this is a new member getting starting balance
             
         Returns:
             BytesBalance: Updated balance record
@@ -265,11 +421,36 @@ class BytesOperations:
             # Calculate total reward
             reward_amount = daily_amount * streak_bonus
             
-            # Update balance and streak with calculated values
+            # Calculate the new streak count
+            final_streak_count = new_streak_count if new_streak_count is not None else balance.streak_count + 1
+            
+            # Build descriptive reason message
+            if is_new_member:
+                reason = "New member welcome bonus"
+            elif streak_bonus > 1:
+                reason = f"Daily reward (Day {final_streak_count}, {streak_bonus}x multiplier)"
+            else:
+                reason = f"Daily reward (Day {final_streak_count})"
+            
+            # Update balance directly (instead of using create_system_reward which gets a different balance object)
             balance.balance += reward_amount
             balance.total_received += reward_amount
             balance.last_daily = claim_date or date.today()
-            balance.streak_count = new_streak_count if new_streak_count is not None else balance.streak_count + 1
+            balance.streak_count = final_streak_count
+            
+            # Create transaction record for audit trail
+            transaction = BytesTransaction(
+                guild_id=guild_id,
+                giver_id="SYSTEM",
+                giver_username="System",
+                receiver_id=user_id,
+                receiver_username=username,
+                amount=reward_amount,
+                reason=reason
+            )
+            
+            session.add(transaction)
+            await session.flush()  # Ensure timestamps are populated
             
             return balance
             
@@ -326,6 +507,7 @@ class BytesOperations:
         if config is None:
             config = BytesConfig(guild_id=guild_id)
             session.add(config)
+            await session.flush()  # Ensure timestamps are populated
         
         return config
 
@@ -575,12 +757,79 @@ class SquadOperations:
         except Exception as e:
             raise DatabaseOperationError(f"Failed to create squad: {e}") from e
     
+    async def update_squad(
+        self,
+        session: AsyncSession,
+        squad_id: UUID,
+        updates: Dict[str, Any]
+    ) -> Squad:
+        """Update a squad's information.
+        
+        Args:
+            session: Database session
+            squad_id: Squad UUID
+            updates: Dictionary of fields to update
+            
+        Returns:
+            Squad: Updated squad
+            
+        Raises:
+            NotFoundError: If squad doesn't exist
+            DatabaseOperationError: If update fails
+        """
+        try:
+            squad = await self.get_squad(session, squad_id)
+            
+            for field, value in updates.items():
+                if hasattr(squad, field):
+                    setattr(squad, field, value)
+            
+            return squad
+            
+        except NotFoundError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to update squad: {e}") from e
+    
+    async def delete_squad(
+        self,
+        session: AsyncSession,
+        squad_id: UUID
+    ) -> None:
+        """Delete a squad and all its memberships.
+        
+        Args:
+            session: Database session
+            squad_id: Squad UUID
+            
+        Raises:
+            NotFoundError: If squad doesn't exist
+            DatabaseOperationError: If deletion fails
+        """
+        try:
+            # First delete all memberships
+            stmt = delete(SquadMembership).where(SquadMembership.squad_id == squad_id)
+            await session.execute(stmt)
+            
+            # Then delete the squad
+            stmt = delete(Squad).where(Squad.id == squad_id)
+            result = await session.execute(stmt)
+            
+            if result.rowcount == 0:
+                raise NotFoundError(f"Squad not found: {squad_id}")
+            
+        except NotFoundError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to delete squad: {e}") from e
+    
     async def join_squad(
         self,
         session: AsyncSession,
         guild_id: str,
         user_id: str,
-        squad_id: UUID
+        squad_id: UUID,
+        username: Optional[str] = None
     ) -> SquadMembership:
         """Join a user to a squad with bytes cost deduction.
         
@@ -618,12 +867,15 @@ class SquadOperations:
             # Check and deduct switch cost if required
             if squad.switch_cost > 0:
                 bytes_ops = BytesOperations()
-                balance = await bytes_ops.get_balance(session, guild_id, user_id)
-                if balance.balance < squad.switch_cost:
-                    raise ConflictError(
-                        f"Insufficient balance: {balance.balance} < {squad.switch_cost}"
-                    )
-                balance.balance -= squad.switch_cost
+                # Create system charge transaction for squad join fee
+                await bytes_ops.create_system_charge(
+                    session,
+                    guild_id,
+                    user_id,
+                    username or f"User {user_id}",  # Use provided username or fallback
+                    squad.switch_cost,
+                    f"Squad join fee: {squad.name}"
+                )
             
             # Create membership
             membership = SquadMembership(

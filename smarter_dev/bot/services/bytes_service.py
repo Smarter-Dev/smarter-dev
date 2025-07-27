@@ -57,7 +57,7 @@ class BytesService(BaseService):
     STREAK_MULTIPLIERS = {7: 2, 14: 4, 30: 10, 60: 20}
     
     # Cache TTL configurations (in seconds)
-    CACHE_TTL_BALANCE = 300  # 5 minutes
+    CACHE_TTL_BALANCE = 300  # 5 minutes (only used when explicitly requested)
     CACHE_TTL_LEADERBOARD = 60  # 1 minute
     CACHE_TTL_CONFIG = 600  # 10 minutes
     CACHE_TTL_TRANSACTION_HISTORY = 120  # 2 minutes
@@ -150,7 +150,7 @@ class BytesService(BaseService):
         self,
         guild_id: str,
         user_id: str,
-        use_cache: bool = True
+        use_cache: bool = False
     ) -> BytesBalance:
         """Get user's bytes balance with intelligent caching.
         
@@ -279,7 +279,11 @@ class BytesService(BaseService):
             
             # Make claim request to API
             response = await self._api_client.post(
-                f"/guilds/{guild_id}/bytes/daily/{user_id}",
+                f"/guilds/{guild_id}/bytes/daily",
+                json_data={
+                    "user_id": user_id,
+                    "username": username
+                },
                 timeout=15.0
             )
             
