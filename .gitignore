@@ -13,3 +13,4 @@ wheels/
 /smarter_dev.db
 .env
 smarter_dev.db
+logs/
