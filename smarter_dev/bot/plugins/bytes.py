@@ -13,14 +13,9 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from smarter_dev.bot.utils.embeds import (
-    create_balance_embed, 
-    create_cooldown_embed,
-    create_error_embed,
-    create_success_embed,
-    create_leaderboard_embed,
-    create_transaction_history_embed
-)
+# Import only the Discord embed function needed for large history lists
+from smarter_dev.bot.utils.embeds import create_transaction_history_embed
+from smarter_dev.bot.utils.image_embeds import get_generator
 from smarter_dev.bot.services.exceptions import (
     AlreadyClaimedError,
     InsufficientBalanceError,
@@ -50,32 +45,47 @@ async def bytes_group(ctx: lightbulb.Context) -> None:
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def balance_command(ctx: lightbulb.Context) -> None:
     """Handle balance command - shows current balance without auto-claiming."""
+    
     service: BytesService = getattr(ctx.bot, 'd', {}).get('bytes_service')
     if not service:
         # Fallback to _services dict
         service = getattr(ctx.bot, 'd', {}).get('_services', {}).get('bytes_service')
     
     if not service:
-        embed = create_error_embed("Bot services are not initialized. Please try again later.")
-        await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        generator = get_generator()
+        image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
         return
     
     try:
         # Get current balance
         balance = await service.get_balance(str(ctx.guild_id), str(ctx.user.id))
         
-        # Show balance without attempting daily claim
-        embed = create_balance_embed(balance)
-        embed.title = "💰 Your Bytes Balance"
+        # Create image embed for balance
+        generator = get_generator()
+        description = f"{balance.balance:,} bytes"
+        if balance.streak_count > 0:
+            description += f"\nStreak: {balance.streak_count} days"
+        if balance.last_daily:
+            # Format last daily as readable date
+            description += f"\nLast Daily: {balance.last_daily.strftime('%B %d, %Y')}"
+        
+        image_file = generator.create_simple_embed("YOUR BYTES BALANCE", description, "info")
+        await ctx.respond(attachment=image_file)
+        return
             
     except ServiceError as e:
         logger.error(f"Service error in balance command: {e}")
-        embed = create_error_embed("Failed to retrieve balance. Please try again later.")
+        generator = get_generator()
+        image_file = generator.create_error_embed("Failed to retrieve balance. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        return
     except Exception as e:
         logger.exception(f"Unexpected error in balance command: {e}")
-        embed = create_error_embed("An unexpected error occurred. Please try again later.")
-        
-    await ctx.respond(embed=embed)
+        generator = get_generator()
+        image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        return
 
 
 
@@ -93,8 +103,9 @@ async def send_command(ctx: lightbulb.Context) -> None:
         service = getattr(ctx.bot, 'd', {}).get('_services', {}).get('bytes_service')
     
     if not service:
-        embed = create_error_embed("Bot services are not initialized. Please try again later.")
-        await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        generator = get_generator()
+        image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
         return
     
     user = ctx.options.user
@@ -103,22 +114,25 @@ async def send_command(ctx: lightbulb.Context) -> None:
     
     # Validate amount
     if amount < 1 or amount > 10000:
-        embed = create_error_embed("Amount must be between 1 and 10,000 bytes.")
-        await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        generator = get_generator()
+        image_file = generator.create_error_embed("Amount must be between 1 and 10,000 bytes.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
         return
     
     # Validate receiver is in guild
     try:
         member = ctx.get_guild().get_member(user.id)
         if not member:
-            embed = create_error_embed("That user is not in this server!")
-            await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+            generator = get_generator()
+            image_file = generator.create_error_embed("That user is not in this server!")
+            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
             return
         
         # Prevent self-transfer (additional validation)
         if user.id == ctx.user.id:
-            embed = create_error_embed("You can't send bytes to yourself!")
-            await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+            generator = get_generator()
+            image_file = generator.create_error_embed("You can't send bytes to yourself!")
+            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
             return
         
         # Process transfer using service
@@ -131,51 +145,58 @@ async def send_command(ctx: lightbulb.Context) -> None:
         )
         
         if not result.success:
+            logger.info(f"Transfer failed: {result.reason}, is_cooldown_error: {result.is_cooldown_error}")
+            generator = get_generator()
             # Use special cooldown embed for cooldown errors
             if result.is_cooldown_error:
-                embed = create_cooldown_embed(result.reason, result.cooldown_end_timestamp)
+                logger.info("Creating cooldown image embed")
+                image_file = generator.create_cooldown_embed(result.reason, result.cooldown_end_timestamp)
             else:
-                # Check for transfer limit error and provide specific title
-                if "exceeds maximum limit" in result.reason.lower():
-                    embed = hikari.Embed(
-                        title="💰 Transfer Limit Exceeded",
-                        description=result.reason,
-                        color=hikari.Color(0xef4444),
-                        timestamp=datetime.now(timezone.utc)
-                    )
-                else:
-                    embed = create_error_embed(result.reason)
-            await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+                # Use error embed for transfer limit and other errors
+                logger.info("Creating error image embed")
+                image_file = generator.create_error_embed(result.reason)
+            logger.info(f"Created image file: {type(image_file)}")
+            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
             return
         
-        # Success embed
-        embed = create_success_embed(
-            title="✅ Bytes Sent!",
-            description=f"Successfully sent **{amount:,}** bytes to {user.mention}"
-        )
+        # Success image embed
+        generator = get_generator()
         
+        # Get user's display name (nickname if set, otherwise username)
+        try:
+            member = ctx.get_guild().get_member(user.id)
+            display_name = member.display_name if member else user.username
+        except:
+            display_name = user.username
+        
+        description = f"Successfully sent {amount:,} bytes to {display_name}"
+        
+        # Add additional details
         if reason:
-            embed.add_field("Reason", reason, inline=False)
-            
-        embed.add_field("Transaction ID", str(result.transaction.id), inline=True)
-        if result.new_giver_balance is not None:
-            embed.add_field("Your New Balance", f"{result.new_giver_balance:,} bytes", inline=True)
+            description += f"\nReason: {reason}"
         
-        await ctx.respond(embed=embed)
+        if result.new_giver_balance is not None:
+            description += f"\nYour New Balance: {result.new_giver_balance:,} bytes"
+        
+        image_file = generator.create_success_embed("BYTES SENT", description)
+        await ctx.respond(attachment=image_file)
         
     except InsufficientBalanceError as e:
-        embed = create_error_embed(f"Insufficient balance! You need {e.required:,} bytes but only have {e.available:,}.")
-        await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        generator = get_generator()
+        image_file = generator.create_error_embed(f"Insufficient balance! You need {e.required:,} bytes but only have {e.available:,}.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
         return
     except ValidationError as e:
-        embed = create_error_embed(f"Invalid input: {e.message}")
-        await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        generator = get_generator()
+        image_file = generator.create_error_embed(f"Invalid input: {e.message}")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
         return
     except ServiceError as e:
         logger.error(f"Service error in send command: {e}")
-        embed = create_error_embed("Transfer failed. Please try again later.")
+        generator = get_generator()
+        image_file = generator.create_error_embed("Transfer failed. Please try again later.")
         try:
-            await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
         except hikari.BadRequestError as discord_err:
             if "already been acknowledged" in str(discord_err):
                 logger.warning("Interaction already acknowledged, skipping response")
@@ -190,9 +211,10 @@ async def send_command(ctx: lightbulb.Context) -> None:
         return
     except Exception as e:
         logger.exception(f"Unexpected error in send command: {e}")
-        embed = create_error_embed("An unexpected error occurred. Please try again later.")
+        generator = get_generator()
+        image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
         try:
-            await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
         except hikari.BadRequestError as discord_err:
             if "already been acknowledged" in str(discord_err):
                 logger.warning("Interaction already acknowledged, skipping error response")
@@ -213,8 +235,9 @@ async def leaderboard_command(ctx: lightbulb.Context) -> None:
         service = getattr(ctx.bot, 'd', {}).get('_services', {}).get('bytes_service')
     
     if not service:
-        embed = create_error_embed("Bot services are not initialized. Please try again later.")
-        await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        generator = get_generator()
+        image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
         return
     
     limit = ctx.options.limit or 10
@@ -223,11 +246,6 @@ async def leaderboard_command(ctx: lightbulb.Context) -> None:
     
     try:
         entries = await service.get_leaderboard(str(ctx.guild_id), limit)
-        
-        if not entries:
-            embed = create_error_embed("No leaderboard data available yet!")
-            await ctx.respond(embed=embed)
-            return
         
         # Create user display names mapping
         user_display_names = {}
@@ -238,16 +256,20 @@ async def leaderboard_command(ctx: lightbulb.Context) -> None:
             except:
                 user_display_names[entry.user_id] = f"User {entry.user_id[:8]}"
         
-        embed = create_leaderboard_embed(entries, ctx.get_guild().name, user_display_names)
+        generator = get_generator()
+        image_file = generator.create_leaderboard_embed(entries, ctx.get_guild().name, user_display_names)
+        await ctx.respond(attachment=image_file)
         
     except ServiceError as e:
         logger.error(f"Service error in leaderboard command: {e}")
-        embed = create_error_embed("Failed to get leaderboard. Please try again later.")
+        generator = get_generator()
+        image_file = generator.create_error_embed("Failed to get leaderboard. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
     except Exception as e:
         logger.exception(f"Unexpected error in leaderboard command: {e}")
-        embed = create_error_embed("An unexpected error occurred. Please try again later.")
-        
-    await ctx.respond(embed=embed)
+        generator = get_generator()
+        image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
 
 
 @bytes_group.child
@@ -262,8 +284,9 @@ async def history_command(ctx: lightbulb.Context) -> None:
         service = getattr(ctx.bot, 'd', {}).get('_services', {}).get('bytes_service')
     
     if not service:
-        embed = create_error_embed("Bot services are not initialized. Please try again later.")
-        await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        generator = get_generator()
+        image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
         return
     
     limit = ctx.options.limit or 10
@@ -277,16 +300,26 @@ async def history_command(ctx: lightbulb.Context) -> None:
             limit=limit
         )
         
-        embed = create_transaction_history_embed(transactions, str(ctx.user.id))
+        # Use image embed for 10 or fewer transactions, Discord embed for more
+        if limit <= 10:
+            generator = get_generator()
+            image_file = generator.create_history_embed(transactions, str(ctx.user.id))
+            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        else:
+            # Use standard Discord embed for larger lists
+            embed = create_transaction_history_embed(transactions, str(ctx.user.id))
+            await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
         
     except ServiceError as e:
         logger.error(f"Service error in history command: {e}")
-        embed = create_error_embed("Failed to get transaction history. Please try again later.")
+        generator = get_generator()
+        image_file = generator.create_error_embed("Failed to get transaction history. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
     except Exception as e:
         logger.exception(f"Unexpected error in history command: {e}")
-        embed = create_error_embed("An unexpected error occurred. Please try again later.")
-        
-    await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        generator = get_generator()
+        image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
 
 
 @bytes_group.child
@@ -300,40 +333,28 @@ async def config_command(ctx: lightbulb.Context) -> None:
         service = getattr(ctx.bot, 'd', {}).get('_services', {}).get('bytes_service')
     
     if not service:
-        embed = create_error_embed("Bot services are not initialized. Please try again later.")
-        await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        generator = get_generator()
+        image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
         return
     
     try:
         config = await service.get_config(str(ctx.guild_id))
         
-        embed = hikari.Embed(
-            title="⚙️ Bytes Economy Configuration",
-            color=hikari.Color(0x3b82f6),
-            timestamp=datetime.now(timezone.utc)
-        )
-        
-        embed.add_field("Daily Amount", f"{config.daily_amount:,} bytes", inline=True)
-        embed.add_field("Starting Balance", f"{config.starting_balance:,} bytes", inline=True)
-        embed.add_field("Max Transfer", f"{config.max_transfer:,} bytes", inline=True)
-        
-        # Streak bonuses
-        if config.streak_bonuses:
-            bonus_lines = []
-            for days, multiplier in sorted(config.streak_bonuses.items()):
-                bonus_lines.append(f"{days} days: **{multiplier}x**")
-            embed.add_field("Streak Bonuses", "\n".join(bonus_lines), inline=True)
-        
-        embed.set_footer(f"Configuration for {ctx.get_guild().name}")
+        generator = get_generator()
+        image_file = generator.create_config_embed(config, ctx.get_guild().name)
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
         
     except ServiceError as e:
         logger.error(f"Service error in config command: {e}")
-        embed = create_error_embed("Failed to get configuration. Please try again later.")
+        generator = get_generator()
+        image_file = generator.create_error_embed("Failed to get configuration. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
     except Exception as e:
         logger.exception(f"Unexpected error in config command: {e}")
-        embed = create_error_embed("An unexpected error occurred. Please try again later.")
-        
-    await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+        generator = get_generator()
+        image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
 
 
 def load(bot: lightbulb.BotApp) -> None:
