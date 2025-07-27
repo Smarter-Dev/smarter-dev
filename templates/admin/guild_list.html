@@ -1,0 +1,111 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Guilds - Smarter Dev Admin{% endblock %}
+
+{% block page_title %}Guild Management{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item active">Guilds</li>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">All Guilds</h3>
+            </div>
+            <div class="card-body">
+                {% if guilds %}
+                <div class="row">
+                    {% for guild in guilds %}
+                    <div class="col-md-6 col-lg-4 mb-4">
+                        <div class="card card-sm">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center mb-3">
+                                    {% if guild.icon_url %}
+                                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" class="guild-icon me-3">
+                                    {% else %}
+                                    <div class="guild-icon-placeholder me-3">
+                                        {{ guild.name[0].upper() }}
+                                    </div>
+                                    {% endif %}
+                                    <div class="flex-fill">
+                                        <h4 class="mb-1">{{ guild.name }}</h4>
+                                        <div class="text-muted small">ID: {{ guild.id }}</div>
+                                        {% if guild.description %}
+                                        <div class="text-muted small mt-1">{{ guild.description }}</div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                
+                                {% if guild.member_count %}
+                                <div class="mb-3">
+                                    <div class="row">
+                                        <div class="col">
+                                            <div class="text-center">
+                                                <div class="h4 mb-1">{{ "{:,}".format(guild.member_count) }}</div>
+                                                <div class="text-muted small">Members</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endif %}
+                                
+                                <div class="d-grid gap-2">
+                                    <a href="/admin/guilds/{{ guild.id }}" class="btn btn-primary">
+                                        <svg class="icon me-2" width="24" height="24">
+                                            <use xlink:href="#tabler-settings"></use>
+                                        </svg>
+                                        Manage Guild
+                                    </a>
+                                    <div class="btn-group" role="group">
+                                        <a href="/admin/guilds/{{ guild.id }}/bytes" class="btn btn-outline-primary btn-sm">
+                                            <svg class="icon me-1" width="16" height="16">
+                                                <use xlink:href="#tabler-coin"></use>
+                                            </svg>
+                                            Bytes
+                                        </a>
+                                        <a href="/admin/guilds/{{ guild.id }}/squads" class="btn btn-outline-primary btn-sm">
+                                            <svg class="icon me-1" width="16" height="16">
+                                                <use xlink:href="#tabler-users"></use>
+                                            </svg>
+                                            Squads
+                                        </a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="empty">
+                    <div class="empty-img">
+                        <svg class="icon" width="48" height="48">
+                            <use xlink:href="#tabler-building-community"></use>
+                        </svg>
+                    </div>
+                    <p class="empty-title">No guilds found</p>
+                    <p class="empty-subtitle text-muted">
+                        {% if error %}
+                        {{ error }}
+                        {% else %}
+                        The bot is not currently in any Discord servers.
+                        {% endif %}
+                    </p>
+                    <div class="empty-action">
+                        <a href="https://discord.com/developers/applications" class="btn btn-primary" target="_blank">
+                            <svg class="icon me-2" width="24" height="24">
+                                <use xlink:href="#tabler-external-link"></use>
+                            </svg>
+                            Manage Bot Application
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

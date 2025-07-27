@@ -269,10 +269,53 @@ def create_transaction_history_embed(transactions: list, user_id: str) -> hikari
     for tx in transactions:
         if tx.giver_id == user_id:
             # Sent transaction
-            lines.append(f"📤 **-{tx.amount:,}** to {tx.receiver_username}")
+            receiver_display = tx.receiver_username
+            
+            # Special handling for system transactions
+            if tx.receiver_id == "SYSTEM":
+                icon = "➖"  # System deduction
+                if (tx.reason and 
+                    tx.reason.startswith("Squad join fee:")):
+                    # Extract squad name from reason: "Squad join fee: Squad Name"
+                    squad_name = tx.reason.replace("Squad join fee: ", "")
+                    receiver_display = f"Joined {squad_name}"
+                else:
+                    receiver_display = "System Charge"
+            else:
+                icon = "📤"  # Regular transfer
+            
+            lines.append(f"{icon} **-{tx.amount:,}** to {receiver_display}")
         else:
-            # Received transaction  
-            lines.append(f"📥 **+{tx.amount:,}** from {tx.giver_username}")
+            # Received transaction
+            if tx.giver_id == "SYSTEM":
+                icon = "➕"  # System reward
+                if (tx.reason and 
+                    tx.reason.strip() == "New member welcome bonus"):
+                    giver_display = "Welcome Bonus"
+                elif (tx.reason and 
+                    tx.reason.startswith("Daily reward")):
+                    # Extract streak info from reason: "Daily reward (Day 5, 2x multiplier)"
+                    if "multiplier)" in tx.reason:
+                        import re
+                        match = re.search(r'Day (\d+)(?:, (\d+)x multiplier)?', tx.reason)
+                        if match:
+                            day = match.group(1)
+                            multiplier = match.group(2)
+                            if multiplier and multiplier != "1":
+                                giver_display = f"Daily ({multiplier}x)"
+                            else:
+                                giver_display = f"Daily (Day {day})"
+                        else:
+                            giver_display = "Daily Reward"
+                    else:
+                        giver_display = "Daily Reward"
+                else:
+                    giver_display = "System Reward"
+            else:
+                icon = "📥"  # Regular transfer
+                giver_display = tx.giver_username
+                
+            lines.append(f"{icon} **+{tx.amount:,}** from {giver_display}")
         
         if tx.reason:
             lines.append(f"    💬 {tx.reason}")

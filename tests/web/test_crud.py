@@ -522,16 +522,19 @@ class TestBytesConfigOperations:
         saved_config = await config_ops.get_config(db_session, "new_guild_123")
         assert saved_config.starting_balance == 150
     
-    async def test_create_config_duplicate_guild(self, config_ops, db_session: AsyncSession):
+    async def test_create_config_duplicate_guild(self, config_ops, db_session: AsyncSession, unique_guild_id):
         """Test creating configuration for existing guild raises ConflictError."""
         # Arrange
-        existing_config = BytesConfig(guild_id="existing_guild_123")
+        existing_config = BytesConfig(guild_id=unique_guild_id)
         db_session.add(existing_config)
         await db_session.commit()
         
+        # Clear identity map to avoid conflicts
+        db_session.expunge_all()
+        
         # Act & Assert
-        with pytest.raises(ConflictError, match="Configuration already exists for guild existing_guild_123"):
-            await config_ops.create_config(db_session, guild_id="existing_guild_123")
+        with pytest.raises(ConflictError, match=f"Configuration already exists for guild {unique_guild_id}"):
+            await config_ops.create_config(db_session, guild_id=unique_guild_id)
     
     async def test_update_config_successful(self, config_ops, db_session: AsyncSession):
         """Test successful configuration update."""

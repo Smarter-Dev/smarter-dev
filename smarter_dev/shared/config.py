@@ -55,7 +55,7 @@ class Settings(BaseSettings):
         description="API secret key for authentication",
     )
     api_base_url: str = Field(
-        default="http://localhost:8000/api",
+        default="http://localhost:8000",
         description="Base URL for API endpoints",
     )
 

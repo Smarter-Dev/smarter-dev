@@ -286,6 +286,13 @@ class SquadsService(BaseService):
             cached_response = await self._get_cached(cache_key)
             if cached_response:
                 self._cache_hits += 1
+                # Parse cached squad data back to Squad object if present
+                if cached_response.get("squad"):
+                    cached_response["squad"] = self._parse_squad_data(cached_response["squad"])
+                # Parse member_since if present
+                if cached_response.get("member_since"):
+                    from datetime import datetime
+                    cached_response["member_since"] = datetime.fromisoformat(cached_response["member_since"])
                 return UserSquadResponse(**cached_response)
             self._cache_misses += 1
         
@@ -350,6 +357,9 @@ class SquadsService(BaseService):
                 # Cache the result
                 if use_cache and self.has_cache:
                     result_dict = result.__dict__.copy()
+                    # Convert member_since to string for caching
+                    if result_dict.get("member_since"):
+                        result_dict["member_since"] = result_dict["member_since"].isoformat()
                     await self._set_cached(
                         cache_key,
                         result_dict,
@@ -370,7 +380,8 @@ class SquadsService(BaseService):
         guild_id: str,
         user_id: str,
         squad_id: UUID,
-        current_balance: int
+        current_balance: int,
+        username: Optional[str] = None
     ) -> JoinSquadResult:
         """Join a squad with comprehensive validation.
         
@@ -444,8 +455,8 @@ class SquadsService(BaseService):
                     reason=f"The {target_squad.name} squad is full! (Maximum: {target_squad.max_members} members)"
                 )
             
-            # Calculate join cost
-            join_cost = target_squad.switch_cost if current_squad else 0
+            # Calculate join cost (always costs the squad's switch_cost)
+            join_cost = target_squad.switch_cost
             
             # Check if user has sufficient balance
             if join_cost > current_balance:
@@ -456,24 +467,49 @@ class SquadsService(BaseService):
                 )
             
             # Attempt to join squad via API
-            response = await self._api_client.post(
-                f"/guilds/{guild_id}/squads/{squad_id}/join",
-                json_data={"user_id": user_id},
-                timeout=15.0
-            )
+            try:
+                response = await self._api_client.post(
+                    f"/guilds/{guild_id}/squads/{squad_id}/join",
+                    json_data={"user_id": user_id, "username": username},
+                    timeout=15.0
+                )
+            except APIError as api_error:
+                # Handle the case where user is already in a squad
+                if "already in squad" in str(api_error).lower():
+                    # User is already in a squad, leave the current squad first
+                    if current_squad:
+                        try:
+                            self._log_operation("leave_squad_for_switch", guild_id=guild_id, user_id=user_id, old_squad=current_squad.name)
+                            await self.leave_squad(guild_id, user_id)
+                            
+                            # Try joining the new squad again after leaving
+                            response = await self._api_client.post(
+                                f"/guilds/{guild_id}/squads/{squad_id}/join",
+                                json_data={"user_id": user_id, "username": username},
+                                timeout=15.0
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to leave current squad {current_squad.name} before joining {target_squad.name}: {e}")
+                            return JoinSquadResult(
+                                success=False,
+                                reason=f"Failed to leave {current_squad.name} before joining {target_squad.name}: {str(e)}"
+                            )
+                    else:
+                        # Shouldn't happen, but handle gracefully
+                        return JoinSquadResult(
+                            success=False,
+                            reason=f"You're already in a squad, but we couldn't identify it!"
+                        )
+                else:
+                    # Re-raise other API errors
+                    raise
             
             if response.status_code >= 400:
                 error_data = response.json()
                 error_message = error_data.get("detail", "Failed to join squad")
                 
                 # Handle specific error cases
-                if "already in squad" in error_message.lower():
-                    current_squad_name = current_squad.name if current_squad else "unknown"
-                    return JoinSquadResult(
-                        success=False,
-                        reason=f"You're already in the {current_squad_name} squad!"
-                    )
-                elif "squad is full" in error_message.lower():
+                if "squad is full" in error_message.lower():
                     return JoinSquadResult(
                         success=False,
                         reason=f"The {target_squad.name} squad is full!"
@@ -493,14 +529,41 @@ class SquadsService(BaseService):
             # Parse successful join response
             join_data = response.json()
             
-            # Calculate new balance after join cost
-            new_balance = current_balance - join_cost if join_cost > 0 else current_balance
+            # Get actual updated balance from the database after join cost deduction
+            # Only fetch if there was a cost, otherwise use current balance
+            if join_cost > 0:
+                try:
+                    balance_response = await self._api_client.get(
+                        f"/guilds/{guild_id}/bytes/balance/{user_id}",
+                        timeout=10.0
+                    )
+                    if balance_response.status_code == 200:
+                        balance_data = balance_response.json()
+                        new_balance = balance_data.get("balance", current_balance)
+                    else:
+                        # Fallback to calculated balance if API call fails
+                        new_balance = current_balance - join_cost
+                except Exception as e:
+                    logger.warning(f"Failed to fetch updated balance after squad join: {e}")
+                    # Fallback to calculated balance
+                    new_balance = current_balance - join_cost
+            else:
+                new_balance = current_balance
             
             # Invalidate related caches
             await self._invalidate_user_squad_cache(guild_id, user_id)
             await self._invalidate_squad_cache(guild_id, squad_id)
             if current_squad:
                 await self._invalidate_squad_cache(guild_id, current_squad.id)
+            
+            # Also invalidate bytes balance cache since cost was deducted
+            if join_cost > 0 and self.has_cache:
+                bytes_cache_key = f"balance:{guild_id}:{user_id}"
+                try:
+                    await self._cache_manager.delete(bytes_cache_key)
+                    logger.debug(f"Invalidated bytes balance cache for user {user_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to invalidate bytes balance cache: {e}")
             
             return JoinSquadResult(
                 success=True,
@@ -626,7 +689,16 @@ class SquadsService(BaseService):
             cached_members = await self._get_cached(cache_key)
             if cached_members:
                 self._cache_hits += 1
-                return [SquadMember(**member) for member in cached_members]
+                # Parse cached member data back to proper objects
+                parsed_members = []
+                for member_data in cached_members:
+                    # Parse joined_at string back to datetime if present
+                    if member_data.get("joined_at"):
+                        from datetime import datetime
+                        member_data = member_data.copy()  # Don't modify original cached data
+                        member_data["joined_at"] = datetime.fromisoformat(member_data["joined_at"])
+                    parsed_members.append(SquadMember(**member_data))
+                return parsed_members
             self._cache_misses += 1
         
         try:
@@ -649,22 +721,19 @@ class SquadsService(BaseService):
             members = []
             
             for member_data in members_data.get("members", []):
+                # Parse joined_at if available
+                joined_at = None
+                if member_data.get("joined_at"):
+                    from datetime import datetime
+                    joined_at = datetime.fromisoformat(
+                        member_data["joined_at"].replace('Z', '+00:00')
+                    )
+                
                 member = SquadMember(
                     user_id=member_data["user_id"],
                     username=member_data.get("username"),
-                    joined_at=None
+                    joined_at=joined_at
                 )
-                
-                # Parse joined_at if available
-                if member_data.get("joined_at"):
-                    from datetime import datetime
-                    member = SquadMember(
-                        user_id=member_data["user_id"],
-                        username=member_data.get("username"),
-                        joined_at=datetime.fromisoformat(
-                            member_data["joined_at"].replace('Z', '+00:00')
-                        )
-                    )
                 
                 members.append(member)
             
@@ -770,5 +839,8 @@ class SquadsService(BaseService):
                 parsed_data["updated_at"] = datetime.fromisoformat(
                     parsed_data["updated_at"].replace('Z', '+00:00')
                 )
+        else:
+            # If no updated_at field, set it to None
+            parsed_data["updated_at"] = None
         
         return Squad(**parsed_data)

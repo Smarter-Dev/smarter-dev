@@ -325,6 +325,11 @@ class Squad(Base):
         default=True,
         doc="Whether this squad is active and accepting members"
     )
+    welcome_message: Mapped[Optional[str]] = mapped_column(
+        String(500),  # Max 500 chars for welcome message
+        nullable=True,
+        doc="Custom welcome message shown when users join this squad"
+    )
     
     # Indexes and constraints for common queries
     __table_args__ = (
@@ -339,6 +344,7 @@ class Squad(Base):
         kwargs.setdefault('id', uuid4())
         kwargs.setdefault('switch_cost', 50)
         kwargs.setdefault('is_active', True)
+        kwargs.setdefault('welcome_message', "Welcome to the squad! We're glad to have you aboard.")
         super().__init__(**kwargs)
 
 

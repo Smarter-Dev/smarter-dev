@@ -171,25 +171,31 @@ class TestStreakBonusCalculation:
         assert streak_service.calculate_streak_bonus(30, bonuses) == 5
     
     def test_bonus_thresholds_exceed(self, streak_service: StreakService):
-        """Test bonus calculation when exceeding thresholds."""
+        """Test bonus calculation - divisible milestones get bonuses."""
         bonuses = {"7": 2, "14": 3, "30": 5}
         
-        # Test exceeding thresholds
-        assert streak_service.calculate_streak_bonus(10, bonuses) == 2  # Uses 7-day bonus
-        assert streak_service.calculate_streak_bonus(20, bonuses) == 3  # Uses 14-day bonus
-        assert streak_service.calculate_streak_bonus(100, bonuses) == 5  # Uses 30-day bonus
+        # Test that bonuses apply on divisible milestone days
+        assert streak_service.calculate_streak_bonus(10, bonuses) == 1  # No bonus (not divisible)
+        assert streak_service.calculate_streak_bonus(21, bonuses) == 2  # Divisible by 7
+        assert streak_service.calculate_streak_bonus(28, bonuses) == 3  # Divisible by 14 (higher than 7)
+        assert streak_service.calculate_streak_bonus(60, bonuses) == 5  # Divisible by 30
+        assert streak_service.calculate_streak_bonus(70, bonuses) == 2  # Divisible by 7
     
     def test_multiple_threshold_crossing(self, streak_service: StreakService):
-        """Test bonus calculation when crossing multiple thresholds."""
+        """Test bonus calculation - divisible milestone days get bonuses."""
         bonuses = {"7": 2, "14": 4, "30": 10}
         
-        # Test progression through thresholds
+        # Test progression through thresholds - bonuses on divisible days
         assert streak_service.calculate_streak_bonus(6, bonuses) == 1   # No bonus
-        assert streak_service.calculate_streak_bonus(7, bonuses) == 2   # 7-day bonus
-        assert streak_service.calculate_streak_bonus(13, bonuses) == 2  # Still 7-day
-        assert streak_service.calculate_streak_bonus(14, bonuses) == 4  # 14-day bonus
-        assert streak_service.calculate_streak_bonus(29, bonuses) == 4  # Still 14-day
-        assert streak_service.calculate_streak_bonus(30, bonuses) == 10 # 30-day bonus
+        assert streak_service.calculate_streak_bonus(7, bonuses) == 2   # Divisible by 7
+        assert streak_service.calculate_streak_bonus(8, bonuses) == 1   # No bonus (not divisible)
+        assert streak_service.calculate_streak_bonus(13, bonuses) == 1  # No bonus (not divisible)
+        assert streak_service.calculate_streak_bonus(14, bonuses) == 4  # Divisible by 14 (higher than 7)
+        assert streak_service.calculate_streak_bonus(15, bonuses) == 1  # No bonus (not divisible)
+        assert streak_service.calculate_streak_bonus(21, bonuses) == 2  # Divisible by 7
+        assert streak_service.calculate_streak_bonus(28, bonuses) == 4  # Divisible by 14
+        assert streak_service.calculate_streak_bonus(30, bonuses) == 10 # Divisible by 30
+        assert streak_service.calculate_streak_bonus(42, bonuses) == 4  # Divisible by both 7 and 14, takes highest
     
     def test_empty_bonus_config(self, streak_service: StreakService):
         """Test bonus calculation with empty configuration."""
@@ -211,22 +217,25 @@ class TestStreakBonusCalculation:
         assert result >= 1  # Should not crash and return at least 1
     
     def test_very_high_streak_bonuses(self, streak_service: StreakService):
-        """Test bonus calculation with very high streak counts."""
+        """Test bonus calculation with very high streak counts - only exact milestones."""
         bonuses = {"100": 10, "365": 50, "1000": 100}
         
-        assert streak_service.calculate_streak_bonus(500, bonuses) == 50
-        assert streak_service.calculate_streak_bonus(1500, bonuses) == 100
-        assert streak_service.calculate_streak_bonus(99, bonuses) == 1
+        assert streak_service.calculate_streak_bonus(100, bonuses) == 10   # Exact milestone
+        assert streak_service.calculate_streak_bonus(365, bonuses) == 50   # Exact milestone
+        assert streak_service.calculate_streak_bonus(1000, bonuses) == 100 # Exact milestone
+        assert streak_service.calculate_streak_bonus(500, bonuses) == 1    # Between milestones
+        assert streak_service.calculate_streak_bonus(1500, bonuses) == 1   # Past all milestones
+        assert streak_service.calculate_streak_bonus(99, bonuses) == 1     # Before first milestone
     
     def test_non_sequential_bonus_config(self, streak_service: StreakService):
-        """Test bonus calculation with non-sequential configuration."""
+        """Test bonus calculation with non-sequential configuration - only exact milestones."""
         bonuses = {"7": 2, "21": 5, "90": 10}  # Skipping 14, 30, etc.
         
-        assert streak_service.calculate_streak_bonus(7, bonuses) == 2
-        assert streak_service.calculate_streak_bonus(14, bonuses) == 2   # Uses 7-day
-        assert streak_service.calculate_streak_bonus(21, bonuses) == 5
-        assert streak_service.calculate_streak_bonus(30, bonuses) == 5   # Uses 21-day
-        assert streak_service.calculate_streak_bonus(90, bonuses) == 10
+        assert streak_service.calculate_streak_bonus(7, bonuses) == 2   # Exact milestone
+        assert streak_service.calculate_streak_bonus(21, bonuses) == 5  # Exact milestone
+        assert streak_service.calculate_streak_bonus(90, bonuses) == 10 # Exact milestone
+        assert streak_service.calculate_streak_bonus(14, bonuses) == 1  # Between milestones
+        assert streak_service.calculate_streak_bonus(30, bonuses) == 1  # Between milestones
 
 
 class TestDateBoundaryEdgeCases:

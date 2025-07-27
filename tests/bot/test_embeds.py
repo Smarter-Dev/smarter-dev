@@ -214,11 +214,12 @@ class TestLeaderboardEmbed:
             LeaderboardEntry(rank=3, user_id="333", balance=1000, total_received=1500)
         ]
         
-        # Add display names for testing
-        for entry in entries:
-            entry.user_display_name = f"User{entry.user_id}"
+        # Create display names mapping for testing
+        user_display_names = {
+            entry.user_id: f"User{entry.user_id}" for entry in entries
+        }
         
-        embed = create_leaderboard_embed(entries, "Test Guild")
+        embed = create_leaderboard_embed(entries, "Test Guild", user_display_names)
         
         assert isinstance(embed, hikari.Embed)
         assert embed.title == "🏆 Bytes Leaderboard"
@@ -298,7 +299,6 @@ class TestSquadListEmbed:
                 max_members=10,
                 member_count=5,
                 is_active=True,
-                is_full=False,
                 created_at=datetime.now(),
                 updated_at=datetime.now()
             ),
@@ -312,7 +312,6 @@ class TestSquadListEmbed:
                 max_members=None,
                 member_count=8,
                 is_active=True,
-                is_full=False,
                 created_at=datetime.now(),
                 updated_at=datetime.now()
             )
@@ -353,7 +352,6 @@ class TestSquadListEmbed:
                 max_members=10,
                 member_count=5,
                 is_active=True,
-                is_full=False,
                 created_at=datetime.now(),
                 updated_at=datetime.now()
             )

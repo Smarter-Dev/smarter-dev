@@ -28,6 +28,8 @@ from smarter_dev.bot.services.squads_service import SquadsService
 from smarter_dev.bot.services.streak_service import StreakService
 from smarter_dev.shared.date_provider import MockDateProvider
 
+# Fixtures from integration tests are imported directly when needed
+
 
 class MockAPIClient(APIClientProtocol):
     """Mock API client for testing."""
@@ -357,7 +359,7 @@ def squad_api_response(sample_squad: Squad) -> Dict[str, Any]:
 
 
 @pytest.fixture
-def squads_list_api_response(sample_squad: Squad) -> List[Dict[str, Any]]:
+def squads_list_api_response(sample_squad: Squad) -> list[Dict[str, Any]]:
     """API response for squads list request."""
     return [
         {
@@ -408,3 +410,24 @@ def assert_cache_operations(
     assert cache_manager.get.call_count == expected_gets
     assert cache_manager.set.call_count == expected_sets
     assert cache_manager.delete.call_count == expected_deletes
+
+
+# Additional fixtures for integration tests
+
+@pytest.fixture
+async def real_api_client():
+    """Create a simple httpx AsyncClient for integration testing."""
+    import httpx
+    async with httpx.AsyncClient(base_url="http://test") as client:
+        yield client
+
+
+@pytest.fixture
+def api_settings():
+    """Create test API settings."""
+    from smarter_dev.shared.config import Settings
+    return Settings(
+        discord_bot_token="test_bot_token_12345",
+        database_url="sqlite+aiosqlite:///:memory:",
+        redis_url="redis://localhost:6379/1"
+    )

@@ -1,0 +1,49 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Error {{ error_code }} - Smarter Dev Admin{% endblock %}
+
+{% block page_title %}Error {{ error_code or 500 }}{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item active">Error</li>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="empty">
+            <div class="empty-img">
+                {% if error_code == 404 %}
+                <svg class="icon" width="128" height="128">
+                    <use xlink:href="#tabler-error-404"></use>
+                </svg>
+                {% else %}
+                <svg class="icon" width="128" height="128">
+                    <use xlink:href="#tabler-alert-triangle"></use>
+                </svg>
+                {% endif %}
+            </div>
+            <p class="empty-title">
+                {% if error_code == 404 %}
+                Not Found
+                {% elif error_code == 503 %}
+                Service Unavailable
+                {% else %}
+                Oops! Something went wrong
+                {% endif %}
+            </p>
+            <p class="empty-subtitle text-muted">
+                {{ error }}
+            </p>
+            <div class="empty-action">
+                <a href="/admin" class="btn btn-primary">
+                    <svg class="icon" width="24" height="24">
+                        <use xlink:href="#tabler-arrow-left"></use>
+                    </svg>
+                    Back to Dashboard
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

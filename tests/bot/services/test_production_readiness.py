@@ -14,7 +14,7 @@ import time
 import tracemalloc
 from datetime import datetime, timezone
 from typing import Any, Dict, List
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
 
 import pytest
@@ -30,6 +30,7 @@ from smarter_dev.bot.services.exceptions import (
 from smarter_dev.bot.services.squads_service import SquadsService
 from smarter_dev.bot.services.streak_service import StreakService
 from smarter_dev.shared.date_provider import MockDateProvider
+from smarter_dev.bot.services.models import ServiceHealth
 
 
 # @pytest.mark.skip(reason="Production stress test - skipping for core functionality focus")
@@ -47,18 +48,35 @@ class TestProductionReliability:
             backoff_factor=2.0
         )
         
+        # Use properly configured mocks with all expected attributes
         mock_api_client = AsyncMock()
+        # Pre-configure API client attributes
+        mock_api_client._request_count = 0
+        mock_api_client._error_count = 0
+        mock_api_client._total_response_time = 0.0
+        
         mock_cache_manager = AsyncMock()
+        # Pre-configure cache manager attributes
+        mock_cache_manager._cache_hits = 0
+        mock_cache_manager._cache_misses = 0
+        mock_cache_manager._operations = 0
+        
+        # Configure cache operations to return proper values, not coroutines
+        mock_cache_manager.get = AsyncMock(return_value=None)
+        mock_cache_manager.set = AsyncMock(return_value=True)
+        mock_cache_manager.delete = AsyncMock(return_value=True)
+        mock_cache_manager.clear = AsyncMock(return_value=True)
+        mock_cache_manager.exists = AsyncMock(return_value=False)
         
         # Simulate production health check responses
-        mock_api_client.health_check.return_value = AsyncMock(
+        mock_api_client.health_check.return_value = ServiceHealth(
             service_name="ProductionAPI",
             is_healthy=True,
             response_time_ms=25.0,
             last_check=datetime.now(timezone.utc)
         )
         
-        mock_cache_manager.health_check.return_value = AsyncMock(
+        mock_cache_manager.health_check.return_value = ServiceHealth(
             service_name="ProductionCache",
             is_healthy=True,
             response_time_ms=5.0,
@@ -76,11 +94,24 @@ class TestProductionReliability:
         )
         await bytes_service.initialize()
         
+        # Pre-configure service statistics to prevent AttributeError
+        bytes_service._cache_hits = 0
+        bytes_service._cache_misses = 0
+        bytes_service._balance_requests = 0
+        bytes_service._daily_claims = 0
+        bytes_service._transfers = 0
+        
         squads_service = SquadsService(
             api_client=mock_api_client,
             cache_manager=mock_cache_manager
         )
         await squads_service.initialize()
+        
+        # Pre-configure service statistics to prevent AttributeError
+        squads_service._squad_list_requests = 0
+        squads_service._member_lookups = 0
+        squads_service._join_attempts = 0
+        squads_service._leave_attempts = 0
         
         return bytes_service, squads_service, mock_api_client, mock_cache_manager
     
@@ -97,10 +128,11 @@ class TestProductionReliability:
         assert health.details["cache_healthy"] is True
         
         # Test unhealthy API scenario
-        mock_api_client.health_check.return_value = AsyncMock(
+        mock_api_client.health_check.return_value = ServiceHealth(
             service_name="ProductionAPI",
             is_healthy=False,
             response_time_ms=1000.0,
+            last_check=datetime.now(timezone.utc),
             details={"error": "Connection timeout"}
         )
         
@@ -110,15 +142,17 @@ class TestProductionReliability:
         assert health.details["api_details"]["error"] == "Connection timeout"
         
         # Test unhealthy cache scenario
-        mock_api_client.health_check.return_value = AsyncMock(
+        mock_api_client.health_check.return_value = ServiceHealth(
             service_name="ProductionAPI",
             is_healthy=True,
-            response_time_ms=25.0
+            response_time_ms=25.0,
+            last_check=datetime.now(timezone.utc)
         )
-        mock_cache_manager.health_check.return_value = AsyncMock(
+        mock_cache_manager.health_check.return_value = ServiceHealth(
             service_name="ProductionCache",
             is_healthy=False,
             response_time_ms=500.0,
+            last_check=datetime.now(timezone.utc),
             details={"error": "Redis connection failed"}
         )
         
@@ -140,20 +174,20 @@ class TestProductionReliability:
                 raise APIError("Service temporarily unavailable", status_code=503)
             else:
                 # Recovery after 5 failures
-                return AsyncMock(
-                    status_code=200,
-                    json=lambda: {
-                        "guild_id": "123456789012345678",
-                        "user_id": "987654321098765432",
-                        "balance": 100,
-                        "total_received": 150,
-                        "total_sent": 50,
-                        "streak_count": 5,
-                        "last_daily": "2024-01-14",
-                        "created_at": "2024-01-01T00:00:00Z",
-                        "updated_at": "2024-01-14T12:00:00Z"
-                    }
-                )
+                mock_response = Mock()
+                mock_response.status_code = 200
+                mock_response.json.return_value = {
+                    "guild_id": "123456789012345678",
+                    "user_id": "987654321098765432",
+                    "balance": 100,
+                    "total_received": 150,
+                    "total_sent": 50,
+                    "streak_count": 5,
+                    "last_daily": "2024-01-14",
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "updated_at": "2024-01-14T12:00:00Z"
+                }
+                return mock_response
         
         mock_api_client.get.side_effect = failing_get
         
@@ -174,20 +208,20 @@ class TestProductionReliability:
         mock_cache_manager.get.side_effect = Exception("Cache unavailable")
         mock_cache_manager.set.side_effect = Exception("Cache unavailable")
         
-        mock_api_client.get.return_value = AsyncMock(
-            status_code=200,
-            json=lambda: {
-                "guild_id": "123456789012345678",
-                "user_id": "987654321098765432",
-                "balance": 100,
-                "total_received": 150,
-                "total_sent": 50,
-                "streak_count": 5,
-                "last_daily": "2024-01-14",
-                "created_at": "2024-01-01T00:00:00Z",
-                "updated_at": "2024-01-14T12:00:00Z"
-            }
-        )
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "guild_id": "123456789012345678",
+            "user_id": "987654321098765432",
+            "balance": 100,
+            "total_received": 150,
+            "total_sent": 50,
+            "streak_count": 5,
+            "last_daily": "2024-01-14",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-14T12:00:00Z"
+        }
+        mock_api_client.get.return_value = mock_response
         
         # Service should still work without cache
         balance = await bytes_service.get_balance("123456789012345678", "987654321098765432")
@@ -250,7 +284,28 @@ class TestProductionObservability:
     async def instrumented_service(self):
         """Set up service with instrumentation."""
         mock_api_client = AsyncMock()
+        # Pre-configure API client attributes
+        mock_api_client._request_count = 0
+        mock_api_client._error_count = 0
+        mock_api_client._total_response_time = 0.0
+        
         mock_cache_manager = AsyncMock()
+        # Pre-configure cache manager attributes  
+        mock_cache_manager._cache_hits = 0
+        mock_cache_manager._cache_misses = 0
+        mock_cache_manager._operations = 0
+        
+        # Configure cache operations to return proper values, not coroutines
+        mock_cache_manager.get = AsyncMock(return_value=None)
+        mock_cache_manager.set = AsyncMock(return_value=True)
+        mock_cache_manager.delete = AsyncMock(return_value=True)
+        mock_cache_manager.clear = AsyncMock(return_value=True)
+        mock_cache_manager.exists = AsyncMock(return_value=False)
+        mock_cache_manager.health_check = AsyncMock(return_value=ServiceHealth(
+            service_name="MockCacheManager",
+            is_healthy=True,
+            last_check=datetime.now(timezone.utc)
+        ))
         
         date_provider = MockDateProvider()
         streak_service = StreakService(date_provider=date_provider)
@@ -261,6 +316,13 @@ class TestProductionObservability:
             streak_service=streak_service
         )
         await service.initialize()
+        
+        # Pre-configure service statistics to prevent AttributeError
+        service._cache_hits = 0
+        service._cache_misses = 0
+        service._balance_requests = 0
+        service._daily_claims = 0
+        service._transfers = 0
         
         return service, mock_api_client, mock_cache_manager
     
@@ -331,40 +393,38 @@ class TestProductionObservability:
         service, mock_api_client, mock_cache_manager = instrumented_service
         
         # Mix of successful and failed operations
-        responses = [
-            # Successful response
-            AsyncMock(
-                status_code=200,
-                json=lambda: {
-                    "guild_id": "123456789012345678",
-                    "user_id": "987654321098765432",
-                    "balance": 100,
-                    "total_received": 150,
-                    "total_sent": 50,
-                    "streak_count": 5,
-                    "last_daily": "2024-01-14",
-                    "created_at": "2024-01-01T00:00:00Z",
-                    "updated_at": "2024-01-14T12:00:00Z"
-                }
-            ),
-            # Error response
-            AsyncMock(status_code=500),
-            # Another successful response
-            AsyncMock(
-                status_code=200,
-                json=lambda: {
-                    "guild_id": "123456789012345678",
-                    "user_id": "987654321098765432",
-                    "balance": 100,
-                    "total_received": 150,
-                    "total_sent": 50,
-                    "streak_count": 5,
-                    "last_daily": "2024-01-14",
-                    "created_at": "2024-01-01T00:00:00Z",
-                    "updated_at": "2024-01-14T12:00:00Z"
-                }
-            )
-        ]
+        success_response1 = Mock()
+        success_response1.status_code = 200
+        success_response1.json.return_value = {
+            "guild_id": "123456789012345678",
+            "user_id": "987654321098765432",
+            "balance": 100,
+            "total_received": 150,
+            "total_sent": 50,
+            "streak_count": 5,
+            "last_daily": "2024-01-14",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-14T12:00:00Z"
+        }
+        
+        error_response = Mock()
+        error_response.status_code = 500
+        
+        success_response2 = Mock()
+        success_response2.status_code = 200
+        success_response2.json.return_value = {
+            "guild_id": "123456789012345678",
+            "user_id": "987654321098765432",
+            "balance": 100,
+            "total_received": 150,
+            "total_sent": 50,
+            "streak_count": 5,
+            "last_daily": "2024-01-14",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-14T12:00:00Z"
+        }
+        
+        responses = [success_response1, error_response, success_response2]
         
         mock_api_client.get.side_effect = responses
         

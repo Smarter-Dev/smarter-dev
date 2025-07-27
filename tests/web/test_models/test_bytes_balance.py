@@ -136,7 +136,7 @@ class TestBytesBalance:
             assert balance.created_at is not None
             assert balance.updated_at is not None
     
-    async def test_bytes_balance_compound_pk_uniqueness(self, test_engine):
+    async def test_bytes_balance_compound_pk_uniqueness(self, test_engine, unique_guild_id, unique_user_id):
         """Test that compound primary key enforces uniqueness."""
         from sqlalchemy.ext.asyncio import async_sessionmaker
         from smarter_dev.shared.database import Base
@@ -149,12 +149,15 @@ class TestBytesBalance:
         session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
         async with session_maker() as session:
             # Create first record
-            balance1 = BytesBalance(guild_id="pk_test_123", user_id="pk_test_456", balance=100)
+            balance1 = BytesBalance(guild_id=unique_guild_id, user_id=unique_user_id, balance=100)
             session.add(balance1)
             await session.commit()
             
+            # Clear identity map to avoid conflicts
+            session.expunge_all()
+            
             # Try to create duplicate record with same guild_id and user_id
-            balance2 = BytesBalance(guild_id="pk_test_123", user_id="pk_test_456", balance=200)
+            balance2 = BytesBalance(guild_id=unique_guild_id, user_id=unique_user_id, balance=200)
             session.add(balance2)
             
             # Should raise IntegrityError due to primary key violation

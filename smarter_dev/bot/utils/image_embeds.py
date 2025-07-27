@@ -285,7 +285,7 @@ class EmbedImageGenerator:
                 current_y += line_height + 4   # Tight spacing for wrapped lines
         
         # Add spacing between title and description
-        current_y += 24
+        current_y += 32
         
         # Draw description - use larger font for better readability
         desc_font = self._fonts["text_large"]
@@ -400,7 +400,7 @@ class EmbedImageGenerator:
         guild_name: str, 
         user_display_names: dict
     ) -> hikari.files.Bytes:
-        """Create a leaderboard embed image.
+        """Create a compact leaderboard embed image with table layout.
         
         Args:
             entries: List of leaderboard entries
@@ -413,24 +413,123 @@ class EmbedImageGenerator:
         if not entries:
             return self.create_simple_embed("BYTES LEADERBOARD", "No leaderboard data available yet!", "info")
         
-        # Build leaderboard text
-        lines = [f"Top {len(entries)} users in {guild_name}:", ""]
+        # Load background
+        background = self._get_background("info")
         
+        # Create working image - use full background size
+        img = background.copy()
+        draw = ImageDraw.Draw(img)
+        
+        # Calculate content area
+        content_width = img.width - (self.PADDING_HORIZONTAL * 2)
+        current_y = self.PADDING_TOP
+        
+        # Get colors
+        title_color = self.COLORS["info"]
+        
+        # Draw title
+        title_font = self._fonts["title_medium"]
+        title_text = "BYTES LEADERBOARD"
+        self._draw_text_with_shadow(
+            draw, 
+            (self.PADDING_HORIZONTAL, current_y), 
+            title_text, 
+            title_font, 
+            title_color
+        )
+        
+        # Move to content
+        current_y += title_font.getbbox(title_text)[3] + 64
+        
+        # Use smaller font for table content
+        table_font = self._fonts["text_small"]
+        
+        # Calculate the width of the widest ranking number for centering
+        max_rank_width = 0
         for entry in entries:
-            # Remove emojis that don't render with custom fonts
-            rank_text = {1: "#1", 2: "#2", 3: "#3"}.get(entry.rank, f"#{entry.rank}")
+            rank_text = f"{entry.rank}"
+            rank_bbox = table_font.getbbox(rank_text)
+            rank_width = rank_bbox[2] - rank_bbox[0]
+            max_rank_width = max(max_rank_width, rank_width)
+        
+        # Define rank column width (60px total)
+        rank_column_width = 60
+        
+        # Process leaderboard entries into compact table rows
+        for i, entry in enumerate(entries):
             display_name = user_display_names.get(entry.user_id, f"User {entry.user_id[:8]}")
             
-            line = f"{rank_text} {display_name}"
-            line += f"\n    {entry.balance:,} bytes"
+            # Truncate username if too long
+            if len(display_name) > 18:
+                display_name = display_name[:15] + "..."
             
+            # Create compact row: Rank | Username | Balance | Streak
+            row_y = current_y + (i * 26)  # Adjusted spacing for table rows
+            
+            # Rank (centered) - special formatting for top 3
+            rank_text = f"{entry.rank}"
+            rank_color = self.TEXT_COLOR
+            if entry.rank == 1:
+                rank_color = "#FFD700"  # Gold
+            elif entry.rank == 2:
+                rank_color = "#C0C0C0"  # Silver  
+            elif entry.rank == 3:
+                rank_color = "#CD7F32"  # Bronze
+            
+            # Center the rank number in its column
+            rank_bbox = table_font.getbbox(rank_text)
+            rank_width = rank_bbox[2] - rank_bbox[0]
+            rank_x = self.PADDING_HORIZONTAL + (rank_column_width - rank_width) // 2
+            
+            draw.text(
+                (rank_x, row_y), 
+                rank_text, 
+                font=table_font, 
+                fill=rank_color
+            )
+            
+            # Username (center-left)
+            user_x = self.PADDING_HORIZONTAL + 60
+            draw.text(
+                (user_x, row_y), 
+                display_name, 
+                font=table_font, 
+                fill=self.TEXT_COLOR
+            )
+            
+            # Streak (middle column) - only show if > 0
             if entry.streak_count > 0:
-                line += f" - {entry.streak_count} day streak"
+                streak_text = f"{entry.streak_count} days"
+                streak_bbox = table_font.getbbox(streak_text)
+                streak_width = streak_bbox[2] - streak_bbox[0]
+                streak_x = self.PADDING_HORIZONTAL + 400 - streak_width  # Right align in streak column
+                
+                draw.text(
+                    (streak_x, row_y), 
+                    streak_text, 
+                    font=table_font, 
+                    fill="#11FF00"  # Green for streaks
+                )
             
-            lines.append(line)
+            # Balance (right-aligned)
+            balance_text = f"{entry.balance:,}"
+            balance_bbox = table_font.getbbox(balance_text)
+            balance_width = balance_bbox[2] - balance_bbox[0]
+            balance_x = self.PADDING_HORIZONTAL + content_width - balance_width
+            draw.text(
+                (balance_x, row_y), 
+                balance_text, 
+                font=table_font, 
+                fill="#00E1FF"  # Cyan for bytes amounts
+            )
         
-        description = "\n".join(lines)
-        return self.create_simple_embed("BYTES LEADERBOARD", description, "info")
+        # Convert to bytes
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format="PNG")
+        img_bytes.seek(0)
+        
+        # Create hikari Bytes object for binary data
+        return hikari.files.Bytes(img_bytes.getvalue(), "embed.png")
     
     def create_history_embed(
         self, 
@@ -474,22 +573,8 @@ class EmbedImageGenerator:
             title_color
         )
         
-        # Move to subtitle
-        current_y += title_font.getbbox(title_text)[3] + 16
-        
-        # Draw subtitle with smaller font
-        subtitle_font = self._fonts["text_medium"]
-        subtitle_text = f"Your last {len(transactions)} transactions"
-        self._draw_text_with_shadow(
-            draw, 
-            (self.PADDING_HORIZONTAL, current_y), 
-            subtitle_text, 
-            subtitle_font, 
-            self.TEXT_COLOR
-        )
-        
         # Move to content
-        current_y += subtitle_font.getbbox(subtitle_text)[3] + 20
+        current_y += title_font.getbbox(title_text)[3] + 64
         
         # Use smaller font for table content - try text_small instead of text_tiny
         table_font = self._fonts["text_small"]  # 24px instead of 20px to avoid rendering issues
@@ -512,14 +597,55 @@ class EmbedImageGenerator:
             # Determine transaction type and format
             if transaction.giver_id == user_id:
                 # User sent bytes
-                type_indicator = ">"  # Simple ASCII arrow
                 other_user = transaction.receiver_username
                 amount_text = f"-{transaction.amount:,}"
+                
+                # Special handling for squad join fees and other system transactions
+                if transaction.receiver_id == "SYSTEM":
+                    type_indicator = "-"  # System deduction
+                    if (transaction.reason and 
+                        transaction.reason.startswith("Squad join fee:")):
+                        # Extract squad name from reason: "Squad join fee: Squad Name"
+                        squad_name = transaction.reason.replace("Squad join fee: ", "")
+                        other_user = f"Joined {squad_name}"
+                    else:
+                        other_user = "System Charge"
+                else:
+                    type_indicator = ">"  # Regular transfer
+                    
             else:
                 # User received bytes
-                type_indicator = "<"  # Simple ASCII arrow
                 other_user = transaction.giver_username
                 amount_text = f"+{transaction.amount:,}"
+                
+                # Special handling for system rewards
+                if transaction.giver_id == "SYSTEM":
+                    type_indicator = "+"  # System reward
+                    if (transaction.reason and 
+                        transaction.reason.strip() == "New member welcome bonus"):
+                        other_user = "Welcome Bonus"
+                    elif (transaction.reason and 
+                        transaction.reason.startswith("Daily reward")):
+                        # Extract streak info from reason: "Daily reward (Day 5, 2x multiplier)"
+                        if "multiplier)" in transaction.reason:
+                            # Extract multiplier info
+                            import re
+                            match = re.search(r'Day (\d+)(?:, (\d+)x multiplier)?', transaction.reason)
+                            if match:
+                                day = match.group(1)
+                                multiplier = match.group(2)
+                                if multiplier and multiplier != "1":
+                                    other_user = f"Daily ({multiplier}x)"
+                                else:
+                                    other_user = f"Daily (Day {day})"
+                            else:
+                                other_user = "Daily Reward"
+                        else:
+                            other_user = "Daily Reward"
+                    else:
+                        other_user = "System Reward"
+                else:
+                    type_indicator = "<"  # Regular transfer
             
             # Truncate username if too long
             if len(other_user) > 15:
@@ -599,7 +725,7 @@ class EmbedImageGenerator:
         
         # Draw title
         title_font = self._fonts["title_medium"]
-        title_text = "BYTES ECONOMY CONFIG"
+        title_text = "Bytes Info"
         self._draw_text_with_shadow(
             draw, 
             (self.PADDING_HORIZONTAL, current_y), 
@@ -609,11 +735,11 @@ class EmbedImageGenerator:
         )
         
         # Move to subtitle
-        current_y += title_font.getbbox(title_text)[3] + 16
+        current_y += title_font.getbbox(title_text)[3] + 32
         
         # Draw subtitle with smaller font
         subtitle_font = self._fonts["text_medium"]
-        subtitle_text = f"Configuration for {guild_name}"
+        subtitle_text = f"Settings for {guild_name}"
         self._draw_text_with_shadow(
             draw, 
             (self.PADDING_HORIZONTAL, current_y), 
@@ -623,17 +749,18 @@ class EmbedImageGenerator:
         )
         
         # Move to content
-        current_y += subtitle_font.getbbox(subtitle_text)[3] + 24
+        current_y += subtitle_font.getbbox(subtitle_text)[3] + 32
         
         # Use smaller font for table content
         table_font = self._fonts["text_small"]
         
         # Create compact table layout
+        cooldown_text = "No cooldown" if config.transfer_cooldown_hours == 0 else f"{config.transfer_cooldown_hours} hours"
         config_items = [
-            ("Daily Amount:", f"{config.daily_amount:,} bytes"),
-            ("Starting Balance:", f"{config.starting_balance:,} bytes"),
+            ("Daily Activity Reward:", f"{config.daily_amount:,} bytes"),
+            ("New Member Balance:", f"{config.starting_balance:,} bytes"),
             ("Max Transfer:", f"{config.max_transfer:,} bytes"),
-            ("Transfer Cooldown:", f"{config.transfer_cooldown_hours} hours")
+            ("Transfer Cooldown:", cooldown_text)
         ]
         
         # Draw main config items in two columns
@@ -704,6 +831,642 @@ class EmbedImageGenerator:
         
         # Create hikari Bytes object for binary data
         return hikari.files.Bytes(img_bytes.getvalue(), "embed.png")
+    
+    def create_squad_list_embed(
+        self, 
+        squads: list, 
+        guild_name: str, 
+        current_squad_id: str = None
+    ) -> hikari.files.Bytes:
+        """Create a compact squad list embed image with table layout.
+        
+        Args:
+            squads: List of squad objects
+            guild_name: Name of the guild
+            current_squad_id: ID of user's current squad (if any)
+            
+        Returns:
+            hikari.File containing the generated image
+        """
+        if not squads:
+            return self.create_simple_embed("AVAILABLE SQUADS", "No squads have been created yet!", "info")
+        
+        # Load background
+        background = self._get_background("info")
+        
+        # Create working image - use full background size
+        img = background.copy()
+        draw = ImageDraw.Draw(img)
+        
+        # Calculate content area
+        content_width = img.width - (self.PADDING_HORIZONTAL * 2)
+        current_y = self.PADDING_TOP
+        
+        # Get colors
+        title_color = self.COLORS["info"]
+        
+        # Draw title
+        title_font = self._fonts["title_medium"]
+        title_text = "AVAILABLE SQUADS"
+        self._draw_text_with_shadow(
+            draw, 
+            (self.PADDING_HORIZONTAL, current_y), 
+            title_text, 
+            title_font, 
+            title_color
+        )
+        
+        # Move to table headers
+        current_y += title_font.getbbox(title_text)[3] + 64
+        
+        # Use smaller font for table content
+        table_font = self._fonts["text_small"]
+        
+        # Draw column headers
+        header_font = self._fonts["text_medium"]
+        
+        # Header: Squad Name | Members | Join Cost
+        # Squad Name header  
+        name_header = "Squad Name"
+        name_x = self.PADDING_HORIZONTAL
+        draw.text(
+            (name_x, current_y), 
+            name_header, 
+            font=header_font, 
+            fill=self.TEXT_COLOR
+        )
+        
+        # Members header (centered in its column)
+        members_header = "Members"
+        members_bbox = header_font.getbbox(members_header)
+        members_width = members_bbox[2] - members_bbox[0]
+        # Position members column to use full width better
+        members_column_start = content_width * 0.6  # 60% across the width
+        members_column_width = 100
+        members_x = self.PADDING_HORIZONTAL + members_column_start + (members_column_width - members_width) // 2
+        draw.text(
+            (members_x, current_y), 
+            members_header, 
+            font=header_font, 
+            fill=self.TEXT_COLOR
+        )
+        
+        # Join Cost header (right-aligned)
+        cost_header = "Join Cost"
+        cost_bbox = header_font.getbbox(cost_header)
+        cost_width = cost_bbox[2] - cost_bbox[0]
+        cost_x = self.PADDING_HORIZONTAL + content_width - cost_width
+        draw.text(
+            (cost_x, current_y), 
+            cost_header, 
+            font=header_font, 
+            fill=self.TEXT_COLOR
+        )
+        
+        # Move past headers
+        current_y += header_font.getbbox("A")[3] + 12
+        
+        # Process squads into compact table rows
+        for i, squad in enumerate(squads[:10]):  # Limit to 10 squads for space
+            # Create compact row: Name | Members | Cost
+            row_y = current_y + (i * 28)  # Spacing between rows
+            
+            # Squad name (truncate if too long)
+            name_text = squad.name
+            if len(name_text) > 25:  # Allow more characters now that status column is removed
+                name_text = name_text[:22] + "..."
+            
+            name_x = self.PADDING_HORIZONTAL
+            draw.text(
+                (name_x, row_y), 
+                name_text, 
+                font=table_font, 
+                fill=self.TEXT_COLOR
+            )
+            
+            # Member count
+            member_text = f"{squad.member_count}"
+            if squad.max_members:
+                member_text += f"/{squad.max_members}"
+            
+            member_bbox = table_font.getbbox(member_text)
+            member_width = member_bbox[2] - member_bbox[0]
+            # Center the member count in the column
+            member_x = self.PADDING_HORIZONTAL + members_column_start + (members_column_width - member_width) // 2
+            
+            draw.text(
+                (member_x, row_y), 
+                member_text, 
+                font=table_font, 
+                fill="#00E1FF"  # Cyan for member counts
+            )
+            
+            # Join cost (always show)
+            if squad.switch_cost > 0:
+                cost_text = f"{squad.switch_cost:,} bytes"
+                cost_color = "#11FF00"  # Green for costs (positive feeling)
+            else:
+                cost_text = "Free"
+                cost_color = "#11FF00"  # Green for free
+            
+            cost_bbox = table_font.getbbox(cost_text)
+            cost_width = cost_bbox[2] - cost_bbox[0]
+            cost_x = self.PADDING_HORIZONTAL + content_width - cost_width
+            
+            draw.text(
+                (cost_x, row_y), 
+                cost_text, 
+                font=table_font, 
+                fill=cost_color
+            )
+        
+        # Convert to bytes
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format="PNG")
+        img_bytes.seek(0)
+        
+        # Create hikari Bytes object for binary data
+        return hikari.files.Bytes(img_bytes.getvalue(), "embed.png")
+    
+    def create_squad_info_embed(
+        self, 
+        squad, 
+        members: list, 
+        user_member_info=None
+    ) -> hikari.files.Bytes:
+        """Create a detailed squad information embed image.
+        
+        Args:
+            squad: Squad object
+            members: List of squad members
+            user_member_info: User's membership information (if applicable)
+            
+        Returns:
+            hikari.File containing the generated image
+        """
+        # Load background
+        background = self._get_background("info")
+        
+        # Create working image - use full background size
+        img = background.copy()
+        draw = ImageDraw.Draw(img)
+        
+        # Calculate content area
+        content_width = img.width - (self.PADDING_HORIZONTAL * 2)
+        current_y = self.PADDING_TOP
+        
+        # Get colors
+        title_color = self.COLORS["info"]
+        
+        # Draw title (squad name)
+        title_font = self._fonts["title_medium"]
+        title_text = f"SQUAD: {squad.name.upper()}"
+        self._draw_text_with_shadow(
+            draw, 
+            (self.PADDING_HORIZONTAL, current_y), 
+            title_text, 
+            title_font, 
+            title_color
+        )
+        
+        # Move to subtitle
+        current_y += title_font.getbbox(title_text)[3] + 32
+        
+        # Draw description if available
+        if squad.description:
+            desc_font = self._fonts["text_medium"]
+            desc_lines = self._wrap_text_with_spacing(squad.description, desc_font, content_width)
+            
+            for line_text, needs_paragraph_spacing in desc_lines:
+                if line_text:
+                    self._draw_text_with_shadow(
+                        draw, 
+                        (self.PADDING_HORIZONTAL, current_y), 
+                        line_text, 
+                        desc_font, 
+                        self.TEXT_COLOR
+                    )
+                
+                line_height = desc_font.getbbox(line_text)[3] if line_text else desc_font.getbbox("A")[3]
+                if needs_paragraph_spacing:
+                    current_y += line_height + 12
+                else:
+                    current_y += line_height + 2
+            
+            current_y += 48  # Extra spacing after description
+        
+        # Squad stats section with full-width table
+        stats_font = self._fonts["text_small"]
+        
+        # Draw stats header
+        stats_header = "Squad Statistics:"
+        self._draw_text_with_shadow(
+            draw, 
+            (self.PADDING_HORIZONTAL, current_y), 
+            stats_header, 
+            stats_font, 
+            self.TEXT_COLOR
+        )
+        current_y += stats_font.getbbox(stats_header)[3] + 16
+        
+        # Create full-width table for stats
+        stats_items = [
+            ("Members", f"{len(members)}" + (f"/{squad.max_members}" if squad.max_members else "")),
+            ("Switch Cost", f"{squad.switch_cost:,} bytes"),
+            ("Status", "Active" if squad.is_active else "Inactive")
+        ]
+        
+        # Calculate column widths for full-width table
+        col1_width = content_width // 2
+        col2_x = self.PADDING_HORIZONTAL + col1_width
+        
+        for i, (label, value) in enumerate(stats_items):
+            stats_y = current_y + (i * 28)
+            
+            # Draw label (left column)
+            draw.text(
+                (self.PADDING_HORIZONTAL, stats_y), 
+                label, 
+                font=stats_font, 
+                fill=self.TEXT_COLOR
+            )
+            
+            # Draw value (right column, right-aligned)
+            value_bbox = stats_font.getbbox(value)
+            value_width = value_bbox[2] - value_bbox[0]
+            value_x = self.PADDING_HORIZONTAL + content_width - value_width
+            
+            draw.text(
+                (value_x, stats_y), 
+                value, 
+                font=stats_font, 
+                fill="#00E1FF"
+            )
+        
+        current_y += len(stats_items) * 28 + 16
+        
+        # User membership info if available
+        if user_member_info and user_member_info.member_since:
+            member_header = "Your Membership:"
+            self._draw_text_with_shadow(
+                draw, 
+                (self.PADDING_HORIZONTAL, current_y), 
+                member_header, 
+                stats_font, 
+                self.TEXT_COLOR
+            )
+            current_y += stats_font.getbbox(member_header)[3] + 8
+            
+            # Membership duration
+            from datetime import datetime
+            membership_duration = datetime.now() - user_member_info.member_since
+            days = membership_duration.days
+            
+            member_info = f"Member for {days} day{'s' if days != 1 else ''}"
+            draw.text(
+                (self.PADDING_HORIZONTAL + 20, current_y), 
+                member_info, 
+                font=stats_font, 
+                fill="#11FF00"
+            )
+            current_y += stats_font.getbbox(member_info)[3] + 16
+        
+        
+        # Convert to bytes
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format="PNG")
+        img_bytes.seek(0)
+        
+        # Create hikari Bytes object for binary data
+        return hikari.files.Bytes(img_bytes.getvalue(), "embed.png")
+    
+    def create_squad_members_embed(
+        self, 
+        squad, 
+        members: list
+    ) -> hikari.files.Bytes:
+        """Create a squad members list embed image with table layout.
+        
+        Args:
+            squad: Squad object
+            members: List of squad members
+            
+        Returns:
+            hikari.File containing the generated image
+        """
+        if not members:
+            return self.create_simple_embed(f"MEMBERS: {squad.name.upper()}", "This squad has no members.", "info")
+        
+        # Load background
+        background = self._get_background("info")
+        
+        # Create working image - use full background size
+        img = background.copy()
+        draw = ImageDraw.Draw(img)
+        
+        # Calculate content area
+        content_width = img.width - (self.PADDING_HORIZONTAL * 2)
+        current_y = self.PADDING_TOP
+        
+        # Get colors
+        title_color = self.COLORS["info"]
+        
+        # Draw title
+        title_font = self._fonts["title_medium"]
+        title_text = f"MEMBERS: {squad.name.upper()}"
+        self._draw_text_with_shadow(
+            draw, 
+            (self.PADDING_HORIZONTAL, current_y), 
+            title_text, 
+            title_font, 
+            title_color
+        )
+        
+        # Move to subtitle
+        current_y += title_font.getbbox(title_text)[3] + 32
+        
+        # Draw subtitle with member count
+        subtitle_font = self._fonts["text_medium"]
+        subtitle_text = f"{len(members)} member{'s' if len(members) != 1 else ''}"
+        self._draw_text_with_shadow(
+            draw, 
+            (self.PADDING_HORIZONTAL, current_y), 
+            subtitle_text, 
+            subtitle_font, 
+            self.TEXT_COLOR
+        )
+        
+        # Move to content
+        current_y += subtitle_font.getbbox(subtitle_text)[3] + 32
+        
+        # Use smaller font for table content
+        table_font = self._fonts["text_small"]
+        
+        # Process members into compact table rows (show up to 15 for space)
+        for i, member in enumerate(members[:15]):
+            # Member name
+            member_name = member.username if member.username else f"User {member.user_id[:8]}"
+            if len(member_name) > 20:
+                member_name = member_name[:17] + "..."
+            
+            # Create compact row: # | Name | Join Date
+            row_y = current_y + (i * 26)
+            
+            # Member number
+            number_text = f"{i + 1}."
+            draw.text(
+                (self.PADDING_HORIZONTAL, row_y), 
+                number_text, 
+                font=table_font, 
+                fill=self.TEXT_COLOR
+            )
+            
+            # Member name
+            name_x = self.PADDING_HORIZONTAL + 40
+            draw.text(
+                (name_x, row_y), 
+                member_name, 
+                font=table_font, 
+                fill=self.TEXT_COLOR
+            )
+            
+            # Join date (if available)
+            if member.joined_at:
+                join_text = member.joined_at.strftime("%m/%d/%y")
+                join_bbox = table_font.getbbox(join_text)
+                join_width = join_bbox[2] - join_bbox[0]
+                join_x = self.PADDING_HORIZONTAL + content_width - join_width
+                
+                draw.text(
+                    (join_x, row_y), 
+                    join_text, 
+                    font=table_font, 
+                    fill="#00E1FF"  # Cyan for dates
+                )
+        
+        # Show truncation note if more members exist
+        if len(members) > 15:
+            truncate_y = current_y + (15 * 26) + 10
+            truncate_text = f"... and {len(members) - 15} more members"
+            draw.text(
+                (self.PADDING_HORIZONTAL, truncate_y), 
+                truncate_text, 
+                font=table_font, 
+                fill="#888888"  # Gray for truncation note
+            )
+        
+        # Convert to bytes
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format="PNG")
+        img_bytes.seek(0)
+        
+        # Create hikari Bytes object for binary data
+        return hikari.files.Bytes(img_bytes.getvalue(), "embed.png")
+    
+    def create_squad_join_selector_embed(
+        self, 
+        user_balance: int, 
+        current_squad_name: str = None, 
+        available_squads_count: int = 0
+    ) -> hikari.files.Bytes:
+        """Create a squad join selector embed image.
+        
+        Args:
+            user_balance: User's current bytes balance
+            current_squad_name: Name of user's current squad (if any)
+            available_squads_count: Number of available squads
+            
+        Returns:
+            hikari.File containing the generated image
+        """
+        # Load background
+        background = self._get_background("info")
+        
+        # Create working image - use full background size
+        img = background.copy()
+        draw = ImageDraw.Draw(img)
+        
+        # Calculate content area
+        content_width = img.width - (self.PADDING_HORIZONTAL * 2)
+        current_y = self.PADDING_TOP
+        
+        # Get colors
+        title_color = self.COLORS["info"]
+        
+        # Draw title
+        title_font = self._fonts["title_medium"]
+        title_text = "SELECT A SQUAD TO JOIN"
+        self._draw_text_with_shadow(
+            draw, 
+            (self.PADDING_HORIZONTAL, current_y), 
+            title_text, 
+            title_font, 
+            title_color
+        )
+        
+        # Move to subtitle
+        current_y += title_font.getbbox(title_text)[3] + 32
+        
+        # Draw subtitle
+        subtitle_font = self._fonts["text_medium"]
+        subtitle_text = "Choose a squad from the menu below."
+        subtitle_lines = self._wrap_text_with_spacing(subtitle_text, subtitle_font, content_width)
+        
+        for line_text, needs_paragraph_spacing in subtitle_lines:
+            if line_text:
+                self._draw_text_with_shadow(
+                    draw, 
+                    (self.PADDING_HORIZONTAL, current_y), 
+                    line_text, 
+                    subtitle_font, 
+                    self.TEXT_COLOR
+                )
+            
+            line_height = subtitle_font.getbbox(line_text)[3] if line_text else subtitle_font.getbbox("A")[3]
+            current_y += line_height + 2
+        
+        current_y += 20  # Extra spacing
+        
+        # User info section
+        info_font = self._fonts["text_small"]
+        
+        # User balance (only show this)
+        balance_text = f"Your Balance: {user_balance:,} bytes"
+        self._draw_text_with_shadow(
+            draw, 
+            (self.PADDING_HORIZONTAL, current_y), 
+            balance_text, 
+            info_font, 
+            "#00E1FF"  # Cyan for balance
+        )
+        
+        # Convert to bytes
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format="PNG")
+        img_bytes.seek(0)
+        
+        # Create hikari Bytes object for binary data
+        return hikari.files.Bytes(img_bytes.getvalue(), "embed.png")
+
+    def create_balance_embed(
+        self,
+        username: str,
+        balance: int,
+        streak_count: int = 0,
+        last_daily: Optional[str] = None,
+        total_received: int = 0,
+        total_sent: int = 0
+    ) -> hikari.files.Bytes:
+        """Create a compact balance embed with table layout matching other commands.
+        
+        Args:
+            username: User's display name
+            balance: Current bytes balance
+            streak_count: Daily claim streak count
+            last_daily: Last daily claim date string
+            total_received: Total bytes received
+            total_sent: Total bytes sent
+            
+        Returns:
+            Bytes object containing the embed image
+        """
+        # Load background - use original size to match other commands
+        background = self._get_background("info")
+        
+        # Create working image - use full background size
+        img = background.copy()
+        draw = ImageDraw.Draw(img)
+        
+        # Calculate content area
+        content_width = img.width - (self.PADDING_HORIZONTAL * 2)
+        current_y = self.PADDING_TOP
+        
+        # Title
+        title_font = self._fonts["title_medium"]
+        title_text = "BYTES BALANCE"
+        self._draw_text_with_shadow(
+            draw, 
+            (self.PADDING_HORIZONTAL, current_y), 
+            title_text, 
+            title_font, 
+            self.COLORS["info"]
+        )
+        
+        # Subtitle with username
+        current_y += title_font.getbbox(title_text)[3] + 32
+        subtitle_font = self._fonts["text_medium"]
+        subtitle_text = f"Account overview for {username}"
+        self._draw_text_with_shadow(
+            draw, 
+            (self.PADDING_HORIZONTAL, current_y), 
+            subtitle_text, 
+            subtitle_font, 
+            self.TEXT_COLOR
+        )
+        
+        # Move to content
+        current_y += subtitle_font.getbbox(subtitle_text)[3] + 32
+        
+        # Use smaller font for table content
+        table_font = self._fonts["text_small"]
+        
+        # Create table rows with consistent spacing
+        rows = [
+            ("Balance:", f"{balance:,} bytes", "#00E1FF"),
+        ]
+        
+        if streak_count > 0:
+            rows.append(("Streak:", f"{streak_count} days", "#FF6B35"))
+        
+        if last_daily:
+            rows.append(("Last Daily:", last_daily, "#B0B0B0"))
+        
+        if total_received > 0:
+            rows.append(("Total Received:", f"{total_received:,}", "#11FF00"))
+        
+        if total_sent > 0:
+            rows.append(("Total Sent:", f"{total_sent:,}", "#FF9999"))
+        
+        # Net calculation
+        if total_received > 0 or total_sent > 0:
+            net_change = total_received - total_sent
+            net_color = "#11FF00" if net_change >= 0 else "#FF6B6B"
+            net_prefix = "+" if net_change >= 0 else ""
+            rows.append(("Net Change:", f"{net_prefix}{net_change:,}", net_color))
+        
+        # Draw table rows
+        for label, value, color in rows:
+            row_y = current_y
+            
+            # Left align label
+            draw.text(
+                (self.PADDING_HORIZONTAL, row_y),
+                label,
+                font=table_font,
+                fill=self.TEXT_COLOR
+            )
+            
+            # Right align value
+            value_bbox = table_font.getbbox(value)
+            value_width = value_bbox[2] - value_bbox[0]
+            value_x = self.PADDING_HORIZONTAL + content_width - value_width
+            
+            draw.text(
+                (value_x, row_y),
+                value,
+                font=table_font,
+                fill=color
+            )
+            
+            current_y += table_font.getbbox(label)[3] + 12
+        
+        # Convert to bytes
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format="PNG")
+        img_bytes.seek(0)
+        
+        # Create hikari Bytes object for binary data
+        return hikari.files.Bytes(img_bytes.getvalue(), "balance.png")
 
 
 # Global instance for easy access

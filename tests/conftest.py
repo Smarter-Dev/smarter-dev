@@ -9,6 +9,7 @@ from typing import Dict
 from typing import Any
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
+import uuid
 
 import pytest
 import pytest_asyncio
@@ -29,12 +30,26 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 TEST_REDIS_URL = "redis://localhost:6379/15"  # Use a different DB for tests
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def event_loop():
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
+    """Create an instance of the default event loop for each test function."""
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        yield loop
+    finally:
+        try:
+            # Cancel all pending tasks before closing
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            # Give tasks time to cancel
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        except Exception:
+            pass  # Ignore cleanup errors
+        finally:
+            loop.close()
 
 
 @pytest.fixture(scope="session")
@@ -52,44 +67,100 @@ def test_settings() -> Settings:
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 async def test_engine():
     """Create test database engine."""
+    import tempfile
+    import os
+    import uuid
+    
+    # Create a unique temporary database file for complete isolation
+    temp_dir = tempfile.mkdtemp()
+    db_name = f"test_db_{uuid.uuid4().hex}.db"
+    db_path = os.path.join(temp_dir, db_name)
+    database_url = f"sqlite+aiosqlite:///{db_path}"
+    
     engine = create_async_engine(
-        TEST_DATABASE_URL,
+        database_url,
         poolclass=StaticPool,
         echo=False,
         future=True,
         connect_args={"check_same_thread": False},
     )
     
-    # Create all tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
-    yield engine
-    
-    # Drop all tables and close
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
+    try:
+        # Create all tables
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        
+        yield engine
+        
+    finally:
+        # Clean up with proper async handling
+        try:
+            await engine.dispose()
+            # Give time for cleanup to complete
+            import asyncio
+            await asyncio.sleep(0.05)
+            # Clean up the temporary database file
+            if os.path.exists(db_path):
+                os.remove(db_path)
+            if os.path.exists(temp_dir):
+                os.rmdir(temp_dir)
+        except Exception:
+            pass  # Ignore disposal errors
 
 
 @pytest.fixture
 async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
-    """Create a test database session with transaction rollback."""
+    """Create a test database session with balanced isolation and usability."""
     # Recreate tables for each test to ensure isolation
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     
+    # Use expire_on_commit=False for better test usability
+    # We'll handle isolation through table recreation and session cleanup
     session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
     
-    async with session_maker() as session:
+    session = session_maker()
+    try:
+        yield session
+    finally:
         try:
-            yield session
-        finally:
+            # Close and clean up session properly
             await session.close()
+            # Give time for session cleanup to complete
+            import asyncio
+            await asyncio.sleep(0.01)
+        except Exception:
+            pass  # Ignore close errors
+
+
+@pytest.fixture
+async def isolated_db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
+    """Create a strictly isolated database session for tests requiring maximum isolation."""
+    # Recreate tables for each test to ensure isolation
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    
+    # Use expire_on_commit=True for maximum isolation
+    session_maker = async_sessionmaker(test_engine, expire_on_commit=True)
+    
+    session = session_maker()
+    try:
+        yield session
+    finally:
+        try:
+            # Expunge all objects to clear identity map
+            session.expunge_all()
+            await session.close()
+            # Give time for session cleanup to complete
+            import asyncio
+            await asyncio.sleep(0.01)
+        except Exception:
+            pass  # Ignore close errors
 
 
 @pytest.fixture
@@ -104,6 +175,107 @@ async def redis_manager(test_settings) -> AsyncGenerator[RedisManager, None]:
     if manager.client:
         await manager.client.flushdb()
         await manager.close()
+
+
+@pytest.fixture(scope="function")
+def unique_guild_id() -> str:
+    """Generate unique guild ID per test function."""
+    return f"test_guild_{uuid.uuid4().hex[:8]}"
+
+
+@pytest.fixture(scope="function")
+def unique_user_id() -> str:
+    """Generate unique user ID per test function."""
+    return f"test_user_{uuid.uuid4().hex[:8]}"
+
+
+@pytest.fixture(scope="function")
+def unique_squad_id() -> str:
+    """Generate unique squad ID per test function."""
+    return f"test_squad_{uuid.uuid4().hex[:8]}"
+
+
+@pytest.fixture
+def mock_bytes_service() -> Mock:
+    """Create a properly configured BytesService mock with all expected attributes."""
+    from smarter_dev.bot.services.bytes_service import BytesService
+    
+    mock_service = AsyncMock(spec=BytesService)
+    
+    # Pre-configure all statistic attributes that the service uses
+    mock_service._cache_hits = 0
+    mock_service._cache_misses = 0
+    mock_service._balance_requests = 0
+    mock_service._daily_claims = 0
+    mock_service._transfers = 0
+    mock_service._service_name = "BytesService"
+    
+    # Configure common method returns
+    mock_service.initialize = AsyncMock()
+    mock_service.close = AsyncMock()
+    
+    return mock_service
+
+
+@pytest.fixture  
+def mock_squads_service() -> Mock:
+    """Create a properly configured SquadsService mock with all expected attributes."""
+    from smarter_dev.bot.services.squads_service import SquadsService
+    
+    mock_service = AsyncMock(spec=SquadsService)
+    
+    # Pre-configure all statistic attributes that the service uses
+    mock_service._squad_list_requests = 0
+    mock_service._member_lookups = 0
+    mock_service._join_attempts = 0
+    mock_service._leave_attempts = 0
+    mock_service._service_name = "SquadsService"
+    
+    # Configure common method returns
+    mock_service.initialize = AsyncMock()
+    mock_service.close = AsyncMock()
+    
+    return mock_service
+
+
+@pytest.fixture
+def mock_api_client() -> Mock:
+    """Create a properly configured APIClient mock with all expected attributes."""
+    from smarter_dev.bot.services.api_client import APIClient
+    
+    mock_client = AsyncMock(spec=APIClient)
+    
+    # Pre-configure all statistic attributes that the client uses
+    mock_client._request_count = 0
+    mock_client._error_count = 0
+    mock_client._total_response_time = 0.0
+    
+    # Configure common method returns
+    mock_client.close = AsyncMock()
+    
+    return mock_client
+
+
+@pytest.fixture
+def mock_cache_manager() -> Mock:
+    """Create a properly configured CacheManager mock with all expected attributes."""
+    from smarter_dev.bot.services.cache_manager import CacheManager
+    
+    mock_manager = AsyncMock(spec=CacheManager)
+    
+    # Pre-configure all statistic attributes
+    mock_manager._cache_hits = 0
+    mock_manager._cache_misses = 0
+    mock_manager._operations = 0
+    
+    # Configure cache operations
+    mock_manager.get = AsyncMock(return_value=None)
+    mock_manager.set = AsyncMock(return_value=True)
+    mock_manager.delete = AsyncMock(return_value=True)
+    mock_manager.clear = AsyncMock(return_value=True)
+    mock_manager.close = AsyncMock()
+    
+    return mock_manager
 
 
 @pytest.fixture
@@ -128,12 +300,31 @@ def mock_redis_manager() -> Mock:
 async def api_client(test_settings) -> AsyncGenerator[AsyncClient, None]:
     """Create an async HTTP client for API testing."""
     # Import here to avoid circular imports
-    from smarter_dev.web.api.app import create_app
+    from smarter_dev.web.api.app import api
+    from httpx import ASGITransport
+    from unittest.mock import patch
     
-    app = create_app(test_settings)
-    
-    async with AsyncClient(app=app, base_url="http://test") as client:
-        yield client
+    # Mock database initialization to avoid conflicts
+    with patch('smarter_dev.web.api.app.init_database'), \
+         patch('smarter_dev.web.api.app.close_database'), \
+         patch('smarter_dev.shared.config.get_settings', return_value=test_settings):
+        
+        # Set test settings on the app
+        api.state.settings = test_settings
+        
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=api),
+                base_url="http://test"
+            ) as client:
+                yield client
+        finally:
+            # Clean up API state
+            try:
+                if hasattr(api, 'state'):
+                    api.state.settings = None
+            except Exception:
+                pass
 
 
 @pytest.fixture

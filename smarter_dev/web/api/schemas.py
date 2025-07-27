@@ -111,6 +111,7 @@ class DailyClaimRequest(BaseAPIModel):
     """Request model for daily bytes claim."""
     
     user_id: str = Field(description="Discord user ID claiming daily")
+    username: Optional[str] = Field(None, description="Discord username for transaction records")
     
     @field_validator('user_id')
     @classmethod
@@ -145,10 +146,9 @@ class BytesConfigResponse(BaseAPIModel):
     daily_amount: int = Field(ge=1, description="Base daily reward amount")
     starting_balance: int = Field(ge=0, description="Starting balance for new users")
     max_transfer: int = Field(ge=1, description="Maximum transfer amount")
-    daily_cooldown_hours: int = Field(ge=1, le=48, description="Hours between daily claims")
+    transfer_cooldown_hours: int = Field(ge=0, description="Hours between transfers")
     streak_bonuses: Dict[int, int] = Field(description="Streak day to multiplier mapping")
-    transfer_tax_rate: float = Field(ge=0.0, le=1.0, description="Tax rate on transfers")
-    is_enabled: bool = Field(description="Whether bytes system is enabled")
+    role_rewards: Dict[str, int] = Field(description="Role ID to minimum reward mapping")
     created_at: datetime = Field(description="Configuration creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")
     
@@ -203,6 +203,7 @@ class SquadResponse(BaseAPIModel):
     role_id: str = Field(description="Discord role ID")
     name: str = Field(description="Squad name")
     description: Optional[str] = Field(description="Squad description")
+    welcome_message: Optional[str] = Field(description="Custom welcome message")
     max_members: Optional[int] = Field(description="Maximum member limit")
     switch_cost: int = Field(description="Cost to join squad")
     member_count: int = Field(description="Current member count")
@@ -221,6 +222,7 @@ class SquadCreate(BaseAPIModel):
     role_id: str = Field(description="Discord role ID for squad")
     name: str = Field(min_length=1, max_length=100, description="Squad name")
     description: Optional[str] = Field(None, max_length=500, description="Squad description")
+    welcome_message: Optional[str] = Field(None, max_length=500, description="Custom welcome message")
     max_members: Optional[int] = Field(None, ge=1, le=1000, description="Member limit")
     switch_cost: int = Field(ge=0, le=10000, default=50, description="Cost to join")
     
@@ -242,6 +244,7 @@ class SquadUpdate(BaseAPIModel):
     
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="Squad name")
     description: Optional[str] = Field(None, max_length=500, description="Description")
+    welcome_message: Optional[str] = Field(None, max_length=500, description="Custom welcome message")
     max_members: Optional[int] = Field(None, ge=1, le=1000, description="Member limit")
     switch_cost: Optional[int] = Field(None, ge=0, le=10000, description="Join cost")
     is_active: Optional[bool] = Field(None, description="Active status")
@@ -265,6 +268,7 @@ class SquadJoinRequest(BaseAPIModel):
     """Request model for joining a squad."""
     
     user_id: str = Field(description="Discord user ID")
+    username: Optional[str] = Field(None, description="Discord username for transaction records")
     
     @field_validator('user_id')
     @classmethod

@@ -32,7 +32,7 @@ class TestBytesBalance:
         balance_mock.created_at = datetime.now(timezone.utc)
         balance_mock.updated_at = datetime.now(timezone.utc)
         
-        mock_bytes_operations.get_balance.return_value = balance_mock
+        mock_bytes_operations.get_or_create_balance.return_value = balance_mock
         
         response = await api_client.get(
             f"/guilds/{test_guild_id}/bytes/balance/{test_user_id}",
@@ -96,6 +96,8 @@ class TestBytesBalance:
         assert response.status_code == 403
 
 
+
+
 class TestDailyClaim:
     """Test daily claim endpoints."""
     
@@ -111,41 +113,49 @@ class TestDailyClaim:
         sample_bytes_config_data: dict
     ):
         """Test successful daily claim."""
-        # Mock config
-        config_mock = Mock()
-        for key, value in sample_bytes_config_data.items():
-            setattr(config_mock, key, value)
-        mock_bytes_config_operations.get_config.return_value = config_mock
+        from unittest.mock import patch
+        from smarter_dev.shared.date_provider import MockDateProvider
         
-        # Mock current balance
-        balance_mock = Mock()
-        for key, value in sample_bytes_balance_data.items():
-            setattr(balance_mock, key, value)
-        balance_mock.last_daily = date.today() - timedelta(days=1)  # Yesterday
-        mock_bytes_operations.get_balance.return_value = balance_mock
+        # Mock date provider to ensure consistent date
+        test_date = date(2024, 1, 15)
+        mock_date_provider = MockDateProvider(fixed_date=test_date)
         
-        # Mock updated balance after claim
-        updated_balance = Mock()
-        for key, value in sample_bytes_balance_data.items():
-            setattr(updated_balance, key, value)
-        updated_balance.balance = 120  # Original 100 + 20 (10 * 2 streak bonus)
-        updated_balance.streak_count = 4
-        updated_balance.last_daily = date.today()
-        updated_balance.created_at = datetime.now(timezone.utc)
-        updated_balance.updated_at = datetime.now(timezone.utc)
-        mock_bytes_operations.update_daily_reward.return_value = updated_balance
-        
-        response = await api_client.post(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-            headers=bot_headers
-        )
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert data["balance"]["balance"] == 120
-        assert data["reward_amount"] == 20  # 10 * 2 streak bonus
-        assert data["streak_bonus"] == 2
-        assert "next_claim_at" in data
+        with patch('smarter_dev.web.api.routers.bytes.get_date_provider', return_value=mock_date_provider):
+            # Mock config
+            config_mock = Mock()
+            for key, value in sample_bytes_config_data.items():
+                setattr(config_mock, key, value)
+            mock_bytes_config_operations.get_config.return_value = config_mock
+            
+            # Mock current balance with yesterday's claim date
+            balance_mock = Mock()
+            for key, value in sample_bytes_balance_data.items():
+                setattr(balance_mock, key, value)
+            balance_mock.last_daily = test_date - timedelta(days=1)  # Yesterday relative to test_date
+            mock_bytes_operations.get_balance.return_value = balance_mock
+            
+            # Mock updated balance after claim
+            updated_balance = Mock()
+            for key, value in sample_bytes_balance_data.items():
+                setattr(updated_balance, key, value)
+            updated_balance.balance = 120  # Original 100 + 20 (10 * 2 streak bonus)
+            updated_balance.streak_count = 4
+            updated_balance.last_daily = test_date
+            updated_balance.created_at = datetime.now(timezone.utc)
+            updated_balance.updated_at = datetime.now(timezone.utc)
+            mock_bytes_operations.update_daily_reward.return_value = updated_balance
+            
+            response = await api_client.post(
+                f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
+                headers=bot_headers
+            )
+            
+            assert response.status_code == 200
+            data = response.json()
+            assert data["balance"]["balance"] == 120
+            assert data["reward_amount"] == 20  # 10 * 2 streak bonus
+            assert data["streak_bonus"] == 2
+            assert "next_claim_at" in data
     
     async def test_claim_daily_already_claimed(
         self,
@@ -159,27 +169,35 @@ class TestDailyClaim:
         sample_bytes_config_data: dict
     ):
         """Test daily claim when already claimed today."""
-        # Mock config
-        config_mock = Mock()
-        for key, value in sample_bytes_config_data.items():
-            setattr(config_mock, key, value)
-        mock_bytes_config_operations.get_config.return_value = config_mock
+        from unittest.mock import patch
+        from smarter_dev.shared.date_provider import MockDateProvider
         
-        # Mock balance with today's claim
-        balance_mock = Mock()
-        for key, value in sample_bytes_balance_data.items():
-            setattr(balance_mock, key, value)
-        balance_mock.last_daily = date.today()  # Already claimed today
-        mock_bytes_operations.get_balance.return_value = balance_mock
+        # Mock date provider to ensure consistent date
+        test_date = date(2024, 1, 15)
+        mock_date_provider = MockDateProvider(fixed_date=test_date)
         
-        response = await api_client.post(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-            headers=bot_headers
-        )
-        
-        assert response.status_code == 409
-        response_data = response.json()
-        assert "already been claimed" in response_data["detail"]["detail"]
+        with patch('smarter_dev.web.api.routers.bytes.get_date_provider', return_value=mock_date_provider):
+            # Mock config
+            config_mock = Mock()
+            for key, value in sample_bytes_config_data.items():
+                setattr(config_mock, key, value)
+            mock_bytes_config_operations.get_config.return_value = config_mock
+            
+            # Mock balance with today's claim
+            balance_mock = Mock()
+            for key, value in sample_bytes_balance_data.items():
+                setattr(balance_mock, key, value)
+            balance_mock.last_daily = test_date  # Already claimed today
+            mock_bytes_operations.get_balance.return_value = balance_mock
+            
+            response = await api_client.post(
+                f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
+                headers=bot_headers
+            )
+            
+            assert response.status_code == 409
+            response_data = response.json()
+            assert "already been claimed" in response_data["detail"]["detail"]
     
     async def test_claim_daily_new_streak(
         self,
@@ -193,38 +211,47 @@ class TestDailyClaim:
         sample_bytes_config_data: dict
     ):
         """Test daily claim starting new streak."""
-        # Mock config
-        config_mock = Mock()
-        for key, value in sample_bytes_config_data.items():
-            setattr(config_mock, key, value)
-        mock_bytes_config_operations.get_config.return_value = config_mock
+        from unittest.mock import patch
+        from smarter_dev.shared.date_provider import MockDateProvider
         
-        # Mock balance with no recent claim (new streak)
-        balance_mock = Mock()
-        for key, value in sample_bytes_balance_data.items():
-            setattr(balance_mock, key, value)
-        balance_mock.last_daily = date.today() - timedelta(days=5)  # 5 days ago
-        mock_bytes_operations.get_balance.return_value = balance_mock
+        # Mock date provider to ensure consistent date
+        test_date = date(2024, 1, 15)
+        mock_date_provider = MockDateProvider(fixed_date=test_date)
         
-        # Mock updated balance
-        updated_balance = Mock()
-        for key, value in sample_bytes_balance_data.items():
-            setattr(updated_balance, key, value)
-        updated_balance.balance = 110  # Original + 10 (no streak bonus)
-        updated_balance.streak_count = 1
-        updated_balance.created_at = datetime.now(timezone.utc)
-        updated_balance.updated_at = datetime.now(timezone.utc)
-        mock_bytes_operations.update_daily_reward.return_value = updated_balance
-        
-        response = await api_client.post(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-            headers=bot_headers
-        )
-        
-        assert response.status_code == 200
-        data = response.json()
-        assert data["reward_amount"] == 10  # Base amount, no streak bonus
-        assert data["streak_bonus"] == 1
+        with patch('smarter_dev.web.api.routers.bytes.get_date_provider', return_value=mock_date_provider):
+            # Mock config
+            config_mock = Mock()
+            for key, value in sample_bytes_config_data.items():
+                setattr(config_mock, key, value)
+            mock_bytes_config_operations.get_config.return_value = config_mock
+            
+            # Mock balance with no recent claim (new streak)
+            balance_mock = Mock()
+            for key, value in sample_bytes_balance_data.items():
+                setattr(balance_mock, key, value)
+            balance_mock.last_daily = test_date - timedelta(days=5)  # 5 days ago
+            mock_bytes_operations.get_balance.return_value = balance_mock
+            
+            # Mock updated balance
+            updated_balance = Mock()
+            for key, value in sample_bytes_balance_data.items():
+                setattr(updated_balance, key, value)
+            updated_balance.balance = 110  # Original + 10 (no streak bonus)
+            updated_balance.streak_count = 1
+            updated_balance.last_daily = test_date
+            updated_balance.created_at = datetime.now(timezone.utc)
+            updated_balance.updated_at = datetime.now(timezone.utc)
+            mock_bytes_operations.update_daily_reward.return_value = updated_balance
+            
+            response = await api_client.post(
+                f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
+                headers=bot_headers
+            )
+            
+            assert response.status_code == 200
+            data = response.json()
+            assert data["reward_amount"] == 10  # Base amount, no streak bonus
+            assert data["streak_bonus"] == 1
 
 
 class TestTransactions:

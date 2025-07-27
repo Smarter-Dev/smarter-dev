@@ -1,0 +1,276 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Dashboard - Smarter Dev Admin{% endblock %}
+
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="row row-deck row-cards">
+    <!-- Statistics Cards -->
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="subheader">Total Users</div>
+                </div>
+                <div class="h1 mb-3">{{ "{:,}".format(total_users) }}</div>
+                <div class="d-flex mb-2">
+                    <div class="flex-fill">
+                        <div class="progress progress-sm">
+                            <div class="progress-bar bg-primary" style="width: 100%" role="progressbar"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-muted">Across all guilds</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="subheader">Total Transactions</div>
+                </div>
+                <div class="h1 mb-3">{{ "{:,}".format(total_transactions) }}</div>
+                <div class="d-flex mb-2">
+                    <div class="flex-fill">
+                        <div class="progress progress-sm">
+                            <div class="progress-bar bg-green" style="width: 100%" role="progressbar"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-muted">Bytes transfers</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="subheader">Total Squads</div>
+                </div>
+                <div class="h1 mb-3">{{ total_squads }}</div>
+                <div class="d-flex mb-2">
+                    <div class="flex-fill">
+                        <div class="progress progress-sm">
+                            <div class="progress-bar bg-yellow" style="width: 100%" role="progressbar"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-muted">Active teams</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="subheader">Bytes in Circulation</div>
+                </div>
+                <div class="h1 mb-3">{{ "{:,}".format(total_bytes) }}</div>
+                <div class="d-flex mb-2">
+                    <div class="flex-fill">
+                        <div class="progress progress-sm">
+                            <div class="progress-bar bg-info" style="width: 100%" role="progressbar"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-muted">Total economy value</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Guilds Overview -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Guild Overview</h3>
+                <div class="card-actions">
+                    <a href="/admin/guilds" class="btn btn-primary">
+                        View All Guilds
+                    </a>
+                </div>
+            </div>
+            <div class="card-body">
+                {% if guilds %}
+                <div class="row">
+                    {% for guild_info in guilds %}
+                    <div class="col-md-6 col-lg-4 mb-3">
+                        <div class="card card-sm">
+                            <div class="card-body">
+                                <div class="d-flex align-items-center mb-3">
+                                    {% if guild_info.guild.icon_url %}
+                                    <img src="{{ guild_info.guild.icon_url }}" alt="{{ guild_info.guild.name }}" class="guild-icon me-3">
+                                    {% else %}
+                                    <div class="guild-icon-placeholder me-3">
+                                        {{ guild_info.guild.name[0].upper() }}
+                                    </div>
+                                    {% endif %}
+                                    <div>
+                                        <h4 class="mb-1">{{ guild_info.guild.name }}</h4>
+                                        <div class="text-muted small">ID: {{ guild_info.guild.id }}</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="row">
+                                    <div class="col-6">
+                                        <div class="text-center">
+                                            <div class="h3 mb-1">{{ guild_info.user_count }}</div>
+                                            <div class="text-muted small">Users</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="text-center">
+                                            <div class="h3 mb-1">{{ guild_info.squad_count }}</div>
+                                            <div class="text-muted small">Squads</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="mt-3">
+                                    <a href="/admin/guilds/{{ guild_info.guild.id }}" class="btn btn-outline-primary w-100">
+                                        Manage Guild
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="empty">
+                    <div class="empty-img">
+                        <svg class="icon" width="48" height="48">
+                            <use xlink:href="#tabler-building-community"></use>
+                        </svg>
+                    </div>
+                    <p class="empty-title">No guilds found</p>
+                    <p class="empty-subtitle text-muted">
+                        {% if error %}
+                        {{ error }}
+                        {% else %}
+                        The bot is not currently in any Discord servers, or there was an error fetching guild information.
+                        {% endif %}
+                    </p>
+                    <div class="empty-action">
+                        <a href="https://discord.com/developers/applications" class="btn btn-primary" target="_blank">
+                            Manage Bot Application
+                        </a>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Quick Actions</h3>
+            </div>
+            <div class="card-body">
+                <div class="list-group list-group-flush">
+                    <div class="list-group-item">
+                        <div class="row align-items-center">
+                            <div class="col-auto">
+                                <svg class="icon text-primary" width="24" height="24">
+                                    <use xlink:href="#tabler-building-community"></use>
+                                </svg>
+                            </div>
+                            <div class="col">
+                                <a href="/admin/guilds" class="text-decoration-none">
+                                    <strong>Manage Guilds</strong>
+                                    <div class="text-muted">Configure bytes and squads for each server</div>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="list-group-item">
+                        <div class="row align-items-center">
+                            <div class="col-auto">
+                                <svg class="icon text-green" width="24" height="24">
+                                    <use xlink:href="#tabler-coin"></use>
+                                </svg>
+                            </div>
+                            <div class="col">
+                                <a href="/api/docs" class="text-decoration-none">
+                                    <strong>API Documentation</strong>
+                                    <div class="text-muted">View and test API endpoints</div>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="list-group-item">
+                        <div class="row align-items-center">
+                            <div class="col-auto">
+                                <svg class="icon text-yellow" width="24" height="24">
+                                    <use xlink:href="#tabler-refresh"></use>
+                                </svg>
+                            </div>
+                            <div class="col">
+                                <a href="/admin" class="text-decoration-none">
+                                    <strong>Refresh Dashboard</strong>
+                                    <div class="text-muted">Reload latest statistics and guild data</div>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">System Information</h3>
+            </div>
+            <div class="card-body">
+                <div class="list-group list-group-flush">
+                    <div class="list-group-item">
+                        <div class="row align-items-center">
+                            <div class="col-auto">
+                                <span class="status-dot status-dot-animated bg-green"></span>
+                            </div>
+                            <div class="col">
+                                <strong>Bot Status</strong>
+                                <div class="text-muted">Online and connected</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="list-group-item">
+                        <div class="row align-items-center">
+                            <div class="col-auto">
+                                <span class="status-dot status-dot-animated bg-green"></span>
+                            </div>
+                            <div class="col">
+                                <strong>Database</strong>
+                                <div class="text-muted">Connected and operational</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="list-group-item">
+                        <div class="row align-items-center">
+                            <div class="col-auto">
+                                <span class="status-dot status-dot-animated bg-green"></span>
+                            </div>
+                            <div class="col">
+                                <strong>API</strong>
+                                <div class="text-muted">All endpoints responding</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

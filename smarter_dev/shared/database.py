@@ -10,6 +10,7 @@ from typing import Optional
 from sqlalchemy import DateTime
 from sqlalchemy import MetaData
 from sqlalchemy import event
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -138,11 +139,18 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     async with session_maker() as session:
         try:
             yield session
+            await session.commit()
         except Exception:
             await session.rollback()
             raise
         finally:
             await session.close()
+
+
+def get_db_session_context():
+    """Get a database session context manager."""
+    session_maker = get_session_maker()
+    return session_maker()
 
 
 async def init_database() -> None:
@@ -164,7 +172,7 @@ async def init_database() -> None:
     # Test connection
     try:
         async with _engine.begin() as conn:
-            await conn.run_sync(lambda sync_conn: sync_conn.execute("SELECT 1"))
+            await conn.run_sync(lambda sync_conn: sync_conn.execute(text("SELECT 1")))
         logger.info("Database connection successful")
     except Exception as e:
         logger.error(f"Failed to connect to database: {e}")

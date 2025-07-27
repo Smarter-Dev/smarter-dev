@@ -2,7 +2,6 @@
 name = "smarter-dev"
 version = "0.1.0"
 description = "Discord bot with bytes economy and squads system, plus web API and admin interface"
-readme = "README.md"
 requires-python = ">=3.11"
 authors = [
     {name = "Smarter Dev Team"}
@@ -32,6 +31,9 @@ dependencies = [
     "numpy>=2.2.6",
     "scipy>=1.16.0",
     "matplotlib>=3.10.3",
+    "itsdangerous>=2.2.0",
+    "python-multipart>=0.0.20",
+    "hikari-lightbulb<3.0.0",
 ]
 
 [dependency-groups]

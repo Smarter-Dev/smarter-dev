@@ -230,7 +230,7 @@ async def database_exception_handler(request: Request, exc: DatabaseOperationErr
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
     
     logger.error(
-        "Database operation error",
+        f"Database operation error: {exc}",
         extra={
             "request_id": request_id,
             "url": str(request.url),
