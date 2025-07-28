@@ -1,53 +1,22 @@
-"""Configuration and fixtures for integration tests."""
+"""Fixtures for integration tests."""
 
-from __future__ import annotations
-
-import asyncio
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
-# Import fixtures from the web API conftest
-from tests.web.test_api.conftest import (
+# Import fixtures from admin test configuration to maintain compatibility
+from tests.web.test_admin.conftest import (
+    admin_auth_headers,
     real_api_client,
-    real_db_engine,
     real_db_session,
-    api_settings,
-    bot_headers,
-    test_guild_id,
-    test_user_id,
-    test_user_id_2,
-    test_role_id,
-    sample_bytes_balance_data,
-    sample_bytes_config_data,
-    sample_squad_data,
-    sample_transaction_data,
+    admin_api_settings,
+    real_db_engine
 )
 
-# Re-export the fixtures so they're available to integration tests
+# Re-export all necessary fixtures so integration tests can use them
 __all__ = [
-    "real_api_client",
-    "real_db_engine", 
-    "real_db_session",
-    "api_settings",
-    "bot_headers",
-    "test_guild_id",
-    "test_user_id",
-    "test_user_id_2",
-    "test_role_id",
-    "sample_bytes_balance_data",
-    "sample_bytes_config_data",
-    "sample_squad_data",
-    "sample_transaction_data",
-    "test_isolation",
+    'admin_auth_headers',
+    'real_api_client', 
+    'real_db_session',
+    'admin_api_settings',
+    'real_db_engine'
 ]
-
-
-@pytest.fixture(autouse=True)
-async def test_isolation():
-    """Ensure test isolation by adding delays and cleanup."""
-    # Small delay before test
-    await asyncio.sleep(0.05)
-    
-    yield
-    
-    # Small delay after test to ensure cleanup
-    await asyncio.sleep(0.05)
