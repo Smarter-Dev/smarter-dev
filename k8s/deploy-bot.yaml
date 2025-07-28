@@ -54,6 +54,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: api-secret-key
+                  - name: BOT_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: bot-api-key
                 resources:
                     requests:
                         cpu: 100m
