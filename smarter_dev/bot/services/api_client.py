@@ -71,7 +71,7 @@ class APIClient(APIClientProtocol):
     def __init__(
         self,
         base_url: str,
-        bot_token: str,
+        api_key: str,
         retry_config: Optional[RetryConfig] = None,
         default_timeout: float = 30.0,
         max_connections: int = 100,
@@ -81,14 +81,19 @@ class APIClient(APIClientProtocol):
         
         Args:
             base_url: Base URL for API endpoints
-            bot_token: Bot authentication token
+            api_key: Secure API key for authentication (sk-xxxxx format)
             retry_config: Retry configuration
             default_timeout: Default request timeout in seconds
             max_connections: Maximum number of connections
             max_keepalive_connections: Maximum keepalive connections
         """
         self._base_url = base_url.rstrip('/')
-        self._bot_token = bot_token
+        
+        # Validate API key format for security
+        if not api_key.startswith('sk-') or len(api_key) != 46:
+            raise ValueError("Invalid API key format. Expected 'sk-' prefix with 43 characters.")
+        
+        self._api_key = api_key
         self._retry_config = retry_config or RetryConfig()
         self._default_timeout = default_timeout
         
@@ -125,7 +130,7 @@ class APIClient(APIClientProtocol):
             self._client = httpx.AsyncClient(
                 base_url=self._base_url,
                 headers={
-                    "Authorization": f"Bearer {self._bot_token}",
+                    "Authorization": f"Bearer {self._api_key}",
                     "User-Agent": "SmarterDev-Bot/1.0",
                     "Accept": "application/json",
                     "Content-Type": "application/json"
@@ -623,8 +628,10 @@ class APIClient(APIClientProtocol):
         """Handle rate limiting by waiting if necessary."""
         current_time = time.time()
         
-        # Check if we're still in rate limit period
-        if current_time < self._rate_limit_reset_time:
+        # Only wait if we're actually rate limited (remaining = 0)
+        # Don't wait just because we have a reset time from a successful response
+        if (current_time < self._rate_limit_reset_time and 
+            self._rate_limit_remaining == 0):
             wait_time = self._rate_limit_reset_time - current_time
             
             self._logger.warning(
@@ -709,6 +716,70 @@ class APIClient(APIClientProtocol):
                 }
             )
     
+    async def get_user_balance(self, guild_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get user bytes balance for integration testing.
+        
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            
+        Returns:
+            Balance data or None if not found
+            
+        Raises:
+            APIError: On API communication failures
+        """
+        try:
+            response = await self.get(f"/guilds/{guild_id}/bytes/balance/{user_id}")
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 404:
+                # Return default balance for 404 cases
+                return {
+                    "guild_id": guild_id,
+                    "user_id": user_id,
+                    "balance": 0,
+                    "total_received": 0,
+                    "total_sent": 0,
+                    "streak_count": 0,
+                    "last_daily": None
+                }
+            else:
+                response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                # Return default balance for 404 cases
+                return {
+                    "guild_id": guild_id,
+                    "user_id": user_id,
+                    "balance": 0,
+                    "total_received": 0,
+                    "total_sent": 0,
+                    "streak_count": 0,
+                    "last_daily": None
+                }
+            raise
+    
+    @property
+    def api_key(self) -> str:
+        """Get the API key."""
+        return self._api_key
+    
+    @property
+    def base_url(self) -> str:
+        """Get the base URL."""
+        return self._base_url
+    
+    @property
+    def headers(self) -> Dict[str, str]:
+        """Get the current headers."""
+        return {
+            "Authorization": f"Bearer {self._api_key}",
+            "User-Agent": "SmarterDev-Bot/1.0",
+            "Accept": "application/json",
+            "Content-Type": "application/json"
+        }
+
     async def close(self) -> None:
         """Close the API client and cleanup resources."""
         if self._client:
