@@ -71,19 +71,34 @@ class EmbedImageGenerator:
     def _load_fonts(self) -> None:
         """Load fonts into memory for reuse."""
         try:
-            # Bruno Ace SC for both titles and text - thicker, more readable on mobile
+            # Bruno Ace SC for titles - thicker, more readable on mobile
             bruno_path = self.fonts_path / "Bruno_Ace_SC" / "BrunoAceSC-Regular.ttf"
-            if bruno_path.exists():
-                # Title fonts - using Bruno for better mobile readability
+            # Anta Regular for body text - friendly readable font
+            anta_path = self.fonts_path / "Anta" / "Anta-Regular.ttf"
+            
+            if bruno_path.exists() and anta_path.exists():
+                # Title fonts - using Bruno Ace SC
                 self._fonts["title_large"] = ImageFont.truetype(str(bruno_path), 60)
                 self._fonts["title_medium"] = ImageFont.truetype(str(bruno_path), 48)
                 self._fonts["title_small"] = ImageFont.truetype(str(bruno_path), 36)
                 
-                # Body text fonts - slightly smaller Bruno
-                self._fonts["text_large"] = ImageFont.truetype(str(bruno_path), 32)
-                self._fonts["text_medium"] = ImageFont.truetype(str(bruno_path), 28)
-                self._fonts["text_small"] = ImageFont.truetype(str(bruno_path), 24)
-                self._fonts["text_tiny"] = ImageFont.truetype(str(bruno_path), 20)
+                # Body text fonts - using Anta Regular
+                self._fonts["text_large"] = ImageFont.truetype(str(anta_path), 32)
+                self._fonts["text_medium"] = ImageFont.truetype(str(anta_path), 28)
+                self._fonts["text_small"] = ImageFont.truetype(str(anta_path), 24)
+                self._fonts["text_tiny"] = ImageFont.truetype(str(anta_path), 20)
+            else:
+                # Fall back to Bruno for everything if Anta is missing
+                if bruno_path.exists():
+                    self._fonts["title_large"] = ImageFont.truetype(str(bruno_path), 60)
+                    self._fonts["title_medium"] = ImageFont.truetype(str(bruno_path), 48)
+                    self._fonts["title_small"] = ImageFont.truetype(str(bruno_path), 36)
+                    self._fonts["text_large"] = ImageFont.truetype(str(bruno_path), 32)
+                    self._fonts["text_medium"] = ImageFont.truetype(str(bruno_path), 28)
+                    self._fonts["text_small"] = ImageFont.truetype(str(bruno_path), 24)
+                    self._fonts["text_tiny"] = ImageFont.truetype(str(bruno_path), 20)
+                else:
+                    raise Exception("Neither Bruno Ace SC nor Anta fonts found")
             
         except Exception as e:
             # Fall back to default font if custom fonts fail
