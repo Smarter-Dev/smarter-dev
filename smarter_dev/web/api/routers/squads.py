@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.api.dependencies import (
     get_database_session,
-    verify_bot_token,
+    APIKey,
     verify_guild_access,
     get_request_metadata
 )
@@ -48,10 +48,10 @@ router = APIRouter()
 
 @router.get("/", response_model=List[SquadResponse])
 async def list_squads(
+    api_key: APIKey,
     include_inactive: bool = Query(False, description="Include inactive squads"),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> List[SquadResponse]:
     """List all squads in a guild.
@@ -76,9 +76,9 @@ async def list_squads(
 @router.post("/", response_model=SquadResponse)
 async def create_squad(
     squad: SquadCreate,
+    api_key: APIKey,
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> SquadResponse:
     """Create a new squad."""
@@ -109,10 +109,10 @@ async def create_squad(
 
 @router.get("/{squad_id}", response_model=SquadResponse)
 async def get_squad(
+    api_key: APIKey,
     squad_id: UUID = Path(..., description="Squad UUID"),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> SquadResponse:
     """Get squad by ID."""
@@ -139,10 +139,10 @@ async def get_squad(
 @router.put("/{squad_id}", response_model=SquadResponse)
 async def update_squad(
     squad_update: SquadUpdate,
+    api_key: APIKey,
     squad_id: UUID = Path(..., description="Squad UUID"),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> SquadResponse:
     """Update squad configuration."""
@@ -181,10 +181,10 @@ async def update_squad(
 @router.post("/{squad_id}/join", response_model=SquadMembershipResponse)
 async def join_squad(
     join_request: SquadJoinRequest,
+    api_key: APIKey,
     squad_id: UUID = Path(..., description="Squad UUID"),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> SquadMembershipResponse:
     """Join a squad."""
@@ -218,9 +218,9 @@ async def join_squad(
 @router.delete("/leave", response_model=SuccessResponse)
 async def leave_squad(
     leave_request: SquadLeaveRequest,
+    api_key: APIKey,
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> SuccessResponse:
     """Leave current squad."""
@@ -241,10 +241,10 @@ async def leave_squad(
 
 @router.get("/members/{user_id}", response_model=UserSquadResponse)
 async def get_user_squad(
+    api_key: APIKey,
     user_id: str = Path(..., description="Discord user ID"),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> UserSquadResponse:
     """Get user's current squad."""
@@ -298,10 +298,10 @@ async def get_user_squad(
 
 @router.get("/{squad_id}/members", response_model=SquadMembersResponse)
 async def get_squad_members(
+    api_key: APIKey,
     squad_id: UUID = Path(..., description="Squad UUID"),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> SquadMembersResponse:
     """Get all members of a squad."""

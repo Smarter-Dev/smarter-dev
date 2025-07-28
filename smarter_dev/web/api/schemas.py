@@ -379,3 +379,152 @@ class HealthResponse(BaseAPIModel):
     @field_serializer('timestamp')
     def serialize_timestamp(self, value: datetime) -> str:
         return value.isoformat()
+
+
+# ============================================================================
+# Admin Management Schemas
+# ============================================================================
+
+class APIKeyCreate(BaseAPIModel):
+    """Request model for creating a new API key."""
+    
+    name: str = Field(..., min_length=1, max_length=255, description="Human-readable name for the API key")
+    description: Optional[str] = Field(None, max_length=1000, description="Optional description of the key's purpose")
+    scopes: List[str] = Field(..., min_length=1, max_length=20, description="List of permission scopes for this key")
+    rate_limit_per_hour: int = Field(default=1000, ge=1, le=100000, description="Rate limit per hour for this key")
+    expires_at: Optional[datetime] = Field(None, description="Optional expiration date for the key")
+    
+    @field_validator('name')
+    def validate_name(cls, v):
+        """Validate API key name."""
+        if not v or not v.strip():
+            raise ValueError("API key name cannot be empty or whitespace only")
+        
+        # Trim whitespace
+        v = v.strip()
+        
+        # Check length after trimming
+        if len(v) < 1 or len(v) > 255:
+            raise ValueError("API key name must be between 1 and 255 characters")
+            
+        return v
+    
+    @field_validator('scopes')
+    def validate_scopes(cls, v):
+        """Validate that all scopes are allowed."""
+        if not v or len(v) == 0:
+            raise ValueError("At least one scope must be provided")
+            
+        allowed_scopes = {
+            "bot:read", "bot:write", "bot:manage",
+            "admin:read", "admin:write", "admin:manage",
+            "system:read", "system:write", "system:manage"
+        }
+        
+        for scope in v:
+            if not isinstance(scope, str) or not scope.strip():
+                raise ValueError("All scopes must be non-empty strings")
+            if scope not in allowed_scopes:
+                raise ValueError(f"Invalid scope: {scope}. Allowed scopes: {sorted(allowed_scopes)}")
+        
+        return v
+    
+    @field_validator('rate_limit_per_hour')
+    def validate_rate_limit(cls, v):
+        """Validate rate limit value."""
+        if v < 1:
+            raise ValueError("Rate limit must be at least 1 request per hour")
+        if v > 100000:
+            raise ValueError("Rate limit cannot exceed 100,000 requests per hour")
+        return v
+
+
+class APIKeyUpdate(BaseAPIModel):
+    """Request model for updating an existing API key."""
+    
+    name: Optional[str] = Field(None, min_length=1, max_length=100, description="Human-readable name for the API key")
+    description: Optional[str] = Field(None, max_length=500, description="Optional description of the key's purpose")
+    scopes: Optional[List[str]] = Field(None, min_items=1, description="List of permission scopes for this key")
+    rate_limit_per_hour: Optional[int] = Field(None, ge=1, le=10000, description="Rate limit per hour for this key")
+    expires_at: Optional[datetime] = Field(None, description="Optional expiration date for the key")
+    
+    @field_validator('scopes')
+    def validate_scopes(cls, v):
+        """Validate that all scopes are allowed."""
+        if v is None:
+            return v
+        
+        allowed_scopes = {
+            "bot:read", "bot:write", "bot:manage",
+            "admin:read", "admin:write", "admin:manage",
+            "system:read", "system:write", "system:manage"
+        }
+        
+        for scope in v:
+            if scope not in allowed_scopes:
+                raise ValueError(f"Invalid scope: {scope}. Allowed scopes: {allowed_scopes}")
+        
+        return v
+    
+    @field_validator('name')
+    def validate_name(cls, v):
+        """Validate API key name."""
+        if v is not None:
+            v = v.strip()
+            if not v:
+                raise ValueError("Name cannot be empty")
+        return v
+
+
+class APIKeyResponse(BaseAPIModel):
+    """Response model for API key operations (safe, no sensitive data)."""
+    
+    id: UUID = Field(..., description="Unique identifier for the API key")
+    name: str = Field(..., description="Human-readable name for the API key")
+    description: Optional[str] = Field(None, description="Description of the key's purpose")
+    key_prefix: str = Field(..., description="First 12 characters of the API key for identification")
+    scopes: List[str] = Field(..., description="List of permission scopes for this key")
+    rate_limit_per_hour: int = Field(..., description="Rate limit per hour for this key")
+    is_active: bool = Field(..., description="Whether the key is currently active")
+    usage_count: int = Field(..., description="Number of times this key has been used")
+    created_at: datetime = Field(..., description="When the key was created")
+    created_by: str = Field(..., description="Who created the key")
+    last_used_at: Optional[datetime] = Field(None, description="When the key was last used")
+    expires_at: Optional[datetime] = Field(None, description="When the key expires (if set)")
+    revoked_at: Optional[datetime] = Field(None, description="When the key was revoked (if revoked)")
+
+
+class APIKeyCreateResponse(APIKeyResponse):
+    """Response model for API key creation (includes the actual key - only shown once)."""
+    
+    api_key: str = Field(..., description="The actual API key (only shown once upon creation)")
+
+
+class APIKeyListResponse(BaseAPIModel):
+    """Response model for paginated API key listings."""
+    
+    items: List[APIKeyResponse] = Field(..., description="List of API keys")
+    total: int = Field(..., description="Total number of API keys")
+    page: int = Field(..., description="Current page number")
+    size: int = Field(..., description="Number of items per page")
+    pages: int = Field(..., description="Total number of pages")
+
+
+class APIKeyRevokeResponse(BaseAPIModel):
+    """Response model for API key revocation."""
+    
+    message: str = Field(..., description="Success message")
+    key_id: str = Field(..., description="ID of the revoked key")
+    revoked_at: datetime = Field(..., description="When the key was revoked")
+
+
+class AdminStatsResponse(BaseAPIModel):
+    """Response model for admin dashboard statistics."""
+    
+    total_api_keys: int = Field(..., description="Total number of API keys")
+    active_api_keys: int = Field(..., description="Number of active API keys")
+    revoked_api_keys: int = Field(..., description="Number of revoked API keys")
+    expired_api_keys: int = Field(..., description="Number of expired API keys")
+    total_api_requests: int = Field(..., description="Total API requests made")
+    api_requests_today: int = Field(..., description="API requests made today")
+    top_api_consumers: List[dict] = Field(..., description="Top API key consumers by usage")
