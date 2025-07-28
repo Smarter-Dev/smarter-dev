@@ -34,6 +34,70 @@ spec:
                 image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
                 ports:
                   - containerPort: 8000
+                envFrom:
+                  - configMapRef:
+                      name: smarter-dev-config
+                env:
+                  - name: DATABASE_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: database-url
+                  - name: REDIS_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: redis-url
+                  - name: API_SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: api-secret-key
+                  - name: WEB_SESSION_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: web-session-secret
+                  - name: DISCORD_CLIENT_ID
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: discord-client-id
+                  - name: DISCORD_CLIENT_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: discord-client-secret
+                  - name: ADMIN_USERNAME
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: admin-username
+                  - name: ADMIN_PASSWORD
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: admin-password
                 resources:
                     requests:
                         cpu: 100m
+                        memory: 256Mi
+                    limits:
+                        cpu: 500m
+                        memory: 512Mi
+                livenessProbe:
+                    httpGet:
+                        path: /api/health
+                        port: 8000
+                    initialDelaySeconds: 30
+                    periodSeconds: 30
+                    timeoutSeconds: 5
+                    failureThreshold: 3
+                readinessProbe:
+                    httpGet:
+                        path: /api/health
+                        port: 8000
+                    initialDelaySeconds: 10
+                    periodSeconds: 10
+                    timeoutSeconds: 3
+                    failureThreshold: 2

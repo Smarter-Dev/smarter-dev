@@ -1,0 +1,84 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: smarter-dev-bot
+    labels:
+        app: smarter-dev-bot
+spec:
+    strategy:
+        type: RollingUpdate
+        rollingUpdate:
+            maxSurge: 1
+            maxUnavailable: 0
+    selector:
+        matchLabels:
+            app: smarter-dev-bot
+            tier: backend
+    replicas: 1  # Bot should only have 1 replica to avoid conflicts
+    template:
+        metadata:
+            labels:
+                app: smarter-dev-bot
+                tier: backend
+        spec:
+            containers:
+              - name: discord-bot
+                image: zzmmrmn/smarter-dev-bot:<IMAGE_VERSION>
+                envFrom:
+                  - configMapRef:
+                      name: smarter-dev-config
+                env:
+                  - name: DATABASE_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: database-url
+                  - name: REDIS_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: redis-url
+                  - name: DISCORD_BOT_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: discord-bot-token
+                  - name: DISCORD_APPLICATION_ID
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: discord-application-id
+                  - name: API_SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: api-secret-key
+                resources:
+                    requests:
+                        cpu: 100m
+                        memory: 256Mi
+                    limits:
+                        cpu: 500m
+                        memory: 512Mi
+                livenessProbe:
+                    exec:
+                        command:
+                          - pgrep
+                          - -f
+                          - "smarter_dev.bot.client"
+                    initialDelaySeconds: 30
+                    periodSeconds: 30
+                    timeoutSeconds: 5
+                    failureThreshold: 3
+                readinessProbe:
+                    exec:
+                        command:
+                          - pgrep
+                          - -f
+                          - "smarter_dev.bot.client"
+                    initialDelaySeconds: 10
+                    periodSeconds: 10
+                    timeoutSeconds: 3
+                    failureThreshold: 2
+            restartPolicy: Always

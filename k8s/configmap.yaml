@@ -1,0 +1,25 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smarter-dev-config
+  namespace: smarter-dev
+data:
+  # Environment configuration
+  ENVIRONMENT: "production"
+  LOG_LEVEL: "INFO"
+  
+  # Web server configuration
+  WEB_HOST: "0.0.0.0"
+  WEB_PORT: "8000"
+  
+  # Discord OAuth redirect URI
+  DISCORD_REDIRECT_URI: "https://smarter.dev/admin/auth/callback"
+  
+  # Rate limiting configuration
+  RATE_LIMIT_ENABLED: "true"
+  RATE_LIMIT_REQUESTS: "100"
+  RATE_LIMIT_WINDOW: "60"
+  
+  # Bot API configuration
+  API_BASE_URL: "http://smarter-dev-website:8000"

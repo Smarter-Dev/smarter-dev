@@ -4,8 +4,8 @@ on:
       - main
 
 jobs:
-  build:
-    name: Deploy to K8s on Digital Ocean
+  build-and-deploy:
+    name: Build and Deploy to K8s on Digital Ocean
     runs-on: ubuntu-latest
     steps:
 
@@ -15,8 +15,11 @@ jobs:
     - name: Get latest commit SHA for the version tag
       run: echo $GITHUB_SHA > $GITHUB_WORKSPACE/_meta
 
-    - name: Update deployment file w/ new image tag
-      run: TAG=$(echo $GITHUB_SHA | head -c7) && sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy.yaml
+    - name: Update deployment files with new image tag
+      run: |
+        TAG=$(echo $GITHUB_SHA | head -c7)
+        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy.yaml
+        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-bot.yaml
 
     - name: Install doctl
       uses: digitalocean/action-doctl@v2
@@ -32,17 +35,32 @@ jobs:
         DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
       run: docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
 
-    - name: Build container image
-      run: docker build -t zzmmrmn/smarter-dev-website:$(echo $GITHUB_SHA | head -c7) .
+    - name: Build web container image
+      run: docker build -f Dockerfile.web -t zzmmrmn/smarter-dev-website:$(echo $GITHUB_SHA | head -c7) .
 
-    - name: Push image to Docker Hub
+    - name: Build bot container image
+      run: docker build -f Dockerfile.bot -t zzmmrmn/smarter-dev-bot:$(echo $GITHUB_SHA | head -c7) .
+
+    - name: Push web image to Docker Hub
       run: docker push zzmmrmn/smarter-dev-website:$(echo $GITHUB_SHA | head -c7)
+
+    - name: Push bot image to Docker Hub
+      run: docker push zzmmrmn/smarter-dev-bot:$(echo $GITHUB_SHA | head -c7)
 
     - name: Create namespace if not exists
       run: kubectl apply -f $GITHUB_WORKSPACE/k8s/namespace.yaml
 
-    - name: Deploy to DigitalOcean Kubernetes
-      run: kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy.yaml && kubectl apply -f $GITHUB_WORKSPACE/k8s/site.yaml
+    - name: Apply ConfigMap
+      run: kubectl apply -f $GITHUB_WORKSPACE/k8s/configmap.yaml
 
-    - name: Verify deployment
+    - name: Deploy to DigitalOcean Kubernetes
+      run: |
+        kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy.yaml
+        kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy-bot.yaml
+        kubectl apply -f $GITHUB_WORKSPACE/k8s/site.yaml
+
+    - name: Verify web deployment
       run: kubectl rollout status deployment/smarter-dev-website
+
+    - name: Verify bot deployment
+      run: kubectl rollout status deployment/smarter-dev-bot
