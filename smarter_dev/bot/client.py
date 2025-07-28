@@ -62,12 +62,12 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         # Create API client
         from smarter_dev.bot.services.api_client import APIClient
         api_base_url = settings.api_base_url
-        bot_token = settings.discord_bot_token
+        api_key = settings.bot_api_key
         logger.info(f"Connecting to API at: {api_base_url}")
-        logger.info(f"Using bot token: {bot_token[:20]}...{bot_token[-10:] if len(bot_token) > 30 else bot_token}")
+        logger.info(f"Using API key: {api_key[:12]}...{api_key[-10:] if len(api_key) > 20 else api_key}")
         api_client = APIClient(
             base_url=api_base_url,  # Web API base URL from settings
-            bot_token=bot_token,  # Use bot token for auth
+            api_key=api_key,  # Use secure API key for auth
             default_timeout=30.0
         )
         
@@ -203,6 +203,10 @@ async def run_bot() -> None:
     
     if not settings.discord_application_id:
         logger.error("Discord application ID not provided")
+        return
+    
+    if not settings.bot_api_key:
+        logger.error("Bot API key not provided")
         return
     
     # Create bot

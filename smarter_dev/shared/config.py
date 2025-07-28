@@ -58,6 +58,12 @@ class Settings(BaseSettings):
         default="http://localhost:8000",
         description="Base URL for API endpoints",
     )
+    
+    # Bot API Authentication
+    bot_api_key: str = Field(
+        default="",
+        description="Secure API key for bot to authenticate with web API (sk-xxxxx format)",
+    )
 
     # Web Application
     web_session_secret: str = Field(
