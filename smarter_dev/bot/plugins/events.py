@@ -439,13 +439,21 @@ async def handle_squad_list_share_interaction(event: hikari.InteractionCreateEve
         user_squad_response = await service.get_user_squad(guild_id, user_id)
         current_squad_id = user_squad_response.squad.id if user_squad_response.squad else None
         
+        # Get guild roles for color information
+        guild_roles = {}
+        guild = event.interaction.get_guild()
+        if guild:
+            for role in guild.get_roles().values():
+                guild_roles[str(role.id)] = role.color
+        
         # Generate the squad list image
         from smarter_dev.bot.utils.image_embeds import get_generator
         generator = get_generator()
         image_file = generator.create_squad_list_embed(
             squads, 
-            event.interaction.get_guild().name, 
-            str(current_squad_id) if current_squad_id else None
+            guild.name, 
+            str(current_squad_id) if current_squad_id else None,
+            guild_roles
         )
         
         # Send as public message

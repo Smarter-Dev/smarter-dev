@@ -72,12 +72,29 @@ async def list_command(ctx: lightbulb.Context) -> None:
         user_squad_response = await service.get_user_squad(str(ctx.guild_id), str(ctx.user.id))
         current_squad_id = user_squad_response.squad.id if user_squad_response.squad else None
         
+        # Get guild roles for color information
+        guild_roles = {}
+        guild = ctx.get_guild()
+        if guild:
+            for role in guild.get_roles().values():
+                guild_roles[str(role.id)] = role.color
+        
         # Create image embed for squad list
         generator = get_generator()
-        image_file = generator.create_squad_list_embed(squads, ctx.get_guild().name, str(current_squad_id) if current_squad_id else None)
+        image_file = generator.create_squad_list_embed(
+            squads, 
+            ctx.get_guild().name, 
+            str(current_squad_id) if current_squad_id else None,
+            guild_roles
+        )
         
         # Create share view
-        share_view = SquadListShareView(squads, ctx.get_guild().name, str(current_squad_id) if current_squad_id else None)
+        share_view = SquadListShareView(
+            squads, 
+            ctx.get_guild().name, 
+            str(current_squad_id) if current_squad_id else None,
+            guild_roles
+        )
         
         # Send as ephemeral message with share button
         await ctx.respond(

@@ -521,17 +521,19 @@ class SquadConfirmView:
 class SquadListShareView:
     """View with share button for squad list command."""
     
-    def __init__(self, squads: List[Squad], guild_name: str, current_squad_id: str = None):
+    def __init__(self, squads: List[Squad], guild_name: str, current_squad_id: str = None, guild_roles: dict = None):
         """Initialize the squad list share view.
         
         Args:
             squads: List of squad objects
             guild_name: Name of the guild
             current_squad_id: ID of user's current squad (if any)
+            guild_roles: Dictionary mapping role IDs to colors
         """
         self.squads = squads
         self.guild_name = guild_name
         self.current_squad_id = current_squad_id
+        self.guild_roles = guild_roles or {}
         self._timeout = 300  # 5 minutes
     
     def build_components(self) -> list[hikari.api.ComponentBuilder]:
