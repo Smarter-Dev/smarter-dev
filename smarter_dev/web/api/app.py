@@ -24,6 +24,7 @@ from smarter_dev.shared.database import init_database, close_database
 from smarter_dev.web.api.routers.auth import router as auth_router
 from smarter_dev.web.api.routers.bytes import router as bytes_router
 from smarter_dev.web.api.routers.squads import router as squads_router
+from smarter_dev.web.api.routers.admin import router as admin_router
 from smarter_dev.web.api.schemas import ErrorResponse, ValidationErrorResponse, ErrorDetail
 from smarter_dev.web.crud import DatabaseOperationError, NotFoundError, ConflictError
 
@@ -320,6 +321,11 @@ api.include_router(
     squads_router,
     prefix="/guilds/{guild_id}/squads",
     tags=["Squad Management"]
+)
+
+api.include_router(
+    admin_router,
+    tags=["Admin Management"]
 )
 
 
