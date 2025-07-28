@@ -16,3 +16,4 @@ smarter_dev.db
 logs/
 .DS_Store
 **/.DS_Store
+k8s/secrets.yaml
