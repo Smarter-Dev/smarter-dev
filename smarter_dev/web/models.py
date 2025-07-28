@@ -396,3 +396,275 @@ class SquadMembership(Base):
         """Initialize SquadMembership with default joined_at timestamp."""
         kwargs.setdefault('joined_at', datetime.now(timezone.utc))
         super().__init__(**kwargs)
+
+
+class APIKey(Base):
+    """API key model for secure authentication and access control.
+    
+    Stores cryptographically secure API keys with hashing, scoping,
+    and usage tracking capabilities. Designed for enterprise-grade
+    API authentication with proper security practices.
+    """
+    
+    __tablename__ = "api_keys"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique identifier for the API key"
+    )
+    
+    # Key identification and naming
+    name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Human-readable name for the API key (e.g., 'Discord Bot', 'Admin Dashboard')"
+    )
+    description: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        doc="Optional description of the API key's purpose and usage"
+    )
+    
+    # Secure key storage
+    key_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        unique=True,
+        doc="SHA-256 hash of the API key for secure storage"
+    )
+    key_prefix: Mapped[str] = mapped_column(
+        String(12),
+        nullable=False,
+        doc="First 12 characters of the key for display (e.g., 'sk-abc123de')"
+    )
+    
+    # Access control
+    scopes: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        doc="List of permission scopes (e.g., ['bytes:read', 'squads:write'])"
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        doc="Whether the API key is active and can be used"
+    )
+    
+    # Expiration and lifecycle
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Optional expiration timestamp for the API key"
+    )
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Timestamp when the API key was revoked (if revoked)"
+    )
+    
+    # Usage tracking
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Timestamp of the last successful API request using this key"
+    )
+    usage_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="Total number of successful API requests using this key"
+    )
+    
+    # Multi-tier rate limiting
+    rate_limit_per_second: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=10,
+        doc="Maximum number of requests allowed per second for this key"
+    )
+    rate_limit_per_minute: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=180,
+        doc="Maximum number of requests allowed per minute for this key"
+    )
+    rate_limit_per_15_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=2500,
+        doc="Maximum number of requests allowed per 15 minutes for this key"
+    )
+    
+    # Legacy rate limiting (kept for backward compatibility)
+    rate_limit_per_hour: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=10000,
+        doc="Maximum number of requests allowed per hour for this key (legacy)"
+    )
+    
+    # Audit trail
+    created_by: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Username or identifier of who created this API key"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the API key was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the API key was last modified"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_api_keys_hash", "key_hash"),
+        Index("ix_api_keys_active", "is_active", postgresql_where="is_active = true"),
+        Index("ix_api_keys_prefix", "key_prefix"),
+        Index("ix_api_keys_created_by", "created_by"),
+        UniqueConstraint("key_hash", name="uq_api_keys_hash"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize APIKey with default timestamps."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        super().__init__(**kwargs)
+    
+    @property
+    def is_expired(self) -> bool:
+        """Check if the API key has expired."""
+        if self.expires_at is None:
+            return False
+        return datetime.now(timezone.utc) > self.expires_at
+    
+    @property
+    def is_valid(self) -> bool:
+        """Check if the API key is valid (active and not expired)."""
+        return self.is_active and not self.is_expired
+    
+    def __repr__(self) -> str:
+        """String representation of the API key."""
+        status = "active" if self.is_valid else "inactive"
+        return f"<APIKey(name='{self.name}', prefix='{self.key_prefix}', status='{status}')>"
+
+
+class SecurityLog(Base):
+    """Security log entries for audit trail and monitoring.
+    
+    Records all security-related events including API key usage,
+    authentication attempts, rate limiting events, and administrative
+    operations. Provides comprehensive audit trail for compliance
+    and security monitoring.
+    """
+    
+    __tablename__ = "security_logs"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique identifier for the log entry"
+    )
+    
+    # Event classification
+    action: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+        doc="Type of action performed (e.g., 'api_key_created', 'authentication_failed')"
+    )
+    
+    # Related entities
+    api_key_id: Mapped[Optional[UUID]] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("api_keys.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        doc="API key involved in the action (if applicable)"
+    )
+    user_identifier: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+        doc="User identifier (Discord ID, admin username, etc.)"
+    )
+    
+    # Request context
+    ip_address: Mapped[Optional[str]] = mapped_column(
+        String(45),  # IPv6 max length
+        nullable=True,
+        index=True,
+        doc="Client IP address"
+    )
+    user_agent: Mapped[Optional[str]] = mapped_column(
+        String(512),
+        nullable=True,
+        doc="Client user agent string"
+    )
+    request_id: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+        doc="Request correlation ID"
+    )
+    
+    # Event outcome and details
+    success: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        index=True,
+        doc="Whether the action was successful"
+    )
+    details: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Detailed description of the event"
+    )
+    event_metadata: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        doc="Additional structured metadata"
+    )
+    
+    # Timestamps
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+        doc="When the event occurred"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_security_logs_action_timestamp", "action", "timestamp"),
+        Index("ix_security_logs_success_timestamp", "success", "timestamp"),
+        Index("ix_security_logs_api_key_timestamp", "api_key_id", "timestamp"),
+        Index("ix_security_logs_user_timestamp", "user_identifier", "timestamp"),
+        Index("ix_security_logs_ip_timestamp", "ip_address", "timestamp"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize SecurityLog with default timestamp."""
+        kwargs.setdefault('timestamp', datetime.now(timezone.utc))
+        super().__init__(**kwargs)
+    
+    def __repr__(self) -> str:
+        """String representation of the security log."""
+        status = "SUCCESS" if self.success else "FAILURE"
+        return f"<SecurityLog(action='{self.action}', status='{status}', timestamp='{self.timestamp}')>"

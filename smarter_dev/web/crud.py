@@ -7,11 +7,11 @@ SQLAlchemy 2.0 syntax.
 
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from uuid import UUID
 from datetime import datetime, timezone, date
 
-from sqlalchemy import select, update, delete, func, desc
+from sqlalchemy import select, update, delete, func, desc, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError, NoResultFound
@@ -22,6 +22,7 @@ from smarter_dev.web.models import (
     BytesConfig,
     Squad,
     SquadMembership,
+    APIKey,
 )
 
 
@@ -1007,3 +1008,443 @@ class SquadOperations:
         )
         result = await session.execute(stmt)
         return result.scalar() or 0
+
+
+class APIKeyOperations:
+    """CRUD operations for API key management with security features.
+    
+    Provides secure API key generation, validation, and management operations
+    with proper cryptographic practices and audit trails.
+    """
+    
+    async def create_api_key(
+        self,
+        session: AsyncSession,
+        name: str,
+        scopes: List[str],
+        created_by: str,
+        expires_days: Optional[int] = None,
+        rate_limit_per_hour: int = 1000
+    ) -> Tuple[APIKey, str]:
+        """Create a new API key with secure generation.
+        
+        Args:
+            session: Database session
+            name: Human-readable name for the API key
+            scopes: List of permission scopes
+            created_by: Username of the creator
+            expires_days: Optional expiration in days
+            rate_limit_per_hour: Rate limit for this key
+            
+        Returns:
+            tuple: (APIKey model, plaintext_key)
+            
+        Raises:
+            ConflictError: If name already exists
+            DatabaseOperationError: If creation fails
+        """
+        from smarter_dev.web.security import generate_secure_api_key
+        from smarter_dev.web.models import APIKey
+        from datetime import timedelta
+        
+        try:
+            # Check if name already exists
+            stmt = select(APIKey).where(APIKey.name == name)
+            result = await session.execute(stmt)
+            if result.scalar_one_or_none():
+                raise ConflictError(f"API key name '{name}' already exists")
+            
+            # Generate secure API key
+            full_key, key_hash, key_prefix = generate_secure_api_key()
+            
+            # Calculate expiration
+            expires_at = None
+            if expires_days and expires_days > 0:
+                expires_at = datetime.now(timezone.utc) + timedelta(days=expires_days)
+            
+            # Create API key record
+            api_key = APIKey(
+                name=name,
+                key_hash=key_hash,
+                key_prefix=key_prefix,
+                scopes=scopes,
+                expires_at=expires_at,
+                rate_limit_per_hour=rate_limit_per_hour,
+                created_by=created_by
+            )
+            
+            session.add(api_key)
+            await session.commit()
+            await session.refresh(api_key)
+            
+            # Return both the model and plaintext key (shown only once)
+            return api_key, full_key
+            
+        except ConflictError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to create API key: {e}") from e
+    
+    async def get_api_key_by_hash(
+        self,
+        session: AsyncSession,
+        key_hash: str
+    ) -> Optional[APIKey]:
+        """Get API key by hash for authentication.
+        
+        Args:
+            session: Database session
+            key_hash: SHA-256 hash of the API key
+            
+        Returns:
+            APIKey or None if not found
+            
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        from smarter_dev.web.models import APIKey
+        
+        try:
+            stmt = (
+                select(APIKey)
+                .where(
+                    APIKey.key_hash == key_hash,
+                    APIKey.is_active == True
+                )
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get API key: {e}") from e
+    
+    async def list_api_keys(
+        self,
+        session: AsyncSession,
+        include_inactive: bool = False
+    ) -> List[APIKey]:
+        """List all API keys with usage statistics.
+        
+        Args:
+            session: Database session
+            include_inactive: Whether to include inactive keys
+            
+        Returns:
+            List of APIKey models
+            
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        from smarter_dev.web.models import APIKey
+        
+        try:
+            stmt = select(APIKey).order_by(APIKey.created_at.desc())
+            
+            if not include_inactive:
+                stmt = stmt.where(APIKey.is_active == True)
+            
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to list API keys: {e}") from e
+    
+    async def get_api_key_by_id(
+        self,
+        session: AsyncSession,
+        key_id: UUID
+    ) -> Optional[APIKey]:
+        """Get API key by ID.
+        
+        Args:
+            session: Database session
+            key_id: API key UUID
+            
+        Returns:
+            APIKey or None if not found
+            
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        from smarter_dev.web.models import APIKey
+        
+        try:
+            stmt = select(APIKey).where(APIKey.id == key_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get API key: {e}") from e
+    
+    async def revoke_api_key(
+        self,
+        session: AsyncSession,
+        key_id: UUID
+    ) -> bool:
+        """Revoke (deactivate) an API key.
+        
+        Args:
+            session: Database session
+            key_id: API key UUID
+            
+        Returns:
+            bool: True if revoked, False if not found
+            
+        Raises:
+            DatabaseOperationError: If operation fails
+        """
+        from smarter_dev.web.models import APIKey
+        
+        try:
+            stmt = (
+                update(APIKey)
+                .where(APIKey.id == key_id)
+                .values(
+                    is_active=False,
+                    updated_at=datetime.now(timezone.utc)
+                )
+            )
+            result = await session.execute(stmt)
+            await session.commit()
+            
+            return result.rowcount > 0
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to revoke API key: {e}") from e
+    
+    async def activate_api_key(
+        self,
+        session: AsyncSession,
+        key_id: UUID
+    ) -> bool:
+        """Activate a revoked API key.
+        
+        Args:
+            session: Database session
+            key_id: API key UUID
+            
+        Returns:
+            bool: True if activated, False if not found
+            
+        Raises:
+            DatabaseOperationError: If operation fails
+        """
+        from smarter_dev.web.models import APIKey
+        
+        try:
+            stmt = (
+                update(APIKey)
+                .where(APIKey.id == key_id)
+                .values(
+                    is_active=True,
+                    updated_at=datetime.now(timezone.utc)
+                )
+            )
+            result = await session.execute(stmt)
+            await session.commit()
+            
+            return result.rowcount > 0
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to activate API key: {e}") from e
+    
+    async def delete_api_key(
+        self,
+        session: AsyncSession,
+        key_id: UUID
+    ) -> bool:
+        """Permanently delete an API key.
+        
+        Args:
+            session: Database session
+            key_id: API key UUID
+            
+        Returns:
+            bool: True if deleted, False if not found
+            
+        Raises:
+            DatabaseOperationError: If operation fails
+        """
+        from smarter_dev.web.models import APIKey
+        
+        try:
+            stmt = delete(APIKey).where(APIKey.id == key_id)
+            result = await session.execute(stmt)
+            await session.commit()
+            
+            return result.rowcount > 0
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to delete API key: {e}") from e
+    
+    async def update_last_used(
+        self,
+        session: AsyncSession,
+        key_id: UUID
+    ) -> None:
+        """Update the last used timestamp and increment usage count.
+        
+        Args:
+            session: Database session
+            key_id: API key UUID
+            
+        Note:
+            This operation is fire-and-forget to avoid blocking API requests.
+        """
+        from smarter_dev.web.models import APIKey
+        
+        try:
+            stmt = (
+                update(APIKey)
+                .where(APIKey.id == key_id)
+                .values(
+                    last_used_at=datetime.now(timezone.utc),
+                    usage_count=APIKey.usage_count + 1,
+                    updated_at=datetime.now(timezone.utc)
+                )
+            )
+            await session.execute(stmt)
+            await session.commit()
+            
+        except Exception:
+            # Silently fail to avoid breaking API requests
+            # This is tracked separately for monitoring
+            pass
+    
+    async def list_api_keys(
+        self,
+        db: AsyncSession,
+        offset: int = 0,
+        limit: int = 20,
+        active_only: bool = False,
+        search: Optional[str] = None
+    ) -> tuple[List[APIKey], int]:
+        """List API keys with pagination and filtering.
+        
+        Args:
+            db: Database session
+            offset: Number of records to skip
+            limit: Maximum number of records to return
+            active_only: Whether to show only active keys
+            search: Search term for name or description
+            
+        Returns:
+            Tuple of (list of API keys, total count)
+        """
+        from smarter_dev.web.models import APIKey
+        
+        try:
+            # Base query
+            query = select(APIKey)
+            count_query = select(func.count(APIKey.id))
+            
+            # Apply filters
+            filters = []
+            
+            if active_only:
+                filters.append(APIKey.is_active == True)
+            
+            if search:
+                search_filter = or_(
+                    APIKey.name.ilike(f"%{search}%"),
+                    APIKey.description.ilike(f"%{search}%")
+                )
+                filters.append(search_filter)
+            
+            if filters:
+                query = query.where(and_(*filters))
+                count_query = count_query.where(and_(*filters))
+            
+            # Get total count
+            count_result = await db.execute(count_query)
+            total = count_result.scalar() or 0
+            
+            # Apply pagination and ordering
+            query = (
+                query
+                .order_by(APIKey.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+            )
+            
+            # Execute query
+            result = await db.execute(query)
+            keys = list(result.scalars().all())
+            
+            return keys, total
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to list API keys: {e}") from e
+    
+    async def get_admin_stats(self, db: AsyncSession) -> dict:
+        """Get admin statistics for the dashboard.
+        
+        Args:
+            db: Database session
+            
+        Returns:
+            Dictionary with admin statistics
+        """
+        from smarter_dev.web.models import APIKey
+        
+        try:
+            # Count total API keys
+            total_query = select(func.count(APIKey.id))
+            total_result = await db.execute(total_query)
+            total_api_keys = total_result.scalar() or 0
+            
+            # Count active API keys
+            active_query = select(func.count(APIKey.id)).where(APIKey.is_active == True)
+            active_result = await db.execute(active_query)
+            active_api_keys = active_result.scalar() or 0
+            
+            # Count revoked API keys
+            revoked_query = select(func.count(APIKey.id)).where(APIKey.is_active == False)
+            revoked_result = await db.execute(revoked_query)
+            revoked_api_keys = revoked_result.scalar() or 0
+            
+            # Count expired API keys (active but past expiration)
+            now = datetime.now(timezone.utc)
+            expired_query = select(func.count(APIKey.id)).where(
+                and_(
+                    APIKey.is_active == True,
+                    APIKey.expires_at < now
+                )
+            )
+            expired_result = await db.execute(expired_query)
+            expired_api_keys = expired_result.scalar() or 0
+            
+            # Calculate total requests
+            usage_query = select(func.sum(APIKey.usage_count))
+            usage_result = await db.execute(usage_query)
+            total_api_requests = usage_result.scalar() or 0
+            
+            # Get top consumers (top 5 by usage count)
+            top_consumers_query = (
+                select(APIKey.name, APIKey.usage_count, APIKey.key_prefix)
+                .where(APIKey.usage_count > 0)
+                .order_by(APIKey.usage_count.desc())
+                .limit(5)
+            )
+            top_consumers_result = await db.execute(top_consumers_query)
+            top_consumers = [
+                {
+                    "name": row.name,
+                    "usage_count": row.usage_count,
+                    "key_prefix": row.key_prefix
+                }
+                for row in top_consumers_result.fetchall()
+            ]
+            
+            return {
+                "total_api_keys": total_api_keys,
+                "active_api_keys": active_api_keys,
+                "revoked_api_keys": revoked_api_keys,
+                "expired_api_keys": expired_api_keys,
+                "total_api_requests": total_api_requests,
+                "api_requests_today": 0,  # TODO: Implement daily tracking
+                "top_api_consumers": top_consumers
+            }
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get admin stats: {e}") from e
