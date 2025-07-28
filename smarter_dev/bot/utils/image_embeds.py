@@ -233,6 +233,26 @@ class EmbedImageGenerator:
         # Draw main text
         draw.text((x, y), text, font=font, fill=fill)
     
+    def _draw_colored_circle(
+        self,
+        draw: ImageDraw.Draw,
+        position: Tuple[int, int],
+        radius: int,
+        color: str
+    ) -> None:
+        """Draw a colored circle.
+        
+        Args:
+            draw: ImageDraw object
+            position: (x, y) center position for circle
+            radius: Circle radius in pixels
+            color: Hex color string for the circle
+        """
+        x, y = position
+        # Calculate bounding box for circle
+        bbox = [x - radius, y - radius, x + radius, y + radius]
+        draw.ellipse(bbox, fill=color, outline=None)
+    
     def create_simple_embed(
         self, 
         title: str, 
@@ -836,7 +856,8 @@ class EmbedImageGenerator:
         self, 
         squads: list, 
         guild_name: str, 
-        current_squad_id: str = None
+        current_squad_id: str = None,
+        guild_roles: Optional[Dict[str, int]] = None
     ) -> hikari.files.Bytes:
         """Create a compact squad list embed image with table layout.
         
@@ -896,14 +917,14 @@ class EmbedImageGenerator:
             fill=self.TEXT_COLOR
         )
         
-        # Members header (centered in its column)
+        # Members header (right-aligned in its column)
         members_header = "Members"
         members_bbox = header_font.getbbox(members_header)
         members_width = members_bbox[2] - members_bbox[0]
         # Position members column to use full width better
         members_column_start = content_width * 0.6  # 60% across the width
         members_column_width = 100
-        members_x = self.PADDING_HORIZONTAL + members_column_start + (members_column_width - members_width) // 2
+        members_x = self.PADDING_HORIZONTAL + members_column_start + members_column_width - members_width
         draw.text(
             (members_x, current_y), 
             members_header, 
@@ -928,15 +949,30 @@ class EmbedImageGenerator:
         
         # Process squads into compact table rows
         for i, squad in enumerate(squads[:10]):  # Limit to 10 squads for space
-            # Create compact row: Name | Members | Cost
+            # Create compact row: Color Circle | Name | Members | Cost
             row_y = current_y + (i * 28)  # Spacing between rows
             
-            # Squad name (truncate if too long)
-            name_text = squad.name
-            if len(name_text) > 25:  # Allow more characters now that status column is removed
-                name_text = name_text[:22] + "..."
+            # Draw colored circle for squad role (if available)
+            circle_x = self.PADDING_HORIZONTAL + 8  # 8px from left edge
+            circle_y = row_y + 12  # Center vertically in row
+            circle_radius = 6
             
-            name_x = self.PADDING_HORIZONTAL
+            # Get role color or use default
+            role_color = "#FFFFFF"  # Default white
+            if guild_roles and hasattr(squad, 'role_id') and squad.role_id in guild_roles:
+                # Convert Discord color integer to hex
+                color_int = guild_roles[squad.role_id]
+                if color_int != 0:  # 0 means default role color
+                    role_color = f"#{color_int:06X}"
+            
+            self._draw_colored_circle(draw, (circle_x, circle_y), circle_radius, role_color)
+            
+            # Squad name (truncate if too long, adjust position for circle)
+            name_text = squad.name
+            if len(name_text) > 22:  # Slightly fewer characters to account for circle
+                name_text = name_text[:19] + "..."
+            
+            name_x = self.PADDING_HORIZONTAL + 24  # Leave space for circle
             draw.text(
                 (name_x, row_y), 
                 name_text, 
@@ -951,8 +987,8 @@ class EmbedImageGenerator:
             
             member_bbox = table_font.getbbox(member_text)
             member_width = member_bbox[2] - member_bbox[0]
-            # Center the member count in the column
-            member_x = self.PADDING_HORIZONTAL + members_column_start + (members_column_width - member_width) // 2
+            # Right-align the member count in the column to match header
+            member_x = self.PADDING_HORIZONTAL + members_column_start + members_column_width - member_width
             
             draw.text(
                 (member_x, row_y), 
