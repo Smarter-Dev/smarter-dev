@@ -6,14 +6,17 @@ database session management, bot token authentication, and guild access verifica
 
 from __future__ import annotations
 
+import logging
 from typing import AsyncGenerator, Annotated
 
-from fastapi import Depends, HTTPException, Security, Request
+from fastapi import Depends, HTTPException, Security, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_db_session
+
+logger = logging.getLogger(__name__)
 
 # Security scheme for bearer token authentication
 security = HTTPBearer(
@@ -36,26 +39,30 @@ async def get_database_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-async def verify_bot_token(
+async def verify_api_key(
     request: Request,
-    credentials: Annotated[HTTPAuthorizationCredentials, Security(security)]
-) -> str:
-    """Verify bot token authentication.
+    credentials: Annotated[HTTPAuthorizationCredentials, Security(security)],
+    session: Annotated[AsyncSession, Depends(get_database_session)]
+) -> "APIKey":
+    """Verify API key authentication with cryptographic security.
     
-    Validates the provided bearer token against the configured bot token
-    in application settings.
+    Validates the provided API key using secure hashing and database lookup.
+    Implements constant-time comparison to prevent timing attacks.
     
     Args:
-        request: FastAPI request object to check raw headers
+        request: FastAPI request object
         credentials: HTTP authorization credentials from request header
+        session: Database session for key lookup
         
     Returns:
-        str: Validated bot token
+        APIKey: Validated API key model with metadata
         
     Raises:
-        HTTPException: If token is invalid or missing
+        HTTPException: If key is invalid, expired, or revoked
     """
-    settings = get_settings()
+    from smarter_dev.web.security import validate_api_key_format, hash_api_key
+    from smarter_dev.web.crud import APIKeyOperations
+    import asyncio
     
     # Check case-sensitive Bearer scheme from raw header
     auth_header = request.headers.get("Authorization")
@@ -69,30 +76,88 @@ async def verify_bot_token(
     # Extract token from credentials
     token = credentials.credentials
     
-    # In a real implementation, this would validate against Discord API
-    # For now, we validate against the configured bot token
     if not token:
         raise HTTPException(
             status_code=401,
-            detail="Bot token is required",
+            detail="API key is required",
             headers={"WWW-Authenticate": "Bearer"}
         )
     
-    # Check if token matches configured bot token
-    if settings.discord_bot_token and token != settings.discord_bot_token:
+    # Validate API key format (constant-time)
+    if not validate_api_key_format(token):
         raise HTTPException(
             status_code=401,
-            detail="Invalid bot token",
+            detail="Invalid API key format",
             headers={"WWW-Authenticate": "Bearer"}
         )
     
-    return token
+    # Hash the token for database lookup
+    token_hash = hash_api_key(token)
+    
+    # Database lookup for API key
+    api_key_ops = APIKeyOperations()
+    api_key = await api_key_ops.get_api_key_by_hash(session, token_hash)
+    
+    # Import security logger here to avoid circular imports
+    from smarter_dev.web.security_logger import get_security_logger
+    security_logger = get_security_logger()
+    
+    if not api_key:
+        # Log failed authentication attempt using a separate session
+        try:
+            await security_logger.log_authentication_failed(
+                session=None,  # Use separate session for reliability
+                failed_key_prefix=token[:10] if len(token) >= 10 else token,
+                request=request,
+                reason="Invalid or revoked API key"
+            )
+        except Exception as log_error:
+            # Don't let logging errors break authentication
+            logger.warning(f"Failed to log authentication failure: {log_error}")
+        
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or revoked API key",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    # Check if key is expired (additional security check)
+    if api_key.is_expired:
+        # Log expired key usage attempt
+        await security_logger.log_authentication_failed(
+            session=None,  # Use separate session for reliability
+            failed_key_prefix=api_key.key_prefix,
+            request=request,
+            reason="API key has expired"
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="API key has expired",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    
+    # Log successful API key usage
+    await security_logger.log_api_key_used(
+        session=session,
+        api_key=api_key,
+        request=request,
+        success=True
+    )
+    
+    # Store API key in request state for use by other dependencies
+    request.state.api_key = api_key
+    request.state.db_session = session
+    
+    # Note: Usage tracking is now handled by the rate limiter
+    # to avoid duplicate database operations
+    
+    return api_key
 
 
 async def verify_guild_access(
     request: Request,
     guild_id: str,
-    token: Annotated[str, Depends(verify_bot_token)]
+    api_key: Annotated["APIKey", Depends(verify_api_key)]
 ) -> str:
     """Verify bot has access to the specified guild.
     
@@ -102,7 +167,7 @@ async def verify_guild_access(
     Args:
         request: FastAPI request object
         guild_id: Discord guild snowflake ID from path parameter
-        token: Validated bot token from authentication
+        api_key: Validated API key from authentication
         
     Returns:
         str: Validated guild ID
@@ -133,7 +198,7 @@ async def verify_guild_access(
 
 async def get_current_user_id(
     request: Request,
-    token: Annotated[str, Depends(verify_bot_token)]
+    api_key: Annotated["APIKey", Depends(verify_api_key)]
 ) -> str:
     """Get current user ID from request context.
     
@@ -142,7 +207,7 @@ async def get_current_user_id(
     
     Args:
         request: FastAPI request object
-        token: Validated bot token
+        api_key: Validated API key
         
     Returns:
         str: User ID
@@ -173,6 +238,35 @@ async def get_current_user_id(
     return user_id
 
 
+async def apply_rate_limiting(
+    request: Request,
+    response: Response
+) -> None:
+    """Apply multi-tier rate limiting to authenticated requests.
+    
+    This dependency enforces multiple rate limiting windows:
+    - 10 requests per second (burst protection)
+    - 180 requests per minute (short-term abuse prevention) 
+    - 2500 requests per 15 minutes (sustained abuse prevention)
+    
+    Args:
+        request: FastAPI request object
+        response: FastAPI response object
+        
+    Raises:
+        HTTPException: If any rate limit is exceeded (429)
+    """
+    from smarter_dev.web.multi_tier_rate_limiter import enforce_multi_tier_rate_limits
+    
+    # Get API key and session from request state
+    api_key = getattr(request.state, "api_key", None)
+    session = getattr(request.state, "db_session", None)
+    
+    if api_key and session:
+        # Enforce multi-tier rate limiting
+        await enforce_multi_tier_rate_limits(api_key, session, request, response)
+
+
 async def get_request_metadata(request: Request) -> dict[str, str]:
     """Extract request metadata for logging and auditing.
     
@@ -192,7 +286,7 @@ async def get_request_metadata(request: Request) -> dict[str, str]:
 
 # Type aliases for common dependencies
 DatabaseSession = Annotated[AsyncSession, Depends(get_database_session)]
-BotToken = Annotated[str, Depends(verify_bot_token)]
+APIKey = Annotated["APIKey", Depends(verify_api_key)]
 GuildAccess = Annotated[str, Depends(verify_guild_access)]
 CurrentUser = Annotated[str, Depends(get_current_user_id)]
 RequestMetadata = Annotated[dict[str, str], Depends(get_request_metadata)]

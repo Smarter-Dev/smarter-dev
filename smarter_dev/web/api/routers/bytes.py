@@ -9,14 +9,15 @@ from __future__ import annotations
 from datetime import datetime, date, timedelta, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Path, Query, Depends, Request
+from fastapi import APIRouter, HTTPException, Path, Query, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.bot.services.streak_service import StreakService
 from smarter_dev.shared.date_provider import get_date_provider
 from smarter_dev.web.api.dependencies import (
     get_database_session,
-    verify_bot_token,
+    APIKey,
+    apply_rate_limiting,
     verify_guild_access,
     get_request_metadata
 )
@@ -65,10 +66,12 @@ router = APIRouter()
 )
 async def get_balance(
     request: Request,
+    response: Response,
+    api_key: APIKey,
+    rate_limit_check: None = Depends(apply_rate_limiting),
     user_id: str = Path(..., description="Discord user ID"),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> BytesBalanceResponse:
     """Get user's bytes balance.
@@ -87,10 +90,12 @@ async def get_balance(
 @router.post("/daily", response_model=DailyClaimResponse)
 async def claim_daily(
     request: Request,
+    response: Response,
     claim_request: DailyClaimRequest,
+    api_key: APIKey,
+    rate_limit_check: None = Depends(apply_rate_limiting),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> DailyClaimResponse:
     """Claim daily bytes reward with streak calculation.
@@ -192,10 +197,12 @@ async def claim_daily(
 @router.post("/transactions", response_model=BytesTransactionResponse)
 async def create_transaction(
     request: Request,
+    response: Response,
     transaction: BytesTransactionCreate,
+    api_key: APIKey,
+    rate_limit_check: None = Depends(apply_rate_limiting),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> BytesTransactionResponse:
     """Create a bytes transaction between users.
@@ -272,10 +279,13 @@ async def create_transaction(
 
 @router.get("/leaderboard", response_model=LeaderboardResponse)
 async def get_leaderboard(
+    request: Request,
+    response: Response,
+    api_key: APIKey,
+    rate_limit_check: None = Depends(apply_rate_limiting),
     limit: int = Query(10, ge=1, le=100, description="Number of top users to return"),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> LeaderboardResponse:
     """Get guild bytes leaderboard.
@@ -297,11 +307,14 @@ async def get_leaderboard(
 
 @router.get("/transactions", response_model=TransactionHistoryResponse)
 async def get_transactions(
+    request: Request,
+    response: Response,
+    api_key: APIKey,
+    rate_limit_check: None = Depends(apply_rate_limiting),
     user_id: Optional[str] = Query(None, description="Filter by user ID"),
     limit: int = Query(20, ge=1, le=100, description="Number of transactions to return"),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> TransactionHistoryResponse:
     """Get transaction history for guild or user.
@@ -329,9 +342,12 @@ async def get_transactions(
 
 @router.get("/config", response_model=BytesConfigResponse)
 async def get_config(
+    request: Request,
+    response: Response,
+    api_key: APIKey,
+    rate_limit_check: None = Depends(apply_rate_limiting),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> BytesConfigResponse:
     """Get guild bytes configuration.
@@ -352,10 +368,12 @@ async def get_config(
 @router.put("/config", response_model=BytesConfigResponse)
 async def update_config(
     request: Request,
+    response: Response,
     config_update: BytesConfigUpdate,
+    api_key: APIKey,
+    rate_limit_check: None = Depends(apply_rate_limiting),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> BytesConfigResponse:
     """Update guild bytes configuration.
@@ -384,9 +402,12 @@ async def update_config(
 
 @router.delete("/config", response_model=SuccessResponse)
 async def delete_config(
+    request: Request,
+    response: Response,
+    api_key: APIKey,
+    rate_limit_check: None = Depends(apply_rate_limiting),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> SuccessResponse:
     """Delete guild bytes configuration.
@@ -407,10 +428,13 @@ async def delete_config(
 
 @router.post("/reset-streak/{user_id}", response_model=BytesBalanceResponse)
 async def reset_streak(
+    request: Request,
+    response: Response,
+    api_key: APIKey,
+    rate_limit_check: None = Depends(apply_rate_limiting),
     user_id: str = Path(..., description="Discord user ID"),
     guild_id: str = Depends(verify_guild_access),
     db: AsyncSession = Depends(get_database_session),
-    token: str = Depends(verify_bot_token),
     metadata: dict = Depends(get_request_metadata)
 ) -> BytesBalanceResponse:
     """Reset user's daily claim streak.

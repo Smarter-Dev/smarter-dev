@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from smarter_dev.shared.config import get_settings
-from smarter_dev.web.api.dependencies import verify_bot_token, BotToken, RequestMetadata
+from smarter_dev.web.api.dependencies import verify_api_key, APIKey, RequestMetadata
 from smarter_dev.web.api.schemas import TokenResponse, HealthResponse
 
 router = APIRouter()
@@ -22,25 +22,25 @@ security = HTTPBearer()
 
 @router.post("/validate", response_model=TokenResponse)
 async def validate_token(
-    token: BotToken,
+    api_key: APIKey,
     metadata: RequestMetadata
 ) -> TokenResponse:
-    """Validate a bot token.
+    """Validate an API key.
     
-    This endpoint validates the provided bot token and returns validation status.
-    Useful for checking token validity before making other API calls.
+    This endpoint validates the provided API key and returns validation status.
+    Useful for checking key validity before making other API calls.
     
     Args:
-        token: Validated bot token from dependency
+        api_key: Validated API key from dependency
         metadata: Request metadata for logging
         
     Returns:
         TokenResponse: Token validation result
     """
-    # If we reach here, token is valid (dependency would have raised HTTPException)
+    # If we reach here, API key is valid (dependency would have raised HTTPException)
     return TokenResponse(
         valid=True,
-        expires_at=None  # Bot tokens don't expire in this implementation
+        expires_at=api_key.expires_at.isoformat() if api_key.expires_at else None
     )
 
 
@@ -68,13 +68,13 @@ async def auth_health_check() -> HealthResponse:
 
 
 @router.get("/status")
-async def auth_status(token: BotToken) -> dict[str, Any]:
-    """Get authentication status for the current token.
+async def auth_status(api_key: APIKey) -> dict[str, Any]:
+    """Get authentication status for the current API key.
     
-    Returns information about the authenticated token and its permissions.
+    Returns information about the authenticated API key and its permissions.
     
     Args:
-        token: Validated bot token
+        api_key: Validated API key
         
     Returns:
         dict: Authentication status information
@@ -83,7 +83,12 @@ async def auth_status(token: BotToken) -> dict[str, Any]:
     
     return {
         "authenticated": True,
-        "token_type": "bot",
+        "key_name": api_key.name,
+        "key_prefix": api_key.key_prefix,
+        "scopes": api_key.scopes,
+        "usage_count": api_key.usage_count,
+        "rate_limit": api_key.rate_limit_per_hour,
+        "expires_at": api_key.expires_at.isoformat() if api_key.expires_at else None,
         "environment": settings.environment,
         "api_version": "1.0.0",
         "timestamp": datetime.now(timezone.utc).isoformat()
