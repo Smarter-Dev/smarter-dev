@@ -41,6 +41,7 @@ def api_settings():
         discord_bot_token="test_bot_token_12345",
         discord_application_id="123456789",
         api_secret_key="test_api_secret_key",
+        bot_api_key="sk-test_api_key_for_testing_only_123456789",  # Test API key
         debug=True,
         log_level="DEBUG",
         # Explicitly disable any PostgreSQL settings
@@ -237,9 +238,36 @@ async def real_api_client(api_settings, real_db_engine) -> AsyncGenerator[AsyncC
 
 
 @pytest.fixture(scope="function")
-def bot_headers():
-    """Valid bot authentication headers."""
-    return {"Authorization": "Bearer test_bot_token_12345"}
+async def test_api_key(real_db_session) -> str:
+    """Create a test API key for authentication."""
+    from smarter_dev.web.security import generate_secure_api_key
+    from smarter_dev.web.models import APIKey
+    
+    # Generate secure API key
+    full_key, key_hash, key_prefix = generate_secure_api_key()
+    
+    # Store in database
+    api_key = APIKey(
+        name="Test API Key",
+        key_hash=key_hash,
+        key_prefix=key_prefix,
+        scopes=["bot:read", "bot:write"],
+        rate_limit_per_hour=1000,
+        created_by="test_system",
+        expires_at=None,
+        is_active=True
+    )
+    
+    real_db_session.add(api_key)
+    await real_db_session.commit()
+    
+    return full_key
+
+
+@pytest.fixture(scope="function")
+async def bot_headers(test_api_key):
+    """Valid bot authentication headers with API key."""
+    return {"Authorization": f"Bearer {test_api_key}"}
 
 
 @pytest.fixture
