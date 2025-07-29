@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import ssl
 from datetime import datetime
 from typing import AsyncGenerator
 from typing import Optional
@@ -49,7 +50,12 @@ def convert_postgres_url_for_asyncpg(database_url: str) -> tuple[str, dict]:
     if 'sslmode' in query_params:
         sslmode = query_params.pop('sslmode')[0]
         if sslmode in ('require', 'prefer'):
-            connect_args['ssl'] = True
+            # Create SSL context that allows self-signed certificates
+            # This is needed for DigitalOcean managed PostgreSQL
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            connect_args['ssl'] = ssl_context
         elif sslmode == 'disable':
             connect_args['ssl'] = False
         # For 'allow' and other modes, let asyncpg decide
