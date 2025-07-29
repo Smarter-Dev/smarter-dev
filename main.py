@@ -15,6 +15,10 @@ from smarter_dev.web.api.app import api
 from smarter_dev.web.admin.routes import admin_routes
 # Import settings
 from smarter_dev.shared.config import get_settings
+# Import security headers middleware
+from smarter_dev.web.security_headers import create_security_headers_middleware
+# Import HTTP methods middleware
+from smarter_dev.web.http_methods_middleware import create_http_methods_middleware
 
 templates = Jinja2Templates(directory="templates")
 
@@ -45,6 +49,13 @@ settings = get_settings()
 
 # Set up middleware
 middleware = [
+    # HTTP methods middleware (applied first to handle method validation)
+    Middleware(create_http_methods_middleware(starlette_compatible=True)),
+    
+    # Security headers middleware (applied second for all responses)
+    Middleware(create_security_headers_middleware(starlette_compatible=True)),
+    
+    # Session middleware
     Middleware(
         SessionMiddleware,
         secret_key=settings.web_session_secret,
