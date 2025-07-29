@@ -34,9 +34,9 @@ def admin_required(func: Callable) -> Callable:
     async def wrapper(request: Request) -> Any:
         # Check if user is authenticated
         if not request.session.get("is_admin"):
-            # Store the requested URL for redirect after login
-            next_url = str(request.url)
-            login_url = f"/admin/login?next={next_url}"
+            # Store the requested path for redirect after login (relative URL only)
+            next_path = str(request.url.path)
+            login_url = f"/admin/login?next={next_path}"
             return RedirectResponse(url=login_url, status_code=303)
         
         return await func(request)
@@ -55,6 +55,9 @@ async def login(request: Request):
         # Check if already logged in
         if request.session.get("is_admin"):
             next_url = request.query_params.get("next", "/admin")
+            # Ensure next_url is a relative path to prevent open redirects
+            if not next_url.startswith("/"):
+                next_url = "/admin"
             return RedirectResponse(url=next_url, status_code=303)
         
         return templates.TemplateResponse(
@@ -86,6 +89,9 @@ async def login(request: Request):
             
             # Redirect to requested page or dashboard
             next_url = request.query_params.get("next", "/admin")
+            # Ensure next_url is a relative path to prevent open redirects
+            if not next_url.startswith("/"):
+                next_url = "/admin"
             return RedirectResponse(url=next_url, status_code=303)
         else:
             raise AdminAuthError("Invalid username or password")
