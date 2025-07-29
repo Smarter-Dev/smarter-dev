@@ -19,10 +19,7 @@ RUN pip install uv
 COPY pyproject.toml uv.lock ./
 
 # Install dependencies in production mode with bot group
-RUN uv sync --frozen --no-dev --group bot && \
-    uv pip list && \
-    uv run python -c "import httpx; print('httpx successfully installed:', httpx.__version__)" || echo "httpx not available" && \
-    uv run python -c "import redis; print('redis successfully installed:', redis.__version__)" || echo "redis not available"
+RUN uv sync --frozen --no-dev --group bot
 
 # Copy application code
 COPY . .

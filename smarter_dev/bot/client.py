@@ -71,15 +71,8 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             default_timeout=30.0
         )
         
-        # Create cache manager (Redis)
-        from smarter_dev.bot.services.cache_manager import CacheManager
-        cache_manager = CacheManager(
-            redis_url=settings.redis_url,
-            default_ttl=300,  # 5 minutes
-            key_prefix="bot:"
-        )
-        
-        # Cache manager initializes connection automatically when needed
+        # Bot doesn't use caching - pass None for cache manager
+        cache_manager = None
         
         # Create services
         from smarter_dev.bot.services.bytes_service import BytesService
@@ -146,8 +139,8 @@ async def cleanup_bot_services(bot: lightbulb.BotApp) -> None:
     logger.info("Cleaning up bot services...")
     
     try:
-        # Clean up cache manager
-        if hasattr(bot, 'd') and 'cache_manager' in bot.d:
+        # Clean up cache manager (if used)
+        if hasattr(bot, 'd') and 'cache_manager' in bot.d and bot.d['cache_manager']:
             await bot.d['cache_manager'].cleanup()
         
         # Clean up API client
