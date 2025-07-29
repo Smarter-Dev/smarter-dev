@@ -13,10 +13,12 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.openapi.utils import get_openapi
 from pydantic import ValidationError
 
 from smarter_dev.shared.config import get_settings
@@ -27,6 +29,8 @@ from smarter_dev.web.api.routers.squads import router as squads_router
 from smarter_dev.web.api.routers.admin import router as admin_router
 from smarter_dev.web.api.schemas import ErrorResponse, ValidationErrorResponse, ErrorDetail
 from smarter_dev.web.crud import DatabaseOperationError, NotFoundError, ConflictError
+from smarter_dev.web.security_headers import SecurityHeadersMiddleware
+from smarter_dev.web.http_methods_middleware import HTTPMethodsMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -61,15 +65,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await close_database()
 
 
+# Get settings for configuration
+settings = get_settings()
+
+# Configure documentation URLs based on security settings
+# If docs require auth, disable default endpoints to force custom authenticated ones
+if settings.api_docs_enabled and settings.api_docs_require_auth:
+    docs_url = None  # Disable default docs, use authenticated custom endpoints
+    redoc_url = None  # Disable default redoc, use authenticated custom endpoints
+    openapi_url = None  # Disable default openapi, use authenticated custom endpoints
+elif settings.api_docs_enabled:
+    docs_url = "/docs"
+    redoc_url = "/redoc"
+    openapi_url = "/openapi.json"
+else:
+    docs_url = None
+    redoc_url = None
+    openapi_url = None
+
+# Disable docs in production unless explicitly enabled
+if settings.is_production and not settings.api_docs_enabled:
+    docs_url = None
+    redoc_url = None
+    openapi_url = None
+
 # Create FastAPI application
 api = FastAPI(
     title="Smarter Dev API",
     description="REST API for Discord bot bytes economy and squad management",
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json"
+    docs_url=docs_url,
+    redoc_url=redoc_url,
+    openapi_url=openapi_url
 )
 
 # Request ID middleware
@@ -84,8 +112,13 @@ async def add_request_id_middleware(request: Request, call_next):
     return response
 
 
-# Add CORS middleware for development
-settings = get_settings()
+# Add HTTP methods middleware (first to handle method validation)
+api.add_middleware(HTTPMethodsMiddleware)
+
+# Add security headers middleware (second for all responses)
+api.add_middleware(SecurityHeadersMiddleware)
+
+# Add CORS middleware for development (after security headers)
 if settings.is_development:
     api.add_middleware(
         CORSMiddleware,
@@ -241,11 +274,10 @@ async def database_exception_handler(request: Request, exc: DatabaseOperationErr
     )
     
     # Don't expose internal database errors in production
-    settings = get_settings()
-    if settings.is_development:
+    if settings.verbose_errors_enabled and settings.is_development:
         detail = f"Database error: {str(exc)}"
     else:
-        detail = "A database error occurred"
+        detail = "Internal server error"
     
     response = ErrorResponse(
         detail=detail,
@@ -285,8 +317,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     )
     
     # Don't expose internal error details in production
-    settings = get_settings()
-    if settings.is_development:
+    if settings.verbose_errors_enabled and settings.is_development:
         detail = f"Internal server error: {str(exc)}"
     else:
         detail = "Internal server error"
@@ -338,3 +369,45 @@ async def health_check() -> dict[str, str]:
         dict: Health status
     """
     return {"status": "healthy", "version": "1.0.0"}
+
+
+# Custom documentation endpoints with authentication
+if settings.api_docs_enabled and settings.api_docs_require_auth:
+    from smarter_dev.web.api.dependencies import verify_api_key
+    
+    @api.get("/docs", include_in_schema=False)
+    async def get_swagger_ui(api_key = Depends(verify_api_key)) -> HTMLResponse:
+        """Authenticated Swagger UI documentation.
+        
+        Requires valid API key authentication to access.
+        """
+        return get_swagger_ui_html(
+            openapi_url="/api/openapi.json",
+            title=f"{api.title} - Swagger UI",
+            swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+            swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+        )
+    
+    @api.get("/redoc", include_in_schema=False)
+    async def get_redoc(api_key = Depends(verify_api_key)) -> HTMLResponse:
+        """Authenticated ReDoc documentation.
+        
+        Requires valid API key authentication to access.
+        """
+        return get_redoc_html(
+            openapi_url="/api/openapi.json",
+            title=f"{api.title} - ReDoc",
+        )
+    
+    @api.get("/openapi.json", include_in_schema=False)
+    async def get_openapi_schema(api_key = Depends(verify_api_key)) -> dict:
+        """Authenticated OpenAPI schema.
+        
+        Requires valid API key authentication to access.
+        """
+        return get_openapi(
+            title=api.title,
+            version=api.version,
+            description=api.description,
+            routes=api.routes,
+        )
