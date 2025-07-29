@@ -19,7 +19,9 @@ RUN pip install uv
 COPY pyproject.toml uv.lock ./
 
 # Install dependencies in production mode with bot group
-RUN uv sync --frozen --no-dev --group bot
+RUN uv sync --frozen --no-dev --group bot && \
+    uv pip list && \
+    uv run python -c "import httpx; print('httpx successfully installed:', httpx.__version__)" || echo "httpx not available"
 
 # Copy application code
 COPY . .
