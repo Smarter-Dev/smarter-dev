@@ -2024,6 +2024,7 @@ bot = [
     { name = "aiohttp" },
     { name = "hikari", extra = ["speedups"] },
     { name = "hikari-lightbulb" },
+    { name = "httpx" },
 ]
 dev = [
     { name = "black" },
@@ -2083,6 +2084,7 @@ bot = [
     { name = "aiohttp", specifier = ">=3.8.0" },
     { name = "hikari", extras = ["speedups"], specifier = ">=2.0.0" },
     { name = "hikari-lightbulb", specifier = ">=2.0.0" },
+    { name = "httpx", specifier = ">=0.24.0" },
 ]
 dev = [
     { name = "black", specifier = ">=23.0.0" },
