@@ -68,8 +68,8 @@ async def verify_api_key(
     auth_header = request.headers.get("Authorization")
     if auth_header and not auth_header.startswith("Bearer "):
         raise HTTPException(
-            status_code=403,
-            detail="Invalid authorization scheme. Must use 'Bearer' (case-sensitive)",
+            status_code=401,
+            detail="Authentication required",
             headers={"WWW-Authenticate": "Bearer"}
         )
     
@@ -79,15 +79,22 @@ async def verify_api_key(
     if not token:
         raise HTTPException(
             status_code=401,
-            detail="API key is required",
+            detail="Authentication required",
             headers={"WWW-Authenticate": "Bearer"}
         )
     
     # Validate API key format (constant-time)
     if not validate_api_key_format(token):
+        # Use generic error message to avoid information disclosure
+        settings = get_settings()
+        if settings.verbose_errors_enabled and settings.is_development:
+            detail = "Invalid API key format"
+        else:
+            detail = "Authentication failed"
+        
         raise HTTPException(
             status_code=401,
-            detail="Invalid API key format",
+            detail=detail,
             headers={"WWW-Authenticate": "Bearer"}
         )
     
@@ -115,9 +122,16 @@ async def verify_api_key(
             # Don't let logging errors break authentication
             logger.warning(f"Failed to log authentication failure: {log_error}")
         
+        # Use generic error message
+        settings = get_settings()
+        if settings.verbose_errors_enabled and settings.is_development:
+            detail = "Invalid or revoked API key"
+        else:
+            detail = "Authentication failed"
+            
         raise HTTPException(
             status_code=401,
-            detail="Invalid or revoked API key",
+            detail=detail,
             headers={"WWW-Authenticate": "Bearer"}
         )
     
@@ -130,9 +144,16 @@ async def verify_api_key(
             request=request,
             reason="API key has expired"
         )
+        # Use generic error message
+        settings = get_settings()
+        if settings.verbose_errors_enabled and settings.is_development:
+            detail = "API key has expired"
+        else:
+            detail = "Authentication failed"
+            
         raise HTTPException(
             status_code=401,
-            detail="API key has expired",
+            detail=detail,
             headers={"WWW-Authenticate": "Bearer"}
         )
     
@@ -183,7 +204,7 @@ async def verify_guild_access(
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail="Invalid guild ID format"
+            detail="Invalid guild ID"
         )
     
     # In a real implementation, this would check if the bot is in the guild
@@ -221,7 +242,7 @@ async def get_current_user_id(
     if not user_id:
         raise HTTPException(
             status_code=400,
-            detail="User ID is required in X-User-ID header"
+            detail="User ID required"
         )
     
     # Validate user ID format (Discord snowflake)
@@ -232,7 +253,7 @@ async def get_current_user_id(
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail="Invalid user ID format"
+            detail="Invalid user ID"
         )
     
     return user_id
