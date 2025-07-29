@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from typing import AsyncGenerator
 from typing import Optional
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from sqlalchemy import DateTime
 from sqlalchemy import MetaData
@@ -26,6 +27,43 @@ from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def convert_postgres_url_for_asyncpg(database_url: str) -> tuple[str, dict]:
+    """Convert PostgreSQL URL with sslmode to asyncpg-compatible format.
+    
+    Args:
+        database_url: Database URL that may contain sslmode parameter
+        
+    Returns:
+        Tuple of (cleaned_url, connect_args) for asyncpg
+    """
+    if not database_url.startswith(('postgresql+asyncpg://', 'postgresql://')):
+        return database_url, {}
+    
+    parsed = urlparse(database_url)
+    query_params = parse_qs(parsed.query)
+    connect_args = {}
+    
+    # Handle sslmode parameter
+    if 'sslmode' in query_params:
+        sslmode = query_params.pop('sslmode')[0]
+        if sslmode in ('require', 'prefer'):
+            connect_args['ssl'] = True
+        elif sslmode == 'disable':
+            connect_args['ssl'] = False
+        # For 'allow' and other modes, let asyncpg decide
+    
+    # Rebuild URL without sslmode
+    if query_params:
+        query_string = urlencode(query_params, doseq=True)
+        new_parsed = parsed._replace(query=query_string)
+    else:
+        new_parsed = parsed._replace(query='')
+    
+    cleaned_url = urlunparse(new_parsed)
+    return cleaned_url, connect_args
+
 
 # Database naming convention for consistent constraint names
 NAMING_CONVENTION = {
@@ -67,6 +105,9 @@ def create_engine(settings: Settings) -> AsyncEngine:
     """Create async SQLAlchemy engine with proper configuration."""
     database_url = settings.effective_database_url
     
+    # Convert PostgreSQL URL to asyncpg-compatible format
+    cleaned_url, pg_connect_args = convert_postgres_url_for_asyncpg(database_url)
+    
     # Engine configuration
     engine_kwargs = {
         "echo": settings.debug and settings.log_level == "DEBUG",
@@ -77,11 +118,13 @@ def create_engine(settings: Settings) -> AsyncEngine:
     # Pool configuration based on environment
     if settings.is_testing:
         # Use StaticPool for testing to maintain connections
+        test_connect_args = {"check_same_thread": False}
+        test_connect_args.update(pg_connect_args)
         engine_kwargs.update({
             "poolclass": StaticPool,
             "pool_pre_ping": True,
             "pool_recycle": -1,
-            "connect_args": {"check_same_thread": False},
+            "connect_args": test_connect_args,
         })
     else:
         # Production/development pool configuration
@@ -91,8 +134,12 @@ def create_engine(settings: Settings) -> AsyncEngine:
             "pool_pre_ping": True,
             "pool_recycle": 3600,  # 1 hour
         })
+        
+        # Add PostgreSQL connection args for production
+        if pg_connect_args:
+            engine_kwargs["connect_args"] = pg_connect_args
     
-    engine = create_async_engine(database_url, **engine_kwargs)
+    engine = create_async_engine(cleaned_url, **engine_kwargs)
     
     # Set up event listeners
     @event.listens_for(engine.sync_engine, "connect")
