@@ -10,7 +10,10 @@ from smarter_dev.web.admin.views import (
     guild_list,
     guild_detail,
     bytes_config,
-    squads_config
+    squads_config,
+    api_keys_list,
+    api_keys_create,
+    api_keys_delete
 )
 
 
@@ -28,4 +31,9 @@ admin_routes = [
     Route("/guilds/{guild_id}", admin_required(guild_detail), name="admin_guild_detail"),
     Route("/guilds/{guild_id}/bytes", admin_required(bytes_config), methods=["GET", "POST"], name="admin_bytes_config"),
     Route("/guilds/{guild_id}/squads", admin_required(squads_config), methods=["GET", "POST"], name="admin_squads_config"),
+    
+    # API key management
+    Route("/api-keys", admin_required(api_keys_list), name="admin_api_keys"),
+    Route("/api-keys/create", admin_required(api_keys_create), methods=["GET", "POST"], name="admin_api_keys_create"),
+    Route("/api-keys/{key_id}/delete", admin_required(api_keys_delete), methods=["POST"], name="admin_api_keys_delete"),
 ]

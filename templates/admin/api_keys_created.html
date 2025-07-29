@@ -1,0 +1,179 @@
+{% extends "admin/base.html" %}
+
+{% block title %}API Key Created - Smarter Dev Admin{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+    <div class="container-xl">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="/admin/api-keys">API Keys</a></li>
+                        <li class="breadcrumb-item active" aria-current="page">Created</li>
+                    </ol>
+                </nav>
+                <div class="page-pretitle">
+                    System Management
+                </div>
+                <h2 class="page-title">
+                    API Key Created Successfully
+                </h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page-body">
+    <div class="container-xl">
+        <div class="row row-deck row-cards">
+            <div class="col-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Your New API Key</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-success" role="alert">
+                            <div class="d-flex">
+                                <div>
+                                    <svg class="icon alert-icon" width="24" height="24">
+                                        <use xlink:href="#tabler-check"></use>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <strong>Success!</strong> Your API key has been created successfully.
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="alert alert-danger" role="alert">
+                            <div class="d-flex">
+                                <div>
+                                    <svg class="icon alert-icon" width="24" height="24">
+                                        <use xlink:href="#tabler-alert-triangle"></use>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <strong>Important:</strong> Copy this API key now. For security reasons, it will not be shown again.
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">API Key</label>
+                            <div class="input-group">
+                                <input type="text" id="apiKey" class="form-control font-monospace" 
+                                       value="{{ full_key }}" readonly>
+                                <button class="btn btn-outline-secondary" type="button" onclick="copyApiKey()">
+                                    <svg class="icon" width="16" height="16">
+                                        <use xlink:href="#tabler-copy"></use>
+                                    </svg>
+                                    Copy
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <h5>API Key Details</h5>
+                        <div class="row">
+                            <div class="col-sm-6">
+                                <dl class="row">
+                                    <dt class="col-5">Name:</dt>
+                                    <dd class="col-7">{{ api_key.name }}</dd>
+                                    
+                                    <dt class="col-5">Key ID:</dt>
+                                    <dd class="col-7"><code>{{ api_key.id }}</code></dd>
+                                    
+                                    <dt class="col-5">Created:</dt>
+                                    <dd class="col-7">{{ api_key.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</dd>
+                                </dl>
+                            </div>
+                            <div class="col-sm-6">
+                                <dl class="row">
+                                    <dt class="col-5">Scopes:</dt>
+                                    <dd class="col-7">
+                                        {% for scope in api_key.scopes %}
+                                        <span class="badge badge-outline me-1">{{ scope }}</span>
+                                        {% endfor %}
+                                    </dd>
+                                    
+                                    <dt class="col-5">Rate Limit:</dt>
+                                    <dd class="col-7">{{ api_key.rate_limit_per_hour }}/hour</dd>
+                                    
+                                    <dt class="col-5">Status:</dt>
+                                    <dd class="col-7"><span class="badge bg-success">Active</span></dd>
+                                </dl>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-footer text-end">
+                        <a href="/admin/api-keys" class="btn btn-primary">
+                            <svg class="icon" width="16" height="16">
+                                <use xlink:href="#tabler-arrow-left"></use>
+                            </svg>
+                            Back to API Keys
+                        </a>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Next Steps</h3>
+                    </div>
+                    <div class="card-body">
+                        <h5>For Discord Bot Setup:</h5>
+                        <ol>
+                            <li>Copy the API key above</li>
+                            <li>Add it to your bot's environment:</li>
+                        </ol>
+                        <pre class="small mb-3"><code>BOT_API_KEY={{ full_key }}</code></pre>
+                        
+                        <h5>For External Applications:</h5>
+                        <p class="text-muted">Use this key in the Authorization header:</p>
+                        <pre class="small"><code>Authorization: Bearer {{ full_key }}</code></pre>
+                        
+                        <div class="alert alert-info mt-3" role="alert">
+                            <div class="d-flex">
+                                <div>
+                                    <svg class="icon alert-icon" width="24" height="24">
+                                        <use xlink:href="#tabler-info-circle"></use>
+                                    </svg>
+                                </div>
+                                <div class="small">
+                                    Store this key securely. If you lose it, you'll need to create a new one.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function copyApiKey() {
+    const apiKeyInput = document.getElementById('apiKey');
+    apiKeyInput.select();
+    apiKeyInput.setSelectionRange(0, 99999); // For mobile devices
+    
+    navigator.clipboard.writeText(apiKeyInput.value).then(function() {
+        // Show success feedback
+        const button = document.querySelector('button[onclick="copyApiKey()"]');
+        const originalText = button.innerHTML;
+        button.innerHTML = '<svg class="icon" width="16" height="16"><use xlink:href="#tabler-check"></use></svg> Copied!';
+        button.className = 'btn btn-success';
+        
+        setTimeout(function() {
+            button.innerHTML = originalText;
+            button.className = 'btn btn-outline-secondary';
+        }, 2000);
+    }).catch(function(err) {
+        console.error('Failed to copy: ', err);
+        // Fallback: select the text
+        apiKeyInput.select();
+    });
+}
+</script>
+{% endblock %}

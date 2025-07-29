@@ -1,0 +1,156 @@
+{% extends "admin/base.html" %}
+
+{% block title %}API Keys - Smarter Dev Admin{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+    <div class="container-xl">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle">
+                    System Management
+                </div>
+                <h2 class="page-title">
+                    API Keys
+                </h2>
+            </div>
+            <div class="col-auto ms-auto d-print-none">
+                <div class="btn-list">
+                    <a href="/admin/api-keys/create" class="btn btn-primary d-sm-inline-block">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-plus"></use>
+                        </svg>
+                        Create API Key
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page-body">
+    <div class="container-xl">
+        <div class="row row-deck row-cards">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">API Keys ({{ total }})</h3>
+                    </div>
+                    
+                    {% if api_keys %}
+                    <div class="table-responsive">
+                        <table class="table table-vcenter card-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Key Prefix</th>
+                                    <th>Scopes</th>
+                                    <th>Rate Limit</th>
+                                    <th>Status</th>
+                                    <th>Created</th>
+                                    <th>Usage</th>
+                                    <th class="w-1">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for key in api_keys %}
+                                <tr>
+                                    <td>
+                                        <div class="d-flex py-1 align-items-center">
+                                            <div class="flex-fill">
+                                                <div class="font-weight-medium">{{ key.name }}</div>
+                                                {% if key.description %}
+                                                <div class="text-muted">{{ key.description }}</div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <code>{{ key.key_prefix }}***</code>
+                                    </td>
+                                    <td>
+                                        {% for scope in key.scopes %}
+                                        <span class="badge badge-outline me-1">{{ scope }}</span>
+                                        {% endfor %}
+                                    </td>
+                                    <td>
+                                        {{ key.rate_limit_per_hour }}/hour
+                                    </td>
+                                    <td>
+                                        {% if key.is_active %}
+                                        <span class="badge bg-success me-1">Active</span>
+                                        {% else %}
+                                        <span class="badge bg-danger me-1">Revoked</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="text-muted">
+                                            {{ key.created_at.strftime('%Y-%m-%d %H:%M') }}
+                                        </div>
+                                        <div class="small text-muted">
+                                            by {{ key.created_by }}
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="text-muted">
+                                            {{ key.usage_count }} requests
+                                        </div>
+                                        {% if key.last_used_at %}
+                                        <div class="small text-muted">
+                                            Last: {{ key.last_used_at.strftime('%Y-%m-%d %H:%M') }}
+                                        </div>
+                                        {% else %}
+                                        <div class="small text-muted">
+                                            Never used
+                                        </div>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        {% if key.is_active %}
+                                        <form method="post" action="/admin/api-keys/{{ key.id }}/delete" style="display: inline;">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger" 
+                                                    onclick="return confirm('Are you sure you want to revoke this API key? This action cannot be undone.')">
+                                                <svg class="icon" width="16" height="16">
+                                                    <use xlink:href="#tabler-trash"></use>
+                                                </svg>
+                                                Revoke
+                                            </button>
+                                        </form>
+                                        {% else %}
+                                        <span class="text-muted">Revoked</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="card-body">
+                        <div class="empty">
+                            <div class="empty-img">
+                                <svg class="icon" width="80" height="80">
+                                    <use xlink:href="#tabler-key"></use>
+                                </svg>
+                            </div>
+                            <p class="empty-title">No API keys found</p>
+                            <p class="empty-subtitle text-muted">
+                                Create your first API key to enable bot authentication and external integrations.
+                            </p>
+                            <div class="empty-action">
+                                <a href="/admin/api-keys/create" class="btn btn-primary">
+                                    <svg class="icon" width="24" height="24">
+                                        <use xlink:href="#tabler-plus"></use>
+                                    </svg>
+                                    Create API Key
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

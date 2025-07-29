@@ -284,6 +284,16 @@
                                 <span class="nav-link-title">Guilds</span>
                             </a>
                         </div>
+                        <div class="nav-item">
+                            <a class="nav-link {% if '/api-keys' in request.url.path %}active{% endif %}" href="/admin/api-keys">
+                                <span class="nav-link-icon d-md-none d-lg-inline-block">
+                                    <svg class="icon" width="24" height="24">
+                                        <use xlink:href="#tabler-key"></use>
+                                    </svg>
+                                </span>
+                                <span class="nav-link-title">API Keys</span>
+                            </a>
+                        </div>
                     </div>
                 </div>
             </div>
