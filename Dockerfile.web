@@ -13,8 +13,8 @@ RUN pip install uv
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies in production mode
-RUN uv sync --frozen --no-dev
+# Install dependencies in production mode with web group
+RUN uv sync --frozen --no-dev --group web
 
 # Copy application code
 COPY . .
