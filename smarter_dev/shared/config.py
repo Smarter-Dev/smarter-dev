@@ -137,6 +137,24 @@ class Settings(BaseSettings):
         description="Rate limit window in seconds",
     )
 
+    # Security Settings
+    api_docs_enabled: bool = Field(
+        default=True,
+        description="Enable API documentation endpoints (disable in production)",
+    )
+    api_docs_require_auth: bool = Field(
+        default=True,
+        description="Require authentication for API documentation access",
+    )
+    security_headers_enabled: bool = Field(
+        default=True,
+        description="Enable security headers middleware",
+    )
+    verbose_errors_enabled: bool = Field(
+        default=True,
+        description="Enable verbose error messages (disable in production)",
+    )
+
     @field_validator("environment")
     @classmethod
     def validate_environment(cls, v: str) -> str:
