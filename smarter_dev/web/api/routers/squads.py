@@ -25,6 +25,11 @@ from smarter_dev.web.api.exceptions import (
     create_conflict_error,
     validate_discord_id
 )
+from smarter_dev.web.api.security_utils import (
+    create_database_error,
+    create_not_found_error as create_secure_not_found_error,
+    create_validation_error as create_secure_validation_error
+)
 from smarter_dev.web.api.schemas import (
     SquadResponse,
     SquadCreate,
@@ -102,9 +107,9 @@ async def create_squad(
         
         return SquadResponse.model_validate(squad_data)
     except ConflictError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise create_secure_validation_error(str(e))
     except DatabaseOperationError as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise create_database_error(e)
 
 
 @router.get("/{squad_id}", response_model=SquadResponse)
@@ -122,7 +127,7 @@ async def get_squad(
         
         # Verify squad belongs to the guild
         if squad.guild_id != guild_id:
-            raise HTTPException(status_code=404, detail="Squad not found in this guild")
+            raise create_secure_not_found_error("Squad")
         
         # Get member count
         member_count = await squad_ops._get_squad_member_count(db, squad_id)
@@ -131,9 +136,9 @@ async def get_squad(
         
         return SquadResponse.model_validate(squad_data)
     except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise create_secure_not_found_error("Squad")
     except DatabaseOperationError as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise create_database_error(e)
 
 
 @router.put("/{squad_id}", response_model=SquadResponse)
@@ -151,13 +156,13 @@ async def update_squad(
         squad = await squad_ops.get_squad(db, squad_id)
         
         if squad.guild_id != guild_id:
-            raise HTTPException(status_code=404, detail="Squad not found in this guild")
+            raise create_secure_not_found_error("Squad")
         
         # Get update data as dict, excluding None values
         update_data = squad_update.model_dump(exclude_unset=True, exclude_none=True)
         
         if not update_data:
-            raise HTTPException(status_code=400, detail="No valid squad updates provided")
+            raise create_secure_validation_error("No valid squad updates provided")
         
         # Apply updates
         for field, value in update_data.items():
@@ -173,9 +178,9 @@ async def update_squad(
         
         return SquadResponse.model_validate(squad_data)
     except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise create_secure_not_found_error("Squad")
     except DatabaseOperationError as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise create_database_error(e)
 
 
 @router.post("/{squad_id}/join", response_model=SquadMembershipResponse)
@@ -208,11 +213,11 @@ async def join_squad(
             squad=SquadResponse.model_validate(squad_data)
         )
     except ConflictError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise create_secure_validation_error(str(e))
     except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise create_secure_not_found_error("Squad")
     except DatabaseOperationError as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise create_database_error(e)
 
 
 @router.delete("/leave", response_model=SuccessResponse)
@@ -234,9 +239,9 @@ async def leave_squad(
             timestamp=datetime.now(timezone.utc)
         )
     except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise create_secure_not_found_error("Squad")
     except DatabaseOperationError as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise create_database_error(e)
 
 
 @router.get("/members/{user_id}", response_model=UserSquadResponse)
@@ -293,7 +298,7 @@ async def get_user_squad(
             )
         )
     except DatabaseOperationError as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise create_database_error(e)
 
 
 @router.get("/{squad_id}/members", response_model=SquadMembersResponse)
@@ -310,7 +315,7 @@ async def get_squad_members(
         squad = await squad_ops.get_squad(db, squad_id)
         
         if squad.guild_id != guild_id:
-            raise HTTPException(status_code=404, detail="Squad not found in this guild")
+            raise create_secure_not_found_error("Squad")
         
         # Get squad members
         memberships = await squad_ops.get_squad_members(db, squad_id)
@@ -338,6 +343,6 @@ async def get_squad_members(
             total_members=member_count
         )
     except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        raise create_secure_not_found_error("Squad")
     except DatabaseOperationError as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        raise create_database_error(e)
