@@ -72,29 +72,23 @@ async def login(request: Request):
         if not username or not password:
             raise AdminAuthError("Username and password are required")
         
-        # Check credentials
-        # In development mode, use simple credentials
-        # In production, this would integrate with Discord OAuth
-        if settings.is_development:
-            if (username == settings.admin_username and 
-                password == settings.admin_password):
-                
-                # Set session
-                request.session["user_id"] = username
-                request.session["is_admin"] = True
-                request.session["username"] = username
-                
-                logger.info(f"Admin login successful for user: {username}")
-                
-                # Redirect to requested page or dashboard
-                next_url = request.query_params.get("next", "/admin")
-                return RedirectResponse(url=next_url, status_code=303)
-            else:
-                raise AdminAuthError("Invalid username or password")
+        # Check credentials against configured admin username/password
+        # This works in both development and production environments
+        if (username == settings.admin_username and 
+            password == settings.admin_password):
+            
+            # Set session
+            request.session["user_id"] = username
+            request.session["is_admin"] = True
+            request.session["username"] = username
+            
+            logger.info(f"Admin login successful for user: {username}")
+            
+            # Redirect to requested page or dashboard
+            next_url = request.query_params.get("next", "/admin")
+            return RedirectResponse(url=next_url, status_code=303)
         else:
-            # Production mode would handle Discord OAuth here
-            # For now, fall back to development mode
-            raise AdminAuthError("Production authentication not yet implemented")
+            raise AdminAuthError("Invalid username or password")
     
     except AdminAuthError as e:
         logger.warning(f"Admin login failed: {e}")
