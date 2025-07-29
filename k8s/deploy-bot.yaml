@@ -3,6 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
     name: smarter-dev-bot
+    namespace: smarter-dev
     labels:
         app: smarter-dev-bot
 spec:
