@@ -43,6 +43,7 @@ bot = [
     "hikari-lightbulb>=2.0.0",
     "aiohttp>=3.8.0",
     "httpx>=0.24.0",  # For API client to communicate with web service
+    "redis>=5.0.0",  # For cache manager
 ]
 
 # Web API dependencies
