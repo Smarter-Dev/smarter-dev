@@ -19,9 +19,11 @@ from smarter_dev.web.models import (
     BytesTransaction, 
     BytesConfig,
     Squad,
-    SquadMembership
+    SquadMembership,
+    APIKey
 )
-from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations
+from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, APIKeyOperations
+from smarter_dev.web.security import generate_secure_api_key
 from smarter_dev.web.admin.discord import (
     get_bot_guilds,
     get_guild_info,
@@ -537,6 +539,188 @@ async def squads_config(request: Request) -> Response:
             "admin/error.html",
             {
                 "error": "An unexpected error occurred while managing squad configuration.",
+                "error_code": 500
+            },
+            status_code=500
+        )
+
+
+async def api_keys_list(request: Request) -> Response:
+    """Display list of API keys."""
+    try:
+        async with get_db_session_context() as session:
+            api_key_ops = APIKeyOperations()
+            
+            # Get all API keys
+            keys, total = await api_key_ops.list_api_keys(
+                db=session,
+                offset=0,
+                limit=100,
+                active_only=False
+            )
+            
+            return templates.TemplateResponse(
+                request,
+                "admin/api_keys.html",
+                {
+                    "api_keys": keys,
+                    "total": total
+                }
+            )
+    
+    except Exception as e:
+        logger.error(f"Error loading API keys: {e}")
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Failed to load API keys.",
+                "error_code": 500
+            },
+            status_code=500
+        )
+
+
+async def api_keys_create(request: Request) -> Response:
+    """Create new API key."""
+    if request.method == "GET":
+        return templates.TemplateResponse(
+            request,
+            "admin/api_keys_create.html"
+        )
+    
+    # POST - Create API key
+    try:
+        form = await request.form()
+        name = form.get("name", "").strip()
+        description = form.get("description", "").strip()
+        scopes = form.getlist("scopes")
+        rate_limit = int(form.get("rate_limit", "1000"))
+        
+        if not name:
+            return templates.TemplateResponse(
+                request,
+                "admin/api_keys_create.html",
+                {
+                    "error": "API key name is required.",
+                    "form_data": {
+                        "name": name,
+                        "description": description,
+                        "scopes": scopes,
+                        "rate_limit": rate_limit
+                    }
+                },
+                status_code=400
+            )
+        
+        if not scopes:
+            scopes = ["bot:read", "bot:write"]  # Default scopes for bot
+        
+        # Generate secure API key
+        full_key, key_hash, key_prefix = generate_secure_api_key()
+        
+        # Create API key record
+        async with get_db_session_context() as session:
+            api_key = APIKey(
+                name=name,
+                description=description,
+                key_hash=key_hash,
+                key_prefix=key_prefix,
+                scopes=scopes,
+                rate_limit_per_hour=rate_limit,
+                created_by=request.session.get("username", "admin"),
+                is_active=True,
+                usage_count=0
+            )
+            
+            session.add(api_key)
+            await session.commit()
+            await session.refresh(api_key)
+        
+        # Show the API key (only displayed once)
+        return templates.TemplateResponse(
+            request,
+            "admin/api_keys_created.html",
+            {
+                "api_key": api_key,
+                "full_key": full_key
+            }
+        )
+    
+    except ValueError as e:
+        return templates.TemplateResponse(
+            request,
+            "admin/api_keys_create.html",
+            {
+                "error": f"Invalid input: {e}",
+                "form_data": dict(form)
+            },
+            status_code=400
+        )
+    except Exception as e:
+        logger.error(f"Error creating API key: {e}")
+        return templates.TemplateResponse(
+            request,
+            "admin/api_keys_create.html",
+            {
+                "error": "Failed to create API key. Please try again.",
+                "form_data": dict(form) if 'form' in locals() else {}
+            },
+            status_code=500
+        )
+
+
+async def api_keys_delete(request: Request) -> Response:
+    """Delete/revoke an API key."""
+    try:
+        key_id = request.path_params["key_id"]
+        
+        async with get_db_session_context() as session:
+            api_key_ops = APIKeyOperations()
+            
+            # Get the API key
+            api_key = await api_key_ops.get_api_key_by_id(session, UUID(key_id))
+            
+            if not api_key:
+                return templates.TemplateResponse(
+                    request,
+                    "admin/error.html",
+                    {
+                        "error": "API key not found.",
+                        "error_code": 404
+                    },
+                    status_code=404
+                )
+            
+            # Revoke the key
+            from datetime import datetime, timezone
+            api_key.is_active = False
+            api_key.revoked_at = datetime.now(timezone.utc)
+            api_key.updated_at = datetime.now(timezone.utc)
+            
+            await session.commit()
+        
+        # Redirect back to API keys list
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(url="/admin/api-keys", status_code=303)
+    
+    except ValueError:
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Invalid API key ID.",
+                "error_code": 400
+            },
+            status_code=400
+        )
+    except Exception as e:
+        logger.error(f"Error deleting API key: {e}")
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Failed to delete API key.",
                 "error_code": 500
             },
             status_code=500

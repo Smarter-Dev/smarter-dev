@@ -1,0 +1,179 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Create API Key - Smarter Dev Admin{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+    <div class="container-xl">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="/admin/api-keys">API Keys</a></li>
+                        <li class="breadcrumb-item active" aria-current="page">Create</li>
+                    </ol>
+                </nav>
+                <div class="page-pretitle">
+                    System Management
+                </div>
+                <h2 class="page-title">
+                    Create API Key
+                </h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page-body">
+    <div class="container-xl">
+        <div class="row row-deck row-cards">
+            <div class="col-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">API Key Details</h3>
+                    </div>
+                    <form method="post">
+                        <div class="card-body">
+                            {% if error %}
+                            <div class="alert alert-danger" role="alert">
+                                <div class="d-flex">
+                                    <div>
+                                        <svg class="icon alert-icon" width="24" height="24">
+                                            <use xlink:href="#tabler-alert-circle"></use>
+                                        </svg>
+                                    </div>
+                                    <div>{{ error }}</div>
+                                </div>
+                            </div>
+                            {% endif %}
+                            
+                            <div class="mb-3">
+                                <label class="form-label">Name <span class="text-danger">*</span></label>
+                                <input type="text" name="name" class="form-control" 
+                                       placeholder="e.g., Discord Bot API Key" 
+                                       value="{{ form_data.name if form_data else '' }}" required>
+                                <small class="form-hint">A descriptive name for this API key</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label">Description</label>
+                                <textarea name="description" class="form-control" rows="3" 
+                                          placeholder="Optional description of what this API key is used for">{{ form_data.description if form_data else '' }}</textarea>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label">Scopes</label>
+                                <div class="form-selectgroup form-selectgroup-boxes d-flex flex-column">
+                                    <label class="form-selectgroup-item flex-fill">
+                                        <input type="checkbox" name="scopes" value="bot:read" class="form-selectgroup-input" 
+                                               {% if not form_data or 'bot:read' in (form_data.scopes or []) %}checked{% endif %}>
+                                        <div class="form-selectgroup-label d-flex align-items-center p-3">
+                                            <div class="me-3">
+                                                <span class="form-selectgroup-check"></span>
+                                            </div>
+                                            <div>
+                                                <strong>Bot Read</strong>
+                                                <div class="text-muted">Allow reading Discord bot data and configurations</div>
+                                            </div>
+                                        </div>
+                                    </label>
+                                    <label class="form-selectgroup-item flex-fill">
+                                        <input type="checkbox" name="scopes" value="bot:write" class="form-selectgroup-input"
+                                               {% if not form_data or 'bot:write' in (form_data.scopes or []) %}checked{% endif %}>
+                                        <div class="form-selectgroup-label d-flex align-items-center p-3">
+                                            <div class="me-3">
+                                                <span class="form-selectgroup-check"></span>
+                                            </div>
+                                            <div>
+                                                <strong>Bot Write</strong>
+                                                <div class="text-muted">Allow modifying Discord bot data and sending messages</div>
+                                            </div>
+                                        </div>
+                                    </label>
+                                    <label class="form-selectgroup-item flex-fill">
+                                        <input type="checkbox" name="scopes" value="admin:read" class="form-selectgroup-input"
+                                               {% if form_data and 'admin:read' in (form_data.scopes or []) %}checked{% endif %}>
+                                        <div class="form-selectgroup-label d-flex align-items-center p-3">
+                                            <div class="me-3">
+                                                <span class="form-selectgroup-check"></span>
+                                            </div>
+                                            <div>
+                                                <strong>Admin Read</strong>
+                                                <div class="text-muted">Allow reading admin data and statistics</div>
+                                            </div>
+                                        </div>
+                                    </label>
+                                    <label class="form-selectgroup-item flex-fill">
+                                        <input type="checkbox" name="scopes" value="admin:write" class="form-selectgroup-input"
+                                               {% if form_data and 'admin:write' in (form_data.scopes or []) %}checked{% endif %}>
+                                        <div class="form-selectgroup-label d-flex align-items-center p-3">
+                                            <div class="me-3">
+                                                <span class="form-selectgroup-check"></span>
+                                            </div>
+                                            <div>
+                                                <strong>Admin Write</strong>
+                                                <div class="text-muted">Allow modifying admin configurations</div>
+                                            </div>
+                                        </div>
+                                    </label>
+                                </div>
+                                <small class="form-hint">Select the permissions this API key should have</small>
+                            </div>
+                            
+                            <div class="mb-3">
+                                <label class="form-label">Rate Limit (requests per hour)</label>
+                                <input type="number" name="rate_limit" class="form-control" 
+                                       value="{{ form_data.rate_limit if form_data else '1000' }}" 
+                                       min="1" max="10000">
+                                <small class="form-hint">Maximum number of requests per hour (1-10,000)</small>
+                            </div>
+                        </div>
+                        <div class="card-footer text-end">
+                            <div class="d-flex">
+                                <a href="/admin/api-keys" class="btn btn-link">Cancel</a>
+                                <button type="submit" class="btn btn-primary ms-auto">Create API Key</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            
+            <div class="col-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Important Security Notes</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-warning" role="alert">
+                            <div class="d-flex">
+                                <div>
+                                    <svg class="icon alert-icon" width="24" height="24">
+                                        <use xlink:href="#tabler-alert-triangle"></use>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <strong>Security Notice</strong><br>
+                                    The API key will only be shown once after creation. Make sure to copy and store it securely.
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <h5>API Key Usage</h5>
+                        <p class="text-muted">
+                            API keys are used to authenticate requests to the Smarter Dev API. Include the key in the Authorization header:
+                        </p>
+                        <pre class="small"><code>Authorization: Bearer sk-...</code></pre>
+                        
+                        <h5>Recommended Scopes</h5>
+                        <ul class="text-muted">
+                            <li><strong>Discord Bot:</strong> bot:read, bot:write</li>
+                            <li><strong>External Apps:</strong> bot:read only</li>
+                            <li><strong>Admin Tools:</strong> admin:read, admin:write</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
