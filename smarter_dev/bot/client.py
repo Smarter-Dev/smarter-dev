@@ -15,6 +15,65 @@ from smarter_dev.shared.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+async def initialize_single_guild_configuration(guild_id: str) -> None:
+    """Initialize bytes configuration for a single guild.
+    
+    Args:
+        guild_id: Discord guild ID to initialize
+    """
+    try:
+        from smarter_dev.shared.database import get_session_maker
+        from smarter_dev.web.models import BytesConfig
+        
+        session_maker = get_session_maker()
+        
+        async with session_maker() as session:
+            # Check if config already exists
+            existing = await session.get(BytesConfig, guild_id)
+            if existing:
+                logger.debug(f"Configuration already exists for guild {guild_id}")
+                return
+            
+            # Create new config with default values
+            config = BytesConfig(
+                guild_id=guild_id,
+                starting_balance=100,
+                daily_amount=10,
+                streak_bonuses={7: 2, 14: 4, 30: 10, 60: 20},
+                max_transfer=1000,
+                transfer_cooldown_hours=0,
+                role_rewards={}
+            )
+            
+            session.add(config)
+            await session.commit()
+            logger.info(f"✅ Created default bytes configuration for guild {guild_id}")
+            
+    except Exception as e:
+        logger.error(f"Failed to initialize guild configuration for {guild_id}: {e}")
+
+
+async def initialize_guild_configurations(bot: lightbulb.BotApp) -> None:
+    """Initialize bytes configurations for all guilds the bot is in.
+    
+    Args:
+        bot: Bot application instance
+    """
+    try:
+        # Get all guilds the bot is currently in
+        guilds = bot.cache.get_guilds_view()
+        
+        logger.info(f"Initializing configurations for {len(guilds)} guilds...")
+        
+        for guild_id in guilds:
+            await initialize_single_guild_configuration(str(guild_id))
+        
+        logger.info(f"✅ Guild configuration initialization complete")
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize guild configurations: {e}")
+
+
 def create_bot(settings: Optional[Settings] = None) -> lightbulb.BotApp:
     """Create and configure the Discord bot with Lightbulb v2 syntax.
     
@@ -220,6 +279,9 @@ async def run_bot() -> None:
         else:
             logger.info("Bot started")
         
+        # Initialize guild configurations for all guilds the bot is in
+        await initialize_guild_configurations(bot)
+        
         logger.info("Bot is now fully ready and will stay online")
     
     @bot.listen()
@@ -233,6 +295,16 @@ async def run_bot() -> None:
         """Handle shard ready event."""
         logger.info(f"Shard {event.shard.id} is ready")
         logger.info("Bot is now fully ready and will stay online")
+    
+    @bot.listen()
+    async def on_guild_join(event: hikari.GuildJoinEvent) -> None:
+        """Handle bot joining a new guild."""
+        logger.info(f"Bot joined guild: {event.guild.name} (ID: {event.guild_id})")
+        
+        # Initialize configuration for the new guild
+        await initialize_single_guild_configuration(str(event.guild_id))
+        
+        logger.info(f"✅ Initialized configuration for guild {event.guild.name}")
     
     @bot.listen()
     async def on_message_create(event: hikari.GuildMessageCreateEvent) -> None:
