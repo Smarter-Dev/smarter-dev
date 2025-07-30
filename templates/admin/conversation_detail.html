@@ -126,84 +126,76 @@
 
             <!-- Conversation Content -->
             <div class="col-md-8">
-                <div class="row">
-                    <!-- Context Messages -->
-                    {% if conversation.context_messages %}
-                    <div class="col-12 mb-1">
-                        <div class="card">
-                            <div class="card-header">
-                                <h3 class="card-title">Context Messages</h3>
-                                <div class="card-subtitle">Recent channel activity before the question</div>
-                            </div>
-                            <div class="card-body">
-                                <div class="divide-y">
-                                    {% for message in conversation.context_messages %}
-                                    <div class="row py-2">
-                                        <div class="col-auto">
-                                            <span class="avatar avatar-sm">{{ message.author[0] }}</span>
-                                        </div>
-                                        <div class="col">
-                                            <div class="d-flex justify-content-between">
-                                                <strong>{{ message.author }}</strong>
-                                                <small class="text-muted">{{ message.timestamp[:19] }}</small>
-                                            </div>
-                                            <div class="text-muted small mt-1">
-                                                {{ message.content }}
-                                            </div>
-                                        </div>
+                <!-- Context Messages -->
+                {% if conversation.context_messages %}
+                <div class="card" style="margin-bottom: 0.5rem;">
+                    <div class="card-header">
+                        <h3 class="card-title">Context Messages</h3>
+                        <div class="card-subtitle">Recent channel activity before the question</div>
+                    </div>
+                    <div class="card-body">
+                        <div class="divide-y">
+                            {% for message in conversation.context_messages %}
+                            <div class="row py-2">
+                                <div class="col-auto">
+                                    <span class="avatar avatar-sm">{{ message.author[0] }}</span>
+                                </div>
+                                <div class="col">
+                                    <div class="d-flex justify-content-between">
+                                        <strong>{{ message.author }}</strong>
+                                        <small class="text-muted">{{ message.timestamp[:19] }}</small>
                                     </div>
-                                    {% endfor %}
+                                    <div class="text-muted small mt-1">
+                                        {{ message.content }}
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- User Question -->
+                <div class="card" style="margin-bottom: 0.5rem;">
+                    <div class="card-header">
+                        <h3 class="card-title">User Question</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-auto">
+                                <span class="avatar avatar-sm bg-primary text-white">{{ conversation.user_username[0] }}</span>
+                            </div>
+                            <div class="col">
+                                <div class="fw-bold mb-2">{{ conversation.user_username }}</div>
+                                <div class="text-wrap">
+                                    {{ conversation.user_question }}
                                 </div>
                             </div>
                         </div>
                     </div>
-                    {% endif %}
+                </div>
 
-                    <!-- User Question -->
-                    <div class="col-12 mb-1">
-                        <div class="card">
-                            <div class="card-header">
-                                <h3 class="card-title">User Question</h3>
-                            </div>
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-auto">
-                                        <span class="avatar avatar-sm bg-primary text-white">{{ conversation.user_username[0] }}</span>
-                                    </div>
-                                    <div class="col">
-                                        <div class="fw-bold mb-2">{{ conversation.user_username }}</div>
-                                        <div class="text-wrap">
-                                            {{ conversation.user_question }}
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                <!-- Bot Response -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Bot Response</h3>
+                        <div class="card-actions">
+                            <span class="badge bg-orange text-white">{{ conversation.tokens_used }} tokens</span>
+                            {% if conversation.response_time_ms %}
+                            <span class="badge bg-info text-white">{{ conversation.response_time_ms }}ms</span>
+                            {% endif %}
                         </div>
                     </div>
-
-                    <!-- Bot Response -->
-                    <div class="col-12">
-                        <div class="card">
-                            <div class="card-header">
-                                <h3 class="card-title">Bot Response</h3>
-                                <div class="card-actions">
-                                    <span class="badge bg-orange text-white">{{ conversation.tokens_used }} tokens</span>
-                                    {% if conversation.response_time_ms %}
-                                    <span class="badge bg-info text-white">{{ conversation.response_time_ms }}ms</span>
-                                    {% endif %}
-                                </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-auto">
+                                <span class="avatar avatar-sm bg-success text-white">🤖</span>
                             </div>
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-auto">
-                                        <span class="avatar avatar-sm bg-success text-white">🤖</span>
-                                    </div>
-                                    <div class="col">
-                                        <div class="fw-bold mb-2">Smarter Dev Bot</div>
-                                        <div class="text-wrap">
-                                            {{ conversation.bot_response|replace('\n', '<br>')|safe }}
-                                        </div>
-                                    </div>
+                            <div class="col">
+                                <div class="fw-bold mb-2">Smarter Dev Bot</div>
+                                <div class="text-wrap">
+                                    {{ conversation.bot_response|replace('\n', '<br>')|safe }}
                                 </div>
                             </div>
                         </div>
