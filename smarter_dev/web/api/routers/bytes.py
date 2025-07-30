@@ -240,11 +240,12 @@ async def create_transaction(
         from datetime import datetime, timezone, timedelta
         cooldown_cutoff = datetime.now(timezone.utc) - timedelta(hours=config.transfer_cooldown_hours)
         
-        # Check for recent transfers from this user
-        recent_transfers = await bytes_ops.get_transaction_history(
+        # Check for recent transfers sent by this user (not received by them)
+        # This prevents daily rewards and received transfers from triggering cooldown
+        recent_transfers = await bytes_ops.get_sent_transaction_history(
             db,
             guild_id,
-            user_id=transaction.giver_id,
+            sender_user_id=transaction.giver_id,
             limit=1
         )
         
