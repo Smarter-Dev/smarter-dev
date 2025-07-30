@@ -124,6 +124,9 @@ async def generate_help_response(
 async def help_command(ctx: lightbulb.Context) -> None:
     """Handle help command - provides AI-powered assistance."""
     
+    # Defer the response immediately to avoid 3-second timeout
+    await ctx.respond(hikari.ResponseType.DEFERRED_MESSAGE_CREATE, flags=hikari.MessageFlag.EPHEMERAL)
+    
     user_question = ctx.options.question
     if not user_question:
         user_question = "How does this bot work? What commands are available?"
@@ -142,8 +145,8 @@ async def help_command(ctx: lightbulb.Context) -> None:
         context_messages
     )
     
-    # Send ephemeral response
-    await ctx.respond(response, flags=hikari.MessageFlag.EPHEMERAL)
+    # Edit the deferred response with the actual content
+    await ctx.edit_last_response(response)
     
     logger.info(f"Help command used by {ctx.user.username} ({ctx.user.id}): {user_question[:50]}...")
 
@@ -175,28 +178,30 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
     if not user_question:
         user_question = "How can you help me?"
     
-    # Gather context from recent channel messages (excluding the current message)
-    context_messages = await gather_message_context(
-        plugin.bot, 
-        event.channel_id, 
-        limit=6  # Get 6 to account for current message
-    )
+    # Start typing indicator to show the bot is processing
+    async with plugin.bot.rest.trigger_typing(event.channel_id):
+        # Gather context from recent channel messages (excluding the current message)
+        context_messages = await gather_message_context(
+            plugin.bot, 
+            event.channel_id, 
+            limit=6  # Get 6 to account for current message
+        )
+        
+        # Remove the current message from context
+        if context_messages:
+            context_messages = [
+                msg for msg in context_messages 
+                if msg.content != event.content
+            ][-5:]  # Keep last 5
+        
+        # Generate response (typing indicator will continue during this)
+        response = await generate_help_response(
+            str(event.author.id),
+            user_question,
+            context_messages
+        )
     
-    # Remove the current message from context
-    if context_messages:
-        context_messages = [
-            msg for msg in context_messages 
-            if msg.content != event.content
-        ][-5:]  # Keep last 5
-    
-    # Generate response
-    response = await generate_help_response(
-        str(event.author.id),
-        user_question,
-        context_messages
-    )
-    
-    # Send public response
+    # Send public response (typing indicator stops automatically when we send the message)
     await plugin.bot.rest.create_message(event.channel_id, response)
     
     logger.info(f"Help mention handled for {event.author.username} ({event.author.id}): {user_question[:50]}...")
