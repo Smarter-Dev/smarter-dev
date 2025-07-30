@@ -10,6 +10,7 @@ from __future__ import annotations
 import hikari
 import lightbulb
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, TYPE_CHECKING
 
@@ -65,17 +66,109 @@ async def gather_message_context(
         return []
 
 
+async def store_conversation(
+    guild_id: str,
+    channel_id: str,
+    user_id: str,
+    user_username: str,
+    interaction_type: str,
+    user_question: str,
+    bot_response: str,
+    context_messages: List[DiscordMessage] = None,
+    tokens_used: int = 0,
+    response_time_ms: Optional[int] = None
+) -> bool:
+    """Store a help conversation in the database for auditing and analytics.
+    
+    Args:
+        guild_id: Discord guild ID
+        channel_id: Discord channel ID
+        user_id: Discord user ID
+        user_username: Username at time of conversation
+        interaction_type: 'slash_command' or 'mention'
+        user_question: User's question
+        bot_response: Bot's response
+        context_messages: Context messages from channel
+        tokens_used: AI tokens consumed
+        response_time_ms: Response generation time
+        
+    Returns:
+        bool: True if stored successfully, False otherwise
+    """
+    try:
+        from smarter_dev.bot.services.api_client import APIClient
+        from smarter_dev.shared.config import get_settings
+        
+        settings = get_settings()
+        
+        # Sanitize context messages for privacy
+        sanitized_context = []
+        if context_messages:
+            for msg in context_messages:
+                sanitized_context.append({
+                    "author": msg.author,  # Already sanitized (display name only)
+                    "timestamp": msg.timestamp.isoformat(),
+                    "content": msg.content[:500]  # Truncate long messages
+                })
+        
+        # Generate session ID (could be improved to link related conversations)
+        session_id = str(uuid.uuid4())
+        
+        # Prepare conversation data
+        conversation_data = {
+            "session_id": session_id,
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "user_id": user_id,
+            "user_username": user_username,
+            "interaction_type": interaction_type,
+            "context_messages": sanitized_context,
+            "user_question": user_question[:2000],  # Truncate to prevent database errors
+            "bot_response": bot_response[:4000],  # Truncate to prevent database errors
+            "tokens_used": tokens_used,
+            "response_time_ms": response_time_ms,
+            "retention_policy": "standard",
+            "is_sensitive": False  # TODO: Add sensitive content detection
+        }
+        
+        # Store conversation via API
+        async with APIClient(
+            base_url=settings.api_base_url,
+            api_key=settings.bot_api_key
+        ) as api_client:
+            response = await api_client.post("/admin/conversations", json_data=conversation_data)
+            
+            if response.status_code == 201:
+                logger.info(f"Conversation stored successfully for user {user_id}")
+                return True
+            else:
+                logger.warning(f"Failed to store conversation: HTTP {response.status_code}")
+                return False
+                
+    except Exception as e:
+        logger.error(f"Error storing conversation: {e}")
+        return False
+
+
 async def generate_help_response(
     user_id: str,
     user_question: str,
-    context_messages: List[DiscordMessage] = None
+    context_messages: List[DiscordMessage] = None,
+    guild_id: str = None,
+    channel_id: str = None,
+    user_username: str = None,
+    interaction_type: str = "unknown"
 ) -> str:
-    """Generate a help response with rate limiting.
+    """Generate a help response with rate limiting and conversation storage.
     
     Args:
         user_id: Discord user ID
         user_question: User's question
         context_messages: Recent conversation context
+        guild_id: Discord guild ID
+        channel_id: Discord channel ID 
+        user_username: Username for conversation record
+        interaction_type: 'slash_command' or 'mention'
         
     Returns:
         str: Generated response or rate limit message
@@ -96,8 +189,15 @@ async def generate_help_response(
         return "⚠️ The help system is currently at capacity. Please try again in a few minutes."
     
     try:
+        # Track response time
+        start_time = datetime.now(timezone.utc)
+        
         # Generate response with token tracking
         response, tokens_used = help_agent.generate_response(user_question, context_messages)
+        
+        # Calculate response time
+        end_time = datetime.now(timezone.utc)
+        response_time_ms = int((end_time - start_time).total_seconds() * 1000)
         
         # Use fallback token estimate if no usage data available
         if tokens_used == 0:
@@ -108,7 +208,26 @@ async def generate_help_response(
         # Record the request with actual or estimated token usage
         rate_limiter.record_request(user_id, tokens_used)
         
-        logger.info(f"Help response generated for {user_id}: {tokens_used} tokens used")
+        logger.info(f"Help response generated for {user_id}: {tokens_used} tokens used in {response_time_ms}ms")
+        
+        # Store conversation in database if we have the required context
+        if guild_id and channel_id and user_username:
+            try:
+                await store_conversation(
+                    guild_id=guild_id,
+                    channel_id=channel_id,
+                    user_id=user_id,
+                    user_username=user_username,
+                    interaction_type=interaction_type,
+                    user_question=user_question,
+                    bot_response=response,
+                    context_messages=context_messages,
+                    tokens_used=tokens_used,
+                    response_time_ms=response_time_ms
+                )
+            except Exception as storage_error:
+                # Don't fail the response if storage fails
+                logger.warning(f"Failed to store conversation for {user_id}: {storage_error}")
         
         return response
         
@@ -138,11 +257,15 @@ async def help_command(ctx: lightbulb.Context) -> None:
         limit=5
     )
     
-    # Generate response
+    # Generate response with conversation storage
     response = await generate_help_response(
-        str(ctx.user.id),
-        user_question,
-        context_messages
+        user_id=str(ctx.user.id),
+        user_question=user_question,
+        context_messages=context_messages,
+        guild_id=str(ctx.guild_id) if ctx.guild_id else None,
+        channel_id=str(ctx.channel_id),
+        user_username=ctx.user.username,
+        interaction_type="slash_command"
     )
     
     # Edit the deferred response with the actual content
@@ -194,11 +317,15 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
                 if msg.content != event.content
             ][-5:]  # Keep last 5
         
-        # Generate response (typing indicator will continue during this)
+        # Generate response with conversation storage (typing indicator will continue during this)
         response = await generate_help_response(
-            str(event.author.id),
-            user_question,
-            context_messages
+            user_id=str(event.author.id),
+            user_question=user_question,
+            context_messages=context_messages,
+            guild_id=str(event.guild_id) if event.guild_id else None,
+            channel_id=str(event.channel_id),
+            user_username=event.author.username,
+            interaction_type="mention"
         )
     
     # Send public response as a reply (typing indicator stops automatically when we send the message)
