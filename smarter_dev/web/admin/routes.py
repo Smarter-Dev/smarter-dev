@@ -13,7 +13,10 @@ from smarter_dev.web.admin.views import (
     squads_config,
     api_keys_list,
     api_keys_create,
-    api_keys_delete
+    api_keys_delete,
+    conversations_list,
+    conversation_detail,
+    cleanup_expired_conversations
 )
 
 
@@ -36,4 +39,9 @@ admin_routes = [
     Route("/api-keys", admin_required(api_keys_list), name="admin_api_keys"),
     Route("/api-keys/create", admin_required(api_keys_create), methods=["GET", "POST"], name="admin_api_keys_create"),
     Route("/api-keys/{key_id}/delete", admin_required(api_keys_delete), methods=["POST"], name="admin_api_keys_delete"),
+    
+    # Conversation management
+    Route("/conversations", admin_required(conversations_list), name="admin_conversations"),
+    Route("/conversations/{conversation_id}", admin_required(conversation_detail), name="admin_conversation_detail"),
+    Route("/conversations/cleanup", admin_required(cleanup_expired_conversations), methods=["GET", "POST"], name="admin_conversation_cleanup"),
 ]

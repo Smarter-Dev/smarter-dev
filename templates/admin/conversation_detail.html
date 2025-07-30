@@ -1,0 +1,206 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Conversation Details - Smarter Dev Admin{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+    <div class="container-xl">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle">
+                    <nav aria-label="breadcrumb">
+                        <ol class="breadcrumb">
+                            <li class="breadcrumb-item"><a href="/admin">Admin</a></li>
+                            <li class="breadcrumb-item"><a href="/admin/conversations">Conversations</a></li>
+                            <li class="breadcrumb-item active">{{ conversation.id }}</li>
+                        </ol>
+                    </nav>
+                </div>
+                <h2 class="page-title">
+                    Conversation Details
+                </h2>
+            </div>
+            <div class="col-auto ms-auto d-print-none">
+                <div class="btn-list">
+                    <a href="/admin/conversations" class="btn btn-outline-secondary">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-arrow-left"></use>
+                        </svg>
+                        Back to Conversations
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page-body">
+    <div class="container-xl">
+        <div class="row row-deck row-cards">
+            <!-- Conversation Metadata -->
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Conversation Info</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="datagrid">
+                            <div class="datagrid-item">
+                                <div class="datagrid-title">User</div>
+                                <div class="datagrid-content">
+                                    <div class="fw-bold">{{ conversation.user_username }}</div>
+                                    <div class="text-muted small">{{ conversation.user_id }}</div>
+                                </div>
+                            </div>
+                            <div class="datagrid-item">
+                                <div class="datagrid-title">Guild</div>
+                                <div class="datagrid-content">
+                                    <div class="fw-bold">{{ guild.name }}</div>
+                                    <div class="text-muted small">{{ conversation.guild_id }}</div>
+                                </div>
+                            </div>
+                            <div class="datagrid-item">
+                                <div class="datagrid-title">Channel</div>
+                                <div class="datagrid-content">
+                                    <div class="text-muted small">{{ conversation.channel_id }}</div>
+                                </div>
+                            </div>
+                            <div class="datagrid-item">
+                                <div class="datagrid-title">Interaction Type</div>
+                                <div class="datagrid-content">
+                                    {% if conversation.interaction_type == 'slash_command' %}
+                                    <span class="badge bg-blue">Slash Command</span>
+                                    {% else %}
+                                    <span class="badge bg-green">Mention</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="datagrid-item">
+                                <div class="datagrid-title">Started</div>
+                                <div class="datagrid-content">
+                                    {{ conversation.started_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}
+                                </div>
+                            </div>
+                            <div class="datagrid-item">
+                                <div class="datagrid-title">Tokens Used</div>
+                                <div class="datagrid-content">
+                                    <span class="badge bg-orange">{{ conversation.tokens_used }}</span>
+                                </div>
+                            </div>
+                            {% if conversation.response_time_ms %}
+                            <div class="datagrid-item">
+                                <div class="datagrid-title">Response Time</div>
+                                <div class="datagrid-content">
+                                    {{ conversation.response_time_ms }}ms
+                                </div>
+                            </div>
+                            {% endif %}
+                            <div class="datagrid-item">
+                                <div class="datagrid-title">Resolution Status</div>
+                                <div class="datagrid-content">
+                                    {% if conversation.is_resolved %}
+                                    <span class="badge bg-success">Resolved</span>
+                                    {% else %}
+                                    <span class="badge bg-warning">Unresolved</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="datagrid-item">
+                                <div class="datagrid-title">Retention Policy</div>
+                                <div class="datagrid-content">
+                                    <span class="badge bg-secondary">{{ conversation.retention_policy.title() }}</span>
+                                </div>
+                            </div>
+                            {% if conversation.expires_at %}
+                            <div class="datagrid-item">
+                                <div class="datagrid-title">Expires</div>
+                                <div class="datagrid-content">
+                                    {{ conversation.expires_at.strftime('%Y-%m-%d') }}
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Conversation Content -->
+            <div class="col-md-8">
+                <!-- Context Messages -->
+                {% if conversation.context_messages %}
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h3 class="card-title">Context Messages</h3>
+                        <div class="card-subtitle">Recent channel activity before the question</div>
+                    </div>
+                    <div class="card-body">
+                        {% for message in conversation.context_messages %}
+                        <div class="d-flex mb-3">
+                            <div class="avatar avatar-sm me-3">
+                                <span class="avatar-initials">{{ message.author[0] }}</span>
+                            </div>
+                            <div class="flex-fill">
+                                <div class="d-flex justify-content-between align-items-start">
+                                    <strong>{{ message.author }}</strong>
+                                    <small class="text-muted">{{ message.timestamp[:19] }}</small>
+                                </div>
+                                <div class="text-muted mt-1">
+                                    {{ message.content }}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- User Question -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h3 class="card-title">User Question</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex">
+                            <div class="avatar avatar-sm me-3">
+                                <span class="avatar-initials bg-primary">{{ conversation.user_username[0] }}</span>
+                            </div>
+                            <div class="flex-fill">
+                                <div class="fw-bold mb-2">{{ conversation.user_username }}</div>
+                                <div class="text-wrap">
+                                    {{ conversation.user_question }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bot Response -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Bot Response</h3>
+                        <div class="card-actions">
+                            <span class="badge bg-orange">{{ conversation.tokens_used }} tokens</span>
+                            {% if conversation.response_time_ms %}
+                            <span class="badge bg-info">{{ conversation.response_time_ms }}ms</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex">
+                            <div class="avatar avatar-sm me-3">
+                                <span class="avatar-initials bg-success">🤖</span>
+                            </div>
+                            <div class="flex-fill">
+                                <div class="fw-bold mb-2">Smarter Dev Bot</div>
+                                <div class="text-wrap">
+                                    {{ conversation.bot_response|replace('\n', '<br>')|safe }}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,130 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Cleanup Result - Smarter Dev Admin{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+    <div class="container-xl">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle">
+                    <nav aria-label="breadcrumb">
+                        <ol class="breadcrumb">
+                            <li class="breadcrumb-item"><a href="/admin">Admin</a></li>
+                            <li class="breadcrumb-item"><a href="/admin/conversations">Conversations</a></li>
+                            <li class="breadcrumb-item"><a href="/admin/conversations/cleanup">Cleanup</a></li>
+                            <li class="breadcrumb-item active">Result</li>
+                        </ol>
+                    </nav>
+                </div>
+                <h2 class="page-title">
+                    Cleanup Result
+                </h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page-body">
+    <div class="container-xl">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-body text-center py-5">
+                        {% if success %}
+                        <div class="mb-4">
+                            <svg class="icon icon-lg text-success" width="64" height="64">
+                                <use xlink:href="#tabler-check-circle"></use>
+                            </svg>
+                        </div>
+                        
+                        <h3 class="text-success mb-3">Cleanup Completed Successfully</h3>
+                        
+                        <div class="alert alert-success" role="alert">
+                            <div class="text-center">
+                                <strong>{{ cleaned_count }}</strong> expired conversation{{ 's' if cleaned_count != 1 else '' }} {{ 'have' if cleaned_count != 1 else 'has' }} been removed from the database.
+                            </div>
+                        </div>
+                        
+                        <p class="text-muted mb-4">
+                            {{ message }}
+                        </p>
+                        
+                        <div class="row text-center">
+                            <div class="col-md-6">
+                                <div class="card card-sm">
+                                    <div class="card-body">
+                                        <div class="h1 text-success">{{ cleaned_count }}</div>
+                                        <div class="text-muted">Conversations Removed</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card card-sm">
+                                    <div class="card-body">
+                                        <div class="h1 text-info">
+                                            {% if cleaned_count > 0 %}
+                                            ~{{ (cleaned_count * 0.5)|round|int }}KB
+                                            {% else %}
+                                            0KB
+                                            {% endif %}
+                                        </div>
+                                        <div class="text-muted">Est. Space Freed</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% else %}
+                        <div class="mb-4">
+                            <svg class="icon icon-lg text-danger" width="64" height="64">
+                                <use xlink:href="#tabler-x-circle"></use>
+                            </svg>
+                        </div>
+                        
+                        <h3 class="text-danger mb-3">Cleanup Failed</h3>
+                        
+                        <div class="alert alert-danger" role="alert">
+                            <div class="text-center">
+                                An error occurred during the cleanup process. Please try again or contact support if the issue persists.
+                            </div>
+                        </div>
+                        
+                        <p class="text-muted mb-4">
+                            {{ message|default("An unexpected error occurred during cleanup.") }}
+                        </p>
+                        {% endif %}
+                        
+                        <div class="btn-list justify-content-center">
+                            <a href="/admin/conversations" class="btn btn-primary">
+                                <svg class="icon" width="24" height="24">
+                                    <use xlink:href="#tabler-message-2"></use>
+                                </svg>
+                                View Conversations
+                            </a>
+                            <a href="/admin/conversations/cleanup" class="btn btn-outline-secondary">
+                                <svg class="icon" width="24" height="24">
+                                    <use xlink:href="#tabler-refresh"></use>
+                                </svg>
+                                Run Cleanup Again
+                            </a>
+                            <a href="/admin" class="btn btn-outline-secondary">
+                                <svg class="icon" width="24" height="24">
+                                    <use xlink:href="#tabler-home"></use>
+                                </svg>
+                                Back to Dashboard
+                            </a>
+                        </div>
+                        
+                        <div class="mt-4">
+                            <small class="text-muted">
+                                Cleanup operations are logged for audit purposes. 
+                                Regular cleanup helps maintain system performance and data privacy.
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
