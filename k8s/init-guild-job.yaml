@@ -1,0 +1,72 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-guild-config
+  namespace: smarter-dev
+spec:
+  template:
+    spec:
+      containers:
+      - name: init-guild
+        image: zzmmrmn/smarter-dev-bot:92f1219
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          python -c "
+          import asyncio
+          from smarter_dev.shared.config import get_settings
+          from smarter_dev.shared.database import get_session_maker
+          from smarter_dev.web.models import BytesConfig
+
+          async def init_guild():
+              guild_id = '733364234141827073'  # Current guild ID
+              
+              session_maker = get_session_maker()
+              async with session_maker() as session:
+                  # Check if config already exists
+                  existing = await session.get(BytesConfig, guild_id)
+                  if existing:
+                      print(f'Configuration already exists for guild {guild_id}')
+                      return
+                  
+                  # Create new config with default values
+                  config = BytesConfig(
+                      guild_id=guild_id,
+                      starting_balance=100,
+                      daily_amount=10,
+                      streak_bonuses={7: 2, 14: 4, 30: 10, 60: 20},
+                      max_transfer=1000,
+                      transfer_cooldown_hours=0,
+                      role_rewards={}
+                  )
+                  
+                  session.add(config)
+                  await session.commit()
+                  print(f'✅ Created default bytes configuration for guild {guild_id}')
+
+          asyncio.run(init_guild())
+          "
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: smarter-dev-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: smarter-dev-secrets
+              key: redis-url
+        - name: API_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: smarter-dev-secrets
+              key: api-secret-key
+        - name: ENVIRONMENT
+          valueFrom:
+            configMapKeyRef:
+              name: smarter-dev-config
+              key: ENVIRONMENT
+      restartPolicy: Never
+  backoffLimit: 1

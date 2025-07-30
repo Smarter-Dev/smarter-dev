@@ -16,38 +16,29 @@ logger = logging.getLogger(__name__)
 
 
 async def initialize_single_guild_configuration(guild_id: str) -> None:
-    """Initialize bytes configuration for a single guild.
+    """Initialize bytes configuration for a single guild using the API.
+    
+    The API automatically creates a default configuration if none exists
+    when requesting the guild configuration.
     
     Args:
         guild_id: Discord guild ID to initialize
     """
     try:
-        from smarter_dev.shared.database import get_session_maker
-        from smarter_dev.web.models import BytesConfig
+        from smarter_dev.bot.services.api_client import APIClient
+        from smarter_dev.shared.config import get_settings
         
-        session_maker = get_session_maker()
+        settings = get_settings()
         
-        async with session_maker() as session:
-            # Check if config already exists
-            existing = await session.get(BytesConfig, guild_id)
-            if existing:
-                logger.debug(f"Configuration already exists for guild {guild_id}")
-                return
-            
-            # Create new config with default values
-            config = BytesConfig(
-                guild_id=guild_id,
-                starting_balance=100,
-                daily_amount=10,
-                streak_bonuses={7: 2, 14: 4, 30: 10, 60: 20},
-                max_transfer=1000,
-                transfer_cooldown_hours=0,
-                role_rewards={}
-            )
-            
-            session.add(config)
-            await session.commit()
-            logger.info(f"✅ Created default bytes configuration for guild {guild_id}")
+        # Create API client
+        api_client = APIClient(
+            base_url=settings.api_base_url,
+            api_key=settings.bot_api_key
+        )
+        
+        # Get guild configuration - this automatically creates one with defaults if it doesn't exist
+        await api_client.get(f"/guilds/{guild_id}/bytes/config")
+        logger.info(f"✅ Ensured bytes configuration exists for guild {guild_id}")
             
     except Exception as e:
         logger.error(f"Failed to initialize guild configuration for {guild_id}: {e}")
