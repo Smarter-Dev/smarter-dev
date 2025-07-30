@@ -60,6 +60,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: bot-api-key
+                  - name: GEMINI_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: gemini-api-key
                 resources:
                     requests:
                         cpu: 100m
