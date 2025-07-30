@@ -392,11 +392,11 @@ class BytesOperations:
         sender_user_id: str,
         limit: int = 20
     ) -> List[BytesTransaction]:
-        """Get transaction history for transactions sent by a specific user.
+        """Get transaction history for user-to-user transfers sent by a specific user.
         
-        This method only returns transactions where the specified user was the sender (giver),
-        not the receiver. This is useful for cooldown checks where we only care about 
-        outgoing transfers, not incoming rewards or transfers.
+        This method only returns transactions where the specified user was the sender (giver)
+        to another user, excluding system charges like squad join fees. This is useful for 
+        cooldown checks where we only care about user-to-user transfers, not system payments.
         
         Args:
             session: Database session
@@ -405,7 +405,7 @@ class BytesOperations:
             limit: Maximum number of results
             
         Returns:
-            List[BytesTransaction]: Transactions where user was sender, ordered by creation time descending
+            List[BytesTransaction]: User-to-user transactions where user was sender, ordered by creation time descending
             
         Raises:
             DatabaseOperationError: If query fails
@@ -415,6 +415,7 @@ class BytesOperations:
                 select(BytesTransaction)
                 .where(BytesTransaction.guild_id == guild_id)
                 .where(BytesTransaction.giver_id == sender_user_id)  # Only transactions where user was sender
+                .where(BytesTransaction.receiver_id != "SYSTEM")  # Exclude system charges (squad fees, etc.)
                 .order_by(desc(BytesTransaction.created_at))
                 .limit(limit)
             )
