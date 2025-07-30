@@ -528,3 +528,81 @@ class AdminStatsResponse(BaseAPIModel):
     total_api_requests: int = Field(..., description="Total API requests made")
     api_requests_today: int = Field(..., description="API requests made today")
     top_api_consumers: List[dict] = Field(..., description="Top API key consumers by usage")
+
+
+# ============================================================================
+# Help Conversation Schemas
+# ============================================================================
+
+class HelpConversationCreate(BaseAPIModel):
+    """Request model for creating a help conversation record."""
+    
+    session_id: str = Field(..., description="Session identifier for linking conversations")
+    guild_id: str = Field(..., description="Discord guild ID")
+    channel_id: str = Field(..., description="Discord channel ID") 
+    user_id: str = Field(..., description="Discord user ID")
+    user_username: str = Field(..., description="Username at time of conversation")
+    interaction_type: str = Field(..., description="Type of interaction: 'slash_command' or 'mention'")
+    context_messages: Optional[List[dict]] = Field(None, description="Sanitized context messages")
+    user_question: str = Field(..., description="User's question or request")
+    bot_response: str = Field(..., description="Bot's generated response")
+    tokens_used: int = Field(..., description="AI tokens consumed")
+    response_time_ms: Optional[int] = Field(None, description="Response generation time in milliseconds")
+    retention_policy: str = Field("standard", description="Data retention policy")
+    is_sensitive: bool = Field(False, description="Whether conversation contains sensitive information")
+
+
+class HelpConversationResponse(BaseAPIModel):
+    """Response model for help conversation data."""
+    
+    id: UUID = Field(..., description="Unique conversation identifier")
+    session_id: str = Field(..., description="Session identifier")
+    guild_id: str = Field(..., description="Discord guild ID")
+    channel_id: str = Field(..., description="Discord channel ID")
+    user_id: str = Field(..., description="Discord user ID")
+    user_username: str = Field(..., description="Username at time of conversation")
+    started_at: datetime = Field(..., description="When conversation started")
+    last_activity_at: datetime = Field(..., description="Most recent activity")
+    interaction_type: str = Field(..., description="Type of interaction")
+    is_resolved: bool = Field(..., description="Whether conversation was resolved")
+    context_messages: Optional[List[dict]] = Field(None, description="Context messages")
+    user_question: str = Field(..., description="User's question")
+    bot_response: str = Field(..., description="Bot's response")
+    tokens_used: int = Field(..., description="Tokens consumed")
+    response_time_ms: Optional[int] = Field(None, description="Response time in ms")
+    retention_policy: str = Field(..., description="Retention policy")
+    expires_at: Optional[datetime] = Field(None, description="Expiration timestamp")
+    is_sensitive: bool = Field(..., description="Contains sensitive information")
+    created_at: datetime = Field(..., description="Record creation time")
+    updated_at: Optional[datetime] = Field(None, description="Last update time")
+
+
+class HelpConversationListResponse(BaseAPIModel):
+    """Response model for paginated conversation listings."""
+    
+    items: List[HelpConversationResponse] = Field(..., description="List of conversations")
+    total: int = Field(..., description="Total number of conversations")
+    page: int = Field(..., description="Current page number")
+    size: int = Field(..., description="Number of items per page")
+    pages: int = Field(..., description="Total number of pages")
+
+
+class HelpConversationCreateResponse(BaseAPIModel):
+    """Response model for conversation creation."""
+    
+    id: UUID = Field(..., description="Created conversation ID")
+    message: str = Field(..., description="Success message")
+    created_at: datetime = Field(..., description="Creation timestamp")
+
+
+class HelpConversationStatsResponse(BaseAPIModel):
+    """Response model for help conversation statistics."""
+    
+    total_conversations: int = Field(..., description="Total conversations")
+    conversations_today: int = Field(..., description="Conversations today")
+    total_tokens_used: int = Field(..., description="Total tokens consumed")
+    tokens_used_today: int = Field(..., description="Tokens used today")
+    average_response_time_ms: Optional[int] = Field(None, description="Average response time")
+    top_users: List[dict] = Field(..., description="Most active users")
+    conversation_types: dict = Field(..., description="Breakdown by interaction type")
+    resolution_rate: float = Field(..., description="Percentage of resolved conversations")
