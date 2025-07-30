@@ -201,8 +201,8 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
             context_messages
         )
     
-    # Send public response (typing indicator stops automatically when we send the message)
-    await plugin.bot.rest.create_message(event.channel_id, response)
+    # Send public response as a reply (typing indicator stops automatically when we send the message)
+    await plugin.bot.rest.create_message(event.channel_id, response, reply=event.message)
     
     logger.info(f"Help mention handled for {event.author.username} ({event.author.id}): {user_question[:50]}...")
 
