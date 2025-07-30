@@ -126,9 +126,9 @@ class HelpAgentSignature(dspy.Signature):
 
     ### How Bytes Work:
     - **Starting Balance**: New users get a starting balance (usually 128 bytes)
-    - **Daily Claims**: Users can claim daily bytes to maintain streaks
+    - **Daily Rewards**: Users get a daily bytes reward for their first message every day UTC time
     - **Transfers**: Send bytes to other users (may have cooldowns)
-    - **Streaks**: Consecutive daily claims earn bonus rewards
+    - **Streaks**: Consecutive daily rewards can recieve streak multipliers
     - **Squad Costs**: Some squads require bytes to join
 
     ## SQUAD MANAGEMENT SYSTEM
