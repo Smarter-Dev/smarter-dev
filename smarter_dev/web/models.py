@@ -668,3 +668,181 @@ class SecurityLog(Base):
         """String representation of the security log."""
         status = "SUCCESS" if self.success else "FAILURE"
         return f"<SecurityLog(action='{self.action}', status='{status}', timestamp='{self.timestamp}')>"
+
+
+class HelpConversation(Base):
+    """Help agent conversation tracking for audit and analytics.
+    
+    Stores complete conversation data including user questions, bot responses,
+    context messages, and performance metrics. Designed for admin auditing,
+    analytics, and system improvement with privacy controls and data retention.
+    """
+    
+    __tablename__ = "help_conversations"
+    
+    # Primary identification
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique identifier for the conversation"
+    )
+    session_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+        doc="Session identifier for linking related conversations"
+    )
+    
+    # Discord context
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord guild (server) snowflake ID"
+    )
+    channel_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord channel snowflake ID"
+    )
+    user_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord user snowflake ID"
+    )
+    user_username: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Username at time of conversation"
+    )
+    
+    # Conversation metadata
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+        doc="When the conversation started"
+    )
+    last_activity_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+        doc="Most recent activity timestamp"
+    )
+    interaction_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        doc="Type of interaction: 'slash_command' or 'mention'"
+    )
+    is_resolved: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        doc="Whether the conversation was resolved successfully"
+    )
+    
+    # Content (with privacy controls)
+    context_messages: Mapped[Optional[list]] = mapped_column(
+        JSON,
+        nullable=True,
+        doc="Sanitized context messages from channel history"
+    )
+    user_question: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="User's question or request"
+    )
+    bot_response: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Bot's generated response"
+    )
+    
+    # Performance tracking
+    tokens_used: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="AI tokens consumed for response generation"
+    )
+    response_time_ms: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Response generation time in milliseconds"
+    )
+    
+    # Privacy and retention
+    retention_policy: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="standard",
+        doc="Data retention policy: 'standard', 'minimal', 'sensitive'"
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc="Auto-deletion timestamp based on retention policy"
+    )
+    is_sensitive: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        doc="Whether conversation contains sensitive information"
+    )
+    
+    # Audit fields
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="When the record was created"
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        onupdate=func.now(),
+        doc="When the record was last updated"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_help_conversations_guild_started", "guild_id", "started_at"),
+        Index("ix_help_conversations_user_started", "user_id", "started_at"),
+        Index("ix_help_conversations_session_started", "session_id", "started_at"),
+        Index("ix_help_conversations_expires_at", "expires_at"),
+        Index("ix_help_conversations_tokens_started", "tokens_used", "started_at"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize HelpConversation with default timestamps."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('started_at', now)
+        kwargs.setdefault('last_activity_at', now)
+        kwargs.setdefault('created_at', now)
+        
+        # Set default expiration based on retention policy
+        if 'retention_policy' in kwargs and 'expires_at' not in kwargs:
+            retention = kwargs['retention_policy']
+            if retention == "sensitive":
+                from datetime import timedelta
+                kwargs['expires_at'] = now + timedelta(days=7)
+            elif retention == "minimal":
+                from datetime import timedelta
+                kwargs['expires_at'] = now + timedelta(days=30)
+            elif retention == "standard":
+                from datetime import timedelta
+                kwargs['expires_at'] = now + timedelta(days=90)
+        
+        super().__init__(**kwargs)
+    
+    def __repr__(self) -> str:
+        """String representation of the help conversation."""
+        return f"<HelpConversation(id='{self.id}', user='{self.user_username}', tokens={self.tokens_used})>"
