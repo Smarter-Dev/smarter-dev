@@ -101,19 +101,23 @@ async def balance_command(ctx: lightbulb.Context) -> None:
             
     except ServiceError as e:
         logger.error(f"Service error in balance command: {e}")
-        # Check if interaction was already responded to
-        if not ctx._interaction.responded:
+        # Try to respond with error, but handle if already responded
+        try:
             generator = get_generator()
             image_file = generator.create_error_embed("Failed to retrieve balance. Please try again later.")
             await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        except:
+            pass  # Interaction was already responded to
         return
     except Exception as e:
         logger.exception(f"Unexpected error in balance command: {e}")
-        # Check if interaction was already responded to
-        if not ctx._interaction.responded:
+        # Try to respond with error, but handle if already responded
+        try:
             generator = get_generator()
             image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
             await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        except:
+            pass  # Interaction was already responded to
         return
 
 
