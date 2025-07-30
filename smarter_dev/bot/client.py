@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Optional, Set
 
 import hikari
 import lightbulb
@@ -14,6 +15,40 @@ from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Cache to track users who have already claimed their daily reward today
+# Format: {f"{guild_id}:{user_id}": "YYYY-MM-DD"}
+daily_claim_cache: dict[str, str] = {}
+
+
+def get_utc_date_string() -> str:
+    """Get current UTC date as YYYY-MM-DD string."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def has_claimed_today(guild_id: str, user_id: str) -> bool:
+    """Check if user has already claimed their daily reward today."""
+    cache_key = f"{guild_id}:{user_id}"
+    today = get_utc_date_string()
+    return daily_claim_cache.get(cache_key) == today
+
+
+def mark_claimed_today(guild_id: str, user_id: str) -> None:
+    """Mark user as having claimed their daily reward today."""
+    cache_key = f"{guild_id}:{user_id}"
+    today = get_utc_date_string()
+    daily_claim_cache[cache_key] = today
+    logger.debug(f"Marked {user_id} as claimed for {today} in guild {guild_id}")
+
+
+def cleanup_old_cache_entries() -> None:
+    """Remove cache entries from previous days to prevent memory leaks."""
+    today = get_utc_date_string()
+    old_keys = [key for key, date_str in daily_claim_cache.items() if date_str != today]
+    for key in old_keys:
+        del daily_claim_cache[key]
+    if old_keys:
+        logger.debug(f"Cleaned up {len(old_keys)} old cache entries")
 
 
 # Fun and techy status messages that rotate every 5 minutes
@@ -80,6 +115,28 @@ async def start_status_rotation(bot: lightbulb.BotApp) -> None:
     # Start the rotation task
     asyncio.create_task(rotate_status())
     logger.info("Started status rotation (5-minute intervals)")
+
+
+async def start_cache_cleanup() -> None:
+    """Start the periodic cache cleanup for daily claim tracking."""
+    async def cleanup_cache():
+        """Clean up old cache entries every hour."""
+        while True:
+            try:
+                # Clean up old entries
+                cleanup_old_cache_entries()
+                
+                # Wait 1 hour before next cleanup
+                await asyncio.sleep(3600)  # 3600 seconds = 1 hour
+                
+            except Exception as e:
+                logger.error(f"Error cleaning up cache: {e}")
+                # Wait a bit before retrying
+                await asyncio.sleep(300)  # 5 minutes
+    
+    # Start the cleanup task
+    asyncio.create_task(cleanup_cache())
+    logger.info("Started daily claim cache cleanup (hourly intervals)")
 
 
 async def initialize_single_guild_configuration(guild_id: str) -> None:
@@ -348,6 +405,9 @@ async def run_bot() -> None:
         # Start status rotation
         await start_status_rotation(bot)
         
+        # Start cache cleanup
+        await start_cache_cleanup()
+        
         logger.info("Bot is now fully ready and will stay online")
     
     @bot.listen()
@@ -396,17 +456,29 @@ async def run_bot() -> None:
             logger.warning("No bytes service available for daily message reward")
             return
         
+        # Check cache first to avoid unnecessary API calls
+        guild_id_str = str(event.guild_id)
+        user_id_str = str(event.author.id)
+        
+        if has_claimed_today(guild_id_str, user_id_str):
+            # User already claimed today, skip API call
+            logger.debug(f"User {event.author} already claimed daily reward today (cached)")
+            return
+        
         try:
             # Try to claim daily reward (this will only succeed on first message of the day)
             logger.debug(f"Attempting daily reward for {event.author} (ID: {event.author.id}) in guild {event.guild_id}")
             
             result = await bytes_service.claim_daily(
-                str(event.guild_id),
-                str(event.author.id),
+                guild_id_str,
+                user_id_str,
                 str(event.author)
             )
             
             if result.success:
+                # Mark as claimed in cache to prevent future API calls today
+                mark_claimed_today(guild_id_str, user_id_str)
+                
                 # Add reaction to the message that earned bytes
                 try:
                     await event.message.add_reaction("🎉")
@@ -417,9 +489,15 @@ async def run_bot() -> None:
                 logger.debug(f"Daily reward not successful for {event.author}")
                 
         except Exception as e:
-            # Log all errors for debugging, but handle expected scenarios gracefully
-            if "already been claimed" in str(e).lower() or "already claimed" in str(e).lower():
-                logger.debug(f"Daily reward already claimed today for {event.author}")
+            # Handle expected scenarios gracefully
+            error_str = str(e).lower()
+            if ("already been claimed" in error_str or 
+                "already claimed" in error_str or 
+                "409" in error_str or
+                "conflict" in error_str):
+                # Mark as claimed in cache to prevent future API calls today
+                mark_claimed_today(guild_id_str, user_id_str)
+                logger.debug(f"Daily reward already claimed today for {event.author} (from API): {e}")
             else:
                 logger.error(f"Unexpected error in daily reward for {event.author}: {e}", exc_info=True)
     
