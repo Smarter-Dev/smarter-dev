@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from typing import Optional
 
 import hikari
@@ -13,6 +14,72 @@ from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+# Fun and techy status messages that rotate every 5 minutes
+STATUS_MESSAGES = [
+    "🚀 Compiling bytes...",
+    "⚡ Optimizing algorithms",
+    "🔧 Debugging the matrix",
+    "💾 Caching quantum data",
+    "🌐 Syncing with the cloud",
+    "🤖 Training neural networks",
+    "📡 Scanning for packets",
+    "🔍 Indexing the interwebs",
+    "⚙️ Refactoring reality",
+    "🎯 Targeting efficiency",
+    "🔐 Encrypting secrets",
+    "📊 Analyzing patterns",
+    "🌟 Generating awesomeness",
+    "🔄 Looping infinitely",
+    "💡 Processing genius ideas",
+    "🚨 Monitoring systems",
+    "📈 Scaling to infinity",
+    "🔋 Charging batteries",
+    "🎨 Rendering pixels",
+    "🌊 Surfing data streams",
+    "🔥 Burning rubber",
+    "⭐ Collecting stardust",
+    "🎲 Rolling random numbers",
+    "🧠 Computing intelligence",
+    "🎵 Harmonizing frequencies",
+]
+
+
+async def start_status_rotation(bot: lightbulb.BotApp) -> None:
+    """Start the periodic status message rotation.
+    
+    Args:
+        bot: Bot application instance
+    """
+    async def rotate_status():
+        """Rotate the bot's status message every 5 minutes."""
+        while True:
+            try:
+                # Pick a random status message
+                status_message = random.choice(STATUS_MESSAGES)
+                
+                # Update bot's activity
+                await bot.update_presence(
+                    activity=hikari.Activity(
+                        name=status_message,
+                        type=hikari.ActivityType.CUSTOM
+                    )
+                )
+                
+                logger.debug(f"Updated bot status to: {status_message}")
+                
+                # Wait 5 minutes before next rotation
+                await asyncio.sleep(300)  # 300 seconds = 5 minutes
+                
+            except Exception as e:
+                logger.error(f"Error rotating status: {e}")
+                # Wait a bit before retrying
+                await asyncio.sleep(60)
+    
+    # Start the rotation task
+    asyncio.create_task(rotate_status())
+    logger.info("Started status rotation (5-minute intervals)")
 
 
 async def initialize_single_guild_configuration(guild_id: str) -> None:
@@ -272,6 +339,9 @@ async def run_bot() -> None:
         
         # Initialize guild configurations for all guilds the bot is in
         await initialize_guild_configurations(bot)
+        
+        # Start status rotation
+        await start_status_rotation(bot)
         
         logger.info("Bot is now fully ready and will stay online")
     
