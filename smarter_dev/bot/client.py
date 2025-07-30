@@ -289,6 +289,11 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         bot.load_extensions("smarter_dev.bot.plugins.squads")
         logger.info("✓ Loaded squads plugin")
         
+        # Load help agent plugin
+        logger.info("Loading help plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.help")
+        logger.info("✓ Loaded help plugin")
+        
         # Load events plugin for component interactions
         logger.info("Loading events plugin...")
         bot.load_extensions("smarter_dev.bot.plugins.events")

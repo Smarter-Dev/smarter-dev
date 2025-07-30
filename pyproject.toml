@@ -42,7 +42,8 @@ bot = [
     "hikari[speedups]>=2.0.0",
     "hikari-lightbulb>=2.0.0",
     "aiohttp>=3.8.0",
-    "httpx>=0.24.0",  # For API client to communicate with web service
+    "httpx>=0.24.0", # For API client to communicate with web service
+    "dspy>=2.6.27",
 ]
 
 # Web API dependencies
@@ -105,6 +106,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
+    "llm: marks tests that use LLM APIs (expensive, skip by default with '-m \"not llm\"')",
 ]
 
 [tool.coverage.run]
