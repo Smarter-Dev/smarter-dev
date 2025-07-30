@@ -1,0 +1,230 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Help Conversations - Smarter Dev Admin{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+    <div class="container-xl">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle">
+                    Help Agent Analytics
+                </div>
+                <h2 class="page-title">
+                    Help Conversations
+                </h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page-body">
+    <div class="container-xl">
+        <!-- Filters -->
+        <div class="row row-cards mb-3">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Filters</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="get" action="/admin/conversations">
+                            <div class="row g-3">
+                                <div class="col-md-3">
+                                    <label class="form-label">Guild</label>
+                                    <select name="guild_id" class="form-select">
+                                        <option value="">All Guilds</option>
+                                        {% for guild in guilds %}
+                                        <option value="{{ guild.id }}" {% if filters.guild_id == guild.id %}selected{% endif %}>
+                                            {{ guild.name }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">User ID</label>
+                                    <input type="text" name="user_id" class="form-control" 
+                                           value="{{ filters.user_id or '' }}" placeholder="Discord User ID">
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label">Type</label>
+                                    <select name="interaction_type" class="form-select">
+                                        <option value="">All Types</option>
+                                        <option value="slash_command" {% if filters.interaction_type == 'slash_command' %}selected{% endif %}>
+                                            Slash Command
+                                        </option>
+                                        <option value="mention" {% if filters.interaction_type == 'mention' %}selected{% endif %}>
+                                            Mention
+                                        </option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Search</label>
+                                    <input type="text" name="search" class="form-control" 
+                                           value="{{ filters.search or '' }}" placeholder="Search questions/responses">
+                                </div>
+                                <div class="col-md-1">
+                                    <label class="form-label">&nbsp;</label>
+                                    <div>
+                                        <label class="form-check">
+                                            <input type="checkbox" name="resolved_only" value="true" 
+                                                   class="form-check-input" {% if filters.resolved_only %}checked{% endif %}>
+                                            <span class="form-check-label">Resolved Only</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row mt-3">
+                                <div class="col">
+                                    <button type="submit" class="btn btn-primary">
+                                        <svg class="icon" width="24" height="24">
+                                            <use xlink:href="#tabler-search"></use>
+                                        </svg>
+                                        Filter
+                                    </button>
+                                    <a href="/admin/conversations" class="btn btn-outline-secondary ms-2">
+                                        Clear
+                                    </a>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Conversations List -->
+        <div class="row row-deck row-cards">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Conversations ({{ total }})</h3>
+                        <div class="card-actions">
+                            <span class="text-muted">Page {{ page }} of {{ total_pages }}</span>
+                        </div>
+                    </div>
+                    
+                    {% if conversations %}
+                    <div class="table-responsive">
+                        <table class="table table-vcenter card-table">
+                            <thead>
+                                <tr>
+                                    <th>User</th>
+                                    <th>Guild</th>
+                                    <th>Type</th>
+                                    <th>Question Preview</th>
+                                    <th>Tokens</th>
+                                    <th>Response Time</th>
+                                    <th>Started</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for conversation in conversations %}
+                                <tr>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <div>
+                                                <div class="fw-bold">{{ conversation.user_username }}</div>
+                                                <div class="text-muted small">{{ conversation.user_id }}</div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="text-muted small">{{ conversation.guild_id }}</span>
+                                    </td>
+                                    <td>
+                                        {% if conversation.interaction_type == 'slash_command' %}
+                                        <span class="badge bg-blue">Slash Command</span>
+                                        {% else %}
+                                        <span class="badge bg-green">Mention</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="text-truncate" style="max-width: 300px;">
+                                            {{ conversation.user_question }}
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-orange">{{ conversation.tokens_used }}</span>
+                                    </td>
+                                    <td>
+                                        {% if conversation.response_time_ms %}
+                                        <span class="text-muted">{{ conversation.response_time_ms }}ms</span>
+                                        {% else %}
+                                        <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <span class="text-muted">{{ conversation.started_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                                    </td>
+                                    <td>
+                                        <a href="/admin/conversations/{{ conversation.id }}" class="btn btn-sm btn-outline-primary">
+                                            View Details
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- Pagination -->
+                    {% if total_pages > 1 %}
+                    <div class="card-footer d-flex align-items-center">
+                        <p class="m-0 text-muted">
+                            Showing {{ ((page - 1) * size) + 1 }} to {{ ((page - 1) * size) + conversations|length }} of {{ total }} results
+                        </p>
+                        <ul class="pagination m-0 ms-auto">
+                            {% if page > 1 %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ page - 1 }}{% if filters.guild_id %}&guild_id={{ filters.guild_id }}{% endif %}{% if filters.user_id %}&user_id={{ filters.user_id }}{% endif %}{% if filters.interaction_type %}&interaction_type={{ filters.interaction_type }}{% endif %}{% if filters.search %}&search={{ filters.search }}{% endif %}{% if filters.resolved_only %}&resolved_only=true{% endif %}">
+                                    <svg class="icon" width="24" height="24">
+                                        <use xlink:href="#tabler-chevron-left"></use>
+                                    </svg>
+                                    prev
+                                </a>
+                            </li>
+                            {% endif %}
+                            
+                            {% for p in range(max(1, page - 2), min(total_pages + 1, page + 3)) %}
+                            <li class="page-item {% if p == page %}active{% endif %}">
+                                <a class="page-link" href="?page={{ p }}{% if filters.guild_id %}&guild_id={{ filters.guild_id }}{% endif %}{% if filters.user_id %}&user_id={{ filters.user_id }}{% endif %}{% if filters.interaction_type %}&interaction_type={{ filters.interaction_type }}{% endif %}{% if filters.search %}&search={{ filters.search }}{% endif %}{% if filters.resolved_only %}&resolved_only=true{% endif %}">
+                                    {{ p }}
+                                </a>
+                            </li>
+                            {% endfor %}
+                            
+                            {% if page < total_pages %}
+                            <li class="page-item">
+                                <a class="page-link" href="?page={{ page + 1 }}{% if filters.guild_id %}&guild_id={{ filters.guild_id }}{% endif %}{% if filters.user_id %}&user_id={{ filters.user_id }}{% endif %}{% if filters.interaction_type %}&interaction_type={{ filters.interaction_type }}{% endif %}{% if filters.search %}&search={{ filters.search }}{% endif %}{% if filters.resolved_only %}&resolved_only=true{% endif %}">
+                                    next
+                                    <svg class="icon" width="24" height="24">
+                                        <use xlink:href="#tabler-chevron-right"></use>
+                                    </svg>
+                                </a>
+                            </li>
+                            {% endif %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                    
+                    {% else %}
+                    <div class="empty">
+                        <div class="empty-img">
+                            <svg class="icon" width="128" height="128">
+                                <use xlink:href="#tabler-messages"></use>
+                            </svg>
+                        </div>
+                        <p class="empty-title">No conversations found</p>
+                        <p class="empty-subtitle text-muted">
+                            No help agent conversations match your current filters.
+                        </p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

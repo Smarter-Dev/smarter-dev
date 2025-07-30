@@ -20,7 +20,8 @@ from smarter_dev.web.models import (
     BytesConfig,
     Squad,
     SquadMembership,
-    APIKey
+    APIKey,
+    HelpConversation
 )
 from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, APIKeyOperations
 from smarter_dev.web.security import generate_secure_api_key
@@ -67,6 +68,35 @@ async def dashboard(request: Request) -> Response:
                 select(func.coalesce(func.sum(BytesBalance.balance), 0))
             )
             total_bytes = total_bytes_result.scalar() or 0
+            
+            # Help conversation statistics
+            total_conversations_result = await session.execute(
+                select(func.count(HelpConversation.id))
+            )
+            total_conversations = total_conversations_result.scalar() or 0
+            
+            # Total tokens used by help agent
+            total_tokens_result = await session.execute(
+                select(func.coalesce(func.sum(HelpConversation.tokens_used), 0))
+            )
+            total_tokens = total_tokens_result.scalar() or 0
+            
+            # Conversations today
+            from datetime import datetime, timezone
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            conversations_today_result = await session.execute(
+                select(func.count(HelpConversation.id))
+                .where(HelpConversation.started_at >= today_start)
+            )
+            conversations_today = conversations_today_result.scalar() or 0
+            
+            # Average response time
+            avg_response_time_result = await session.execute(
+                select(func.avg(HelpConversation.response_time_ms))
+                .where(HelpConversation.response_time_ms.is_not(None))
+            )
+            avg_response_time = avg_response_time_result.scalar()
+            avg_response_time_ms = int(avg_response_time) if avg_response_time else None
         
         # Add basic stats to each guild
         guild_stats = []
@@ -99,7 +129,11 @@ async def dashboard(request: Request) -> Response:
                 "total_users": total_users,
                 "total_transactions": total_transactions,
                 "total_squads": total_squads,
-                "total_bytes": total_bytes
+                "total_bytes": total_bytes,
+                "total_conversations": total_conversations,
+                "total_tokens": total_tokens,
+                "conversations_today": conversations_today,
+                "avg_response_time_ms": avg_response_time_ms
             }
         )
     
@@ -114,7 +148,11 @@ async def dashboard(request: Request) -> Response:
                 "total_users": 0,
                 "total_transactions": 0,
                 "total_squads": 0,
-                "total_bytes": 0
+                "total_bytes": 0,
+                "total_conversations": 0,
+                "total_tokens": 0,
+                "conversations_today": 0,
+                "avg_response_time_ms": None
             }
         )
     except Exception as e:
@@ -128,7 +166,11 @@ async def dashboard(request: Request) -> Response:
                 "total_users": 0,
                 "total_transactions": 0,
                 "total_squads": 0,
-                "total_bytes": 0
+                "total_bytes": 0,
+                "total_conversations": 0,
+                "total_tokens": 0,
+                "conversations_today": 0,
+                "avg_response_time_ms": None
             }
         )
 
@@ -721,6 +763,251 @@ async def api_keys_delete(request: Request) -> Response:
             "admin/error.html",
             {
                 "error": "Failed to delete API key.",
+                "error_code": 500
+            },
+            status_code=500
+        )
+
+
+async def conversations_list(request: Request) -> Response:
+    """List help conversations with filtering and pagination."""
+    try:
+        # Get query parameters
+        page = int(request.query_params.get("page", 1))
+        size = min(int(request.query_params.get("size", 20)), 100)
+        guild_id = request.query_params.get("guild_id")
+        user_id = request.query_params.get("user_id")
+        interaction_type = request.query_params.get("interaction_type")
+        search = request.query_params.get("search")
+        resolved_only = request.query_params.get("resolved_only") == "true"
+        
+        async with get_db_session_context() as session:
+            # Build query with filters
+            query = select(HelpConversation)
+            count_query = select(func.count(HelpConversation.id))
+            
+            # Apply filters
+            if guild_id:
+                query = query.where(HelpConversation.guild_id == guild_id)
+                count_query = count_query.where(HelpConversation.guild_id == guild_id)
+            
+            if user_id:
+                query = query.where(HelpConversation.user_id == user_id)
+                count_query = count_query.where(HelpConversation.user_id == user_id)
+                
+            if interaction_type:
+                query = query.where(HelpConversation.interaction_type == interaction_type)
+                count_query = count_query.where(HelpConversation.interaction_type == interaction_type)
+                
+            if resolved_only:
+                query = query.where(HelpConversation.is_resolved == True)
+                count_query = count_query.where(HelpConversation.is_resolved == True)
+                
+            if search:
+                from sqlalchemy import or_
+                search_filter = or_(
+                    HelpConversation.user_question.ilike(f"%{search}%"),
+                    HelpConversation.bot_response.ilike(f"%{search}%"),
+                    HelpConversation.user_username.ilike(f"%{search}%")
+                )
+                query = query.where(search_filter)
+                count_query = count_query.where(search_filter)
+            
+            # Apply pagination and ordering
+            offset = (page - 1) * size
+            query = query.order_by(HelpConversation.started_at.desc()).offset(offset).limit(size)
+            
+            # Execute queries
+            result = await session.execute(query)
+            conversations = result.scalars().all()
+            
+            count_result = await session.execute(count_query)
+            total = count_result.scalar()
+            
+            # Calculate pagination info
+            total_pages = max(1, (total + size - 1) // size)
+            
+            # Get all guilds for the filter dropdown
+            guilds = await get_bot_guilds()
+            
+            return templates.TemplateResponse(
+                request,
+                "admin/conversations.html",
+                {
+                    "conversations": conversations,
+                    "total": total,
+                    "page": page,
+                    "size": size,
+                    "total_pages": total_pages,
+                    "guilds": guilds,
+                    "filters": {
+                        "guild_id": guild_id,
+                        "user_id": user_id,
+                        "interaction_type": interaction_type,
+                        "search": search,
+                        "resolved_only": resolved_only
+                    }
+                }
+            )
+            
+    except Exception as e:
+        logger.error(f"Error listing conversations: {e}")
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Failed to load conversations.",
+                "error_code": 500
+            },
+            status_code=500
+        )
+
+
+async def conversation_detail(request: Request) -> Response:
+    """View details of a specific help conversation."""
+    try:
+        conversation_id = request.path_params["conversation_id"]
+        
+        async with get_db_session_context() as session:
+            # Get conversation by ID
+            query = select(HelpConversation).where(HelpConversation.id == conversation_id)
+            result = await session.execute(query)
+            conversation = result.scalar_one_or_none()
+            
+            if not conversation:
+                return templates.TemplateResponse(
+                    request,
+                    "admin/error.html",
+                    {
+                        "error": "Conversation not found.",
+                        "error_code": 404
+                    },
+                    status_code=404
+                )
+            
+            # Get guild info for context
+            try:
+                guild_info = await get_guild_info(conversation.guild_id)
+            except (GuildNotFoundError, DiscordAPIError):
+                guild_info = {"name": f"Guild {conversation.guild_id}", "id": conversation.guild_id}
+            
+            return templates.TemplateResponse(
+                request,
+                "admin/conversation_detail.html",
+                {
+                    "conversation": conversation,
+                    "guild": guild_info
+                }
+            )
+            
+    except ValueError:
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Invalid conversation ID.",
+                "error_code": 400
+            },
+            status_code=400
+        )
+    except Exception as e:
+        logger.error(f"Error viewing conversation: {e}")
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Failed to load conversation.",
+                "error_code": 500
+            },
+            status_code=500
+        )
+
+
+async def cleanup_expired_conversations(request: Request) -> Response:
+    """Clean up expired help conversations based on retention policies."""
+    try:
+        if request.method == "POST":
+            async with get_db_session_context() as session:
+                from datetime import datetime, timezone
+                
+                now = datetime.now(timezone.utc)
+                
+                # Find expired conversations
+                expired_query = select(HelpConversation).where(
+                    HelpConversation.expires_at <= now
+                )
+                result = await session.execute(expired_query)
+                expired_conversations = result.scalars().all()
+                
+                # Delete expired conversations
+                for conversation in expired_conversations:
+                    await session.delete(conversation)
+                
+                await session.commit()
+                
+                logger.info(f"Cleaned up {len(expired_conversations)} expired conversations")
+                
+                return templates.TemplateResponse(
+                    request,
+                    "admin/cleanup_result.html",
+                    {
+                        "success": True,
+                        "cleaned_count": len(expired_conversations),
+                        "message": f"Successfully cleaned up {len(expired_conversations)} expired conversations."
+                    }
+                )
+        
+        # GET request - show cleanup interface
+        async with get_db_session_context() as session:
+            from datetime import datetime, timezone
+            
+            now = datetime.now(timezone.utc)
+            
+            # Count conversations by retention policy
+            standard_count_result = await session.execute(
+                select(func.count(HelpConversation.id))
+                .where(HelpConversation.retention_policy == "standard")
+            )
+            standard_count = standard_count_result.scalar() or 0
+            
+            minimal_count_result = await session.execute(
+                select(func.count(HelpConversation.id))
+                .where(HelpConversation.retention_policy == "minimal")
+            )
+            minimal_count = minimal_count_result.scalar() or 0
+            
+            sensitive_count_result = await session.execute(
+                select(func.count(HelpConversation.id))
+                .where(HelpConversation.retention_policy == "sensitive")
+            )
+            sensitive_count = sensitive_count_result.scalar() or 0
+            
+            # Count expired conversations
+            expired_count_result = await session.execute(
+                select(func.count(HelpConversation.id))
+                .where(HelpConversation.expires_at <= now)
+            )
+            expired_count = expired_count_result.scalar() or 0
+            
+            return templates.TemplateResponse(
+                request,
+                "admin/conversation_cleanup.html",
+                {
+                    "standard_count": standard_count,
+                    "minimal_count": minimal_count,
+                    "sensitive_count": sensitive_count,
+                    "expired_count": expired_count,
+                    "total_count": standard_count + minimal_count + sensitive_count
+                }
+            )
+    
+    except Exception as e:
+        logger.error(f"Error in conversation cleanup: {e}")
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Failed to perform conversation cleanup.",
                 "error_code": 500
             },
             status_code=500

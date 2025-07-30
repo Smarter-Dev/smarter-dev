@@ -1,0 +1,174 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Conversation Cleanup - Smarter Dev Admin{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+    <div class="container-xl">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <div class="page-pretitle">
+                    <nav aria-label="breadcrumb">
+                        <ol class="breadcrumb">
+                            <li class="breadcrumb-item"><a href="/admin">Admin</a></li>
+                            <li class="breadcrumb-item"><a href="/admin/conversations">Conversations</a></li>
+                            <li class="breadcrumb-item active">Cleanup</li>
+                        </ol>
+                    </nav>
+                </div>
+                <h2 class="page-title">
+                    Conversation Cleanup
+                </h2>
+            </div>
+            <div class="col-auto ms-auto d-print-none">
+                <div class="btn-list">
+                    <a href="/admin/conversations" class="btn btn-outline-secondary">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-arrow-left"></use>
+                        </svg>
+                        Back to Conversations
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page-body">
+    <div class="container-xl">
+        <!-- Cleanup Statistics -->
+        <div class="row row-deck row-cards mb-4">
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="subheader">Total Conversations</div>
+                        </div>
+                        <div class="h1 mb-3">{{ "{:,}".format(total_count) }}</div>
+                        <div class="text-muted">All stored conversations</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="subheader">Standard (30 days)</div>
+                        </div>
+                        <div class="h1 mb-3">{{ "{:,}".format(standard_count) }}</div>
+                        <div class="text-muted">Standard retention policy</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="subheader">Minimal (7 days)</div>
+                        </div>
+                        <div class="h1 mb-3">{{ "{:,}".format(minimal_count) }}</div>
+                        <div class="text-muted">Minimal retention policy</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div class="subheader">Sensitive (3 days)</div>
+                        </div>
+                        <div class="h1 mb-3">{{ "{:,}".format(sensitive_count) }}</div>
+                        <div class="text-muted">Sensitive retention policy</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Cleanup Action -->
+        <div class="row">
+            <div class="col-md-8 mx-auto">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Data Retention Cleanup</h3>
+                        <div class="card-subtitle">Remove expired conversations based on retention policies</div>
+                    </div>
+                    <div class="card-body">
+                        {% if expired_count > 0 %}
+                        <div class="alert alert-warning" role="alert">
+                            <div class="d-flex">
+                                <div>
+                                    <svg class="icon alert-icon" width="24" height="24">
+                                        <use xlink:href="#tabler-alert-triangle"></use>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h4 class="alert-title">{{ expired_count }} expired conversation{{ 's' if expired_count != 1 else '' }} found</h4>
+                                    <div class="text-muted">
+                                        These conversations have exceeded their retention period and can be safely removed.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h4>Retention Policies:</h4>
+                            <ul class="list-unstyled">
+                                <li><strong>Standard:</strong> 30 days - General help conversations</li>
+                                <li><strong>Minimal:</strong> 7 days - Basic queries and routine interactions</li>
+                                <li><strong>Sensitive:</strong> 3 days - Conversations flagged as containing sensitive content</li>
+                            </ul>
+                        </div>
+                        
+                        <form method="post" onsubmit="return confirm('Are you sure you want to delete {{ expired_count }} expired conversation{{ 's' if expired_count != 1 else '' }}? This action cannot be undone.');">
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-danger">
+                                    <svg class="icon" width="24" height="24">
+                                        <use xlink:href="#tabler-trash"></use>
+                                    </svg>
+                                    Delete {{ expired_count }} Expired Conversation{{ 's' if expired_count != 1 else '' }}
+                                </button>
+                            </div>
+                        </form>
+                        {% else %}
+                        <div class="alert alert-success" role="alert">
+                            <div class="d-flex">
+                                <div>
+                                    <svg class="icon alert-icon" width="24" height="24">
+                                        <use xlink:href="#tabler-check"></use>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h4 class="alert-title">No expired conversations</h4>
+                                    <div class="text-muted">
+                                        All stored conversations are within their retention periods. No cleanup is needed at this time.
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h4>Retention Policies:</h4>
+                            <ul class="list-unstyled">
+                                <li><strong>Standard:</strong> 30 days - General help conversations</li>
+                                <li><strong>Minimal:</strong> 7 days - Basic queries and routine interactions</li>
+                                <li><strong>Sensitive:</strong> 3 days - Conversations flagged as containing sensitive content</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="text-muted">
+                            <small>
+                                Cleanup runs automatically, but you can manually trigger it here if needed.
+                                Data retention policies help maintain privacy and comply with data protection requirements.
+                            </small>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
