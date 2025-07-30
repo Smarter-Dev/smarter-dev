@@ -186,7 +186,7 @@ async def generate_help_response(
     
     # Check token usage limit
     if not rate_limiter.check_token_limit():
-        return "⚠️ The help system is currently at capacity. Please try again in a few minutes."
+        return "⚠️ **Help System at Capacity**\n\nThe AI help system has reached its usage limits for this time period.\n\n**Please try again in 5-10 minutes** or use specific commands like `/bytes` or `/squad` for direct assistance."
     
     try:
         # Track response time
@@ -232,8 +232,27 @@ async def generate_help_response(
         return response
         
     except Exception as e:
+        error_message = str(e).lower()
         logger.error(f"Failed to generate help response: {e}")
-        return "❌ Sorry, I'm having trouble generating a response right now. Please try again in a moment or contact an administrator if this persists."
+        
+        # Provide specific error messages based on the type of failure
+        if "overloaded" in error_message or "503" in error_message:
+            return "🔄 **AI Service Temporarily Overloaded**\n\nThe AI service is experiencing high demand right now. This usually resolves within a few minutes.\n\n**Please try again in 2-3 minutes** or use `/help` with a specific question to get priority processing."
+        
+        elif "unavailable" in error_message or "502" in error_message or "504" in error_message:
+            return "⚠️ **AI Service Temporarily Unavailable**\n\nThe AI help system is currently down for maintenance or experiencing technical issues.\n\n**Alternative:** Try using `/bytes` or `/squad` commands for specific features, or contact an administrator if urgent."
+        
+        elif "rate" in error_message or "quota" in error_message or "429" in error_message:
+            return "⏱️ **Service Rate Limited**\n\nThe AI service has reached its usage limits. This is temporary and resets automatically.\n\n**Please wait 5-10 minutes** before asking for help again."
+        
+        elif "timeout" in error_message or "connection" in error_message:
+            return "🌐 **Connection Issues**\n\nThere's a temporary network issue connecting to the AI service.\n\n**Please try again in a moment.** If this persists, the service may be experiencing outages."
+        
+        elif "api" in error_message and ("key" in error_message or "auth" in error_message):
+            return "🔧 **Service Configuration Issue**\n\nThere's a configuration problem with the AI service.\n\n**Please contact an administrator** - this requires technical attention."
+        
+        else:
+            return "❌ **Unexpected Error**\n\nSomething unexpected went wrong with the help system.\n\n**Try again in a moment** or contact an administrator if this keeps happening."
 
 
 @plugin.command
