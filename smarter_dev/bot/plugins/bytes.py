@@ -266,8 +266,6 @@ async def send_command(ctx: lightbulb.Context) -> None:
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def leaderboard_command(ctx: lightbulb.Context) -> None:
     """Handle leaderboard command - show top users by balance."""
-    # Defer the response to prevent timeout while processing
-    await ctx.defer(flags=hikari.MessageFlag.EPHEMERAL)
     
     service: BytesService = getattr(ctx.bot, 'd', {}).get('bytes_service')
     if not service:
@@ -277,7 +275,7 @@ async def leaderboard_command(ctx: lightbulb.Context) -> None:
     if not service:
         generator = get_generator()
         image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
-        await ctx.followup.create(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
         return
     
     limit = ctx.options.limit or 10
@@ -309,7 +307,7 @@ async def leaderboard_command(ctx: lightbulb.Context) -> None:
                 user_display_names=user_display_names
             )
             
-            await ctx.followup.create(
+            await ctx.respond(
                 attachment=image_file,
                 components=share_view.build_components(),
                 flags=hikari.MessageFlag.EPHEMERAL
@@ -317,18 +315,18 @@ async def leaderboard_command(ctx: lightbulb.Context) -> None:
         else:
             # Use standard Discord embed for larger lists
             embed = create_leaderboard_embed(entries, ctx.get_guild().name, user_display_names)
-            await ctx.followup.create(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
+            await ctx.respond(embed=embed, flags=hikari.MessageFlag.EPHEMERAL)
         
     except ServiceError as e:
         logger.error(f"Service error in leaderboard command: {e}")
         generator = get_generator()
         image_file = generator.create_error_embed("Failed to get leaderboard. Please try again later.")
-        await ctx.followup.create(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
     except Exception as e:
         logger.exception(f"Unexpected error in leaderboard command: {e}")
         generator = get_generator()
         image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
-        await ctx.followup.create(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
 
 
 @bytes_group.child
