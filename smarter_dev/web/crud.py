@@ -385,6 +385,46 @@ class BytesOperations:
         except Exception as e:
             raise DatabaseOperationError(f"Failed to get transaction history: {e}") from e
     
+    async def get_sent_transaction_history(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        sender_user_id: str,
+        limit: int = 20
+    ) -> List[BytesTransaction]:
+        """Get transaction history for transactions sent by a specific user.
+        
+        This method only returns transactions where the specified user was the sender (giver),
+        not the receiver. This is useful for cooldown checks where we only care about 
+        outgoing transfers, not incoming rewards or transfers.
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            sender_user_id: User ID to filter by (as sender only)
+            limit: Maximum number of results
+            
+        Returns:
+            List[BytesTransaction]: Transactions where user was sender, ordered by creation time descending
+            
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = (
+                select(BytesTransaction)
+                .where(BytesTransaction.guild_id == guild_id)
+                .where(BytesTransaction.giver_id == sender_user_id)  # Only transactions where user was sender
+                .order_by(desc(BytesTransaction.created_at))
+                .limit(limit)
+            )
+            
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get sent transaction history: {e}") from e
+    
     async def update_daily_reward(
         self,
         session: AsyncSession,
