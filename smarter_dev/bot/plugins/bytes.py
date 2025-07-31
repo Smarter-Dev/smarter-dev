@@ -508,7 +508,7 @@ async def send_bytes_context_menu(ctx: lightbulb.Context) -> None:
     handler_key = f"send_bytes_modal:{recipient.id}:{ctx.user.id}"
     ctx.bot.d['modal_handlers'][handler_key] = handler
     
-    await ctx.respond_with_modal(modal)
+    await ctx.respond_with_modal(modal, f"send_bytes_modal:{recipient.id}")
 
 
 def load(bot: lightbulb.BotApp) -> None:
