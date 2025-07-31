@@ -187,9 +187,14 @@ class SendBytesModalHandler:
                 )
                 logger.info(f"✅ Transfer successful: {amount} bytes from {self.giver} to {self.recipient}")
             else:
-                # Use error embed for transfer failures
-                logger.info("Creating error image embed")
-                image_file = generator.create_error_embed(result.reason)
+                # Use special cooldown embed for cooldown errors
+                if result.is_cooldown_error:
+                    logger.info("Creating cooldown image embed")
+                    image_file = generator.create_cooldown_embed(result.reason, result.cooldown_end_timestamp)
+                else:
+                    # Use error embed for transfer limit and other errors
+                    logger.info("Creating error image embed")
+                    image_file = generator.create_error_embed(result.reason)
             
             logger.info(f"Created image file: {type(image_file)}")
             
