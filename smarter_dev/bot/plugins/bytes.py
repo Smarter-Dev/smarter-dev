@@ -426,6 +426,91 @@ async def info_command(ctx: lightbulb.Context) -> None:
         await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
 
 
+@plugin.command
+@lightbulb.command("Send Bytes", "Send bytes to the author of this message")
+@lightbulb.implements(lightbulb.MessageCommand)
+async def send_bytes_context_menu(ctx: lightbulb.Context) -> None:
+    """Handle message context menu for sending bytes to message author."""
+    service: BytesService = getattr(ctx.bot, 'd', {}).get('bytes_service')
+    if not service:
+        # Fallback to _services dict
+        service = getattr(ctx.bot, 'd', {}).get('_services', {}).get('bytes_service')
+    
+    if not service:
+        generator = get_generator()
+        image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        return
+    
+    # Get the target message and its author
+    target_message = ctx.options.target
+    recipient = target_message.author
+    
+    # Prevent sending bytes to bots
+    if recipient.is_bot:
+        generator = get_generator()
+        image_file = generator.create_error_embed("You cannot send bytes to bots!")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        return
+    
+    # Prevent self-transfer
+    if recipient.id == ctx.user.id:
+        generator = get_generator()
+        image_file = generator.create_error_embed("You cannot send bytes to yourself!")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        return
+    
+    # Validate recipient is in guild
+    try:
+        member = ctx.get_guild().get_member(recipient.id)
+        if not member:
+            generator = get_generator()
+            image_file = generator.create_error_embed("That user is not in this server!")
+            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+            return
+    except Exception:
+        generator = get_generator()
+        image_file = generator.create_error_embed("Unable to verify user membership in this server.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        return
+    
+    # Get guild config for max transfer limit
+    try:
+        config = await service.get_config(str(ctx.guild_id))
+        max_transfer = config.max_transfer
+    except Exception as e:
+        logger.error(f"Failed to get guild config for transfer limit: {e}")
+        generator = get_generator()
+        image_file = generator.create_error_embed("Failed to get server configuration. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        return
+    
+    # Create and show modal for amount/reason input
+    from smarter_dev.bot.views.bytes_views import create_send_bytes_modal, SendBytesModalHandler
+    
+    modal = create_send_bytes_modal(recipient, max_transfer)
+    
+    # Store the modal handler for the interaction
+    handler = SendBytesModalHandler(
+        recipient=recipient,
+        guild_id=str(ctx.guild_id),
+        giver=ctx.user,
+        max_transfer=max_transfer,
+        bytes_service=service
+    )
+    
+    # Store handler in bot data for later retrieval
+    if not hasattr(ctx.bot, 'd'):
+        ctx.bot.d = {}
+    if 'modal_handlers' not in ctx.bot.d:
+        ctx.bot.d['modal_handlers'] = {}
+    
+    handler_key = f"send_bytes_modal:{recipient.id}:{ctx.user.id}"
+    ctx.bot.d['modal_handlers'][handler_key] = handler
+    
+    await ctx.respond_with_modal(modal)
+
+
 def load(bot: lightbulb.BotApp) -> None:
     """Load the bytes plugin."""
     bot.add_plugin(plugin)

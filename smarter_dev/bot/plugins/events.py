@@ -43,6 +43,90 @@ def unregister_view(interaction_id: str) -> None:
         logger.debug(f"Unregistered view for interaction {interaction_id}")
 
 
+async def handle_modal_interaction(event: hikari.InteractionCreateEvent) -> None:
+    """Handle modal interactions for the bot.
+    
+    Args:
+        event: The interaction event from Discord
+    """
+    if not isinstance(event.interaction, hikari.ModalInteraction):
+        return
+    
+    custom_id = event.interaction.custom_id
+    logger.debug(f"Handling modal interaction: {custom_id}")
+    
+    try:
+        # Handle bytes transfer modal
+        if custom_id.startswith("send_bytes_modal:"):
+            await handle_send_bytes_modal(event)
+        else:
+            logger.warning(f"Unhandled modal interaction: {custom_id}")
+    
+    except Exception as e:
+        logger.exception(f"Error handling modal interaction {custom_id}: {e}")
+        
+        # Try to respond with error message
+        try:
+            if not event.interaction.is_responded():
+                from smarter_dev.bot.utils.image_embeds import get_generator
+                generator = get_generator()
+                image_file = generator.create_error_embed("An error occurred while processing your request.")
+                await event.interaction.create_initial_response(
+                    hikari.ResponseType.MESSAGE_CREATE,
+                    attachment=image_file,
+                    flags=hikari.MessageFlag.EPHEMERAL
+                )
+        except Exception as e2:
+            logger.error(f"Failed to send modal error response: {e2}")
+
+
+async def handle_send_bytes_modal(event: hikari.InteractionCreateEvent) -> None:
+    """Handle send bytes modal submission.
+    
+    Args:
+        event: The modal interaction event
+    """
+    if not isinstance(event.interaction, hikari.ModalInteraction):
+        return
+        
+    # Parse custom_id to get recipient ID
+    custom_id_parts = event.interaction.custom_id.split(":")
+    if len(custom_id_parts) != 2:
+        logger.error(f"Invalid send_bytes_modal custom_id format: {event.interaction.custom_id}")
+        return
+    
+    recipient_id = custom_id_parts[1]
+    user_id = str(event.interaction.user.id)
+    
+    # Find the handler
+    handler_key = f"send_bytes_modal:{recipient_id}:{user_id}"
+    
+    # Get bot instance from event
+    bot = event.app
+    if not hasattr(bot, 'd') or 'modal_handlers' not in bot.d:
+        logger.error("No modal handlers found in bot data")
+        return
+    
+    handler = bot.d['modal_handlers'].get(handler_key)
+    if not handler:
+        logger.error(f"No handler found for key: {handler_key}")
+        return
+    
+    try:
+        # Call the handler's submit method
+        await handler.handle_submit(event.interaction)
+        
+        # Clean up the handler after use
+        del bot.d['modal_handlers'][handler_key]
+        
+    except Exception as e:
+        logger.exception(f"Error in send bytes modal handler: {e}")
+        # Clean up handler even on error
+        if handler_key in bot.d['modal_handlers']:
+            del bot.d['modal_handlers'][handler_key]
+        raise
+
+
 async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle component interactions for the bot.
     
@@ -487,7 +571,9 @@ def setup_interaction_handlers(bot: hikari.GatewayBot) -> None:
     @bot.listen(hikari.InteractionCreateEvent)
     async def on_interaction_create(event: hikari.InteractionCreateEvent) -> None:
         """Handle all interaction events."""
+        # Handle both component and modal interactions
         await handle_component_interaction(event)
+        await handle_modal_interaction(event)
     
     logger.info("Interaction handlers set up")
 
