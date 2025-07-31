@@ -1,0 +1,1 @@
+"""Repository layer for data access operations following SOLID principles."""
