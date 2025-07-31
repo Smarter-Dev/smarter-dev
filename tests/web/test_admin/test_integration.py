@@ -183,7 +183,7 @@ class TestAdminIntegration:
                 mock_default_config.daily_amount = 10
                 mock_default_config.max_transfer = 1000
                 mock_default_config.transfer_cooldown_hours = 0
-                mock_default_config.streak_bonuses = {7: 2, 14: 4, 30: 10}
+                mock_default_config.streak_bonuses = {8: 2, 16: 4, 32: 8}
                 mock_default_config.role_rewards = {}
                 mock_config_model.get_defaults.return_value = mock_default_config
                 

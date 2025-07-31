@@ -51,7 +51,7 @@ class TestBytesOperations:
             guild_id="test_guild_123",
             starting_balance=100,
             daily_amount=10,
-            streak_bonuses={"7": 2, "14": 4},
+            streak_bonuses={"8": 2, "16": 4},
             max_transfer=1000,
             transfer_cooldown_hours=0,
             role_rewards={}

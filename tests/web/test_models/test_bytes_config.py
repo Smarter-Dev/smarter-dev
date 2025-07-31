@@ -48,7 +48,7 @@ class TestBytesConfig:
         # Check default values per Session 2 specification
         assert config.starting_balance == 100
         assert config.daily_amount == 10
-        assert config.streak_bonuses == {7: 2, 14: 4, 30: 10, 60: 20}
+        assert config.streak_bonuses == {8: 2, 16: 4, 32: 8, 64: 16}
         assert config.max_transfer == 1000
         assert config.transfer_cooldown_hours == 0
         assert config.role_rewards == {}

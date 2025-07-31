@@ -327,7 +327,7 @@ def sample_bytes_config_data(test_guild_id) -> Dict[str, Any]:
         "starting_balance": 100,
         "max_transfer": 1000,
         "daily_cooldown_hours": 24,
-        "streak_bonuses": {"4": 2, "7": 2, "14": 3, "30": 5},
+        "streak_bonuses": {"4": 2, "8": 2, "16": 3, "32": 5},
         "transfer_tax_rate": 0.0,
         "is_enabled": True
     }

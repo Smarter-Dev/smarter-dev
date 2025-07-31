@@ -87,7 +87,7 @@ class TestRealAPIIntegration:
             starting_balance=100,
             max_transfer=1000,
             transfer_cooldown_hours=24,
-            streak_bonuses={"4": 2, "7": 2, "14": 3, "30": 5}
+            streak_bonuses={"4": 2, "8": 2, "16": 3, "32": 5}
         )
         real_db_session.add(config)
         await real_db_session.commit()

@@ -239,7 +239,7 @@ class BytesConfig(Base):
         # Set defaults for fields not provided
         kwargs.setdefault('starting_balance', 100)
         kwargs.setdefault('daily_amount', 10)
-        kwargs.setdefault('streak_bonuses', {7: 2, 14: 4, 30: 10, 60: 20})
+        kwargs.setdefault('streak_bonuses', {8: 2, 16: 4, 32: 8, 64: 16})
         kwargs.setdefault('max_transfer', 1000)
         kwargs.setdefault('transfer_cooldown_hours', 0)
         kwargs.setdefault('role_rewards', {})

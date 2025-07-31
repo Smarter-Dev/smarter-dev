@@ -35,7 +35,7 @@ spec:
                       guild_id=guild_id,
                       starting_balance=100,
                       daily_amount=10,
-                      streak_bonuses={7: 2, 14: 4, 30: 10, 60: 20},
+                      streak_bonuses={8: 2, 16: 4, 32: 8, 64: 16},
                       max_transfer=1000,
                       transfer_cooldown_hours=0,
                       role_rewards={}

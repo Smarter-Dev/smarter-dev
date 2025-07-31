@@ -45,7 +45,7 @@ Create database models for the bytes and squads systems using SQLAlchemy with as
 - guild_id: str (primary key)
 - starting_balance: int (default: 100)
 - daily_amount: int (default: 10)
-- streak_bonuses: JSON (default: {7: 2, 14: 4, 30: 10, 60: 20})
+- streak_bonuses: JSON (default: {8: 2, 16: 4, 32: 8, 64: 16})
 - max_transfer: int (default: 1000)
 - transfer_cooldown_hours: int (default: 0)
 - role_rewards: JSON ({role_id: min_received_amount})

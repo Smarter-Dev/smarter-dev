@@ -32,7 +32,7 @@ class TestStreakService:
     @pytest.fixture
     def standard_bonuses(self) -> Dict[str, int]:
         """Standard streak bonus configuration."""
-        return {"7": 2, "14": 3, "30": 5}
+        return {"8": 2, "16": 3, "32": 5}
     
     def test_new_user_first_claim(self, streak_service: StreakService, standard_bonuses: Dict[str, int]):
         """Test streak calculation for new user's first claim."""
@@ -163,16 +163,16 @@ class TestStreakBonusCalculation:
     
     def test_bonus_thresholds_exact_match(self, streak_service: StreakService):
         """Test bonus calculation at exact threshold values."""
-        bonuses = {"7": 2, "14": 3, "30": 5}
+        bonuses = {"8": 2, "16": 3, "32": 5}
         
         # Test exact threshold matches
-        assert streak_service.calculate_streak_bonus(7, bonuses) == 2
-        assert streak_service.calculate_streak_bonus(14, bonuses) == 3
-        assert streak_service.calculate_streak_bonus(30, bonuses) == 5
+        assert streak_service.calculate_streak_bonus(8, bonuses) == 2
+        assert streak_service.calculate_streak_bonus(16, bonuses) == 3
+        assert streak_service.calculate_streak_bonus(32, bonuses) == 5
     
     def test_bonus_thresholds_exceed(self, streak_service: StreakService):
         """Test bonus calculation - divisible milestones get bonuses."""
-        bonuses = {"7": 2, "14": 3, "30": 5}
+        bonuses = {"8": 2, "16": 3, "32": 5}
         
         # Test that bonuses apply on divisible milestone days
         assert streak_service.calculate_streak_bonus(10, bonuses) == 1  # No bonus (not divisible)
@@ -183,19 +183,19 @@ class TestStreakBonusCalculation:
     
     def test_multiple_threshold_crossing(self, streak_service: StreakService):
         """Test bonus calculation - divisible milestone days get bonuses."""
-        bonuses = {"7": 2, "14": 4, "30": 10}
+        bonuses = {"8": 2, "16": 4, "32": 8}
         
         # Test progression through thresholds - bonuses on divisible days
-        assert streak_service.calculate_streak_bonus(6, bonuses) == 1   # No bonus
-        assert streak_service.calculate_streak_bonus(7, bonuses) == 2   # Divisible by 7
-        assert streak_service.calculate_streak_bonus(8, bonuses) == 1   # No bonus (not divisible)
-        assert streak_service.calculate_streak_bonus(13, bonuses) == 1  # No bonus (not divisible)
-        assert streak_service.calculate_streak_bonus(14, bonuses) == 4  # Divisible by 14 (higher than 7)
+        assert streak_service.calculate_streak_bonus(7, bonuses) == 1   # No bonus
+        assert streak_service.calculate_streak_bonus(8, bonuses) == 2   # Divisible by 8
         assert streak_service.calculate_streak_bonus(15, bonuses) == 1  # No bonus (not divisible)
-        assert streak_service.calculate_streak_bonus(21, bonuses) == 2  # Divisible by 7
-        assert streak_service.calculate_streak_bonus(28, bonuses) == 4  # Divisible by 14
-        assert streak_service.calculate_streak_bonus(30, bonuses) == 10 # Divisible by 30
-        assert streak_service.calculate_streak_bonus(42, bonuses) == 4  # Divisible by both 7 and 14, takes highest
+        assert streak_service.calculate_streak_bonus(16, bonuses) == 4  # Divisible by 16 (higher than 8)
+        assert streak_service.calculate_streak_bonus(24, bonuses) == 2  # Divisible by 8
+        assert streak_service.calculate_streak_bonus(32, bonuses) == 8  # Divisible by 32
+        assert streak_service.calculate_streak_bonus(48, bonuses) == 4  # Divisible by both 8 and 16, takes highest
+        assert streak_service.calculate_streak_bonus(64, bonuses) == 8  # Divisible by both 8, 16, and 32, takes highest (32)
+        assert streak_service.calculate_streak_bonus(33, bonuses) == 1  # No bonus (not divisible)
+        assert streak_service.calculate_streak_bonus(40, bonuses) == 2  # Divisible by 8
     
     def test_empty_bonus_config(self, streak_service: StreakService):
         """Test bonus calculation with empty configuration."""
@@ -206,9 +206,9 @@ class TestStreakBonusCalculation:
         """Test bonus calculation with malformed configuration."""
         malformed_bonuses = {
             "invalid": 2,      # Non-numeric key
-            "7": "invalid",    # Non-numeric value
-            7: 3,              # Numeric key (should be string)
-            "14": 3.5,         # Float value
+            "8": "invalid",    # Non-numeric value
+            8: 3,              # Numeric key (should be string)
+            "16": 3.5,         # Float value
             "21": -1           # Negative value
         }
         
@@ -229,13 +229,13 @@ class TestStreakBonusCalculation:
     
     def test_non_sequential_bonus_config(self, streak_service: StreakService):
         """Test bonus calculation with non-sequential configuration - only exact milestones."""
-        bonuses = {"7": 2, "21": 5, "90": 10}  # Skipping 14, 30, etc.
+        bonuses = {"8": 2, "24": 5, "96": 10}  # Skipping 16, 32, etc.
         
-        assert streak_service.calculate_streak_bonus(7, bonuses) == 2   # Exact milestone
-        assert streak_service.calculate_streak_bonus(21, bonuses) == 5  # Exact milestone
-        assert streak_service.calculate_streak_bonus(90, bonuses) == 10 # Exact milestone
-        assert streak_service.calculate_streak_bonus(14, bonuses) == 1  # Between milestones
-        assert streak_service.calculate_streak_bonus(30, bonuses) == 1  # Between milestones
+        assert streak_service.calculate_streak_bonus(8, bonuses) == 2   # Exact milestone
+        assert streak_service.calculate_streak_bonus(24, bonuses) == 5  # Exact milestone
+        assert streak_service.calculate_streak_bonus(96, bonuses) == 10 # Exact milestone
+        assert streak_service.calculate_streak_bonus(16, bonuses) == 1  # Between milestones
+        assert streak_service.calculate_streak_bonus(32, bonuses) == 1  # Between milestones
 
 
 class TestDateBoundaryEdgeCases:
@@ -267,7 +267,7 @@ class TestDateBoundaryEdgeCases:
             last_daily=yesterday,
             current_streak=5,
             daily_amount=10,
-            streak_bonuses={"7": 2}
+            streak_bonuses={"8": 2}
         )
         
         assert result.new_streak_count == 6
@@ -290,7 +290,7 @@ class TestDateBoundaryEdgeCases:
             last_daily=yesterday,
             current_streak=10,
             daily_amount=10,
-            streak_bonuses={"7": 2}
+            streak_bonuses={"8": 2}
         )
         
         assert result.new_streak_count == 11
@@ -313,13 +313,13 @@ class TestDateBoundaryEdgeCases:
             last_daily=yesterday,
             current_streak=15,
             daily_amount=10,
-            streak_bonuses={"7": 2, "14": 3}
+            streak_bonuses={"8": 2, "16": 3}
         )
         
         assert result.new_streak_count == 16
         assert result.can_claim is True
         assert result.is_streak_broken is False
-        assert result.streak_bonus == 3  # Should get 14-day bonus
+        assert result.streak_bonus == 3  # Should get 16-day bonus
     
     def test_leap_year_to_non_leap_year(
         self, 
@@ -337,7 +337,7 @@ class TestDateBoundaryEdgeCases:
             last_daily=many_days_ago,
             current_streak=100,
             daily_amount=10,
-            streak_bonuses={"30": 5}
+            streak_bonuses={"32": 5}
         )
         
         # Should reset due to long gap
@@ -374,7 +374,7 @@ class TestDataCorruptionHandling:
             last_daily=future_date,  # Corrupted: future date
             current_streak=10,
             daily_amount=10,
-            streak_bonuses={"7": 2}
+            streak_bonuses={"8": 2}
         )
         
         # Should reset streak and block claim
@@ -398,7 +398,7 @@ class TestDataCorruptionHandling:
             last_daily=far_future,
             current_streak=100,
             daily_amount=10,
-            streak_bonuses={"30": 5}
+            streak_bonuses={"32": 5}
         )
         
         assert result.new_streak_count == 1
@@ -420,7 +420,7 @@ class TestDataCorruptionHandling:
             last_daily=far_past,
             current_streak=1000,  # Unrealistic streak
             daily_amount=10,
-            streak_bonuses={"30": 5}
+            streak_bonuses={"32": 5}
         )
         
         assert result.new_streak_count == 1
@@ -630,7 +630,7 @@ try:
                 last_daily=last_daily,
                 current_streak=5,
                 daily_amount=10,
-                streak_bonuses={"7": 2}
+                streak_bonuses={"8": 2}
             )
             
             # Next claim date should always be tomorrow

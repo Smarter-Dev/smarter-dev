@@ -34,8 +34,8 @@ class TestStreakServicePerformance:
     def complex_bonuses(self) -> Dict[str, int]:
         """Complex streak bonus configuration for performance testing."""
         return {
-            "3": 1.2, "7": 1.5, "14": 2, "21": 2.5, "30": 3,
-            "45": 3.5, "60": 4, "90": 5, "120": 6, "180": 8, "365": 10
+            "3": 1.2, "8": 1.5, "16": 2, "21": 2.5, "32": 3,
+            "45": 3.5, "64": 4, "90": 5, "120": 6, "180": 8, "365": 10
         }
     
     def test_streak_calculation_performance_high_counts(self, streak_service: StreakService):
@@ -119,7 +119,7 @@ class TestStreakServicePerformance:
         initial_memory = process.memory_info().rss / 1024 / 1024  # MB
         
         # Perform many streak calculations
-        bonuses = {"7": 2, "14": 3, "30": 5, "60": 10, "365": 20}
+        bonuses = {"8": 2, "16": 3, "32": 5, "64": 10, "365": 20}
         iterations = 10000
         
         results = []
@@ -227,7 +227,7 @@ class TestAPIPerformanceBenchmarks:
                 last_daily=last_daily,
                 current_streak=current_streak,
                 daily_amount=10,
-                streak_bonuses={"7": 2, "14": 3, "30": 5}
+                streak_bonuses={"8": 2, "16": 3, "32": 5}
             )
             
             # 3. Simulate database update (mock timing)
@@ -283,7 +283,7 @@ class TestAPIPerformanceBenchmarks:
                 last_daily=last_daily,
                 current_streak=current_streak,
                 daily_amount=15,
-                streak_bonuses={"7": 2, "14": 3, "30": 5, "60": 10}
+                streak_bonuses={"8": 2, "16": 3, "32": 5, "64": 10}
             )
             results.append(result)
         
@@ -392,7 +392,7 @@ class TestScalabilityBenchmarks:
             users_data.append((last_daily, current_streak))
         
         # Realistic bonus configuration
-        bonuses = {"7": 2, "14": 3, "30": 5, "60": 8, "90": 12, "180": 20, "365": 50}
+        bonuses = {"8": 2, "16": 3, "32": 5, "64": 8, "90": 12, "180": 20, "365": 50}
         
         start_time = time.perf_counter()
         
@@ -462,9 +462,9 @@ class TestScalabilityBenchmarks:
         
         # Perform operations with all services
         bonus_configs = [
-            {"7": 2, "14": 3},
-            {"5": 1.5, "10": 2, "20": 3, "30": 5},
-            {"3": 1.2, "7": 1.5, "14": 2, "30": 4, "60": 8},
+            {"8": 2, "16": 3},
+            {"5": 1.5, "10": 2, "20": 3, "32": 5},
+            {"3": 1.2, "8": 1.5, "16": 2, "32": 4, "64": 8},
         ]
         
         for i, service in enumerate(services):
@@ -523,7 +523,7 @@ class TestScalabilityBenchmarks:
                         last_daily=last_daily,
                         current_streak=streak,
                         daily_amount=12,
-                        streak_bonuses={"7": 2, "14": 3, "30": 5}
+                        streak_bonuses={"8": 2, "16": 3, "32": 5}
                     )
                 
                 tasks.append(process_user(i))
