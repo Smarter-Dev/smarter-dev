@@ -855,10 +855,10 @@ class TestBytesServicePlanningCompliance:
     async def test_calculate_multiplier(self, bytes_service):
         """Test _calculate_multiplier method as specified in planning document."""
         assert bytes_service._calculate_multiplier(0) == 1
-        assert bytes_service._calculate_multiplier(7) == 2
-        assert bytes_service._calculate_multiplier(14) == 4
-        assert bytes_service._calculate_multiplier(30) == 10
-        assert bytes_service._calculate_multiplier(60) == 20
-        assert bytes_service._calculate_multiplier(100) == 20  # Max multiplier
+        assert bytes_service._calculate_multiplier(8) == 2
+        assert bytes_service._calculate_multiplier(16) == 4
+        assert bytes_service._calculate_multiplier(32) == 8
+        assert bytes_service._calculate_multiplier(64) == 16
+        assert bytes_service._calculate_multiplier(100) == 16  # Max multiplier
 
 

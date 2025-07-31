@@ -46,7 +46,7 @@ class TestStreakIntegration:
             "starting_balance": 100,
             "max_transfer": 1000,
             "daily_cooldown_hours": 24,
-            "streak_bonuses": {"7": 2, "14": 3, "30": 5},
+            "streak_bonuses": {"8": 2, "16": 3, "32": 5},
             "transfer_tax_rate": 0.0,
             "is_enabled": True
         }
@@ -333,7 +333,7 @@ class TestStreakIntegration:
             "starting_balance": 100,
             "max_transfer": 1000,
             "daily_cooldown_hours": 24,
-            "streak_bonuses": {"7": 2, "14": 3, "30": 5, "60": 10},
+            "streak_bonuses": {"8": 2, "16": 3, "32": 5, "64": 10},
             "transfer_tax_rate": 0.0,
             "is_enabled": True
         }
@@ -419,7 +419,7 @@ class TestDateBoundaryIntegration:
         config_mock = Mock()
         config_mock.guild_id = test_guild_id
         config_mock.daily_amount = 15
-        config_mock.streak_bonuses = {"7": 2}
+        config_mock.streak_bonuses = {"8": 2}
         mock_bytes_config_operations.get_config.return_value = config_mock
         
         # User claimed on Jan 31
@@ -485,7 +485,7 @@ class TestDateBoundaryIntegration:
         config_mock = Mock()
         config_mock.guild_id = test_guild_id
         config_mock.daily_amount = 20
-        config_mock.streak_bonuses = {"14": 3}
+        config_mock.streak_bonuses = {"16": 3}
         mock_bytes_config_operations.get_config.return_value = config_mock
         
         # User claimed on Feb 28
@@ -495,7 +495,7 @@ class TestDateBoundaryIntegration:
         balance_mock.balance = 400
         balance_mock.total_received = 300
         balance_mock.total_sent = 0
-        balance_mock.streak_count = 14
+        balance_mock.streak_count = 15
         balance_mock.last_daily = date(2024, 2, 28)  # Yesterday (Feb 28)
         balance_mock.created_at = datetime(2024, 1, 1, 0, 0, 0)
         balance_mock.updated_at = datetime(2024, 2, 28, 0, 0, 0)
@@ -506,7 +506,7 @@ class TestDateBoundaryIntegration:
         updated_balance_mock.balance = 460  # 400 + (20 * 3) = 460
         updated_balance_mock.total_received = 360
         updated_balance_mock.total_sent = 0
-        updated_balance_mock.streak_count = 15
+        updated_balance_mock.streak_count = 16
         updated_balance_mock.last_daily = date(2024, 2, 29)
         updated_balance_mock.created_at = datetime(2024, 1, 1, 0, 0, 0)
         updated_balance_mock.updated_at = datetime(2024, 2, 29, 0, 0, 0)
@@ -524,9 +524,9 @@ class TestDateBoundaryIntegration:
         assert response.status_code == 200
         data = response.json()
         
-        assert data["reward_amount"] == 60  # 20 * 3 (14-day bonus)
+        assert data["reward_amount"] == 60  # 20 * 3 (16-day bonus)
         assert data["streak_bonus"] == 3
-        assert data["balance"]["streak_count"] == 15
+        assert data["balance"]["streak_count"] == 16
         
         # Verify correct leap year date was passed to CRUD
         call_args = mock_bytes_operations.update_daily_reward.call_args
@@ -561,7 +561,7 @@ class TestErrorHandlingIntegration:
         config_mock = Mock()
         config_mock.guild_id = test_guild_id
         config_mock.daily_amount = 10
-        config_mock.streak_bonuses = {"7": 2}
+        config_mock.streak_bonuses = {"8": 2}
         mock_bytes_config_operations.get_config.return_value = config_mock
         
         # Setup balance
@@ -613,7 +613,7 @@ class TestErrorHandlingIntegration:
         config_mock = Mock()
         config_mock.guild_id = test_guild_id
         config_mock.daily_amount = 10
-        config_mock.streak_bonuses = {"7": 2}
+        config_mock.streak_bonuses = {"8": 2}
         mock_bytes_config_operations.get_config.return_value = config_mock
         
         # Corrupted balance: last_daily is in the future

@@ -33,7 +33,7 @@ class TestAPIIntegration:
         config_mock.starting_balance = 100
         config_mock.max_transfer = 1000
         config_mock.daily_cooldown_hours = 24
-        config_mock.streak_bonuses = {"7": 2}
+        config_mock.streak_bonuses = {"8": 2}
         config_mock.transfer_tax_rate = 0.0
         config_mock.is_enabled = True
         config_mock.created_at = datetime.now(timezone.utc)

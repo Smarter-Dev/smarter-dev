@@ -59,7 +59,7 @@ class TestConcurrentDailyClaims:
             config_mock = Mock()
             config_mock.guild_id = test_guild_id
             config_mock.daily_amount = 10
-            config_mock.streak_bonuses = {"7": 2}
+            config_mock.streak_bonuses = {"8": 2}
             mock_bytes_config_operations.get_config.return_value = config_mock
             
             # Setup balance for user who can claim
@@ -161,7 +161,7 @@ class TestConcurrentDailyClaims:
         config_mock = Mock()
         config_mock.guild_id = test_guild_id
         config_mock.daily_amount = 15
-        config_mock.streak_bonuses = {"7": 2}
+        config_mock.streak_bonuses = {"8": 2}
         mock_bytes_config_operations.get_config.return_value = config_mock
         
         # Setup balances for both users
@@ -252,7 +252,7 @@ class TestConcurrentDailyClaims:
         config_mock = Mock()
         config_mock.guild_id = test_guild_id
         config_mock.daily_amount = 20
-        config_mock.streak_bonuses = {"7": 2, "14": 3}
+        config_mock.streak_bonuses = {"8": 2, "16": 3}
         mock_bytes_config_operations.get_config.return_value = config_mock
         
         # Setup user with high streak
@@ -351,7 +351,7 @@ class TestConcurrentDailyClaims:
         config_mock = Mock()
         config_mock.guild_id = test_guild_id
         config_mock.daily_amount = 10
-        config_mock.streak_bonuses = {"7": 2}
+        config_mock.streak_bonuses = {"8": 2}
         mock_bytes_config_operations.get_config.return_value = config_mock
         
         # Setup balance
@@ -466,7 +466,7 @@ class TestHighConcurrencyScenarios:
         config_mock = Mock()
         config_mock.guild_id = test_guild_id
         config_mock.daily_amount = 25
-        config_mock.streak_bonuses = {"7": 2, "14": 3}
+        config_mock.streak_bonuses = {"8": 2, "16": 3}
         mock_bytes_config_operations.get_config.return_value = config_mock
         
         # Create multiple test users (using valid numeric Discord IDs)
@@ -592,7 +592,7 @@ class TestHighConcurrencyScenarios:
         config_mock = Mock()
         config_mock.guild_id = test_guild_id
         config_mock.daily_amount = 20
-        config_mock.streak_bonuses = {"7": 2, "14": 3, "30": 5}
+        config_mock.streak_bonuses = {"8": 2, "16": 3, "32": 5}
         mock_bytes_config_operations.get_config.return_value = config_mock
         
         # Create pool of users (using valid numeric Discord IDs)
