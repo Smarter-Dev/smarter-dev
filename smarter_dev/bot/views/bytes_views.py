@@ -177,14 +177,14 @@ class SendBytesModalHandler:
             generator = get_generator()
             
             if result.success:
-                # Create success embed with transfer details
-                image_file = generator.create_transfer_success_embed(
-                    giver_name=str(self.giver),
-                    receiver_name=str(self.recipient),
-                    amount=amount,
-                    reason=reason,
-                    new_balance=result.new_giver_balance
-                )
+                # Create success embed with same format as slash command
+                description = f"{str(self.giver)} sent {amount:,} bytes to {str(self.recipient)}"
+                
+                # Add reason if provided
+                if reason:
+                    description += f"\n\n{reason}"
+                
+                image_file = generator.create_success_embed("BYTES SENT", description)
                 logger.info(f"✅ Transfer successful: {amount} bytes from {self.giver} to {self.recipient}")
             else:
                 # Use special cooldown embed for cooldown errors
