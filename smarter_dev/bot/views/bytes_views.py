@@ -204,17 +204,18 @@ class SendBytesModalHandler:
             if result.success:
                 # Success messages should be public for everyone to see
                 if self.target_message_id:
-                    # For context menu: Reply to the original message
-                    await interaction.create_initial_response(
-                        hikari.ResponseType.MESSAGE_CREATE,
+                    # For context menu: Defer response then create reply message
+                    await interaction.create_initial_response(hikari.ResponseType.DEFERRED_MESSAGE_CREATE)
+                    
+                    # Create a reply message to the original message
+                    await interaction.app.rest.create_message(
+                        interaction.channel_id,
                         attachment=image_file,
-                        mentions_reply=hikari.mentions.MentionsReply(
-                            reply_to=self.target_message_id,
-                            user_mentions=False,
-                            role_mentions=False,
-                            everyone_mentions=False
-                        )
+                        reply=self.target_message_id
                     )
+                    
+                    # Delete the deferred response since we created our own message
+                    await interaction.delete_initial_response()
                 else:
                     # For slash command: Regular response
                     await interaction.create_initial_response(
