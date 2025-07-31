@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hikari
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from smarter_dev.bot.utils.image_embeds import get_generator
 from smarter_dev.bot.services.exceptions import (
@@ -81,7 +81,8 @@ class SendBytesModalHandler:
         guild_id: str,
         giver: hikari.User,
         max_transfer: int,
-        bytes_service: BytesService
+        bytes_service: BytesService,
+        target_message_id: Optional[int] = None
     ):
         """Initialize the modal handler.
         
@@ -91,12 +92,14 @@ class SendBytesModalHandler:
             giver: User sending the bytes
             max_transfer: Maximum transfer amount for this guild
             bytes_service: Bytes service for transfer operations
+            target_message_id: Optional message ID to reply to (for context menu)
         """
         self.recipient = recipient
         self.guild_id = guild_id
         self.giver = giver
         self.max_transfer = max_transfer
         self.bytes_service = bytes_service
+        self.target_message_id = target_message_id
     
     async def handle_submit(self, interaction: hikari.ModalInteraction) -> None:
         """Handle modal submission and process the bytes transfer.
@@ -200,10 +203,15 @@ class SendBytesModalHandler:
             
             if result.success:
                 # Success messages should be public for everyone to see
-                await interaction.create_initial_response(
-                    hikari.ResponseType.MESSAGE_CREATE,
-                    attachment=image_file
-                )
+                # Reply to original message if this came from context menu
+                response_kwargs = {
+                    "response_type": hikari.ResponseType.MESSAGE_CREATE,
+                    "attachment": image_file
+                }
+                if self.target_message_id:
+                    response_kwargs["reply_to_message"] = self.target_message_id
+                
+                await interaction.create_initial_response(**response_kwargs)
             else:
                 # Error messages should be private (ephemeral)
                 await interaction.create_initial_response(

@@ -496,7 +496,8 @@ async def send_bytes_context_menu(ctx: lightbulb.Context) -> None:
         guild_id=str(ctx.guild_id),
         giver=ctx.user,
         max_transfer=max_transfer,
-        bytes_service=service
+        bytes_service=service,
+        target_message_id=target_message.id
     )
     
     # Store handler in bot data for later retrieval
