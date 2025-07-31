@@ -198,11 +198,19 @@ class SendBytesModalHandler:
             
             logger.info(f"Created image file: {type(image_file)}")
             
-            await interaction.create_initial_response(
-                hikari.ResponseType.MESSAGE_CREATE,
-                attachment=image_file,
-                flags=hikari.MessageFlag.EPHEMERAL
-            )
+            if result.success:
+                # Success messages should be public for everyone to see
+                await interaction.create_initial_response(
+                    hikari.ResponseType.MESSAGE_CREATE,
+                    attachment=image_file
+                )
+            else:
+                # Error messages should be private (ephemeral)
+                await interaction.create_initial_response(
+                    hikari.ResponseType.MESSAGE_CREATE,
+                    attachment=image_file,
+                    flags=hikari.MessageFlag.EPHEMERAL
+                )
             
         except InsufficientBalanceError as e:
             logger.info(f"Insufficient balance for transfer: {e}")
