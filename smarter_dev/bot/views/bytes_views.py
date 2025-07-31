@@ -203,15 +203,24 @@ class SendBytesModalHandler:
             
             if result.success:
                 # Success messages should be public for everyone to see
-                # Reply to original message if this came from context menu
-                response_kwargs = {
-                    "response_type": hikari.ResponseType.MESSAGE_CREATE,
-                    "attachment": image_file
-                }
                 if self.target_message_id:
-                    response_kwargs["reply_to_message"] = self.target_message_id
-                
-                await interaction.create_initial_response(**response_kwargs)
+                    # For context menu: Reply to the original message
+                    await interaction.create_initial_response(
+                        hikari.ResponseType.MESSAGE_CREATE,
+                        attachment=image_file,
+                        mentions_reply=hikari.mentions.MentionsReply(
+                            reply_to=self.target_message_id,
+                            user_mentions=False,
+                            role_mentions=False,
+                            everyone_mentions=False
+                        )
+                    )
+                else:
+                    # For slash command: Regular response
+                    await interaction.create_initial_response(
+                        hikari.ResponseType.MESSAGE_CREATE,
+                        attachment=image_file
+                    )
             else:
                 # Error messages should be private (ephemeral)
                 await interaction.create_initial_response(
