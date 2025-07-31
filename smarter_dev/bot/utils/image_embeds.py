@@ -1519,6 +1519,104 @@ class EmbedImageGenerator:
         # Create hikari Bytes object for binary data
         return hikari.files.Bytes(img_bytes.getvalue(), "balance.png")
 
+    def create_transfer_success_embed(
+        self,
+        giver_name: str,
+        receiver_name: str,
+        amount: int,
+        reason: Optional[str] = None,
+        new_balance: Optional[int] = None
+    ) -> hikari.files.Bytes:
+        """Create a transfer success embed image.
+        
+        Args:
+            giver_name: Name of the user who sent bytes
+            receiver_name: Name of the user who received bytes
+            amount: Amount of bytes transferred
+            reason: Optional reason for the transfer
+            new_balance: Sender's new balance after transfer
+            
+        Returns:
+            hikari.File containing the generated image
+        """
+        # Load background
+        background = self._get_background("success")
+        
+        # Create working image - use full background size
+        img = background.copy()
+        draw = ImageDraw.Draw(img)
+        
+        # Calculate content area
+        content_width = img.width - (self.PADDING_HORIZONTAL * 2)
+        current_y = self.PADDING_TOP
+        
+        # Get colors
+        title_color = self.COLORS["success"]
+        
+        # Draw title
+        title_font = self._fonts["title_medium"]
+        title_text = "BYTES TRANSFERRED SUCCESSFULLY"
+        self._draw_text_with_shadow(
+            draw, 
+            (self.PADDING_HORIZONTAL, current_y), 
+            title_text, 
+            title_font, 
+            title_color
+        )
+        
+        # Move to content
+        current_y += title_font.getbbox(title_text)[3] + 32
+        
+        # Use smaller font for details
+        table_font = self._fonts["text_small"]
+        
+        # Create table rows with transfer details
+        rows = [
+            ("From:", giver_name, self.TEXT_COLOR),
+            ("To:", receiver_name, self.TEXT_COLOR),
+            ("Amount:", f"{amount:,} bytes", "#00E1FF"),
+        ]
+        
+        if reason:
+            rows.append(("Reason:", reason, "#B0B0B0"))
+        
+        if new_balance is not None:
+            rows.append(("New Balance:", f"{new_balance:,} bytes", "#11FF00"))
+        
+        # Draw table rows
+        for label, value, color in rows:
+            row_y = current_y
+            
+            # Left align label
+            draw.text(
+                (self.PADDING_HORIZONTAL, row_y),
+                label,
+                font=table_font,
+                fill=self.TEXT_COLOR
+            )
+            
+            # Right align value
+            value_bbox = table_font.getbbox(value)
+            value_width = value_bbox[2] - value_bbox[0]
+            value_x = self.PADDING_HORIZONTAL + content_width - value_width
+            
+            draw.text(
+                (value_x, row_y),
+                value,
+                font=table_font,
+                fill=color
+            )
+            
+            current_y += table_font.getbbox(label)[3] + 12
+        
+        # Convert to bytes
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format="PNG")
+        img_bytes.seek(0)
+        
+        # Create hikari Bytes object for binary data
+        return hikari.files.Bytes(img_bytes.getvalue(), "transfer_success.png")
+
 
 # Global instance for easy access
 _generator = None
