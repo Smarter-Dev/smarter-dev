@@ -195,27 +195,14 @@ async def send_command(ctx: lightbulb.Context) -> None:
         # Success image embed
         generator = get_generator()
         
-        # Get sender's display name (nickname if set, otherwise username)
-        try:
-            sender_member = ctx.get_guild().get_member(ctx.user.id)
-            sender_display_name = sender_member.display_name if sender_member else ctx.user.username
-        except:
-            sender_display_name = ctx.user.username
-        
-        # Get receiver's display name (nickname if set, otherwise username)
-        try:
-            receiver_member = ctx.get_guild().get_member(user.id)
-            receiver_display_name = receiver_member.display_name if receiver_member else user.username
-        except:
-            receiver_display_name = user.username
-        
-        description = f"{sender_display_name} sent {amount:,} bytes to {receiver_display_name}"
-        
-        # Add reason if provided with 32px spacing (handled by image generator)
-        if reason:
-            description += f"\n\n{reason}"
-        
-        image_file = generator.create_success_embed("BYTES SENT", description)
+        # Create success embed with transfer details (same as context menu)
+        image_file = generator.create_transfer_success_embed(
+            giver_name=str(ctx.user),
+            receiver_name=str(user),
+            amount=amount,
+            reason=reason,
+            new_balance=result.new_giver_balance
+        )
         await ctx.respond(attachment=image_file)
         
     except InsufficientBalanceError as e:
