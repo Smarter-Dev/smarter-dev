@@ -183,7 +183,7 @@ class SendBytesModalHandler:
                     receiver_name=str(self.recipient),
                     amount=amount,
                     reason=reason,
-                    new_balance=result.new_balance
+                    new_balance=result.new_giver_balance
                 )
                 logger.info(f"✅ Transfer successful: {amount} bytes from {self.giver} to {self.recipient}")
             else:
