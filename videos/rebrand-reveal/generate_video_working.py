@@ -97,12 +97,52 @@ def generate_video():
     output_path = base_path / "output"
     output_path.mkdir(exist_ok=True)
     
-    # Create background
-    print("📽️  Creating background...")
+    # Create background with overlay blend mode grid
+    print("📽️  Creating background with overlay blend mode grid...")
     try:
         bg_img = ImageClip(str(assets_path / "video-bg.png"))
         background = bg_img.resized((VIDEO_WIDTH, VIDEO_HEIGHT)).with_duration(TOTAL_DURATION)
-        print("✅ Background loaded")
+        
+        # Apply overlay blend mode to background
+        try:
+            def overlay_blend(base_frame, overlay_frame, opacity=0.8):
+                """
+                Implement true overlay blend mode using the mathematical formula:
+                - if base <= 0.5: result = 2 * base * overlay
+                - else: result = 1 - 2 * (1 - base) * (1 - overlay)
+                """
+                # Normalize to 0-1 range
+                base = base_frame.astype(np.float32) / 255.0
+                overlay = overlay_frame.astype(np.float32) / 255.0
+                
+                # Apply overlay blend formula
+                mask = base <= 0.5
+                result = np.zeros_like(base)
+                
+                # For dark areas: 2 * base * overlay (makes overlay nearly invisible)
+                result[mask] = 2 * base[mask] * overlay[mask]
+                
+                # For light areas: 1 - 2 * (1 - base) * (1 - overlay) (makes overlay glow)
+                result[~mask] = 1 - 2 * (1 - base[~mask]) * (1 - overlay[~mask])
+                
+                # Apply opacity and convert back to 0-255 range
+                result = base + opacity * (result - base)
+                return np.clip(result * 255, 0, 255).astype(np.uint8)
+            
+            # Load grid image and get frame data
+            grid_img = ImageClip(str(assets_path / "bg-grid.png"))
+            grid_img = grid_img.resized((VIDEO_WIDTH, VIDEO_HEIGHT))
+            grid_frame = grid_img.get_frame(0)
+            
+            # Apply overlay blend to background using fl_image
+            def apply_grid_blend(frame):
+                return overlay_blend(frame, grid_frame, opacity=0.8)
+            
+            background = background.fl_image(apply_grid_blend)
+            print("✅ Background loaded with true overlay blend mode grid")
+        except Exception as e:
+            print(f"⚠️ Could not apply overlay blend, using plain background: {e}")
+        
     except Exception as e:
         print(f"⚠️  Could not load background: {e}")
         background = ColorClip((VIDEO_WIDTH, VIDEO_HEIGHT), color=(20, 20, 40)).with_duration(TOTAL_DURATION)
@@ -210,16 +250,57 @@ def generate_video():
     # Create brand reveal
     print("🧠 Creating brand reveal...")
     try:
-        # Brain logo with smooth scale entrance
+        # Brain logo with reverse glitch reveal effect
         brain_img = ImageClip(str(assets_path / "smarter-dev-brain.png"))
         
-        brain_clip = (brain_img
-                     .resized(height=150)  # Make brain logo about half the size (was 300, now 150)
-                     .with_start(REVEAL_START + 7.5)  # Start 3 seconds after Smarter Dev text (4.5 + 3 = 7.5)
-                     .with_duration(CLOSING_END - REVEAL_START - 7.5)
-                     .with_position(('center', VIDEO_HEIGHT // 2 - 300)))  # Nudge further up
-        clips.append(brain_clip)
-        print("✅ Added brain logo")
+        def create_reverse_glitch_brain():
+            """Create brain logo with reverse glitch reveal effect."""
+            brain_clips = []
+            glitch_start = REVEAL_START + 7.5  # Start 3 seconds after Smarter Dev text
+            glitch_duration = 2.0  # 2 seconds of reverse glitch effect
+            
+            # Create the base brain image
+            base_brain = brain_img.resized(height=150).with_position(('center', VIDEO_HEIGHT // 2 - 200))
+            
+            # Create reverse flickering pattern: starts invisible, gradually becomes more visible
+            flicker_frame_duration = 0.08  # Fast flicker (80ms per frame)
+            num_flicker_frames = int(glitch_duration / flicker_frame_duration)
+            
+            for i in range(num_flicker_frames):
+                frame_start = glitch_start + i * flicker_frame_duration
+                
+                # Reverse glitch pattern - starts with low visibility, gradually increases
+                visibility_chance = min(1.0, (i / num_flicker_frames) * 1.3 + 0.1)  # 10% to 100% chance
+                
+                if np.random.random() < visibility_chance:
+                    # Visible frame - starts dimmed, gradually gets brighter
+                    opacity_progression = i / num_flicker_frames
+                    if opacity_progression < 0.3:
+                        opacity = np.random.choice([0.2, 0.4, 0.6], p=[0.5, 0.3, 0.2])
+                    elif opacity_progression < 0.7:
+                        opacity = np.random.choice([0.4, 0.6, 0.8], p=[0.3, 0.4, 0.3])
+                    else:
+                        opacity = np.random.choice([0.6, 0.8, 1.0], p=[0.2, 0.3, 0.5])
+                    
+                    glitch_frame = (base_brain
+                                   .with_opacity(opacity)
+                                   .with_start(frame_start)
+                                   .with_duration(flicker_frame_duration))
+                    brain_clips.append(glitch_frame)
+                # If not visible, don't add any frame (creates the reverse flicker gap)
+            
+            # Add final solid brain logo after glitch effect ends
+            final_brain = (base_brain
+                          .with_start(glitch_start + glitch_duration)
+                          .with_duration(CLOSING_END - glitch_start - glitch_duration))
+            brain_clips.append(final_brain)
+            
+            return brain_clips
+        
+        # Add reverse glitch brain effect
+        brain_clips = create_reverse_glitch_brain()
+        clips.extend(brain_clips)
+        print(f"🧠 Added brain logo with reverse glitch effect ({len(brain_clips)} frames over 2 seconds)")
         
         # \"Smarter Dev\" text on one line with dramatic reveal
         try:
@@ -236,17 +317,24 @@ def generate_video():
             # Create "Dev" in cyan using Bruno Ace SC  
             dev_text = TextClip(
                 text="DEV", 
-                font_size=60, 
+                font_size=45, 
                 color=CYAN,
                 font=bruno_font,
                 size=(200, 100),
                 method='caption'
             )
             
-            # Position them closer together on a single line, centered as a unit
+            # Center "SMARTER DEV" using the original 215px relative positioning
+            smarter_width = smarter_text.size[0]    # Get actual rendered width of SMARTER
+            dev_width = dev_text.size[0]            # Get actual rendered width of DEV
+            relative_gap = 315  # Original gap (215px) + 100px nudge
+            
+            total_width = relative_gap + dev_width  # Total span from start of SMARTER to end of DEV
+            start_x = (800 - total_width) // 2     # Center this total span
+            
             brand_text = CompositeVideoClip([
-                smarter_text.with_position((120, 0)),   # Position "SMARTER " 
-                dev_text.with_position((420, 0))        # Nudge "DEV" 20px to the right (was 400, now 420)
+                smarter_text.with_position((start_x, 0)),                    # SMARTER at start of centered span
+                dev_text.with_position((start_x + relative_gap, 10))         # DEV at original 215px offset
             ], size=(800, 100))
             
             def brand_slide_position(t):
@@ -262,8 +350,15 @@ def generate_video():
                 else:
                     return 1.0
             
+            # Center the composite so the actual text content is centered on screen
+            # Our text starts at x=142 within the 800px composite
+            # To center the actual text: screen_center (960px) - composite_start - text_start_within_composite
+            # We want: (1920 - total_width) / 2 to be where our text actually appears
+            composite_x = (1920 - total_width) // 2 - start_x
+            print(f"📏 Positioning brand composite at x={composite_x} so text appears centered")
+            
             brand_text = (brand_text
-                         .with_position(brand_slide_position)
+                         .with_position((composite_x, 'center'))
                          .with_start(REVEAL_START + 4.5)  # Start immediately after flickering ends
                          .with_duration(CLOSING_END - REVEAL_START - 4.5))
             
@@ -287,26 +382,138 @@ def generate_video():
             clips.append(brand_text)
             print("✅ Added 'Smarter Dev' text (fallback)")
         
-        # Subtitle
+        # Subtitle with typing effect and flashing cursor
         try:
-            subtitle = TextClip(
-                text="Level up your code", 
-                font_size=40, 
-                color=WHITE,
-                font=bungee_font,
-                size=(600, 60),
-                method='caption'
-            )
+            def create_typing_effect():
+                """Create typing effect with separate text and cursor clips to prevent shifting."""
+                typing_clips = []
+                typing_start = REVEAL_START + 7.5  # Start same time as brain glitch
+                full_text = "Level up your code"
+                typing_speed = 0.08  # 80ms per character
+                cursor_blink_speed = 0.5  # 500ms cursor blink cycle
+                
+                # Create the full text clip to measure its width and position
+                full_text_clip = TextClip(
+                    text=full_text,
+                    font_size=40,
+                    color=WHITE,
+                    font=bungee_font,
+                    size=(600, 60),
+                    method='caption'
+                )
+                
+                # Get the actual rendered width to calculate positioning
+                full_text_width = full_text_clip.size[0]
+                text_x = (VIDEO_WIDTH - full_text_width) // 2  # Center the full text
+                text_y = VIDEO_HEIGHT // 2 + 80
+                
+                # Create typing animation - progressive text reveal
+                for i in range(len(full_text) + 1):
+                    partial_text = full_text[:i]
+                    frame_start = typing_start + i * typing_speed
+                    
+                    if partial_text:
+                        # Create partial text clip
+                        partial_clip = TextClip(
+                            text=partial_text,
+                            font_size=40,
+                            color=WHITE,
+                            font=bungee_font,
+                            size=(600, 60),
+                            method='caption'
+                        )
+                        
+                        # Position at same location as full text will be
+                        partial_clip = (partial_clip
+                                      .with_position((text_x, text_y))
+                                      .with_start(frame_start)
+                                      .with_duration(typing_speed))
+                        typing_clips.append(partial_clip)
+                        
+                        # Add cursor positioned after the partial text
+                        if i < len(full_text):
+                            # Measure partial text width to position cursor
+                            partial_width = partial_clip.size[0]
+                            cursor_x = text_x + partial_width
+                            
+                            cursor_clip = TextClip(
+                                text="_",
+                                font_size=40,
+                                color=WHITE,
+                                font=bungee_font,
+                                size=(20, 60),
+                                method='caption'
+                            )
+                            
+                            cursor_clip = (cursor_clip
+                                         .with_position((cursor_x, text_y))
+                                         .with_start(frame_start)
+                                         .with_duration(typing_speed))
+                            typing_clips.append(cursor_clip)
+                
+                # After typing is complete, show final text with blinking cursor
+                typing_end = typing_start + len(full_text) * typing_speed
+                final_text_duration = CLOSING_END - typing_end
+                
+                # Add stable final text
+                final_text_clip = (full_text_clip
+                                 .with_position((text_x, text_y))
+                                 .with_start(typing_end)
+                                 .with_duration(final_text_duration))
+                typing_clips.append(final_text_clip)
+                
+                # Add blinking cursor after final text
+                cursor_x = text_x + full_text_width
+                cursor_blink_frames = int(final_text_duration / cursor_blink_speed)
+                
+                for i in range(cursor_blink_frames):
+                    frame_start = typing_end + i * cursor_blink_speed
+                    
+                    # Only show cursor on even frames (creates blinking effect)
+                    if i % 2 == 0:
+                        cursor_clip = TextClip(
+                            text="_",
+                            font_size=40,
+                            color=WHITE,
+                            font=bungee_font,
+                            size=(20, 60),
+                            method='caption'
+                        )
+                        
+                        cursor_clip = (cursor_clip
+                                     .with_position((cursor_x, text_y))
+                                     .with_start(frame_start)
+                                     .with_duration(cursor_blink_speed))
+                        typing_clips.append(cursor_clip)
+                
+                return typing_clips
             
-            subtitle = (subtitle
-                       .with_position(('center', VIDEO_HEIGHT // 2 + 80))   # Move CTA text up for equal spacing between logo, name, and CTA
-                       .with_start(REVEAL_START + 9.5)  # Start 5 seconds after Smarter Dev text (4.5 + 5 = 9.5)
-                       .with_duration(CLOSING_END - REVEAL_START - 9.5))
-            
-            clips.append(subtitle)
-            print("✅ Added subtitle")
+            # Add typing effect
+            typing_clips = create_typing_effect()
+            clips.extend(typing_clips)
+            print(f"⌨️  Added typing effect for CTA text ({len(typing_clips)} frames with flashing cursor)")
         except Exception as e:
-            print(f"⚠️  Could not create subtitle: {e}")
+            print(f"⚠️  Could not create typing effect: {e}")
+            # Fallback to regular subtitle
+            try:
+                subtitle = TextClip(
+                    text="Level up your code", 
+                    font_size=40, 
+                    color=WHITE,
+                    font=bungee_font,
+                    size=(600, 60),
+                    method='caption'
+                )
+                
+                subtitle = (subtitle
+                           .with_position(('center', VIDEO_HEIGHT // 2 + 80))
+                           .with_start(REVEAL_START + 9.5)
+                           .with_duration(CLOSING_END - REVEAL_START - 9.5))
+                
+                clips.append(subtitle)
+                print("✅ Added subtitle (fallback)")
+            except Exception as e2:
+                print(f"⚠️  Subtitle fallback failed: {e2}")
         
     except Exception as e:
         print(f"⚠️  Could not create brand elements: {e}")
@@ -389,6 +596,8 @@ def generate_video():
         print("⚠️  No audio files loaded, using silent track")
         final_audio = AudioClip(lambda t: 0, duration=TOTAL_DURATION)
     
+    # Grid overlay is now applied directly to the background above
+    
     # Create final video
     print("🎭 Compositing final video...")
     print(f"📊 Total clips: {len(clips)}")
@@ -397,10 +606,10 @@ def generate_video():
     final_video = final_video.with_audio(final_audio).with_duration(TOTAL_DURATION)
     
     # Export video
-    output_file = output_path / "smarter_dev_rebrand_reveal_FLICKERING.mp4"
+    output_file = output_path / "smarter_dev_rebrand_reveal_OVERLAY_BLEND.mp4"
     print(f"🚀 Exporting to {output_file}...")
     print(f"📏 Video duration: {TOTAL_DURATION} seconds (30-second final screen)")
-    print("⚡ Features: FLICKERING EFFECT - Text flickers for 3 seconds then disappears + Single line 'Smarter Dev'")
+    print("⚡ Features: OVERLAY BLEND MODE - Grid overlay with proper blending + Reverse glitch brain + Typing effect + Centered text")
     
     try:
         final_video.write_videofile(
@@ -408,11 +617,11 @@ def generate_video():
             fps=FPS,
             codec='libx264',
             audio_codec='aac',
-            temp_audiofile='temp-audio-FLICKERING.m4a',
+            temp_audiofile='temp-audio-OVERLAY_BLEND.m4a',
             remove_temp=True
         )
         print(f"✅ Video generation complete! Output: {output_file}")
-        print(f"⚡ FLICKERING VIDEO READY: {output_file}")
+        print(f"🌐 OVERLAY BLEND MODE VIDEO READY: {output_file}")
         return output_file
     except Exception as e:
         print(f"❌ Error during video export: {e}")
