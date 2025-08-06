@@ -34,6 +34,7 @@ dependencies = [
     "itsdangerous>=2.2.0",
     "python-multipart>=0.0.20",
     "hikari-lightbulb<3.0.0",
+    "blend-modes>=2.2.0",
 ]
 
 [dependency-groups]
@@ -85,6 +86,19 @@ test = [
 # GIF creation (existing)
 gif-creation = [
     "pillow>=11.3.0",
+]
+
+# Video/movie generation
+movie = [
+    "moviepy>=1.0.3",
+    "imageio>=2.9.0",
+    "imageio-ffmpeg>=0.4.0",
+]
+
+# Interactive reveal
+interactive = [
+    "pygame>=2.5.0",
+    "pytz>=2023.3",
 ]
 
 [tool.pytest.ini_options]
