@@ -657,12 +657,17 @@ class InteractiveReveal:
         # Load and start background music
         self.load_background_music()
         
+        # Load glitch sound effect
+        self.load_glitch_sound()
+        
         # Create working surface to avoid repeated copying
         self.working_surface = pygame.Surface((self.width, self.height))
         
         # State management
         self.state = "countdown"  # countdown, standby, transformation
         self.transformation_started = False
+        self.transition_start_time = None
+        self.transition_duration = 1.5  # 1.5 second crossfade
         self.show_fps = False  # Toggle for FPS counter
         self.show_grid = True  # Toggle for grid overlay (G key)
         
@@ -670,8 +675,8 @@ class InteractiveReveal:
         
         # Set target datetime based on mode
         if self.test_mode:
-            # Test mode: 30 seconds from now
-            self.target_datetime = datetime.datetime.now(pytz.timezone('US/Eastern')) + datetime.timedelta(seconds=30)
+            # Test mode: 5 seconds from now
+            self.target_datetime = datetime.datetime.now(pytz.timezone('US/Eastern')) + datetime.timedelta(seconds=5)
             print(f"🧪 Test target: {self.target_datetime.strftime('%H:%M:%S ET')}")
         else:
             # Production mode: August 8th noon ET
@@ -700,6 +705,21 @@ class InteractiveReveal:
             print("✅ Started background music")
         except Exception as e:
             print(f"⚠️  Could not load background music: {e}")
+    
+    def load_glitch_sound(self):
+        """Load glitch sound effect."""
+        try:
+            glitch_path = Path(__file__).parent / "audio" / "glitch.mp3"
+            if glitch_path.exists():
+                self.glitch_sound = pygame.mixer.Sound(str(glitch_path))
+                self.glitch_sound.set_volume(0.8)  # Set volume to 80%
+                print("✅ Loaded glitch sound effect")
+            else:
+                print("⚠️  Glitch sound file not found")
+                self.glitch_sound = None
+        except Exception as e:
+            print(f"⚠️  Could not load glitch sound: {e}")
+            self.glitch_sound = None
     
     def get_time_remaining(self):
         """Calculate time remaining until target datetime."""
@@ -737,6 +757,12 @@ class InteractiveReveal:
                         self.transformation_started = True
                         self.transformation_manager.reset()
                         self.state = "transformation"
+                        
+                        # Stop background music and play glitch sound on loop
+                        pygame.mixer.music.stop()
+                        if self.glitch_sound:
+                            self.glitch_sound.play(-1)  # Loop indefinitely
+                            print("🎵 Stopped background music, playing glitch sound (looping)")
                 
                 elif event.key == pygame.K_f:
                     self.show_fps = not self.show_fps
@@ -750,8 +776,9 @@ class InteractiveReveal:
         
         return True
     
-    def update(self, dt):
+    def update(self, dt, current_time):
         """Update game state."""
+        
         # Mark dirty rectangles from streak movement before updating
         if self.show_grid:
             for dirty_rect in self.streak_manager.get_dirty_rectangles():
@@ -764,14 +791,32 @@ class InteractiveReveal:
         # Check countdown state
         time_remaining = self.get_time_remaining()
         if time_remaining is None and self.state == "countdown":
-            self.state = "standby"
-            print("🎯 Countdown finished! Press SPACE to begin transformation...")
+            self.state = "countdown_to_standby_transition"
+            self.transition_start_time = current_time
+            print("🎯 Countdown finished! Starting crossfade to standby...")
+        
+        # Handle crossfade transition
+        if self.state == "countdown_to_standby_transition":
+            if current_time - self.transition_start_time >= self.transition_duration:
+                self.state = "standby"
+                self.transition_start_time = None
+                # Force text cache refresh
+                if hasattr(self.text_renderer, 'fonts'):
+                    pass  # Text renderer should re-render
+                print("🎯 Crossfade complete! Press SPACE to begin transformation...")
         
         # Update transformation if active
         if self.state == "transformation":
+            prev_phase = self.transformation_manager.phase
             self.transformation_manager.update(dt)
+            
+            # Stop glitch sound when glitch phase ends (phase 1 -> phase 2)
+            if prev_phase == 1 and self.transformation_manager.phase == 2:
+                if hasattr(self, 'glitch_sound') and self.glitch_sound:
+                    self.glitch_sound.stop()
+                    print("🎵 Glitch effect ended, stopped glitch sound")
     
-    def render(self):
+    def render(self, current_time):
         """Render the current frame."""
         # Use working surface instead of copying background each frame
         self.working_surface.blit(self.background, (0, 0))
@@ -790,6 +835,8 @@ class InteractiveReveal:
         # Draw text content on top of blended surface (directly to screen)
         if self.state == "countdown":
             self.draw_countdown_state(self.screen)
+        elif self.state == "countdown_to_standby_transition":
+            self.draw_countdown_to_standby_transition(self.screen, current_time)
         elif self.state == "standby":
             self.draw_standby_state(self.screen)
         elif self.state == "transformation":
@@ -808,16 +855,52 @@ class InteractiveReveal:
         )
         surface.blit(title_surface, title_rect)
         
-        # Draw countdown
+        # Draw countdown with monospaced appearance
         time_remaining = self.get_time_remaining()
         if time_remaining:
-            # New format: dd hh mm ss
-            countdown_text = f"{time_remaining['days']:02d} {time_remaining['hours']:02d} {time_remaining['minutes']:02d} {time_remaining['seconds']:02d}"
+            # Format: dd hh mm ss
+            countdown_parts = [
+                f"{time_remaining['days']:02d}",
+                f"{time_remaining['hours']:02d}", 
+                f"{time_remaining['minutes']:02d}",
+                f"{time_remaining['seconds']:02d}"
+            ]
+        else:
+            # Show final countdown when time is up
+            countdown_parts = ["00", "00", "00", "00"]
+        
+        # Get the width of a "0" character to use as reference for spacing
+        zero_surface, _ = self.text_renderer.render_text("0", "bruno_large", CYAN, (0, 0))
+        char_width = zero_surface.get_width()
+        space_width = char_width // 2  # Space between groups
+        
+        # Calculate total width needed for proper centering
+        total_chars = 8  # 8 digits total (2+2+2+2)
+        total_spaces = 3  # 3 spaces between groups
+        total_width = total_chars * char_width + total_spaces * space_width
+        
+        # Start position (centered)
+        start_x = (self.width - total_width) // 2
+        y_pos = self.height // 2 + 150
+        
+        # Draw each digit group with proper spacing
+        current_x = start_x
+        for i, part in enumerate(countdown_parts):
+            # Draw each digit in this part
+            for digit in part:
+                # Render the digit
+                digit_surface, _ = self.text_renderer.render_text(digit, "bruno_large", CYAN, (0, 0))
+                
+                # Center the digit within the character width
+                digit_x = current_x + (char_width - digit_surface.get_width()) // 2
+                digit_rect = digit_surface.get_rect(center=(digit_x + digit_surface.get_width()//2, y_pos))
+                
+                surface.blit(digit_surface, digit_rect)
+                current_x += char_width
             
-            countdown_surface, countdown_rect = self.text_renderer.render_text(
-                countdown_text, "bruno_large", CYAN, (self.width // 2, self.height // 2 + 150)
-            )
-            surface.blit(countdown_surface, countdown_rect)
+            # Add space between groups (but not after the last group)
+            if i < len(countdown_parts) - 1:
+                current_x += space_width
     
     def draw_standby_state(self, surface):
         """Draw standby state."""
@@ -829,10 +912,83 @@ class InteractiveReveal:
         
         # Draw "Standby" message
         standby_surface, standby_rect = self.text_renderer.render_text(
-            "Standby for something epic!", "bruno_small", CYAN, (self.width // 2, self.height // 2 + 150)
+            "STANDBY FOR SOMETHING EPIC!", "bruno_small", CYAN, (self.width // 2, self.height // 2 + 150)
         )
         surface.blit(standby_surface, standby_rect)
+    
+    def draw_countdown_to_standby_transition(self, surface, current_time):
+        """Draw crossfade transition from countdown to standby."""
+        if self.transition_start_time is None:
+            return
         
+        # Calculate fade progress (0.0 to 1.0)
+        elapsed = current_time - self.transition_start_time
+        fade_progress = min(1.0, elapsed / self.transition_duration)
+        
+        # Create surfaces for both states
+        countdown_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        standby_surface = pygame.Surface((self.width, self.height), pygame.SRCALPHA)
+        
+        # Draw countdown state on its surface
+        # Title (same for both)
+        title_surface, title_rect = self.text_renderer.render_text(
+            "BEGINNER.CODES", "bungee_large", WHITE, (self.width // 2, self.height // 2)
+        )
+        countdown_surface.blit(title_surface, title_rect)
+        standby_surface.blit(title_surface, title_rect)
+        
+        # Countdown text (fading out) - using same monospaced logic
+        countdown_parts = ["00", "00", "00", "00"]  # Final countdown
+        
+        # Get the width of a "0" character to use as reference for spacing
+        zero_surface, _ = self.text_renderer.render_text("0", "bruno_large", CYAN, (0, 0))
+        char_width = zero_surface.get_width()
+        space_width = char_width // 2  # Space between groups
+        
+        # Calculate total width needed for proper centering
+        total_chars = 8  # 8 digits total (2+2+2+2)
+        total_spaces = 3  # 3 spaces between groups
+        total_width = total_chars * char_width + total_spaces * space_width
+        
+        # Start position (centered)
+        start_x = (self.width - total_width) // 2
+        y_pos = self.height // 2 + 150
+        
+        # Draw each digit group with proper spacing on countdown surface
+        current_x = start_x
+        for i, part in enumerate(countdown_parts):
+            # Draw each digit in this part
+            for digit in part:
+                # Render the digit
+                digit_surface, _ = self.text_renderer.render_text(digit, "bruno_large", CYAN, (0, 0))
+                
+                # Center the digit within the character width
+                digit_x = current_x + (char_width - digit_surface.get_width()) // 2
+                digit_rect = digit_surface.get_rect(center=(digit_x + digit_surface.get_width()//2, y_pos))
+                
+                countdown_surface.blit(digit_surface, digit_rect)
+                current_x += char_width
+            
+            # Add space between groups (but not after the last group)
+            if i < len(countdown_parts) - 1:
+                current_x += space_width
+        
+        # Standby text (fading in)
+        standby_text_surface, standby_text_rect = self.text_renderer.render_text(
+            "STANDBY FOR SOMETHING EPIC!", "bruno_small", CYAN, (self.width // 2, self.height // 2 + 150)
+        )
+        standby_surface.blit(standby_text_surface, standby_text_rect)
+        
+        # Apply alpha blending
+        countdown_alpha = int(255 * (1.0 - fade_progress))
+        standby_alpha = int(255 * fade_progress)
+        
+        countdown_surface.set_alpha(countdown_alpha)
+        standby_surface.set_alpha(standby_alpha)
+        
+        # Blit both surfaces
+        surface.blit(countdown_surface, (0, 0))
+        surface.blit(standby_surface, (0, 0))
     
     def draw_transformation_state(self, surface):
         """Draw transformation sequence."""
@@ -907,16 +1063,21 @@ class InteractiveReveal:
             fps_value = self.clock.get_fps()
             fps_text = f"FPS: {fps_value:.1f}"
             fps_surface = debug_font.render(fps_text, True, WHITE)
+            
+            # Center the FPS display at the top of the screen
+            fps_x = (self.width - fps_surface.get_width()) // 2
+            fps_y = 10
+            
             # Add a semi-transparent background to make it more visible
-            bg_rect = pygame.Rect(8, 8, fps_surface.get_width() + 4, fps_surface.get_height() + 4)
+            bg_rect = pygame.Rect(fps_x - 2, fps_y - 2, fps_surface.get_width() + 4, fps_surface.get_height() + 4)
             pygame.draw.rect(self.screen, (0, 0, 0, 128), bg_rect)
-            self.screen.blit(fps_surface, (10, 10))
+            self.screen.blit(fps_surface, (fps_x, fps_y))
     
     def run(self):
         """Main game loop."""
         print("🚀 Starting Interactive Smarter Dev Rebrand Reveal...")
         if self.test_mode:
-            print(f"🎯 Test Target: {self.target_datetime.strftime('%H:%M:%S ET')} (30 seconds)")
+            print(f"🎯 Test Target: {self.target_datetime.strftime('%H:%M:%S ET')} (5 seconds)")
         else:
             print(f"🎯 Target: {self.target_datetime.strftime('%B %d, %Y at %I:%M %p ET')}")
         print("💡 Press CTRL+C to exit, or ESC key")
@@ -926,9 +1087,12 @@ class InteractiveReveal:
             while running:
                 dt = self.clock.tick(FPS) / 1000.0  # Delta time in seconds
                 
+                import time
+                current_time = time.time()
+                
                 running = self.handle_events()
-                self.update(dt)
-                self.render()
+                self.update(dt, current_time)
+                self.render(current_time)
         
         except KeyboardInterrupt:
             print("\n👋 Exiting...")
@@ -940,7 +1104,7 @@ def main():
     """Main function with command-line argument parsing."""
     parser = argparse.ArgumentParser(description="Interactive Smarter Dev Rebrand Reveal")
     parser.add_argument("--720p", action="store_true", help="Use 720p resolution (1280x720) instead of 1080p")
-    parser.add_argument("--test", action="store_true", help="Set countdown to 30 seconds from program start for testing")
+    parser.add_argument("--test", action="store_true", help="Set countdown to 5 seconds from program start for testing")
     
     args = parser.parse_args()
     
@@ -952,7 +1116,7 @@ def main():
         print("🖥️  Using 1080p resolution (1920x1080)")
     
     if args.test:
-        print("🧪 TEST MODE: Countdown set to 30 seconds from now")
+        print("🧪 TEST MODE: Countdown set to 5 seconds from now")
     
     app = InteractiveReveal(width, height, test_mode=args.test)
     app.run()
