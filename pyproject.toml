@@ -99,6 +99,7 @@ movie = [
 interactive = [
     "pygame>=2.5.0",
     "pytz>=2023.3",
+    "opencv-python>=4.8.0",
 ]
 
 [tool.pytest.ini_options]

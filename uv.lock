@@ -2887,6 +2887,7 @@ gif-creation = [
     { name = "pillow" },
 ]
 interactive = [
+    { name = "opencv-python" },
     { name = "pygame" },
     { name = "pytz" },
 ]
@@ -2956,6 +2957,7 @@ dev = [
 ]
 gif-creation = [{ name = "pillow", specifier = ">=11.3.0" }]
 interactive = [
+    { name = "opencv-python", specifier = ">=4.8.0" },
     { name = "pygame", specifier = ">=2.5.0" },
     { name = "pytz", specifier = ">=2023.3" },
 ]
