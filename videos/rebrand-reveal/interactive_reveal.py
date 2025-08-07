@@ -660,6 +660,8 @@ class InteractiveReveal:
         # Load glitch sound effect
         self.load_glitch_sound()
         
+        # Don't initialize webcam yet - wait for user to toggle it
+        
         # Create working surface to avoid repeated copying
         self.working_surface = pygame.Surface((self.width, self.height))
         
@@ -670,6 +672,14 @@ class InteractiveReveal:
         self.transition_duration = 1.5  # 1.5 second crossfade
         self.show_fps = False  # Toggle for FPS counter
         self.show_grid = True  # Toggle for grid overlay (G key)
+        self.show_webcam = False  # Toggle for webcam (W key)
+        self.webcam = None  # Will be initialized when first toggled
+        self.webcam_surface = None
+        self.webcam_update_timer = 0  # Limit webcam update frequency
+        self.webcam_update_interval = 1/15  # Update webcam at 15 FPS instead of 60
+        self.webcam_thread = None  # Background thread for webcam
+        self.latest_webcam_frame = None  # Latest frame from background thread
+        self.webcam_thread_running = False
         
         # No longer need text dirty rectangle tracking since text is rendered after overlay
         
@@ -720,6 +730,161 @@ class InteractiveReveal:
         except Exception as e:
             print(f"⚠️  Could not load glitch sound: {e}")
             self.glitch_sound = None
+    
+    def init_webcam(self):
+        """Initialize webcam for video capture."""
+        try:
+            import cv2
+            print("🔍 OpenCV imported successfully")
+            
+            # Try different camera backends/indices for macOS compatibility
+            camera_configs = [
+                (0, cv2.CAP_AVFOUNDATION),  # macOS AVFoundation backend
+                (0, cv2.CAP_ANY),           # Default backend
+                (1, cv2.CAP_AVFOUNDATION),  # Try index 1 with AVFoundation
+                (0, None),                  # Fallback without specifying backend
+            ]
+            
+            for i, (index, backend) in enumerate(camera_configs):
+                print(f"🔍 Trying camera config {i+1}: index={index}, backend={backend}")
+                try:
+                    if backend is not None:
+                        self.webcam = cv2.VideoCapture(index, backend)
+                    else:
+                        self.webcam = cv2.VideoCapture(index)
+                    
+                    print(f"🔍 VideoCapture created: {self.webcam}")
+                    
+                    if self.webcam.isOpened():
+                        print("✅ Webcam initialized and opened")
+                        # Try to read a test frame
+                        ret, frame = self.webcam.read()
+                        print(f"🔍 Test frame read: ret={ret}, frame={'None' if frame is None else 'OK'}")
+                        if ret:
+                            print(f"🔍 Frame shape: {frame.shape}")
+                            
+                            # Set lower resolution for better performance
+                            self.webcam.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+                            self.webcam.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+                            # Set lower FPS at camera level too
+                            self.webcam.set(cv2.CAP_PROP_FPS, 15)
+                            
+                            print(f"✅ Successfully initialized webcam with config {i+1}")
+                            print(f"🔍 Set webcam to 320x240@15fps for better performance")
+                            return  # Success! Exit the function
+                        else:
+                            print("⚠️  Could not read test frame")
+                            self.webcam.release()
+                            self.webcam = None
+                    else:
+                        print("⚠️  Could not open webcam with this config")
+                        if self.webcam:
+                            self.webcam.release()
+                        self.webcam = None
+                
+                except Exception as config_e:
+                    print(f"⚠️  Config {i+1} failed: {config_e}")
+                    if hasattr(self, 'webcam') and self.webcam:
+                        self.webcam.release()
+                    self.webcam = None
+            
+            # If we get here, all configs failed
+            print("⚠️  All camera configurations failed")
+            self.webcam = None
+        except ImportError:
+            print("⚠️  OpenCV not available, webcam disabled")
+            self.webcam = None
+        except Exception as e:
+            print(f"⚠️  Could not initialize webcam: {e}")
+            self.webcam = None
+    
+    def webcam_background_thread(self):
+        """Background thread to continuously grab webcam frames."""
+        import cv2
+        while self.webcam_thread_running and self.webcam and self.webcam.isOpened():
+            try:
+                ret, frame = self.webcam.read()
+                if ret:
+                    self.latest_webcam_frame = frame
+                else:
+                    # If read fails, stop the thread
+                    break
+            except Exception as e:
+                print(f"⚠️  Webcam background thread error: {e}")
+                break
+        
+        self.webcam_thread_running = False
+    
+    def start_webcam_thread(self):
+        """Start the background webcam thread."""
+        if not self.webcam_thread_running and self.webcam:
+            import threading
+            self.webcam_thread_running = True
+            self.webcam_thread = threading.Thread(target=self.webcam_background_thread, daemon=True)
+            self.webcam_thread.start()
+            print("🎥 Started webcam background thread")
+    
+    def stop_webcam_thread(self):
+        """Stop the background webcam thread."""
+        if self.webcam_thread_running:
+            self.webcam_thread_running = False
+            if self.webcam_thread and self.webcam_thread.is_alive():
+                self.webcam_thread.join(timeout=1.0)  # Wait up to 1 second
+            print("🎥 Stopped webcam background thread")
+    
+    def update_webcam(self):
+        """Update webcam display using latest frame from background thread."""
+        if not self.latest_webcam_frame is None:
+            try:
+                import cv2
+                frame = self.latest_webcam_frame
+                webcam_size = 150  # Diameter of circle
+                
+                # Resize frame immediately to reduce processing overhead
+                frame_resized = cv2.resize(frame, (webcam_size, webcam_size))
+                
+                # Convert BGR to RGB and flip in one operation
+                frame_rgb = cv2.flip(cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB), 1)
+                
+                # Convert to pygame surface more efficiently
+                frame_surface = pygame.surfarray.make_surface(frame_rgb.swapaxes(0, 1))
+                
+                # Create circular webcam surface with pre-cached mask if possible
+                if not hasattr(self, '_webcam_mask') or self._webcam_mask is None:
+                    # Cache the circular mask to avoid recreating it every frame
+                    self._webcam_mask = pygame.Surface((webcam_size, webcam_size), pygame.SRCALPHA)
+                    pygame.draw.circle(self._webcam_mask, (255, 255, 255, 255), 
+                                     (webcam_size//2, webcam_size//2), webcam_size//2)
+                
+                # Create webcam surface
+                webcam_surface = pygame.Surface((webcam_size, webcam_size), pygame.SRCALPHA)
+                webcam_surface.blit(frame_surface, (0, 0))
+                webcam_surface.blit(self._webcam_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+                
+                self.webcam_surface = webcam_surface
+            except Exception as e:
+                print(f"⚠️  Error updating webcam: {e}")
+    
+    def draw_webcam(self, surface):
+        """Draw webcam in bottom right corner as a circle."""
+        if not self.show_webcam or not self.webcam_surface:
+            return
+        
+        # Position in bottom right corner with some padding
+        webcam_size = 150
+        padding = 20
+        x = self.width - webcam_size - padding
+        y = self.height - webcam_size - padding
+        
+        # Draw border circle
+        border_color = WHITE
+        border_width = 3
+        pygame.draw.circle(surface, border_color, 
+                         (x + webcam_size//2, y + webcam_size//2), 
+                         webcam_size//2 + border_width, border_width)
+        
+        # Draw webcam feed
+        surface.blit(self.webcam_surface, (x, y))
     
     def get_time_remaining(self):
         """Calculate time remaining until target datetime."""
@@ -773,6 +938,30 @@ class InteractiveReveal:
                     # Invalidate cache when toggling grid
                     self.grid_renderer.cached_blend_surface = None
                     print(f"🌐 Grid overlay {'enabled' if self.show_grid else 'disabled'}")
+                
+                elif event.key == pygame.K_w:
+                    if not self.show_webcam:
+                        # Turning webcam ON - initialize if needed
+                        if self.webcam is None:
+                            print("📷 Initializing webcam...")
+                            self.init_webcam()
+                        
+                        if self.webcam is not None:
+                            self.show_webcam = True
+                            self.start_webcam_thread()  # Start background thread
+                            print("📷 Webcam enabled")
+                        else:
+                            print("📷 Failed to initialize webcam")
+                    else:
+                        # Turning webcam OFF - release resources
+                        self.show_webcam = False
+                        self.stop_webcam_thread()  # Stop background thread
+                        if self.webcam is not None:
+                            self.webcam.release()
+                            self.webcam = None
+                        self.webcam_surface = None
+                        self.latest_webcam_frame = None
+                        print("📷 Webcam disabled and released")
         
         return True
     
@@ -815,6 +1004,13 @@ class InteractiveReveal:
                 if hasattr(self, 'glitch_sound') and self.glitch_sound:
                     self.glitch_sound.stop()
                     print("🎵 Glitch effect ended, stopped glitch sound")
+        
+        # Update webcam if enabled (but limit frequency for performance)
+        if self.show_webcam and self.webcam:
+            self.webcam_update_timer += dt
+            if self.webcam_update_timer >= self.webcam_update_interval:
+                self.update_webcam()
+                self.webcam_update_timer = 0
     
     def render(self, current_time):
         """Render the current frame."""
@@ -844,6 +1040,9 @@ class InteractiveReveal:
         
         # Debug info
         self.draw_debug_info()
+        
+        # Draw webcam overlay (after everything else)
+        self.draw_webcam(self.screen)
         
         pygame.display.flip()
     
@@ -1096,6 +1295,11 @@ class InteractiveReveal:
         
         except KeyboardInterrupt:
             print("\n👋 Exiting...")
+        
+        # Cleanup webcam if it was initialized
+        if hasattr(self, 'webcam') and self.webcam:
+            self.stop_webcam_thread()  # Stop background thread first
+            self.webcam.release()
         
         pygame.quit()
         sys.exit()
