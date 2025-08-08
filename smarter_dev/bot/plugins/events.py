@@ -153,6 +153,8 @@ async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> 
             await handle_history_share_interaction(event)
         elif custom_id == "share_squad_list":
             await handle_squad_list_share_interaction(event)
+        elif custom_id.startswith("share_tldr:"):
+            await handle_tldr_share_interaction(event)
         else:
             logger.warning(f"Unhandled component interaction: {custom_id}")
     
@@ -560,6 +562,93 @@ async def handle_squad_list_share_interaction(event: hikari.InteractionCreateEve
                 )
         except Exception as e2:
             logger.error(f"Failed to send squad list share error response: {e2}")
+
+
+async def handle_tldr_share_interaction(event: hikari.InteractionCreateEvent) -> None:
+    """Handle TLDR share button interactions.
+    
+    Args:
+        event: The interaction event
+    """
+    if not isinstance(event.interaction, hikari.ComponentInteraction):
+        return
+        
+    user_id = str(event.interaction.user.id)
+    guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
+    
+    if not guild_id:
+        logger.error("TLDR share interaction without guild context")
+        return
+    
+    logger.info(f"TLDR share interaction from user {user_id} in guild {guild_id}")
+    
+    try:
+        # Parse the custom_id to get user_id and message_count
+        # Format: share_tldr:user_id:message_count
+        custom_id_parts = event.interaction.custom_id.split(":")
+        if len(custom_id_parts) != 3:
+            logger.error(f"Invalid TLDR share custom_id format: {event.interaction.custom_id}")
+            await event.interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_CREATE,
+                content="❌ Invalid share request format.",
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
+            return
+        
+        original_user_id = custom_id_parts[1]
+        message_count = custom_id_parts[2]
+        
+        # Only allow the original requester to share their summary
+        if user_id != original_user_id:
+            await event.interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_CREATE,
+                content="❌ You can only share your own TLDR summaries.",
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
+            return
+        
+        # Get the original message content from the interaction
+        original_message = event.interaction.message
+        if not original_message:
+            logger.error("No original message found for TLDR share")
+            await event.interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_CREATE,
+                content="❌ Original summary not found.",
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
+            return
+        
+        # Extract the summary content from the original message
+        summary_content = original_message.content if original_message.content else "Summary content not available"
+        
+        # Get user's display name for attribution
+        username = event.interaction.user.display_name or event.interaction.user.username
+        
+        # Create public message with attribution
+        public_content = f"📝 **Channel Summary** (requested by {username})\n\n{summary_content}"
+        
+        # Share as public message
+        await event.interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_CREATE,
+            content=public_content,
+            flags=hikari.MessageFlag.NONE  # Public message
+        )
+        
+        logger.info(f"TLDR summary shared publicly by {username} ({user_id})")
+        
+    except Exception as e:
+        logger.exception(f"Error in TLDR share interaction: {e}")
+        
+        # Send error response
+        try:
+            if not event.interaction.is_responded():
+                await event.interaction.create_initial_response(
+                    hikari.ResponseType.MESSAGE_CREATE,
+                    content="❌ Failed to share TLDR summary. Please try again later.",
+                    flags=hikari.MessageFlag.EPHEMERAL
+                )
+        except Exception as e2:
+            logger.error(f"Failed to send TLDR share error response: {e2}")
 
 
 def setup_interaction_handlers(bot: hikari.GatewayBot) -> None:
