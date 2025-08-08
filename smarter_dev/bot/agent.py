@@ -253,3 +253,164 @@ class HelpAgent:
                         tokens_used += usage['total_tokens']
         
         return result.response, tokens_used
+
+
+class TLDRAgentSignature(dspy.Signature):
+    """You are a helpful Discord bot that creates concise summaries of channel conversations.
+
+    ## TASK
+    Analyze the provided Discord messages and create a clear, informative summary of the conversation.
+
+    ## GUIDELINES
+    - **Be Concise**: Aim for 2-4 sentences maximum
+    - **Capture Key Points**: Include main topics, decisions, or important information discussed
+    - **Identify Participants**: Mention key contributors when relevant
+    - **Maintain Context**: Preserve important details and relationships between messages
+    - **Use Natural Language**: Write in a conversational, easy-to-read style
+    - **Handle Various Content**: Summarize technical discussions, casual chat, questions/answers, etc.
+
+    ## RESPONSE FORMAT
+    - Start with "📝 **Channel Summary**" 
+    - Provide the summary in 2-4 clear sentences
+    - End with message count: "(Summarized X messages)"
+
+    ## EXAMPLE OUTPUT
+    📝 **Channel Summary**
+    Users discussed implementing a new bot feature for message summarization. Alice suggested using an LLM approach while Bob raised concerns about rate limiting. The team decided to create a separate plugin with progressive context handling to manage long conversations.
+    (Summarized 12 messages)
+    """
+    
+    messages: str = dspy.InputField(description="Discord messages to summarize, formatted as structured data")
+    summary: str = dspy.OutputField(description="Concise summary of the conversation")
+
+
+class TLDRAgent:
+    """Discord bot TLDR agent using Gemini for conversation summarization."""
+    
+    def __init__(self):
+        self._agent = dspy.ChainOfThought(TLDRAgentSignature)
+    
+    def estimate_token_count(self, text: str) -> int:
+        """Rough estimation of token count for text (approximately 4 chars per token)."""
+        return len(text) // 4
+    
+    def truncate_message_content(self, content: str, max_chars: int = 500) -> str:
+        """Truncate message content while preserving readability."""
+        if len(content) <= max_chars:
+            return content
+        
+        # Try to truncate at word boundaries
+        truncated = content[:max_chars]
+        last_space = truncated.rfind(' ')
+        if last_space > max_chars * 0.8:  # If we find a space in the last 20%
+            truncated = truncated[:last_space]
+        
+        return truncated + "..."
+    
+    def prepare_messages_for_context(
+        self, 
+        messages: List[DiscordMessage], 
+        max_tokens: int = 15000
+    ) -> tuple[str, int]:
+        """Prepare messages for LLM context with progressive truncation.
+        
+        Args:
+            messages: List of Discord messages to process
+            max_tokens: Maximum tokens to use (leaving room for response)
+            
+        Returns:
+            tuple[str, int]: Formatted message string and actual message count used
+        """
+        if not messages:
+            return "<no-messages>No messages to summarize</no-messages>", 0
+        
+        # Start with full messages and progressively reduce if needed
+        current_messages = messages.copy()
+        
+        while current_messages:
+            # Format current set of messages
+            formatted_lines = []
+            for msg in current_messages:
+                timestamp_str = msg.timestamp.strftime("%m/%d %H:%M")
+                
+                # Truncate very long messages
+                content = self.truncate_message_content(msg.content, 500)
+                
+                formatted_lines.append(
+                    f"<message>"
+                    f"<timestamp>{timestamp_str}</timestamp>"
+                    f"<author>{msg.author}</author>"
+                    f"<content>{content}</content>"
+                    f"</message>"
+                )
+            
+            formatted_text = f"<conversation>\n{chr(10).join(formatted_lines)}\n</conversation>"
+            
+            # Check if this fits within token limit
+            estimated_tokens = self.estimate_token_count(formatted_text)
+            
+            if estimated_tokens <= max_tokens or len(current_messages) <= 3:
+                # Either it fits, or we're down to minimum messages
+                return formatted_text, len(current_messages)
+            
+            # Remove some messages and try again (remove from the oldest/beginning)
+            reduction = max(1, len(current_messages) // 4)  # Remove 25% each iteration
+            current_messages = current_messages[-len(current_messages) + reduction:]
+        
+        return "<no-messages>No messages could be processed</no-messages>", 0
+    
+    def generate_summary(
+        self, 
+        messages: List[DiscordMessage],
+        max_context_tokens: int = 15000
+    ) -> tuple[str, int, int]:
+        """Generate a TLDR summary of Discord messages.
+        
+        Args:
+            messages: List of Discord messages to summarize
+            max_context_tokens: Maximum tokens to use for context
+            
+        Returns:
+            tuple[str, int, int]: Summary text, token usage, messages actually summarized
+        """
+        # Prepare messages with progressive truncation
+        formatted_messages, messages_used = self.prepare_messages_for_context(
+            messages, max_context_tokens
+        )
+        
+        if messages_used == 0:
+            return ("📝 **Channel Summary**\nNo messages found to summarize. The channel might be empty or contain only bot messages.\n(Summarized 0 messages)", 0, 0)
+        
+        try:
+            # Generate summary
+            result = self._agent(messages=formatted_messages)
+            
+            # Get token usage from DSPy prediction
+            tokens_used = 0
+            if hasattr(result, '_completions') and result._completions:
+                for completion in result._completions:
+                    if hasattr(completion, 'kwargs') and 'usage' in completion.kwargs:
+                        usage = completion.kwargs['usage']
+                        if hasattr(usage, 'total_tokens'):
+                            tokens_used += usage.total_tokens
+                        elif isinstance(usage, dict) and 'total_tokens' in usage:
+                            tokens_used += usage['total_tokens']
+            
+            return result.summary, tokens_used, messages_used
+            
+        except Exception as e:
+            # Generate a helpful error message using the agent with minimal context
+            error_context = f"<error>Failed to summarize {messages_used} messages due to: {str(e)[:200]}</error>"
+            
+            try:
+                error_result = self._agent(messages=error_context)
+                return error_result.summary, 0, 0
+            except:
+                # Final fallback
+                return ("📝 **Channel Summary**\nSorry, there was too much content to summarize. Try using a smaller message count or wait a moment before trying again.\n(Unable to process messages)", 0, 0)
+
+
+def estimate_message_tokens(messages: List[DiscordMessage]) -> int:
+    """Estimate total token count for a list of messages."""
+    total_chars = sum(len(msg.content) + len(msg.author) + 50 for msg in messages)  # +50 for formatting
+    return total_chars // 4  # Rough estimation of 4 chars per token
