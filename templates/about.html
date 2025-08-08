@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About Us - Smarter Dev</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link href="https://fonts.googleapis.com/css2?family=Bruno+Ace+SC&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css?family=Bungee+Hairline&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/footer.css">
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', Arial, sans-serif;
+            background-color: #02000F;
+            color: white;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        
+        .grid-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            mix-blend-mode: overlay;
+            background-image: url("/static/resources/bg-grid.svg");
+            opacity: 0.25;
+            z-index: 999;
+        }
+        
+        .gradient-backgrounds {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: -1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 1em;
+            min-height: 100vh;
+        }
+
+        .glow-container {
+            position: relative;
+            width: 720px;
+            height: 12rem;
+        }
+        
+        .dev-glow {
+            position: absolute;
+            pointer-events: none;
+            top: -80vh; 
+            right: -33%;
+            width: 50vh; 
+            height: 200vh;
+            transform: rotate(-30deg) translate(0, 0);
+            background:
+                radial-gradient(
+                    ellipse 50% 50% at 50% 50%,
+                    rgba(0,225,255,0.17) 0%,
+                    rgba(0,0,0,0) 100%
+                ) no-repeat;
+        }
+
+        .message-glow {
+            position: absolute;
+            pointer-events: none;
+            top: -20vh; 
+            left: 0;
+            width: 100vh; 
+            height: 100vh;
+            transform: translate(-30%, -40%);
+            background:
+                radial-gradient(
+                    ellipse 50% 50% at 50% 50%,
+                    rgba(255,225,255,0.17) 0%,
+                    rgba(0,0,0,0) 100%
+                ) no-repeat;
+        }
+
+        /* About page wrapper */
+        .about-wrapper {
+            background-color: transparent;
+            padding: 4rem 2rem;
+            position: relative;
+            z-index: 1;
+            display: flex;
+            justify-content: center;
+        }
+        
+        /* About page container - max 720px, centered horizontally but content left-aligned */
+        .about-container {
+            max-width: 720px;
+            width: 100%;
+            margin: 0 auto;
+            text-align: left;
+        }
+
+        .about-branding {
+            margin-bottom: 1.5rem;
+        }
+        
+        .brand-link {
+            text-decoration: none;
+            font-size: 2rem;
+            font-family: 'Bruno Ace SC', sans-serif;
+            transition: all 0.3s ease;
+        }
+        
+        .brand-link .text-smarter {
+            color: #fff;
+            font-family: 'Bungee Hairline', sans-serif;
+        }
+
+        .brand-link .text-dev {
+            color: #00E1FF;
+            opacity: 75%;
+            font-family: 'Bruno Ace SC', sans-serif;
+        }
+        
+        .brand-link:hover {
+            transform: scale(1.02);
+        }
+
+        .about-header {
+            margin-bottom: 3rem;
+        }
+        
+        .about-title {
+            font-size: 3rem;
+            font-family: 'Bruno Ace SC', sans-serif;
+            color: #00E1FF;
+            margin-bottom: 1rem;
+            line-height: 1.2;
+        }
+        
+        .about-content {
+            text-align: left;
+            max-width: none;
+            line-height: 1.8;
+        }
+        
+        .about-content h2 {
+            color: #00E1FF;
+            font-size: 1.8rem;
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+        
+        .about-content p {
+            margin-bottom: 1.5rem;
+            font-size: 1.1rem;
+        }
+        
+        .about-content a {
+            color: #00E1FF;
+            text-decoration: none;
+            border-bottom: 1px solid rgba(0, 225, 255, 0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .about-content a:hover {
+            border-bottom-color: #00E1FF;
+            text-shadow: 0 0 8px rgba(0, 225, 255, 0.3);
+        }
+        
+        
+        @media (max-width: 720px) {
+            .about-wrapper {
+                padding: 2rem 1rem;
+            }
+            
+            .about-container {
+                max-width: 100%;
+            }
+            
+            .brand-link {
+                font-size: 1.5rem;
+            }
+            
+            .about-title {
+                font-size: 2rem;
+            }
+            
+            .about-content {
+                font-size: 1rem;
+            }
+            
+            .about-content h2 {
+                font-size: 1.5rem;
+            }
+            
+            .gradient-backgrounds {
+                justify-content: flex-start;
+                min-height: auto;
+                align-items: flex-start;
+            }
+
+            .glow-container {
+                width: 100%;
+                max-width: 90vw;
+            }
+            
+            .dev-glow {
+                width: 40vh;
+                height: 160vh;
+                top: -60vh;
+                transform: rotate(30deg) translate(-50%, 0);
+            }
+
+            .message-glow {
+                width: 100vh;
+                height: 100vh;
+                top: -45vh;
+                transform: translate(-30%, 0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="grid-overlay"></div>
+    <div class="gradient-backgrounds">
+        <div class="glow-container">
+            <div class="dev-glow"></div>
+        </div>
+        <div class="glow-container">
+            <div class="message-glow"></div>
+        </div>
+    </div>
+    <div class="page-wrapper">
+        <div class="about-wrapper content-wrapper">
+            <div class="about-container">
+            <!-- Branding -->
+            <div class="about-branding">
+                <a href="/" class="brand-link">
+                    <span class="text-smarter">Smarter</span> <span class="text-dev">Dev</span>
+                </a>
+            </div>
+            
+            <div class="about-header">
+                <h1 class="about-title">About Us</h1>
+            </div>
+            
+            <div class="about-content">
+                <p>Welcome to <strong>Smarter Dev</strong> – a community dedicated to helping developers grow together and build better software.</p>
+                
+                <h2>Our Mission</h2>
+                <p>We believe that the best learning happens through collaboration and shared experiences. Our community provides a supportive environment where developers of all skill levels can connect, learn, and grow together.</p>
+                
+                <h2>What We Offer</h2>
+                <p>Through our <a href="/discord">Discord community</a>, we facilitate meaningful discussions about software development, share knowledge, and help each other overcome challenges. Whether you're just starting your coding journey or you're a seasoned professional, you'll find valuable insights and supportive peers here.</p>
+                
+                <h2>Join Us</h2>
+                <p>Ready to be part of something bigger? <a href="/discord">Join our Discord community</a> and start growing with fellow developers who share your passion for creating amazing software.</p>
+            </div>
+            
+            </div>
+        </div>
+        
+        <div class="footer">
+            <div class="footer-links">
+                <a href="/">Home</a>
+                <a href="/blog">Blog</a>
+                <a href="/about">About Us</a>
+                <a href="/discord">Discord</a>
+            </div>
+            <div class="footer-copyright">
+                © 2025 Zech Zimmerman on behalf of the Smarter Dev Community
+            </div>
+        </div>
+    </div>
+</body>
+</html>

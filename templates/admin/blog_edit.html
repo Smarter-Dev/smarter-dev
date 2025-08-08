@@ -1,0 +1,190 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Edit Blog Post - Smarter Dev Admin{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+    <div class="container-xl">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="/admin">Dashboard</a></li>
+                        <li class="breadcrumb-item"><a href="/admin/blogs">Blog Posts</a></li>
+                        <li class="breadcrumb-item active" aria-current="page">Edit</li>
+                    </ol>
+                </nav>
+                <h2 class="page-title">
+                    Edit Blog Post
+                </h2>
+            </div>
+            <div class="col-auto ms-auto d-print-none">
+                <div class="btn-list">
+                    {% if blog_post and blog_post.is_published %}
+                    <a href="/blog/{{ blog_post.slug }}" class="btn btn-outline-secondary d-none d-sm-inline-block" target="_blank">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-external-link"></use>
+                        </svg>
+                        View post
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page-body">
+    <div class="container-xl">
+        {% if error %}
+        <div class="alert alert-danger" role="alert">
+            {{ error }}
+        </div>
+        {% endif %}
+        
+        {% if success %}
+        <div class="alert alert-success" role="alert">
+            {{ success }}
+            <div class="mt-2">
+                {% if blog_post.is_published %}
+                <a href="/blog/{{ blog_post.slug }}" class="btn btn-sm btn-outline-secondary" target="_blank">View post</a>
+                {% endif %}
+                <a href="/admin/blogs" class="btn btn-sm btn-outline-primary">Back to list</a>
+            </div>
+        </div>
+        {% endif %}
+        
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Blog Post Details</h3>
+                        {% if blog_post %}
+                        <div class="card-actions">
+                            <div class="text-muted small">
+                                Created: {{ blog_post.created_at.strftime("%b %d, %Y at %I:%M %p") }}<br>
+                                {% if blog_post.updated_at != blog_post.created_at %}
+                                Updated: {{ blog_post.updated_at.strftime("%b %d, %Y at %I:%M %p") }}<br>
+                                {% endif %}
+                                {% if blog_post.published_at %}
+                                Published: {{ blog_post.published_at.strftime("%b %d, %Y at %I:%M %p") }}
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+                    <div class="card-body">
+                        <form method="post">
+                            <div class="row">
+                                <div class="col-lg-8">
+                                    <div class="mb-3">
+                                        <label class="form-label">Title <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" name="title" value="{{ title or (blog_post.title if blog_post else '') }}" required>
+                                        <div class="form-hint">The title of your blog post. The URL slug will update if you change this.</div>
+                                        {% if blog_post %}
+                                        <div class="form-hint">Current slug: <code>{{ blog_post.slug }}</code></div>
+                                        {% endif %}
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">Author <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" name="author" value="{{ author or (blog_post.author if blog_post else '') }}" required>
+                                        <div class="form-hint">The author name that will be displayed with the post.</div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">Content <span class="text-danger">*</span></label>
+                                        <textarea class="form-control" name="body" rows="15" required>{{ body or (blog_post.body if blog_post else '') }}</textarea>
+                                        <div class="form-hint">Write your blog post content in Markdown format. You can use headings, links, lists, and other Markdown formatting.</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-lg-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Publishing Status</label>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" name="is_published" id="is_published" 
+                                                   {% if is_published is defined %}
+                                                       {% if is_published %}checked{% endif %}
+                                                   {% elif blog_post and blog_post.is_published %}checked{% endif %}>
+                                            <label class="form-check-label" for="is_published">
+                                                Published
+                                            </label>
+                                        </div>
+                                        {% if blog_post %}
+                                            {% if blog_post.is_published %}
+                                            <div class="form-hint text-success">This post is currently published and visible to visitors.</div>
+                                            {% else %}
+                                            <div class="form-hint text-warning">This post is currently a draft and not visible to visitors.</div>
+                                            {% endif %}
+                                        {% endif %}
+                                    </div>
+                                    
+                                    {% if blog_post %}
+                                    <div class="mb-3">
+                                        <label class="form-label">Statistics</label>
+                                        <div class="card">
+                                            <div class="card-body">
+                                                <div class="row">
+                                                    <div class="col">
+                                                        <div class="text-muted small">Content length</div>
+                                                        <div>{{ blog_post.body|length }} characters</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                    
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h4 class="card-title">Markdown Tips</h4>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="small text-muted">
+                                                <div class="mb-2">
+                                                    <strong># Heading 1</strong><br>
+                                                    <strong>## Heading 2</strong><br>
+                                                    <strong>### Heading 3</strong>
+                                                </div>
+                                                <div class="mb-2">
+                                                    <strong>**bold text**</strong><br>
+                                                    <strong>*italic text*</strong>
+                                                </div>
+                                                <div class="mb-2">
+                                                    <strong>[link text](URL)</strong>
+                                                </div>
+                                                <div class="mb-2">
+                                                    <strong>- List item</strong><br>
+                                                    <strong>1. Numbered item</strong>
+                                                </div>
+                                                <div>
+                                                    <strong>`code`</strong><br>
+                                                    <strong>```<br>code block<br>```</strong>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-primary">Update blog post</button>
+                                <a href="/admin/blogs" class="btn btn-link">Cancel</a>
+                                {% if blog_post %}
+                                <div class="ms-auto">
+                                    <form method="post" action="/admin/blogs/{{ blog_post.id }}/delete" style="display: inline;" 
+                                          onsubmit="return confirm('Are you sure you want to delete this blog post? This action cannot be undone.')">
+                                        <button type="submit" class="btn btn-outline-danger">Delete post</button>
+                                    </form>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

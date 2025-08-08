@@ -8,6 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Bruno+Ace+SC&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css?family=Bungee+Hairline&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/footer.css">
     <style>
         html, body {
             height: 100%;
@@ -401,6 +402,10 @@
             <!-- No glow for CTA section -->
         </div>
     </div>
+    
+    <!-- Content that appears after the hero section -->
+    {% block after_hero %}{% endblock %}
+    
     {% block extra_scripts %}{% endblock %}
 </body>
 </html>

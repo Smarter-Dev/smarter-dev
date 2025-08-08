@@ -52,6 +52,304 @@
 </a>
 {% endblock %}
 
+{% block after_hero %}
+{% if latest_post or recent_posts %}
+<!-- Blog Section (Below the fold) -->
+<div class="page-wrapper">
+<div class="blog-section-wrapper content-wrapper">
+    <div class="blog-section">
+        {% if latest_post %}
+        <div class="latest-post">
+            <h3 class="blog-section-title">Latest from the Blog</h3>
+            <h4 class="latest-post-title">
+                <a href="/blog/{{ latest_post.slug }}">{{ latest_post.title }}</a>
+            </h4>
+            <div class="latest-post-meta">
+                <span class="blog-post-author">By {{ latest_post.author }}</span>
+                {% if latest_post.published_at %}
+                <span class="blog-post-date">{{ latest_post.published_at.strftime("%B %d, %Y") }}</span>
+                {% endif %}
+            </div>
+            <div class="latest-post-excerpt">
+                {{ latest_post.body|strip_markdown(300) }}
+            </div>
+            <div class="latest-post-link">
+                <a href="/blog/{{ latest_post.slug }}" class="read-more-link">Read more →</a>
+            </div>
+        </div>
+        {% endif %}
+        
+        {% if recent_posts and recent_posts|length > 1 %}
+        <div class="recent-posts">
+            <h3 class="blog-section-title">Recent Posts</h3>
+            <div class="blog-posts-list">
+                {% for post in recent_posts %}
+                    {% if loop.index > 1 %} {# Skip the first post as it's shown above #}
+                    <div class="blog-post-item">
+                        <h5 class="blog-post-item-title">
+                            <a href="/blog/{{ post.slug }}">{{ post.title }}</a>
+                        </h5>
+                        <div class="blog-post-item-meta">
+                            <span class="blog-post-author">By {{ post.author }}</span>
+                            {% if post.published_at %}
+                            <span class="blog-post-date">{{ post.published_at.strftime("%B %d, %Y") }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+            <div class="view-all-posts">
+                <a href="/blog" class="view-all-link">View All Posts →</a>
+            </div>
+        </div>
+        {% endif %}
+        
+        <div class="footer">
+            <div class="footer-links">
+                <a href="/">Home</a>
+                <a href="/blog">Blog</a>
+                <a href="/about">About Us</a>
+                <a href="/discord">Discord</a>
+            </div>
+            <div class="footer-copyright">
+                © 2025 Zech Zimmerman on behalf of the Smarter Dev Community
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_styles %}
+<style>
+    /* Ensure hero section fills full viewport height */
+    body .container {
+        min-height: 100vh;
+        height: 100vh;
+    }
+    
+    /* Blog section wrapper styles - positioned after hero */
+    .blog-section-wrapper {
+        background-color: #02000F;
+        min-height: 100vh;
+        padding: 4rem 2rem;
+        position: relative;
+        z-index: 1;
+        display: flex;
+        justify-content: center; /* Center the container horizontally */
+    }
+    
+    /* Blog section container - max 600px, centered horizontally but content left-aligned */
+    .blog-section {
+        max-width: 600px;
+        width: 100%;
+        margin: 0 auto; /* Center the container */
+        text-align: left; /* Ensure content is left-aligned within the container */
+    }
+    
+    .blog-section-title {
+        font-size: 2rem;
+        font-family: 'Bruno Ace SC', sans-serif;
+        color: #00E1FF;
+        margin-bottom: 2rem;
+        text-align: left; /* Left aligned */
+    }
+    
+    .latest-post {
+        margin-bottom: 4rem;
+    }
+    
+    .latest-post-title {
+        margin: 0 0 1rem 0;
+        font-size: 2rem;
+        font-weight: 600;
+        line-height: 1.3;
+    }
+    
+    .latest-post-title a {
+        color: #fff;
+        text-decoration: none;
+        transition: color 0.3s ease;
+    }
+    
+    .latest-post-title a:hover {
+        color: #00E1FF;
+        text-shadow: 0 0 8px rgba(0, 225, 255, 0.3);
+    }
+    
+    .latest-post-meta {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+        font-size: 0.9rem;
+        opacity: 0.8;
+    }
+    
+    .latest-post-excerpt {
+        margin-bottom: 1.5rem;
+        line-height: 1.7;
+        opacity: 0.9;
+        font-size: 1.1rem;
+    }
+    
+    .latest-post-link {
+        margin-bottom: 3rem;
+    }
+    
+    .blog-post-meta {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+        opacity: 0.8;
+    }
+    
+    .blog-post-author {
+        color: #00E1FF;
+    }
+    
+    .blog-post-date {
+        color: #ccc;
+    }
+    
+    .blog-post-excerpt {
+        margin-bottom: 1.5rem;
+        line-height: 1.6;
+        opacity: 0.9;
+    }
+    
+    .read-more-link {
+        color: #00E1FF;
+        text-decoration: none;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        display: inline-flex;
+        align-items: center;
+    }
+    
+    .read-more-link:hover {
+        text-shadow: 0 0 8px rgba(0, 225, 255, 0.5);
+        transform: translateX(4px);
+    }
+    
+    .recent-posts {
+        margin-top: 3rem;
+    }
+    
+    .blog-posts-list {
+        display: grid;
+        gap: 1.5rem;
+    }
+    
+    .blog-post-item {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 1.5rem;
+        transition: all 0.3s ease;
+        max-width: 100%;
+    }
+    
+    .blog-post-item:hover {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(0, 225, 255, 0.3);
+    }
+    
+    .blog-post-item-title {
+        margin: 0 0 0.5rem 0;
+        font-size: 1.2rem;
+        font-weight: 600;
+    }
+    
+    .blog-post-item-title a {
+        color: #fff;
+        text-decoration: none;
+        transition: color 0.3s ease;
+    }
+    
+    .blog-post-item-title a:hover {
+        color: #00E1FF;
+    }
+    
+    .blog-post-item-meta {
+        display: flex;
+        gap: 1rem;
+        font-size: 0.85rem;
+        opacity: 0.7;
+    }
+    
+    .view-all-posts {
+        margin-top: 2rem;
+        text-align: center;
+    }
+    
+    .view-all-link {
+        color: #00E1FF;
+        text-decoration: none;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        display: inline-flex;
+        align-items: center;
+        font-size: 1.1rem;
+    }
+    
+    .view-all-link:hover {
+        text-shadow: 0 0 8px rgba(0, 225, 255, 0.5);
+        transform: translateX(4px);
+    }
+    
+    /* Mobile styles */
+    @media (max-width: 720px) {
+        .blog-section-wrapper {
+            padding: 2rem;
+        }
+        
+        .blog-section {
+            max-width: 100%;
+        }
+        
+        .blog-section-title {
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .latest-post-title {
+            font-size: 1.5rem;
+        }
+        
+        .latest-post-meta {
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .latest-post-excerpt {
+            font-size: 1rem;
+        }
+        
+        .blog-post-item {
+            padding: 1rem;
+        }
+        
+        .blog-post-item-title {
+            font-size: 1.1rem;
+        }
+    }
+    
+    /* Ensure responsive behavior for smaller screens */
+    @media (max-width: 480px) {
+        .blog-section-wrapper {
+            padding: 2rem;
+        }
+        
+        .blog-section {
+            max-width: 100%;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block extra_scripts %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {

@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog - Smarter Dev</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link href="https://fonts.googleapis.com/css2?family=Bruno+Ace+SC&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css?family=Bungee+Hairline&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/footer.css">
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', Arial, sans-serif;
+            background-color: #02000F;
+            color: white;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+        
+        .grid-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none;
+            mix-blend-mode: overlay;
+            background-image: url("/static/resources/bg-grid.svg");
+            opacity: 0.25;
+            z-index: 999;
+        }
+        
+        .gradient-backgrounds {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: -1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            gap: 1em;
+            min-height: 100vh;
+        }
+
+        .glow-container {
+            position: relative;
+            width: 720px;
+            height: 12rem;
+        }
+        
+        .dev-glow {
+            position: absolute;
+            pointer-events: none;
+            top: -80vh; 
+            right: -33%;
+            width: 50vh; 
+            height: 200vh;
+            transform: rotate(-30deg) translate(0, 0);
+            background:
+                radial-gradient(
+                    ellipse 50% 50% at 50% 50%,
+                    rgba(0,225,255,0.17) 0%,
+                    rgba(0,0,0,0) 100%
+                ) no-repeat;
+        }
+
+        .message-glow {
+            position: absolute;
+            pointer-events: none;
+            top: -20vh; 
+            left: 0;
+            width: 100vh; 
+            height: 100vh;
+            transform: translate(-30%, -40%);
+            background:
+                radial-gradient(
+                    ellipse 50% 50% at 50% 50%,
+                    rgba(255,225,255,0.17) 0%,
+                    rgba(0,0,0,0) 100%
+                ) no-repeat;
+        }
+
+        /* Blog list wrapper */
+        .blog-list-wrapper {
+            background-color: transparent;
+            padding: 4rem 2rem;
+            position: relative;
+            z-index: 1;
+            display: flex;
+            justify-content: center;
+        }
+        
+        /* Blog list container - max 720px, centered horizontally but content left-aligned */
+        .blog-list-container {
+            max-width: 720px;
+            width: 100%;
+            margin: 0 auto;
+            text-align: left;
+        }
+
+        .blog-list-branding {
+            margin-bottom: 1.5rem;
+        }
+        
+        .brand-link {
+            text-decoration: none;
+            font-size: 2rem;
+            font-family: 'Bruno Ace SC', sans-serif;
+            transition: all 0.3s ease;
+        }
+        
+        .brand-link .text-smarter {
+            color: #fff;
+            font-family: 'Bungee Hairline', sans-serif;
+        }
+
+        .brand-link .text-dev {
+            color: #00E1FF;
+            opacity: 75%;
+            font-family: 'Bruno Ace SC', sans-serif;
+        }
+        
+        .brand-link:hover {
+            transform: scale(1.02);
+        }
+
+        .blog-list-header {
+            margin-bottom: 3rem;
+        }
+        
+        .blog-list-title {
+            font-size: 3rem;
+            font-family: 'Bruno Ace SC', sans-serif;
+            color: #00E1FF;
+            margin-bottom: 1rem;
+            line-height: 1.2;
+        }
+        
+        .blog-list-description {
+            font-size: 1.2rem;
+            opacity: 0.8;
+            margin-bottom: 2rem;
+        }
+        
+        .blog-posts-grid {
+            display: grid;
+            gap: 2rem;
+        }
+        
+        .blog-post-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(0, 225, 255, 0.2);
+            border-radius: 16px;
+            padding: 2rem;
+            transition: all 0.3s ease;
+        }
+        
+        .blog-post-card:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(0, 225, 255, 0.4);
+            transform: translateY(-2px);
+        }
+        
+        .blog-post-card-title {
+            margin: 0 0 1rem 0;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        
+        .blog-post-card-title a {
+            color: #fff;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+        
+        .blog-post-card-title a:hover {
+            color: #00E1FF;
+            text-shadow: 0 0 8px rgba(0, 225, 255, 0.3);
+        }
+        
+        .blog-post-card-meta {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+        
+        .blog-post-card-author {
+            color: #00E1FF;
+        }
+        
+        .blog-post-card-date {
+            color: #ccc;
+        }
+        
+        .blog-post-card-excerpt {
+            line-height: 1.6;
+            opacity: 0.9;
+            margin-bottom: 1.5rem;
+        }
+        
+        .read-more-link {
+            color: #00E1FF;
+            text-decoration: none;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+        }
+        
+        .read-more-link:hover {
+            text-shadow: 0 0 8px rgba(0, 225, 255, 0.5);
+            transform: translateX(4px);
+        }
+        
+        .no-posts {
+            text-align: center;
+            padding: 4rem 0;
+            opacity: 0.7;
+        }
+        
+        .no-posts h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #00E1FF;
+        }
+        
+        
+        @media (max-width: 720px) {
+            .blog-list-wrapper {
+                padding: 2rem 1rem;
+            }
+            
+            .blog-list-container {
+                max-width: 100%;
+            }
+            
+            .brand-link {
+                font-size: 1.5rem;
+            }
+            
+            .blog-list-title {
+                font-size: 2rem;
+            }
+            
+            .blog-list-description {
+                font-size: 1rem;
+            }
+            
+            .blog-post-card {
+                padding: 1.5rem;
+            }
+            
+            .blog-post-card-title {
+                font-size: 1.25rem;
+            }
+            
+            .blog-post-card-meta {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+            
+            .gradient-backgrounds {
+                justify-content: flex-start;
+                min-height: auto;
+                align-items: flex-start;
+            }
+
+            .glow-container {
+                width: 100%;
+                max-width: 90vw;
+            }
+            
+            .dev-glow {
+                width: 40vh;
+                height: 160vh;
+                top: -60vh;
+                transform: rotate(30deg) translate(-50%, 0);
+            }
+
+            .message-glow {
+                width: 100vh;
+                height: 100vh;
+                top: -45vh;
+                transform: translate(-30%, 0);
+            }
+            
+        }
+    </style>
+</head>
+<body>
+    <div class="grid-overlay"></div>
+    <div class="gradient-backgrounds">
+        <div class="glow-container">
+            <div class="dev-glow"></div>
+        </div>
+        <div class="glow-container">
+            <div class="message-glow"></div>
+        </div>
+    </div>
+    <div class="page-wrapper">
+        <div class="blog-list-wrapper content-wrapper">
+            <div class="blog-list-container">
+            <!-- Branding -->
+            <div class="blog-list-branding">
+                <a href="/" class="brand-link">
+                    <span class="text-smarter">Smarter</span> <span class="text-dev">Dev</span>
+                </a>
+            </div>
+            
+            <div class="blog-list-header">
+                <h1 class="blog-list-title">Blog</h1>
+                <p class="blog-list-description">Insights, updates, and thoughts from the Smarter Dev community.</p>
+            </div>
+            
+            {% if blog_posts %}
+            <div class="blog-posts-grid">
+                {% for post in blog_posts %}
+                <article class="blog-post-card">
+                    <h2 class="blog-post-card-title">
+                        <a href="/blog/{{ post.slug }}">{{ post.title }}</a>
+                    </h2>
+                    <div class="blog-post-card-meta">
+                        <span class="blog-post-card-author">By {{ post.author }}</span>
+                        {% if post.published_at %}
+                        <span class="blog-post-card-date">{{ post.published_at.strftime("%B %d, %Y") }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="blog-post-card-excerpt">
+                        {{ post.body|strip_markdown(200) }}
+                    </div>
+                    <div class="blog-post-card-link">
+                        <a href="/blog/{{ post.slug }}" class="read-more-link">Read more →</a>
+                    </div>
+                </article>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="no-posts">
+                <h3>No blog posts yet</h3>
+                <p>Check back soon for updates and insights!</p>
+            </div>
+            {% endif %}
+            </div>
+        </div>
+        
+        <div class="footer">
+            <div class="footer-links">
+                <a href="/">Home</a>
+                <a href="/blog">Blog</a>
+                <a href="/about">About Us</a>
+                <a href="/discord">Discord</a>
+            </div>
+            <div class="footer-copyright">
+                © 2025 Zech Zimmerman on behalf of the Smarter Dev Community
+            </div>
+        </div>
+    </div>
+</body>
+</html>

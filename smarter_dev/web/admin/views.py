@@ -21,7 +21,8 @@ from smarter_dev.web.models import (
     Squad,
     SquadMembership,
     APIKey,
-    HelpConversation
+    HelpConversation,
+    BlogPost
 )
 from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, APIKeyOperations
 from smarter_dev.web.security import generate_secure_api_key
@@ -1012,3 +1013,354 @@ async def cleanup_expired_conversations(request: Request) -> Response:
             },
             status_code=500
         )
+
+
+async def blog_list(request: Request) -> Response:
+    """List all blog posts in admin interface."""
+    try:
+        async with get_db_session_context() as session:
+            # Get all blog posts ordered by creation date
+            result = await session.execute(
+                select(BlogPost)
+                .order_by(BlogPost.created_at.desc())
+            )
+            blog_posts = result.scalars().all()
+            
+            return templates.TemplateResponse(
+                request,
+                "admin/blog_list.html",
+                {
+                    "blog_posts": blog_posts
+                }
+            )
+    
+    except Exception as e:
+        logger.error(f"Error in blog list: {e}")
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Failed to load blog posts.",
+                "error_code": 500
+            },
+            status_code=500
+        )
+
+
+async def blog_create(request: Request) -> Response:
+    """Create a new blog post."""
+    if request.method == "POST":
+        try:
+            form_data = await request.form()
+            title = form_data.get("title", "").strip()
+            body = form_data.get("body", "").strip()
+            author = form_data.get("author", "").strip()
+            is_published = form_data.get("is_published") == "on"
+            
+            # Basic validation
+            if not title or not body or not author:
+                return templates.TemplateResponse(
+                    request,
+                    "admin/blog_create.html",
+                    {
+                        "error": "Title, body, and author are required.",
+                        "title": title,
+                        "body": body,
+                        "author": author,
+                        "is_published": is_published
+                    }
+                )
+            
+            # Generate slug from title
+            slug = _generate_slug(title)
+            
+            async with get_db_session_context() as session:
+                # Check if slug already exists
+                existing_result = await session.execute(
+                    select(BlogPost).where(BlogPost.slug == slug)
+                )
+                if existing_result.scalar_one_or_none():
+                    return templates.TemplateResponse(
+                        request,
+                        "admin/blog_create.html",
+                        {
+                            "error": f"A blog post with slug '{slug}' already exists.",
+                            "title": title,
+                            "body": body,
+                            "author": author,
+                            "is_published": is_published
+                        }
+                    )
+                
+                # Create new blog post
+                from datetime import datetime, timezone
+                blog_post = BlogPost(
+                    title=title,
+                    slug=slug,
+                    body=body,
+                    author=author,
+                    is_published=is_published,
+                    published_at=datetime.now(timezone.utc) if is_published else None
+                )
+                
+                session.add(blog_post)
+                await session.commit()
+                
+                return templates.TemplateResponse(
+                    request,
+                    "admin/blog_create.html",
+                    {
+                        "success": f"Blog post '{title}' created successfully!",
+                        "blog_post": blog_post
+                    }
+                )
+        
+        except IntegrityError:
+            return templates.TemplateResponse(
+                request,
+                "admin/blog_create.html",
+                {
+                    "error": "A blog post with this slug already exists.",
+                    "title": title,
+                    "body": body,
+                    "author": author,
+                    "is_published": is_published
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error creating blog post: {e}")
+            return templates.TemplateResponse(
+                request,
+                "admin/blog_create.html",
+                {
+                    "error": "Failed to create blog post.",
+                    "title": title,
+                    "body": body,
+                    "author": author,
+                    "is_published": is_published
+                }
+            )
+    
+    # GET request - show create form
+    return templates.TemplateResponse(
+        request,
+        "admin/blog_create.html",
+        {}
+    )
+
+
+async def blog_edit(request: Request) -> Response:
+    """Edit an existing blog post."""
+    blog_id = request.path_params["blog_id"]
+    
+    try:
+        async with get_db_session_context() as session:
+            # Get the blog post
+            result = await session.execute(
+                select(BlogPost).where(BlogPost.id == UUID(blog_id))
+            )
+            blog_post = result.scalar_one_or_none()
+            
+            if not blog_post:
+                return templates.TemplateResponse(
+                    request,
+                    "admin/error.html",
+                    {
+                        "error": "Blog post not found.",
+                        "error_code": 404
+                    },
+                    status_code=404
+                )
+            
+            if request.method == "POST":
+                form_data = await request.form()
+                title = form_data.get("title", "").strip()
+                body = form_data.get("body", "").strip()
+                author = form_data.get("author", "").strip()
+                is_published = form_data.get("is_published") == "on"
+                
+                # Basic validation
+                if not title or not body or not author:
+                    return templates.TemplateResponse(
+                        request,
+                        "admin/blog_edit.html",
+                        {
+                            "error": "Title, body, and author are required.",
+                            "blog_post": blog_post,
+                            "title": title,
+                            "body": body,
+                            "author": author,
+                            "is_published": is_published
+                        }
+                    )
+                
+                # Generate slug from title if title changed
+                new_slug = _generate_slug(title)
+                if new_slug != blog_post.slug:
+                    # Check if new slug already exists
+                    existing_result = await session.execute(
+                        select(BlogPost).where(
+                            BlogPost.slug == new_slug,
+                            BlogPost.id != blog_post.id
+                        )
+                    )
+                    if existing_result.scalar_one_or_none():
+                        return templates.TemplateResponse(
+                            request,
+                            "admin/blog_edit.html",
+                            {
+                                "error": f"A blog post with slug '{new_slug}' already exists.",
+                                "blog_post": blog_post,
+                                "title": title,
+                                "body": body,
+                                "author": author,
+                                "is_published": is_published
+                            }
+                        )
+                
+                # Update blog post
+                from datetime import datetime, timezone
+                blog_post.title = title
+                blog_post.slug = new_slug
+                blog_post.body = body
+                blog_post.author = author
+                
+                # Handle publishing status
+                if is_published and not blog_post.is_published:
+                    # Publishing for first time
+                    blog_post.is_published = True
+                    blog_post.published_at = datetime.now(timezone.utc)
+                elif not is_published and blog_post.is_published:
+                    # Unpublishing
+                    blog_post.is_published = False
+                    # Keep published_at for historical reference
+                else:
+                    blog_post.is_published = is_published
+                
+                await session.commit()
+                
+                return templates.TemplateResponse(
+                    request,
+                    "admin/blog_edit.html",
+                    {
+                        "success": f"Blog post '{title}' updated successfully!",
+                        "blog_post": blog_post
+                    }
+                )
+            
+            # GET request - show edit form
+            return templates.TemplateResponse(
+                request,
+                "admin/blog_edit.html",
+                {
+                    "blog_post": blog_post
+                }
+            )
+    
+    except ValueError:
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Invalid blog post ID.",
+                "error_code": 400
+            },
+            status_code=400
+        )
+    except Exception as e:
+        logger.error(f"Error editing blog post: {e}")
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Failed to edit blog post.",
+                "error_code": 500
+            },
+            status_code=500
+        )
+
+
+async def blog_delete(request: Request) -> Response:
+    """Delete a blog post."""
+    blog_id = request.path_params["blog_id"]
+    
+    try:
+        async with get_db_session_context() as session:
+            # Get the blog post
+            result = await session.execute(
+                select(BlogPost).where(BlogPost.id == UUID(blog_id))
+            )
+            blog_post = result.scalar_one_or_none()
+            
+            if not blog_post:
+                return templates.TemplateResponse(
+                    request,
+                    "admin/error.html",
+                    {
+                        "error": "Blog post not found.",
+                        "error_code": 404
+                    },
+                    status_code=404
+                )
+            
+            # Delete the blog post
+            await session.delete(blog_post)
+            await session.commit()
+            
+            # Redirect to blog list (we'll handle this with a simple template response for now)
+            return templates.TemplateResponse(
+                request,
+                "admin/blog_list.html",
+                {
+                    "success": f"Blog post '{blog_post.title}' deleted successfully!",
+                    "blog_posts": []  # We could reload the list here
+                }
+            )
+    
+    except ValueError:
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Invalid blog post ID.",
+                "error_code": 400
+            },
+            status_code=400
+        )
+    except Exception as e:
+        logger.error(f"Error deleting blog post: {e}")
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Failed to delete blog post.",
+                "error_code": 500
+            },
+            status_code=500
+        )
+
+
+def _generate_slug(title: str) -> str:
+    """Generate a URL-friendly slug from a title."""
+    import re
+    
+    # Convert to lowercase and replace spaces with hyphens
+    slug = title.lower().strip()
+    
+    # Remove or replace special characters
+    slug = re.sub(r'[^\w\s-]', '', slug)
+    slug = re.sub(r'[-\s]+', '-', slug)
+    
+    # Remove leading/trailing hyphens
+    slug = slug.strip('-')
+    
+    # Ensure slug is not empty
+    if not slug:
+        from datetime import datetime
+        slug = f"post-{int(datetime.now().timestamp())}"
+    
+    # Limit length
+    if len(slug) > 180:  # Leave room for uniqueness suffixes
+        slug = slug[:180].rstrip('-')
+    
+    return slug
