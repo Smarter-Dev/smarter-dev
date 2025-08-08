@@ -74,7 +74,7 @@ async def store_tldr_conversation(
             "channel_id": channel_id,
             "user_id": user_id,
             "user_username": user_username,
-            "interaction_type": "tldr_command",
+            "interaction_type": "slash_command",
             "context_messages": [],  # We don't store the actual messages for privacy
             "user_question": f"Summarize last {message_count_requested} messages",
             "bot_response": summary[:4000],  # Truncate to prevent database errors

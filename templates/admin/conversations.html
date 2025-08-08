@@ -136,8 +136,10 @@
                                     <td>
                                         {% if conversation.interaction_type == 'slash_command' %}
                                         <span class="badge bg-blue">Slash Command</span>
-                                        {% else %}
+                                        {% elif conversation.interaction_type == 'mention' %}
                                         <span class="badge bg-green">Mention</span>
+                                        {% else %}
+                                        <span class="badge bg-orange">{{ conversation.interaction_type|title }}</span>
                                         {% endif %}
                                     </td>
                                     <td>
