@@ -193,6 +193,11 @@ async def join_squad(
     metadata: dict = Depends(get_request_metadata)
 ) -> SquadMembershipResponse:
     """Join a squad."""
+    # Debug logging
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.error(f"DEBUG: join_squad called with user_id='{join_request.user_id}', username='{join_request.username}', squad_id={squad_id}, guild_id='{guild_id}'")
+    
     try:
         squad_ops = SquadOperations()
         membership = await squad_ops.join_squad(db, guild_id, join_request.user_id, squad_id, join_request.username)
