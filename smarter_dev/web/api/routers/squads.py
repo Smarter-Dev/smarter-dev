@@ -199,10 +199,15 @@ async def join_squad(
     logger.error(f"DEBUG: join_squad called with user_id='{join_request.user_id}', username='{join_request.username}', squad_id={squad_id}, guild_id='{guild_id}'")
     
     try:
+        logger.error(f"DEBUG: About to call squad_ops.join_squad with params: db={db}, guild_id='{guild_id}', user_id='{join_request.user_id}', squad_id={squad_id}, username='{join_request.username}'")
+        
         squad_ops = SquadOperations()
         membership = await squad_ops.join_squad(db, guild_id, join_request.user_id, squad_id, join_request.username)
+        
+        logger.error(f"DEBUG: squad_ops.join_squad completed successfully, about to commit")
         await db.commit()
         
+        logger.error(f"DEBUG: About to get squad information for response")
         # Get squad information for response
         squad = await squad_ops.get_squad(db, squad_id)
         member_count = await squad_ops._get_squad_member_count(db, squad_id)
@@ -218,16 +223,17 @@ async def join_squad(
             squad=SquadResponse.model_validate(squad_data)
         )
     except ConflictError as e:
+        logger.error(f"DEBUG: ConflictError caught: {e}")
         raise create_secure_validation_error(str(e))
     except NotFoundError as e:
+        logger.error(f"DEBUG: NotFoundError caught: {e}")
         raise create_secure_not_found_error("Squad")
     except DatabaseOperationError as e:
+        logger.error(f"DEBUG: DatabaseOperationError caught: {e}")
         raise create_database_error(e)
     except Exception as e:
         # Log unexpected errors for debugging
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"Unexpected error in join_squad: {e}", exc_info=True)
+        logger.error(f"DEBUG: Unexpected error in join_squad: {e}", exc_info=True)
         raise create_database_error(e)
 
 
