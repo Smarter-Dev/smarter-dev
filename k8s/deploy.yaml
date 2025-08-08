@@ -79,6 +79,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: discord-client-secret
+                  - name: DISCORD_REDIRECT_URI
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: discord-redirect-uri
                   - name: ADMIN_USERNAME
                     valueFrom:
                       secretKeyRef:
