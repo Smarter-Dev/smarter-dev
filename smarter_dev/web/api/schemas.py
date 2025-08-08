@@ -578,7 +578,7 @@ class HelpConversationCreate(BaseAPIModel):
     response_time_ms: Optional[int] = Field(None, description="Response generation time in milliseconds")
     retention_policy: str = Field("standard", description="Data retention policy")
     is_sensitive: bool = Field(False, description="Whether conversation contains sensitive information")
-    metadata: Optional[dict] = Field(None, description="Command-specific metadata for analytics")
+    command_metadata: Optional[dict] = Field(None, description="Command-specific metadata for analytics")
 
 
 class HelpConversationResponse(BaseAPIModel):
@@ -602,7 +602,7 @@ class HelpConversationResponse(BaseAPIModel):
     retention_policy: str = Field(..., description="Retention policy")
     expires_at: Optional[datetime] = Field(None, description="Expiration timestamp")
     is_sensitive: bool = Field(..., description="Contains sensitive information")
-    metadata: Optional[dict] = Field(None, description="Command-specific metadata for analytics")
+    command_metadata: Optional[dict] = Field(None, description="Command-specific metadata for analytics")
     created_at: datetime = Field(..., description="Record creation time")
     updated_at: Optional[datetime] = Field(None, description="Last update time")
 

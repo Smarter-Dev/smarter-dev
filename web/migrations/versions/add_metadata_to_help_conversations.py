@@ -1,4 +1,4 @@
-"""Add metadata field to help_conversations
+"""Add command_metadata field to help_conversations
 
 Revision ID: g2a3b4c5d6e7
 Revises: f1a2b3c4d5e6
@@ -17,13 +17,13 @@ depends_on = None
 
 
 def upgrade():
-    """Add metadata column to help_conversations table."""
-    # Add metadata column as nullable JSON field
+    """Add command_metadata column to help_conversations table."""
+    # Add command_metadata column as nullable JSON field
     op.add_column('help_conversations', 
-                  sa.Column('metadata', postgresql.JSON(astext_type=sa.Text()), nullable=True))
+                  sa.Column('command_metadata', postgresql.JSON(astext_type=sa.Text()), nullable=True))
 
 
 def downgrade():
-    """Remove metadata column from help_conversations table."""
-    # Drop metadata column
-    op.drop_column('help_conversations', 'metadata')
+    """Remove command_metadata column from help_conversations table."""
+    # Drop command_metadata column
+    op.drop_column('help_conversations', 'command_metadata')
