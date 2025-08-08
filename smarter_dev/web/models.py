@@ -798,6 +798,13 @@ class HelpConversation(Base):
         doc="Whether conversation contains sensitive information"
     )
     
+    # Analytics metadata
+    metadata: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        doc="Command-specific metadata for analytics and tracking"
+    )
+    
     # Audit fields
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
