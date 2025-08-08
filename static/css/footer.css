@@ -1,0 +1,57 @@
+/* Footer Styles - Shared across all pages */
+
+/* Ensure body doesn't interfere with grid */
+body {
+    height: auto !important;
+    min-height: 100vh !important;
+}
+
+/* Simple sticky footer approach */
+.page-wrapper {
+    min-height: 100vh !important;
+    display: grid !important;
+    grid-template-rows: 1fr auto !important;
+    width: 100% !important;
+}
+
+.content-wrapper {
+    /* This will take up all available space */
+    min-height: auto !important;
+    grid-row: 1 !important;
+}
+
+/* Footer styles - will stick to bottom */
+.footer {
+    padding: 180px 0 10rem 0;
+    text-align: center;
+    grid-row: 2 !important;
+}
+
+.footer-links {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    margin-bottom: 2.5rem;
+}
+
+.footer-links a {
+    color: #00E1FF;
+    text-decoration: none;
+    transition: all 0.3s ease;
+}
+
+.footer-links a:hover {
+    text-shadow: 0 0 8px rgba(0, 225, 255, 0.5);
+}
+
+.footer-copyright {
+    font-size: 0.9rem;
+    opacity: 0.7;
+}
+
+@media (max-width: 720px) {
+    .footer-links {
+        flex-direction: column;
+        gap: 1rem;
+    }
+}

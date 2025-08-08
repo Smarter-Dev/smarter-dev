@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from starlette.routing import Route
 
-from smarter_dev.web.admin.auth import login, logout, admin_required
+from smarter_dev.web.admin.auth import login, logout, discord_oauth_callback, admin_required
 from smarter_dev.web.admin.views import (
     dashboard,
     guild_list,
@@ -16,14 +16,19 @@ from smarter_dev.web.admin.views import (
     api_keys_delete,
     conversations_list,
     conversation_detail,
-    cleanup_expired_conversations
+    cleanup_expired_conversations,
+    blog_list,
+    blog_create,
+    blog_edit,
+    blog_delete
 )
 
 
 # Define admin routes
 admin_routes = [
     # Authentication routes
-    Route("/login", login, methods=["GET", "POST"], name="admin_login"),
+    Route("/login", login, methods=["GET"], name="admin_login"),
+    Route("/auth/discord/callback", discord_oauth_callback, methods=["GET"], name="discord_oauth_callback"),
     Route("/logout", logout, methods=["POST"], name="admin_logout"),
     
     # Dashboard and overview
@@ -44,4 +49,10 @@ admin_routes = [
     Route("/conversations", admin_required(conversations_list), name="admin_conversations"),
     Route("/conversations/{conversation_id}", admin_required(conversation_detail), name="admin_conversation_detail"),
     Route("/conversations/cleanup", admin_required(cleanup_expired_conversations), methods=["GET", "POST"], name="admin_conversation_cleanup"),
+    
+    # Blog management
+    Route("/blogs", admin_required(blog_list), name="admin_blogs"),
+    Route("/blogs/create", admin_required(blog_create), methods=["GET", "POST"], name="admin_blog_create"),
+    Route("/blogs/{blog_id}/edit", admin_required(blog_edit), methods=["GET", "POST"], name="admin_blog_edit"),
+    Route("/blogs/{blog_id}/delete", admin_required(blog_delete), methods=["POST"], name="admin_blog_delete"),
 ]
