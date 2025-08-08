@@ -92,7 +92,13 @@ async def store_conversation(
             "tokens_used": tokens_used,
             "response_time_ms": response_time_ms,
             "retention_policy": "standard",
-            "is_sensitive": False  # TODO: Add sensitive content detection
+            "is_sensitive": False,  # TODO: Add sensitive content detection
+            # Help-specific metadata for unified LLM command tracking
+            "metadata": {
+                "command_type": "help",
+                "question_length": len(user_question),
+                "context_message_count": len(sanitized_context) if sanitized_context else 0
+            }
         }
         
         # Store conversation via API
@@ -137,14 +143,14 @@ async def generate_help_response(
     Returns:
         str: Generated response or rate limit message
     """
-    # Check user rate limit
-    if not rate_limiter.check_user_limit(user_id):
-        remaining_requests = rate_limiter.get_user_remaining_requests(user_id)
-        reset_time = rate_limiter.get_user_reset_time(user_id)
+    # Check user rate limit for help command
+    if not rate_limiter.check_user_limit(user_id, 'help'):
+        remaining_requests = rate_limiter.get_user_remaining_requests(user_id, 'help')
+        reset_time = rate_limiter.get_user_reset_time(user_id, 'help')
         
         if reset_time:
             minutes_left = max(1, int((reset_time - datetime.now()).total_seconds() / 60))
-            return f"🕒 You've reached the rate limit of 10 questions per 30 minutes. Please try again in {minutes_left} minutes."
+            return f"🕒 You've reached the rate limit of 10 help questions per 30 minutes. Please try again in {minutes_left} minutes."
         else:
             return "🕒 You've reached the rate limit. Please try again in a few minutes."
     
@@ -169,8 +175,8 @@ async def generate_help_response(
             tokens_used = max(100, len(response) // 4)  # ~4 chars per token
             logger.warning(f"No token usage data available, using estimate: {tokens_used}")
         
-        # Record the request with actual or estimated token usage
-        rate_limiter.record_request(user_id, tokens_used)
+        # Record the request with actual or estimated token usage for help command
+        rate_limiter.record_request(user_id, tokens_used, 'help')
         
         logger.info(f"Help response generated for {user_id}: {tokens_used} tokens used in {response_time_ms}ms")
         
