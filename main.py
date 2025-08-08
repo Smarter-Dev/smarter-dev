@@ -8,6 +8,7 @@ from starlette.requests import Request
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
+from sqlalchemy import select
 
 # Import FastAPI app
 from smarter_dev.web.api.app import api
@@ -19,11 +20,54 @@ from smarter_dev.shared.config import get_settings
 from smarter_dev.web.security_headers import create_security_headers_middleware
 # Import HTTP methods middleware
 from smarter_dev.web.http_methods_middleware import create_http_methods_middleware
+# Import blog models and database
+from smarter_dev.web.models import BlogPost
+from smarter_dev.shared.database import get_db_session_context
+
+import markdown
 
 templates = Jinja2Templates(directory="templates")
 
+# Add markdown filter to Jinja2
+def markdown_filter(text: str) -> str:
+    """Convert markdown text to HTML."""
+    md = markdown.Markdown(extensions=['codehilite', 'fenced_code', 'tables', 'toc'])
+    return md.convert(text)
+
+templates.env.filters['markdown'] = markdown_filter
+
 async def homepage(request: Request):
-    return templates.TemplateResponse(request, "index.html")
+    try:
+        # Get the latest published blog post for the homepage
+        async with get_db_session_context() as session:
+            result = await session.execute(
+                select(BlogPost)
+                .where(BlogPost.is_published == True)
+                .order_by(BlogPost.published_at.desc())
+                .limit(1)
+            )
+            latest_post = result.scalar_one_or_none()
+            
+            # Get recent blog posts for the list
+            recent_posts_result = await session.execute(
+                select(BlogPost)
+                .where(BlogPost.is_published == True)
+                .order_by(BlogPost.published_at.desc())
+                .limit(5)
+            )
+            recent_posts = recent_posts_result.scalars().all()
+            
+        return templates.TemplateResponse(
+            request, 
+            "index.html", 
+            {
+                "latest_post": latest_post,
+                "recent_posts": recent_posts
+            }
+        )
+    except Exception as e:
+        # If there's an error, just show the homepage without blog content
+        return templates.TemplateResponse(request, "index.html")
 
 async def discord_redirect(request: Request):
     return RedirectResponse(url="https://discord.gg/de8kajxbYS", status_code=302)
@@ -34,9 +78,41 @@ async def not_found(request: Request, exc: HTTPException):
 async def server_error(request: Request, exc: HTTPException):
     return templates.TemplateResponse(request, "500.html", status_code=500)
 
+
+async def blog_post_detail(request: Request) -> HTMLResponse:
+    """Display a single blog post by slug."""
+    slug = request.path_params["slug"]
+    
+    try:
+        async with get_db_session_context() as session:
+            # Get the blog post by slug
+            result = await session.execute(
+                select(BlogPost)
+                .where(BlogPost.slug == slug, BlogPost.is_published == True)
+            )
+            blog_post = result.scalar_one_or_none()
+            
+            if not blog_post:
+                raise HTTPException(status_code=404, detail="Blog post not found")
+            
+            return templates.TemplateResponse(
+                request,
+                "blog_post.html",
+                {
+                    "blog_post": blog_post,
+                    "title": blog_post.title
+                }
+            )
+    
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 routes = [
     Route("/", homepage),
     Route("/discord", discord_redirect),
+    Route("/blog/{slug}", blog_post_detail),
 ]
 
 exception_handlers = {

@@ -1,0 +1,132 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Create Blog Post - Smarter Dev Admin{% endblock %}
+
+{% block content %}
+<div class="page-header d-print-none">
+    <div class="container-xl">
+        <div class="row g-2 align-items-center">
+            <div class="col">
+                <nav aria-label="breadcrumb">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item"><a href="/admin">Dashboard</a></li>
+                        <li class="breadcrumb-item"><a href="/admin/blogs">Blog Posts</a></li>
+                        <li class="breadcrumb-item active" aria-current="page">Create</li>
+                    </ol>
+                </nav>
+                <h2 class="page-title">
+                    Create Blog Post
+                </h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page-body">
+    <div class="container-xl">
+        {% if error %}
+        <div class="alert alert-danger" role="alert">
+            {{ error }}
+        </div>
+        {% endif %}
+        
+        {% if success %}
+        <div class="alert alert-success" role="alert">
+            {{ success }}
+            {% if blog_post %}
+            <div class="mt-2">
+                <a href="/admin/blogs/{{ blog_post.id }}/edit" class="btn btn-sm btn-outline-success">Edit post</a>
+                {% if blog_post.is_published %}
+                <a href="/blog/{{ blog_post.slug }}" class="btn btn-sm btn-outline-secondary" target="_blank">View post</a>
+                {% endif %}
+                <a href="/admin/blogs" class="btn btn-sm btn-outline-primary">Back to list</a>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+        
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Blog Post Details</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="post">
+                            <div class="row">
+                                <div class="col-lg-8">
+                                    <div class="mb-3">
+                                        <label class="form-label">Title <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" name="title" value="{{ title or '' }}" required>
+                                        <div class="form-hint">The title of your blog post. A URL slug will be generated automatically.</div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">Author <span class="text-danger">*</span></label>
+                                        <input type="text" class="form-control" name="author" value="{{ author or '' }}" required>
+                                        <div class="form-hint">The author name that will be displayed with the post.</div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">Content <span class="text-danger">*</span></label>
+                                        <textarea class="form-control" name="body" rows="15" required>{{ body or '' }}</textarea>
+                                        <div class="form-hint">Write your blog post content in Markdown format. You can use headings, links, lists, and other Markdown formatting.</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="col-lg-4">
+                                    <div class="mb-3">
+                                        <label class="form-label">Publishing</label>
+                                        <div class="form-check form-switch">
+                                            <input class="form-check-input" type="checkbox" name="is_published" id="is_published" {% if is_published %}checked{% endif %}>
+                                            <label class="form-check-label" for="is_published">
+                                                Publish immediately
+                                            </label>
+                                        </div>
+                                        <div class="form-hint">Check this to publish the post immediately. Uncheck to save as draft.</div>
+                                    </div>
+                                    
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <h4 class="card-title">Markdown Tips</h4>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="small text-muted">
+                                                <div class="mb-2">
+                                                    <strong># Heading 1</strong><br>
+                                                    <strong>## Heading 2</strong><br>
+                                                    <strong>### Heading 3</strong>
+                                                </div>
+                                                <div class="mb-2">
+                                                    <strong>**bold text**</strong><br>
+                                                    <strong>*italic text*</strong>
+                                                </div>
+                                                <div class="mb-2">
+                                                    <strong>[link text](URL)</strong>
+                                                </div>
+                                                <div class="mb-2">
+                                                    <strong>- List item</strong><br>
+                                                    <strong>1. Numbered item</strong>
+                                                </div>
+                                                <div>
+                                                    <strong>`code`</strong><br>
+                                                    <strong>```<br>code block<br>```</strong>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-primary">Create blog post</button>
+                                <a href="/admin/blogs" class="btn btn-link">Cancel</a>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
