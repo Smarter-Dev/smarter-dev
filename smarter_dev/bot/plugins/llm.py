@@ -129,16 +129,18 @@ async def generate_tldr_summary(
     Returns:
         str: Generated summary or rate limit/error message
     """
-    # Check user rate limit
-    if not rate_limiter.check_user_limit(user_id):
-        remaining_requests = rate_limiter.get_user_remaining_requests(user_id)
-        reset_time = rate_limiter.get_user_reset_time(user_id)
+    # Check user rate limit for TLDR command
+    if not rate_limiter.check_user_limit(user_id, 'tldr'):
+        remaining_requests = rate_limiter.get_user_remaining_requests(user_id, 'tldr')
+        reset_time = rate_limiter.get_user_reset_time(user_id, 'tldr')
         
         if reset_time:
+            hours_left = max(1, int((reset_time - datetime.now()).total_seconds() / 3600))
             minutes_left = max(1, int((reset_time - datetime.now()).total_seconds() / 60))
-            return f"🕒 You've reached the rate limit of 10 requests per 30 minutes. Please try again in {minutes_left} minutes."
+            time_left = f"{hours_left} hour{'s' if hours_left != 1 else ''}" if hours_left >= 1 else f"{minutes_left} minute{'s' if minutes_left != 1 else ''}"
+            return f"🕒 You've reached the rate limit of 5 TLDR requests per hour. Please try again in {time_left}."
         else:
-            return "🕒 You've reached the rate limit. Please try again in a few minutes."
+            return "🕒 You've reached the TLDR rate limit. Please try again in a few minutes."
     
     # Check token usage limit
     if not rate_limiter.check_token_limit():
@@ -164,8 +166,8 @@ async def generate_tldr_summary(
             tokens_used = estimated_input + estimated_output
             logger.warning(f"No token usage data available, using estimate: {tokens_used}")
         
-        # Record the request with actual or estimated token usage
-        rate_limiter.record_request(user_id, tokens_used)
+        # Record the request with actual or estimated token usage for TLDR command
+        rate_limiter.record_request(user_id, tokens_used, 'tldr')
         
         logger.info(f"TLDR summary generated for {user_id}: {tokens_used} tokens used in {response_time_ms}ms, {messages_summarized}/{message_count_requested} messages")
         
