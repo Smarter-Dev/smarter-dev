@@ -116,6 +116,12 @@ class Settings(BaseSettings):
         default=None,
         description="Log file path",
     )
+    
+    # Analytics
+    google_analytics_id: Optional[str] = Field(
+        default=None,
+        description="Google Analytics Measurement ID (G-XXXXXXXXXX)",
+    )
 
     # Rate Limiting
     rate_limit_enabled: bool = Field(

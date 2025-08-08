@@ -61,6 +61,9 @@ def strip_markdown_filter(text: str, max_length: int = 200) -> str:
 templates.env.filters['markdown'] = markdown_filter
 templates.env.filters['strip_markdown'] = strip_markdown_filter
 
+# Make settings available in templates
+templates.env.globals['config'] = get_settings()
+
 async def homepage(request: Request):
     try:
         # Get the latest published blog post for the homepage

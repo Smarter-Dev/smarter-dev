@@ -79,6 +79,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: admin-password
+                  - name: GOOGLE_ANALYTICS_ID
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: google-analytics-id
                 resources:
                     requests:
                         cpu: 100m
