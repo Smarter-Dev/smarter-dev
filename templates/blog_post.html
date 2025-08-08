@@ -7,16 +7,7 @@
 {% block subheading %}{{ blog_post.title }}{% endblock %}
 
 {% block description %}
-<div class="blog-post-meta">
-    <p><strong>By {{ blog_post.author }}</strong></p>
-    {% if blog_post.published_at %}
-    <p class="text-muted">Published on {{ blog_post.published_at.strftime("%B %d, %Y") }}</p>
-    {% endif %}
-</div>
-
-<div class="blog-content">
-    {{ blog_post.body|markdown|safe }}
-</div>
+<p>Read our latest insights and updates</p>
 {% endblock %}
 
 {% block cta %}
@@ -60,8 +51,44 @@
 </a>
 {% endblock %}
 
+{% block after_hero %}
+<div class="blog-post-wrapper">
+    <div class="blog-post-container">
+        <div class="blog-post-meta">
+            <p><strong>By {{ blog_post.author }}</strong></p>
+            {% if blog_post.published_at %}
+            <p class="text-muted">Published on {{ blog_post.published_at.strftime("%B %d, %Y") }}</p>
+            {% endif %}
+        </div>
+
+        <div class="blog-content">
+            {{ blog_post.body|markdown|safe }}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
 {% block extra_styles %}
 <style>
+    /* Blog post wrapper - similar to homepage blog section */
+    .blog-post-wrapper {
+        background-color: #02000F;
+        min-height: 100vh;
+        padding: 4rem 2rem;
+        position: relative;
+        z-index: 1;
+        display: flex;
+        justify-content: center; /* Center the container horizontally */
+    }
+    
+    /* Blog post container - max 720px, centered horizontally but content left-aligned */
+    .blog-post-container {
+        max-width: 720px;
+        width: 100%;
+        margin: 0 auto; /* Center the container */
+        text-align: left; /* Ensure content is left-aligned within the container */
+    }
+
     .blog-post-meta {
         margin-bottom: 2rem;
     }
@@ -180,6 +207,14 @@
     }
     
     @media (max-width: 720px) {
+        .blog-post-wrapper {
+            padding: 2rem 1rem;
+        }
+        
+        .blog-post-container {
+            max-width: 100%;
+        }
+        
         .blog-content {
             font-size: 1rem;
         }
