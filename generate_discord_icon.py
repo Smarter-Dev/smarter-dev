@@ -21,7 +21,7 @@ FPS = 30
 NUM_STREAKS = 5  # Fixed number of streaks
 
 # Colors (RGB)
-VERY_DARK_BLUE = (2, 4, 12)  # Even darker blue background
+VERY_DARK_BLUE = (2, 0, 15)  # #02000F background
 WHITE = (255, 255, 255)
 STREAK_COLOR = (0, 225, 255)  # Cyan like the brand
 
@@ -91,7 +91,7 @@ class DiscordIconGenerator:
             brain_size = int(ICON_SIZE * 0.6)  # 60% of icon size
             brain = brain.resize((brain_size, brain_size), Image.Resampling.LANCZOS)
             
-            # Center the brain
+            # Center the brain vertically and horizontally
             self.brain_image = Image.new("RGBA", (ICON_SIZE, ICON_SIZE), (0, 0, 0, 0))
             brain_x = (ICON_SIZE - brain_size) // 2
             brain_y = (ICON_SIZE - brain_size) // 2
@@ -204,10 +204,13 @@ class DiscordIconGenerator:
             path_spacing * 4 + path_spacing // 2,       # Path 5: x = 230
         ]
         
-        # Create streaks with different starting positions on their paths for variety
-        start_offsets = [0, path_length // 5, 2 * path_length // 5, 3 * path_length // 5, 4 * path_length // 5]
-        random.shuffle(start_offsets)  # Randomize initial positions
+        # Create streaks with spacing that ensures continuous coverage
+        # Use offsets that guarantee overlap while maintaining irregularity
+        timing_variations = [0.0, 0.18, 0.35, 0.53, 0.71]  # Spaced to ensure coverage
+        start_offsets = [int(variation * path_length) for variation in timing_variations]
+        random.shuffle(start_offsets)  # Randomize which streak gets which timing
         
+        # Add primary streaks (one per path)
         for i in range(5):
             path_start_x = path_positions[i]
             path_start_y = -buffer  # Start above frame
@@ -215,10 +218,26 @@ class DiscordIconGenerator:
             streak = StreakAnimation(path_start_x, path_start_y, path_length, start_offsets[i])
             self.streaks.append(streak)
         
-        # Calculate total frames for perfect loop - when all streaks return to start position
-        self.total_frames = int(path_length / (STREAK_SPEED / FPS))
+        # Add second streaks to three random paths, offset by half the path duration
+        paths_with_double_streaks = random.sample(range(5), 3)  # Pick 3 random paths
+        half_path_offset = path_length // 2
         
-        print(f"✅ Created {len(self.streaks)} streak animations on rails")
+        for path_idx in paths_with_double_streaks:
+            path_start_x = path_positions[path_idx]
+            path_start_y = -buffer
+            
+            # Second streak offset by half the path length from the first streak
+            second_streak_offset = (start_offsets[path_idx] + half_path_offset) % path_length
+            streak = StreakAnimation(path_start_x, path_start_y, path_length, second_streak_offset)
+            self.streaks.append(streak)
+        
+        # Calculate total frames for perfect loop
+        # The loop completes when all streaks return to their original relative positions
+        frames_per_path = path_length / (STREAK_SPEED / FPS)
+        self.total_frames = int(frames_per_path)
+        
+        print(f"✅ Created {len(self.streaks)} streak animations on rails (5 paths, 3 with double streaks)")
+        print(f"✅ Paths with double streaks: {paths_with_double_streaks}")
         print(f"✅ Path length: {path_length} pixels, Loop duration: {self.total_frames} frames")
     
     def apply_overlay_blend(self, base, overlay, opacity=0.3):
@@ -298,17 +317,17 @@ class DiscordIconGenerator:
         # Create base background
         frame = Image.new("RGB", (ICON_SIZE, ICON_SIZE), VERY_DARK_BLUE)
         
-        # Add brain image
-        if self.brain_image:
-            frame_rgba = frame.convert("RGBA")
-            frame_rgba = Image.alpha_composite(frame_rgba, self.brain_image)
-            frame = frame_rgba.convert("RGB")
-        
-        # Draw streaks using actual streak.png
+        # Draw streaks using actual streak.png (behind brain)
         streaks_layer = self.draw_streaks(frame_num)
         if not all(pixel[3] == 0 for pixel in streaks_layer.getdata()):  # If not empty
             frame_rgba = frame.convert("RGBA")
             frame_rgba = Image.alpha_composite(frame_rgba, streaks_layer)
+            frame = frame_rgba.convert("RGB")
+        
+        # Add brain image on top (top layer)
+        if self.brain_image:
+            frame_rgba = frame.convert("RGBA")
+            frame_rgba = Image.alpha_composite(frame_rgba, self.brain_image)
             frame = frame_rgba.convert("RGB")
         
         # Grid overlay removed per user request
