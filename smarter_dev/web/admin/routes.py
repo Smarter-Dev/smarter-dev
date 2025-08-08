@@ -16,7 +16,11 @@ from smarter_dev.web.admin.views import (
     api_keys_delete,
     conversations_list,
     conversation_detail,
-    cleanup_expired_conversations
+    cleanup_expired_conversations,
+    blog_list,
+    blog_create,
+    blog_edit,
+    blog_delete
 )
 
 
@@ -44,4 +48,10 @@ admin_routes = [
     Route("/conversations", admin_required(conversations_list), name="admin_conversations"),
     Route("/conversations/{conversation_id}", admin_required(conversation_detail), name="admin_conversation_detail"),
     Route("/conversations/cleanup", admin_required(cleanup_expired_conversations), methods=["GET", "POST"], name="admin_conversation_cleanup"),
+    
+    # Blog management
+    Route("/blogs", admin_required(blog_list), name="admin_blogs"),
+    Route("/blogs/create", admin_required(blog_create), methods=["GET", "POST"], name="admin_blog_create"),
+    Route("/blogs/{blog_id}/edit", admin_required(blog_edit), methods=["GET", "POST"], name="admin_blog_edit"),
+    Route("/blogs/{blog_id}/delete", admin_required(blog_delete), methods=["POST"], name="admin_blog_delete"),
 ]

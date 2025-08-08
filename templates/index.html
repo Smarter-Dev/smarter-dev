@@ -50,6 +50,226 @@
         </defs>
     </svg>
 </a>
+
+{% if latest_post or recent_posts %}
+<!-- Blog Section (Below the fold) -->
+<div class="blog-section">
+    {% if latest_post %}
+    <div class="latest-post">
+        <h3 class="blog-section-title">Latest from the Blog</h3>
+        <div class="blog-post-card">
+            <h4 class="blog-post-title">
+                <a href="/blog/{{ latest_post.slug }}">{{ latest_post.title }}</a>
+            </h4>
+            <div class="blog-post-meta">
+                <span class="blog-post-author">By {{ latest_post.author }}</span>
+                {% if latest_post.published_at %}
+                <span class="blog-post-date">{{ latest_post.published_at.strftime("%B %d, %Y") }}</span>
+                {% endif %}
+            </div>
+            <div class="blog-post-excerpt">
+                {{ latest_post.excerpt }}
+            </div>
+            <div class="blog-post-link">
+                <a href="/blog/{{ latest_post.slug }}" class="read-more-link">Read more →</a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    
+    {% if recent_posts and recent_posts|length > 1 %}
+    <div class="recent-posts">
+        <h3 class="blog-section-title">Recent Posts</h3>
+        <div class="blog-posts-list">
+            {% for post in recent_posts %}
+                {% if loop.index > 1 %} {# Skip the first post as it's shown above %}
+                <div class="blog-post-item">
+                    <h5 class="blog-post-item-title">
+                        <a href="/blog/{{ post.slug }}">{{ post.title }}</a>
+                    </h5>
+                    <div class="blog-post-item-meta">
+                        <span class="blog-post-author">By {{ post.author }}</span>
+                        {% if post.published_at %}
+                        <span class="blog-post-date">{{ post.published_at.strftime("%B %d, %Y") }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_styles %}
+<style>
+    /* Blog section styles */
+    .blog-section {
+        margin-top: 4rem;
+        max-width: 800px;
+        width: 100%;
+    }
+    
+    .blog-section-title {
+        font-size: 2rem;
+        font-family: 'Bruno Ace SC', sans-serif;
+        color: #00E1FF;
+        margin-bottom: 2rem;
+        text-align: center;
+    }
+    
+    .latest-post {
+        margin-bottom: 4rem;
+    }
+    
+    .blog-post-card {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(0, 225, 255, 0.2);
+        border-radius: 16px;
+        padding: 2rem;
+        transition: all 0.3s ease;
+    }
+    
+    .blog-post-card:hover {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(0, 225, 255, 0.4);
+        transform: translateY(-2px);
+    }
+    
+    .blog-post-title {
+        margin: 0 0 1rem 0;
+        font-size: 1.5rem;
+        font-weight: 600;
+    }
+    
+    .blog-post-title a {
+        color: #fff;
+        text-decoration: none;
+        transition: color 0.3s ease;
+    }
+    
+    .blog-post-title a:hover {
+        color: #00E1FF;
+        text-shadow: 0 0 8px rgba(0, 225, 255, 0.3);
+    }
+    
+    .blog-post-meta {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        font-size: 0.9rem;
+        opacity: 0.8;
+    }
+    
+    .blog-post-author {
+        color: #00E1FF;
+    }
+    
+    .blog-post-date {
+        color: #ccc;
+    }
+    
+    .blog-post-excerpt {
+        margin-bottom: 1.5rem;
+        line-height: 1.6;
+        opacity: 0.9;
+    }
+    
+    .read-more-link {
+        color: #00E1FF;
+        text-decoration: none;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        display: inline-flex;
+        align-items: center;
+    }
+    
+    .read-more-link:hover {
+        text-shadow: 0 0 8px rgba(0, 225, 255, 0.5);
+        transform: translateX(4px);
+    }
+    
+    .recent-posts {
+        margin-top: 3rem;
+    }
+    
+    .blog-posts-list {
+        display: grid;
+        gap: 1.5rem;
+    }
+    
+    .blog-post-item {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        padding: 1.5rem;
+        transition: all 0.3s ease;
+    }
+    
+    .blog-post-item:hover {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(0, 225, 255, 0.3);
+    }
+    
+    .blog-post-item-title {
+        margin: 0 0 0.5rem 0;
+        font-size: 1.2rem;
+        font-weight: 600;
+    }
+    
+    .blog-post-item-title a {
+        color: #fff;
+        text-decoration: none;
+        transition: color 0.3s ease;
+    }
+    
+    .blog-post-item-title a:hover {
+        color: #00E1FF;
+    }
+    
+    .blog-post-item-meta {
+        display: flex;
+        gap: 1rem;
+        font-size: 0.85rem;
+        opacity: 0.7;
+    }
+    
+    /* Mobile styles */
+    @media (max-width: 720px) {
+        .blog-section {
+            margin-top: 2rem;
+            padding: 0 1rem;
+        }
+        
+        .blog-section-title {
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .blog-post-card {
+            padding: 1.5rem;
+        }
+        
+        .blog-post-title {
+            font-size: 1.25rem;
+        }
+        
+        .blog-post-meta {
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .blog-post-item {
+            padding: 1rem;
+        }
+        
+        .blog-post-item-title {
+            font-size: 1.1rem;
+        }
+    }
+</style>
 {% endblock %}
 
 {% block extra_scripts %}

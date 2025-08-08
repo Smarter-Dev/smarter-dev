@@ -846,3 +846,110 @@ class HelpConversation(Base):
     def __repr__(self) -> str:
         """String representation of the help conversation."""
         return f"<HelpConversation(id='{self.id}', user='{self.user_username}', tokens={self.tokens_used})>"
+
+
+class BlogPost(Base):
+    """Blog post model for the website blog feature.
+    
+    Stores blog posts with markdown content, slug-based URLs, and publishing status.
+    Supports draft and published states with optional publishing timestamps.
+    """
+    
+    __tablename__ = "blog_posts"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique identifier for the blog post"
+    )
+    
+    # Content fields
+    title: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        doc="Blog post title"
+    )
+    slug: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        unique=True,
+        index=True,
+        doc="URL-friendly slug for the blog post"
+    )
+    body: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Blog post content in Markdown format"
+    )
+    author: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Author name or identifier"
+    )
+    
+    # Publishing status
+    is_published: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        doc="Whether the blog post is published"
+    )
+    published_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc="Timestamp when the blog post was published"
+    )
+    
+    # Audit timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the blog post was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the blog post was last updated"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_blog_posts_published", "is_published", "published_at"),
+        Index("ix_blog_posts_author", "author"),
+        Index("ix_blog_posts_created_at", "created_at"),
+        UniqueConstraint("slug", name="uq_blog_posts_slug"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize BlogPost with default timestamps."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        super().__init__(**kwargs)
+    
+    @property
+    def excerpt(self) -> str:
+        """Get a brief excerpt from the blog post body."""
+        # Simple excerpt: first 200 characters, cut at word boundary
+        if len(self.body) <= 200:
+            return self.body
+        
+        excerpt = self.body[:200]
+        # Find the last space to avoid cutting words
+        last_space = excerpt.rfind(' ')
+        if last_space > 100:  # Don't make excerpt too short
+            excerpt = excerpt[:last_space]
+        
+        return excerpt + "..."
+    
+    def __repr__(self) -> str:
+        """String representation of the blog post."""
+        status = "published" if self.is_published else "draft"
+        return f"<BlogPost(title='{self.title}', slug='{self.slug}', status='{status}')>"
