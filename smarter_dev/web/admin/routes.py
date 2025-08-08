@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from starlette.routing import Route
 
-from smarter_dev.web.admin.auth import login, logout, admin_required
+from smarter_dev.web.admin.auth import login, logout, discord_oauth_callback, admin_required
 from smarter_dev.web.admin.views import (
     dashboard,
     guild_list,
@@ -27,7 +27,8 @@ from smarter_dev.web.admin.views import (
 # Define admin routes
 admin_routes = [
     # Authentication routes
-    Route("/login", login, methods=["GET", "POST"], name="admin_login"),
+    Route("/login", login, methods=["GET"], name="admin_login"),
+    Route("/auth/discord/callback", discord_oauth_callback, methods=["GET"], name="discord_oauth_callback"),
     Route("/logout", logout, methods=["POST"], name="admin_logout"),
     
     # Dashboard and overview

@@ -89,23 +89,17 @@ class Settings(BaseSettings):
         description="Test Redis connection URL",
     )
 
-    # Admin Interface
-    admin_username: str = Field(
-        default="admin",
-        description="Admin interface username",
-    )
-    admin_password: str = Field(
-        default="admin",
-        description="Admin interface password",
-    )
+    # Admin Interface (Discord OAuth only)
 
     # Discord OAuth (for admin interface)
     discord_client_id: Optional[str] = Field(
         default=None,
-        description="Discord OAuth client ID",
+        alias="discord_application_id",
+        description="Discord OAuth client ID (same as application ID)",
     )
     discord_client_secret: Optional[str] = Field(
         default=None,
+        alias="discord_application_secret",
         description="Discord OAuth client secret",
     )
     discord_redirect_uri: Optional[str] = Field(
@@ -220,6 +214,18 @@ class Settings(BaseSettings):
         if self.is_testing and self.test_redis_url:
             return self.test_redis_url
         return self.redis_url
+
+    @property
+    def effective_discord_redirect_uri(self) -> str:
+        """Get the effective Discord OAuth redirect URI based on environment."""
+        if self.discord_redirect_uri:
+            return self.discord_redirect_uri
+        
+        # Default redirect URIs based on environment
+        if self.is_development:
+            return "http://localhost:8000/admin/auth/discord/callback"
+        else:
+            return "https://smarter.dev/admin/auth/discord/callback"
 
 
 # Global settings instance

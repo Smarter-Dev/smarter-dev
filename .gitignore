@@ -23,3 +23,14 @@ k8s/secrets.yaml
 *.log
 bot.log
 web.log
+
+# Video files
+*.mp4
+*.avi
+*.mov
+*.wmv
+*.flv
+*.mkv
+*.webm
+*.m4v
+*.3gp
