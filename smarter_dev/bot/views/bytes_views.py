@@ -37,7 +37,7 @@ def create_send_bytes_modal(
         The modal builder instance
     """
     modal = hikari.impl.InteractionModalBuilder(
-        title=f"Send Bytes to {recipient.username}",
+        title=f"Send Bytes to {recipient.display_name or recipient.username}",
         custom_id=f"send_bytes_modal:{recipient.id}"
     )
     

@@ -283,14 +283,14 @@ async def help_command(ctx: lightbulb.Context) -> None:
         context_messages=context_messages,
         guild_id=str(ctx.guild_id) if ctx.guild_id else None,
         channel_id=str(ctx.channel_id),
-        user_username=ctx.user.username,
+        user_username=ctx.user.display_name or ctx.user.username,
         interaction_type="slash_command"
     )
     
     # Edit the deferred response with the actual content
     await ctx.edit_last_response(response)
     
-    logger.info(f"Help command used by {ctx.user.username} ({ctx.user.id}): {user_question[:50]}...")
+    logger.info(f"Help command used by {ctx.user.display_name or ctx.user.username} ({ctx.user.id}): {user_question[:50]}...")
 
 
 @plugin.listener(hikari.MessageCreateEvent)
@@ -343,14 +343,14 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
             context_messages=context_messages,
             guild_id=str(event.guild_id) if event.guild_id else None,
             channel_id=str(event.channel_id),
-            user_username=event.author.username,
+            user_username=event.author.display_name or event.author.username,
             interaction_type="mention"
         )
     
     # Send public response as a reply (typing indicator stops automatically when we send the message)
     await plugin.bot.rest.create_message(event.channel_id, response, reply=event.message)
     
-    logger.info(f"Help mention handled for {event.author.username} ({event.author.id}): {user_question[:50]}...")
+    logger.info(f"Help mention handled for {event.author.display_name or event.author.username} ({event.author.id}): {user_question[:50]}...")
 
 
 def load(bot: lightbulb.BotApp) -> None:

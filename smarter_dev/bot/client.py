@@ -472,7 +472,7 @@ async def run_bot() -> None:
             result = await bytes_service.claim_daily(
                 guild_id_str,
                 user_id_str,
-                str(event.author)
+                event.author.display_name or event.author.username
             )
             
             if result.success:
