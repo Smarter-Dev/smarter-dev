@@ -74,6 +74,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: discord-application-id
+                  - name: DISCORD_APPLICATION_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: discord-client-secret
                   - name: ADMIN_USERNAME
                     valueFrom:
                       secretKeyRef:
