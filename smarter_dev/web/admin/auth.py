@@ -11,6 +11,11 @@ from starlette.responses import RedirectResponse
 from starlette.templating import Jinja2Templates
 
 from smarter_dev.shared.config import get_settings
+from smarter_dev.web.admin.discord_oauth import (
+    get_discord_oauth_service,
+    DiscordOAuthError,
+    InsufficientPermissionsError
+)
 
 logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory="templates")
@@ -44,13 +49,11 @@ def admin_required(func: Callable) -> Callable:
 
 
 async def login(request: Request):
-    """Admin login page and handler.
+    """Admin login handler - Discord OAuth only.
     
-    GET: Display login form
-    POST: Process login credentials
+    GET: Redirect to Discord OAuth
+    POST: Not supported (Discord OAuth only)
     """
-    settings = get_settings()
-    
     if request.method == "GET":
         # Check if already logged in
         if request.session.get("is_admin"):
@@ -60,59 +63,88 @@ async def login(request: Request):
                 next_url = "/admin"
             return RedirectResponse(url=next_url, status_code=303)
         
-        return templates.TemplateResponse(
-            request,
-            "admin/login.html"
-        )
+        # Redirect to Discord OAuth
+        try:
+            oauth_service = get_discord_oauth_service()
+            auth_url = oauth_service.get_authorization_url(request)
+            return RedirectResponse(url=auth_url, status_code=303)
+        except DiscordOAuthError as e:
+            logger.error(f"Discord OAuth configuration error: {e}")
+            return templates.TemplateResponse(
+                request,
+                "admin/login.html",
+                {
+                    "error": f"Authentication service unavailable: {e}",
+                    "config_error": True
+                },
+                status_code=500
+            )
     
-    # POST - Process login
+    # POST method not supported - Discord OAuth only
+    return templates.TemplateResponse(
+        request,
+        "admin/login.html",
+        {
+            "error": "Username/password authentication is disabled. Please use Discord OAuth.",
+            "oauth_only": True
+        },
+        status_code=405
+    )
+
+
+async def discord_oauth_callback(request: Request):
+    """Handle Discord OAuth callback."""
     try:
-        form = await request.form()
-        username = form.get("username", "").strip()
-        password = form.get("password", "").strip()
+        oauth_service = get_discord_oauth_service()
+        discord_user = await oauth_service.handle_callback(request)
         
-        # Validate credentials
-        if not username or not password:
-            raise AdminAuthError("Username and password are required")
+        # Set session for authenticated user
+        request.session["user_id"] = discord_user.id
+        request.session["is_admin"] = True
+        request.session["username"] = discord_user.display_name
+        request.session["discord_id"] = discord_user.id
+        request.session["discord_avatar"] = discord_user.avatar_url
+        request.session["auth_method"] = "discord_oauth"
         
-        # Check credentials against configured admin username/password
-        # This works in both development and production environments
-        if (username == settings.admin_username and 
-            password == settings.admin_password):
-            
-            # Set session
-            request.session["user_id"] = username
-            request.session["is_admin"] = True
-            request.session["username"] = username
-            
-            logger.info(f"Admin login successful for user: {username}")
-            
-            # Redirect to requested page or dashboard
-            next_url = request.query_params.get("next", "/admin")
-            # Ensure next_url is a relative path to prevent open redirects
-            if not next_url.startswith("/"):
-                next_url = "/admin"
-            return RedirectResponse(url=next_url, status_code=303)
-        else:
-            raise AdminAuthError("Invalid username or password")
-    
-    except AdminAuthError as e:
-        logger.warning(f"Admin login failed: {e}")
+        logger.info(f"Discord OAuth login successful for user: {discord_user.display_name}")
+        
+        # Redirect to originally requested page
+        next_url = request.session.pop("oauth_next", "/admin")
+        # Ensure next_url is a relative path to prevent open redirects
+        if not next_url.startswith("/"):
+            next_url = "/admin"
+        
+        return RedirectResponse(url=next_url, status_code=303)
+        
+    except InsufficientPermissionsError as e:
+        logger.warning(f"Discord OAuth access denied: {e}")
         return templates.TemplateResponse(
             request,
             "admin/login.html",
             {
-                "error": str(e)
+                "permission_error": True
+            },
+            status_code=403
+        )
+    except DiscordOAuthError as e:
+        logger.error(f"Discord OAuth error: {e}")
+        return templates.TemplateResponse(
+            request,
+            "admin/login.html",
+            {
+                "error": f"Authentication failed: {e}",
+                "fallback_login": True
             },
             status_code=400
         )
     except Exception as e:
-        logger.error(f"Unexpected error during admin login: {e}")
+        logger.error(f"Unexpected error during Discord OAuth callback: {e}")
         return templates.TemplateResponse(
             request,
             "admin/login.html",
             {
-                "error": "An unexpected error occurred. Please try again."
+                "error": "An unexpected error occurred during authentication. Please try again.",
+                "fallback_login": True
             },
             status_code=500
         )
@@ -122,9 +154,10 @@ async def logout(request: Request):
     """Admin logout handler."""
     try:
         username = request.session.get("username", "unknown")
+        auth_method = request.session.get("auth_method", "unknown")
         request.session.clear()
         
-        logger.info(f"Admin logout successful for user: {username}")
+        logger.info(f"Admin logout successful for user: {username} (auth: {auth_method})")
         
         return RedirectResponse(url="/", status_code=303)
     
