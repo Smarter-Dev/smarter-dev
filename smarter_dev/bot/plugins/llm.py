@@ -83,7 +83,7 @@ async def store_tldr_conversation(
             "retention_policy": "standard",
             "is_sensitive": False,
             # TLDR-specific metadata
-            "metadata": {
+            "command_metadata": {
                 "command_type": "tldr",
                 "messages_requested": message_count_requested,
                 "messages_processed": messages_summarized

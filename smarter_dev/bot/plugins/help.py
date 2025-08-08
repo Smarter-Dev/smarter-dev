@@ -94,7 +94,7 @@ async def store_conversation(
             "retention_policy": "standard",
             "is_sensitive": False,  # TODO: Add sensitive content detection
             # Help-specific metadata for unified LLM command tracking
-            "metadata": {
+            "command_metadata": {
                 "command_type": "help",
                 "question_length": len(user_question),
                 "context_message_count": len(sanitized_context) if sanitized_context else 0

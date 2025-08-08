@@ -30,8 +30,9 @@ GRID_SPACING = 120
 GRID_ANGLE = -15  # degrees
 STREAK_SPEED = 200  # pixels per second
 
-# Target datetime: August 8th noon Eastern Time
-TARGET_DATETIME = datetime.datetime(2025, 8, 8, 12, 0, 0, tzinfo=pytz.timezone('US/Eastern'))
+# Target datetime: August 8th noon Eastern Time (EDT in summer)
+eastern_tz = pytz.timezone('US/Eastern')
+TARGET_DATETIME = eastern_tz.localize(datetime.datetime(2025, 8, 8, 12, 0, 0))
 
 class GridRenderer:
     """Handles grid generation and overlay blending."""
@@ -686,7 +687,8 @@ class InteractiveReveal:
         # Set target datetime based on mode
         if self.test_mode:
             # Test mode: 5 seconds from now
-            self.target_datetime = datetime.datetime.now(pytz.timezone('US/Eastern')) + datetime.timedelta(seconds=5)
+            eastern_tz = pytz.timezone('US/Eastern')
+            self.target_datetime = datetime.datetime.now(eastern_tz) + datetime.timedelta(seconds=5)
             print(f"🧪 Test target: {self.target_datetime.strftime('%H:%M:%S ET')}")
         else:
             # Production mode: August 8th noon ET
@@ -888,7 +890,8 @@ class InteractiveReveal:
     
     def get_time_remaining(self):
         """Calculate time remaining until target datetime."""
-        now = datetime.datetime.now(pytz.timezone('US/Eastern'))
+        eastern_tz = pytz.timezone('US/Eastern')
+        now = datetime.datetime.now(eastern_tz)
         
         if now >= self.target_datetime:
             return None  # Countdown finished

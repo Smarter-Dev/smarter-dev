@@ -386,7 +386,7 @@ async def create_conversation(
             response_time_ms=conversation_data.response_time_ms,
             retention_policy=conversation_data.retention_policy,
             is_sensitive=conversation_data.is_sensitive,
-            metadata=conversation_data.metadata
+            command_metadata=conversation_data.command_metadata
         )
         
         db.add(conversation)

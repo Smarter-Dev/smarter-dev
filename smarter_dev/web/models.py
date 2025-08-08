@@ -799,7 +799,7 @@ class HelpConversation(Base):
     )
     
     # Analytics metadata
-    metadata: Mapped[Optional[dict]] = mapped_column(
+    command_metadata: Mapped[Optional[dict]] = mapped_column(
         JSON,
         nullable=True,
         doc="Command-specific metadata for analytics and tracking"
