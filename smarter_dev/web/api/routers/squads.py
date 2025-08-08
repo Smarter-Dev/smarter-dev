@@ -224,7 +224,14 @@ async def join_squad(
         )
     except ConflictError as e:
         logger.error(f"DEBUG: ConflictError caught: {e}")
-        raise create_secure_validation_error(str(e))
+        # Check if it's the "already in squad" case - provide a specific error message for the bot to handle
+        error_msg = str(e)
+        if "already in squad" in error_msg.lower():
+            # Return the actual error message so bot can detect and handle squad switching
+            raise HTTPException(status_code=400, detail=error_msg)
+        else:
+            # For other conflict errors, use the secure generic message
+            raise create_secure_validation_error(str(e))
     except NotFoundError as e:
         logger.error(f"DEBUG: NotFoundError caught: {e}")
         raise create_secure_not_found_error("Squad")
