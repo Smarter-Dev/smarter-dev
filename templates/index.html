@@ -122,13 +122,16 @@
         padding: 4rem 2rem;
         position: relative;
         z-index: 1;
+        display: flex;
+        justify-content: center; /* Center the container horizontally */
     }
     
-    /* Blog section container - max 720px, left aligned */
+    /* Blog section container - max 720px, centered horizontally but content left-aligned */
     .blog-section {
         max-width: 720px;
         width: 100%;
-        margin: 0; /* Left aligned */
+        margin: 0 auto; /* Center the container */
+        text-align: left; /* Ensure content is left-aligned within the container */
     }
     
     .blog-section-title {
