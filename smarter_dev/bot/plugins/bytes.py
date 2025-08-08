@@ -200,14 +200,14 @@ async def send_command(ctx: lightbulb.Context) -> None:
             sender_member = ctx.get_guild().get_member(ctx.user.id)
             sender_display_name = sender_member.display_name if sender_member else ctx.user.username
         except:
-            sender_display_name = ctx.user.username
+            sender_display_name = ctx.user.display_name or ctx.user.username
         
         # Get receiver's display name (nickname if set, otherwise username)
         try:
             receiver_member = ctx.get_guild().get_member(user.id)
             receiver_display_name = receiver_member.display_name if receiver_member else user.username
         except:
-            receiver_display_name = user.username
+            receiver_display_name = user.display_name or user.username
         
         description = f"{sender_display_name} sent {amount:,} bytes to {receiver_display_name}"
         
