@@ -97,52 +97,12 @@ def generate_video():
     output_path = base_path / "output"
     output_path.mkdir(exist_ok=True)
     
-    # Create background with overlay blend mode grid
-    print("📽️  Creating background with overlay blend mode grid...")
+    # Create background
+    print("📽️  Creating background...")
     try:
         bg_img = ImageClip(str(assets_path / "video-bg.png"))
         background = bg_img.resized((VIDEO_WIDTH, VIDEO_HEIGHT)).with_duration(TOTAL_DURATION)
-        
-        # Apply overlay blend mode to background
-        try:
-            def overlay_blend(base_frame, overlay_frame, opacity=0.8):
-                """
-                Implement true overlay blend mode using the mathematical formula:
-                - if base <= 0.5: result = 2 * base * overlay
-                - else: result = 1 - 2 * (1 - base) * (1 - overlay)
-                """
-                # Normalize to 0-1 range
-                base = base_frame.astype(np.float32) / 255.0
-                overlay = overlay_frame.astype(np.float32) / 255.0
-                
-                # Apply overlay blend formula
-                mask = base <= 0.5
-                result = np.zeros_like(base)
-                
-                # For dark areas: 2 * base * overlay (makes overlay nearly invisible)
-                result[mask] = 2 * base[mask] * overlay[mask]
-                
-                # For light areas: 1 - 2 * (1 - base) * (1 - overlay) (makes overlay glow)
-                result[~mask] = 1 - 2 * (1 - base[~mask]) * (1 - overlay[~mask])
-                
-                # Apply opacity and convert back to 0-255 range
-                result = base + opacity * (result - base)
-                return np.clip(result * 255, 0, 255).astype(np.uint8)
-            
-            # Load grid image and get frame data
-            grid_img = ImageClip(str(assets_path / "bg-grid.png"))
-            grid_img = grid_img.resized((VIDEO_WIDTH, VIDEO_HEIGHT))
-            grid_frame = grid_img.get_frame(0)
-            
-            # Apply overlay blend to background using fl_image
-            def apply_grid_blend(frame):
-                return overlay_blend(frame, grid_frame, opacity=0.8)
-            
-            background = background.fl_image(apply_grid_blend)
-            print("✅ Background loaded with true overlay blend mode grid")
-        except Exception as e:
-            print(f"⚠️ Could not apply overlay blend, using plain background: {e}")
-        
+        print("✅ Background loaded")
     except Exception as e:
         print(f"⚠️  Could not load background: {e}")
         background = ColorClip((VIDEO_WIDTH, VIDEO_HEIGHT), color=(20, 20, 40)).with_duration(TOTAL_DURATION)
@@ -171,10 +131,10 @@ def generate_video():
         # First show static text briefly before flickering
         static_text = TextClip(
             text="BEGINNER.CODES", 
-            font_size=60, 
+            font_size=120, 
             color=WHITE,
             font=bungee_font,
-            size=(800, 100),
+            size=(1600, 200),
             method='caption'
         ).with_position(('center', 'center')).with_start(REVEAL_START).with_duration(1.5)
         
@@ -189,10 +149,10 @@ def generate_video():
             # Create the base text clip
             base_text = TextClip(
                 text="BEGINNER.CODES", 
-                font_size=60, 
+                font_size=120, 
                 color=WHITE,
                 font=bungee_font,
-                size=(800, 100),
+                size=(1600, 200),
                 method='caption'
             ).with_position(('center', 'center'))
             
@@ -231,9 +191,9 @@ def generate_video():
         try:
             old_brand = TextClip(
                 text="BEGINNER.CODES", 
-                font_size=60, 
+                font_size=120, 
                 color=WHITE,
-                size=(800, 100),
+                size=(1600, 200),
                 method='caption'
             )
             
@@ -259,8 +219,8 @@ def generate_video():
             glitch_start = REVEAL_START + 7.5  # Start 3 seconds after Smarter Dev text
             glitch_duration = 2.0  # 2 seconds of reverse glitch effect
             
-            # Create the base brain image
-            base_brain = brain_img.resized(height=150).with_position(('center', VIDEO_HEIGHT // 2 - 200))
+            # Create the base brain image (doubled size)
+            base_brain = brain_img.resized(height=300).with_position(('center', VIDEO_HEIGHT // 2 - 400))
             
             # Create reverse flickering pattern: starts invisible, gradually becomes more visible
             flicker_frame_duration = 0.08  # Fast flicker (80ms per frame)
@@ -304,38 +264,38 @@ def generate_video():
         
         # \"Smarter Dev\" text on one line with dramatic reveal
         try:
-            # Create "Smarter" in white using Bungee Hairline
+            # Create "Smarter" in white using Bungee Hairline (doubled size)
             smarter_text = TextClip(
                 text="SMARTER ", 
-                font_size=60, 
+                font_size=120, 
                 color=WHITE,
                 font=bungee_font,
-                size=(400, 100),
+                size=(800, 200),
                 method='caption'
             )
             
-            # Create "Dev" in cyan using Bruno Ace SC  
+            # Create "Dev" in cyan using Bruno Ace SC (doubled size) 
             dev_text = TextClip(
                 text="DEV", 
-                font_size=45, 
+                font_size=90, 
                 color=CYAN,
                 font=bruno_font,
-                size=(200, 100),
+                size=(400, 200),
                 method='caption'
             )
             
-            # Center "SMARTER DEV" using the original 215px relative positioning
+            # Center "SMARTER DEV" using doubled positioning
             smarter_width = smarter_text.size[0]    # Get actual rendered width of SMARTER
             dev_width = dev_text.size[0]            # Get actual rendered width of DEV
-            relative_gap = 315  # Original gap (215px) + 100px nudge
+            relative_gap = 630  # Doubled gap (315px * 2)
             
             total_width = relative_gap + dev_width  # Total span from start of SMARTER to end of DEV
-            start_x = (800 - total_width) // 2     # Center this total span
+            start_x = (1600 - total_width) // 2     # Center this total span (doubled composite width)
             
             brand_text = CompositeVideoClip([
                 smarter_text.with_position((start_x, 0)),                    # SMARTER at start of centered span
-                dev_text.with_position((start_x + relative_gap, 10))         # DEV at original 215px offset
-            ], size=(800, 100))
+                dev_text.with_position((start_x + relative_gap, 20))         # DEV at doubled offset
+            ], size=(1600, 200))
             
             def brand_slide_position(t):
                 if t < 0.5:
@@ -365,12 +325,12 @@ def generate_video():
             clips.append(brand_text)
             print("✅ Added 'Smarter Dev' text on one line with dramatic reveal")
         except Exception as e:
-            # Simple fallback - match BEGINNER.CODES exactly
+            # Simple fallback - doubled size to match other text
             brand_text = TextClip(
                 text="SMARTER DEV", 
-                font_size=60, 
+                font_size=120, 
                 color=WHITE,
-                size=(800, 100),
+                size=(1600, 200),
                 method='caption'
             )
             
@@ -392,20 +352,20 @@ def generate_video():
                 typing_speed = 0.08  # 80ms per character
                 cursor_blink_speed = 0.5  # 500ms cursor blink cycle
                 
-                # Create the full text clip to measure its width and position
+                # Create the full text clip to measure its width and position (doubled size)
                 full_text_clip = TextClip(
                     text=full_text,
-                    font_size=40,
+                    font_size=80,
                     color=WHITE,
                     font=bungee_font,
-                    size=(600, 60),
+                    size=(1200, 120),
                     method='caption'
                 )
                 
                 # Get the actual rendered width to calculate positioning
                 full_text_width = full_text_clip.size[0]
                 text_x = (VIDEO_WIDTH - full_text_width) // 2  # Center the full text
-                text_y = VIDEO_HEIGHT // 2 + 80
+                text_y = VIDEO_HEIGHT // 2 + 160  # Doubled spacing
                 
                 # Create typing animation - progressive text reveal
                 for i in range(len(full_text) + 1):
@@ -413,13 +373,13 @@ def generate_video():
                     frame_start = typing_start + i * typing_speed
                     
                     if partial_text:
-                        # Create partial text clip
+                        # Create partial text clip (doubled size)
                         partial_clip = TextClip(
                             text=partial_text,
-                            font_size=40,
+                            font_size=80,
                             color=WHITE,
                             font=bungee_font,
-                            size=(600, 60),
+                            size=(1200, 120),
                             method='caption'
                         )
                         
@@ -438,10 +398,10 @@ def generate_video():
                             
                             cursor_clip = TextClip(
                                 text="_",
-                                font_size=40,
+                                font_size=80,
                                 color=WHITE,
                                 font=bungee_font,
-                                size=(20, 60),
+                                size=(40, 120),
                                 method='caption'
                             )
                             
@@ -473,10 +433,10 @@ def generate_video():
                     if i % 2 == 0:
                         cursor_clip = TextClip(
                             text="_",
-                            font_size=40,
+                            font_size=80,
                             color=WHITE,
                             font=bungee_font,
-                            size=(20, 60),
+                            size=(40, 120),
                             method='caption'
                         )
                         
@@ -498,15 +458,15 @@ def generate_video():
             try:
                 subtitle = TextClip(
                     text="Level up your code", 
-                    font_size=40, 
+                    font_size=80, 
                     color=WHITE,
                     font=bungee_font,
-                    size=(600, 60),
+                    size=(1200, 120),
                     method='caption'
                 )
                 
                 subtitle = (subtitle
-                           .with_position(('center', VIDEO_HEIGHT // 2 + 80))
+                           .with_position(('center', VIDEO_HEIGHT // 2 + 160))
                            .with_start(REVEAL_START + 9.5)
                            .with_duration(CLOSING_END - REVEAL_START - 9.5))
                 
@@ -596,14 +556,81 @@ def generate_video():
         print("⚠️  No audio files loaded, using silent track")
         final_audio = AudioClip(lambda t: 0, duration=TOTAL_DURATION)
     
-    # Grid overlay is now applied directly to the background above
-    
-    # Create final video
-    print("🎭 Compositing final video...")
+    # Create base composite video (without grid overlay)
+    print("🎭 Compositing base video...")
     print(f"📊 Total clips: {len(clips)}")
     
-    final_video = CompositeVideoClip(clips, size=(VIDEO_WIDTH, VIDEO_HEIGHT))
-    final_video = final_video.with_audio(final_audio).with_duration(TOTAL_DURATION)
+    base_composite = CompositeVideoClip(clips, size=(VIDEO_WIDTH, VIDEO_HEIGHT))
+    base_composite = base_composite.with_audio(final_audio).with_duration(TOTAL_DURATION)
+    
+    # Apply grid overlay using proper overlay blend mode
+    print("🌐 Applying true overlay blend mode grid...")
+    try:
+        from blend_modes import overlay
+        
+        # Load grid image
+        grid_img = ImageClip(str(assets_path / "bg-grid.png"))
+        grid_overlay = grid_img.resized((VIDEO_WIDTH, VIDEO_HEIGHT))
+        
+        def blend_frames(t):
+            """Blend base composite frame with grid overlay using true overlay blend mode."""
+            # Get frames from both clips
+            base_frame = base_composite.get_frame(t)  # Base composite frame
+            overlay_frame = grid_overlay.get_frame(0)  # Grid overlay frame (static)
+            
+            # Convert to float32 for blending (0-1 range)
+            base_float = base_frame.astype(float) / 255.0
+            overlay_float = overlay_frame.astype(float) / 255.0
+            
+            # Handle alpha channel properly - only blend where grid has content
+            if overlay_float.shape[2] == 4:  # RGBA
+                overlay_alpha = overlay_float[:, :, 3]  # Get alpha channel
+                overlay_rgb = overlay_float[:, :, :3]   # Get RGB channels
+            else:  # RGB - assume white areas are grid, treat as opaque
+                # For RGB grid images, create alpha based on brightness
+                overlay_alpha = np.mean(overlay_float, axis=2)  # Use brightness as alpha
+                overlay_rgb = overlay_float
+            
+            # Only apply overlay blend where grid has content (alpha > 0)
+            result = base_float.copy()
+            
+            # Create mask for areas where grid has content
+            blend_mask = overlay_alpha > 0.01  # Small threshold to avoid noise
+            
+            if np.any(blend_mask):
+                # Apply overlay blend formula only where grid has content
+                for c in range(3):  # RGB channels
+                    base_channel = base_float[:, :, c]
+                    overlay_channel = overlay_rgb[:, :, c]
+                    
+                    # Overlay blend formula: if base <= 0.5: 2*base*overlay, else: 1 - 2*(1-base)*(1-overlay)
+                    overlay_result = np.where(
+                        base_channel <= 0.5,
+                        2 * base_channel * overlay_channel,
+                        1 - 2 * (1 - base_channel) * (1 - overlay_channel)
+                    )
+                    
+                    # Apply the blend result with 50% grid opacity where the grid has content
+                    result[:, :, c] = np.where(
+                        blend_mask,
+                        overlay_result * 0.5 + base_channel * 0.5,  # 50% overlay effect
+                        base_channel  # Keep original where grid is transparent
+                    )
+            
+            # Convert back to uint8 (0-255 range)
+            result = (result * 255).astype(np.uint8)
+            return np.clip(result, 0, 255)
+        
+        # Create final video with overlay blend mode
+        final_video = VideoClip(blend_frames, duration=base_composite.duration)
+        final_video = final_video.with_audio(base_composite.audio)
+        
+        print("✅ Applied true overlay blend mode - dark areas invisible, light areas glowing")
+        
+    except Exception as e:
+        print(f"⚠️  Could not apply overlay blend mode: {e}")
+        print("📽️  Using base composite without grid overlay")
+        final_video = base_composite
     
     # Export video
     output_file = output_path / "smarter_dev_rebrand_reveal_OVERLAY_BLEND.mp4"
