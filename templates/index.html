@@ -50,66 +50,85 @@
         </defs>
     </svg>
 </a>
+{% endblock %}
 
+{% block after_hero %}
 {% if latest_post or recent_posts %}
 <!-- Blog Section (Below the fold) -->
-<div class="blog-section">
-    {% if latest_post %}
-    <div class="latest-post">
-        <h3 class="blog-section-title">Latest from the Blog</h3>
-        <div class="blog-post-card">
-            <h4 class="blog-post-title">
-                <a href="/blog/{{ latest_post.slug }}">{{ latest_post.title }}</a>
-            </h4>
-            <div class="blog-post-meta">
-                <span class="blog-post-author">By {{ latest_post.author }}</span>
-                {% if latest_post.published_at %}
-                <span class="blog-post-date">{{ latest_post.published_at.strftime("%B %d, %Y") }}</span>
-                {% endif %}
-            </div>
-            <div class="blog-post-excerpt">
-                {{ latest_post.excerpt }}
-            </div>
-            <div class="blog-post-link">
-                <a href="/blog/{{ latest_post.slug }}" class="read-more-link">Read more →</a>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-    
-    {% if recent_posts and recent_posts|length > 1 %}
-    <div class="recent-posts">
-        <h3 class="blog-section-title">Recent Posts</h3>
-        <div class="blog-posts-list">
-            {% for post in recent_posts %}
-                {% if loop.index > 1 %} {# Skip the first post as it's shown above %}
-                <div class="blog-post-item">
-                    <h5 class="blog-post-item-title">
-                        <a href="/blog/{{ post.slug }}">{{ post.title }}</a>
-                    </h5>
-                    <div class="blog-post-item-meta">
-                        <span class="blog-post-author">By {{ post.author }}</span>
-                        {% if post.published_at %}
-                        <span class="blog-post-date">{{ post.published_at.strftime("%B %d, %Y") }}</span>
-                        {% endif %}
-                    </div>
+<div class="blog-section-wrapper">
+    <div class="blog-section">
+        {% if latest_post %}
+        <div class="latest-post">
+            <h3 class="blog-section-title">Latest from the Blog</h3>
+            <div class="blog-post-card">
+                <h4 class="blog-post-title">
+                    <a href="/blog/{{ latest_post.slug }}">{{ latest_post.title }}</a>
+                </h4>
+                <div class="blog-post-meta">
+                    <span class="blog-post-author">By {{ latest_post.author }}</span>
+                    {% if latest_post.published_at %}
+                    <span class="blog-post-date">{{ latest_post.published_at.strftime("%B %d, %Y") }}</span>
+                    {% endif %}
                 </div>
-                {% endif %}
-            {% endfor %}
+                <div class="blog-post-excerpt">
+                    {{ latest_post.excerpt }}
+                </div>
+                <div class="blog-post-link">
+                    <a href="/blog/{{ latest_post.slug }}" class="read-more-link">Read more →</a>
+                </div>
+            </div>
         </div>
+        {% endif %}
+        
+        {% if recent_posts and recent_posts|length > 1 %}
+        <div class="recent-posts">
+            <h3 class="blog-section-title">Recent Posts</h3>
+            <div class="blog-posts-list">
+                {% for post in recent_posts %}
+                    {% if loop.index > 1 %} {# Skip the first post as it's shown above #}
+                    <div class="blog-post-item">
+                        <h5 class="blog-post-item-title">
+                            <a href="/blog/{{ post.slug }}">{{ post.title }}</a>
+                        </h5>
+                        <div class="blog-post-item-meta">
+                            <span class="blog-post-author">By {{ post.author }}</span>
+                            {% if post.published_at %}
+                            <span class="blog-post-date">{{ post.published_at.strftime("%B %d, %Y") }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
     </div>
-    {% endif %}
 </div>
 {% endif %}
 {% endblock %}
 
 {% block extra_styles %}
 <style>
-    /* Blog section styles */
+    /* Ensure hero section fills full viewport height */
+    body .container {
+        min-height: 100vh;
+        height: 100vh;
+    }
+    
+    /* Blog section wrapper styles - positioned after hero */
+    .blog-section-wrapper {
+        background-color: #02000F;
+        min-height: 100vh;
+        padding: 4rem 2rem;
+        position: relative;
+        z-index: 1;
+    }
+    
+    /* Blog section container - max 720px, left aligned */
     .blog-section {
-        margin-top: 4rem;
-        max-width: 800px;
+        max-width: 720px;
         width: 100%;
+        margin: 0; /* Left aligned */
     }
     
     .blog-section-title {
@@ -117,7 +136,7 @@
         font-family: 'Bruno Ace SC', sans-serif;
         color: #00E1FF;
         margin-bottom: 2rem;
-        text-align: center;
+        text-align: left; /* Left aligned */
     }
     
     .latest-post {
@@ -130,6 +149,7 @@
         border-radius: 16px;
         padding: 2rem;
         transition: all 0.3s ease;
+        max-width: 100%;
     }
     
     .blog-post-card:hover {
@@ -206,6 +226,7 @@
         border-radius: 12px;
         padding: 1.5rem;
         transition: all 0.3s ease;
+        max-width: 100%;
     }
     
     .blog-post-item:hover {
@@ -238,9 +259,12 @@
     
     /* Mobile styles */
     @media (max-width: 720px) {
+        .blog-section-wrapper {
+            padding: 2rem 1rem;
+        }
+        
         .blog-section {
-            margin-top: 2rem;
-            padding: 0 1rem;
+            max-width: 100%;
         }
         
         .blog-section-title {
@@ -267,6 +291,17 @@
         
         .blog-post-item-title {
             font-size: 1.1rem;
+        }
+    }
+    
+    /* Ensure responsive behavior for smaller screens */
+    @media (max-width: 480px) {
+        .blog-section-wrapper {
+            padding: 2rem 1rem;
+        }
+        
+        .blog-section {
+            max-width: 100%;
         }
     }
 </style>
