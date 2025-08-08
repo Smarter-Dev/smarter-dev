@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ blog_post.title }} - Smarter Dev</title>
+    <title>Blog - Smarter Dev</title>
     <link rel="icon" type="image/png" href="/static/favicon.png">
     <link href="https://fonts.googleapis.com/css2?family=Bruno+Ace+SC&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css?family=Bungee+Hairline&display=swap" rel="stylesheet">
@@ -87,25 +87,25 @@
                 ) no-repeat;
         }
 
-        /* Blog post wrapper - similar to homepage blog section */
-        .blog-post-wrapper {
+        /* Blog list wrapper */
+        .blog-list-wrapper {
             background-color: transparent;
             padding: 4rem 2rem;
             position: relative;
             z-index: 1;
             display: flex;
-            justify-content: center; /* Center the container horizontally */
+            justify-content: center;
         }
         
-        /* Blog post container - max 720px, centered horizontally but content left-aligned */
-        .blog-post-container {
+        /* Blog list container - max 720px, centered horizontally but content left-aligned */
+        .blog-list-container {
             max-width: 720px;
             width: 100%;
-            margin: 0 auto; /* Center the container */
-            text-align: left; /* Ensure content is left-aligned within the container */
+            margin: 0 auto;
+            text-align: left;
         }
 
-        .blog-post-branding {
+        .blog-list-branding {
             margin-bottom: 1.5rem;
         }
         
@@ -130,176 +130,116 @@
         .brand-link:hover {
             transform: scale(1.02);
         }
-        
 
-        .blog-post-header {
+        .blog-list-header {
             margin-bottom: 3rem;
         }
         
-        .blog-post-title {
+        .blog-list-title {
             font-size: 3rem;
             font-family: 'Bruno Ace SC', sans-serif;
             color: #00E1FF;
             margin-bottom: 1rem;
             line-height: 1.2;
         }
-
-        .blog-post-meta {
-            margin-bottom: 2rem;
-            display: flex;
-            gap: 1rem;
-            font-size: 1rem;
+        
+        .blog-list-description {
+            font-size: 1.2rem;
             opacity: 0.8;
+            margin-bottom: 2rem;
         }
         
-        .blog-post-author {
-            color: #00E1FF;
-            font-weight: 500;
+        .blog-posts-grid {
+            display: grid;
+            gap: 2rem;
         }
         
-        .blog-post-date {
-            color: #ccc;
-        }
-        
-        .blog-content {
-            text-align: left;
-            max-width: none;
-            line-height: 1.8;
-        }
-        
-        .blog-content h1, .blog-content h2, .blog-content h3, 
-        .blog-content h4, .blog-content h5, .blog-content h6 {
-            color: #fff;
-            margin-top: 2rem;
-            margin-bottom: 1rem;
-            font-weight: 600;
-        }
-        
-        .blog-content h1 {
-            font-size: 2.5rem;
-            border-bottom: 2px solid #00E1FF;
-            padding-bottom: 0.5rem;
-        }
-        
-        .blog-content h2 {
-            font-size: 2rem;
-            color: #00E1FF;
-        }
-        
-        .blog-content h3 {
-            font-size: 1.5rem;
-        }
-        
-        .blog-content p {
-            margin-bottom: 1.5rem;
-        }
-        
-        .blog-content ul, .blog-content ol {
-            margin-bottom: 1.5rem;
-            padding-left: 2rem;
-        }
-        
-        .blog-content li {
-            margin-bottom: 0.5rem;
-        }
-        
-        .blog-content blockquote {
-            border-left: 4px solid #00E1FF;
-            padding-left: 1.5rem;
-            margin: 1.5rem 0;
-            font-style: italic;
-            opacity: 0.9;
-        }
-        
-        .blog-content pre {
-            background-color: rgba(255, 255, 255, 0.05);
-            border-radius: 8px;
-            padding: 1.5rem;
-            overflow-x: auto;
-            margin: 1.5rem 0;
-        }
-        
-        .blog-content code {
-            background-color: rgba(255, 255, 255, 0.1);
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 0.9em;
-        }
-        
-        .blog-content pre code {
-            background: none;
-            padding: 0;
-        }
-        
-        .blog-content a {
-            color: #00E1FF;
-            text-decoration: none;
-            border-bottom: 1px solid rgba(0, 225, 255, 0.3);
+        .blog-post-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(0, 225, 255, 0.2);
+            border-radius: 16px;
+            padding: 2rem;
             transition: all 0.3s ease;
         }
         
-        .blog-content a:hover {
-            border-bottom-color: #00E1FF;
+        .blog-post-card:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(0, 225, 255, 0.4);
+            transform: translateY(-2px);
+        }
+        
+        .blog-post-card-title {
+            margin: 0 0 1rem 0;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        
+        .blog-post-card-title a {
+            color: #fff;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+        
+        .blog-post-card-title a:hover {
+            color: #00E1FF;
             text-shadow: 0 0 8px rgba(0, 225, 255, 0.3);
         }
         
-        .blog-content img {
-            max-width: 100%;
-            height: auto;
-            border-radius: 8px;
-            margin: 1.5rem 0;
+        .blog-post-card-meta {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            opacity: 0.8;
         }
         
-        .blog-content table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 1.5rem 0;
+        .blog-post-card-author {
+            color: #00E1FF;
         }
         
-        .blog-content th, .blog-content td {
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            padding: 0.75rem;
-            text-align: left;
+        .blog-post-card-date {
+            color: #ccc;
         }
         
-        .blog-content th {
-            background-color: rgba(0, 225, 255, 0.1);
-            font-weight: 600;
+        .blog-post-card-excerpt {
+            line-height: 1.6;
+            opacity: 0.9;
+            margin-bottom: 1.5rem;
         }
         
-        .blog-content hr {
-            border: none;
-            border-top: 1px solid rgba(255, 255, 255, 0.3);
-            margin: 3rem 0;
-        }
-        
-        .back-to-blog {
-            margin-top: 3rem;
-        }
-        
-        .back-to-blog a {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
+        .read-more-link {
             color: #00E1FF;
             text-decoration: none;
             font-weight: 500;
             transition: all 0.3s ease;
+            display: inline-flex;
+            align-items: center;
         }
         
-        .back-to-blog a:hover {
+        .read-more-link:hover {
             text-shadow: 0 0 8px rgba(0, 225, 255, 0.5);
-            transform: translateX(-4px);
+            transform: translateX(4px);
+        }
+        
+        .no-posts {
+            text-align: center;
+            padding: 4rem 0;
+            opacity: 0.7;
+        }
+        
+        .no-posts h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: #00E1FF;
         }
         
         
         @media (max-width: 720px) {
-            .blog-post-wrapper {
+            .blog-list-wrapper {
                 padding: 2rem 1rem;
             }
             
-            .blog-post-container {
+            .blog-list-container {
                 max-width: 100%;
             }
             
@@ -307,34 +247,25 @@
                 font-size: 1.5rem;
             }
             
-            .blog-post-title {
+            .blog-list-title {
                 font-size: 2rem;
             }
             
-            .blog-post-meta {
-                flex-direction: column;
-                gap: 0.5rem;
-            }
-            
-            .blog-content {
+            .blog-list-description {
                 font-size: 1rem;
             }
             
-            .blog-content h1 {
-                font-size: 2rem;
+            .blog-post-card {
+                padding: 1.5rem;
             }
             
-            .blog-content h2 {
-                font-size: 1.5rem;
-            }
-            
-            .blog-content h3 {
+            .blog-post-card-title {
                 font-size: 1.25rem;
             }
             
-            .blog-content pre {
-                padding: 1rem;
-                font-size: 0.85rem;
+            .blog-post-card-meta {
+                flex-direction: column;
+                gap: 0.5rem;
             }
             
             .gradient-backgrounds {
@@ -376,32 +307,48 @@
         </div>
     </div>
     <div class="page-wrapper">
-        <div class="blog-post-wrapper content-wrapper">
-            <div class="blog-post-container">
+        <div class="blog-list-wrapper content-wrapper">
+            <div class="blog-list-container">
             <!-- Branding -->
-            <div class="blog-post-branding">
+            <div class="blog-list-branding">
                 <a href="/" class="brand-link">
                     <span class="text-smarter">Smarter</span> <span class="text-dev">Dev</span>
                 </a>
             </div>
             
-            <div class="blog-post-header">
-                <h1 class="blog-post-title">{{ blog_post.title }}</h1>
-                <div class="blog-post-meta">
-                    <span class="blog-post-author">By {{ blog_post.author }}</span>
-                    {% if blog_post.published_at %}
-                    <span class="blog-post-date">{{ blog_post.published_at.strftime("%B %d, %Y") }}</span>
-                    {% endif %}
-                </div>
-            </div>
-
-            <div class="blog-content">
-                {{ blog_post.body|markdown|safe }}
+            <div class="blog-list-header">
+                <h1 class="blog-list-title">Blog</h1>
+                <p class="blog-list-description">Insights, updates, and thoughts from the Smarter Dev community.</p>
             </div>
             
-            <div class="back-to-blog">
-                <a href="/blog">← Back to Blog</a>
+            {% if blog_posts %}
+            <div class="blog-posts-grid">
+                {% for post in blog_posts %}
+                <article class="blog-post-card">
+                    <h2 class="blog-post-card-title">
+                        <a href="/blog/{{ post.slug }}">{{ post.title }}</a>
+                    </h2>
+                    <div class="blog-post-card-meta">
+                        <span class="blog-post-card-author">By {{ post.author }}</span>
+                        {% if post.published_at %}
+                        <span class="blog-post-card-date">{{ post.published_at.strftime("%B %d, %Y") }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="blog-post-card-excerpt">
+                        {{ post.body|strip_markdown(200) }}
+                    </div>
+                    <div class="blog-post-card-link">
+                        <a href="/blog/{{ post.slug }}" class="read-more-link">Read more →</a>
+                    </div>
+                </article>
+                {% endfor %}
             </div>
+            {% else %}
+            <div class="no-posts">
+                <h3>No blog posts yet</h3>
+                <p>Check back soon for updates and insights!</p>
+            </div>
+            {% endif %}
             </div>
         </div>
         

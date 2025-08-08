@@ -55,27 +55,26 @@
 {% block after_hero %}
 {% if latest_post or recent_posts %}
 <!-- Blog Section (Below the fold) -->
-<div class="blog-section-wrapper">
+<div class="page-wrapper">
+<div class="blog-section-wrapper content-wrapper">
     <div class="blog-section">
         {% if latest_post %}
         <div class="latest-post">
             <h3 class="blog-section-title">Latest from the Blog</h3>
-            <div class="blog-post-card">
-                <h4 class="blog-post-title">
-                    <a href="/blog/{{ latest_post.slug }}">{{ latest_post.title }}</a>
-                </h4>
-                <div class="blog-post-meta">
-                    <span class="blog-post-author">By {{ latest_post.author }}</span>
-                    {% if latest_post.published_at %}
-                    <span class="blog-post-date">{{ latest_post.published_at.strftime("%B %d, %Y") }}</span>
-                    {% endif %}
-                </div>
-                <div class="blog-post-excerpt">
-                    {{ latest_post.excerpt }}
-                </div>
-                <div class="blog-post-link">
-                    <a href="/blog/{{ latest_post.slug }}" class="read-more-link">Read more →</a>
-                </div>
+            <h4 class="latest-post-title">
+                <a href="/blog/{{ latest_post.slug }}">{{ latest_post.title }}</a>
+            </h4>
+            <div class="latest-post-meta">
+                <span class="blog-post-author">By {{ latest_post.author }}</span>
+                {% if latest_post.published_at %}
+                <span class="blog-post-date">{{ latest_post.published_at.strftime("%B %d, %Y") }}</span>
+                {% endif %}
+            </div>
+            <div class="latest-post-excerpt">
+                {{ latest_post.body|strip_markdown(300) }}
+            </div>
+            <div class="latest-post-link">
+                <a href="/blog/{{ latest_post.slug }}" class="read-more-link">Read more →</a>
             </div>
         </div>
         {% endif %}
@@ -100,9 +99,25 @@
                     {% endif %}
                 {% endfor %}
             </div>
+            <div class="view-all-posts">
+                <a href="/blog" class="view-all-link">View All Posts →</a>
+            </div>
         </div>
         {% endif %}
+        
+        <div class="footer">
+            <div class="footer-links">
+                <a href="/">Home</a>
+                <a href="/blog">Blog</a>
+                <a href="/about">About Us</a>
+                <a href="/discord">Discord</a>
+            </div>
+            <div class="footer-copyright">
+                © 2025 Zech Zimmerman on behalf of the Smarter Dev Community
+            </div>
+        </div>
     </div>
+</div>
 </div>
 {% endif %}
 {% endblock %}
@@ -126,9 +141,9 @@
         justify-content: center; /* Center the container horizontally */
     }
     
-    /* Blog section container - max 720px, centered horizontally but content left-aligned */
+    /* Blog section container - max 600px, centered horizontally but content left-aligned */
     .blog-section {
-        max-width: 720px;
+        max-width: 600px;
         width: 100%;
         margin: 0 auto; /* Center the container */
         text-align: left; /* Ensure content is left-aligned within the container */
@@ -146,36 +161,41 @@
         margin-bottom: 4rem;
     }
     
-    .blog-post-card {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(0, 225, 255, 0.2);
-        border-radius: 16px;
-        padding: 2rem;
-        transition: all 0.3s ease;
-        max-width: 100%;
-    }
-    
-    .blog-post-card:hover {
-        background: rgba(255, 255, 255, 0.08);
-        border-color: rgba(0, 225, 255, 0.4);
-        transform: translateY(-2px);
-    }
-    
-    .blog-post-title {
+    .latest-post-title {
         margin: 0 0 1rem 0;
-        font-size: 1.5rem;
+        font-size: 2rem;
         font-weight: 600;
+        line-height: 1.3;
     }
     
-    .blog-post-title a {
+    .latest-post-title a {
         color: #fff;
         text-decoration: none;
         transition: color 0.3s ease;
     }
     
-    .blog-post-title a:hover {
+    .latest-post-title a:hover {
         color: #00E1FF;
         text-shadow: 0 0 8px rgba(0, 225, 255, 0.3);
+    }
+    
+    .latest-post-meta {
+        display: flex;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+        font-size: 0.9rem;
+        opacity: 0.8;
+    }
+    
+    .latest-post-excerpt {
+        margin-bottom: 1.5rem;
+        line-height: 1.7;
+        opacity: 0.9;
+        font-size: 1.1rem;
+    }
+    
+    .latest-post-link {
+        margin-bottom: 3rem;
     }
     
     .blog-post-meta {
@@ -260,10 +280,30 @@
         opacity: 0.7;
     }
     
+    .view-all-posts {
+        margin-top: 2rem;
+        text-align: center;
+    }
+    
+    .view-all-link {
+        color: #00E1FF;
+        text-decoration: none;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        display: inline-flex;
+        align-items: center;
+        font-size: 1.1rem;
+    }
+    
+    .view-all-link:hover {
+        text-shadow: 0 0 8px rgba(0, 225, 255, 0.5);
+        transform: translateX(4px);
+    }
+    
     /* Mobile styles */
     @media (max-width: 720px) {
         .blog-section-wrapper {
-            padding: 2rem 1rem;
+            padding: 2rem;
         }
         
         .blog-section {
@@ -275,17 +315,17 @@
             margin-bottom: 1.5rem;
         }
         
-        .blog-post-card {
-            padding: 1.5rem;
+        .latest-post-title {
+            font-size: 1.5rem;
         }
         
-        .blog-post-title {
-            font-size: 1.25rem;
-        }
-        
-        .blog-post-meta {
+        .latest-post-meta {
             flex-direction: column;
             gap: 0.5rem;
+        }
+        
+        .latest-post-excerpt {
+            font-size: 1rem;
         }
         
         .blog-post-item {
@@ -300,7 +340,7 @@
     /* Ensure responsive behavior for smaller screens */
     @media (max-width: 480px) {
         .blog-section-wrapper {
-            padding: 2rem 1rem;
+            padding: 2rem;
         }
         
         .blog-section {

@@ -25,6 +25,7 @@ from smarter_dev.web.models import BlogPost
 from smarter_dev.shared.database import get_db_session_context
 
 import markdown
+import re
 
 templates = Jinja2Templates(directory="templates")
 
@@ -34,7 +35,31 @@ def markdown_filter(text: str) -> str:
     md = markdown.Markdown(extensions=['codehilite', 'fenced_code', 'tables', 'toc'])
     return md.convert(text)
 
+def strip_markdown_filter(text: str, max_length: int = 200) -> str:
+    """Strip markdown formatting and create a text excerpt."""
+    # Remove markdown headers
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+    # Remove markdown links but keep link text
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+    # Remove markdown emphasis
+    text = re.sub(r'[*_]{1,2}([^*_]+)[*_]{1,2}', r'\1', text)
+    # Remove code blocks and inline code
+    text = re.sub(r'```[^`]*```', '', text, flags=re.DOTALL)
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+    # Remove blockquotes
+    text = re.sub(r'^>\s+', '', text, flags=re.MULTILINE)
+    # Clean up multiple whitespace
+    text = re.sub(r'\s+', ' ', text)
+    text = text.strip()
+    
+    # Truncate to max_length
+    if len(text) > max_length:
+        text = text[:max_length].rsplit(' ', 1)[0] + '...'
+    
+    return text
+
 templates.env.filters['markdown'] = markdown_filter
+templates.env.filters['strip_markdown'] = strip_markdown_filter
 
 async def homepage(request: Request):
     try:
@@ -72,11 +97,40 @@ async def homepage(request: Request):
 async def discord_redirect(request: Request):
     return RedirectResponse(url="https://discord.gg/de8kajxbYS", status_code=302)
 
+async def about_us(request: Request) -> HTMLResponse:
+    """Display the About Us page."""
+    return templates.TemplateResponse(request, "about.html", {"title": "About Us"})
+
 async def not_found(request: Request, exc: HTTPException):
     return templates.TemplateResponse(request, "404.html", status_code=404)
 
 async def server_error(request: Request, exc: HTTPException):
     return templates.TemplateResponse(request, "500.html", status_code=500)
+
+
+async def blog_list(request: Request) -> HTMLResponse:
+    """Display a list of all published blog posts."""
+    try:
+        async with get_db_session_context() as session:
+            # Get all published blog posts
+            result = await session.execute(
+                select(BlogPost)
+                .where(BlogPost.is_published == True)
+                .order_by(BlogPost.published_at.desc())
+            )
+            blog_posts = result.scalars().all()
+            
+            return templates.TemplateResponse(
+                request,
+                "blog_list.html",
+                {
+                    "blog_posts": blog_posts,
+                    "title": "Blog"
+                }
+            )
+    
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 async def blog_post_detail(request: Request) -> HTMLResponse:
@@ -112,6 +166,8 @@ async def blog_post_detail(request: Request) -> HTMLResponse:
 routes = [
     Route("/", homepage),
     Route("/discord", discord_redirect),
+    Route("/about", about_us),
+    Route("/blog", blog_list),
     Route("/blog/{slug}", blog_post_detail),
 ]
 
