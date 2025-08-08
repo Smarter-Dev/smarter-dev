@@ -187,7 +187,7 @@
                             </li>
                             {% endif %}
                             
-                            {% for p in range(max(1, page - 2), min(total_pages + 1, page + 3)) %}
+                            {% for p in range([1, page - 2]|max, [total_pages + 1, page + 3]|min) %}
                             <li class="page-item {% if p == page %}active{% endif %}">
                                 <a class="page-link" href="?page={{ p }}{% if filters.guild_id %}&guild_id={{ filters.guild_id }}{% endif %}{% if filters.user_id %}&user_id={{ filters.user_id }}{% endif %}{% if filters.interaction_type %}&interaction_type={{ filters.interaction_type }}{% endif %}{% if filters.search %}&search={{ filters.search }}{% endif %}{% if filters.resolved_only %}&resolved_only=true{% endif %}">
                                     {{ p }}
