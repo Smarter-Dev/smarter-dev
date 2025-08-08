@@ -218,6 +218,12 @@ async def join_squad(
         raise create_secure_not_found_error("Squad")
     except DatabaseOperationError as e:
         raise create_database_error(e)
+    except Exception as e:
+        # Log unexpected errors for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Unexpected error in join_squad: {e}", exc_info=True)
+        raise create_database_error(e)
 
 
 @router.delete("/leave", response_model=SuccessResponse)

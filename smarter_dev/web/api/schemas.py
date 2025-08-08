@@ -268,19 +268,47 @@ class SquadJoinRequest(BaseAPIModel):
     """Request model for joining a squad."""
     
     user_id: str = Field(description="Discord user ID")
-    username: Optional[str] = Field(None, description="Discord username for transaction records")
+    username: Optional[str] = Field(None, max_length=100, description="Discord username for transaction records")
     
     @field_validator('user_id')
     @classmethod
     def validate_user_id(cls, v: str) -> str:
         """Validate Discord user ID."""
+        if not v or not v.strip():
+            raise ValueError("User ID cannot be empty")
+        
+        v = v.strip()
+        
         try:
             user_id_int = int(v)
             if user_id_int <= 0:
                 raise ValueError("User ID must be positive")
+            # Discord IDs should be reasonable length (snowflakes are typically 17-19 digits)
+            if len(v) < 10 or len(v) > 20:
+                raise ValueError("User ID length is invalid for Discord snowflake")
             return v
-        except ValueError:
-            raise ValueError("Invalid Discord user ID format")
+        except ValueError as e:
+            if "invalid literal" in str(e).lower():
+                raise ValueError("User ID must contain only digits")
+            raise e
+    
+    @field_validator('username')
+    @classmethod
+    def validate_username(cls, v: Optional[str]) -> Optional[str]:
+        """Validate Discord username."""
+        if v is None:
+            return v
+        
+        # Strip whitespace
+        v = v.strip()
+        if not v:
+            return None
+        
+        # Discord usernames can contain various characters, be permissive
+        if len(v) > 100:
+            raise ValueError("Username is too long (max 100 characters)")
+        
+        return v
 
 
 class SquadLeaveRequest(BaseAPIModel):
