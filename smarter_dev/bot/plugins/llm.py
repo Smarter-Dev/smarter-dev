@@ -15,6 +15,7 @@ from typing import List, Optional, TYPE_CHECKING
 
 from smarter_dev.bot.agent import TLDRAgent, DiscordMessage, rate_limiter
 from smarter_dev.bot.utils.messages import gather_message_context
+from smarter_dev.bot.views.tldr_views import TLDRShareView
 
 if TYPE_CHECKING:
     pass
@@ -258,8 +259,25 @@ async def tldr_command(ctx: lightbulb.Context) -> None:
         user_username=ctx.user.display_name or ctx.user.username
     )
     
-    # Edit the deferred response with the actual content
-    await ctx.edit_last_response(summary)
+    # Check if this is an error message or successful summary
+    is_error = summary.startswith("🕒") or summary.startswith("⚠️") or summary.startswith("❌") or summary.startswith("🔄") or summary.startswith("🌐") or summary.startswith("📄")
+    
+    if is_error:
+        # For error messages, don't include share button
+        await ctx.edit_last_response(summary)
+    else:
+        # For successful summaries, add share button
+        share_view = TLDRShareView(
+            summary_content=summary,
+            user_id=str(ctx.user.id),
+            message_count=len(messages)
+        )
+        
+        # Edit the deferred response with the content and share button
+        await ctx.edit_last_response(
+            content=summary,
+            components=share_view.build_components()
+        )
     
     logger.info(f"TLDR command used by {ctx.user.display_name or ctx.user.username} ({ctx.user.id}): requested {message_count} messages, processed {len(messages)}")
 
