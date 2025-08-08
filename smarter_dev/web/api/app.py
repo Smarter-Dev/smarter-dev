@@ -100,14 +100,33 @@ api = FastAPI(
     openapi_url=openapi_url
 )
 
-# Request ID middleware
+# Request ID and debug middleware
 @api.middleware("http")
 async def add_request_id_middleware(request: Request, call_next):
     """Add request ID to request state for tracking."""
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
     request.state.request_id = request_id
     
+    # Debug logging for squad join requests
+    if "squad" in str(request.url) and request.method == "POST":
+        body = b""
+        if hasattr(request, "_body"):
+            body = request._body
+        else:
+            # Try to read body
+            try:
+                body = await request.body()
+            except:
+                pass
+        
+        logger.error(f"DEBUG MIDDLEWARE: POST {request.url}, method={request.method}, body={body[:500]}, headers={dict(request.headers)}")
+    
     response = await call_next(request)
+    
+    # Debug logging for failed squad join responses
+    if "squad" in str(request.url) and request.method == "POST" and response.status_code >= 400:
+        logger.error(f"DEBUG MIDDLEWARE RESPONSE: status={response.status_code}, response_headers={dict(response.headers)}")
+    
     response.headers["x-request-id"] = request_id
     return response
 
