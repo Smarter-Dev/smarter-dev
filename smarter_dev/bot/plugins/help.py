@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import List, Optional, TYPE_CHECKING
 
 from smarter_dev.bot.agent import HelpAgent, DiscordMessage, rate_limiter
+from smarter_dev.bot.utils.messages import gather_message_context
 
 if TYPE_CHECKING:
     pass
@@ -27,43 +28,6 @@ plugin = lightbulb.Plugin("help")
 # Global help agent instance
 help_agent = HelpAgent()
 
-
-async def gather_message_context(
-    bot: hikari.GatewayBot, 
-    channel_id: int, 
-    limit: int = 5
-) -> List[DiscordMessage]:
-    """Gather recent messages from a channel for context.
-    
-    Args:
-        bot: Discord bot instance
-        channel_id: Channel to gather messages from
-        limit: Number of recent messages to gather
-        
-    Returns:
-        List[DiscordMessage]: Recent messages for context
-    """
-    try:
-        messages = []
-        async for message in bot.rest.fetch_messages(channel_id).limit(limit):
-            # Skip bot messages and system messages
-            if message.author.is_bot or message.type != hikari.MessageType.DEFAULT:
-                continue
-                
-            # Convert to our message format
-            discord_msg = DiscordMessage(
-                author=message.author.display_name or message.author.username,
-                timestamp=message.created_at.replace(tzinfo=timezone.utc),
-                content=message.content or ""
-            )
-            messages.append(discord_msg)
-        
-        # Return in chronological order (oldest first)
-        return list(reversed(messages))
-        
-    except Exception as e:
-        logger.warning(f"Failed to gather message context: {e}")
-        return []
 
 
 async def store_conversation(
