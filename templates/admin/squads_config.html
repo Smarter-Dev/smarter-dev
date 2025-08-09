@@ -73,12 +73,12 @@
                                             Actions
                                         </button>
                                         <ul class="dropdown-menu">
-                                            <li><a class="dropdown-item" href="#" onclick="editSquad('{{ squad.id }}')">Edit</a></li>
-                                            <li><a class="dropdown-item" href="#" onclick="toggleSquad('{{ squad.id }}', {{ 'false' if squad.is_active else 'true' }})">
+                                            <li><a class="dropdown-item" href="#" onclick="editSquad({{ squad.id | tojson }})">Edit</a></li>
+                                            <li><a class="dropdown-item" href="#" onclick="toggleSquad({{ squad.id | tojson }}, {{ (not squad.is_active) | lower | tojson }})">
                                                 {{ 'Deactivate' if squad.is_active else 'Activate' }}
                                             </a></li>
                                             <li><hr class="dropdown-divider"></li>
-                                            <li><a class="dropdown-item text-danger" href="#" onclick="deleteSquad('{{ squad.id }}')">Delete</a></li>
+                                            <li><a class="dropdown-item text-danger" href="#" onclick="deleteSquad({{ squad.id | tojson }})">Delete</a></li>
                                         </ul>
                                     </div>
                                 </div>
