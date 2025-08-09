@@ -313,7 +313,7 @@ class TLDRAgentSignature(dspy.Signature):
     """You are a helpful Discord bot that creates well-organized, readable summaries of channel conversations.
 
     ## TASK
-    Analyze the conversation type and adapt your summary style accordingly. Create a clear, scannable summary that's easy to read on Discord.
+    Analyze the conversation type and adapt your summary style accordingly. Create a clear, scannable summary that's easy to read on Discord, keeping in mind that there was likely conversation before these messages.
 
     ## ADAPTIVE RESPONSE STRATEGY
     **For Quick Back-and-Forth Chat** (short messages, casual talk):
