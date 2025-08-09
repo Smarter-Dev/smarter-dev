@@ -1804,7 +1804,7 @@ async def forum_agent_analytics(request: Request) -> Response:
             "total_responses": stats['total_responses'], 
             "response_rate": stats['response_rate'],
             "total_tokens": stats['total_tokens_used'],  # Template expects 'total_tokens'
-            "average_confidence": stats['average_confidence'] if stats['average_confidence'] is not None else "N/A",
+            "avg_confidence": stats['average_confidence'],  # Template expects 'avg_confidence'
             "average_response_time_ms": stats['average_response_time_ms'] if stats['average_response_time_ms'] is not None else "N/A",
             "agent": analytics['agent']
         }
