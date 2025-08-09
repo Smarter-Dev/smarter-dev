@@ -1761,7 +1761,7 @@ class ForumAgentOperations:
             recent_responses_result = await self.session.execute(
                 select(ForumAgentResponse)
                 .where(ForumAgentResponse.agent_id == agent_id)
-                .order_by(ForumAgentResponse.responded_at.desc())
+                .order_by(ForumAgentResponse.created_at.desc())
                 .limit(20)
             )
             recent_responses_raw = recent_responses_result.scalars().all()
