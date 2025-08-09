@@ -167,6 +167,26 @@ class ForumAgentService(BaseService):
                 'responded': responded
             }
             
+            # Debug logging for API data
+            logger.debug(f"FORUM API DEBUG - Recording response for agent {agent.get('name', 'Unknown')}")
+            logger.debug(f"FORUM API DEBUG - Post title: '{response_data['post_title']}'")
+            logger.debug(f"FORUM API DEBUG - Post content: '{response_data['post_content'][:100]}...' ({len(response_data['post_content'])} chars)")
+            logger.debug(f"FORUM API DEBUG - Author: '{response_data['author_display_name']}'")
+            logger.debug(f"FORUM API DEBUG - Tokens used: {response_data['tokens_used']}")
+            logger.debug(f"FORUM API DEBUG - Decision: '{decision_reason[:100]}...'")
+            logger.debug(f"FORUM API DEBUG - Confidence: {confidence_score}")
+            logger.debug(f"FORUM API DEBUG - Responded: {responded}")
+            
+            # Data validation before API call
+            if not response_data['post_content'] and not response_data['post_title']:
+                logger.warning(f"FORUM API WARNING - Both post_content and post_title are empty for agent {agent.get('name', 'Unknown')}")
+            
+            if response_data['author_display_name'] == 'Unknown':
+                logger.warning(f"FORUM API WARNING - Author display name is 'Unknown' for agent {agent.get('name', 'Unknown')}")
+            
+            if response_data['tokens_used'] == 0:
+                logger.warning(f"FORUM API WARNING - Zero tokens used for agent {agent.get('name', 'Unknown')} - this may indicate token extraction issues")
+            
             response = await self._api_client.post(
                 f"/guilds/{agent['guild_id']}/forum-agents/{agent['id']}/responses",
                 json_data=response_data

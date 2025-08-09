@@ -27,6 +27,7 @@ from smarter_dev.web.admin.views import (
     forum_agent_delete,
     forum_agent_toggle,
     forum_agent_analytics,
+    get_forum_response_details,
     forum_agents_bulk
 )
 
@@ -54,6 +55,7 @@ admin_routes = [
     Route("/guilds/{guild_id}/forum-agents/{agent_id}/delete", admin_required(forum_agent_delete), methods=["POST"], name="admin_forum_agent_delete"),
     Route("/guilds/{guild_id}/forum-agents/{agent_id}/toggle", admin_required(forum_agent_toggle), methods=["POST"], name="admin_forum_agent_toggle"),
     Route("/guilds/{guild_id}/forum-agents/{agent_id}/analytics", admin_required(forum_agent_analytics), name="admin_forum_agent_analytics"),
+    Route("/api/forum-responses/{response_id}/details", admin_required(get_forum_response_details), name="api_forum_response_details"),
     Route("/guilds/{guild_id}/forum-agents/bulk", admin_required(forum_agents_bulk), methods=["POST"], name="admin_forum_agents_bulk"),
     
     # API key management

@@ -1757,13 +1757,46 @@ class ForumAgentOperations:
             )
             avg_response_time = avg_response_time_result.scalar()
             
+            # Get recent responses for activity table
+            recent_responses_result = await self.session.execute(
+                select(ForumAgentResponse)
+                .where(ForumAgentResponse.agent_id == agent_id)
+                .order_by(ForumAgentResponse.responded_at.desc())
+                .limit(20)
+            )
+            recent_responses_raw = recent_responses_result.scalars().all()
+            
+            # Format recent responses for template
+            from types import SimpleNamespace
+            recent_responses = []
+            for response in recent_responses_raw:
+                # Convert to object with attributes for template compatibility
+                response_obj = SimpleNamespace(
+                    id=str(response.id),
+                    post_title=response.post_title or "Untitled",
+                    post_author=response.author_display_name or "Unknown",  # Fixed field name
+                    confidence_score=response.confidence_score,
+                    responded=response.responded,
+                    tokens_used=response.tokens_used or 0,
+                    created_at=response.created_at,  # Match template expectation
+                    post_tags=response.post_tags or [],
+                    response_content=response.response_content[:100] if response.response_content else None,
+                    decision_reasoning=response.decision_reason,
+                    full_response_content=response.response_content
+                )
+                recent_responses.append(response_obj)
+            
             return {
                 "agent": {
                     "id": str(agent.id),
                     "name": agent.name,
+                    "system_prompt": agent.system_prompt,
                     "is_active": agent.is_active,
                     "created_at": agent.created_at,
                     "updated_at": agent.updated_at,
+                    "response_threshold": agent.response_threshold,
+                    "max_responses_per_hour": agent.max_responses_per_hour,
+                    "created_by": agent.created_by,
                 },
                 "statistics": {
                     "total_evaluations": total_responses,
@@ -1772,7 +1805,8 @@ class ForumAgentOperations:
                     "total_tokens_used": total_tokens,
                     "average_confidence": avg_confidence,
                     "average_response_time_ms": avg_response_time,
-                }
+                },
+                "recent_responses": recent_responses
             }
             
         except Exception as e:

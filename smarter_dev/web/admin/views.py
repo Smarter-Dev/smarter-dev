@@ -79,10 +79,19 @@ async def dashboard(request: Request) -> Response:
             total_conversations = total_conversations_result.scalar() or 0
             
             # Total tokens used by help agent
-            total_tokens_result = await session.execute(
+            help_tokens_result = await session.execute(
                 select(func.coalesce(func.sum(HelpConversation.tokens_used), 0))
             )
-            total_tokens = total_tokens_result.scalar() or 0
+            help_tokens = help_tokens_result.scalar() or 0
+            
+            # Total tokens used by forum agents
+            forum_tokens_result = await session.execute(
+                select(func.coalesce(func.sum(ForumAgentResponse.tokens_used), 0))
+            )
+            forum_tokens = forum_tokens_result.scalar() or 0
+            
+            # Combined total tokens
+            total_tokens = help_tokens + forum_tokens
             
             # Conversations today
             from datetime import datetime, timezone
@@ -135,6 +144,8 @@ async def dashboard(request: Request) -> Response:
                 "total_bytes": total_bytes,
                 "total_conversations": total_conversations,
                 "total_tokens": total_tokens,
+                "help_tokens": help_tokens,
+                "forum_tokens": forum_tokens,
                 "conversations_today": conversations_today,
                 "avg_response_time_ms": avg_response_time_ms
             }
@@ -154,6 +165,8 @@ async def dashboard(request: Request) -> Response:
                 "total_bytes": 0,
                 "total_conversations": 0,
                 "total_tokens": 0,
+                "help_tokens": 0,
+                "forum_tokens": 0,
                 "conversations_today": 0,
                 "avg_response_time_ms": None
             }
@@ -172,6 +185,8 @@ async def dashboard(request: Request) -> Response:
                 "total_bytes": 0,
                 "total_conversations": 0,
                 "total_tokens": 0,
+                "help_tokens": 0,
+                "forum_tokens": 0,
                 "conversations_today": 0,
                 "avg_response_time_ms": None
             }
@@ -1773,10 +1788,33 @@ async def forum_agent_analytics(request: Request) -> Response:
                 }
                 return templates.TemplateResponse("admin/error.html", context, status_code=404)
         
+        # Handle empty analytics (agent not found)
+        if not analytics or 'agent' not in analytics:
+            context = {
+                "request": request,
+                "error": f"Forum agent {agent_id} not found in guild {guild_id}",
+                "title": "Error"
+            }
+            return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        
+        # Flatten and adapt analytics structure for template convenience
+        stats = analytics['statistics']
+        flattened_analytics = {
+            "total_evaluations": stats['total_evaluations'],
+            "total_responses": stats['total_responses'], 
+            "response_rate": stats['response_rate'],
+            "total_tokens": stats['total_tokens_used'],  # Template expects 'total_tokens'
+            "average_confidence": stats['average_confidence'] if stats['average_confidence'] is not None else "N/A",
+            "average_response_time_ms": stats['average_response_time_ms'] if stats['average_response_time_ms'] is not None else "N/A",
+            "agent": analytics['agent']
+        }
+        
         context = {
             "request": request,
             "guild": guild_info,
-            "analytics": analytics,
+            "agent": analytics['agent'],  # Extract agent data for template
+            "analytics": flattened_analytics,  # Flattened for easier template access
+            "recent_responses": analytics.get('recent_responses', []),  # Add recent responses for activity table
             "title": f"Analytics: {analytics['agent']['name']}",
         }
         
@@ -1790,13 +1828,73 @@ async def forum_agent_analytics(request: Request) -> Response:
         }
         return templates.TemplateResponse("admin/error.html", context, status_code=404)
     except Exception as e:
+        import traceback
         logger.error(f"Error getting forum agent analytics for {agent_id}: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         context = {
             "request": request,
             "error": "Failed to load analytics",
             "title": "Error"
         }
         return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def get_forum_response_details(request: Request) -> Response:
+    """Get detailed information about a forum agent response."""
+    response_id = request.path_params["response_id"]
+    
+    try:
+        async with get_db_session_context() as session:
+            forum_ops = ForumAgentOperations(session)
+            
+            # Get the forum response
+            result = await session.execute(
+                select(ForumAgentResponse, ForumAgent)
+                .join(ForumAgent, ForumAgentResponse.agent_id == ForumAgent.id)
+                .where(ForumAgentResponse.id == UUID(response_id))
+            )
+            row = result.first()
+            
+            if not row:
+                return Response(
+                    content='{"error": "Response not found"}',
+                    media_type="application/json",
+                    status_code=404
+                )
+            
+            response, agent = row
+            
+            # Format the response data
+            response_data = {
+                "id": str(response.id),
+                "agent_name": agent.name,
+                "post_title": response.post_title or "Untitled",
+                "post_content": response.post_content or "",
+                "author_display_name": response.author_display_name or "Unknown",
+                "post_tags": response.post_tags or [],
+                "confidence_score": response.confidence_score,
+                "decision_reasoning": response.decision_reason or "",
+                "responded": response.responded,
+                "response_content": response.response_content or "",
+                "tokens_used": response.tokens_used or 0,
+                "response_time_ms": response.response_time_ms,
+                "created_at": response.created_at.isoformat() if response.created_at else "",
+                "responded_at": response.responded_at.isoformat() if response.responded_at else ""
+            }
+            
+            import json
+            return Response(
+                content=json.dumps(response_data),
+                media_type="application/json"
+            )
+            
+    except Exception as e:
+        logger.error(f"Error getting response details for {response_id}: {e}")
+        return Response(
+            content='{"error": "Failed to load response details"}',
+            media_type="application/json",
+            status_code=500
+        )
 
 
 async def forum_agents_bulk(request: Request) -> Response:
