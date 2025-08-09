@@ -591,17 +591,67 @@ class ForumMonitorAgent:
             post_context=post_context
         )
         
-        # Get token usage from DSPy prediction
+        # Get token usage from DSPy prediction with improved extraction
         tokens_used = 0
+        
+        # Try multiple approaches to extract tokens
         if hasattr(result, '_completions') and result._completions:
-            # Sum token usage from all completions
             for completion in result._completions:
-                if hasattr(completion, 'kwargs') and 'usage' in completion.kwargs:
-                    usage = completion.kwargs['usage']
+                # Method 1: Check kwargs.usage
+                if hasattr(completion, 'kwargs') and completion.kwargs:
+                    if 'usage' in completion.kwargs:
+                        usage = completion.kwargs['usage']
+                        if hasattr(usage, 'total_tokens'):
+                            tokens_used += usage.total_tokens
+                        elif isinstance(usage, dict):
+                            # Try different token field names
+                            if 'total_tokens' in usage:
+                                tokens_used += usage['total_tokens']
+                            elif 'totalTokens' in usage:
+                                tokens_used += usage['totalTokens']
+                            elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
+                                tokens_used += usage['prompt_tokens'] + usage['completion_tokens']
+                    
+                    # Method 2: Check for response metadata
+                    if 'response' in completion.kwargs:
+                        response_obj = completion.kwargs['response']
+                        if hasattr(response_obj, 'usage') and hasattr(response_obj.usage, 'total_tokens'):
+                            tokens_used += response_obj.usage.total_tokens
+                
+                # Method 3: Check completion object directly
+                if hasattr(completion, 'usage'):
+                    usage = completion.usage
                     if hasattr(usage, 'total_tokens'):
                         tokens_used += usage.total_tokens
                     elif isinstance(usage, dict) and 'total_tokens' in usage:
                         tokens_used += usage['total_tokens']
+        
+        # Debug token extraction with more detailed output
+        if tokens_used == 0:
+            print(f"FORUM DEBUG: No tokens extracted. Debugging completion structure:")
+            if hasattr(result, '_completions') and result._completions:
+                print(f"FORUM DEBUG: Found {len(result._completions)} completions")
+                for i, completion in enumerate(result._completions):
+                    print(f"FORUM DEBUG: Completion {i}:")
+                    print(f"  - Type: {type(completion)}")
+                    print(f"  - Has kwargs: {hasattr(completion, 'kwargs')}")
+                    if hasattr(completion, 'kwargs'):
+                        kwargs_keys = list(completion.kwargs.keys()) if completion.kwargs else []
+                        print(f"  - Kwargs keys: {kwargs_keys}")
+                        if 'usage' in kwargs_keys:
+                            usage = completion.kwargs['usage']
+                            print(f"  - Usage type: {type(usage)}")
+                            if isinstance(usage, dict):
+                                print(f"  - Usage keys: {list(usage.keys())}")
+                            else:
+                                print(f"  - Usage attributes: {dir(usage)}")
+                    print(f"  - Has direct usage: {hasattr(completion, 'usage')}")
+                    if hasattr(completion, 'usage'):
+                        print(f"  - Direct usage: {completion.usage}")
+            else:
+                print(f"FORUM DEBUG: No completions found in result")
+        else:
+            print(f"FORUM DEBUG: Successfully extracted {tokens_used} tokens")
         
         # Ensure confidence is bounded between 0.0 and 1.0
         confidence = max(0.0, min(1.0, float(result.confidence)))

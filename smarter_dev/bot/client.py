@@ -373,10 +373,16 @@ async def extract_forum_post_data(bot: lightbulb.BotApp, thread, initial_message
         attachments = []
         if hasattr(initial_message, 'attachments'):
             attachments = [getattr(att, 'filename', 'unknown') for att in initial_message.attachments]
+        
+        # Debug extracted data
+        logger.debug(f"FORUM EXTRACT DEBUG: Content: '{content[:100]}...' ({len(content)} chars)")
+        logger.debug(f"FORUM EXTRACT DEBUG: Author: '{author_name}'")
+        logger.debug(f"FORUM EXTRACT DEBUG: Attachments: {len(attachments)}")
     else:
         content = ''
         author_name = 'Unknown'
         attachments = []
+        logger.warning(f"FORUM EXTRACT DEBUG: No initial message provided - content and author will be empty/unknown")
     
     # Extract tags if available
     tags = []
@@ -514,11 +520,18 @@ async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:
         initial_message = None
         try:
             # Get the first message in the thread (the forum post)
+            # Messages are returned in reverse chronological order (newest first)
             messages = await bot.rest.fetch_messages(event.thread.id)
+            logger.debug(f"FORUM DEBUG: Fetched {len(messages) if messages else 0} messages for thread {event.thread.id}")
+            
             if messages:
-                initial_message = messages[0]
+                # Get the last message (oldest, which should be the initial forum post)
+                initial_message = messages[-1]
+                logger.debug(f"FORUM DEBUG: Initial message found - Author: {getattr(initial_message.author, 'display_name', 'Unknown')}, Content length: {len(getattr(initial_message, 'content', ''))}")
+            else:
+                logger.warning(f"FORUM DEBUG: No messages found in thread {event.thread.id}")
         except Exception as e:
-            logger.debug(f"Could not fetch initial message for thread {event.thread.id}: {e}")
+            logger.error(f"Could not fetch initial message for thread {event.thread.id}: {e}")
         
         # Log thread details for debugging
         logger.warning(f"FORUM TAG DEBUG - Thread details: id={event.thread.id}, name={event.thread.name}")
