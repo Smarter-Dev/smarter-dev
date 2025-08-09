@@ -1,0 +1,326 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ agent.name }} Analytics - {{ guild.name }}{% endblock %}
+
+{% block page_title %}{{ agent.name }} Analytics{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/forum-agents">Forum Agents</a></li>
+<li class="breadcrumb-item active">{{ agent.name }} Analytics</li>
+{% endblock %}
+
+{% block page_actions %}
+<div class="col-auto ms-auto d-print-none">
+    <div class="btn-list">
+        <a href="/admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/edit" class="btn btn-primary">
+            <svg class="icon me-2" width="16" height="16">
+                <use xlink:href="#tabler-edit"></use>
+            </svg>
+            Edit Agent
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Agent Info Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center">
+                        <div class="avatar avatar-lg bg-success text-white me-3">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-robot"></use>
+                            </svg>
+                        </div>
+                        <div>
+                            <h2 class="mb-1">{{ agent.name }}</h2>
+                            <div class="text-muted">
+                                {% if agent.description %}{{ agent.description }}{% else %}AI Forum Agent{% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-end">
+                        {% if agent.is_active %}
+                        <span class="badge bg-success fs-6">Active</span>
+                        {% else %}
+                        <span class="badge bg-secondary fs-6">Inactive</span>
+                        {% endif %}
+                        <div class="text-muted small mt-1">
+                            Created {{ agent.created_at.strftime("%Y-%m-%d") }}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Performance Overview -->
+<div class="row row-deck row-cards mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="subheader">Total Evaluations</div>
+                </div>
+                <div class="h1 mb-3">{{ "{:,}".format(analytics.total_evaluations) }}</div>
+                <div class="text-muted">Posts evaluated</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="subheader">Responses Sent</div>
+                </div>
+                <div class="h1 mb-3">{{ "{:,}".format(analytics.total_responses) }}</div>
+                <div class="text-muted">
+                    {% if analytics.total_evaluations > 0 %}
+                    {{ ((analytics.total_responses / analytics.total_evaluations) * 100)|round(1) }}% response rate
+                    {% else %}
+                    No evaluations yet
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="subheader">Avg Confidence</div>
+                </div>
+                <div class="h1 mb-3">
+                    {% if analytics.avg_confidence %}
+                    {{ (analytics.avg_confidence * 100)|round }}%
+                    {% else %}
+                    N/A
+                    {% endif %}
+                </div>
+                <div class="text-muted">Decision confidence</div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-sm-6 col-lg-3">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="subheader">Tokens Used</div>
+                </div>
+                <div class="h1 mb-3">{{ "{:,}".format(analytics.total_tokens) }}</div>
+                <div class="text-muted">Total consumption</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Configuration Summary -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Agent Configuration</h3>
+            </div>
+            <div class="card-body">
+                <dl class="row">
+                    <dt class="col-sm-5">Response Threshold</dt>
+                    <dd class="col-sm-7">{{ (agent.response_threshold * 100)|int }}%</dd>
+                    
+                    <dt class="col-sm-5">Rate Limit</dt>
+                    <dd class="col-sm-7">{{ agent.max_responses_per_hour }} responses/hour</dd>
+                    
+                    <dt class="col-sm-5">Monitored Forums</dt>
+                    <dd class="col-sm-7">
+                        {% if agent.monitored_forums %}
+                        {{ agent.monitored_forums|length }} specific channels
+                        {% else %}
+                        All forum channels
+                        {% endif %}
+                    </dd>
+                    
+                    <dt class="col-sm-5">Created By</dt>
+                    <dd class="col-sm-7">{{ agent.created_by }}</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">System Prompt</h3>
+            </div>
+            <div class="card-body">
+                <div class="form-control" style="height: 200px; overflow-y: auto; white-space: pre-wrap;">{{ agent.system_prompt }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Activity -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Recent Activity</h3>
+                <div class="card-actions">
+                    <div class="dropdown">
+                        <a href="#" class="btn btn-outline-primary btn-sm dropdown-toggle" data-bs-toggle="dropdown">
+                            Filter by time
+                        </a>
+                        <div class="dropdown-menu">
+                            <a href="?period=24h" class="dropdown-item">Last 24 hours</a>
+                            <a href="?period=7d" class="dropdown-item">Last 7 days</a>
+                            <a href="?period=30d" class="dropdown-item">Last 30 days</a>
+                            <a href="?" class="dropdown-item">All time</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>Post Title</th>
+                            <th>Author</th>
+                            <th>Confidence</th>
+                            <th>Decision</th>
+                            <th>Tokens</th>
+                            <th>Time</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for response in recent_responses %}
+                        <tr>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div>
+                                        <strong>{{ response.post_title[:50] }}{% if response.post_title|length > 50 %}...{% endif %}</strong>
+                                        {% if response.post_tags %}
+                                        <div class="mt-1">
+                                            {% for tag in response.post_tags[:3] %}
+                                            <span class="badge badge-outline text-muted me-1">{{ tag }}</span>
+                                            {% endfor %}
+                                            {% if response.post_tags|length > 3 %}
+                                            <span class="text-muted small">+{{ response.post_tags|length - 3 }} more</span>
+                                            {% endif %}
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="text-truncate" style="max-width: 100px;">
+                                    {{ response.author_display_name }}
+                                </div>
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div class="progress me-2" style="width: 60px;">
+                                        <div class="progress-bar" style="width: {{ (response.confidence_score * 100)|int }}%"></div>
+                                    </div>
+                                    <span class="text-muted small">{{ (response.confidence_score * 100)|int }}%</span>
+                                </div>
+                            </td>
+                            <td>
+                                {% if response.responded %}
+                                <span class="badge bg-success">Responded</span>
+                                {% else %}
+                                <span class="badge bg-secondary">No Response</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <span class="text-muted">{{ "{:,}".format(response.tokens_used) }}</span>
+                            </td>
+                            <td>
+                                <span class="text-muted" title="{{ response.created_at.isoformat() }}">
+                                    {{ response.created_at.strftime("%m/%d %H:%M") }}
+                                </span>
+                            </td>
+                            <td>
+                                <div class="btn-list flex-nowrap">
+                                    <button class="btn btn-sm btn-outline-primary" onclick="viewResponseDetails('{{ response.id }}')">
+                                        <svg class="icon" width="16" height="16">
+                                            <use xlink:href="#tabler-eye"></use>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="text-center text-muted py-4">
+                                No activity recorded yet. The agent will appear here once it starts evaluating posts.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% if recent_responses|length >= 20 %}
+            <div class="card-footer text-center">
+                <a href="?limit=100" class="btn btn-outline-primary">Load More Results</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Response Details Modal -->
+<div class="modal modal-blur fade" id="responseModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Agent Response Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="responseModalBody">
+                <!-- Content loaded via JavaScript -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function viewResponseDetails(responseId) {
+    // This would typically fetch the response details via AJAX
+    // For now, show a placeholder
+    const modalBody = document.getElementById('responseModalBody');
+    modalBody.innerHTML = `
+        <div class="text-center text-muted py-4">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <div class="mt-2">Loading response details...</div>
+        </div>
+    `;
+    
+    const modal = new bootstrap.Modal(document.getElementById('responseModal'));
+    modal.show();
+    
+    // Simulate loading details
+    setTimeout(() => {
+        modalBody.innerHTML = `
+            <div class="alert alert-info">
+                <strong>Feature Coming Soon:</strong> Detailed response analysis will be available in a future update.
+                <br><br>
+                Response ID: <code>${responseId}</code>
+            </div>
+        `;
+    }, 1000);
+}
+</script>
+{% endblock %}

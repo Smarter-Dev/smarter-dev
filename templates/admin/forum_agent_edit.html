@@ -1,0 +1,181 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Edit Forum Agent - {{ guild.name }}{% endblock %}
+
+{% block page_title %}Edit Forum Agent{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/forum-agents">Forum Agents</a></li>
+<li class="breadcrumb-item active">Edit {{ agent.name }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8 col-lg-6">
+        <form method="POST">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">
+                        <svg class="icon me-2" width="24" height="24">
+                            <use xlink:href="#tabler-robot"></use>
+                        </svg>
+                        Edit Forum Agent
+                    </h3>
+                    <div class="card-actions">
+                        {% if agent.is_active %}
+                        <span class="badge bg-success">Active</span>
+                        {% else %}
+                        <span class="badge bg-secondary">Inactive</span>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="card-body">
+                    <!-- Agent Name -->
+                    <div class="mb-3">
+                        <label class="form-label required">Agent Name</label>
+                        <input type="text" name="name" class="form-control" value="{{ agent.name }}" required maxlength="100">
+                        <div class="form-hint">Give your agent a descriptive name</div>
+                    </div>
+
+                    <!-- Description -->
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <input type="text" name="description" class="form-control" value="{{ agent.description or '' }}" maxlength="500">
+                        <div class="form-hint">Optional description for admin reference</div>
+                    </div>
+
+                    <!-- System Prompt -->
+                    <div class="mb-3">
+                        <label class="form-label required">System Prompt</label>
+                        <textarea name="system_prompt" class="form-control" rows="8" required>{{ agent.system_prompt }}</textarea>
+                        <div class="form-hint">Define what the agent should look for and how it should respond</div>
+                    </div>
+
+                    <!-- Monitored Forums -->
+                    <div class="mb-3">
+                        <label class="form-label">Monitored Forum Channels</label>
+                        <div id="forum-channels-container">
+                            {% if agent.monitored_forums %}
+                                {% for forum_id in agent.monitored_forums %}
+                                <div class="input-group mb-2">
+                                    <input type="text" name="monitored_forums[]" class="form-control" value="{{ forum_id }}">
+                                    <button class="btn btn-outline-danger" type="button" onclick="removeForumChannel(this)">
+                                        <svg class="icon" width="16" height="16">
+                                            <use xlink:href="#tabler-x"></use>
+                                        </svg>
+                                    </button>
+                                </div>
+                                {% endfor %}
+                            {% else %}
+                            <div class="input-group mb-2">
+                                <input type="text" name="monitored_forums[]" class="form-control" placeholder="Forum channel ID (e.g. 123456789)">
+                                <button class="btn btn-outline-danger" type="button" onclick="removeForumChannel(this)" style="display: none;">
+                                    <svg class="icon" width="16" height="16">
+                                        <use xlink:href="#tabler-x"></use>
+                                    </svg>
+                                </button>
+                            </div>
+                            {% endif %}
+                        </div>
+                        <button type="button" class="btn btn-outline-primary btn-sm" onclick="addForumChannel()">
+                            <svg class="icon me-1" width="16" height="16">
+                                <use xlink:href="#tabler-plus"></use>
+                            </svg>
+                            Add Another Channel
+                        </button>
+                        <div class="form-hint">Leave empty to monitor all forum channels</div>
+                    </div>
+
+                    <!-- Advanced Settings -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h4 class="card-title">Advanced Settings</h4>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Response Threshold</label>
+                                        <input type="range" name="response_threshold" class="form-range" min="0" max="1" step="0.1" value="{{ agent.response_threshold }}" oninput="updateThresholdValue(this.value)">
+                                        <div class="d-flex justify-content-between text-muted small">
+                                            <span>Low (0%)</span>
+                                            <span id="threshold-value">{{ (agent.response_threshold * 100)|int }}%</span>
+                                            <span>High (100%)</span>
+                                        </div>
+                                        <div class="form-hint">Confidence threshold for responding to posts</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Max Responses Per Hour</label>
+                                        <input type="number" name="max_responses_per_hour" class="form-control" min="1" max="100" value="{{ agent.max_responses_per_hour }}">
+                                        <div class="form-hint">Rate limit to prevent spam</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-check">
+                                    <input type="checkbox" name="is_active" class="form-check-input" {% if agent.is_active %}checked{% endif %}>
+                                    <span class="form-check-label">Agent is active</span>
+                                </label>
+                                <div class="form-hint">Active agents monitor and respond to forum posts</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer text-end">
+                    <div class="d-flex">
+                        <a href="/admin/guilds/{{ guild.id }}/forum-agents" class="btn btn-link">Cancel</a>
+                        <button type="submit" class="btn btn-primary ms-auto">
+                            <svg class="icon me-2" width="16" height="16">
+                                <use xlink:href="#tabler-device-floppy"></use>
+                            </svg>
+                            Save Changes
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function addForumChannel() {
+    const container = document.getElementById('forum-channels-container');
+    const div = document.createElement('div');
+    div.className = 'input-group mb-2';
+    div.innerHTML = `
+        <input type="text" name="monitored_forums[]" class="form-control" placeholder="Forum channel ID (e.g. 123456789)">
+        <button class="btn btn-outline-danger" type="button" onclick="removeForumChannel(this)">
+            <svg class="icon" width="16" height="16">
+                <use xlink:href="#tabler-x"></use>
+            </svg>
+        </button>
+    `;
+    container.appendChild(div);
+    updateRemoveButtons();
+}
+
+function removeForumChannel(button) {
+    button.parentElement.remove();
+    updateRemoveButtons();
+}
+
+function updateRemoveButtons() {
+    const removeButtons = document.querySelectorAll('#forum-channels-container .btn-outline-danger');
+    removeButtons.forEach((button, index) => {
+        button.style.display = removeButtons.length > 1 ? 'block' : 'none';
+    });
+}
+
+function updateThresholdValue(value) {
+    document.getElementById('threshold-value').textContent = Math.round(value * 100) + '%';
+}
+
+// Initialize remove button visibility
+document.addEventListener('DOMContentLoaded', updateRemoveButtons);
+</script>
+{% endblock %}

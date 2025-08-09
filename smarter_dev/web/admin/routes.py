@@ -20,7 +20,14 @@ from smarter_dev.web.admin.views import (
     blog_list,
     blog_create,
     blog_edit,
-    blog_delete
+    blog_delete,
+    forum_agents_list,
+    forum_agent_create,
+    forum_agent_edit,
+    forum_agent_delete,
+    forum_agent_toggle,
+    forum_agent_analytics,
+    forum_agents_bulk
 )
 
 
@@ -39,6 +46,15 @@ admin_routes = [
     Route("/guilds/{guild_id}", admin_required(guild_detail), name="admin_guild_detail"),
     Route("/guilds/{guild_id}/bytes", admin_required(bytes_config), methods=["GET", "POST"], name="admin_bytes_config"),
     Route("/guilds/{guild_id}/squads", admin_required(squads_config), methods=["GET", "POST"], name="admin_squads_config"),
+    
+    # Forum agent management
+    Route("/guilds/{guild_id}/forum-agents", admin_required(forum_agents_list), name="admin_forum_agents"),
+    Route("/guilds/{guild_id}/forum-agents/create", admin_required(forum_agent_create), methods=["GET", "POST"], name="admin_forum_agent_create"),
+    Route("/guilds/{guild_id}/forum-agents/{agent_id}/edit", admin_required(forum_agent_edit), methods=["GET", "POST"], name="admin_forum_agent_edit"),
+    Route("/guilds/{guild_id}/forum-agents/{agent_id}/delete", admin_required(forum_agent_delete), methods=["POST"], name="admin_forum_agent_delete"),
+    Route("/guilds/{guild_id}/forum-agents/{agent_id}/toggle", admin_required(forum_agent_toggle), methods=["POST"], name="admin_forum_agent_toggle"),
+    Route("/guilds/{guild_id}/forum-agents/{agent_id}/analytics", admin_required(forum_agent_analytics), name="admin_forum_agent_analytics"),
+    Route("/guilds/{guild_id}/forum-agents/bulk", admin_required(forum_agents_bulk), methods=["POST"], name="admin_forum_agents_bulk"),
     
     # API key management
     Route("/api-keys", admin_required(api_keys_list), name="admin_api_keys"),
