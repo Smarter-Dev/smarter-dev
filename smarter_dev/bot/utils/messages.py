@@ -42,20 +42,48 @@ async def gather_message_context(
         # Since we may skip bot messages and system messages
         max_fetch = limit * 2 if skip_short_messages else int(limit * 1.5)
         
+        skipped_count = 0
+        processed_count = 0
+        
         async for message in bot.rest.fetch_messages(channel_id).limit(max_fetch):
-            # Skip bot messages and system messages
-            if message.author.is_bot or message.type != hikari.MessageType.DEFAULT:
+            processed_count += 1
+            
+            # Only skip system messages (keep bot messages as they can be part of conversation)
+            if message.type != hikari.MessageType.DEFAULT:
+                skipped_count += 1
+                logger.debug(f"Skipped system message type: {message.type}")
                 continue
             
             # Skip short messages if requested
             if skip_short_messages and len(message.content.strip()) < min_message_length:
+                skipped_count += 1
+                logger.debug(f"Skipped short message: '{message.content[:20]}...'")
                 continue
+            
+            # Build message content with attachments
+            content = message.content or ""
+            
+            # Add attachment information for context
+            if message.attachments:
+                attachment_info = []
+                for attachment in message.attachments:
+                    # Include filename and media type info
+                    if hasattr(attachment, 'filename') and attachment.filename:
+                        attachment_info.append(f"📎 {attachment.filename}")
+                    elif hasattr(attachment, 'url') and attachment.url:
+                        # Extract filename from URL if no filename attribute
+                        url_parts = attachment.url.split('/')
+                        if url_parts:
+                            attachment_info.append(f"📎 {url_parts[-1].split('?')[0]}")
+                
+                if attachment_info:
+                    content = f"{content} {' '.join(attachment_info)}".strip()
                 
             # Convert to our message format
             discord_msg = DiscordMessage(
                 author=message.author.display_name or message.author.username,
                 timestamp=message.created_at.replace(tzinfo=timezone.utc),
-                content=message.content or ""
+                content=content
             )
             messages.append(discord_msg)
             
@@ -67,7 +95,9 @@ async def gather_message_context(
         # in chronological order (oldest-first) for better summarization context
         reversed_messages = list(reversed(messages))
         
-        # Log for debugging - show which messages were selected
+        # Log for debugging - show filtering results and selected messages
+        logger.info(f"Message gathering results: processed {processed_count} messages, skipped {skipped_count}, selected {len(reversed_messages)}")
+        
         if reversed_messages:
             logger.debug(f"Selected {len(reversed_messages)} messages for context:")
             for i, msg in enumerate(reversed_messages):
