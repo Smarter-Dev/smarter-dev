@@ -34,3 +34,7 @@ web.log
 *.webm
 *.m4v
 *.3gp
+
+# Coverage files
+.coverage
+coverage.xml
