@@ -279,6 +279,7 @@ class Squad:
     max_members: Optional[int] = None
     member_count: int = 0
     is_active: bool = True
+    is_default: bool = False
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     

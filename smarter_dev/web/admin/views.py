@@ -26,7 +26,7 @@ from smarter_dev.web.models import (
     ForumAgent,
     ForumAgentResponse
 )
-from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, APIKeyOperations, ForumAgentOperations
+from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, APIKeyOperations, ForumAgentOperations, ConflictError
 from smarter_dev.web.security import generate_secure_api_key
 from smarter_dev.web.admin.discord import (
     get_bot_guilds,
@@ -509,7 +509,8 @@ async def squads_config(request: Request) -> Response:
                         description=form.get("description") or None,
                         welcome_message=form.get("welcome_message") or None,
                         switch_cost=int(form.get("switch_cost", 50)),
-                        max_members=int(form.get("max_members")) if form.get("max_members") else None
+                        max_members=int(form.get("max_members")) if form.get("max_members") else None,
+                        is_default=form.get("is_default") == "on"
                     )
                     await session.commit()
                     success_message = "Squad created successfully!"
@@ -523,7 +524,8 @@ async def squads_config(request: Request) -> Response:
                         "welcome_message": form.get("welcome_message") or None,
                         "switch_cost": int(form.get("switch_cost")),
                         "max_members": int(form.get("max_members")) if form.get("max_members") else None,
-                        "is_active": form.get("is_active") == "on"
+                        "is_active": form.get("is_active") == "on",
+                        "is_default": form.get("is_default") == "on"
                     }
                     
                     await squad_ops.update_squad(session, squad_id, updates)
@@ -566,10 +568,20 @@ async def squads_config(request: Request) -> Response:
                     },
                     status_code=400
                 )
-            except IntegrityError as e:
-                logger.warning(f"Database integrity error in squads config: {e}")
+            except (ConflictError, IntegrityError) as e:
+                logger.warning(f"Database conflict error in squads config: {e}")
                 await session.rollback()
                 squads = await squad_ops.get_guild_squads(session, guild_id)
+                
+                # Check error type and content
+                error_str = str(e)
+                if isinstance(e, ConflictError) and "default squad" in error_str.lower():
+                    error_msg = "Default squad conflict: " + error_str
+                elif "uq_squads_guild_default" in error_str:
+                    error_msg = "Squad configuration conflict. Only one default squad is allowed per guild."
+                else:
+                    error_msg = "Squad configuration conflict. The role may already be assigned to another squad."
+                
                 return templates.TemplateResponse(
                     request,
                     "admin/squads_config.html",
@@ -577,7 +589,7 @@ async def squads_config(request: Request) -> Response:
                         "guild": guild,
                         "guild_roles": guild_roles,
                         "squads": squads,
-                        "error": "Squad configuration conflict. The role may already be assigned to another squad."
+                        "error": error_msg
                     },
                     status_code=400
                 )

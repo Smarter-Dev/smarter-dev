@@ -932,3 +932,283 @@ class TestSquadOperations:
         assert "member_1" in user_ids
         assert "member_2" in user_ids
         assert all(m.squad_id == sample_squad.id for m in members)
+    
+    # Default Squad Tests
+    
+    @pytest.fixture
+    async def default_squad(self, db_session: AsyncSession):
+        """Create a default squad for testing."""
+        squad = Squad(
+            guild_id="test_guild_123",
+            role_id="default_role_123",
+            name="Default Squad",
+            description="Auto-assigned default squad",
+            switch_cost=0,
+            is_active=True,
+            is_default=True
+        )
+        db_session.add(squad)
+        await db_session.commit()
+        await db_session.refresh(squad)
+        return squad
+    
+    @pytest.fixture
+    async def regular_squad(self, db_session: AsyncSession):
+        """Create a regular (non-default) squad for testing."""
+        squad = Squad(
+            guild_id="test_guild_123",
+            role_id="regular_role_456",
+            name="Regular Squad",
+            description="Regular joinable squad",
+            switch_cost=50,
+            is_active=True,
+            is_default=False
+        )
+        db_session.add(squad)
+        await db_session.commit()
+        await db_session.refresh(squad)
+        return squad
+    
+    async def test_create_default_squad_success(self, squad_ops, db_session: AsyncSession):
+        """Test creating a default squad successfully."""
+        # Act
+        squad = await squad_ops.create_squad(
+            db_session,
+            guild_id="test_guild_123",
+            role_id="default_role_789",
+            name="Default Squad",
+            description="Auto-assigned squad",
+            is_default=True
+        )
+        
+        # Assert
+        assert squad.is_default is True
+        assert squad.name == "Default Squad"
+        assert squad.guild_id == "test_guild_123"
+    
+    async def test_create_second_default_squad_fails(self, squad_ops, db_session: AsyncSession, default_squad):
+        """Test that creating a second default squad in the same guild fails."""
+        # Act & Assert
+        with pytest.raises(ConflictError, match="Guild already has a default squad"):
+            await squad_ops.create_squad(
+                db_session,
+                guild_id="test_guild_123",
+                role_id="another_role_123",
+                name="Another Default Squad",
+                is_default=True
+            )
+    
+    async def test_get_default_squad_success(self, squad_ops, db_session: AsyncSession, default_squad):
+        """Test getting the default squad for a guild."""
+        # Act
+        result = await squad_ops.get_default_squad(db_session, "test_guild_123")
+        
+        # Assert
+        assert result is not None
+        assert result.id == default_squad.id
+        assert result.is_default is True
+        assert result.name == "Default Squad"
+    
+    async def test_get_default_squad_none_exists(self, squad_ops, db_session: AsyncSession):
+        """Test getting default squad when none exists returns None."""
+        # Act
+        result = await squad_ops.get_default_squad(db_session, "no_default_guild_123")
+        
+        # Assert
+        assert result is None
+    
+    async def test_set_default_squad_success(self, squad_ops, db_session: AsyncSession, regular_squad):
+        """Test setting a squad as default."""
+        # Act
+        result = await squad_ops.set_default_squad(db_session, regular_squad.id)
+        
+        # Assert
+        assert result.id == regular_squad.id
+        assert result.is_default is True
+        
+        # Verify in database
+        updated_squad = await squad_ops.get_squad(db_session, regular_squad.id)
+        assert updated_squad.is_default is True
+    
+    async def test_set_default_squad_clears_existing(
+        self, 
+        squad_ops, 
+        db_session: AsyncSession, 
+        default_squad, 
+        regular_squad
+    ):
+        """Test that setting a new default squad clears the existing one."""
+        # Act
+        await squad_ops.set_default_squad(db_session, regular_squad.id)
+        await db_session.commit()
+        
+        # Assert new default is set
+        new_default = await squad_ops.get_squad(db_session, regular_squad.id)
+        assert new_default.is_default is True
+        
+        # Assert old default is cleared
+        old_default = await squad_ops.get_squad(db_session, default_squad.id)
+        assert old_default.is_default is False
+    
+    async def test_clear_default_squad(self, squad_ops, db_session: AsyncSession, default_squad):
+        """Test clearing the default squad for a guild."""
+        # Act
+        await squad_ops.clear_default_squad(db_session, "test_guild_123")
+        await db_session.commit()
+        
+        # Assert
+        updated_squad = await squad_ops.get_squad(db_session, default_squad.id)
+        assert updated_squad.is_default is False
+        
+        # Verify no default squad exists
+        result = await squad_ops.get_default_squad(db_session, "test_guild_123")
+        assert result is None
+    
+    async def test_join_default_squad_fails(self, squad_ops, db_session: AsyncSession, default_squad):
+        """Test that manually joining a default squad fails."""
+        # Act & Assert
+        with pytest.raises(ConflictError, match="Cannot manually join the default squad"):
+            await squad_ops.join_squad(
+                db_session,
+                guild_id="test_guild_123",
+                user_id="test_user_123",
+                squad_id=default_squad.id,
+                username="TestUser"
+            )
+    
+    async def test_auto_assign_to_default_squad_success(
+        self, 
+        squad_ops, 
+        db_session: AsyncSession, 
+        default_squad
+    ):
+        """Test successful auto-assignment to default squad."""
+        # Act
+        result = await squad_ops.auto_assign_to_default_squad(
+            db_session,
+            guild_id="test_guild_123",
+            user_id="new_user_123",
+            username="NewUser"
+        )
+        
+        # Assert
+        assert result is not None
+        assert result.id == default_squad.id
+        
+        # Verify membership was created
+        user_squad = await squad_ops.get_user_squad(db_session, "test_guild_123", "new_user_123")
+        assert user_squad is not None
+        assert user_squad.id == default_squad.id
+    
+    async def test_auto_assign_user_already_in_squad(
+        self, 
+        squad_ops, 
+        db_session: AsyncSession, 
+        default_squad,
+        regular_squad
+    ):
+        """Test auto-assignment when user is already in a squad returns None."""
+        # Arrange - put user in regular squad
+        membership = SquadMembership(
+            squad_id=regular_squad.id,
+            user_id="existing_user_123",
+            guild_id="test_guild_123"
+        )
+        db_session.add(membership)
+        await db_session.commit()
+        
+        # Act
+        result = await squad_ops.auto_assign_to_default_squad(
+            db_session,
+            guild_id="test_guild_123",
+            user_id="existing_user_123"
+        )
+        
+        # Assert
+        assert result is None  # Should not assign to default
+    
+    async def test_auto_assign_no_default_squad(self, squad_ops, db_session: AsyncSession):
+        """Test auto-assignment when no default squad exists returns None."""
+        # Act
+        result = await squad_ops.auto_assign_to_default_squad(
+            db_session,
+            guild_id="no_default_guild_123",
+            user_id="user_123"
+        )
+        
+        # Assert
+        assert result is None
+    
+    async def test_auto_assign_default_squad_full(
+        self, 
+        squad_ops, 
+        db_session: AsyncSession
+    ):
+        """Test auto-assignment when default squad is full returns None."""
+        # Arrange - create default squad with max 1 member
+        default_squad = Squad(
+            guild_id="test_guild_456",
+            role_id="default_role_456",
+            name="Full Default Squad",
+            max_members=1,
+            is_active=True,
+            is_default=True
+        )
+        db_session.add(default_squad)
+        await db_session.flush()
+        
+        # Add one member to fill it up
+        membership = SquadMembership(
+            squad_id=default_squad.id,
+            user_id="existing_member_123",
+            guild_id="test_guild_456"
+        )
+        db_session.add(membership)
+        await db_session.commit()
+        
+        # Act
+        result = await squad_ops.auto_assign_to_default_squad(
+            db_session,
+            guild_id="test_guild_456",
+            user_id="new_user_123"
+        )
+        
+        # Assert
+        assert result is None  # Should not assign when full
+    
+    async def test_update_squad_set_as_default(
+        self, 
+        squad_ops, 
+        db_session: AsyncSession, 
+        regular_squad
+    ):
+        """Test updating a squad to set it as default."""
+        # Act
+        updated_squad = await squad_ops.update_squad(
+            db_session,
+            regular_squad.id,
+            {"is_default": True}
+        )
+        
+        # Assert
+        assert updated_squad.is_default is True
+        
+        # Verify in database
+        squad_from_db = await squad_ops.get_squad(db_session, regular_squad.id)
+        assert squad_from_db.is_default is True
+    
+    async def test_update_squad_default_conflict(
+        self, 
+        squad_ops, 
+        db_session: AsyncSession, 
+        default_squad,
+        regular_squad
+    ):
+        """Test updating squad to default when another default exists fails."""
+        # Act & Assert
+        with pytest.raises(ConflictError, match="Guild already has a default squad"):
+            await squad_ops.update_squad(
+                db_session,
+                regular_squad.id,
+                {"is_default": True}
+            )

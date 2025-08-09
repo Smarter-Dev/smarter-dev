@@ -441,6 +441,13 @@ class SquadsService(BaseService):
                     reason=f"The {target_squad.name} squad is currently inactive."
                 )
             
+            # Prevent joining default squads manually
+            if target_squad.is_default:
+                return JoinSquadResult(
+                    success=False,
+                    reason=f"Cannot manually join the {target_squad.name} squad. This is the default squad - members are automatically assigned when they earn bytes."
+                )
+            
             # Check if user is already in this squad
             if current_squad and current_squad.id == squad_id:
                 return JoinSquadResult(

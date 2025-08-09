@@ -208,6 +208,7 @@ class SquadResponse(BaseAPIModel):
     switch_cost: int = Field(description="Cost to join squad")
     member_count: int = Field(description="Current member count")
     is_active: bool = Field(description="Whether squad is active")
+    is_default: bool = Field(description="Whether this is the default squad for auto-assignment")
     created_at: datetime = Field(description="Squad creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")
     
@@ -225,6 +226,7 @@ class SquadCreate(BaseAPIModel):
     welcome_message: Optional[str] = Field(None, max_length=500, description="Custom welcome message")
     max_members: Optional[int] = Field(None, ge=1, le=1000, description="Member limit")
     switch_cost: int = Field(ge=0, le=10000, default=50, description="Cost to join")
+    is_default: bool = Field(default=False, description="Whether this is the default squad for auto-assignment")
     
     @field_validator('role_id')
     @classmethod
@@ -248,6 +250,7 @@ class SquadUpdate(BaseAPIModel):
     max_members: Optional[int] = Field(None, ge=1, le=1000, description="Member limit")
     switch_cost: Optional[int] = Field(None, ge=0, le=10000, description="Join cost")
     is_active: Optional[bool] = Field(None, description="Active status")
+    is_default: Optional[bool] = Field(None, description="Whether this is the default squad for auto-assignment")
 
 
 class SquadMembershipResponse(BaseAPIModel):

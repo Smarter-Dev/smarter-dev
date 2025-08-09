@@ -2908,9 +2908,14 @@ name = "smarter-dev"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "alembic" },
+    { name = "asyncpg" },
     { name = "blend-modes" },
     { name = "cairosvg" },
+    { name = "fastapi" },
+    { name = "greenlet" },
     { name = "hikari-lightbulb" },
+    { name = "httpx" },
     { name = "itsdangerous" },
     { name = "jinja2" },
     { name = "markdown" },
@@ -2922,6 +2927,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
     { name = "python-multipart" },
+    { name = "redis" },
     { name = "scipy" },
     { name = "starlette" },
     { name = "uvicorn", extra = ["standard"] },
@@ -2983,9 +2989,14 @@ web = [
 
 [package.metadata]
 requires-dist = [
+    { name = "alembic", specifier = ">=1.16.4" },
+    { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "blend-modes", specifier = ">=2.2.0" },
     { name = "cairosvg", specifier = ">=2.8.2" },
+    { name = "fastapi", specifier = ">=0.116.1" },
+    { name = "greenlet", specifier = ">=3.2.3" },
     { name = "hikari-lightbulb", specifier = "<3.0.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "itsdangerous", specifier = ">=2.2.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "markdown", specifier = ">=3.4.0" },
@@ -2997,6 +3008,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "python-multipart", specifier = ">=0.0.20" },
+    { name = "redis", specifier = ">=6.2.0" },
     { name = "scipy", specifier = ">=1.16.0" },
     { name = "starlette", specifier = ">=0.47.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35.0" },
