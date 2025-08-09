@@ -10,6 +10,8 @@ from typing import Optional, Set
 
 import hikari
 import lightbulb
+from dataclasses import dataclass
+from typing import List, Optional
 
 from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
@@ -19,6 +21,19 @@ logger = logging.getLogger(__name__)
 # Cache to track users who have already claimed their daily reward today
 # Format: {f"{guild_id}:{user_id}": "YYYY-MM-DD"}
 daily_claim_cache: dict[str, str] = {}
+
+
+@dataclass
+class ForumPostData:
+    """Data structure for forum post information."""
+    title: str
+    content: str
+    author_display_name: str
+    tags: List[str]
+    attachments: List[str]
+    channel_id: str
+    thread_id: str
+    guild_id: str
 
 
 def get_utc_date_string() -> str:
@@ -200,10 +215,11 @@ def create_bot(settings: Optional[Settings] = None) -> lightbulb.BotApp:
     
     # Configure bot intents
     intents = (
-        hikari.Intents.GUILDS
+        hikari.Intents.GUILDS  # Covers thread events including forum thread creation
         | hikari.Intents.GUILD_MEMBERS  # For member tracking
         | hikari.Intents.GUILD_MESSAGES  # For activity tracking
         | hikari.Intents.MESSAGE_CONTENT  # For message content
+        | hikari.Intents.GUILD_MESSAGE_REACTIONS  # For message reactions
     )
     
     # Create bot instance using Lightbulb BotApp (v2 syntax)
@@ -251,9 +267,11 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         # Create services
         from smarter_dev.bot.services.bytes_service import BytesService
         from smarter_dev.bot.services.squads_service import SquadsService
+        from smarter_dev.bot.services.forum_agent_service import ForumAgentService
         
         bytes_service = BytesService(api_client, cache_manager)
         squads_service = SquadsService(api_client, cache_manager)
+        forum_agent_service = ForumAgentService(api_client, cache_manager)
         
         # Initialize services
         logger.info("Initializing bytes service...")
@@ -264,19 +282,27 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         await squads_service.initialize()
         logger.info("✓ Squads service initialized")
         
+        logger.info("Initializing forum agent service...")
+        await forum_agent_service.initialize()
+        logger.info("✓ Forum agent service initialized")
+        
         # Verify service health
         logger.info("Verifying service health...")
         try:
             bytes_health = await bytes_service.health_check()
             squads_health = await squads_service.health_check()
+            forum_agent_health = await forum_agent_service.health_check()
             
             logger.info(f"Bytes service health: {bytes_health.status}")
             logger.info(f"Squads service health: {squads_health.status}")
+            logger.info(f"Forum agent service health: {forum_agent_health.status}")
             
             if bytes_health.status != "healthy":
                 logger.warning(f"Bytes service not healthy: {bytes_health.details}")
             if squads_health.status != "healthy":
                 logger.warning(f"Squads service not healthy: {squads_health.details}")
+            if forum_agent_health.status != "healthy":
+                logger.warning(f"Forum agent service not healthy: {forum_agent_health.details}")
                 
         except Exception as e:
             logger.error(f"Failed to check service health: {e}")
@@ -289,11 +315,13 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d['cache_manager'] = cache_manager
         bot.d['bytes_service'] = bytes_service
         bot.d['squads_service'] = squads_service
+        bot.d['forum_agent_service'] = forum_agent_service
         
         # Store services in d for plugin access (primary)
         bot.d['_services'] = {
             'bytes_service': bytes_service,
-            'squads_service': squads_service
+            'squads_service': squads_service,
+            'forum_agent_service': forum_agent_service
         }
         
         logger.info("✓ Bot services setup complete")
@@ -306,6 +334,167 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         if not hasattr(bot, 'd'):
             bot.d = {}
         bot.d['_services'] = {}
+
+
+def is_forum_channel(channel) -> bool:
+    """Check if a channel is a forum channel.
+    
+    Args:
+        channel: Discord channel object
+        
+    Returns:
+        True if channel is a forum channel
+    """
+    return hasattr(channel, 'type') and channel.type == hikari.ChannelType.GUILD_FORUM
+
+
+def extract_forum_post_data(thread, initial_message=None) -> ForumPostData:
+    """Extract forum post data from Discord thread and message objects.
+    
+    Args:
+        thread: Discord thread object
+        initial_message: Initial message in the thread (forum post content)
+        
+    Returns:
+        ForumPostData object with extracted information
+    """
+    # Extract basic information
+    title = getattr(thread, 'name', '')
+    thread_id = str(getattr(thread, 'id', ''))
+    channel_id = str(getattr(thread, 'parent_id', ''))
+    
+    # Extract message information if available
+    if initial_message:
+        content = getattr(initial_message, 'content', '')
+        author = getattr(initial_message, 'author', None)
+        author_name = getattr(author, 'display_name', getattr(author, 'username', 'Unknown')) if author else 'Unknown'
+        
+        # Extract attachments
+        attachments = []
+        if hasattr(initial_message, 'attachments'):
+            attachments = [getattr(att, 'filename', 'unknown') for att in initial_message.attachments]
+    else:
+        content = ''
+        author_name = 'Unknown'
+        attachments = []
+    
+    # Extract tags if available
+    tags = []
+    if hasattr(thread, 'applied_tags'):
+        tags = [getattr(tag, 'name', '') for tag in thread.applied_tags if hasattr(tag, 'name')]
+    
+    return ForumPostData(
+        title=title,
+        content=content,
+        author_display_name=author_name,
+        tags=tags,
+        attachments=attachments,
+        channel_id=channel_id,
+        thread_id=thread_id,
+        guild_id=''  # Will be set by caller
+    )
+
+
+async def post_agent_responses(bot: lightbulb.BotApp, thread_id: int, responses: List[dict]) -> None:
+    """Post AI agent responses to a Discord thread.
+    
+    Args:
+        bot: Discord bot instance
+        thread_id: Thread ID to post responses to
+        responses: List of agent response dictionaries
+    """
+    if not responses:
+        return
+    
+    try:
+        for response_data in responses:
+            # Only post if agent decided to respond
+            if not response_data.get('should_respond', False):
+                continue
+                
+            response_content = response_data.get('response_content', '').strip()
+            if not response_content:
+                continue
+            
+            # Use just the raw response content (no agent identification)
+            formatted_response = response_content
+            
+            # Post the response to the thread
+            await bot.rest.create_message(
+                thread_id,
+                content=formatted_response
+            )
+            
+            logger.info(f"Posted response to thread {thread_id}")
+            
+    except Exception as e:
+        logger.error(f"Error posting agent responses to thread {thread_id}: {e}")
+
+
+async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:
+    """Handle forum thread creation events for AI agent processing.
+    
+    Args:
+        bot: Discord bot instance
+        event: Thread creation event
+    """
+    logger.info(f"DEBUG: handle_forum_thread_create called for thread {event.thread.id}")
+    
+    # Check if this is a forum thread
+    if not getattr(event, 'is_forum_thread', True):
+        logger.info(f"DEBUG: Not a forum thread, skipping")
+        return
+    
+    # Check if we have a guild context
+    if not hasattr(event, 'guild_id') or not event.guild_id:
+        return
+    
+    # Get forum agent service
+    forum_agent_service = getattr(bot, 'd', {}).get('forum_agent_service')
+    if not forum_agent_service:
+        forum_agent_service = getattr(bot, 'd', {}).get('_services', {}).get('forum_agent_service')
+    
+    if not forum_agent_service:
+        logger.debug("No forum agent service available for thread creation")
+        return
+    
+    try:
+        # Fetch the initial message (forum post content)
+        initial_message = None
+        try:
+            # Get the first message in the thread (the forum post)
+            messages = await bot.rest.fetch_messages(event.thread.id)
+            if messages:
+                initial_message = messages[0]
+        except Exception as e:
+            logger.debug(f"Could not fetch initial message for thread {event.thread.id}: {e}")
+        
+        # Extract post data from the thread and initial message
+        post_data = extract_forum_post_data(event.thread, initial_message)
+        post_data.guild_id = str(event.guild_id)
+        
+        # Process the post through all applicable agents
+        responses = await forum_agent_service.process_forum_post(str(event.guild_id), post_data)
+        
+        # Post responses that should be posted
+        if responses:
+            await post_agent_responses(bot, event.thread.id, responses)
+            
+    except Exception as e:
+        logger.error(f"Error handling forum thread creation: {e}")
+
+
+async def handle_forum_message_create(bot: lightbulb.BotApp, event) -> None:
+    """Handle message creation in forum threads (follow-up messages).
+    
+    Args:
+        bot: Discord bot instance
+        event: Message creation event
+    """
+    # For now, we only process initial forum posts (thread creation)
+    # Follow-up messages are not processed by agents
+    # This function exists for potential future expansion
+    pass
 
 
 async def cleanup_bot_services(bot: lightbulb.BotApp) -> None:
@@ -558,6 +747,53 @@ async def run_bot() -> None:
                     )
                 except:
                     pass  # Interaction might already be responded to
+    
+    @bot.listen()
+    async def on_guild_thread_create(event: hikari.GuildThreadCreateEvent) -> None:
+        """Handle forum thread creation for AI agent processing."""
+        logger.info(f"FORUM DEBUG: Thread creation detected: {event.thread.id} in channel {event.thread.parent_id}, type: {event.thread.type}")
+        
+        # Only process forum threads
+        if not event.thread.type == hikari.ChannelType.GUILD_PUBLIC_THREAD:
+            logger.info(f"FORUM DEBUG: Skipping non-public thread: {event.thread.type}")
+            return
+        
+        # Check if parent is a forum channel
+        try:
+            parent_channel = bot.cache.get_guild_channel(event.thread.parent_id)
+            if not parent_channel or not is_forum_channel(parent_channel):
+                return
+        except:
+            return
+        
+        # Create a mock event object for the handler
+        class MockForumEvent:
+            def __init__(self, thread, guild_id):
+                self.thread = thread
+                self.guild_id = guild_id
+                self.is_forum_thread = True
+        
+        mock_event = MockForumEvent(event.thread, event.guild_id)
+        await handle_forum_thread_create(bot, mock_event)
+    
+    @bot.listen()
+    async def on_guild_thread_update(event: hikari.GuildThreadUpdateEvent) -> None:
+        """Handle forum thread updates (for initial post content)."""
+        # Only process if this might be a new forum post getting its initial message
+        if not event.thread.type == hikari.ChannelType.GUILD_PUBLIC_THREAD:
+            return
+            
+        # Check if parent is a forum channel
+        try:
+            parent_channel = bot.cache.get_guild_channel(event.thread.parent_id)
+            if not parent_channel or not is_forum_channel(parent_channel):
+                return
+        except:
+            return
+        
+        # This could be when the initial message is added to a forum thread
+        # For now, we'll skip this to avoid duplicate processing
+        # The thread creation event should handle most cases
     
     # Set up services before loading plugins
     logger.info("Setting up bot services...")

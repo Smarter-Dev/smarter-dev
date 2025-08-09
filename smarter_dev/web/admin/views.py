@@ -7,7 +7,7 @@ from typing import Dict, Any, List
 from uuid import UUID
 
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import Response, RedirectResponse
 from starlette.templating import Jinja2Templates
 from sqlalchemy import select, func, distinct
 from sqlalchemy.exc import IntegrityError
@@ -22,9 +22,11 @@ from smarter_dev.web.models import (
     SquadMembership,
     APIKey,
     HelpConversation,
-    BlogPost
+    BlogPost,
+    ForumAgent,
+    ForumAgentResponse
 )
-from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, APIKeyOperations
+from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, APIKeyOperations, ForumAgentOperations
 from smarter_dev.web.security import generate_secure_api_key
 from smarter_dev.web.admin.discord import (
     get_bot_guilds,
@@ -1364,3 +1366,479 @@ def _generate_slug(title: str) -> str:
         slug = slug[:180].rstrip('-')
     
     return slug
+
+
+def validate_forum_agent_data(data: Dict[str, Any]) -> tuple[bool, List[str]]:
+    """Validate forum agent form data.
+    
+    Args:
+        data: Form data dictionary
+        
+    Returns:
+        Tuple of (is_valid, list_of_errors)
+    """
+    errors = []
+    
+    # Required fields
+    if not data.get("name", "").strip():
+        errors.append("Agent name is required")
+    elif len(data["name"]) > 100:
+        errors.append("Agent name must be 100 characters or less")
+    
+    system_prompt = data.get("system_prompt", "").strip()
+    if not system_prompt:
+        errors.append("System prompt is required")
+    elif len(system_prompt) < 10:
+        errors.append("System prompt must be at least 10 characters")
+    elif len(system_prompt) > 10000:
+        errors.append("System prompt must be 10,000 characters or less")
+    
+    # Response threshold validation
+    try:
+        threshold = float(data.get("response_threshold", 0.7))
+        if threshold < 0.0 or threshold > 1.0:
+            errors.append("Response threshold must be between 0.0 and 1.0")
+    except (ValueError, TypeError):
+        errors.append("Response threshold must be a valid number")
+    
+    # Rate limit validation
+    try:
+        rate_limit = int(data.get("max_responses_per_hour", 5))
+        if rate_limit < 0:
+            errors.append("Rate limit cannot be negative")
+        elif rate_limit > 100:
+            errors.append("Rate limit cannot exceed 100 responses per hour")
+    except (ValueError, TypeError):
+        errors.append("Rate limit must be a valid number")
+    
+    # Monitored forums validation (should be a list of channel IDs)
+    monitored_forums = data.get("monitored_forums", [])
+    if not isinstance(monitored_forums, list):
+        errors.append("Monitored forums must be a list")
+    else:
+        # Filter out empty strings from the list (empty form fields)
+        monitored_forums = [forum.strip() for forum in monitored_forums if forum and forum.strip()]
+        # Update the data with cleaned forums list
+        data["monitored_forums"] = monitored_forums
+        # Note: Empty list is allowed - it means monitor all forum channels
+    
+    return len(errors) == 0, errors
+
+
+async def forum_agents_list(request: Request) -> Response:
+    """List all forum agents for a guild."""
+    guild_id = request.path_params["guild_id"]
+    
+    try:
+        # Get guild information
+        guild_info = await get_guild_info(guild_id)
+        
+        # Get forum agents from database
+        async with get_db_session_context() as session:
+            forum_ops = ForumAgentOperations(session)
+            agents = await forum_ops.list_agents(guild_id)
+        
+        context = {
+            "request": request,
+            "guild": guild_info,
+            "agents": agents,
+            "title": f"Forum Agents - {guild_info.name}",
+        }
+        
+        return templates.TemplateResponse("admin/forum_agents_list.html", context)
+        
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except DiscordAPIError as e:
+        context = {
+            "request": request,
+            "error": f"Discord API error: {e}",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=503)
+    except Exception as e:
+        logger.error(f"Error listing forum agents for guild {guild_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Database error occurred",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def forum_agent_create(request: Request) -> Response:
+    """Create a new forum agent."""
+    guild_id = request.path_params["guild_id"]
+    
+    try:
+        # Get guild information
+        guild_info = await get_guild_info(guild_id)
+        
+        if request.method == "GET":
+            # Show create form
+            context = {
+                "request": request,
+                "guild": guild_info,
+                "title": f"Create Forum Agent - {guild_info.name}",
+            }
+            return templates.TemplateResponse("admin/forum_agent_create.html", context)
+        
+        elif request.method == "POST":
+            # Process form submission
+            form_data = await request.form()
+            data = {
+                "name": form_data.get("name", "").strip(),
+                "description": form_data.get("description", "").strip(),
+                "system_prompt": form_data.get("system_prompt", "").strip(),
+                "response_threshold": form_data.get("response_threshold", "0.7"),
+                "max_responses_per_hour": form_data.get("max_responses_per_hour", "5"),
+                "monitored_forums": form_data.getlist("monitored_forums[]"),
+                "is_active": form_data.get("is_active") == "on",
+            }
+            
+            # Validate data
+            is_valid, errors = validate_forum_agent_data(data)
+            
+            # Debug logging
+            logger.info(f"Forum agent form data: {data}")
+            logger.info(f"Validation result: valid={is_valid}, errors={errors}")
+            
+            if not is_valid:
+                context = {
+                    "request": request,
+                    "guild": guild_info,
+                    "errors": errors,
+                    "form_data": data,
+                    "title": f"Create Forum Agent - {guild_info.name}",
+                }
+                return templates.TemplateResponse("admin/forum_agent_create.html", context, status_code=400)
+            
+            # Create agent
+            async with get_db_session_context() as session:
+                try:
+                    forum_ops = ForumAgentOperations(session)
+                    await forum_ops.create_agent(
+                        guild_id=guild_id,
+                        name=data["name"],
+                        description=data.get("description") or None,
+                        system_prompt=data["system_prompt"],
+                        monitored_forums=data["monitored_forums"],
+                        response_threshold=float(data["response_threshold"]),
+                        max_responses_per_hour=int(data["max_responses_per_hour"]),
+                        is_active=data.get("is_active", True),
+                        created_by="admin"  # TODO: Get from authenticated user
+                    )
+                    
+                    # Redirect to agents list
+                    return RedirectResponse(
+                        url=f"/admin/guilds/{guild_id}/forum-agents",
+                        status_code=303
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Error creating forum agent: {e}")
+                    context = {
+                        "request": request,
+                        "guild": guild_info,
+                        "errors": [f"Failed to create agent: {e}"],
+                        "form_data": data,
+                        "title": f"Create Forum Agent - {guild_info.name}",
+                    }
+                    return templates.TemplateResponse("admin/forum_agent_create.html", context, status_code=500)
+        
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error in forum agent create for guild {guild_id}: {e}")
+        context = {
+            "request": request,
+            "error": "An unexpected error occurred",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def forum_agent_edit(request: Request) -> Response:
+    """Edit an existing forum agent."""
+    guild_id = request.path_params["guild_id"]
+    agent_id = request.path_params["agent_id"]
+    
+    try:
+        # Get guild information
+        guild_info = await get_guild_info(guild_id)
+        
+        async with get_db_session_context() as session:
+            forum_ops = ForumAgentOperations(session)
+            
+            # Get the agent
+            agent = await forum_ops.get_agent(UUID(agent_id), guild_id)
+            if not agent:
+                context = {
+                    "request": request,
+                    "error": "Forum agent not found",
+                    "title": "Error"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            if request.method == "GET":
+                # Show edit form
+                context = {
+                    "request": request,
+                    "guild": guild_info,
+                    "agent": agent,
+                    "title": f"Edit Forum Agent: {agent.name}",
+                }
+                return templates.TemplateResponse("admin/forum_agent_edit.html", context)
+            
+            elif request.method == "POST":
+                # Process form submission
+                form_data = await request.form()
+                data = {
+                    "name": form_data.get("name", "").strip(),
+                    "description": form_data.get("description", "").strip(),
+                    "system_prompt": form_data.get("system_prompt", "").strip(),
+                    "response_threshold": form_data.get("response_threshold", "0.7"),
+                    "max_responses_per_hour": form_data.get("max_responses_per_hour", "5"),
+                    "monitored_forums": form_data.getlist("monitored_forums[]"),
+                    "is_active": form_data.get("is_active") == "on",
+                }
+                
+                # Validate data
+                is_valid, errors = validate_forum_agent_data(data)
+                
+                # Debug logging
+                logger.info(f"Forum agent EDIT form data: {data}")
+                logger.info(f"EDIT validation result: valid={is_valid}, errors={errors}")
+                
+                if not is_valid:
+                    context = {
+                        "request": request,
+                        "guild": guild_info,
+                        "agent": agent,
+                        "errors": errors,
+                        "form_data": data,
+                        "title": f"Edit Forum Agent: {agent.name}",
+                    }
+                    return templates.TemplateResponse("admin/forum_agent_edit.html", context, status_code=400)
+                
+                # Update agent
+                try:
+                    await forum_ops.update_agent(
+                        agent_id=UUID(agent_id),
+                        guild_id=guild_id,
+                        name=data["name"],
+                        description=data.get("description") or None,
+                        system_prompt=data["system_prompt"],
+                        monitored_forums=data["monitored_forums"],
+                        response_threshold=float(data["response_threshold"]),
+                        max_responses_per_hour=int(data["max_responses_per_hour"]),
+                        is_active=data.get("is_active", True)
+                    )
+                    
+                    # Redirect to agents list
+                    return RedirectResponse(
+                        url=f"/admin/guilds/{guild_id}/forum-agents",
+                        status_code=303
+                    )
+                    
+                except Exception as e:
+                    logger.error(f"Error updating forum agent: {e}")
+                    context = {
+                        "request": request,
+                        "guild": guild_info,
+                        "agent": agent,
+                        "errors": [f"Failed to update agent: {e}"],
+                        "form_data": data,
+                        "title": f"Edit Forum Agent: {agent.name}",
+                    }
+                    return templates.TemplateResponse("admin/forum_agent_edit.html", context, status_code=500)
+        
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error in forum agent edit for guild {guild_id}, agent {agent_id}: {e}")
+        context = {
+            "request": request,
+            "error": "An unexpected error occurred",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def forum_agent_delete(request: Request) -> Response:
+    """Delete a forum agent."""
+    guild_id = request.path_params["guild_id"]
+    agent_id = request.path_params["agent_id"]
+    
+    try:
+        async with get_db_session_context() as session:
+            forum_ops = ForumAgentOperations(session)
+            
+            deleted = await forum_ops.delete_agent(UUID(agent_id), guild_id)
+            
+            if not deleted:
+                context = {
+                    "request": request,
+                    "error": "Forum agent not found",
+                    "title": "Error"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        
+        # Redirect to agents list
+        return RedirectResponse(
+            url=f"/admin/guilds/{guild_id}/forum-agents",
+            status_code=303
+        )
+        
+    except Exception as e:
+        logger.error(f"Error deleting forum agent {agent_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to delete forum agent",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def forum_agent_toggle(request: Request) -> Response:
+    """Toggle forum agent active status."""
+    guild_id = request.path_params["guild_id"]
+    agent_id = request.path_params["agent_id"]
+    
+    try:
+        async with get_db_session_context() as session:
+            forum_ops = ForumAgentOperations(session)
+            
+            agent = await forum_ops.toggle_agent(UUID(agent_id), guild_id)
+            
+            if not agent:
+                context = {
+                    "request": request,
+                    "error": "Forum agent not found",
+                    "title": "Error"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        
+        # Redirect to agents list
+        return RedirectResponse(
+            url=f"/admin/guilds/{guild_id}/forum-agents",
+            status_code=303
+        )
+        
+    except Exception as e:
+        logger.error(f"Error toggling forum agent {agent_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to toggle forum agent",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def forum_agent_analytics(request: Request) -> Response:
+    """Show forum agent analytics."""
+    guild_id = request.path_params["guild_id"]
+    agent_id = request.path_params["agent_id"]
+    
+    try:
+        # Get guild information
+        guild_info = await get_guild_info(guild_id)
+        
+        async with get_db_session_context() as session:
+            forum_ops = ForumAgentOperations(session)
+            
+            # Get analytics
+            analytics = await forum_ops.get_agent_analytics(UUID(agent_id), guild_id)
+            
+            if not analytics:
+                context = {
+                    "request": request,
+                    "error": "Forum agent not found",
+                    "title": "Error"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        
+        context = {
+            "request": request,
+            "guild": guild_info,
+            "analytics": analytics,
+            "title": f"Analytics: {analytics['agent']['name']}",
+        }
+        
+        return templates.TemplateResponse("admin/forum_agent_analytics.html", context)
+        
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error getting forum agent analytics for {agent_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to load analytics",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def forum_agents_bulk(request: Request) -> Response:
+    """Perform bulk operations on forum agents."""
+    guild_id = request.path_params["guild_id"]
+    
+    try:
+        form_data = await request.form()
+        action = form_data.get("action", "")
+        agent_ids = form_data.getlist("agent_ids")
+        
+        if not action or not agent_ids:
+            context = {
+                "request": request,
+                "error": "Invalid bulk operation request",
+                "title": "Error"
+            }
+            return templates.TemplateResponse("admin/error.html", context, status_code=400)
+        
+        # Convert string UUIDs to UUID objects
+        uuid_agent_ids = [UUID(aid) for aid in agent_ids]
+        
+        async with get_db_session_context() as session:
+            forum_ops = ForumAgentOperations(session)
+            
+            modified_count = await forum_ops.bulk_update_agents(
+                agent_ids=uuid_agent_ids,
+                guild_id=guild_id,
+                action=action
+            )
+        
+        # Redirect to agents list with success message
+        return RedirectResponse(
+            url=f"/admin/guilds/{guild_id}/forum-agents",
+            status_code=303
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in bulk forum agent operation: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to perform bulk operation",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)

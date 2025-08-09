@@ -11,7 +11,7 @@ from sqlalchemy import Boolean
 from sqlalchemy import DateTime, Date
 from sqlalchemy import Float
 from sqlalchemy import ForeignKey
-from sqlalchemy import Index, UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint, CheckConstraint
 from sqlalchemy import Integer
 from sqlalchemy import JSON
 from sqlalchemy import String
@@ -960,3 +960,282 @@ class BlogPost(Base):
         """String representation of the blog post."""
         status = "published" if self.is_published else "draft"
         return f"<BlogPost(title='{self.title}', slug='{self.slug}', status='{status}')>"
+
+
+class ForumAgent(Base):
+    """Forum monitoring agent configuration for AI-driven post responses.
+    
+    Stores per-guild agent configurations that monitor forum channels and
+    automatically evaluate new posts to determine if they warrant AI responses.
+    Each agent has a customizable system prompt and configurable thresholds.
+    """
+    
+    __tablename__ = "forum_agents"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique identifier for the forum agent"
+    )
+    
+    # Guild context
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord guild (server) snowflake ID"
+    )
+    
+    # Agent identification
+    name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Human-readable name for the agent"
+    )
+    description: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+        default="",
+        doc="Optional description of the agent's purpose"
+    )
+    
+    # Agent configuration
+    system_prompt: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="System prompt that defines agent behavior and response criteria"
+    )
+    monitored_forums: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        doc="List of Discord forum channel IDs to monitor"
+    )
+    
+    # Response settings
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        doc="Whether this agent is actively monitoring and responding"
+    )
+    response_threshold: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=0.7,
+        doc="Minimum confidence score (0.0-1.0) required to post a response"
+    )
+    max_responses_per_hour: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=5,
+        doc="Maximum number of responses this agent can make per hour"
+    )
+    
+    # Audit fields
+    created_by: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Username or identifier of who created this agent"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the agent was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the agent was last modified"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_forum_agents_guild_id", "guild_id"),
+        Index("ix_forum_agents_guild_active", "guild_id", "is_active"),
+        Index("ix_forum_agents_created_by", "created_by"),
+        UniqueConstraint("guild_id", "name", name="uq_forum_agents_guild_name"),
+        # Validation constraints
+        CheckConstraint("response_threshold >= 0.0 AND response_threshold <= 1.0", name="ck_forum_agents_threshold_range"),
+        CheckConstraint("max_responses_per_hour >= 0", name="ck_forum_agents_max_responses_positive"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize ForumAgent with default timestamps."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        super().__init__(**kwargs)
+    
+    def __repr__(self) -> str:
+        """String representation of the forum agent."""
+        status = "active" if self.is_active else "inactive"
+        return f"<ForumAgent(name='{self.name}', guild_id='{self.guild_id}', status='{status}')>"
+
+
+class ForumAgentResponse(Base):
+    """Record of forum agent post evaluation and response.
+    
+    Tracks each time an agent evaluates a forum post, including the AI's
+    decision-making process, confidence score, token usage, and whether
+    a response was actually posted. Used for analytics and audit purposes.
+    """
+    
+    __tablename__ = "forum_agent_responses"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique identifier for this response record"
+    )
+    
+    # Agent relationship
+    agent_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("forum_agents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        doc="Forum agent that evaluated this post"
+    )
+    
+    # Discord context
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord guild (server) snowflake ID"
+    )
+    channel_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord forum channel snowflake ID"
+    )
+    thread_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord thread (forum post) snowflake ID"
+    )
+    
+    # Original post data
+    post_title: Mapped[str] = mapped_column(
+        String(300),
+        nullable=False,
+        doc="Title of the forum post"
+    )
+    post_content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Content of the forum post"
+    )
+    author_display_name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Display name of the post author"
+    )
+    post_tags: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        doc="Forum post tags as list of strings"
+    )
+    attachments: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        doc="List of attachment filenames from the post"
+    )
+    
+    # AI evaluation results
+    decision_reason: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="AI's reasoning for whether to respond or not"
+    )
+    confidence_score: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        doc="AI confidence score (0.0-1.0) for the response decision"
+    )
+    response_content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="",
+        doc="AI-generated response content (empty if no response)"
+    )
+    
+    # Performance tracking
+    tokens_used: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="Total AI tokens consumed for evaluation and response generation"
+    )
+    response_time_ms: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="Time taken for AI evaluation and response generation in milliseconds"
+    )
+    
+    # Response status
+    responded: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        doc="Whether a response was actually posted to Discord"
+    )
+    responded_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc="Timestamp when the response was posted (if responded=True)"
+    )
+    
+    # Audit timestamp
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+        doc="Timestamp when the post was evaluated"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_forum_agent_responses_agent_created", "agent_id", "created_at"),
+        Index("ix_forum_agent_responses_guild_created", "guild_id", "created_at"),
+        Index("ix_forum_agent_responses_channel_created", "channel_id", "created_at"),
+        Index("ix_forum_agent_responses_responded_at", "responded_at"),
+        Index("ix_forum_agent_responses_tokens_created", "tokens_used", "created_at"),
+        # Validation constraints
+        CheckConstraint("confidence_score >= 0.0 AND confidence_score <= 1.0", name="ck_forum_agent_responses_confidence_range"),
+        CheckConstraint("tokens_used >= 0", name="ck_forum_agent_responses_tokens_positive"),
+        CheckConstraint("response_time_ms >= 0", name="ck_forum_agent_responses_time_positive"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize ForumAgentResponse with automatic timestamps."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        
+        # Auto-set responded_at if responded is True
+        if kwargs.get('responded', False) and 'responded_at' not in kwargs:
+            kwargs['responded_at'] = now
+            
+        super().__init__(**kwargs)
+    
+    def __repr__(self) -> str:
+        """String representation of the forum agent response."""
+        status = "responded" if self.responded else "evaluated"
+        return f"<ForumAgentResponse(agent_id='{self.agent_id}', thread_id='{self.thread_id}', status='{status}')>"

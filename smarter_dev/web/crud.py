@@ -23,6 +23,8 @@ from smarter_dev.web.models import (
     Squad,
     SquadMembership,
     APIKey,
+    ForumAgent,
+    ForumAgentResponse,
 )
 
 
@@ -1489,3 +1491,419 @@ class APIKeyOperations:
             
         except Exception as e:
             raise DatabaseOperationError(f"Failed to get admin stats: {e}") from e
+
+
+class ForumAgentOperations:
+    """Database operations for forum agents.
+    
+    This class encapsulates all database operations related to forum agents
+    and their responses. Follows the Single Responsibility Principle.
+    """
+    
+    def __init__(self, session: AsyncSession):
+        self.session = session
+    
+    async def create_agent(
+        self,
+        guild_id: str,
+        name: str,
+        system_prompt: str,
+        monitored_forums: List[str],
+        response_threshold: float = 0.7,
+        max_responses_per_hour: int = 5,
+        description: str = None,
+        is_active: bool = True,
+        created_by: str = "admin"
+    ) -> ForumAgent:
+        """Create a new forum agent.
+        
+        Args:
+            guild_id: Discord guild ID
+            name: Agent name
+            system_prompt: AI system prompt
+            monitored_forums: List of forum channel IDs to monitor
+            response_threshold: Minimum confidence to respond
+            max_responses_per_hour: Rate limit for responses
+            description: Optional description
+            is_active: Whether agent should be active immediately
+            created_by: Who created the agent
+            
+        Returns:
+            Created ForumAgent instance
+            
+        Raises:
+            ConflictError: If agent with same name already exists in guild
+            DatabaseOperationError: If creation fails
+        """
+        try:
+            agent = ForumAgent(
+                guild_id=guild_id,
+                name=name,
+                description=description,
+                system_prompt=system_prompt,
+                monitored_forums=monitored_forums,
+                response_threshold=response_threshold,
+                max_responses_per_hour=max_responses_per_hour,
+                is_active=is_active,
+                created_by=created_by
+            )
+            
+            self.session.add(agent)
+            await self.session.commit()
+            await self.session.refresh(agent)
+            
+            return agent
+            
+        except IntegrityError as e:
+            await self.session.rollback()
+            if "UNIQUE constraint" in str(e) or "unique" in str(e).lower():
+                raise ConflictError(f"Agent with name '{name}' already exists in guild") from e
+            raise DatabaseOperationError(f"Failed to create agent: {e}") from e
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to create agent: {e}") from e
+    
+    async def get_agent(self, agent_id: UUID, guild_id: str) -> Optional[ForumAgent]:
+        """Get a forum agent by ID.
+        
+        Args:
+            agent_id: Agent UUID
+            guild_id: Discord guild ID (for security)
+            
+        Returns:
+            ForumAgent instance or None if not found
+        """
+        try:
+            result = await self.session.execute(
+                select(ForumAgent)
+                .where(and_(ForumAgent.id == agent_id, ForumAgent.guild_id == guild_id))
+            )
+            return result.scalar_one_or_none()
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get agent: {e}") from e
+    
+    async def list_agents(self, guild_id: str, active_only: bool = False) -> List[ForumAgent]:
+        """List all forum agents for a guild.
+        
+        Args:
+            guild_id: Discord guild ID
+            active_only: If True, only return active agents
+            
+        Returns:
+            List of ForumAgent instances
+        """
+        try:
+            query = select(ForumAgent).where(ForumAgent.guild_id == guild_id)
+            
+            if active_only:
+                query = query.where(ForumAgent.is_active == True)
+            
+            query = query.order_by(ForumAgent.name)
+            
+            result = await self.session.execute(query)
+            return list(result.scalars().all())
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to list agents: {e}") from e
+    
+    async def update_agent(
+        self,
+        agent_id: UUID,
+        guild_id: str,
+        **updates
+    ) -> Optional[ForumAgent]:
+        """Update a forum agent.
+        
+        Args:
+            agent_id: Agent UUID
+            guild_id: Discord guild ID (for security)
+            **updates: Fields to update
+            
+        Returns:
+            Updated ForumAgent instance or None if not found
+            
+        Raises:
+            ConflictError: If update violates constraints
+            DatabaseOperationError: If update fails
+        """
+        try:
+            # Get the agent first to ensure it exists and belongs to guild
+            agent = await self.get_agent(agent_id, guild_id)
+            if not agent:
+                return None
+            
+            # Apply updates
+            for field, value in updates.items():
+                if hasattr(agent, field):
+                    setattr(agent, field, value)
+            
+            agent.updated_at = datetime.now(timezone.utc)
+            
+            await self.session.commit()
+            await self.session.refresh(agent)
+            
+            return agent
+            
+        except IntegrityError as e:
+            await self.session.rollback()
+            if "UNIQUE constraint" in str(e) or "unique" in str(e).lower():
+                raise ConflictError(f"Update violates unique constraint") from e
+            raise DatabaseOperationError(f"Failed to update agent: {e}") from e
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to update agent: {e}") from e
+    
+    async def delete_agent(self, agent_id: UUID, guild_id: str) -> bool:
+        """Delete a forum agent.
+        
+        Args:
+            agent_id: Agent UUID
+            guild_id: Discord guild ID (for security)
+            
+        Returns:
+            True if deleted, False if not found
+            
+        Raises:
+            DatabaseOperationError: If deletion fails
+        """
+        try:
+            # Get the agent first to ensure it exists and belongs to guild
+            agent = await self.get_agent(agent_id, guild_id)
+            if not agent:
+                return False
+            
+            await self.session.delete(agent)
+            await self.session.commit()
+            
+            return True
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to delete agent: {e}") from e
+    
+    async def toggle_agent(self, agent_id: UUID, guild_id: str) -> Optional[ForumAgent]:
+        """Toggle agent active status.
+        
+        Args:
+            agent_id: Agent UUID
+            guild_id: Discord guild ID (for security)
+            
+        Returns:
+            Updated ForumAgent instance or None if not found
+        """
+        try:
+            agent = await self.get_agent(agent_id, guild_id)
+            if not agent:
+                return None
+            
+            agent.is_active = not agent.is_active
+            agent.updated_at = datetime.now(timezone.utc)
+            
+            await self.session.commit()
+            await self.session.refresh(agent)
+            
+            return agent
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to toggle agent: {e}") from e
+    
+    async def get_agent_analytics(self, agent_id: UUID, guild_id: str) -> Dict[str, Any]:
+        """Get analytics for a forum agent.
+        
+        Args:
+            agent_id: Agent UUID
+            guild_id: Discord guild ID (for security)
+            
+        Returns:
+            Dictionary containing analytics data
+        """
+        try:
+            # Verify agent exists and belongs to guild
+            agent = await self.get_agent(agent_id, guild_id)
+            if not agent:
+                return {}
+            
+            # Get response statistics
+            total_responses_result = await self.session.execute(
+                select(func.count(ForumAgentResponse.id))
+                .where(ForumAgentResponse.forum_agent_id == agent_id)
+            )
+            total_responses = total_responses_result.scalar() or 0
+            
+            responses_posted_result = await self.session.execute(
+                select(func.count(ForumAgentResponse.id))
+                .where(and_(
+                    ForumAgentResponse.forum_agent_id == agent_id,
+                    ForumAgentResponse.responded == True
+                ))
+            )
+            responses_posted = responses_posted_result.scalar() or 0
+            
+            total_tokens_result = await self.session.execute(
+                select(func.coalesce(func.sum(ForumAgentResponse.tokens_used), 0))
+                .where(ForumAgentResponse.forum_agent_id == agent_id)
+            )
+            total_tokens = total_tokens_result.scalar() or 0
+            
+            avg_confidence_result = await self.session.execute(
+                select(func.avg(ForumAgentResponse.confidence_score))
+                .where(ForumAgentResponse.forum_agent_id == agent_id)
+            )
+            avg_confidence = avg_confidence_result.scalar()
+            
+            avg_response_time_result = await self.session.execute(
+                select(func.avg(ForumAgentResponse.response_time_ms))
+                .where(ForumAgentResponse.forum_agent_id == agent_id)
+            )
+            avg_response_time = avg_response_time_result.scalar()
+            
+            return {
+                "agent": {
+                    "id": str(agent.id),
+                    "name": agent.name,
+                    "is_active": agent.is_active,
+                    "created_at": agent.created_at,
+                    "updated_at": agent.updated_at,
+                },
+                "statistics": {
+                    "total_evaluations": total_responses,
+                    "total_responses": responses_posted,
+                    "response_rate": responses_posted / max(1, total_responses),
+                    "total_tokens_used": total_tokens,
+                    "average_confidence": avg_confidence,
+                    "average_response_time_ms": avg_response_time,
+                }
+            }
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get agent analytics: {e}") from e
+    
+    async def get_guild_agent_overview(self, guild_id: str) -> Dict[str, Any]:
+        """Get overview of all forum agents in a guild.
+        
+        Args:
+            guild_id: Discord guild ID
+            
+        Returns:
+            Dictionary containing guild agent overview
+        """
+        try:
+            # Get agent counts
+            total_agents_result = await self.session.execute(
+                select(func.count(ForumAgent.id))
+                .where(ForumAgent.guild_id == guild_id)
+            )
+            total_agents = total_agents_result.scalar() or 0
+            
+            active_agents_result = await self.session.execute(
+                select(func.count(ForumAgent.id))
+                .where(and_(ForumAgent.guild_id == guild_id, ForumAgent.is_active == True))
+            )
+            active_agents = active_agents_result.scalar() or 0
+            
+            # Get all agents with basic info
+            agents_result = await self.session.execute(
+                select(ForumAgent)
+                .where(ForumAgent.guild_id == guild_id)
+                .order_by(ForumAgent.name)
+            )
+            agents = list(agents_result.scalars().all())
+            
+            # Get agent summaries with response counts
+            agent_summaries = []
+            for agent in agents:
+                responses_count_result = await self.session.execute(
+                    select(func.count(ForumAgentResponse.id))
+                    .where(ForumAgentResponse.forum_agent_id == agent.id)
+                )
+                responses_count = responses_count_result.scalar() or 0
+                
+                agent_summaries.append({
+                    "id": str(agent.id),
+                    "name": agent.name,
+                    "is_active": agent.is_active,
+                    "response_count": responses_count,
+                    "monitored_forums_count": len(agent.monitored_forums),
+                    "response_threshold": agent.response_threshold,
+                })
+            
+            return {
+                "guild_id": guild_id,
+                "total_agents": total_agents,
+                "active_agents": active_agents,
+                "overall_statistics": {
+                    "total_agents": total_agents,
+                    "active_percentage": active_agents / max(1, total_agents) * 100,
+                },
+                "agent_summaries": agent_summaries,
+            }
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get guild agent overview: {e}") from e
+    
+    async def bulk_update_agents(
+        self,
+        agent_ids: List[UUID],
+        guild_id: str,
+        action: str
+    ) -> int:
+        """Perform bulk operations on forum agents.
+        
+        Args:
+            agent_ids: List of agent UUIDs
+            guild_id: Discord guild ID (for security)
+            action: Action to perform ("enable", "disable", "delete")
+            
+        Returns:
+            Number of agents modified
+            
+        Raises:
+            DatabaseOperationError: If bulk operation fails
+        """
+        try:
+            if not agent_ids:
+                return 0
+            
+            base_query = select(ForumAgent).where(
+                and_(
+                    ForumAgent.id.in_(agent_ids),
+                    ForumAgent.guild_id == guild_id
+                )
+            )
+            
+            result = await self.session.execute(base_query)
+            agents = list(result.scalars().all())
+            
+            if not agents:
+                return 0
+            
+            modified_count = 0
+            
+            if action == "enable":
+                for agent in agents:
+                    if not agent.is_active:
+                        agent.is_active = True
+                        agent.updated_at = datetime.now(timezone.utc)
+                        modified_count += 1
+                        
+            elif action == "disable":
+                for agent in agents:
+                    if agent.is_active:
+                        agent.is_active = False
+                        agent.updated_at = datetime.now(timezone.utc)
+                        modified_count += 1
+                        
+            elif action == "delete":
+                for agent in agents:
+                    await self.session.delete(agent)
+                    modified_count += 1
+            
+            else:
+                raise ValueError(f"Invalid bulk action: {action}")
+            
+            await self.session.commit()
+            return modified_count
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to perform bulk operation: {e}") from e

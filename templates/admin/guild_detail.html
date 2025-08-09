@@ -24,6 +24,12 @@
             </svg>
             Manage Squads
         </a>
+        <a href="/admin/guilds/{{ guild.id }}/forum-agents" class="btn btn-outline-success">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-robot"></use>
+            </svg>
+            Forum Agents
+        </a>
     </div>
 </div>
 {% endblock %}
@@ -256,6 +262,37 @@
                     </a>
                 </div>
                 {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Forum Agents Overview -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Forum Agents</h3>
+                <div class="card-actions">
+                    <a href="/admin/guilds/{{ guild.id }}/forum-agents" class="btn btn-success btn-sm">
+                        <svg class="icon me-1" width="16" height="16">
+                            <use xlink:href="#tabler-robot"></use>
+                        </svg>
+                        Manage Agents
+                    </a>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="text-center text-muted py-4">
+                    <svg class="icon mb-3" width="48" height="48">
+                        <use xlink:href="#tabler-robot"></use>
+                    </svg>
+                    <p>AI-powered forum monitoring agents for this guild.</p>
+                    <p class="small">Create agents to automatically respond to forum posts based on custom criteria.</p>
+                    <a href="/admin/guilds/{{ guild.id }}/forum-agents" class="btn btn-success">
+                        Configure Forum Agents
+                    </a>
+                </div>
             </div>
         </div>
     </div>

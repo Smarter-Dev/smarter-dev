@@ -2936,6 +2936,7 @@ bot = [
     { name = "httpx" },
 ]
 dev = [
+    { name = "aiosqlite" },
     { name = "black" },
     { name = "isort" },
     { name = "mypy" },
@@ -3010,6 +3011,7 @@ bot = [
     { name = "httpx", specifier = ">=0.24.0" },
 ]
 dev = [
+    { name = "aiosqlite", specifier = ">=0.21.0" },
     { name = "black", specifier = ">=23.0.0" },
     { name = "isort", specifier = ">=5.12.0" },
     { name = "mypy", specifier = ">=1.5.0" },
