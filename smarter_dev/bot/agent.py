@@ -336,7 +336,6 @@ class TLDRAgentSignature(dspy.Signature):
     - **Bold key terms** or decisions for scanning
     - **Avoid walls of text** - break into digestible chunks
     - Include relevant usernames naturally
-    - End with "(Summarized X messages)"
 
     ## EXAMPLE OUTPUTS
     
@@ -345,7 +344,6 @@ class TLDRAgentSignature(dspy.Signature):
     Users discussed their favorite pizza toppings, with **pineapple** being surprisingly popular. Sarah shared a local restaurant recommendation that got several positive reactions.
     
     Most people agreed to try the new place for the next meetup.
-    (Summarized 8 messages)
 
     **Technical Discussion Example:**
     📝 **Channel Summary**
@@ -356,7 +354,6 @@ class TLDRAgentSignature(dspy.Signature):
     **Solution**: Team decided to rename the field to `command_metadata` and run manual migration.
     
     Alice successfully applied the fix and confirmed the admin dashboard is working.
-    (Summarized 15 messages)
     """
     
     messages: str = dspy.InputField(description="Discord messages to summarize, formatted as structured data")
@@ -458,7 +455,7 @@ class TLDRAgent:
         )
         
         if messages_used == 0:
-            return ("📝 **Channel Summary**\nNo messages found to summarize. The channel might be empty or contain only bot messages.\n(Summarized 0 messages)", 0, 0)
+            return ("📝 **Channel Summary**\nNo messages found to summarize. The channel might be empty or contain only bot messages.\n\n*(Summarized 0 messages)*", 0, 0)
         
         try:
             # Generate summary
@@ -475,7 +472,10 @@ class TLDRAgent:
                         elif isinstance(usage, dict) and 'total_tokens' in usage:
                             tokens_used += usage['total_tokens']
             
-            return result.summary, tokens_used, messages_used
+            # Inject the actual message count into the summary
+            summary_with_count = f"{result.summary}\n\n*(Summarized {messages_used} messages)*"
+            
+            return summary_with_count, tokens_used, messages_used
             
         except Exception as e:
             # Generate a helpful error message using the agent with minimal context
@@ -483,10 +483,11 @@ class TLDRAgent:
             
             try:
                 error_result = self._agent(messages=error_context)
-                return error_result.summary, 0, 0
+                error_summary_with_count = f"{error_result.summary}\n\n*(Unable to process {messages_used} messages)*"
+                return error_summary_with_count, 0, 0
             except:
                 # Final fallback
-                return ("📝 **Channel Summary**\nSorry, there was too much content to summarize. Try using a smaller message count or wait a moment before trying again.\n(Unable to process messages)", 0, 0)
+                return ("📝 **Channel Summary**\nSorry, there was too much content to summarize. Try using a smaller message count or wait a moment before trying again.\n\n*(Unable to process messages)*", 0, 0)
 
 
 def estimate_message_tokens(messages: List[DiscordMessage]) -> int:
