@@ -244,6 +244,8 @@ class HelpAgentSignature(dspy.Signature):
     - Use the conversation context to give relevant answers
     - Keep responses concise but informative
     - Use emojis sparingly and appropriately
+    - If the user asks a question, answer it. If the user asks for help, provide help.
+    - If the user goes off topic, play along and keep the conversation going, gently redirect them back to the topic.
     """
     
     context_messages: str = dspy.InputField(description="Recent conversation messages for context")
