@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, Mock
 
-from web.models.squads import Squad, SquadMembership
+from smarter_dev.web.models.squads import Squad, SquadMembership
 
 
 class TestSquadMembershipCreationBug:

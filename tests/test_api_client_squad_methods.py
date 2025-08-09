@@ -3,9 +3,9 @@
 import pytest
 from unittest.mock import AsyncMock, Mock
 
-from bot.services.api_client import APIClient
-from bot.config import BotConfig
-from shared.exceptions import APIError
+from smarter_dev.bot.services.api_client import APIClient
+from smarter_dev.bot.config import BotConfig
+from smarter_dev.shared.exceptions import APIError
 
 
 class TestAPIClientSquadMethods:

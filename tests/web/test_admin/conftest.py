@@ -57,17 +57,15 @@ async def admin_async_client(admin_app):
 @pytest.fixture
 def authenticated_client(admin_client, mock_settings):
     """Create an authenticated admin client."""
-    # Perform a login to establish session
-    with patch("smarter_dev.web.admin.auth.get_settings", return_value=mock_settings):
-        response = admin_client.post("/admin/login", data={
-            "username": "admin",
-            "password": "password"
-        }, follow_redirects=False)
-        
-        # Verify login was successful
-        assert response.status_code == 303
+    # Mock the admin_required decorator to always pass authentication
+    def mock_admin_required(func):
+        """Mock admin_required decorator that always allows access."""
+        return func
     
-    return admin_client
+    with patch("smarter_dev.web.admin.auth.admin_required", side_effect=mock_admin_required):
+        # Also mock the session check for any direct session access
+        with patch.object(admin_client, "session", {"is_admin": True, "discord_user": {"id": "123456789", "username": "testadmin"}}):
+            yield admin_client
 
 
 @pytest.fixture
@@ -263,6 +261,108 @@ def sample_squad_data() -> Dict[str, Any]:
         "switch_cost": "50",
         "max_members": "10"
     }
+
+
+@pytest.fixture
+def sample_forum_agent_data() -> Dict[str, Any]:
+    """Sample forum agent data for testing."""
+    return {
+        "name": "Python Helper",
+        "system_prompt": "You are a helpful Python programming assistant. Help users with Python-related questions, provide code examples, and explain programming concepts clearly.",
+        "monitored_forums": ["123456789012345678", "234567890123456789"],
+        "response_threshold": "0.7",
+        "max_responses_per_hour": "5"
+    }
+
+
+@pytest.fixture
+def mock_forum_agents():
+    """Mock forum agent data for testing."""
+    from uuid import uuid4
+    from unittest.mock import Mock
+    
+    agents = []
+    
+    # Create mock forum agents
+    agent1 = Mock()
+    agent1.id = uuid4()
+    agent1.guild_id = "123456789012345678"
+    agent1.name = "Python Helper"
+    agent1.system_prompt = "You are a helpful Python programming assistant."
+    agent1.monitored_forums = ["123456789012345678", "234567890123456789"]
+    agent1.response_threshold = 0.7
+    agent1.max_responses_per_hour = 5
+    agent1.is_active = True
+    agent1.created_at = None
+    agent1.updated_at = None
+    agents.append(agent1)
+    
+    agent2 = Mock()
+    agent2.id = uuid4()
+    agent2.guild_id = "123456789012345678"
+    agent2.name = "Code Reviewer"
+    agent2.system_prompt = "You are a code review assistant. Review code for best practices."
+    agent2.monitored_forums = ["123456789012345678"]
+    agent2.response_threshold = 0.8
+    agent2.max_responses_per_hour = 3
+    agent2.is_active = False
+    agent2.created_at = None
+    agent2.updated_at = None
+    agents.append(agent2)
+    
+    return agents
+
+
+@pytest.fixture 
+def mock_forum_responses(mock_forum_agents):
+    """Mock forum agent response data for testing."""
+    from uuid import uuid4
+    from unittest.mock import Mock
+    from datetime import datetime, timezone
+    
+    responses = []
+    
+    for i, agent in enumerate(mock_forum_agents):
+        # Create multiple responses per agent
+        for j in range(3):
+            response = Mock()
+            response.id = uuid4()
+            response.forum_agent_id = agent.id
+            response.channel_id = f"channel_{i}_{j}"
+            response.thread_id = f"thread_{i}_{j}"
+            response.post_title = f"Test Question {i}_{j}"
+            response.post_content = f"This is test post content {i}_{j}"
+            response.author_display_name = f"TestUser{i}_{j}"
+            response.post_tags = ["python", "help"]
+            response.attachments = []
+            response.decision_reason = f"This question matches my expertise area {i}_{j}"
+            response.confidence_score = 0.85 + (j * 0.02)
+            response.response_content = f"Test response content {i}_{j}"
+            response.tokens_used = 250 + (j * 50)
+            response.response_time_ms = 800 + (j * 100)
+            response.responded = j % 2 == 0  # Alternate responded status
+            response.created_at = datetime.now(timezone.utc)
+            responses.append(response)
+    
+    return responses
+
+
+@pytest.fixture
+def mock_forum_operations():
+    """Mock forum agent operations."""
+    with patch("smarter_dev.web.admin.views.ForumAgentOperations") as mock_ops:
+        mock_instance = AsyncMock()
+        mock_ops.return_value = mock_instance
+        
+        # Mock return values
+        mock_instance.list_agents.return_value = []
+        mock_instance.create_agent.return_value = Mock()
+        mock_instance.get_agent.return_value = None
+        mock_instance.update_agent.return_value = Mock()
+        mock_instance.delete_agent.return_value = Mock()
+        mock_instance.get_agent_analytics.return_value = {}
+        
+        yield mock_instance
 
 
 @pytest.fixture

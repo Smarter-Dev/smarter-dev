@@ -4,11 +4,11 @@ import pytest
 import asyncio
 from unittest.mock import AsyncMock, patch, Mock
 
-from bot.services.bytes_service import BytesService
-from bot.plugins.bytes_commands import BalanceCommand, SendCommand, LeaderboardCommand
-from bot.views.bytes_views import TransferConfirmView, DailyClaimView
-from shared.types import StreakMultiplier
-from bot.errors import InsufficientBytesError
+from smarter_dev.bot.services.bytes_service import BytesService
+from smarter_dev.bot.plugins.bytes_commands import BalanceCommand, SendCommand, LeaderboardCommand
+from smarter_dev.bot.views.bytes_views import TransferConfirmView, DailyClaimView
+from smarter_dev.shared.types import StreakMultiplier
+from smarter_dev.bot.errors import InsufficientBytesError
 
 
 @pytest.fixture
