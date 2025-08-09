@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smarter-dev-migration
+  namespace: smarter-dev
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: migration
+        image: zzmmrmn/smarter-dev-website:89bb26b
+        command: ["uv", "run", "alembic", "upgrade", "head"]
+        envFrom:
+        - secretRef:
+            name: smarter-dev-secrets
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+  backoffLimit: 3

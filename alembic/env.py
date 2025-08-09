@@ -83,8 +83,12 @@ async def run_async_migrations() -> None:
     """Run migrations in async mode."""
     configuration = config.get_section(config.config_ini_section, {})
     
-    # Override with the current database URL
-    configuration["sqlalchemy.url"] = settings.effective_database_url
+    # Override with the current database URL and fix SSL parameters for asyncpg
+    db_url = settings.effective_database_url
+    # Convert sslmode=require to ssl=require for asyncpg compatibility
+    if "sslmode=require" in db_url:
+        db_url = db_url.replace("sslmode=require", "ssl=require")
+    configuration["sqlalchemy.url"] = db_url
     
     connectable = async_engine_from_config(
         configuration,
