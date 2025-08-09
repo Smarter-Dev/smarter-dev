@@ -147,7 +147,7 @@
                                             <small class="text-muted">{{ message.timestamp[:19] }}</small>
                                         </div>
                                         <div class="text-muted small mt-1">
-                                            {{ message.content }}
+                                            {{ message.content|replace('\n', '<br>')|safe }}
                                         </div>
                                     </div>
                                 </div>

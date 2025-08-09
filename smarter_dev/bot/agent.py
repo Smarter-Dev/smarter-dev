@@ -1,5 +1,6 @@
 import dspy
 import dotenv
+import html
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
 from dataclasses import dataclass
@@ -281,9 +282,9 @@ class HelpAgent:
                 timestamp_str = msg.timestamp.strftime("%m/%d %H:%M")
                 context_lines.append(
                     f"<message>"
-                    f"<timestamp>{timestamp_str}</timestamp>"
-                    f"<author>{msg.author}</author>"
-                    f"<content>{msg.content}</content>"
+                    f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
+                    f"<author>{html.escape(msg.author)}</author>"
+                    f"<content>{html.escape(msg.content)}</content>"
                     f"</message>"
                 )
             context_str = "\n".join(context_lines)
@@ -416,9 +417,9 @@ class TLDRAgent:
                 
                 formatted_lines.append(
                     f"<message>"
-                    f"<timestamp>{timestamp_str}</timestamp>"
-                    f"<author>{msg.author}</author>"
-                    f"<content>{content}</content>"
+                    f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
+                    f"<author>{html.escape(msg.author)}</author>"
+                    f"<content>{html.escape(content)}</content>"
                     f"</message>"
                 )
             
@@ -571,18 +572,18 @@ class ForumMonitorAgent:
         
         context_parts = [
             f"<post>",
-            f"<title>{post_title}</title>",
-            f"<author>{author_display_name}</author>",
-            f"<content>{post_content}</content>",
+            f"<title>{html.escape(post_title)}</title>",
+            f"<author>{html.escape(author_display_name)}</author>",
+            f"<content>{html.escape(post_content)}</content>",
         ]
         
         if post_tags:
-            tags_str = ", ".join(post_tags)
-            context_parts.append(f"<tags>{tags_str}</tags>")
+            tags_str = ", ".join(html.escape(tag) for tag in post_tags)
+            context_parts.append(f"<tags>{html.escape(tags_str)}</tags>")
         
         if attachment_names:
-            attachments_str = ", ".join(attachment_names)
-            context_parts.append(f"<attachments>{attachments_str}</attachments>")
+            attachments_str = ", ".join(html.escape(name) for name in attachment_names)
+            context_parts.append(f"<attachments>{html.escape(attachments_str)}</attachments>")
         
         context_parts.append("</post>")
         
