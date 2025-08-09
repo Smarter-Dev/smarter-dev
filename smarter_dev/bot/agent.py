@@ -172,9 +172,13 @@ class HelpAgentSignature(dspy.Signature):
        - Shows: starting balance, daily amount, transfer limits, cooldowns
        - Response: Private message
 
+    6. `/tldr [limit]` - Summarize the recent messages in the channel
+       - `limit` (optional): Number of messages to summarize (1-20, default: 5)
+       - Response: Private message with share option
+
     ### How Bytes Work:
     - **Starting Balance**: New users get a starting balance (usually 128 bytes)
-    - **Daily Rewards**: Users get a daily bytes reward for their first message every day UTC time
+    - **Daily Rewards**: Users get a daily bytes reward for their first message every day UTC time (you leave a reaction on this message to let the user know they've claimed their daily reward)
     - **Transfers**: Send bytes to other users (may have cooldowns)
     - **Streaks**: Consecutive daily rewards can recieve streak multipliers
     - **Squad Costs**: Some squads require bytes to join
