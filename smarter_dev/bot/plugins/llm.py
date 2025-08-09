@@ -217,7 +217,7 @@ async def generate_tldr_summary(
 
 
 @plugin.command
-@lightbulb.option("count", "Number of recent messages to summarize (1-20, default: 5)", type=int, required=False, min_value=1, max_value=20)
+@lightbulb.option("count", "Number of recent messages to summarize (1-40, default: 5)", type=int, required=False, min_value=1, max_value=40)
 @lightbulb.command("tldr", "Generate a summary of recent channel messages")
 @lightbulb.implements(lightbulb.SlashCommand)
 async def tldr_command(ctx: lightbulb.Context) -> None:
@@ -229,22 +229,22 @@ async def tldr_command(ctx: lightbulb.Context) -> None:
     # Get message count (default to 5)
     message_count = ctx.options.count if ctx.options.count is not None else 5
     
-    # Gather messages from the channel (skip short messages for better summaries)
+    # Gather messages from the channel (include all messages for full context)
     messages = await gather_message_context(
         ctx.bot, 
         ctx.channel_id, 
         limit=message_count,
-        skip_short_messages=True,
+        skip_short_messages=False,
         min_message_length=10
     )
     
     if not messages:
         await ctx.edit_last_response(
             "📝 **No Messages to Summarize**\n\n"
-            "I couldn't find any substantial messages to summarize in this channel. "
+            "I couldn't find any messages to summarize in this channel. "
             "This might be because:\n"
             "• The channel is empty\n"
-            "• Only bot messages or very short messages are present\n"
+            "• Only bot messages are present\n"
             "• There was an error accessing the channel history"
         )
         return
