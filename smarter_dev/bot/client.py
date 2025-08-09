@@ -748,7 +748,7 @@ async def run_bot() -> None:
                 
                 # Add reaction to the message that earned bytes
                 try:
-                    await event.message.add_reaction("<:daily_bytes_received:1403748840477163642>")
+                    await event.message.add_reaction("1403748840477163642")
                     logger.info(f"✅ Added reaction and awarded daily bytes reward ({result.earned}) to {event.author}")
                 except Exception as e:
                     logger.error(f"Failed to add reaction to daily reward message: {e}")
