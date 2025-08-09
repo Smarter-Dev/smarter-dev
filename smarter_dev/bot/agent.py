@@ -489,3 +489,117 @@ def estimate_message_tokens(messages: List[DiscordMessage]) -> int:
     """Estimate total token count for a list of messages."""
     total_chars = sum(len(msg.content) + len(msg.author) + 50 for msg in messages)  # +50 for formatting
     return total_chars // 4  # Rough estimation of 4 chars per token
+
+
+class ForumMonitorSignature(dspy.Signature):
+    """You are an AI agent that monitors Discord forum posts and decides whether to respond.
+
+    ## YOUR ROLE
+    You evaluate new forum posts based on your system prompt and decide if they warrant a response.
+    You should be helpful but selective - only respond when you can provide genuine value.
+
+    ## DECISION PROCESS
+    1. **Read the system prompt carefully** - this defines your specific role and criteria
+    2. **Analyze the post content** - consider title, content, author, tags, and attachments
+    3. **Determine if response is warranted** - based on your criteria and the post quality
+    4. **Generate response if appropriate** - create a helpful, relevant response
+
+    ## DECISION CRITERIA
+    - **Relevance**: Does this match your area of expertise defined in the system prompt?
+    - **Quality**: Is this a genuine question/discussion that needs help?
+    - **Value**: Can you provide meaningful assistance?
+    - **Appropriateness**: Is a response appropriate given the context?
+
+    ## RESPONSE GUIDELINES
+    - Be helpful, accurate, and concise
+    - Match the tone and complexity to the question
+    - Provide actionable advice when possible
+    - Acknowledge when you're unsure or need more information
+    - Don't respond to spam, off-topic, or inappropriate content
+
+    ## OUTPUT FORMAT
+    - **decision**: Clear explanation of why you should/shouldn't respond
+    - **confidence**: Numeric confidence score (0.0 to 1.0) in your decision
+    - **response**: Your actual response (empty string if not responding)
+    """
+    
+    system_prompt: str = dspy.InputField(description="Your specific role and response criteria")
+    post_context: str = dspy.InputField(description="Complete forum post information including title, content, author, tags, and attachments")
+    decision: str = dspy.OutputField(description="Explanation of whether and why to respond")
+    confidence: float = dspy.OutputField(description="Confidence score (0.0-1.0) in the decision")
+    response: str = dspy.OutputField(description="Generated response content (empty if not responding)")
+
+
+class ForumMonitorAgent:
+    """Discord forum monitoring agent using Gemini for post evaluation and response generation."""
+    
+    def __init__(self):
+        self._agent = dspy.ChainOfThought(ForumMonitorSignature)
+    
+    async def evaluate_post(
+        self, 
+        system_prompt: str,
+        post_title: str,
+        post_content: str,
+        author_display_name: str,
+        post_tags: List[str] = None,
+        attachment_names: List[str] = None
+    ) -> tuple[str, float, str, int]:
+        """Evaluate a forum post and generate response if warranted.
+        
+        Args:
+            system_prompt: Agent's specific role and criteria
+            post_title: Title of the forum post
+            post_content: Content of the forum post
+            author_display_name: Display name of the post author
+            post_tags: List of tags on the post
+            attachment_names: List of attachment filenames
+            
+        Returns:
+            tuple[str, float, str, int]: Decision reason, confidence score, response content, tokens used
+        """
+        # Format post context for the AI
+        post_tags = post_tags or []
+        attachment_names = attachment_names or []
+        
+        context_parts = [
+            f"<post>",
+            f"<title>{post_title}</title>",
+            f"<author>{author_display_name}</author>",
+            f"<content>{post_content}</content>",
+        ]
+        
+        if post_tags:
+            tags_str = ", ".join(post_tags)
+            context_parts.append(f"<tags>{tags_str}</tags>")
+        
+        if attachment_names:
+            attachments_str = ", ".join(attachment_names)
+            context_parts.append(f"<attachments>{attachments_str}</attachments>")
+        
+        context_parts.append("</post>")
+        
+        post_context = "\n".join(context_parts)
+        
+        # Generate evaluation and response
+        result = self._agent(
+            system_prompt=system_prompt,
+            post_context=post_context
+        )
+        
+        # Get token usage from DSPy prediction
+        tokens_used = 0
+        if hasattr(result, '_completions') and result._completions:
+            # Sum token usage from all completions
+            for completion in result._completions:
+                if hasattr(completion, 'kwargs') and 'usage' in completion.kwargs:
+                    usage = completion.kwargs['usage']
+                    if hasattr(usage, 'total_tokens'):
+                        tokens_used += usage.total_tokens
+                    elif isinstance(usage, dict) and 'total_tokens' in usage:
+                        tokens_used += usage['total_tokens']
+        
+        # Ensure confidence is bounded between 0.0 and 1.0
+        confidence = max(0.0, min(1.0, float(result.confidence)))
+        
+        return result.decision, confidence, result.response, tokens_used
