@@ -73,12 +73,12 @@
                                             Actions
                                         </button>
                                         <ul class="dropdown-menu">
-                                            <li><a class="dropdown-item" href="#" onclick="editSquad({{ squad.id | tojson }})">Edit</a></li>
-                                            <li><a class="dropdown-item" href="#" onclick="toggleSquad({{ squad.id | tojson }}, {{ (not squad.is_active) | lower | tojson }})">
+                                            <li><a class="dropdown-item" href="#" onclick="editSquad({{ squad.id | string | tojson }})">Edit</a></li>
+                                            <li><a class="dropdown-item" href="#" onclick="toggleSquad({{ squad.id | string | tojson }}, {{ (not squad.is_active) | lower }})">
                                                 {{ 'Deactivate' if squad.is_active else 'Activate' }}
                                             </a></li>
                                             <li><hr class="dropdown-divider"></li>
-                                            <li><a class="dropdown-item text-danger" href="#" onclick="deleteSquad({{ squad.id | tojson }})">Delete</a></li>
+                                            <li><a class="dropdown-item text-danger" href="#" onclick="deleteSquad({{ squad.id | string | tojson }})">Delete</a></li>
                                         </ul>
                                     </div>
                                 </div>
@@ -366,7 +366,7 @@ function updateCharacterCount(textareaId, counterId) {
 // Squad data for editing
 const squads = {
     {% for squad in squads %}
-    {{ squad.id | tojson }}: {
+    {{ squad.id | string | tojson }}: {
         name: {{ squad.name | tojson }},
         description: {{ (squad.description or "") | tojson }},
         welcome_message: {{ (squad.welcome_message or "") | tojson }},
