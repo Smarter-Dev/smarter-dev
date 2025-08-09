@@ -71,6 +71,43 @@ async def resolve_mentions(content: str, bot: hikari.GatewayBot) -> str:
     return content
 
 
+async def format_reply_context(message: hikari.Message, bot: hikari.GatewayBot) -> str:
+    """Format reply context for a message that replies to another message.
+    
+    Args:
+        message: The message that contains a reply
+        bot: Discord bot instance to fetch referenced message
+        
+    Returns:
+        Formatted string with reply context and response
+    """
+    content = message.content or ""
+    
+    # Check if this message is a reply
+    if message.referenced_message:
+        try:
+            replied_msg = message.referenced_message
+            replied_author = replied_msg.author.display_name or replied_msg.author.username
+            replied_content = (replied_msg.content or "")[:100]  # Truncate long replies
+            
+            # Resolve mentions in the replied message too
+            replied_content = await resolve_mentions(replied_content, bot)
+            
+            # Format with quoted reply context
+            if replied_content.strip():
+                content = f"> {replied_author}: {replied_content}{'...' if len(replied_msg.content or '') > 100 else ''}\n{content}"
+            else:
+                # Handle cases where replied message has no text (like images/embeds)
+                content = f"> {replied_author}: [attachment/embed]\n{content}"
+                
+        except Exception as e:
+            logger.debug(f"Failed to format reply context: {e}")
+            # If we can't get the replied message, just indicate it's a reply
+            content = f"> [replied to message]\n{content}"
+    
+    return content
+
+
 async def gather_message_context(
     bot: hikari.GatewayBot, 
     channel_id: int, 
@@ -109,8 +146,8 @@ async def gather_message_context(
                 logger.debug(f"Skipped short message: '{message.content[:20]}...'")
                 continue
             
-            # Build message content with attachments
-            content = message.content or ""
+            # Build message content starting with reply context
+            content = await format_reply_context(message, bot)
             
             # Add attachment information for context
             if message.attachments:
@@ -128,7 +165,7 @@ async def gather_message_context(
                 if attachment_info:
                     content = f"{content} {' '.join(attachment_info)}".strip()
             
-            # Resolve Discord mentions to readable usernames
+            # Resolve Discord mentions to readable usernames (after reply formatting)
             content = await resolve_mentions(content, bot)
                 
             # Convert to our message format
