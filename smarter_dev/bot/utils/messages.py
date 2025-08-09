@@ -39,15 +39,15 @@ async def gather_message_context(
         messages = []
         
         # When filtering messages, we need to fetch more to ensure we get enough
-        # But we also need to be smarter about it
-        max_fetch = limit * 4 if skip_short_messages else limit
+        # Since we may skip bot messages and system messages
+        max_fetch = limit * 2 if skip_short_messages else int(limit * 1.5)
         
         async for message in bot.rest.fetch_messages(channel_id).limit(max_fetch):
             # Skip bot messages and system messages
             if message.author.is_bot or message.type != hikari.MessageType.DEFAULT:
                 continue
             
-            # Skip short messages if requested (useful for summarization)
+            # Skip short messages if requested
             if skip_short_messages and len(message.content.strip()) < min_message_length:
                 continue
                 
