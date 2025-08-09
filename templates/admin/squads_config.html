@@ -387,6 +387,7 @@ function editSquad(squadId) {
     
     console.log('Editing squad:', squad);
     
+    // Populate form fields
     document.getElementById('edit_squad_id').value = squadId;
     document.getElementById('edit_name').value = squad.name;
     document.getElementById('edit_description').value = squad.description || '';
@@ -399,33 +400,17 @@ function editSquad(squadId) {
     // Update character counters
     updateCharacterCount('edit_welcome_message', 'edit_welcome_count');
     
-    // Use Tabler modal approach
-    const modalElement = document.getElementById('editSquadModal');
-    modalElement.classList.add('show');
-    modalElement.style.display = 'block';
-    document.body.classList.add('modal-open');
-    
-    // Add backdrop
-    const backdrop = document.createElement('div');
-    backdrop.className = 'modal-backdrop fade show';
-    backdrop.id = 'editModalBackdrop';
-    document.body.appendChild(backdrop);
+    // Use Bootstrap modal
+    const modal = new bootstrap.Modal(document.getElementById('editSquadModal'));
+    modal.show();
 }
 
 function deleteSquad(squadId) {
     document.getElementById('delete_squad_id').value = squadId;
     
-    // Use Tabler modal approach
-    const modalElement = document.getElementById('deleteSquadModal');
-    modalElement.classList.add('show');
-    modalElement.style.display = 'block';
-    document.body.classList.add('modal-open');
-    
-    // Add backdrop
-    const backdrop = document.createElement('div');
-    backdrop.className = 'modal-backdrop fade show';
-    backdrop.id = 'deleteModalBackdrop';
-    document.body.appendChild(backdrop);
+    // Use Bootstrap modal
+    const modal = new bootstrap.Modal(document.getElementById('deleteSquadModal'));
+    modal.show();
 }
 
 function toggleSquad(squadId, isActive) {
@@ -436,51 +421,21 @@ function toggleSquad(squadId, isActive) {
     squad.is_active = isActive;
     
     // Populate the edit form with updated data
-    editSquad(squadId);
+    document.getElementById('edit_squad_id').value = squadId;
+    document.getElementById('edit_name').value = squad.name;
+    document.getElementById('edit_description').value = squad.description || '';
+    document.getElementById('edit_welcome_message').value = squad.welcome_message || '';
+    document.getElementById('edit_switch_cost').value = squad.switch_cost;
+    document.getElementById('edit_max_members').value = squad.max_members || '';
+    document.getElementById('edit_is_active').checked = squad.is_active;
+    document.getElementById('edit_is_default').checked = squad.is_default;
     
-    // Auto-submit the form
-    setTimeout(() => {
-        document.getElementById('editSquadForm').submit();
-    }, 100);
+    // Auto-submit the form without showing the modal
+    document.getElementById('editSquadForm').submit();
 }
 
-// Modal close functionality
-function closeModal(modalId, backdropId) {
-    const modal = document.getElementById(modalId);
-    const backdrop = document.getElementById(backdropId);
-    
-    modal.classList.remove('show');
-    modal.style.display = 'none';
-    document.body.classList.remove('modal-open');
-    
-    if (backdrop) {
-        backdrop.remove();
-    }
-}
-
-// Add event listeners for modal close buttons
+// Add event listeners for character counters
 document.addEventListener('DOMContentLoaded', function() {
-    // Edit modal close
-    document.querySelectorAll('#editSquadModal .btn-close, #editSquadModal [data-bs-dismiss="modal"]').forEach(btn => {
-        btn.addEventListener('click', () => closeModal('editSquadModal', 'editModalBackdrop'));
-    });
-    
-    // Delete modal close
-    document.querySelectorAll('#deleteSquadModal .btn-close, #deleteSquadModal [data-bs-dismiss="modal"]').forEach(btn => {
-        btn.addEventListener('click', () => closeModal('deleteSquadModal', 'deleteModalBackdrop'));
-    });
-    
-    // Close on backdrop click
-    document.addEventListener('click', function(e) {
-        if (e.target.classList.contains('modal-backdrop')) {
-            if (e.target.id === 'editModalBackdrop') {
-                closeModal('editSquadModal', 'editModalBackdrop');
-            } else if (e.target.id === 'deleteModalBackdrop') {
-                closeModal('deleteSquadModal', 'deleteModalBackdrop');
-            }
-        }
-    });
-    
     // Add character counter listeners
     document.addEventListener('input', function(e) {
         if (e.target.name === 'welcome_message') {
