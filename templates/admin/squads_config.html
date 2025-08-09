@@ -400,17 +400,28 @@ function editSquad(squadId) {
     // Update character counters
     updateCharacterCount('edit_welcome_message', 'edit_welcome_count');
     
-    // Use Bootstrap modal
-    const modal = new bootstrap.Modal(document.getElementById('editSquadModal'));
-    modal.show();
+    // Trigger modal using HTML data attributes
+    const modalElement = document.getElementById('editSquadModal');
+    const trigger = document.createElement('button');
+    trigger.setAttribute('data-bs-toggle', 'modal');
+    trigger.setAttribute('data-bs-target', '#editSquadModal');
+    trigger.style.display = 'none';
+    document.body.appendChild(trigger);
+    trigger.click();
+    document.body.removeChild(trigger);
 }
 
 function deleteSquad(squadId) {
     document.getElementById('delete_squad_id').value = squadId;
     
-    // Use Bootstrap modal
-    const modal = new bootstrap.Modal(document.getElementById('deleteSquadModal'));
-    modal.show();
+    // Trigger modal using HTML data attributes
+    const trigger = document.createElement('button');
+    trigger.setAttribute('data-bs-toggle', 'modal');
+    trigger.setAttribute('data-bs-target', '#deleteSquadModal');
+    trigger.style.display = 'none';
+    document.body.appendChild(trigger);
+    trigger.click();
+    document.body.removeChild(trigger);
 }
 
 function toggleSquad(squadId, isActive) {
