@@ -583,6 +583,11 @@ class BytesOperations:
             user_id: Discord user snowflake ID
             username: Optional username for logging
         """
+        # Import logging here for better visibility
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Checking auto-assignment for user {user_id} in guild {guild_id} after earning bytes")
+        
         try:
             # Use SquadOperations to handle the auto-assignment
             squad_ops = SquadOperations()
@@ -591,15 +596,11 @@ class BytesOperations:
             )
             
             if assigned_squad:
-                # Import logging to track successful assignments
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.info(f"Auto-assigned user {user_id} to default squad '{assigned_squad.name}' in guild {guild_id} after earning bytes")
+            else:
+                logger.info(f"No auto-assignment needed for user {user_id} in guild {guild_id} (may already be in squad or no default squad exists)")
                 
         except Exception as e:
-            # Import logging for error reporting
-            import logging
-            logger = logging.getLogger(__name__)
             logger.warning(f"Failed to auto-assign user {user_id} to default squad in guild {guild_id} after earning bytes: {e}")
             # Don't raise - squad assignment failure shouldn't break bytes earning
 
@@ -1257,21 +1258,35 @@ class SquadOperations:
         Raises:
             DatabaseOperationError: If operation fails
         """
+        # Import logging for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
             # Check if user is already in a squad
             current_squad = await self.get_user_squad(session, guild_id, user_id)
             if current_squad:
+                logger.info(f"User {user_id} already in squad '{current_squad.name}' in guild {guild_id}, no auto-assignment needed")
                 return None  # User is already in a squad
             
             # Get default squad for guild
             default_squad = await self.get_default_squad(session, guild_id)
             if not default_squad:
+                logger.info(f"No default squad configured for guild {guild_id}, cannot auto-assign user {user_id}")
                 return None  # No default squad configured
+            
+            logger.info(f"Found default squad '{default_squad.name}' for guild {guild_id}, checking if user {user_id} can be assigned")
+            
+            # Check if default squad is active
+            if not default_squad.is_active:
+                logger.info(f"Default squad '{default_squad.name}' is inactive in guild {guild_id}, cannot auto-assign user {user_id}")
+                return None  # Default squad is inactive
             
             # Check if default squad is full
             if default_squad.max_members:
                 member_count = await self._get_squad_member_count(session, default_squad.id)
                 if member_count >= default_squad.max_members:
+                    logger.info(f"Default squad '{default_squad.name}' is full ({member_count}/{default_squad.max_members}) in guild {guild_id}, cannot auto-assign user {user_id}")
                     return None  # Default squad is full
             
             # Auto-assign user to default squad (no cost for default squad assignment)
