@@ -38,9 +38,9 @@ async def gather_message_context(
     try:
         messages = []
         
-        # When filtering messages, we need to fetch more to ensure we get enough
-        # Since we may skip bot messages and system messages
-        max_fetch = limit * 2 if skip_short_messages else int(limit * 1.5)
+        # When filtering short messages, we need to fetch more to ensure we get enough
+        # Otherwise fetch exactly what we need since we include all messages
+        max_fetch = limit * 2 if skip_short_messages else limit
         
         skipped_count = 0
         processed_count = 0
@@ -48,13 +48,7 @@ async def gather_message_context(
         async for message in bot.rest.fetch_messages(channel_id).limit(max_fetch):
             processed_count += 1
             
-            # Only skip system messages (keep bot messages as they can be part of conversation)
-            if message.type != hikari.MessageType.DEFAULT:
-                skipped_count += 1
-                logger.debug(f"Skipped system message type: {message.type}")
-                continue
-            
-            # Skip short messages if requested
+            # Include ALL messages - no filtering except for short messages if explicitly requested
             if skip_short_messages and len(message.content.strip()) < min_message_length:
                 skipped_count += 1
                 logger.debug(f"Skipped short message: '{message.content[:20]}...'")
