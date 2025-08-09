@@ -33,16 +33,16 @@ async def gather_message_context(
         min_message_length: Minimum message length to include (if skip_short_messages is True)
         
     Returns:
-        List[DiscordMessage]: Recent messages for context
+        List[DiscordMessage]: Recent messages for context, in chronological order
     """
     try:
         messages = []
-        message_count = 0
         
-        # Fetch extra messages in case we filter many
-        fetch_limit = limit * 2 if skip_short_messages else limit
+        # When filtering messages, we need to fetch more to ensure we get enough
+        # But we also need to be smarter about it
+        max_fetch = limit * 4 if skip_short_messages else limit
         
-        async for message in bot.rest.fetch_messages(channel_id).limit(fetch_limit):
+        async for message in bot.rest.fetch_messages(channel_id).limit(max_fetch):
             # Skip bot messages and system messages
             if message.author.is_bot or message.type != hikari.MessageType.DEFAULT:
                 continue
@@ -58,14 +58,22 @@ async def gather_message_context(
                 content=message.content or ""
             )
             messages.append(discord_msg)
-            message_count += 1
             
             # Stop when we have enough messages
-            if message_count >= limit:
+            if len(messages) >= limit:
                 break
         
-        # Return in chronological order (oldest first)
-        return list(reversed(messages))
+        # Messages are collected newest-first, but we want to return them
+        # in chronological order (oldest-first) for better summarization context
+        reversed_messages = list(reversed(messages))
+        
+        # Log for debugging - show which messages were selected
+        if reversed_messages:
+            logger.debug(f"Selected {len(reversed_messages)} messages for context:")
+            for i, msg in enumerate(reversed_messages):
+                logger.debug(f"  {i+1}. {msg.author}: {msg.content[:50]}... ({msg.timestamp.strftime('%H:%M:%S')})")
+        
+        return reversed_messages
         
     except Exception as e:
         logger.warning(f"Failed to gather message context: {e}")
