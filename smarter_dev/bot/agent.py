@@ -591,13 +591,13 @@ class ForumMonitorAgent:
             post_context=post_context
         )
         
-        # Get token usage from DSPy prediction with improved extraction
+        # Get token usage from DSPy prediction with comprehensive extraction
         tokens_used = 0
         
-        # Try multiple approaches to extract tokens
+        # Try multiple approaches to extract tokens from DSPy completions
         if hasattr(result, '_completions') and result._completions:
             for completion in result._completions:
-                # Method 1: Check kwargs.usage
+                # Method 1: Traditional kwargs.usage approach  
                 if hasattr(completion, 'kwargs') and completion.kwargs:
                     if 'usage' in completion.kwargs:
                         usage = completion.kwargs['usage']
@@ -618,13 +618,32 @@ class ForumMonitorAgent:
                         if hasattr(response_obj, 'usage') and hasattr(response_obj.usage, 'total_tokens'):
                             tokens_used += response_obj.usage.total_tokens
                 
-                # Method 3: Check completion object directly
-                if hasattr(completion, 'usage'):
-                    usage = completion.usage
-                    if hasattr(usage, 'total_tokens'):
-                        tokens_used += usage.total_tokens
-                    elif isinstance(usage, dict) and 'total_tokens' in usage:
-                        tokens_used += usage['total_tokens']
+                # Method 3: Direct completion attributes
+                for attr in ['usage', 'response', 'metadata', 'raw_response', 'completion']:
+                    if hasattr(completion, attr):
+                        attr_value = getattr(completion, attr)
+                        
+                        # Direct usage object  
+                        if hasattr(attr_value, 'total_tokens'):
+                            tokens_used += attr_value.total_tokens
+                            break
+                        elif hasattr(attr_value, 'usage') and hasattr(attr_value.usage, 'total_tokens'):
+                            tokens_used += attr_value.usage.total_tokens
+                            break
+                        
+                        # Dictionary with usage info
+                        elif isinstance(attr_value, dict):
+                            if 'total_tokens' in attr_value:
+                                tokens_used += attr_value['total_tokens']
+                                break
+                            elif 'usage' in attr_value and isinstance(attr_value['usage'], dict):
+                                usage_dict = attr_value['usage']
+                                if 'total_tokens' in usage_dict:
+                                    tokens_used += usage_dict['total_tokens']
+                                    break
+                                elif 'prompt_tokens' in usage_dict and 'completion_tokens' in usage_dict:
+                                    tokens_used += usage_dict['prompt_tokens'] + usage_dict['completion_tokens']
+                                    break
         
         # Debug token extraction with more detailed output
         if tokens_used == 0:
@@ -635,6 +654,26 @@ class ForumMonitorAgent:
                     print(f"FORUM DEBUG: Completion {i}:")
                     print(f"  - Type: {type(completion)}")
                     print(f"  - Has kwargs: {hasattr(completion, 'kwargs')}")
+                    print(f"  - All attributes: {[attr for attr in dir(completion) if not attr.startswith('_')]}")
+                    
+                    # Try to access common token storage attributes
+                    for attr_name in ['usage', 'response', 'metadata', 'raw_response', 'completion']:
+                        if hasattr(completion, attr_name):
+                            attr_value = getattr(completion, attr_name)
+                            print(f"  - Has {attr_name}: {attr_value}")
+                            if hasattr(attr_value, 'total_tokens'):
+                                print(f"    - {attr_name}.total_tokens: {attr_value.total_tokens}")
+                                tokens_used += attr_value.total_tokens
+                            elif isinstance(attr_value, dict):
+                                print(f"    - {attr_name} keys: {list(attr_value.keys())}")
+                                if 'total_tokens' in attr_value:
+                                    tokens_used += attr_value['total_tokens']
+                                elif 'usage' in attr_value and isinstance(attr_value['usage'], dict):
+                                    usage_dict = attr_value['usage']
+                                    if 'total_tokens' in usage_dict:
+                                        tokens_used += usage_dict['total_tokens']
+                    
+                    # Try direct attribute access
                     if hasattr(completion, 'kwargs'):
                         kwargs_keys = list(completion.kwargs.keys()) if completion.kwargs else []
                         print(f"  - Kwargs keys: {kwargs_keys}")
@@ -645,11 +684,12 @@ class ForumMonitorAgent:
                                 print(f"  - Usage keys: {list(usage.keys())}")
                             else:
                                 print(f"  - Usage attributes: {dir(usage)}")
-                    print(f"  - Has direct usage: {hasattr(completion, 'usage')}")
-                    if hasattr(completion, 'usage'):
-                        print(f"  - Direct usage: {completion.usage}")
             else:
                 print(f"FORUM DEBUG: No completions found in result")
+            
+            # Check if we found tokens in the debug process
+            if tokens_used > 0:
+                print(f"FORUM DEBUG: Found {tokens_used} tokens during debug inspection")
         else:
             print(f"FORUM DEBUG: Successfully extracted {tokens_used} tokens")
         
