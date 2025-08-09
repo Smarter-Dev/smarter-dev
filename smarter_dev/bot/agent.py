@@ -315,7 +315,7 @@ class TLDRAgentSignature(dspy.Signature):
 
     ## ADAPTIVE RESPONSE STRATEGY
     **For Quick Back-and-Forth Chat** (short messages, casual talk):
-    - Brief overview focusing on main theme or outcome
+    - Keep it brief and to the point, don't lose juicy details
     - 2-4 sentences max
     - Highlight any decisions or conclusions
 
