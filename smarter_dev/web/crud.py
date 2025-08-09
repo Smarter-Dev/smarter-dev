@@ -1748,6 +1748,7 @@ class ForumAgentOperations:
             avg_confidence_result = await self.session.execute(
                 select(func.avg(ForumAgentResponse.confidence_score))
                 .where(ForumAgentResponse.agent_id == agent_id)
+                .where(ForumAgentResponse.confidence_score.is_not(None))
             )
             avg_confidence = avg_confidence_result.scalar()
             
@@ -1774,7 +1775,7 @@ class ForumAgentOperations:
                 response_obj = SimpleNamespace(
                     id=str(response.id),
                     post_title=response.post_title or "Untitled",
-                    post_author=response.author_display_name or "Unknown",  # Fixed field name
+                    author_display_name=response.author_display_name or "Unknown",  # Match template expectation
                     confidence_score=response.confidence_score,
                     responded=response.responded,
                     tokens_used=response.tokens_used or 0,
