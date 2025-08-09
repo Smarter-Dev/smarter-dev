@@ -362,7 +362,7 @@ def create_daily_claim_embed(
         Formatted embed for daily claim notification
     """
     embed = hikari.Embed(
-        title="🎉 Daily Bytes Claimed!",
+        title="<:daily_bytes_received:1403748840477163642> Daily Bytes Claimed!",
         description=f"You've earned **{earned:,} bytes** from your first message today in {guild_name}!",
         color=hikari.Color(0x22c55e),
         timestamp=datetime.now(timezone.utc)
