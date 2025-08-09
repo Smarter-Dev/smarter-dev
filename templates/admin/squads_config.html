@@ -374,7 +374,7 @@ const squads = {
         max_members: {% if squad.max_members %}{{ squad.max_members }}{% else %}null{% endif %},
         is_active: {{ squad.is_active | lower }},
         is_default: {{ squad.is_default | lower }}
-    },
+    }{% if not loop.last %},{% endif %}
     {% endfor %}
 };
 
