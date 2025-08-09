@@ -1,8 +1,9 @@
 import dspy
 import dotenv
 import html
+import re
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from pydantic import BaseModel
 
@@ -16,6 +17,53 @@ class DiscordMessage(BaseModel):
     author: str
     timestamp: datetime
     content: str
+
+
+def parse_reply_context(content: str) -> Tuple[Optional[str], Optional[str], str]:
+    """Parse reply context from formatted message content.
+    
+    Args:
+        content: Message content that may contain reply context in format:
+                "> Author: replied content...\nActual message content"
+    
+    Returns:
+        Tuple[replied_author, replied_content, actual_content]: 
+        - replied_author: Author of the message being replied to (None if no reply)
+        - replied_content: Content of the message being replied to (None if no reply)  
+        - actual_content: The actual message content without reply context
+    """
+    # Check if message starts with reply context (> Author: content)
+    reply_pattern = r'^> ([^:]+): (.+?)(?:\.\.\.)?\n(.*)$'
+    match = re.match(reply_pattern, content, re.DOTALL)
+    
+    if match:
+        replied_author = match.group(1).strip()
+        replied_content = match.group(2).strip()
+        actual_content = match.group(3).strip()
+        return replied_author, replied_content, actual_content
+    
+    # Check for attachment/embed reply format
+    attachment_pattern = r'^> ([^:]+): \[attachment/embed\]\n(.*)$'
+    match = re.match(attachment_pattern, content, re.DOTALL)
+    
+    if match:
+        replied_author = match.group(1).strip()
+        replied_content = "[attachment/embed]"
+        actual_content = match.group(2).strip()
+        return replied_author, replied_content, actual_content
+    
+    # Check for generic reply indicator
+    generic_pattern = r'^> \[replied to message\]\n(.*)$'
+    match = re.match(generic_pattern, content, re.DOTALL)
+    
+    if match:
+        replied_author = "[unknown]"
+        replied_content = "[message]"
+        actual_content = match.group(1).strip()
+        return replied_author, replied_content, actual_content
+    
+    # No reply context found
+    return None, None, content
 
 
 class RateLimiter:
@@ -280,13 +328,32 @@ class HelpAgent:
             context_lines = []
             for msg in context_messages[-5:]:  # Last 5 messages
                 timestamp_str = msg.timestamp.strftime("%m/%d %H:%M")
-                context_lines.append(
-                    f"<message>"
-                    f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
-                    f"<author>{html.escape(msg.author)}</author>"
-                    f"<content>{html.escape(msg.content)}</content>"
-                    f"</message>"
-                )
+                
+                # Parse reply context for structured XML
+                replied_author, replied_content, actual_content = parse_reply_context(msg.content)
+                
+                if replied_author and replied_content:
+                    # Message with reply context - use structured format
+                    context_lines.append(
+                        f"<message>"
+                        f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
+                        f"<author>{html.escape(msg.author)}</author>"
+                        f"<replying-to>"
+                        f"<replied-author>{html.escape(replied_author)}</replied-author>"
+                        f"<replied-content>{html.escape(replied_content)}</replied-content>"
+                        f"</replying-to>"
+                        f"<content>{html.escape(actual_content)}</content>"
+                        f"</message>"
+                    )
+                else:
+                    # Regular message without reply context
+                    context_lines.append(
+                        f"<message>"
+                        f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
+                        f"<author>{html.escape(msg.author)}</author>"
+                        f"<content>{html.escape(msg.content)}</content>"
+                        f"</message>"
+                    )
             context_str = "\n".join(context_lines)
         
         # Generate response
@@ -315,6 +382,22 @@ class TLDRAgentSignature(dspy.Signature):
 
     ## TASK
     Analyze the conversation type and adapt your summary style accordingly. Create a clear, scannable summary that's easy to read on Discord, keeping in mind that there was likely conversation before these messages.
+
+    ## MESSAGE FORMAT
+    Messages may include reply context with this structure:
+    ```xml
+    <message>
+        <timestamp>01/15 12:30</timestamp>
+        <author>Username</author>
+        <replying-to>
+            <replied-author>OriginalAuthor</replied-author>
+            <replied-content>Original message content</replied-content>
+        </replying-to>
+        <content>The user's response to the original message</content>
+    </message>
+    ```
+    
+    When a message has `<replying-to>`, it means the user is responding to a previous message. Use this context to understand conversation flow and relationships between messages.
 
     ## ADAPTIVE RESPONSE STRATEGY
     **For Quick Back-and-Forth Chat** (short messages, casual talk):
@@ -415,13 +498,31 @@ class TLDRAgent:
                 # Truncate very long messages
                 content = self.truncate_message_content(msg.content, 500)
                 
-                formatted_lines.append(
-                    f"<message>"
-                    f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
-                    f"<author>{html.escape(msg.author)}</author>"
-                    f"<content>{html.escape(content)}</content>"
-                    f"</message>"
-                )
+                # Parse reply context for structured XML
+                replied_author, replied_content, actual_content = parse_reply_context(content)
+                
+                if replied_author and replied_content:
+                    # Message with reply context - use structured format
+                    formatted_lines.append(
+                        f"<message>"
+                        f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
+                        f"<author>{html.escape(msg.author)}</author>"
+                        f"<replying-to>"
+                        f"<replied-author>{html.escape(replied_author)}</replied-author>"
+                        f"<replied-content>{html.escape(replied_content)}</replied-content>"
+                        f"</replying-to>"
+                        f"<content>{html.escape(actual_content)}</content>"
+                        f"</message>"
+                    )
+                else:
+                    # Regular message without reply context
+                    formatted_lines.append(
+                        f"<message>"
+                        f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
+                        f"<author>{html.escape(msg.author)}</author>"
+                        f"<content>{html.escape(content)}</content>"
+                        f"</message>"
+                    )
             
             formatted_text = f"<conversation>\n{chr(10).join(formatted_lines)}\n</conversation>"
             
