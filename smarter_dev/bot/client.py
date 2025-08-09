@@ -382,6 +382,7 @@ def extract_forum_post_data(thread, initial_message=None) -> ForumPostData:
     tags = []
     if hasattr(thread, 'applied_tags'):
         tags = [getattr(tag, 'name', '') for tag in thread.applied_tags if hasattr(tag, 'name')]
+        logger.warning(f"FORUM TAG DEBUG - Tags extracted: {tags} from {len(getattr(thread, 'applied_tags', []))} applied_tags")
     
     return ForumPostData(
         title=title,
@@ -468,6 +469,15 @@ async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:
                 initial_message = messages[0]
         except Exception as e:
             logger.debug(f"Could not fetch initial message for thread {event.thread.id}: {e}")
+        
+        # Log thread details for debugging
+        logger.warning(f"FORUM TAG DEBUG - Thread details: id={event.thread.id}, name={event.thread.name}")
+        logger.warning(f"FORUM TAG DEBUG - Thread attributes: {[attr for attr in dir(event.thread) if not attr.startswith('_')]}")
+        logger.warning(f"FORUM TAG DEBUG - Applied tags attribute exists: {hasattr(event.thread, 'applied_tags')}")
+        if hasattr(event.thread, 'applied_tags'):
+            logger.warning(f"FORUM TAG DEBUG - Applied tags raw: {event.thread.applied_tags}")
+        else:
+            logger.warning(f"FORUM TAG DEBUG - No applied_tags attribute found")
         
         # Extract post data from the thread and initial message
         post_data = extract_forum_post_data(event.thread, initial_message)
