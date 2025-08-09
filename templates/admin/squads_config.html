@@ -367,9 +367,9 @@ function updateCharacterCount(textareaId, counterId) {
 const squads = {
     {% for squad in squads %}
     '{{ squad.id }}': {
-        name: '{{ squad.name }}',
-        description: '{{ squad.description or "" }}',
-        welcome_message: '{{ squad.welcome_message or "" }}',
+        name: {{ (squad.name | tojson) }},
+        description: {{ (squad.description or "" | tojson) }},
+        welcome_message: {{ (squad.welcome_message or "" | tojson) }},
         switch_cost: {{ squad.switch_cost }},
         max_members: {% if squad.max_members %}{{ squad.max_members }}{% else %}null{% endif %},
         is_active: {{ 'true' if squad.is_active else 'false' }},
