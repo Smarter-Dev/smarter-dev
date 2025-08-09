@@ -1,11 +1,14 @@
 import dspy
 import dotenv
 import html
+import logging
 import re
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 
 lm = dspy.LM("gemini/gemini-2.0-flash-lite", api_key=dotenv.get_key(".env", "GEMINI_API_KEY"), cache=False)
@@ -362,17 +365,92 @@ class HelpAgent:
             user_question=user_question
         )
         
-        # Get token usage from DSPy prediction
+        # Get token usage from DSPy prediction using robust extraction methods
         tokens_used = 0
-        if hasattr(result, '_completions') and result._completions:
-            # Sum token usage from all completions
+        
+        # Method 1: Use DSPy's built-in get_lm_usage() method (preferred approach)
+        try:
+            usage_data = result.get_lm_usage()
+            if usage_data:
+                # Extract tokens from the usage data dictionary
+                for model_name, usage_info in usage_data.items():
+                    if isinstance(usage_info, dict):
+                        if 'total_tokens' in usage_info:
+                            tokens_used += usage_info['total_tokens']
+                        elif 'prompt_tokens' in usage_info and 'completion_tokens' in usage_info:
+                            tokens_used += usage_info['prompt_tokens'] + usage_info['completion_tokens']
+                        elif 'input_tokens' in usage_info and 'output_tokens' in usage_info:
+                            tokens_used += usage_info['input_tokens'] + usage_info['output_tokens']
+        except Exception as e:
+            logger.debug(f"HELP DEBUG: Error with get_lm_usage(): {e}")
+        
+        # Method 2: Extract from LM history (fallback for Gemini API bug)
+        if tokens_used == 0:
+            try:
+                import dspy
+                current_lm = dspy.settings.lm
+                if current_lm and hasattr(current_lm, 'history') and current_lm.history:
+                    latest_entry = current_lm.history[-1]  # Get the most recent API call
+                    
+                    # Check response.usage in history (most reliable for Gemini)
+                    if 'response' in latest_entry and hasattr(latest_entry['response'], 'usage'):
+                        response_usage = latest_entry['response'].usage
+                        if hasattr(response_usage, 'total_tokens'):
+                            tokens_used = response_usage.total_tokens
+                        elif hasattr(response_usage, 'prompt_tokens') and hasattr(response_usage, 'completion_tokens'):
+                            tokens_used = response_usage.prompt_tokens + response_usage.completion_tokens
+                    
+                    # Check for usage field in history
+                    elif 'usage' in latest_entry and latest_entry['usage']:
+                        usage = latest_entry['usage']
+                        if isinstance(usage, dict):
+                            if 'total_tokens' in usage:
+                                tokens_used = usage['total_tokens']
+                            elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
+                                tokens_used = usage['prompt_tokens'] + usage['completion_tokens']
+                    
+                    # Fallback: estimate from cost (Gemini-specific)
+                    elif 'cost' in latest_entry and latest_entry['cost'] > 0:
+                        cost = latest_entry['cost']
+                        # Rough estimation: Gemini Flash pricing ~$0.075 per million tokens
+                        estimated_tokens = int(cost * 13333333)
+                        tokens_used = estimated_tokens
+                        
+            except Exception as e:
+                logger.debug(f"HELP DEBUG: Error extracting from LM history: {e}")
+        
+        # Method 3: Legacy fallback for other DSPy completion formats
+        if tokens_used == 0 and hasattr(result, '_completions') and result._completions:
             for completion in result._completions:
-                if hasattr(completion, 'kwargs') and 'usage' in completion.kwargs:
-                    usage = completion.kwargs['usage']
-                    if hasattr(usage, 'total_tokens'):
-                        tokens_used += usage.total_tokens
-                    elif isinstance(usage, dict) and 'total_tokens' in usage:
-                        tokens_used += usage['total_tokens']
+                # Method 1: Traditional kwargs.usage approach  
+                if hasattr(completion, 'kwargs') and completion.kwargs:
+                    if 'usage' in completion.kwargs:
+                        usage = completion.kwargs['usage']
+                        if hasattr(usage, 'total_tokens'):
+                            tokens_used += usage.total_tokens
+                        elif isinstance(usage, dict):
+                            # Try different token field names
+                            if 'total_tokens' in usage:
+                                tokens_used += usage['total_tokens']
+                            elif 'totalTokens' in usage:
+                                tokens_used += usage['totalTokens']
+                            elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
+                                tokens_used += usage['prompt_tokens'] + usage['completion_tokens']
+                    
+                    # Method 2: Check for response metadata
+                    if 'response' in completion.kwargs:
+                        response_obj = completion.kwargs['response']
+                        if hasattr(response_obj, 'usage') and hasattr(response_obj.usage, 'total_tokens'):
+                            tokens_used += response_obj.usage.total_tokens
+        
+        # Final fallback: estimate tokens from text length if all methods fail
+        if tokens_used == 0:
+            # Rough estimation: ~4 characters per token for English text
+            input_text = f"{context_str}\n{user_question}"
+            output_text = result.response
+            estimated_tokens = (len(input_text) + len(output_text)) // 4
+            tokens_used = estimated_tokens
+            logger.warning(f"HELP DEBUG: Fallback estimation - {tokens_used} tokens from text length")
         
         return result.response, tokens_used
 
@@ -565,16 +643,92 @@ class TLDRAgent:
             # Generate summary
             result = self._agent(messages=formatted_messages)
             
-            # Get token usage from DSPy prediction
+            # Get token usage from DSPy prediction using robust extraction methods
             tokens_used = 0
-            if hasattr(result, '_completions') and result._completions:
+            
+            # Method 1: Use DSPy's built-in get_lm_usage() method (preferred approach)
+            try:
+                usage_data = result.get_lm_usage()
+                if usage_data:
+                    # Extract tokens from the usage data dictionary
+                    for model_name, usage_info in usage_data.items():
+                        if isinstance(usage_info, dict):
+                            if 'total_tokens' in usage_info:
+                                tokens_used += usage_info['total_tokens']
+                            elif 'prompt_tokens' in usage_info and 'completion_tokens' in usage_info:
+                                tokens_used += usage_info['prompt_tokens'] + usage_info['completion_tokens']
+                            elif 'input_tokens' in usage_info and 'output_tokens' in usage_info:
+                                tokens_used += usage_info['input_tokens'] + usage_info['output_tokens']
+            except Exception as e:
+                logger.debug(f"TLDR DEBUG: Error with get_lm_usage(): {e}")
+            
+            # Method 2: Extract from LM history (fallback for Gemini API bug)
+            if tokens_used == 0:
+                try:
+                    import dspy
+                    current_lm = dspy.settings.lm
+                    if current_lm and hasattr(current_lm, 'history') and current_lm.history:
+                        latest_entry = current_lm.history[-1]  # Get the most recent API call
+                        
+                        # Check response.usage in history (most reliable for Gemini)
+                        if 'response' in latest_entry and hasattr(latest_entry['response'], 'usage'):
+                            response_usage = latest_entry['response'].usage
+                            if hasattr(response_usage, 'total_tokens'):
+                                tokens_used = response_usage.total_tokens
+                            elif hasattr(response_usage, 'prompt_tokens') and hasattr(response_usage, 'completion_tokens'):
+                                tokens_used = response_usage.prompt_tokens + response_usage.completion_tokens
+                        
+                        # Check for usage field in history
+                        elif 'usage' in latest_entry and latest_entry['usage']:
+                            usage = latest_entry['usage']
+                            if isinstance(usage, dict):
+                                if 'total_tokens' in usage:
+                                    tokens_used = usage['total_tokens']
+                                elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
+                                    tokens_used = usage['prompt_tokens'] + usage['completion_tokens']
+                        
+                        # Fallback: estimate from cost (Gemini-specific)
+                        elif 'cost' in latest_entry and latest_entry['cost'] > 0:
+                            cost = latest_entry['cost']
+                            # Rough estimation: Gemini Flash pricing ~$0.075 per million tokens
+                            estimated_tokens = int(cost * 13333333)
+                            tokens_used = estimated_tokens
+                            
+                except Exception as e:
+                    logger.debug(f"TLDR DEBUG: Error extracting from LM history: {e}")
+            
+            # Method 3: Legacy fallback for other DSPy completion formats
+            if tokens_used == 0 and hasattr(result, '_completions') and result._completions:
                 for completion in result._completions:
-                    if hasattr(completion, 'kwargs') and 'usage' in completion.kwargs:
-                        usage = completion.kwargs['usage']
-                        if hasattr(usage, 'total_tokens'):
-                            tokens_used += usage.total_tokens
-                        elif isinstance(usage, dict) and 'total_tokens' in usage:
-                            tokens_used += usage['total_tokens']
+                    # Method 1: Traditional kwargs.usage approach  
+                    if hasattr(completion, 'kwargs') and completion.kwargs:
+                        if 'usage' in completion.kwargs:
+                            usage = completion.kwargs['usage']
+                            if hasattr(usage, 'total_tokens'):
+                                tokens_used += usage.total_tokens
+                            elif isinstance(usage, dict):
+                                # Try different token field names
+                                if 'total_tokens' in usage:
+                                    tokens_used += usage['total_tokens']
+                                elif 'totalTokens' in usage:
+                                    tokens_used += usage['totalTokens']
+                                elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
+                                    tokens_used += usage['prompt_tokens'] + usage['completion_tokens']
+                        
+                        # Method 2: Check for response metadata
+                        if 'response' in completion.kwargs:
+                            response_obj = completion.kwargs['response']
+                            if hasattr(response_obj, 'usage') and hasattr(response_obj.usage, 'total_tokens'):
+                                tokens_used += response_obj.usage.total_tokens
+            
+            # Final fallback: estimate tokens from text length if all methods fail
+            if tokens_used == 0:
+                # Rough estimation: ~4 characters per token for English text
+                input_text = formatted_messages
+                output_text = result.summary
+                estimated_tokens = (len(input_text) + len(output_text)) // 4
+                tokens_used = estimated_tokens
+                logger.warning(f"TLDR DEBUG: Fallback estimation - {tokens_used} tokens from text length")
             
             # Inject the actual message count into the summary
             summary_with_count = f"{result.summary}\n\n*(Summarized {messages_used} messages)*"
