@@ -39,6 +39,7 @@ async def store_tldr_conversation(
     message_count_requested: int,
     messages_summarized: int,
     summary: str,
+    messages: List[DiscordMessage] = None,
     tokens_used: int = 0,
     response_time_ms: Optional[int] = None
 ) -> bool:
@@ -52,6 +53,7 @@ async def store_tldr_conversation(
         message_count_requested: Number of messages user requested to summarize
         messages_summarized: Actual number of messages summarized
         summary: Generated summary text
+        messages: The actual messages that were summarized
         tokens_used: AI tokens consumed
         response_time_ms: Response generation time
         
@@ -67,6 +69,16 @@ async def store_tldr_conversation(
         # Generate session ID
         session_id = str(uuid.uuid4())
         
+        # Prepare context messages for storage (for debugging and audit purposes)
+        context_messages = []
+        if messages:
+            for msg in messages:
+                context_messages.append({
+                    "author": msg.author,
+                    "timestamp": msg.timestamp.isoformat(),
+                    "content": msg.content[:500]  # Truncate long messages
+                })
+        
         # Prepare conversation data
         conversation_data = {
             "session_id": session_id,
@@ -75,8 +87,8 @@ async def store_tldr_conversation(
             "user_id": user_id,
             "user_username": user_username,
             "interaction_type": "slash_command",
-            "context_messages": [],  # We don't store the actual messages for privacy
-            "user_question": f"Summarize last {message_count_requested} messages",
+            "context_messages": context_messages,  # Store actual messages for debugging
+            "user_question": f"Summarize last {message_count_requested} messages from channel",
             "bot_response": summary[:4000],  # Truncate to prevent database errors
             "tokens_used": tokens_used,
             "response_time_ms": response_time_ms,
@@ -86,7 +98,8 @@ async def store_tldr_conversation(
             "command_metadata": {
                 "command_type": "tldr",
                 "messages_requested": message_count_requested,
-                "messages_processed": messages_summarized
+                "messages_processed": messages_summarized,
+                "channel_name": f"Channel {channel_id}"  # Add channel context
             }
         }
         
@@ -183,6 +196,7 @@ async def generate_tldr_summary(
                     message_count_requested=message_count_requested,
                     messages_summarized=messages_summarized,
                     summary=summary,
+                    messages=messages,  # Pass the actual messages for debugging
                     tokens_used=tokens_used,
                     response_time_ms=response_time_ms
                 )
