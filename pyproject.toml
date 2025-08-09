@@ -36,6 +36,12 @@ dependencies = [
     "python-multipart>=0.0.20",
     "hikari-lightbulb<3.0.0",
     "blend-modes>=2.2.0",
+    "alembic>=1.16.4",
+    "asyncpg>=0.30.0",
+    "greenlet>=3.2.3",
+    "fastapi>=0.116.1",
+    "httpx>=0.28.1",
+    "redis>=6.2.0",
 ]
 
 [dependency-groups]

@@ -89,6 +89,8 @@ class SquadSelectView:
             # Create description
             if self.current_squad and self.current_squad.id == squad.id:
                 description = "Your current squad"
+            elif squad.is_default:
+                description = "🏠 Default squad - Auto-assigned when earning bytes"
             elif switch_cost > 0:
                 if can_afford:
                     description = f"Cost: {switch_cost:,} bytes"

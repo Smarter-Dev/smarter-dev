@@ -96,7 +96,8 @@ async def create_squad(
             squad.name,
             description=squad.description,
             max_members=squad.max_members,
-            switch_cost=squad.switch_cost
+            switch_cost=squad.switch_cost,
+            is_default=squad.is_default
         )
         
         await db.commit()
@@ -224,10 +225,13 @@ async def join_squad(
         )
     except ConflictError as e:
         logger.error(f"DEBUG: ConflictError caught: {e}")
-        # Check if it's the "already in squad" case - provide a specific error message for the bot to handle
+        # Check for specific error cases and provide appropriate error messages
         error_msg = str(e)
         if "already in squad" in error_msg.lower():
             # Return the actual error message so bot can detect and handle squad switching
+            raise HTTPException(status_code=400, detail=error_msg)
+        elif "default squad" in error_msg.lower() and "cannot manually join" in error_msg.lower():
+            # Return the actual error message for default squad joining attempts
             raise HTTPException(status_code=400, detail=error_msg)
         else:
             # For other conflict errors, use the secure generic message

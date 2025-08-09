@@ -325,6 +325,12 @@ class Squad(Base):
         default=True,
         doc="Whether this squad is active and accepting members"
     )
+    is_default: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Whether this is the default squad for auto-assignment when users earn bytes"
+    )
     welcome_message: Mapped[Optional[str]] = mapped_column(
         String(500),  # Max 500 chars for welcome message
         nullable=True,
@@ -336,7 +342,10 @@ class Squad(Base):
         Index("ix_squads_guild_id", "guild_id"),
         Index("ix_squads_role_id", "role_id"),
         Index("ix_squads_guild_active", "guild_id", "is_active"),
+        Index("ix_squads_guild_default", "guild_id", "is_default"),
         UniqueConstraint("guild_id", "role_id", name="uq_squads_guild_role"),  # Unique per specification
+        # Note: The unique constraint for default squads is handled in the migration
+        # because SQLAlchemy doesn't support partial unique constraints directly
     )
     
     def __init__(self, **kwargs):
@@ -344,6 +353,7 @@ class Squad(Base):
         kwargs.setdefault('id', uuid4())
         kwargs.setdefault('switch_cost', 50)
         kwargs.setdefault('is_active', True)
+        kwargs.setdefault('is_default', False)
         kwargs.setdefault('welcome_message', "Welcome to the squad! We're glad to have you aboard.")
         super().__init__(**kwargs)
 

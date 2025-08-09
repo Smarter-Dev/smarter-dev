@@ -83,11 +83,14 @@
                                     </div>
                                 </div>
                                 
-                                {% if not squad.is_active %}
                                 <div class="mb-2">
+                                    {% if not squad.is_active %}
                                     <span class="badge bg-secondary">Inactive</span>
+                                    {% endif %}
+                                    {% if squad.is_default %}
+                                    <span class="badge bg-success">🏠 Default Squad</span>
+                                    {% endif %}
                                 </div>
-                                {% endif %}
                                 
                                 {% if squad.description %}
                                 <p class="text-muted mb-3">{{ squad.description }}</p>
@@ -224,6 +227,16 @@
                             <div class="form-hint">Leave empty for unlimited</div>
                         </div>
                     </div>
+                    
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="is_default" id="create_is_default">
+                            <label class="form-check-label" for="create_is_default">
+                                🏠 Set as default squad
+                            </label>
+                            <div class="form-hint">Default squad members are automatically assigned when they earn bytes but aren't in any squad. Only one default squad allowed per guild.</div>
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <a href="#" class="btn btn-link link-secondary" data-bs-dismiss="modal">Cancel</a>
@@ -288,11 +301,18 @@
                             <div class="form-hint">Leave empty for unlimited</div>
                         </div>
                         <div class="col-lg-6 mb-3">
-                            <div class="form-check">
+                            <div class="form-check mb-2">
                                 <input class="form-check-input" type="checkbox" name="is_active" id="edit_is_active">
                                 <label class="form-check-label" for="edit_is_active">
                                     Squad is active
                                 </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="is_default" id="edit_is_default">
+                                <label class="form-check-label" for="edit_is_default">
+                                    🏠 Set as default squad
+                                </label>
+                                <div class="form-hint small">Only one default squad allowed per guild</div>
                             </div>
                         </div>
                     </div>
@@ -352,7 +372,8 @@ const squads = {
         welcome_message: '{{ squad.welcome_message or "" }}',
         switch_cost: {{ squad.switch_cost }},
         max_members: {% if squad.max_members %}{{ squad.max_members }}{% else %}null{% endif %},
-        is_active: {{ 'true' if squad.is_active else 'false' }}
+        is_active: {{ 'true' if squad.is_active else 'false' }},
+        is_default: {{ 'true' if squad.is_default else 'false' }}
     },
     {% endfor %}
 };
@@ -373,6 +394,7 @@ function editSquad(squadId) {
     document.getElementById('edit_switch_cost').value = squad.switch_cost;
     document.getElementById('edit_max_members').value = squad.max_members || '';
     document.getElementById('edit_is_active').checked = squad.is_active;
+    document.getElementById('edit_is_default').checked = squad.is_default;
     
     // Update character counters
     updateCharacterCount('edit_welcome_message', 'edit_welcome_count');
