@@ -43,6 +43,582 @@ class ConflictError(DatabaseOperationError):
     pass
 
 
+class SquadOperations:
+    """Database operations for squad management system.
+    
+    Handles all squad-related database operations including squad creation,
+    membership management, and queries. Follows SOLID principles for clean
+    separation of concerns.
+    """
+    
+    async def get_squad(
+        self,
+        session: AsyncSession,
+        squad_id: UUID
+    ) -> Squad:
+        """Get squad by ID.
+        
+        Args:
+            session: Database session
+            squad_id: Squad UUID
+            
+        Returns:
+            Squad: Squad record
+            
+        Raises:
+            NotFoundError: If squad doesn't exist
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = select(Squad).where(Squad.id == squad_id)
+            result = await session.execute(stmt)
+            squad = result.scalar_one_or_none()
+            
+            if squad is None:
+                raise NotFoundError(f"Squad not found: {squad_id}")
+            
+            return squad
+            
+        except NotFoundError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get squad: {e}") from e
+    
+    async def get_guild_squads(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        active_only: bool = True
+    ) -> List[Squad]:
+        """Get all squads for a guild.
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            active_only: Whether to include only active squads
+            
+        Returns:
+            List[Squad]: Guild squads
+            
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = select(Squad).where(Squad.guild_id == guild_id)
+            
+            if active_only:
+                stmt = stmt.where(Squad.is_active == True)
+            
+            stmt = stmt.order_by(Squad.name)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get guild squads: {e}") from e
+    
+    async def create_squad(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        role_id: str,
+        name: str,
+        **squad_data
+    ) -> Squad:
+        """Create a new squad.
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            role_id: Discord role snowflake ID
+            name: Squad name
+            **squad_data: Additional squad parameters (including is_default)
+            
+        Returns:
+            Squad: Created squad
+            
+        Raises:
+            ConflictError: If role is already associated with a squad or default squad conflict
+            DatabaseOperationError: If creation fails
+        """
+        try:
+            # Check if trying to create a default squad when one already exists
+            if squad_data.get('is_default', False):
+                existing_default = await self.get_default_squad(session, guild_id)
+                if existing_default:
+                    raise ConflictError(f"Guild already has a default squad: {existing_default.name}")
+            
+            squad = Squad(
+                guild_id=guild_id,
+                role_id=role_id,
+                name=name,
+                **squad_data
+            )
+            session.add(squad)
+            return squad
+            
+        except IntegrityError as e:
+            # Check if it's the unique constraint for default squad
+            if "uq_squads_guild_default" in str(e):
+                raise ConflictError("Guild already has a default squad") from e
+            else:
+                raise ConflictError(f"Role {role_id} already associated with a squad") from e
+        except ConflictError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to create squad: {e}") from e
+    
+    async def update_squad(
+        self,
+        session: AsyncSession,
+        squad_id: UUID,
+        updates: Dict[str, Any]
+    ) -> Squad:
+        """Update a squad's information.
+        
+        Args:
+            session: Database session
+            squad_id: Squad UUID
+            updates: Dictionary of fields to update
+            
+        Returns:
+            Squad: Updated squad
+            
+        Raises:
+            NotFoundError: If squad doesn't exist
+            ConflictError: If trying to set as default when another default exists
+            DatabaseOperationError: If update fails
+        """
+        try:
+            squad = await self.get_squad(session, squad_id)
+            
+            # Handle is_default field specially to ensure only one default per guild
+            if 'is_default' in updates and updates['is_default']:
+                # Check if there's already a default squad in this guild
+                existing_default = await self.get_default_squad(session, squad.guild_id)
+                if existing_default and existing_default.id != squad_id:
+                    raise ConflictError(f"Guild already has a default squad: {existing_default.name}")
+                
+                # Clear any existing default first (in case of race conditions)
+                await self._clear_default_squad(session, squad.guild_id)
+            
+            for field, value in updates.items():
+                if hasattr(squad, field):
+                    setattr(squad, field, value)
+            
+            return squad
+            
+        except (NotFoundError, ConflictError):
+            raise
+        except IntegrityError as e:
+            if "uq_squads_guild_default" in str(e):
+                raise ConflictError("Guild already has a default squad") from e
+            raise DatabaseOperationError(f"Failed to update squad: {e}") from e
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to update squad: {e}") from e
+    
+    async def delete_squad(
+        self,
+        session: AsyncSession,
+        squad_id: UUID
+    ) -> None:
+        """Delete a squad and all its memberships.
+        
+        Args:
+            session: Database session
+            squad_id: Squad UUID
+            
+        Raises:
+            NotFoundError: If squad doesn't exist
+            DatabaseOperationError: If deletion fails
+        """
+        try:
+            # First delete all memberships
+            stmt = delete(SquadMembership).where(SquadMembership.squad_id == squad_id)
+            await session.execute(stmt)
+            
+            # Then delete the squad
+            stmt = delete(Squad).where(Squad.id == squad_id)
+            result = await session.execute(stmt)
+            
+            if result.rowcount == 0:
+                raise NotFoundError(f"Squad not found: {squad_id}")
+            
+        except NotFoundError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to delete squad: {e}") from e
+    
+    async def join_squad(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        user_id: str,
+        squad_id: UUID,
+        username: Optional[str] = None
+    ) -> SquadMembership:
+        """Join a user to a squad with bytes cost deduction.
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            user_id: Discord user snowflake ID
+            squad_id: Squad UUID
+            
+        Returns:
+            SquadMembership: Created membership record
+            
+        Raises:
+            NotFoundError: If squad doesn't exist
+            ConflictError: If user already in squad, squad full, or insufficient balance
+            DatabaseOperationError: If operation fails
+        """
+        try:
+            # Get squad and validate
+            squad = await self.get_squad(session, squad_id)
+            if not squad.is_active:
+                raise ConflictError(f"Squad {squad.name} is not active")
+            
+            # Prevent manual joining of default squads
+            if squad.is_default:
+                raise ConflictError("Cannot manually join the default squad. Users are automatically assigned when earning bytes.")
+            
+            # Check if user already in any squad in this guild
+            current_membership = await self.get_user_squad(session, guild_id, user_id)
+            if current_membership:
+                raise ConflictError(f"User already in squad {current_membership.name}")
+            
+            # Check squad capacity
+            if squad.max_members:
+                member_count = await self._get_squad_member_count(session, squad_id)
+                if member_count >= squad.max_members:
+                    raise ConflictError(f"Squad {squad.name} is full")
+            
+            # Check and deduct switch cost if required
+            if squad.switch_cost > 0:
+                bytes_ops = BytesOperations()
+                # Create system charge transaction for squad join fee
+                await bytes_ops.create_system_charge(
+                    session,
+                    guild_id,
+                    user_id,
+                    username or f"User {user_id}",  # Use provided username or fallback
+                    squad.switch_cost,
+                    f"Squad join fee: {squad.name}"
+                )
+            
+            # Create membership
+            membership = SquadMembership(
+                squad_id=squad_id,
+                user_id=user_id,
+                guild_id=guild_id
+            )
+            session.add(membership)
+            
+            return membership
+            
+        except (NotFoundError, ConflictError):
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to join squad: {e}") from e
+    
+    async def leave_squad(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        user_id: str
+    ) -> None:
+        """Remove user from their current squad.
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            user_id: Discord user snowflake ID
+            
+        Raises:
+            NotFoundError: If user not in any squad
+            DatabaseOperationError: If operation fails
+        """
+        try:
+            stmt = delete(SquadMembership).where(
+                SquadMembership.guild_id == guild_id,
+                SquadMembership.user_id == user_id
+            )
+            result = await session.execute(stmt)
+            
+            if result.rowcount == 0:
+                raise NotFoundError(f"User {user_id} not in any squad")
+            
+        except NotFoundError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to leave squad: {e}") from e
+    
+    async def get_user_squad(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        user_id: str
+    ) -> Optional[Squad]:
+        """Get user's current squad in a guild.
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            user_id: Discord user snowflake ID
+            
+        Returns:
+            Optional[Squad]: User's current squad or None
+            
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = (
+                select(Squad)
+                .join(SquadMembership)
+                .where(
+                    SquadMembership.guild_id == guild_id,
+                    SquadMembership.user_id == user_id
+                )
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get user squad: {e}") from e
+    
+    async def get_squad_members(
+        self,
+        session: AsyncSession,
+        squad_id: UUID
+    ) -> List[SquadMembership]:
+        """Get all members of a squad.
+        
+        Args:
+            session: Database session
+            squad_id: Squad UUID
+            
+        Returns:
+            List[SquadMembership]: Squad memberships
+            
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = (
+                select(SquadMembership)
+                .where(SquadMembership.squad_id == squad_id)
+                .order_by(SquadMembership.joined_at)
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get squad members: {e}") from e
+    
+    async def _get_squad_member_count(
+        self,
+        session: AsyncSession,
+        squad_id: UUID
+    ) -> int:
+        """Get count of squad members.
+        
+        Args:
+            session: Database session
+            squad_id: Squad UUID
+            
+        Returns:
+            int: Number of members
+        """
+        stmt = (
+            select(func.count(SquadMembership.user_id))
+            .where(SquadMembership.squad_id == squad_id)
+        )
+        result = await session.execute(stmt)
+        return result.scalar() or 0
+    
+    async def get_default_squad(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> Optional[Squad]:
+        """Get the default squad for a guild.
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            
+        Returns:
+            Optional[Squad]: Default squad if exists, None otherwise
+            
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = select(Squad).where(
+                Squad.guild_id == guild_id,
+                Squad.is_default == True,
+                Squad.is_active == True
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get default squad: {e}") from e
+    
+    async def set_default_squad(
+        self,
+        session: AsyncSession,
+        squad_id: UUID
+    ) -> Squad:
+        """Set a squad as the default for its guild.
+        
+        This method ensures only one default squad per guild by:
+        1. Clearing any existing default squad in the guild
+        2. Setting the specified squad as default
+        
+        Args:
+            session: Database session
+            squad_id: Squad UUID to set as default
+            
+        Returns:
+            Squad: The updated default squad
+            
+        Raises:
+            NotFoundError: If squad doesn't exist
+            DatabaseOperationError: If update fails
+        """
+        try:
+            # Get the squad to be made default
+            squad = await self.get_squad(session, squad_id)
+            
+            # Clear existing default squad in this guild (if any)
+            await self._clear_default_squad(session, squad.guild_id)
+            
+            # Set this squad as default
+            squad.is_default = True
+            
+            return squad
+            
+        except NotFoundError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to set default squad: {e}") from e
+    
+    async def clear_default_squad(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> None:
+        """Clear the default squad for a guild.
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            
+        Raises:
+            DatabaseOperationError: If update fails
+        """
+        try:
+            await self._clear_default_squad(session, guild_id)
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to clear default squad: {e}") from e
+    
+    async def _clear_default_squad(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> None:
+        """Internal method to clear default squad for a guild."""
+        stmt = update(Squad).where(
+            Squad.guild_id == guild_id,
+            Squad.is_default == True
+        ).values(is_default=False)
+        await session.execute(stmt)
+    
+    async def auto_assign_to_default_squad(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        user_id: str,
+        username: Optional[str] = None
+    ) -> Optional[Squad]:
+        """Auto-assign a user to the default squad if they're not in any squad.
+        
+        This method is called when users earn bytes but aren't in a squad.
+        It will only assign them if:
+        1. They are not currently in any squad
+        2. A default squad exists and is active
+        3. The default squad is not full
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            user_id: Discord user snowflake ID
+            username: Optional username for the membership record
+            
+        Returns:
+            Optional[Squad]: The default squad if assignment occurred, None otherwise
+            
+        Raises:
+            DatabaseOperationError: If operation fails
+        """
+        # Import logging for debugging
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # Check if user is already in a squad
+            current_squad = await self.get_user_squad(session, guild_id, user_id)
+            if current_squad:
+                logger.info(f"User {user_id} already in squad '{current_squad.name}' in guild {guild_id}, no auto-assignment needed")
+                return None  # User is already in a squad
+            
+            # Get default squad for guild
+            default_squad = await self.get_default_squad(session, guild_id)
+            if not default_squad:
+                logger.info(f"No default squad configured for guild {guild_id}, cannot auto-assign user {user_id}")
+                return None  # No default squad configured
+            
+            logger.info(f"Found default squad '{default_squad.name}' for guild {guild_id}, checking if user {user_id} can be assigned")
+            
+            # Check if default squad is active
+            if not default_squad.is_active:
+                logger.info(f"Default squad '{default_squad.name}' is inactive in guild {guild_id}, cannot auto-assign user {user_id}")
+                return None  # Default squad is inactive
+            
+            # Check if default squad is full
+            if default_squad.max_members:
+                member_count = await self._get_squad_member_count(session, default_squad.id)
+                if member_count >= default_squad.max_members:
+                    logger.info(f"Default squad '{default_squad.name}' is full ({member_count}/{default_squad.max_members}) in guild {guild_id}, cannot auto-assign user {user_id}")
+                    return None  # Default squad is full
+            
+            # Auto-assign user to default squad (no cost for default squad assignment)
+            membership = SquadMembership(
+                squad_id=default_squad.id,
+                user_id=user_id,
+                guild_id=guild_id,
+                joined_at=datetime.now(timezone.utc)
+            )
+            session.add(membership)
+            
+            # Import logging to track auto-assignments
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Auto-assigned user {user_id} to default squad '{default_squad.name}' in guild {guild_id}")
+            
+            return default_squad
+            
+        except Exception as e:
+            # Import logging for error reporting  
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to auto-assign user {user_id} to default squad in guild {guild_id}: {e}")
+            # Don't raise the error - auto-assignment failure shouldn't break bytes earning
+            return None
+
+
 class BytesOperations:
     """Database operations for the bytes economy system.
     
@@ -737,581 +1313,6 @@ class BytesConfigOperations:
         except Exception as e:
             raise DatabaseOperationError(f"Failed to delete config: {e}") from e
 
-
-class SquadOperations:
-    """Database operations for squad management system.
-    
-    Handles all squad-related database operations including squad creation,
-    membership management, and queries. Follows SOLID principles for clean
-    separation of concerns.
-    """
-    
-    async def get_squad(
-        self,
-        session: AsyncSession,
-        squad_id: UUID
-    ) -> Squad:
-        """Get squad by ID.
-        
-        Args:
-            session: Database session
-            squad_id: Squad UUID
-            
-        Returns:
-            Squad: Squad record
-            
-        Raises:
-            NotFoundError: If squad doesn't exist
-            DatabaseOperationError: If query fails
-        """
-        try:
-            stmt = select(Squad).where(Squad.id == squad_id)
-            result = await session.execute(stmt)
-            squad = result.scalar_one_or_none()
-            
-            if squad is None:
-                raise NotFoundError(f"Squad not found: {squad_id}")
-            
-            return squad
-            
-        except NotFoundError:
-            raise
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to get squad: {e}") from e
-    
-    async def get_guild_squads(
-        self,
-        session: AsyncSession,
-        guild_id: str,
-        active_only: bool = True
-    ) -> List[Squad]:
-        """Get all squads for a guild.
-        
-        Args:
-            session: Database session
-            guild_id: Discord guild snowflake ID
-            active_only: Whether to include only active squads
-            
-        Returns:
-            List[Squad]: Guild squads
-            
-        Raises:
-            DatabaseOperationError: If query fails
-        """
-        try:
-            stmt = select(Squad).where(Squad.guild_id == guild_id)
-            
-            if active_only:
-                stmt = stmt.where(Squad.is_active == True)
-            
-            stmt = stmt.order_by(Squad.name)
-            result = await session.execute(stmt)
-            return list(result.scalars().all())
-            
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to get guild squads: {e}") from e
-    
-    async def create_squad(
-        self,
-        session: AsyncSession,
-        guild_id: str,
-        role_id: str,
-        name: str,
-        **squad_data
-    ) -> Squad:
-        """Create a new squad.
-        
-        Args:
-            session: Database session
-            guild_id: Discord guild snowflake ID
-            role_id: Discord role snowflake ID
-            name: Squad name
-            **squad_data: Additional squad parameters (including is_default)
-            
-        Returns:
-            Squad: Created squad
-            
-        Raises:
-            ConflictError: If role is already associated with a squad or default squad conflict
-            DatabaseOperationError: If creation fails
-        """
-        try:
-            # Check if trying to create a default squad when one already exists
-            if squad_data.get('is_default', False):
-                existing_default = await self.get_default_squad(session, guild_id)
-                if existing_default:
-                    raise ConflictError(f"Guild already has a default squad: {existing_default.name}")
-            
-            squad = Squad(
-                guild_id=guild_id,
-                role_id=role_id,
-                name=name,
-                **squad_data
-            )
-            session.add(squad)
-            return squad
-            
-        except IntegrityError as e:
-            # Check if it's the unique constraint for default squad
-            if "uq_squads_guild_default" in str(e):
-                raise ConflictError("Guild already has a default squad") from e
-            else:
-                raise ConflictError(f"Role {role_id} already associated with a squad") from e
-        except ConflictError:
-            raise
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to create squad: {e}") from e
-    
-    async def update_squad(
-        self,
-        session: AsyncSession,
-        squad_id: UUID,
-        updates: Dict[str, Any]
-    ) -> Squad:
-        """Update a squad's information.
-        
-        Args:
-            session: Database session
-            squad_id: Squad UUID
-            updates: Dictionary of fields to update
-            
-        Returns:
-            Squad: Updated squad
-            
-        Raises:
-            NotFoundError: If squad doesn't exist
-            ConflictError: If trying to set as default when another default exists
-            DatabaseOperationError: If update fails
-        """
-        try:
-            squad = await self.get_squad(session, squad_id)
-            
-            # Handle is_default field specially to ensure only one default per guild
-            if 'is_default' in updates and updates['is_default']:
-                # Check if there's already a default squad in this guild
-                existing_default = await self.get_default_squad(session, squad.guild_id)
-                if existing_default and existing_default.id != squad_id:
-                    raise ConflictError(f"Guild already has a default squad: {existing_default.name}")
-                
-                # Clear any existing default first (in case of race conditions)
-                await self._clear_default_squad(session, squad.guild_id)
-            
-            for field, value in updates.items():
-                if hasattr(squad, field):
-                    setattr(squad, field, value)
-            
-            return squad
-            
-        except (NotFoundError, ConflictError):
-            raise
-        except IntegrityError as e:
-            if "uq_squads_guild_default" in str(e):
-                raise ConflictError("Guild already has a default squad") from e
-            raise DatabaseOperationError(f"Failed to update squad: {e}") from e
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to update squad: {e}") from e
-    
-    async def delete_squad(
-        self,
-        session: AsyncSession,
-        squad_id: UUID
-    ) -> None:
-        """Delete a squad and all its memberships.
-        
-        Args:
-            session: Database session
-            squad_id: Squad UUID
-            
-        Raises:
-            NotFoundError: If squad doesn't exist
-            DatabaseOperationError: If deletion fails
-        """
-        try:
-            # First delete all memberships
-            stmt = delete(SquadMembership).where(SquadMembership.squad_id == squad_id)
-            await session.execute(stmt)
-            
-            # Then delete the squad
-            stmt = delete(Squad).where(Squad.id == squad_id)
-            result = await session.execute(stmt)
-            
-            if result.rowcount == 0:
-                raise NotFoundError(f"Squad not found: {squad_id}")
-            
-        except NotFoundError:
-            raise
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to delete squad: {e}") from e
-    
-    async def join_squad(
-        self,
-        session: AsyncSession,
-        guild_id: str,
-        user_id: str,
-        squad_id: UUID,
-        username: Optional[str] = None
-    ) -> SquadMembership:
-        """Join a user to a squad with bytes cost deduction.
-        
-        Args:
-            session: Database session
-            guild_id: Discord guild snowflake ID
-            user_id: Discord user snowflake ID
-            squad_id: Squad UUID
-            
-        Returns:
-            SquadMembership: Created membership record
-            
-        Raises:
-            NotFoundError: If squad doesn't exist
-            ConflictError: If user already in squad, squad full, or insufficient balance
-            DatabaseOperationError: If operation fails
-        """
-        try:
-            # Get squad and validate
-            squad = await self.get_squad(session, squad_id)
-            if not squad.is_active:
-                raise ConflictError(f"Squad {squad.name} is not active")
-            
-            # Prevent manual joining of default squads
-            if squad.is_default:
-                raise ConflictError("Cannot manually join the default squad. Users are automatically assigned when earning bytes.")
-            
-            # Check if user already in any squad in this guild
-            current_membership = await self.get_user_squad(session, guild_id, user_id)
-            if current_membership:
-                raise ConflictError(f"User already in squad {current_membership.name}")
-            
-            # Check squad capacity
-            if squad.max_members:
-                member_count = await self._get_squad_member_count(session, squad_id)
-                if member_count >= squad.max_members:
-                    raise ConflictError(f"Squad {squad.name} is full")
-            
-            # Check and deduct switch cost if required
-            if squad.switch_cost > 0:
-                bytes_ops = BytesOperations()
-                # Create system charge transaction for squad join fee
-                await bytes_ops.create_system_charge(
-                    session,
-                    guild_id,
-                    user_id,
-                    username or f"User {user_id}",  # Use provided username or fallback
-                    squad.switch_cost,
-                    f"Squad join fee: {squad.name}"
-                )
-            
-            # Create membership
-            membership = SquadMembership(
-                squad_id=squad_id,
-                user_id=user_id,
-                guild_id=guild_id
-            )
-            session.add(membership)
-            
-            return membership
-            
-        except (NotFoundError, ConflictError):
-            raise
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to join squad: {e}") from e
-    
-    async def leave_squad(
-        self,
-        session: AsyncSession,
-        guild_id: str,
-        user_id: str
-    ) -> None:
-        """Remove user from their current squad.
-        
-        Args:
-            session: Database session
-            guild_id: Discord guild snowflake ID
-            user_id: Discord user snowflake ID
-            
-        Raises:
-            NotFoundError: If user not in any squad
-            DatabaseOperationError: If operation fails
-        """
-        try:
-            stmt = delete(SquadMembership).where(
-                SquadMembership.guild_id == guild_id,
-                SquadMembership.user_id == user_id
-            )
-            result = await session.execute(stmt)
-            
-            if result.rowcount == 0:
-                raise NotFoundError(f"User {user_id} not in any squad")
-            
-        except NotFoundError:
-            raise
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to leave squad: {e}") from e
-    
-    async def get_user_squad(
-        self,
-        session: AsyncSession,
-        guild_id: str,
-        user_id: str
-    ) -> Optional[Squad]:
-        """Get user's current squad in a guild.
-        
-        Args:
-            session: Database session
-            guild_id: Discord guild snowflake ID
-            user_id: Discord user snowflake ID
-            
-        Returns:
-            Optional[Squad]: User's current squad or None
-            
-        Raises:
-            DatabaseOperationError: If query fails
-        """
-        try:
-            stmt = (
-                select(Squad)
-                .join(SquadMembership)
-                .where(
-                    SquadMembership.guild_id == guild_id,
-                    SquadMembership.user_id == user_id
-                )
-            )
-            result = await session.execute(stmt)
-            return result.scalar_one_or_none()
-            
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to get user squad: {e}") from e
-    
-    async def get_squad_members(
-        self,
-        session: AsyncSession,
-        squad_id: UUID
-    ) -> List[SquadMembership]:
-        """Get all members of a squad.
-        
-        Args:
-            session: Database session
-            squad_id: Squad UUID
-            
-        Returns:
-            List[SquadMembership]: Squad memberships
-            
-        Raises:
-            DatabaseOperationError: If query fails
-        """
-        try:
-            stmt = (
-                select(SquadMembership)
-                .where(SquadMembership.squad_id == squad_id)
-                .order_by(SquadMembership.joined_at)
-            )
-            result = await session.execute(stmt)
-            return list(result.scalars().all())
-            
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to get squad members: {e}") from e
-    
-    async def _get_squad_member_count(
-        self,
-        session: AsyncSession,
-        squad_id: UUID
-    ) -> int:
-        """Get count of squad members.
-        
-        Args:
-            session: Database session
-            squad_id: Squad UUID
-            
-        Returns:
-            int: Number of members
-        """
-        stmt = (
-            select(func.count(SquadMembership.user_id))
-            .where(SquadMembership.squad_id == squad_id)
-        )
-        result = await session.execute(stmt)
-        return result.scalar() or 0
-    
-    async def get_default_squad(
-        self,
-        session: AsyncSession,
-        guild_id: str
-    ) -> Optional[Squad]:
-        """Get the default squad for a guild.
-        
-        Args:
-            session: Database session
-            guild_id: Discord guild snowflake ID
-            
-        Returns:
-            Optional[Squad]: Default squad if exists, None otherwise
-            
-        Raises:
-            DatabaseOperationError: If query fails
-        """
-        try:
-            stmt = select(Squad).where(
-                Squad.guild_id == guild_id,
-                Squad.is_default == True,
-                Squad.is_active == True
-            )
-            result = await session.execute(stmt)
-            return result.scalar_one_or_none()
-            
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to get default squad: {e}") from e
-    
-    async def set_default_squad(
-        self,
-        session: AsyncSession,
-        squad_id: UUID
-    ) -> Squad:
-        """Set a squad as the default for its guild.
-        
-        This method ensures only one default squad per guild by:
-        1. Clearing any existing default squad in the guild
-        2. Setting the specified squad as default
-        
-        Args:
-            session: Database session
-            squad_id: Squad UUID to set as default
-            
-        Returns:
-            Squad: The updated default squad
-            
-        Raises:
-            NotFoundError: If squad doesn't exist
-            DatabaseOperationError: If update fails
-        """
-        try:
-            # Get the squad to be made default
-            squad = await self.get_squad(session, squad_id)
-            
-            # Clear existing default squad in this guild (if any)
-            await self._clear_default_squad(session, squad.guild_id)
-            
-            # Set this squad as default
-            squad.is_default = True
-            
-            return squad
-            
-        except NotFoundError:
-            raise
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to set default squad: {e}") from e
-    
-    async def clear_default_squad(
-        self,
-        session: AsyncSession,
-        guild_id: str
-    ) -> None:
-        """Clear the default squad for a guild.
-        
-        Args:
-            session: Database session
-            guild_id: Discord guild snowflake ID
-            
-        Raises:
-            DatabaseOperationError: If update fails
-        """
-        try:
-            await self._clear_default_squad(session, guild_id)
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to clear default squad: {e}") from e
-    
-    async def _clear_default_squad(
-        self,
-        session: AsyncSession,
-        guild_id: str
-    ) -> None:
-        """Internal method to clear default squad for a guild."""
-        stmt = update(Squad).where(
-            Squad.guild_id == guild_id,
-            Squad.is_default == True
-        ).values(is_default=False)
-        await session.execute(stmt)
-    
-    async def auto_assign_to_default_squad(
-        self,
-        session: AsyncSession,
-        guild_id: str,
-        user_id: str,
-        username: Optional[str] = None
-    ) -> Optional[Squad]:
-        """Auto-assign a user to the default squad if they're not in any squad.
-        
-        This method is called when users earn bytes but aren't in a squad.
-        It will only assign them if:
-        1. They are not currently in any squad
-        2. A default squad exists and is active
-        3. The default squad is not full
-        
-        Args:
-            session: Database session
-            guild_id: Discord guild snowflake ID
-            user_id: Discord user snowflake ID
-            username: Optional username for the membership record
-            
-        Returns:
-            Optional[Squad]: The default squad if assignment occurred, None otherwise
-            
-        Raises:
-            DatabaseOperationError: If operation fails
-        """
-        # Import logging for debugging
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        try:
-            # Check if user is already in a squad
-            current_squad = await self.get_user_squad(session, guild_id, user_id)
-            if current_squad:
-                logger.info(f"User {user_id} already in squad '{current_squad.name}' in guild {guild_id}, no auto-assignment needed")
-                return None  # User is already in a squad
-            
-            # Get default squad for guild
-            default_squad = await self.get_default_squad(session, guild_id)
-            if not default_squad:
-                logger.info(f"No default squad configured for guild {guild_id}, cannot auto-assign user {user_id}")
-                return None  # No default squad configured
-            
-            logger.info(f"Found default squad '{default_squad.name}' for guild {guild_id}, checking if user {user_id} can be assigned")
-            
-            # Check if default squad is active
-            if not default_squad.is_active:
-                logger.info(f"Default squad '{default_squad.name}' is inactive in guild {guild_id}, cannot auto-assign user {user_id}")
-                return None  # Default squad is inactive
-            
-            # Check if default squad is full
-            if default_squad.max_members:
-                member_count = await self._get_squad_member_count(session, default_squad.id)
-                if member_count >= default_squad.max_members:
-                    logger.info(f"Default squad '{default_squad.name}' is full ({member_count}/{default_squad.max_members}) in guild {guild_id}, cannot auto-assign user {user_id}")
-                    return None  # Default squad is full
-            
-            # Auto-assign user to default squad (no cost for default squad assignment)
-            membership = SquadMembership(
-                squad_id=default_squad.id,
-                user_id=user_id,
-                guild_id=guild_id,
-                joined_at=datetime.now(timezone.utc)
-            )
-            session.add(membership)
-            
-            # Import logging to track auto-assignments
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(f"Auto-assigned user {user_id} to default squad '{default_squad.name}' in guild {guild_id}")
-            
-            return default_squad
-            
-        except Exception as e:
-            # Import logging for error reporting  
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Failed to auto-assign user {user_id} to default squad in guild {guild_id}: {e}")
-            # Don't raise the error - auto-assignment failure shouldn't break bytes earning
-            return None
 
 
 class APIKeyOperations:
