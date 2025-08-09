@@ -150,12 +150,12 @@ async def join_command(ctx: lightbulb.Context) -> None:
             await ctx.edit_last_response(attachment=image_file)
             return
         
-        # Filter out inactive squads for joining
-        active_squads = [squad for squad in squads if squad.is_active]
+        # Filter out inactive squads and default squads for joining
+        active_squads = [squad for squad in squads if squad.is_active and not getattr(squad, 'is_default', False)]
         
         if not active_squads:
             generator = get_generator()
-            image_file = generator.create_error_embed("No active squads available to join!")
+            image_file = generator.create_error_embed("No joinable squads available! (Default squads cannot be joined manually)")
             await ctx.edit_last_response(attachment=image_file)
             return
         

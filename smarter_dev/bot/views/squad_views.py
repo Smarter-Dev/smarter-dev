@@ -69,9 +69,12 @@ class SquadSelectView:
         Returns:
             List of action row builders containing the select menu
         """
-        # Create select menu options
+        # Create select menu options (skip default squads)
         options = []
         for squad in self.squads[:25]:  # Discord select menu limit
+            # Skip default squads - they cannot be manually joined
+            if getattr(squad, 'is_default', False):
+                continue
             # Calculate join cost (always costs the squad's switch_cost)
             switch_cost = squad.switch_cost
             # Skip showing cost if user is already in this squad

@@ -1012,8 +1012,11 @@ class EmbedImageGenerator:
                 fill="#00E1FF"  # Cyan for member counts
             )
             
-            # Join cost (always show)
-            if squad.switch_cost > 0:
+            # Join cost or special status
+            if hasattr(squad, 'is_default') and squad.is_default:
+                cost_text = "Default"
+                cost_color = "#f59e0b"  # Amber for default squads
+            elif squad.switch_cost > 0:
                 cost_text = f"{squad.switch_cost:,} bytes"
                 cost_color = "#11FF00"  # Green for costs (positive feeling)
             else:
