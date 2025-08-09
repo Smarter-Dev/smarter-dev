@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from pydantic import BaseModel
 
 
-lm = dspy.LM("gemini/gemini-2.0-flash-lite", api_key=dotenv.get_key(".env", "GEMINI_API_KEY"))
-dspy.configure(lm=lm)
+lm = dspy.LM("gemini/gemini-2.0-flash-lite", api_key=dotenv.get_key(".env", "GEMINI_API_KEY"), cache=False)
+dspy.configure(lm=lm, track_usage=True)
 
 
 class DiscordMessage(BaseModel):
@@ -591,11 +591,66 @@ class ForumMonitorAgent:
             post_context=post_context
         )
         
-        # Get token usage from DSPy prediction with comprehensive extraction
+        # Get token usage from DSPy prediction
         tokens_used = 0
         
-        # Try multiple approaches to extract tokens from DSPy completions
-        if hasattr(result, '_completions') and result._completions:
+        # Method 1: Use DSPy's built-in get_lm_usage() method (preferred approach)
+        try:
+            usage_data = result.get_lm_usage()
+            if usage_data:
+                # Extract tokens from the usage data dictionary
+                for model_name, usage_info in usage_data.items():
+                    if isinstance(usage_info, dict):
+                        if 'total_tokens' in usage_info:
+                            tokens_used += usage_info['total_tokens']
+                        elif 'prompt_tokens' in usage_info and 'completion_tokens' in usage_info:
+                            tokens_used += usage_info['prompt_tokens'] + usage_info['completion_tokens']
+                        elif 'input_tokens' in usage_info and 'output_tokens' in usage_info:
+                            tokens_used += usage_info['input_tokens'] + usage_info['output_tokens']
+                print(f"FORUM DEBUG: Extracted {tokens_used} tokens using get_lm_usage()")
+        except Exception as e:
+            print(f"FORUM DEBUG: Error with get_lm_usage(): {e}")
+        
+        # Method 2: Extract from LM history (fallback for Gemini API bug)
+        if tokens_used == 0:
+            try:
+                import dspy
+                current_lm = dspy.settings.lm
+                if current_lm and hasattr(current_lm, 'history') and current_lm.history:
+                    latest_entry = current_lm.history[-1]  # Get the most recent API call
+                    
+                    # Check response.usage in history (most reliable for Gemini)
+                    if 'response' in latest_entry and hasattr(latest_entry['response'], 'usage'):
+                        response_usage = latest_entry['response'].usage
+                        if hasattr(response_usage, 'total_tokens'):
+                            tokens_used = response_usage.total_tokens
+                        elif hasattr(response_usage, 'prompt_tokens') and hasattr(response_usage, 'completion_tokens'):
+                            tokens_used = response_usage.prompt_tokens + response_usage.completion_tokens
+                        print(f"FORUM DEBUG: Extracted {tokens_used} tokens from LM history response.usage")
+                    
+                    # Check for usage field in history
+                    elif 'usage' in latest_entry and latest_entry['usage']:
+                        usage = latest_entry['usage']
+                        if isinstance(usage, dict):
+                            if 'total_tokens' in usage:
+                                tokens_used = usage['total_tokens']
+                            elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
+                                tokens_used = usage['prompt_tokens'] + usage['completion_tokens']
+                        print(f"FORUM DEBUG: Extracted {tokens_used} tokens from LM history usage")
+                    
+                    # Fallback: estimate from cost (Gemini-specific)
+                    elif 'cost' in latest_entry and latest_entry['cost'] > 0:
+                        cost = latest_entry['cost']
+                        # Rough estimation: Gemini Flash pricing ~$0.075 per million tokens
+                        estimated_tokens = int(cost * 13333333)
+                        tokens_used = estimated_tokens
+                        print(f"FORUM DEBUG: Estimated {tokens_used} tokens from cost: ${cost}")
+                        
+            except Exception as e:
+                print(f"FORUM DEBUG: Error extracting from LM history: {e}")
+        
+        # Method 3: Legacy fallback for other DSPy completion formats
+        if tokens_used == 0 and hasattr(result, '_completions') and result._completions:
             for completion in result._completions:
                 # Method 1: Traditional kwargs.usage approach  
                 if hasattr(completion, 'kwargs') and completion.kwargs:
@@ -618,78 +673,59 @@ class ForumMonitorAgent:
                         if hasattr(response_obj, 'usage') and hasattr(response_obj.usage, 'total_tokens'):
                             tokens_used += response_obj.usage.total_tokens
                 
-                # Method 3: Direct completion attributes
-                for attr in ['usage', 'response', 'metadata', 'raw_response', 'completion']:
-                    if hasattr(completion, attr):
-                        attr_value = getattr(completion, attr)
-                        
-                        # Direct usage object  
-                        if hasattr(attr_value, 'total_tokens'):
-                            tokens_used += attr_value.total_tokens
-                            break
-                        elif hasattr(attr_value, 'usage') and hasattr(attr_value.usage, 'total_tokens'):
-                            tokens_used += attr_value.usage.total_tokens
-                            break
-                        
-                        # Dictionary with usage info
-                        elif isinstance(attr_value, dict):
-                            if 'total_tokens' in attr_value:
-                                tokens_used += attr_value['total_tokens']
-                                break
-                            elif 'usage' in attr_value and isinstance(attr_value['usage'], dict):
-                                usage_dict = attr_value['usage']
-                                if 'total_tokens' in usage_dict:
-                                    tokens_used += usage_dict['total_tokens']
-                                    break
-                                elif 'prompt_tokens' in usage_dict and 'completion_tokens' in usage_dict:
-                                    tokens_used += usage_dict['prompt_tokens'] + usage_dict['completion_tokens']
-                                    break
-        
-        # Debug token extraction with more detailed output
-        if tokens_used == 0:
-            print(f"FORUM DEBUG: No tokens extracted. Debugging completion structure:")
-            if hasattr(result, '_completions') and result._completions:
-                print(f"FORUM DEBUG: Found {len(result._completions)} completions")
-                for i, completion in enumerate(result._completions):
-                    print(f"FORUM DEBUG: Completion {i}:")
-                    print(f"  - Type: {type(completion)}")
-                    print(f"  - Has kwargs: {hasattr(completion, 'kwargs')}")
-                    print(f"  - All attributes: {[attr for attr in dir(completion) if not attr.startswith('_')]}")
-                    
-                    # Try to access common token storage attributes
-                    for attr_name in ['usage', 'response', 'metadata', 'raw_response', 'completion']:
-                        if hasattr(completion, attr_name):
-                            attr_value = getattr(completion, attr_name)
-                            print(f"  - Has {attr_name}: {attr_value}")
+                # Method 3: DSPy's get_lm_usage method (the correct approach!)
+                if hasattr(completion, 'get_lm_usage') and callable(getattr(completion, 'get_lm_usage')):
+                    try:
+                        usage_stats = completion.get_lm_usage()
+                        if isinstance(usage_stats, dict):
+                            # Try different field names for total tokens
+                            if 'total_tokens' in usage_stats:
+                                tokens_used += usage_stats['total_tokens']
+                            elif 'prompt_tokens' in usage_stats and 'completion_tokens' in usage_stats:
+                                tokens_used += usage_stats['prompt_tokens'] + usage_stats['completion_tokens']
+                            elif 'input_tokens' in usage_stats and 'output_tokens' in usage_stats:
+                                tokens_used += usage_stats['input_tokens'] + usage_stats['output_tokens']
+                        elif hasattr(usage_stats, 'total_tokens'):
+                            tokens_used += usage_stats.total_tokens
+                    except Exception as e:
+                        print(f"FORUM DEBUG: Error calling get_lm_usage(): {e}")
+                
+                # Method 4: Direct completion attributes (fallback)  
+                if tokens_used == 0:
+                    for attr in ['usage', 'response', 'metadata', 'raw_response', 'completion']:
+                        if hasattr(completion, attr):
+                            attr_value = getattr(completion, attr)
+                            
+                            # Direct usage object  
                             if hasattr(attr_value, 'total_tokens'):
-                                print(f"    - {attr_name}.total_tokens: {attr_value.total_tokens}")
                                 tokens_used += attr_value.total_tokens
+                                break
+                            elif hasattr(attr_value, 'usage') and hasattr(attr_value.usage, 'total_tokens'):
+                                tokens_used += attr_value.usage.total_tokens
+                                break
+                            
+                            # Dictionary with usage info
                             elif isinstance(attr_value, dict):
-                                print(f"    - {attr_name} keys: {list(attr_value.keys())}")
                                 if 'total_tokens' in attr_value:
                                     tokens_used += attr_value['total_tokens']
+                                    break
                                 elif 'usage' in attr_value and isinstance(attr_value['usage'], dict):
                                     usage_dict = attr_value['usage']
                                     if 'total_tokens' in usage_dict:
                                         tokens_used += usage_dict['total_tokens']
-                    
-                    # Try direct attribute access
-                    if hasattr(completion, 'kwargs'):
-                        kwargs_keys = list(completion.kwargs.keys()) if completion.kwargs else []
-                        print(f"  - Kwargs keys: {kwargs_keys}")
-                        if 'usage' in kwargs_keys:
-                            usage = completion.kwargs['usage']
-                            print(f"  - Usage type: {type(usage)}")
-                            if isinstance(usage, dict):
-                                print(f"  - Usage keys: {list(usage.keys())}")
-                            else:
-                                print(f"  - Usage attributes: {dir(usage)}")
-            else:
-                print(f"FORUM DEBUG: No completions found in result")
-            
-            # Check if we found tokens in the debug process
-            if tokens_used > 0:
-                print(f"FORUM DEBUG: Found {tokens_used} tokens during debug inspection")
+                                        break
+                                    elif 'prompt_tokens' in usage_dict and 'completion_tokens' in usage_dict:
+                                        tokens_used += usage_dict['prompt_tokens'] + usage_dict['completion_tokens']
+                                        break
+        
+        # Final fallback: estimate tokens from text length if all methods fail
+        if tokens_used == 0:
+            # Rough estimation: ~4 characters per token for English text
+            input_text = f"{system_prompt}\n{post_context}"
+            output_text = result.decision + result.response
+            estimated_tokens = (len(input_text) + len(output_text)) // 4
+            tokens_used = estimated_tokens
+            print(f"FORUM DEBUG: Fallback estimation - {tokens_used} tokens from text length")
         else:
             print(f"FORUM DEBUG: Successfully extracted {tokens_used} tokens")
         
