@@ -8,12 +8,67 @@ from __future__ import annotations
 
 import hikari
 import logging
+import re
 from datetime import timezone
 from typing import List
 
 from smarter_dev.bot.agent import DiscordMessage
 
 logger = logging.getLogger(__name__)
+
+
+async def resolve_mentions(content: str, bot: hikari.GatewayBot) -> str:
+    """Replace Discord user and channel mentions with readable format.
+    
+    Args:
+        content: Message content with potential <@123456> and <#123456> mentions
+        bot: Discord bot instance to resolve user/channel IDs
+        
+    Returns:
+        Content with mentions resolved to @username and #channel-name format
+    """
+    if not content:
+        return content
+    
+    # Replace user mentions: <@123456789> or <@!123456789>
+    user_mention_pattern = r'<@!?(\d+)>'
+    user_mentions = re.findall(user_mention_pattern, content)
+    for user_id_str in user_mentions:
+        user_id = int(user_id_str)
+        try:
+            user = await bot.rest.fetch_user(user_id)
+            username = user.display_name or user.username
+            # Replace both <@123> and <@!123> formats
+            content = re.sub(f'<@!?{user_id}>', f'@{username}', content)
+        except Exception:
+            # If we can't resolve, use a readable fallback
+            content = re.sub(f'<@!?{user_id}>', f'@user{user_id}', content)
+    
+    # Replace channel mentions: <#123456789>
+    channel_mention_pattern = r'<#(\d+)>'
+    channel_mentions = re.findall(channel_mention_pattern, content)
+    for channel_id_str in channel_mentions:
+        channel_id = int(channel_id_str)
+        try:
+            channel = await bot.rest.fetch_channel(channel_id)
+            if hasattr(channel, 'name') and channel.name:
+                content = re.sub(f'<#{channel_id}>', f'#{channel.name}', content)
+            else:
+                content = re.sub(f'<#{channel_id}>', f'#channel{channel_id}', content)
+        except Exception:
+            # If we can't resolve, use a readable fallback
+            content = re.sub(f'<#{channel_id}>', f'#channel{channel_id}', content)
+    
+    # Replace role mentions: <@&123456789>
+    role_mention_pattern = r'<@&(\d+)>'
+    role_mentions = re.findall(role_mention_pattern, content)
+    for role_id_str in role_mentions:
+        role_id = int(role_id_str)
+        # Role resolution is more complex since we need guild context
+        # For now, just make it readable - could enhance later with guild parameter
+        content = re.sub(f'<@&{role_id}>', f'@role{role_id}', content)
+    
+    return content
 
 
 async def gather_message_context(
@@ -72,6 +127,9 @@ async def gather_message_context(
                 
                 if attachment_info:
                     content = f"{content} {' '.join(attachment_info)}".strip()
+            
+            # Resolve Discord mentions to readable usernames
+            content = await resolve_mentions(content, bot)
                 
             # Convert to our message format
             discord_msg = DiscordMessage(
