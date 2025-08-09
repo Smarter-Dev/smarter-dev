@@ -1726,14 +1726,14 @@ class ForumAgentOperations:
             # Get response statistics
             total_responses_result = await self.session.execute(
                 select(func.count(ForumAgentResponse.id))
-                .where(ForumAgentResponse.forum_agent_id == agent_id)
+                .where(ForumAgentResponse.agent_id == agent_id)
             )
             total_responses = total_responses_result.scalar() or 0
             
             responses_posted_result = await self.session.execute(
                 select(func.count(ForumAgentResponse.id))
                 .where(and_(
-                    ForumAgentResponse.forum_agent_id == agent_id,
+                    ForumAgentResponse.agent_id == agent_id,
                     ForumAgentResponse.responded == True
                 ))
             )
@@ -1741,19 +1741,19 @@ class ForumAgentOperations:
             
             total_tokens_result = await self.session.execute(
                 select(func.coalesce(func.sum(ForumAgentResponse.tokens_used), 0))
-                .where(ForumAgentResponse.forum_agent_id == agent_id)
+                .where(ForumAgentResponse.agent_id == agent_id)
             )
             total_tokens = total_tokens_result.scalar() or 0
             
             avg_confidence_result = await self.session.execute(
                 select(func.avg(ForumAgentResponse.confidence_score))
-                .where(ForumAgentResponse.forum_agent_id == agent_id)
+                .where(ForumAgentResponse.agent_id == agent_id)
             )
             avg_confidence = avg_confidence_result.scalar()
             
             avg_response_time_result = await self.session.execute(
                 select(func.avg(ForumAgentResponse.response_time_ms))
-                .where(ForumAgentResponse.forum_agent_id == agent_id)
+                .where(ForumAgentResponse.agent_id == agent_id)
             )
             avg_response_time = avg_response_time_result.scalar()
             
@@ -1814,7 +1814,7 @@ class ForumAgentOperations:
             for agent in agents:
                 responses_count_result = await self.session.execute(
                     select(func.count(ForumAgentResponse.id))
-                    .where(ForumAgentResponse.forum_agent_id == agent.id)
+                    .where(ForumAgentResponse.agent_id == agent.id)
                 )
                 responses_count = responses_count_result.scalar() or 0
                 
