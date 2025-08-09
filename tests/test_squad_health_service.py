@@ -12,7 +12,7 @@ from typing import Dict, Any, List, Protocol
 from uuid import uuid4
 from unittest.mock import Mock, AsyncMock
 
-from web.repositories.squad_activity_repository import SquadActivityRepository
+from smarter_dev.web.repositories.squad_activity_repository import SquadActivityRepository
 
 
 # Segregated interfaces following ISP
