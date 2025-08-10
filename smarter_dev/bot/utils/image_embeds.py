@@ -1115,9 +1115,10 @@ class EmbedImageGenerator:
         # Skip stats header - go directly to stats content
         
         # Create full-width table for stats
+        switch_cost_display = "N/A (default)" if getattr(squad, 'is_default', False) else f"{squad.switch_cost:,} bytes"
         stats_items = [
             ("Members", f"{len(members)}" + (f"/{squad.max_members}" if squad.max_members else "")),
-            ("Switch Cost", f"{squad.switch_cost:,} bytes"),
+            ("Switch Cost", switch_cost_display),
             ("Status", "Active" if squad.is_active else "Inactive")
         ]
         
