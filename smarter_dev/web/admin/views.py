@@ -484,13 +484,21 @@ async def squads_config(request: Request) -> Response:
                     logger.warning(f"Failed to get guild squads: {e}")
                     squads = []
                 
+                # Get all squad members
+                try:
+                    squad_members = await squad_ops.get_all_guild_squad_members(session, guild_id)
+                except Exception as e:
+                    logger.warning(f"Failed to get squad members: {e}")
+                    squad_members = []
+                
                 return templates.TemplateResponse(
                     request,
                     "admin/squads_config.html",
                     {
                         "guild": guild,
                         "guild_roles": guild_roles,
-                        "squads": squads
+                        "squads": squads,
+                        "squad_members": squad_members
                     }
                 )
             
@@ -540,8 +548,13 @@ async def squads_config(request: Request) -> Response:
                     success_message = "Squad deleted successfully!"
                     logger.info(f"Deleted squad {squad_id} in guild {guild_id}")
                 
-                # Refresh squads list
+                # Refresh squads list and members
                 squads = await squad_ops.get_guild_squads(session, guild_id)
+                try:
+                    squad_members = await squad_ops.get_all_guild_squad_members(session, guild_id)
+                except Exception as e:
+                    logger.warning(f"Failed to get squad members after update: {e}")
+                    squad_members = []
                 
                 return templates.TemplateResponse(
                     request,
@@ -550,6 +563,7 @@ async def squads_config(request: Request) -> Response:
                         "guild": guild,
                         "guild_roles": guild_roles,
                         "squads": squads,
+                        "squad_members": squad_members,
                         "success": success_message
                     }
                 )
@@ -557,6 +571,10 @@ async def squads_config(request: Request) -> Response:
             except (ValueError, TypeError) as e:
                 logger.warning(f"Invalid form data in squads config: {e}")
                 squads = await squad_ops.get_guild_squads(session, guild_id)
+                try:
+                    squad_members = await squad_ops.get_all_guild_squad_members(session, guild_id)
+                except Exception:
+                    squad_members = []
                 return templates.TemplateResponse(
                     request,
                     "admin/squads_config.html",
@@ -564,6 +582,7 @@ async def squads_config(request: Request) -> Response:
                         "guild": guild,
                         "guild_roles": guild_roles,
                         "squads": squads,
+                        "squad_members": squad_members,
                         "error": "Invalid squad configuration. Please check your input."
                     },
                     status_code=400
@@ -572,6 +591,10 @@ async def squads_config(request: Request) -> Response:
                 logger.warning(f"Database conflict error in squads config: {e}")
                 await session.rollback()
                 squads = await squad_ops.get_guild_squads(session, guild_id)
+                try:
+                    squad_members = await squad_ops.get_all_guild_squad_members(session, guild_id)
+                except Exception:
+                    squad_members = []
                 
                 # Check error type and content
                 error_str = str(e)
@@ -589,6 +612,7 @@ async def squads_config(request: Request) -> Response:
                         "guild": guild,
                         "guild_roles": guild_roles,
                         "squads": squads,
+                        "squad_members": squad_members,
                         "error": error_msg
                     },
                     status_code=400
