@@ -746,6 +746,30 @@ async def run_bot() -> None:
                 # Mark as claimed in cache to prevent future API calls today
                 mark_claimed_today(guild_id_str, user_id_str)
                 
+                # Handle squad auto-assignment if user was assigned to a squad
+                if result.squad_assignment:
+                    try:
+                        squad = result.squad_assignment
+                        role_id = int(squad['role_id'])
+                        squad_name = squad['name']
+                        
+                        # Get the guild and member
+                        guild = event.get_guild()
+                        if guild:
+                            member = guild.get_member(event.author.id)
+                            role = guild.get_role(role_id)
+                            
+                            if member and role:
+                                # Add the squad role to the user
+                                await member.add_role(role)
+                                logger.info(f"✅ Auto-assigned user {event.author} to squad '{squad_name}' with role {role.name}")
+                            else:
+                                logger.warning(f"Could not assign squad role: member={member is not None}, role={role is not None}")
+                        else:
+                            logger.warning("Could not get guild for squad role assignment")
+                    except Exception as e:
+                        logger.error(f"Failed to assign squad role during daily claim: {e}")
+                
                 # Add reaction to the message that earned bytes
                 try:
                     await event.message.add_reaction("daily_bytes_received:1403748840477163642")

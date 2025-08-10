@@ -320,7 +320,8 @@ class BytesService(BaseService):
                 streak=balance.streak_count,
                 streak_bonus=claim_data.get("streak_bonus", 1),
                 multiplier=claim_data.get("streak_bonus", 1),
-                next_claim_at=next_claim_at
+                next_claim_at=next_claim_at,
+                squad_assignment=claim_data.get("squad_assignment")
             )
             
             # Invalidate related caches
