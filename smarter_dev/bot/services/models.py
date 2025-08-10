@@ -85,6 +85,7 @@ class DailyClaimResult:
     multiplier: Optional[float] = None
     reason: Optional[str] = None
     next_claim_at: Optional[datetime] = None
+    squad_assignment: Optional[Dict[str, any]] = None
     
     def __post_init__(self):
         """Validate claim result data."""

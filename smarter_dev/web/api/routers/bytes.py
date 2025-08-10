@@ -160,7 +160,7 @@ async def claim_daily(
     reward_amount = config.starting_balance if is_new_user else config.daily_amount
     
     # Update balance with reward using calculated values
-    updated_balance = await bytes_ops.update_daily_reward(
+    updated_balance, assigned_squad = await bytes_ops.update_daily_reward(
         db, 
         guild_id, 
         user_id, 
@@ -184,13 +184,28 @@ async def claim_daily(
     # Serialize model before commit to avoid session detachment issues
     balance_response = BytesBalanceResponse.model_validate(updated_balance)
     
+    # Serialize squad assignment if user was assigned to a squad
+    squad_response = None
+    if assigned_squad:
+        from smarter_dev.web.api.schemas import SquadResponse
+        from smarter_dev.web.crud import SquadOperations
+        
+        # Get the full squad data with member_count from the database
+        squad_ops = SquadOperations()
+        full_squad_data = await squad_ops.get_squad(db, assigned_squad.id)
+        member_count = await squad_ops._get_squad_member_count(db, assigned_squad.id)
+        squad_data = full_squad_data.__dict__.copy()
+        squad_data['member_count'] = member_count
+        squad_response = SquadResponse.model_validate(squad_data)
+    
     await db.commit()
     
     return DailyClaimResponse(
         balance=balance_response,
         reward_amount=streak_result.reward_amount,
         streak_bonus=streak_result.streak_bonus,
-        next_claim_at=next_claim_at
+        next_claim_at=next_claim_at,
+        squad_assignment=squad_response
     )
 
 

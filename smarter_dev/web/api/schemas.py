@@ -133,6 +133,7 @@ class DailyClaimResponse(BaseAPIModel):
     reward_amount: int = Field(description="Amount awarded")
     streak_bonus: int = Field(description="Streak multiplier applied")
     next_claim_at: datetime = Field(description="When next claim is available")
+    squad_assignment: Optional[SquadResponse] = Field(None, description="Squad assigned during this claim (if auto-assigned)")
     
     @field_serializer('next_claim_at')
     def serialize_next_claim_at(self, value: datetime) -> str:

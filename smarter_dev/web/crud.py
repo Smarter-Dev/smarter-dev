@@ -1021,7 +1021,7 @@ class BytesOperations:
         new_streak_count: Optional[int] = None,
         claim_date: Optional[date] = None,
         is_new_member: bool = False
-    ) -> BytesBalance:
+    ) -> tuple[BytesBalance, Optional["Squad"]]:
         """Update balance with daily reward and streak tracking using transaction records.
         
         Args:
@@ -1036,7 +1036,7 @@ class BytesOperations:
             is_new_member: Whether this is a new member getting starting balance
             
         Returns:
-            BytesBalance: Updated balance record
+            tuple[BytesBalance, Optional["Squad"]]: Updated balance record and assigned squad (if auto-assigned)
             
         Raises:
             DatabaseOperationError: If update fails
@@ -1079,9 +1079,9 @@ class BytesOperations:
             await session.flush()  # Ensure timestamps are populated
             
             # Auto-assign to default squad if user isn't in any squad
-            await self._auto_assign_default_squad_if_needed(session, guild_id, user_id, username)
+            assigned_squad = await self._auto_assign_default_squad_if_needed(session, guild_id, user_id, username)
             
-            return balance
+            return balance, assigned_squad
             
         except Exception as e:
             raise DatabaseOperationError(f"Failed to update daily reward: {e}") from e
@@ -1146,7 +1146,7 @@ class BytesOperations:
         guild_id: str,
         user_id: str,
         username: Optional[str] = None
-    ) -> None:
+    ) -> Optional["Squad"]:
         """Helper method to auto-assign user to default squad if they're not in any squad.
         
         This method is called after users earn bytes to check if they should be 
@@ -1158,6 +1158,9 @@ class BytesOperations:
             guild_id: Discord guild snowflake ID  
             user_id: Discord user snowflake ID
             username: Optional username for logging
+            
+        Returns:
+            Squad: The squad the user was assigned to, or None if no assignment occurred
         """
         # Import logging here for better visibility
         import logging
@@ -1173,12 +1176,15 @@ class BytesOperations:
             
             if assigned_squad:
                 logger.info(f"Auto-assigned user {user_id} to default squad '{assigned_squad.name}' in guild {guild_id} after earning bytes")
+                return assigned_squad
             else:
                 logger.info(f"No auto-assignment needed for user {user_id} in guild {guild_id} (may already be in squad or no default squad exists)")
+                return None
                 
         except Exception as e:
             logger.warning(f"Failed to auto-assign user {user_id} to default squad in guild {guild_id} after earning bytes: {e}")
             # Don't raise - squad assignment failure shouldn't break bytes earning
+            return None
 
 
 class BytesConfigOperations:
