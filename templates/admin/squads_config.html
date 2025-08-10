@@ -162,6 +162,156 @@
     </div>
 </div>
 
+<!-- Squad Members -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Squad Members</h3>
+                <div class="card-subtitle">
+                    {% if squad_members %}
+                        {{ squad_members|length }} member{{ 's' if squad_members|length != 1 else '' }} across all squads
+                    {% else %}
+                        No members found
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                {% if squad_members %}
+                <!-- Filter Controls -->
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <div class="input-group">
+                            <span class="input-group-text">
+                                <svg class="icon" width="24" height="24">
+                                    <use xlink:href="#tabler-search"></use>
+                                </svg>
+                            </span>
+                            <input type="text" class="form-control" id="memberSearch" placeholder="Search by username..." onkeyup="filterMembers()">
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <select class="form-select" id="squadFilter" onchange="filterMembers()">
+                            <option value="">All Squads</option>
+                            {% for squad in squads %}
+                            <option value="{{ squad.id }}">{{ squad.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-outline-secondary w-100" onclick="clearFilters()">
+                            <svg class="icon me-1" width="24" height="24">
+                                <use xlink:href="#tabler-x"></use>
+                            </svg>
+                            Clear
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Members Table -->
+                <div class="table-responsive">
+                    <table class="table table-vcenter table-hover" id="membersTable">
+                        <thead>
+                            <tr>
+                                <th class="cursor-pointer" onclick="sortMembers('username')">
+                                    Username
+                                    <svg class="icon ms-1 sort-icon" width="16" height="16">
+                                        <use xlink:href="#tabler-chevron-up-down"></use>
+                                    </svg>
+                                </th>
+                                <th class="cursor-pointer" onclick="sortMembers('squad_name')">
+                                    Squad
+                                    <svg class="icon ms-1 sort-icon" width="16" height="16">
+                                        <use xlink:href="#tabler-chevron-up-down"></use>
+                                    </svg>
+                                </th>
+                                <th class="cursor-pointer" onclick="sortMembers('joined_at')">
+                                    Joined Date
+                                    <svg class="icon ms-1 sort-icon" width="16" height="16">
+                                        <use xlink:href="#tabler-chevron-up-down"></use>
+                                    </svg>
+                                </th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for member in squad_members %}
+                            <tr class="member-row" 
+                                data-username="{{ member.username|lower }}" 
+                                data-squad-id="{{ member.squad_id }}"
+                                data-squad-name="{{ member.squad_name|lower }}"
+                                data-joined-at="{{ member.joined_at.isoformat() }}">
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <div class="avatar avatar-sm me-2" style="background-color: #206bc4; color: white;">
+                                            {{ member.username[0].upper() if member.username else '?' }}
+                                        </div>
+                                        <div>
+                                            <strong>{{ member.username or 'Unknown User' }}</strong>
+                                            <div class="text-muted small">ID: {{ member.user_id }}</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <span class="badge {% if member.squad_is_default %}bg-dark text-warning{% else %}bg-primary{% endif %} me-2">
+                                            {% if member.squad_is_default %}🏠{% endif %}
+                                        </span>
+                                        {{ member.squad_name }}
+                                    </div>
+                                </td>
+                                <td>
+                                    <div>
+                                        {{ member.joined_at.strftime("%Y-%m-%d") }}
+                                        <div class="text-muted small">{{ member.joined_at.strftime("%H:%M") }}</div>
+                                    </div>
+                                </td>
+                                <td>
+                                    {% if member.squad_is_active %}
+                                        <span class="badge bg-success">Active</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Inactive</span>
+                                    {% endif %}
+                                    {% if member.squad_is_default %}
+                                        <span class="badge bg-dark text-warning ms-1">Default</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- No Results Message -->
+                <div id="noResultsMessage" class="empty d-none">
+                    <div class="empty-img">
+                        <svg class="icon" width="48" height="48">
+                            <use xlink:href="#tabler-search"></use>
+                        </svg>
+                    </div>
+                    <p class="empty-title">No members found</p>
+                    <p class="empty-subtitle text-muted">
+                        Try adjusting your search or filter criteria.
+                    </p>
+                </div>
+                {% else %}
+                <div class="empty">
+                    <div class="empty-img">
+                        <svg class="icon" width="48" height="48">
+                            <use xlink:href="#tabler-users"></use>
+                        </svg>
+                    </div>
+                    <p class="empty-title">No squad members</p>
+                    <p class="empty-subtitle text-muted">
+                        Squad members will appear here once users join squads.
+                    </p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Create Squad Modal -->
 <div class="modal modal-blur fade" id="createSquadModal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
@@ -458,5 +608,107 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 });
+
+// Squad Members Filtering and Sorting
+let currentSortColumn = '';
+let currentSortOrder = 'asc';
+
+function filterMembers() {
+    const searchTerm = document.getElementById('memberSearch').value.toLowerCase();
+    const selectedSquad = document.getElementById('squadFilter').value;
+    const rows = document.querySelectorAll('.member-row');
+    let visibleCount = 0;
+    
+    rows.forEach(row => {
+        const username = row.dataset.username || '';
+        const squadId = row.dataset.squadId || '';
+        const squadName = row.dataset.squadName || '';
+        
+        const matchesSearch = username.includes(searchTerm) || squadName.includes(searchTerm);
+        const matchesSquad = !selectedSquad || squadId === selectedSquad;
+        
+        if (matchesSearch && matchesSquad) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+    
+    // Show/hide no results message
+    const noResultsMsg = document.getElementById('noResultsMessage');
+    const membersTable = document.getElementById('membersTable');
+    
+    if (visibleCount === 0 && (searchTerm || selectedSquad)) {
+        noResultsMsg.classList.remove('d-none');
+        membersTable.style.display = 'none';
+    } else {
+        noResultsMsg.classList.add('d-none');
+        membersTable.style.display = '';
+    }
+}
+
+function clearFilters() {
+    document.getElementById('memberSearch').value = '';
+    document.getElementById('squadFilter').value = '';
+    filterMembers();
+}
+
+function sortMembers(column) {
+    const rows = Array.from(document.querySelectorAll('.member-row'));
+    const tbody = document.querySelector('#membersTable tbody');
+    
+    // Toggle sort order if clicking the same column
+    if (currentSortColumn === column) {
+        currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+        currentSortColumn = column;
+        currentSortOrder = 'asc';
+    }
+    
+    // Sort rows
+    rows.sort((a, b) => {
+        let aValue, bValue;
+        
+        switch (column) {
+            case 'username':
+                aValue = a.dataset.username || '';
+                bValue = b.dataset.username || '';
+                break;
+            case 'squad_name':
+                aValue = a.dataset.squadName || '';
+                bValue = b.dataset.squadName || '';
+                break;
+            case 'joined_at':
+                aValue = new Date(a.dataset.joinedAt);
+                bValue = new Date(b.dataset.joinedAt);
+                break;
+            default:
+                return 0;
+        }
+        
+        if (column === 'joined_at') {
+            return currentSortOrder === 'asc' ? aValue - bValue : bValue - aValue;
+        } else {
+            const comparison = aValue.localeCompare(bValue);
+            return currentSortOrder === 'asc' ? comparison : -comparison;
+        }
+    });
+    
+    // Clear and re-append sorted rows
+    tbody.innerHTML = '';
+    rows.forEach(row => tbody.appendChild(row));
+    
+    // Update sort icons
+    document.querySelectorAll('.sort-icon').forEach(icon => {
+        icon.innerHTML = '<use xlink:href="#tabler-chevron-up-down"></use>';
+    });
+    
+    const currentHeader = document.querySelector(`th[onclick="sortMembers('${column}')"] .sort-icon`);
+    if (currentHeader) {
+        const iconHref = currentSortOrder === 'asc' ? '#tabler-chevron-up' : '#tabler-chevron-down';
+        currentHeader.innerHTML = `<use xlink:href="${iconHref}"></use>`;
+    }
+}
 </script>
 {% endblock %}

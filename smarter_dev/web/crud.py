@@ -415,6 +415,130 @@ class SquadOperations:
             
         except Exception as e:
             raise DatabaseOperationError(f"Failed to get squad members: {e}") from e
+
+    async def get_all_guild_squad_members(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        squad_filter: Optional[UUID] = None,
+        username_search: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """Get all squad members across all squads in a guild.
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            squad_filter: Optional UUID to filter by specific squad
+            username_search: Optional string to search in usernames
+            
+        Returns:
+            List[Dict[str, Any]]: Squad members with squad information
+            
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            # Create subquery to get the most recent username for each user
+            # We'll check both giver and receiver transactions to find the latest username
+            latest_username_subq = (
+                select(
+                    BytesTransaction.giver_id.label('user_id'),
+                    BytesTransaction.giver_username.label('username'),
+                    BytesTransaction.created_at.label('last_transaction')
+                )
+                .where(
+                    BytesTransaction.guild_id == guild_id,
+                    BytesTransaction.giver_username.isnot(None),
+                    BytesTransaction.giver_username != ''
+                )
+                .union_all(
+                    select(
+                        BytesTransaction.receiver_id.label('user_id'),
+                        BytesTransaction.receiver_username.label('username'),
+                        BytesTransaction.created_at.label('last_transaction')
+                    )
+                    .where(
+                        BytesTransaction.guild_id == guild_id,
+                        BytesTransaction.receiver_username.isnot(None),
+                        BytesTransaction.receiver_username != ''
+                    )
+                )
+                .subquery()
+            )
+            
+            # Get the most recent username for each user_id
+            latest_username_cte = (
+                select(
+                    latest_username_subq.c.user_id,
+                    latest_username_subq.c.username,
+                    func.row_number().over(
+                        partition_by=latest_username_subq.c.user_id,
+                        order_by=desc(latest_username_subq.c.last_transaction)
+                    ).label('rn')
+                )
+                .select_from(latest_username_subq)
+                .cte('latest_usernames')
+            )
+            
+            # Build main query joining squad memberships with squads and usernames
+            stmt = (
+                select(
+                    SquadMembership.user_id,
+                    SquadMembership.joined_at,
+                    Squad.id.label('squad_id'),
+                    Squad.name.label('squad_name'),
+                    Squad.role_id.label('squad_role_id'),
+                    Squad.is_default.label('squad_is_default'),
+                    Squad.is_active.label('squad_is_active'),
+                    func.coalesce(latest_username_cte.c.username, SquadMembership.user_id).label('username')
+                )
+                .select_from(SquadMembership)
+                .join(Squad, SquadMembership.squad_id == Squad.id)
+                .outerjoin(
+                    latest_username_cte,
+                    and_(
+                        latest_username_cte.c.user_id == SquadMembership.user_id,
+                        latest_username_cte.c.rn == 1
+                    )
+                )
+                .where(Squad.guild_id == guild_id)
+                .order_by(SquadMembership.joined_at.desc())
+            )
+            
+            # Apply filters if provided
+            if squad_filter:
+                stmt = stmt.where(Squad.id == squad_filter)
+                
+            if username_search:
+                search_pattern = f"%{username_search}%"
+                stmt = stmt.where(
+                    or_(
+                        func.coalesce(latest_username_cte.c.username, SquadMembership.user_id).ilike(search_pattern),
+                        SquadMembership.user_id.ilike(search_pattern)
+                    )
+                )
+            
+            result = await session.execute(stmt)
+            rows = result.fetchall()
+            
+            # Convert to list of dictionaries
+            members = []
+            for row in rows:
+                members.append({
+                    'user_id': row.user_id,
+                    'username': row.username,  # Now contains actual username from transactions
+                    'joined_at': row.joined_at,
+                    'squad_id': str(row.squad_id),
+                    'squad_name': row.squad_name,
+                    'squad_role_id': row.squad_role_id,
+                    'squad_is_default': row.squad_is_default,
+                    'squad_is_active': row.squad_is_active
+                })
+            
+            return members
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get all guild squad members: {e}") from e
     
     async def _get_squad_member_count(
         self,
