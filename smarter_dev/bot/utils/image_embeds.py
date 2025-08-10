@@ -1204,7 +1204,7 @@ class EmbedImageGenerator:
             hikari.File containing the generated image
         """
         if not members:
-            return self.create_simple_embed(f"MEMBERS: {squad.name.upper()}", "This squad has no members.", "info")
+            return self.create_simple_embed(squad.name.upper(), "This squad has no members.", "info")
         
         # Load background
         background = self._get_background("info")
@@ -1222,7 +1222,7 @@ class EmbedImageGenerator:
         
         # Draw title
         title_font = self._fonts["title_medium"]
-        title_text = f"MEMBERS: {squad.name.upper()}"
+        title_text = squad.name.upper()
         self._draw_text_with_shadow(
             draw, 
             (self.PADDING_HORIZONTAL, current_y), 
