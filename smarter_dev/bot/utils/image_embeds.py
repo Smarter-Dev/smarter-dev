@@ -1118,7 +1118,7 @@ class EmbedImageGenerator:
         switch_cost_display = "N/A (default)" if getattr(squad, 'is_default', False) else f"{squad.switch_cost:,} bytes"
         stats_items = [
             ("Members", f"{len(members)}" + (f"/{squad.max_members}" if squad.max_members else "")),
-            ("Switch Cost", switch_cost_display),
+            ("Join Cost", switch_cost_display),
             ("Status", "Active" if squad.is_active else "Inactive")
         ]
         
