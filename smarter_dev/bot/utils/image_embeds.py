@@ -1074,7 +1074,7 @@ class EmbedImageGenerator:
         
         # Draw title (squad name)
         title_font = self._fonts["title_medium"]
-        title_text = f"SQUAD: {squad.name.upper()}"
+        title_text = squad.name.upper()
         self._draw_text_with_shadow(
             draw, 
             (self.PADDING_HORIZONTAL, current_y), 
@@ -1112,16 +1112,7 @@ class EmbedImageGenerator:
         # Squad stats section with full-width table
         stats_font = self._fonts["text_small"]
         
-        # Draw stats header
-        stats_header = "Squad Statistics:"
-        self._draw_text_with_shadow(
-            draw, 
-            (self.PADDING_HORIZONTAL, current_y), 
-            stats_header, 
-            stats_font, 
-            self.TEXT_COLOR
-        )
-        current_y += stats_font.getbbox(stats_header)[3] + 16
+        # Skip stats header - go directly to stats content
         
         # Create full-width table for stats
         stats_items = [
@@ -1130,14 +1121,21 @@ class EmbedImageGenerator:
             ("Status", "Active" if squad.is_active else "Inactive")
         ]
         
-        # Calculate column widths for full-width table
-        col1_width = content_width // 2
-        col2_x = self.PADDING_HORIZONTAL + col1_width
+        # Calculate maximum label width to align values consistently
+        max_label_width = 0
+        for label, _ in stats_items:
+            label_bbox = stats_font.getbbox(label)
+            label_width = label_bbox[2] - label_bbox[0]
+            max_label_width = max(max_label_width, label_width)
+        
+        # Position values with consistent spacing after the longest label
+        value_spacing = 40  # Space between label and value
+        value_x = self.PADDING_HORIZONTAL + max_label_width + value_spacing
         
         for i, (label, value) in enumerate(stats_items):
             stats_y = current_y + (i * 28)
             
-            # Draw label (left column)
+            # Draw label (left aligned)
             draw.text(
                 (self.PADDING_HORIZONTAL, stats_y), 
                 label, 
@@ -1145,11 +1143,7 @@ class EmbedImageGenerator:
                 fill=self.TEXT_COLOR
             )
             
-            # Draw value (right column, right-aligned)
-            value_bbox = stats_font.getbbox(value)
-            value_width = value_bbox[2] - value_bbox[0]
-            value_x = self.PADDING_HORIZONTAL + content_width - value_width
-            
+            # Draw value (aligned after longest label)
             draw.text(
                 (value_x, stats_y), 
                 value, 
