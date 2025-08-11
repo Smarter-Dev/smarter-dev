@@ -682,9 +682,9 @@ class EmbedImageGenerator:
                 else:
                     type_indicator = "<"  # Regular transfer
             
-            # Truncate username if too long
-            if len(other_user) > 15:
-                other_user = other_user[:12] + "..."
+            # Truncate username if too long - increased limit to show more of squad names and descriptions
+            if len(other_user) > 35:
+                other_user = other_user[:32] + "..."
             
             # Create compact row: Date | Type + User | Amount
             row_y = current_y + (i * 26)  # Adjusted spacing for larger font
