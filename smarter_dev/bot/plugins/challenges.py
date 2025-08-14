@@ -54,7 +54,8 @@ async def scoreboard_command(ctx: lightbulb.Context) -> None:
             default_timeout=30.0
         )
 
-        await ctx.respond("🔍 Fetching scoreboard data...", flags=hikari.MessageFlag.EPHEMERAL)
+        # Defer the response immediately to avoid timeout
+        await ctx.respond(hikari.ResponseType.DEFERRED_MESSAGE_CREATE, flags=hikari.MessageFlag.EPHEMERAL)
 
         try:
             # Get current campaign and scoreboard data
