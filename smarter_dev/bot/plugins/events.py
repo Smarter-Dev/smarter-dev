@@ -874,7 +874,7 @@ async def _provide_challenge_input_directly(
         # Send response with file attachment (non-ephemeral so squad can see)
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
-            content=f"📥 **Challenge Input for {challenge_title}**\n\nYour squad's input data is attached as `{filename}`.",
+            content=f"📥 **{challenge_title}**",
             attachment=file_attachment
         )
         
