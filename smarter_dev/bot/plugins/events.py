@@ -724,24 +724,6 @@ async def handle_challenge_get_input_interaction(event: hikari.InteractionCreate
                 }
             )
             
-            if exists_response.status_code != 200:
-                logger.error(f"Input exists check failed with status {exists_response.status_code}: {exists_response.text}")
-                
-                # Handle specific error cases for exists check
-                if exists_response.status_code == 404:
-                    if "not a member of any squad" in exists_response.text:
-                        content = "❌ You must be a member of a squad to get challenge input. Use `/squads join` to join a squad first."
-                    else:
-                        content = "❌ Challenge not found or not available yet."
-                else:
-                    content = "❌ Failed to check challenge input status. Please try again later."
-                
-                await event.interaction.create_initial_response(
-                    hikari.ResponseType.MESSAGE_CREATE,
-                    content=content
-                )
-                return
-            
             exists_data = exists_response.json()
             input_already_exists = exists_data.get("exists", False)
             
@@ -753,10 +735,19 @@ async def handle_challenge_get_input_interaction(event: hikari.InteractionCreate
                 await _show_input_generation_confirmation(event, challenge_id)
                 
         except Exception as api_error:
-            logger.exception(f"API call failed while checking input existence: {api_error}")
+            # Handle specific API errors
+            error_message = str(api_error)
+            if "not a member of any squad" in error_message:
+                content = "❌ You must be a member of a squad to get challenge input. Use `/squads join` to join a squad first."
+            elif "Challenge not found" in error_message or "not available yet" in error_message:
+                content = "❌ Challenge not found or not available yet."
+            else:
+                logger.exception(f"API call failed while checking input existence: {api_error}")
+                content = "❌ Failed to check challenge input status. Please try again later."
+            
             await event.interaction.create_initial_response(
                 hikari.ResponseType.MESSAGE_CREATE,
-                content="❌ Failed to check challenge input status. Please try again later."
+                content=content
             )
         
     except Exception as e:
