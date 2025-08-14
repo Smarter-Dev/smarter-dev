@@ -1,6 +1,10 @@
 import subprocess
 import json
 import sys
+import random
+
+# Set the seed for random number generation for reproducibility
+random.seed(42)
 
 def run_challenge_generator(challenge_num):
     """Run the challenge generator script and return input/result"""

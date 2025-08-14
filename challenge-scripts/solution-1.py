@@ -11,7 +11,7 @@ def is_reconnaissance(hex_color):
     return (rgb_sum % 3 == 0) and (r > b)
 
 # Read input
-lines = sys.stdin.read().strip().split('\n')
+lines = sys.stdin.readlines()
 
 # Count reconnaissance packets
 recon_count = 0
