@@ -25,6 +25,10 @@ from smarter_dev.web.models import (
     APIKey,
     ForumAgent,
     ForumAgentResponse,
+    Campaign,
+    Challenge,
+    ChallengeInput,
+    ScheduledMessage,
 )
 
 
@@ -2334,3 +2338,884 @@ class ForumAgentOperations:
         except Exception as e:
             await self.session.rollback()
             raise DatabaseOperationError(f"Failed to perform bulk operation: {e}") from e
+
+
+class CampaignOperations:
+    """Database operations for campaign management system.
+    
+    Handles all campaign-related database operations including campaign creation,
+    challenge management, and queries. Follows SOLID principles for clean
+    separation of concerns.
+    """
+    
+    def __init__(self, session: AsyncSession):
+        """Initialize with database session.
+        
+        Args:
+            session: SQLAlchemy async session
+        """
+        self.session = session
+    
+    async def create_campaign(
+        self,
+        guild_id: str,
+        title: str,
+        description: str,
+        start_time: datetime,
+        release_cadence_hours: int,
+        announcement_channels: List[str],
+        created_by: str,
+        scheduled_message_title: Optional[str] = None,
+        scheduled_message_description: Optional[str] = None,
+        scheduled_message_time: Optional[datetime] = None
+    ) -> Campaign:
+        """Create a new campaign.
+        
+        Args:
+            guild_id: Discord guild ID
+            title: Campaign title
+            description: Campaign description
+            start_time: When campaign starts
+            release_cadence_hours: Hours between challenge releases
+            announcement_channels: List of Discord channel IDs
+            created_by: Admin who created the campaign
+            scheduled_message_title: Optional title for scheduled message
+            scheduled_message_description: Optional description for scheduled message
+            scheduled_message_time: Optional datetime when to send scheduled message
+            
+        Returns:
+            Created campaign
+            
+        Raises:
+            ConflictError: If campaign title already exists in guild
+            DatabaseOperationError: For database errors
+        """
+        try:
+            campaign = Campaign(
+                guild_id=guild_id,
+                title=title,
+                description=description,
+                start_time=start_time,
+                release_cadence_hours=release_cadence_hours,
+                announcement_channels=announcement_channels,
+                created_by=created_by,
+                scheduled_message_title=scheduled_message_title,
+                scheduled_message_description=scheduled_message_description,
+                scheduled_message_time=scheduled_message_time
+            )
+            
+            self.session.add(campaign)
+            await self.session.commit()
+            await self.session.refresh(campaign)
+            
+            return campaign
+            
+        except IntegrityError as e:
+            await self.session.rollback()
+            if "uq_campaigns_guild_title" in str(e):
+                raise ConflictError(f"Campaign with title '{title}' already exists in this guild")
+            raise DatabaseOperationError(f"Failed to create campaign: {e}") from e
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to create campaign: {e}") from e
+    
+    async def get_campaigns_by_guild(
+        self,
+        guild_id: str,
+        active_only: bool = False,
+        limit: Optional[int] = None,
+        offset: int = 0
+    ) -> Tuple[List[Campaign], int]:
+        """Get campaigns for a guild with optional filtering.
+        
+        Args:
+            guild_id: Discord guild ID
+            active_only: Whether to filter to active campaigns only
+            limit: Maximum number of campaigns to return
+            offset: Number of campaigns to skip
+            
+        Returns:
+            Tuple of (campaigns, total_count)
+        """
+        try:
+            # Build base query with eager loading
+            query = select(Campaign).options(selectinload(Campaign.challenges)).where(Campaign.guild_id == guild_id)
+            
+            if active_only:
+                query = query.where(Campaign.is_active == True)
+            
+            # Get total count
+            count_query = select(func.count(Campaign.id)).where(Campaign.guild_id == guild_id)
+            if active_only:
+                count_query = count_query.where(Campaign.is_active == True)
+            
+            total_result = await self.session.execute(count_query)
+            total_count = total_result.scalar() or 0
+            
+            # Apply ordering, limit, and offset
+            query = query.order_by(desc(Campaign.created_at))
+            
+            if limit is not None:
+                query = query.limit(limit)
+            if offset > 0:
+                query = query.offset(offset)
+            
+            result = await self.session.execute(query)
+            campaigns = result.scalars().all()
+            
+            return list(campaigns), total_count
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get campaigns: {e}") from e
+    
+    async def get_campaign_by_id(self, campaign_id: UUID, guild_id: Optional[str] = None) -> Optional[Campaign]:
+        """Get a campaign by its ID.
+        
+        Args:
+            campaign_id: Campaign UUID
+            guild_id: Optional guild ID to verify ownership
+            
+        Returns:
+            Campaign if found, None otherwise
+        """
+        try:
+            query = select(Campaign).options(selectinload(Campaign.challenges)).where(Campaign.id == campaign_id)
+            
+            if guild_id is not None:
+                query = query.where(Campaign.guild_id == guild_id)
+            
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get campaign: {e}") from e
+    
+    async def update_campaign(
+        self,
+        campaign_id: UUID,
+        guild_id: str,
+        **updates
+    ) -> Optional[Campaign]:
+        """Update a campaign.
+        
+        Args:
+            campaign_id: Campaign UUID
+            guild_id: Discord guild ID for verification
+            **updates: Fields to update
+            
+        Returns:
+            Updated campaign if found, None otherwise
+            
+        Raises:
+            ConflictError: If title conflict occurs
+            DatabaseOperationError: For database errors
+        """
+        try:
+            # Get existing campaign
+            campaign = await self.get_campaign_by_id(campaign_id, guild_id)
+            if not campaign:
+                return None
+            
+            # Update fields
+            for field, value in updates.items():
+                if hasattr(campaign, field):
+                    setattr(campaign, field, value)
+            
+            campaign.updated_at = datetime.now(timezone.utc)
+            
+            await self.session.commit()
+            await self.session.refresh(campaign)
+            
+            return campaign
+            
+        except IntegrityError as e:
+            await self.session.rollback()
+            if "uq_campaigns_guild_title" in str(e):
+                raise ConflictError(f"Campaign with this title already exists in the guild")
+            raise DatabaseOperationError(f"Failed to update campaign: {e}") from e
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to update campaign: {e}") from e
+    
+    async def delete_campaign(self, campaign_id: UUID, guild_id: str) -> bool:
+        """Soft delete a campaign (set is_active = False).
+        
+        Args:
+            campaign_id: Campaign UUID
+            guild_id: Discord guild ID for verification
+            
+        Returns:
+            True if campaign was found and deactivated, False otherwise
+        """
+        try:
+            campaign = await self.get_campaign_by_id(campaign_id, guild_id)
+            if not campaign:
+                return False
+            
+            campaign.is_active = False
+            campaign.updated_at = datetime.now(timezone.utc)
+            
+            await self.session.commit()
+            return True
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to delete campaign: {e}") from e
+    
+    async def get_campaign_with_challenges(self, campaign_id: UUID, guild_id: Optional[str] = None) -> Optional[Campaign]:
+        """Get a campaign with all its challenges loaded.
+        
+        Args:
+            campaign_id: Campaign UUID
+            guild_id: Optional guild ID to verify ownership
+            
+        Returns:
+            Campaign with challenges if found, None otherwise
+        """
+        try:
+            query = select(Campaign).where(Campaign.id == campaign_id)
+            
+            if guild_id is not None:
+                query = query.where(Campaign.guild_id == guild_id)
+            
+            # Use selectinload to eager load challenges with ordering
+            query = query.options(
+                selectinload(Campaign.challenges)
+            )
+            
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get campaign with challenges: {e}") from e
+    
+    async def create_challenge(
+        self,
+        campaign_id: UUID,
+        title: str,
+        description: str,
+        order_position: int,
+        points_value: int = 100,
+        python_script: Optional[str] = None,
+        input_generator_script: Optional[str] = None,
+        solution_validator_script: Optional[str] = None
+    ) -> Challenge:
+        """Create a new challenge in a campaign.
+        
+        Args:
+            campaign_id: Campaign UUID
+            title: Challenge title
+            description: Challenge description
+            order_position: Position in campaign (1-based)
+            points_value: Base points for completion
+            input_generator_script: Python script to generate inputs
+            solution_validator_script: Python script to validate solutions
+            
+        Returns:
+            Created challenge
+            
+        Raises:
+            ConflictError: If position already exists in campaign
+            DatabaseOperationError: For database errors
+        """
+        try:
+            challenge = Challenge(
+                campaign_id=campaign_id,
+                title=title,
+                description=description,
+                order_position=order_position,
+                points_value=points_value,
+                python_script=python_script,
+                input_generator_script=input_generator_script,
+                solution_validator_script=solution_validator_script
+            )
+            
+            self.session.add(challenge)
+            await self.session.commit()
+            await self.session.refresh(challenge)
+            
+            return challenge
+            
+        except IntegrityError as e:
+            await self.session.rollback()
+            if "uq_challenges_campaign_position" in str(e):
+                raise ConflictError(f"Challenge position {order_position} already exists in this campaign")
+            raise DatabaseOperationError(f"Failed to create challenge: {e}") from e
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to create challenge: {e}") from e
+    
+    async def get_challenge_by_id(self, challenge_id: UUID) -> Optional[Challenge]:
+        """Get a challenge by its ID.
+        
+        Args:
+            challenge_id: Challenge UUID
+            
+        Returns:
+            Challenge if found, None otherwise
+        """
+        try:
+            result = await self.session.execute(
+                select(Challenge).where(Challenge.id == challenge_id)
+            )
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get challenge: {e}") from e
+    
+    async def get_challenges_by_campaign(
+        self,
+        campaign_id: UUID,
+        released_only: bool = False
+    ) -> List[Challenge]:
+        """Get all challenges for a campaign.
+        
+        Args:
+            campaign_id: Campaign UUID
+            released_only: Whether to only return released challenges
+            
+        Returns:
+            List of challenges ordered by position
+        """
+        try:
+            query = select(Challenge).where(Challenge.campaign_id == campaign_id)
+            
+            if released_only:
+                query = query.where(Challenge.is_released == True)
+            
+            query = query.order_by(Challenge.order_position)
+            
+            result = await self.session.execute(query)
+            return list(result.scalars().all())
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get challenges: {e}") from e
+    
+    async def get_pending_announcements(self) -> List[Challenge]:
+        """Get challenges that should be announced but haven't been yet.
+        
+        Returns:
+            List of challenges ready for announcement
+        """
+        try:
+            # Find challenges that:
+            # 1. Haven't been announced yet (is_announced = False)
+            # 2. Are part of active campaigns
+            # Then filter by release time in Python
+            
+            now = datetime.now(timezone.utc)
+            
+            query = select(Challenge).join(Campaign).where(
+                and_(
+                    Challenge.is_announced == False,
+                    Campaign.is_active == True
+                )
+            ).options(selectinload(Challenge.campaign))
+            
+            result = await self.session.execute(query)
+            all_pending = list(result.scalars().all())
+            
+            # Filter by release time in Python
+            ready_challenges = []
+            for challenge in all_pending:
+                campaign = challenge.campaign
+                release_time = challenge.calculate_release_time(campaign.start_time, campaign.release_cadence_hours)
+                if now >= release_time:
+                    ready_challenges.append(challenge)
+            
+            return ready_challenges
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get pending announcements: {e}") from e
+    
+    async def mark_challenge_announced(self, challenge_id: UUID) -> bool:
+        """Mark a challenge as announced.
+        
+        Args:
+            challenge_id: Challenge UUID
+            
+        Returns:
+            True if marked successfully, False if challenge not found
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            
+            query = update(Challenge).where(
+                Challenge.id == challenge_id
+            ).values(
+                is_announced=True,
+                announced_at=now
+            )
+            
+            result = await self.session.execute(query)
+            await self.session.commit()
+            
+            return result.rowcount > 0
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to mark challenge as announced: {e}") from e
+    
+    async def mark_challenge_released(self, challenge_id: UUID) -> bool:
+        """Mark a challenge as released.
+        
+        Args:
+            challenge_id: Challenge UUID
+            
+        Returns:
+            True if marked successfully, False if challenge not found
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            
+            query = update(Challenge).where(
+                Challenge.id == challenge_id
+            ).values(
+                is_released=True,
+                released_at=now
+            )
+            
+            result = await self.session.execute(query)
+            await self.session.commit()
+            
+            return result.rowcount > 0
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to mark challenge as released: {e}") from e
+    
+    async def get_challenge_with_campaign(self, challenge_id: UUID) -> Optional[Challenge]:
+        """Get a challenge with its campaign data loaded.
+        
+        Args:
+            challenge_id: Challenge UUID
+            
+        Returns:
+            Challenge with campaign if found, None otherwise
+        """
+        try:
+            query = select(Challenge).where(
+                Challenge.id == challenge_id
+            ).options(selectinload(Challenge.campaign))
+            
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get challenge with campaign: {e}") from e
+
+
+class ChallengeInputOperations:
+    """Database operations for challenge input management system.
+    
+    Handles squad-specific challenge input generation, storage, and retrieval.
+    Ensures all squad members receive the same input data for fairness.
+    """
+    
+    def __init__(self, session: AsyncSession):
+        """Initialize with database session.
+        
+        Args:
+            session: SQLAlchemy async session
+        """
+        self.session = session
+    
+    async def get_or_create_input(
+        self, 
+        challenge_id: UUID, 
+        squad_id: UUID, 
+        script: Optional[str] = None
+    ) -> tuple[str, str]:
+        """Get existing input for squad or generate new one if not exists.
+        
+        Args:
+            challenge_id: UUID of the challenge
+            squad_id: UUID of the squad
+            script: Python script to execute for generating input (if needed)
+            
+        Returns:
+            Tuple of (input_data, result_data)
+            
+        Raises:
+            DatabaseOperationError: If database operation fails
+            ScriptExecutionError: If script execution fails
+        """
+        try:
+            # First, try to get existing input
+            existing_input = await self.get_input_by_squad(challenge_id, squad_id)
+            if existing_input:
+                return existing_input.input_data, existing_input.result_data
+            
+            # If no existing input, generate new one
+            if not script:
+                raise DatabaseOperationError("No script provided for input generation")
+            
+            input_data, result_data = await self._execute_script(script)
+            
+            # Store the generated input in database
+            challenge_input = ChallengeInput(
+                challenge_id=challenge_id,
+                squad_id=squad_id,
+                input_data=input_data,
+                result_data=result_data
+            )
+            
+            self.session.add(challenge_input)
+            await self.session.commit()
+            
+            return input_data, result_data
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to get or create challenge input: {e}") from e
+    
+    async def get_input_by_squad(
+        self, 
+        challenge_id: UUID, 
+        squad_id: UUID
+    ) -> Optional["ChallengeInput"]:
+        """Get existing challenge input for a specific squad.
+        
+        Args:
+            challenge_id: UUID of the challenge
+            squad_id: UUID of the squad
+            
+        Returns:
+            ChallengeInput object or None if not found
+            
+        Raises:
+            DatabaseOperationError: If database operation fails
+        """
+        try:
+            query = select(ChallengeInput).where(
+                ChallengeInput.challenge_id == challenge_id,
+                ChallengeInput.squad_id == squad_id
+            )
+            
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get challenge input by squad: {e}") from e
+    
+    async def get_existing_input(
+        self, 
+        challenge_id: UUID, 
+        squad_id: UUID
+    ) -> Optional["ChallengeInput"]:
+        """Check if challenge input exists for a squad without generating it.
+        
+        This is an alias for get_input_by_squad() to make the intent clear
+        when checking existence without side effects.
+        
+        Args:
+            challenge_id: UUID of the challenge
+            squad_id: UUID of the squad
+            
+        Returns:
+            ChallengeInput object or None if not found
+        """
+        return await self.get_input_by_squad(challenge_id, squad_id)
+    
+    async def _execute_script(self, script: str) -> tuple[str, str]:
+        """Execute Python script to generate input and result data.
+        
+        Args:
+            script: Python script code to execute
+            
+        Returns:
+            Tuple of (input_data, result_data)
+            
+        Raises:
+            ScriptExecutionError: If script execution fails or output is invalid
+        """
+        import json
+        import io
+        import sys
+        from contextlib import redirect_stdout
+        
+        try:
+            # Capture stdout
+            captured_output = io.StringIO()
+            
+            # Execute the script with captured stdout
+            with redirect_stdout(captured_output):
+                exec(script)
+            
+            # Get the output
+            output = captured_output.getvalue().strip()
+            
+            # Parse JSON output
+            try:
+                output_data = json.loads(output)
+            except json.JSONDecodeError as e:
+                raise ScriptExecutionError(f"Script output is not valid JSON: {e}")
+            
+            # Validate required keys
+            if not isinstance(output_data, dict):
+                raise ScriptExecutionError("Script output must be a JSON object")
+            
+            if "input" not in output_data or "result" not in output_data:
+                raise ScriptExecutionError("Script output must contain 'input' and 'result' keys")
+            
+            # Convert values to strings for database storage
+            input_data = str(output_data["input"])
+            result_data = str(output_data["result"])
+            
+            return input_data, result_data
+            
+        except Exception as e:
+            if isinstance(e, ScriptExecutionError):
+                raise
+            raise ScriptExecutionError(f"Script execution failed: {e}") from e
+
+
+class ScriptExecutionError(Exception):
+    """Exception raised when script execution fails."""
+    pass
+
+
+class ScheduledMessageOperations:
+    """Database operations for scheduled message management system.
+    
+    Handles all scheduled message-related database operations including creation,
+    management, and queries. Follows SOLID principles for clean separation of concerns.
+    """
+    
+    def __init__(self, session: AsyncSession):
+        """Initialize with database session.
+        
+        Args:
+            session: SQLAlchemy async session
+        """
+        self.session = session
+    
+    async def create_scheduled_message(
+        self,
+        campaign_id: UUID,
+        title: str,
+        description: str,
+        scheduled_time: datetime,
+        created_by: str
+    ) -> ScheduledMessage:
+        """Create a new scheduled message for a campaign.
+        
+        Args:
+            campaign_id: Campaign UUID
+            title: Message title
+            description: Message description
+            scheduled_time: When to send the message (UTC)
+            created_by: Admin who created the scheduled message
+            
+        Returns:
+            Created scheduled message
+            
+        Raises:
+            DatabaseOperationError: For database errors
+        """
+        try:
+            scheduled_message = ScheduledMessage(
+                campaign_id=campaign_id,
+                title=title,
+                description=description,
+                scheduled_time=scheduled_time,
+                created_by=created_by
+            )
+            
+            self.session.add(scheduled_message)
+            await self.session.commit()
+            await self.session.refresh(scheduled_message)
+            
+            return scheduled_message
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to create scheduled message: {e}") from e
+    
+    async def get_scheduled_messages_by_campaign(
+        self,
+        campaign_id: UUID
+    ) -> List[ScheduledMessage]:
+        """Get all scheduled messages for a campaign.
+        
+        Args:
+            campaign_id: Campaign UUID
+            
+        Returns:
+            List of scheduled messages ordered by scheduled time
+        """
+        try:
+            query = select(ScheduledMessage).where(
+                ScheduledMessage.campaign_id == campaign_id
+            ).order_by(ScheduledMessage.scheduled_time)
+            
+            result = await self.session.execute(query)
+            return list(result.scalars().all())
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get scheduled messages: {e}") from e
+    
+    async def get_scheduled_message_by_id(
+        self,
+        message_id: UUID,
+        campaign_id: Optional[UUID] = None
+    ) -> Optional[ScheduledMessage]:
+        """Get a scheduled message by its ID.
+        
+        Args:
+            message_id: Scheduled message UUID
+            campaign_id: Optional campaign ID to verify ownership
+            
+        Returns:
+            Scheduled message if found, None otherwise
+        """
+        try:
+            query = select(ScheduledMessage).where(ScheduledMessage.id == message_id)
+            
+            if campaign_id is not None:
+                query = query.where(ScheduledMessage.campaign_id == campaign_id)
+            
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get scheduled message: {e}") from e
+    
+    async def update_scheduled_message(
+        self,
+        message_id: UUID,
+        campaign_id: UUID,
+        **updates
+    ) -> Optional[ScheduledMessage]:
+        """Update a scheduled message.
+        
+        Args:
+            message_id: Scheduled message UUID
+            campaign_id: Campaign UUID for verification
+            **updates: Fields to update
+            
+        Returns:
+            Updated scheduled message if found, None otherwise
+            
+        Raises:
+            DatabaseOperationError: For database errors
+        """
+        try:
+            # Get existing scheduled message
+            message = await self.get_scheduled_message_by_id(message_id, campaign_id)
+            if not message:
+                return None
+            
+            # Update fields
+            for field, value in updates.items():
+                if hasattr(message, field):
+                    setattr(message, field, value)
+            
+            message.updated_at = datetime.now(timezone.utc)
+            
+            await self.session.commit()
+            await self.session.refresh(message)
+            
+            return message
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to update scheduled message: {e}") from e
+    
+    async def delete_scheduled_message(
+        self,
+        message_id: UUID,
+        campaign_id: UUID
+    ) -> bool:
+        """Delete a scheduled message.
+        
+        Args:
+            message_id: Scheduled message UUID
+            campaign_id: Campaign UUID for verification
+            
+        Returns:
+            True if message was found and deleted, False otherwise
+        """
+        try:
+            message = await self.get_scheduled_message_by_id(message_id, campaign_id)
+            if not message:
+                return False
+            
+            await self.session.delete(message)
+            await self.session.commit()
+            return True
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to delete scheduled message: {e}") from e
+    
+    async def get_pending_scheduled_messages(self) -> List[ScheduledMessage]:
+        """Get scheduled messages that should be sent but haven't been yet.
+        
+        Returns:
+            List of scheduled messages ready to be sent
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            
+            query = select(ScheduledMessage).join(Campaign).where(
+                and_(
+                    ScheduledMessage.is_sent == False,
+                    ScheduledMessage.scheduled_time <= now,
+                    Campaign.is_active == True
+                )
+            ).options(selectinload(ScheduledMessage.campaign))
+            
+            result = await self.session.execute(query)
+            return list(result.scalars().all())
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get pending scheduled messages: {e}") from e
+    
+    async def mark_scheduled_message_sent(self, message_id: UUID) -> bool:
+        """Mark a scheduled message as sent.
+        
+        Args:
+            message_id: Scheduled message UUID
+            
+        Returns:
+            True if marked successfully, False if message not found
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            
+            query = update(ScheduledMessage).where(
+                ScheduledMessage.id == message_id
+            ).values(
+                is_sent=True,
+                sent_at=now
+            )
+            
+            result = await self.session.execute(query)
+            await self.session.commit()
+            
+            return result.rowcount > 0
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to mark scheduled message as sent: {e}") from e
+    
+    async def get_scheduled_message_with_campaign(self, message_id: UUID) -> Optional[ScheduledMessage]:
+        """Get a scheduled message with its campaign data loaded.
+        
+        Args:
+            message_id: Scheduled message UUID
+            
+        Returns:
+            Scheduled message with campaign if found, None otherwise
+        """
+        try:
+            query = select(ScheduledMessage).where(
+                ScheduledMessage.id == message_id
+            ).options(selectinload(ScheduledMessage.campaign))
+            
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get scheduled message with campaign: {e}") from e
