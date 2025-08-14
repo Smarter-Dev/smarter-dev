@@ -200,15 +200,15 @@ class ChallengeService(BaseService):
         Returns:
             Formatted announcement text
         """
-        # Create a simple, clean announcement with just title and description
-        announcement = f"**{title}**\n{description}"
+        # Create announcement with @here mention and h1 markdown header
+        announcement = f"@here\n\n# {title}\n{description}"
         
         # Limit message length to Discord's limit (2000 characters)
         if len(announcement) > 2000:
             # Truncate description if needed
-            max_desc_length = 2000 - len(f"**{title}**\n") - 3  # 3 for "..."
+            max_desc_length = 2000 - len(f"@here\n\n# {title}\n") - 3  # 3 for "..."
             truncated_desc = description[:max_desc_length] + "..."
-            announcement = f"**{title}**\n{truncated_desc}"
+            announcement = f"@here\n\n# {title}\n{truncated_desc}"
         
         return announcement
     
@@ -243,12 +243,22 @@ class ChallengeService(BaseService):
             action_row.add_component(get_input_button)
             action_row.add_component(submit_solution_button)
             
-            # Send message using the bot's REST API with buttons
-            await self._bot.rest.create_message(
+            # Send message using the bot's REST API with buttons and allowed mentions
+            sent_message = await self._bot.rest.create_message(
                 channel_id_int,
                 content=message,
-                components=[action_row]
+                components=[action_row],
+                mentions_everyone=True
             )
+            
+            # Pin the message to the channel
+            try:
+                await self._bot.rest.pin_message(channel_id_int, sent_message.id)
+                logger.info(f"Pinned challenge announcement message {sent_message.id} in channel {channel_id}")
+            except hikari.ForbiddenError:
+                logger.warning(f"No permission to pin message in channel {channel_id}")
+            except Exception as pin_error:
+                logger.error(f"Failed to pin message in channel {channel_id}: {pin_error}")
             
         except ValueError as e:
             logger.error(f"Invalid channel ID format: {channel_id}")

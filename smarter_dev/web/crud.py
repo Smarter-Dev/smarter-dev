@@ -7,6 +7,7 @@ SQLAlchemy 2.0 syntax.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional, List, Dict, Any, Tuple
 from uuid import UUID
 from datetime import datetime, timezone, date
@@ -31,6 +32,8 @@ from smarter_dev.web.models import (
     ChallengeSubmission,
     ScheduledMessage,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseOperationError(Exception):
@@ -2814,6 +2817,46 @@ class CampaignOperations:
             
         except Exception as e:
             raise DatabaseOperationError(f"Failed to get challenge with campaign: {e}") from e
+    
+    async def get_most_recent_campaign(self, guild_id: str) -> Optional[Campaign]:
+        """Get the most recently begun campaign for a guild.
+        
+        Args:
+            guild_id: Discord guild ID
+            
+        Returns:
+            Most recent campaign if found, None otherwise
+        """
+        try:
+            query = select(Campaign).where(
+                and_(
+                    Campaign.guild_id == guild_id,
+                    Campaign.start_time <= datetime.now(timezone.utc)
+                )
+            ).order_by(desc(Campaign.start_time)).limit(1)
+            
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get most recent campaign: {e}") from e
+    
+    async def get_campaign_challenge_count(self, campaign_id: UUID) -> int:
+        """Get the total number of challenges in a campaign.
+        
+        Args:
+            campaign_id: Campaign UUID
+            
+        Returns:
+            Number of challenges in the campaign
+        """
+        try:
+            query = select(func.count(Challenge.id)).where(Challenge.campaign_id == campaign_id)
+            result = await self.session.execute(query)
+            return result.scalar() or 0
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get campaign challenge count: {e}") from e
 
 
 class ChallengeInputOperations:
@@ -2942,16 +2985,19 @@ class ChallengeInputOperations:
         """
         import json
         import io
-        import sys
         from contextlib import redirect_stdout
         
         try:
             # Capture stdout
             captured_output = io.StringIO()
             
-            # Execute the script with captured stdout
+            # Allow unrestricted script execution with full Python capabilities
+            # These scripts are trusted and need access to arbitrary imports
+            exec_globals = {'__builtins__': __builtins__}
+            
+            # Execute the script with captured stdout and full Python environment
             with redirect_stdout(captured_output):
-                exec(script)
+                exec(script, exec_globals)
             
             # Get the output
             output = captured_output.getvalue().strip()
@@ -3128,6 +3174,136 @@ class ChallengeSubmissionOperations:
             
         except Exception as e:
             raise DatabaseOperationError(f"Failed to get squad submissions: {e}") from e
+    
+    async def _calculate_points(self, challenge_id: UUID, input_generated_at: datetime) -> int:
+        """Calculate points earned based on timing.
+        
+        Points are based on the campaign's release cadence:
+        - Max points = release_cadence_in_seconds / 30
+        - Points lost = time_taken_in_seconds / 30 (rounded down)
+        - Minimum points = 0
+        
+        Args:
+            challenge_id: UUID of the challenge
+            input_generated_at: When the input was generated (start of timer)
+            
+        Returns:
+            Points earned (0 or positive integer)
+        """
+        try:
+            # Get the challenge and its campaign to access release cadence
+            challenge_query = select(Challenge).options(
+                selectinload(Challenge.campaign)
+            ).where(Challenge.id == challenge_id)
+            
+            result = await self.session.execute(challenge_query)
+            challenge = result.scalar_one_or_none()
+            
+            if not challenge or not challenge.campaign:
+                # If we can't get cadence info, return 0 points
+                return 0
+            
+            # Convert release cadence from hours to seconds
+            release_cadence_seconds = challenge.campaign.release_cadence_hours * 3600
+            
+            # Calculate max possible points (cadence / 30)
+            max_points = release_cadence_seconds // 30
+            
+            # Calculate time taken from input generation to now
+            current_time = datetime.now(timezone.utc)
+            if input_generated_at.tzinfo is None:
+                input_generated_at = input_generated_at.replace(tzinfo=timezone.utc)
+            
+            time_taken_seconds = (current_time - input_generated_at).total_seconds()
+            
+            # Calculate points lost (time taken / 30, rounded down)
+            points_lost = int(time_taken_seconds // 30)
+            
+            # Calculate final points (max - lost, minimum 0)
+            points_earned = max(0, max_points - points_lost)
+            
+            # Debug logging for points calculation
+            logger.info(f"Points calculation: release_cadence={release_cadence_seconds}s, max_points={max_points}, time_taken={time_taken_seconds}s, points_lost={points_lost}, final_points={points_earned}")
+            
+            return points_earned
+            
+        except Exception as e:
+            # If calculation fails, return 0 points rather than failing the submission
+            return 0
+    
+    async def get_campaign_scoreboard(self, campaign_id: UUID) -> List[Dict[str, Any]]:
+        """Get scoreboard data for a campaign with squad rankings by total points.
+        
+        Args:
+            campaign_id: Campaign UUID
+            
+        Returns:
+            List of dictionaries containing squad names, total points, and submission counts
+        """
+        try:
+            # Query to get scoreboard data grouped by squad
+            query = select(
+                Squad.name.label("squad_name"),
+                Squad.id.label("squad_id"),
+                func.coalesce(func.sum(ChallengeSubmission.points_earned), 0).label("total_points"),
+                func.count(ChallengeSubmission.id).filter(
+                    ChallengeSubmission.is_first_success == True
+                ).label("successful_submissions")
+            ).select_from(
+                Squad
+            ).outerjoin(
+                ChallengeSubmission, Squad.id == ChallengeSubmission.squad_id
+            ).outerjoin(
+                Challenge, ChallengeSubmission.challenge_id == Challenge.id
+            ).where(
+                Challenge.campaign_id == campaign_id
+            ).group_by(
+                Squad.id, Squad.name
+            ).order_by(
+                func.coalesce(func.sum(ChallengeSubmission.points_earned), 0).desc()
+            )
+            
+            result = await self.session.execute(query)
+            rows = result.fetchall()
+            
+            # Convert to list of dictionaries
+            scoreboard = []
+            for row in rows:
+                scoreboard.append({
+                    "squad_name": row.squad_name,
+                    "squad_id": row.squad_id,
+                    "total_points": row.total_points,
+                    "successful_submissions": row.successful_submissions
+                })
+            
+            return scoreboard
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get campaign scoreboard: {e}") from e
+    
+    async def get_campaign_submission_count(self, campaign_id: UUID) -> int:
+        """Get the total number of submissions for a campaign.
+        
+        Args:
+            campaign_id: Campaign UUID
+            
+        Returns:
+            Total number of submissions across all challenges in the campaign
+        """
+        try:
+            query = select(func.count(ChallengeSubmission.id)).select_from(
+                ChallengeSubmission
+            ).join(
+                Challenge, ChallengeSubmission.challenge_id == Challenge.id
+            ).where(
+                Challenge.campaign_id == campaign_id
+            )
+            
+            result = await self.session.execute(query)
+            return result.scalar() or 0
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get campaign submission count: {e}") from e
 
 
 class ScheduledMessageOperations:
