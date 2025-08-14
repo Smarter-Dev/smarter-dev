@@ -780,21 +780,32 @@ async def _show_input_generation_confirmation(event: hikari.InteractionCreateEve
         event: The interaction event
         challenge_id: The challenge ID
     """
-    # Create buttons for Get Input and Cancel
-    get_input_button = hikari.impl.ActionRowBuilder().add_button(
-        hikari.ButtonStyle.PRIMARY, f"confirm_get_input:{challenge_id}"
-    ).set_label("Get Input").set_emoji("📥")
+    # Create buttons using the correct Hikari API
+    get_input_button = hikari.impl.InteractiveButtonBuilder(
+        style=hikari.ButtonStyle.PRIMARY,
+        custom_id=f"confirm_get_input:{challenge_id}",
+        emoji="📥",
+        label="Get Input"
+    )
     
-    cancel_button = hikari.impl.ActionRowBuilder().add_button(
-        hikari.ButtonStyle.SECONDARY, f"cancel_get_input:{challenge_id}"
-    ).set_label("Cancel").set_emoji("❌")
+    cancel_button = hikari.impl.InteractiveButtonBuilder(
+        style=hikari.ButtonStyle.SECONDARY,
+        custom_id=f"cancel_get_input:{challenge_id}",
+        emoji="❌",
+        label="Cancel"
+    )
+    
+    # Create action row and add buttons
+    action_row = hikari.impl.MessageActionRowBuilder()
+    action_row.add_component(get_input_button)
+    action_row.add_component(cancel_button)
     
     await event.interaction.create_initial_response(
         hikari.ResponseType.MESSAGE_CREATE,
         content="⚠️ **Challenge Input Generation**\n\n"
                "This will generate input data for your squad. **Once you get the input data, your score timer will start!**\n\n"
                "Are you sure you want to proceed?",
-        components=[get_input_button, cancel_button]
+        components=[action_row]
     )
 
 
