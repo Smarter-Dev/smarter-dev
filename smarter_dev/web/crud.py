@@ -28,6 +28,7 @@ from smarter_dev.web.models import (
     Campaign,
     Challenge,
     ChallengeInput,
+    ChallengeSubmission,
     ScheduledMessage,
 )
 
@@ -2398,15 +2399,25 @@ class CampaignOperations:
                 start_time=start_time,
                 release_cadence_hours=release_cadence_hours,
                 announcement_channels=announcement_channels,
-                created_by=created_by,
-                scheduled_message_title=scheduled_message_title,
-                scheduled_message_description=scheduled_message_description,
-                scheduled_message_time=scheduled_message_time
+                created_by=created_by
             )
             
             self.session.add(campaign)
             await self.session.commit()
             await self.session.refresh(campaign)
+            
+            # Create scheduled message if provided
+            if scheduled_message_time and scheduled_message_title:
+                from .models import ScheduledMessage
+                scheduled_message = ScheduledMessage(
+                    campaign_id=campaign.id,
+                    title=scheduled_message_title,
+                    description=scheduled_message_description or "",
+                    scheduled_time=scheduled_message_time,
+                    created_by=created_by
+                )
+                self.session.add(scheduled_message)
+                await self.session.commit()
             
             return campaign
             
@@ -2973,6 +2984,150 @@ class ChallengeInputOperations:
 class ScriptExecutionError(Exception):
     """Exception raised when script execution fails."""
     pass
+
+
+class ChallengeSubmissionOperations:
+    """Database operations for challenge solution submission and success tracking.
+    
+    Handles solution submission, comparison with expected results, and tracking
+    of first successful submissions per squad.
+    """
+    
+    def __init__(self, session: AsyncSession):
+        """Initialize with database session.
+        
+        Args:
+            session: SQLAlchemy async session
+        """
+        self.session = session
+    
+    async def submit_solution(
+        self,
+        challenge_id: UUID,
+        squad_id: UUID,
+        user_id: str,
+        username: str,
+        submitted_solution: str
+    ) -> tuple[bool, bool, Optional[int]]:
+        """Submit a solution and check if it matches the expected result.
+        
+        Args:
+            challenge_id: UUID of the challenge
+            squad_id: UUID of the squad
+            user_id: Discord user ID of the submitter
+            username: Username for audit purposes
+            submitted_solution: The solution text submitted by the user
+            
+        Returns:
+            Tuple of (is_correct, is_first_success, points_earned)
+            
+        Raises:
+            DatabaseOperationError: If operation fails
+            ValueError: If no expected result exists for this challenge/squad
+        """
+        try:
+            # Get the expected result from ChallengeInput
+            input_ops = ChallengeInputOperations(self.session)
+            challenge_input = await input_ops.get_input_by_squad(challenge_id, squad_id)
+            
+            if not challenge_input:
+                raise ValueError("No input/result data found for this challenge and squad. Generate input first.")
+            
+            # Compare submitted solution with expected result
+            expected_result = challenge_input.result_data.strip()
+            submitted_solution_clean = submitted_solution.strip()
+            is_correct = expected_result == submitted_solution_clean
+            
+            # Check if this squad already has a successful submission
+            is_first_success = False
+            points_earned = None
+            
+            if is_correct:
+                existing_success = await self._get_first_success_for_squad(challenge_id, squad_id)
+                is_first_success = existing_success is None
+                
+                # Calculate points for first successful submission
+                if is_first_success:
+                    points_earned = await self._calculate_points(challenge_id, challenge_input.created_at)
+            
+            # Create submission record
+            submission = ChallengeSubmission(
+                challenge_id=challenge_id,
+                squad_id=squad_id,
+                user_id=user_id,
+                username=username,
+                submitted_solution=submitted_solution,
+                is_correct=is_correct,
+                is_first_success=is_first_success,
+                points_earned=points_earned
+            )
+            
+            self.session.add(submission)
+            await self.session.commit()
+            
+            return is_correct, is_first_success, points_earned
+            
+        except Exception as e:
+            await self.session.rollback()
+            if isinstance(e, ValueError):
+                raise
+            raise DatabaseOperationError(f"Failed to submit solution: {e}") from e
+    
+    async def _get_first_success_for_squad(
+        self, 
+        challenge_id: UUID, 
+        squad_id: UUID
+    ) -> Optional["ChallengeSubmission"]:
+        """Get the first successful submission for a squad/challenge combination.
+        
+        Args:
+            challenge_id: UUID of the challenge
+            squad_id: UUID of the squad
+            
+        Returns:
+            ChallengeSubmission object or None if no successful submission exists
+        """
+        try:
+            query = select(ChallengeSubmission).where(
+                ChallengeSubmission.challenge_id == challenge_id,
+                ChallengeSubmission.squad_id == squad_id,
+                ChallengeSubmission.is_correct == True,
+                ChallengeSubmission.is_first_success == True
+            ).order_by(ChallengeSubmission.submitted_at.asc()).limit(1)
+            
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get first success: {e}") from e
+    
+    async def get_squad_submissions(
+        self, 
+        challenge_id: UUID, 
+        squad_id: UUID,
+        limit: int = 10
+    ) -> list["ChallengeSubmission"]:
+        """Get recent submissions for a squad/challenge combination.
+        
+        Args:
+            challenge_id: UUID of the challenge
+            squad_id: UUID of the squad
+            limit: Maximum number of submissions to return
+            
+        Returns:
+            List of ChallengeSubmission objects
+        """
+        try:
+            query = select(ChallengeSubmission).where(
+                ChallengeSubmission.challenge_id == challenge_id,
+                ChallengeSubmission.squad_id == squad_id
+            ).order_by(ChallengeSubmission.submitted_at.desc()).limit(limit)
+            
+            result = await self.session.execute(query)
+            return result.scalars().all()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get squad submissions: {e}") from e
 
 
 class ScheduledMessageOperations:
