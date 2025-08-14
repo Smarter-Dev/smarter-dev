@@ -116,11 +116,160 @@ async def list_command(ctx: lightbulb.Context) -> None:
         await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
 
 
+async def joinable_squad_autocomplete(
+    option: hikari.AutocompleteInteractionOption, 
+    interaction: hikari.AutocompleteInteraction
+) -> List[str]:
+    """Autocomplete function for squad names that can be joined."""
+    try:
+        logger.info(f"Autocomplete called: option.value='{option.value}', guild_id={interaction.guild_id}")
+        
+        # Get the service
+        service: SquadsService = getattr(interaction.app.d, 'squads_service')
+        if not service:
+            service = getattr(interaction.app.d, '_services', {}).get('squads_service')
+        
+        if not service:
+            logger.warning("No squads service found for autocomplete")
+            return []
+        
+        # Get all squads
+        squads = await service.list_squads(str(interaction.guild_id))
+        logger.info(f"Found {len(squads)} total squads")
+        
+        # Filter out inactive squads and default squads (same logic as join command)
+        joinable_squads = [squad for squad in squads if squad.is_active and not getattr(squad, 'is_default', False)]
+        logger.info(f"Found {len(joinable_squads)} joinable squads: {[s.name for s in joinable_squads]}")
+        
+        # Filter squads based on current input
+        current_input = option.value.lower() if option.value else ""
+        matching_squads = [
+            squad.name for squad in joinable_squads 
+            if current_input in squad.name.lower()
+        ]
+        
+        logger.info(f"Returning {len(matching_squads)} matching squads: {matching_squads}")
+        # Return up to 25 suggestions (Discord limit)
+        return matching_squads[:25]
+        
+    except Exception as e:
+        # If autocomplete fails, just return empty list
+        logger.error(f"Autocomplete error: {e}")
+        return []
+
+
+async def _handle_direct_squad_join(
+    ctx: lightbulb.Context,
+    squad_name: str,
+    squads_service: 'SquadsService',
+    bytes_service: 'BytesService'
+) -> None:
+    """Handle direct squad join by name - mirrors dropdown selection behavior exactly."""
+    try:
+        # Get available squads (same filtering as interactive menu)
+        squads = await squads_service.list_squads(str(ctx.guild_id))
+        active_squads = [squad for squad in squads if squad.is_active and not getattr(squad, 'is_default', False)]
+        
+        # Find squad by name
+        selected_squad = next(
+            (s for s in active_squads if s.name.lower() == squad_name.lower()), 
+            None
+        )
+        
+        if not selected_squad:
+            generator = get_generator()
+            image_file = generator.create_error_embed(f"Squad '{squad_name}' not found or cannot be joined!")
+            await ctx.edit_last_response(attachment=image_file)
+            return
+        
+        # Get user's balance and current squad
+        balance = await bytes_service.get_balance(str(ctx.guild_id), str(ctx.user.id))
+        user_squad_response = await squads_service.get_user_squad(str(ctx.guild_id), str(ctx.user.id))
+        current_squad = user_squad_response.squad
+        
+        # Check if user is already in this squad (same as dropdown logic)
+        if current_squad and current_squad.id == selected_squad.id:
+            generator = get_generator()
+            image_file = generator.create_error_embed(f"You're already in the {selected_squad.name} squad!")
+            await ctx.edit_last_response(attachment=image_file)
+            return
+        
+        # Get username for transaction records (same as dropdown logic)
+        username = None
+        try:
+            username = ctx.user.display_name or ctx.user.username
+        except:
+            pass  # Fall back to None
+        
+        # Process squad join (exact same call as dropdown)
+        result = await squads_service.join_squad(
+            str(ctx.guild_id),
+            str(ctx.user.id),
+            selected_squad.id,
+            balance.balance,
+            username
+        )
+        
+        if not result.success:
+            generator = get_generator()
+            image_file = generator.create_error_embed(result.reason)
+        else:
+            # Assign Discord role for the new squad (same as dropdown logic)
+            role_assignment_status = ""
+            try:
+                # Get the Discord guild and member
+                guild = ctx.get_guild()
+                if guild:
+                    member = guild.get_member(int(ctx.user.id))
+                    if member and result.squad.role_id:
+                        # Remove previous squad role if switching squads
+                        if result.previous_squad and result.previous_squad.role_id:
+                            try:
+                                await member.remove_role(int(result.previous_squad.role_id))
+                                logger.info(f"Removed role {result.previous_squad.role_id} from user {ctx.user.id}")
+                            except Exception as e:
+                                logger.warning(f"Failed to remove previous squad role {result.previous_squad.role_id}: {e}")
+                        
+                        # Add new squad role
+                        try:
+                            await member.add_role(int(result.squad.role_id))
+                            role_assignment_status = f"\n✅ Squad role assigned!"
+                            logger.info(f"Assigned role {result.squad.role_id} to user {ctx.user.id}")
+                        except Exception as e:
+                            role_assignment_status = f"\n⚠️ Role assignment failed: {str(e)}"
+                            logger.error(f"Failed to assign squad role {result.squad.role_id} to user {ctx.user.id}: {e}")
+                    else:
+                        logger.warning(f"Could not find member {ctx.user.id} in guild or squad has no role_id")
+                else:
+                    logger.warning("Could not get guild from context")
+            except Exception as e:
+                role_assignment_status = f"\n⚠️ Role assignment error: {str(e)}"
+                logger.error(f"Error during role assignment for user {ctx.user.id}: {e}")
+            
+            # Build clean success description with custom welcome message (same as dropdown logic)
+            if result.squad.welcome_message:
+                description = result.squad.welcome_message
+            else:
+                description = f"Welcome to {result.squad.name}! We're glad to have you aboard."
+            
+            generator = get_generator()
+            image_file = generator.create_success_embed("SQUAD JOINED", description)
+    
+        await ctx.edit_last_response(attachment=image_file)
+        
+    except Exception as e:
+        logger.exception(f"Error in direct squad join: {e}")
+        generator = get_generator()
+        image_file = generator.create_error_embed(f"Failed to join squad: {str(e)}")
+        await ctx.edit_last_response(attachment=image_file)
+
+
 @squads_group.child
-@lightbulb.command("join", "Join a squad using an interactive menu")
+@lightbulb.option("squad", "Name of the squad to join (leave empty for interactive menu)", required=False, autocomplete=joinable_squad_autocomplete)
+@lightbulb.command("join", "Join a squad by name or using an interactive menu")
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def join_command(ctx: lightbulb.Context) -> None:
-    """Handle squad join command - interactive squad selection."""
+    """Handle squad join command - direct join by name or interactive squad selection."""
     # Defer the interaction immediately to prevent timeout
     await ctx.respond(hikari.ResponseType.DEFERRED_MESSAGE_CREATE, flags=hikari.MessageFlag.EPHEMERAL)
     
@@ -140,6 +289,15 @@ async def join_command(ctx: lightbulb.Context) -> None:
         await ctx.edit_last_response(attachment=image_file)
         return
     
+    # Check if user provided a squad name
+    squad_name = getattr(ctx.options, 'squad', None)
+    
+    if squad_name:
+        # Handle direct squad join by name
+        await _handle_direct_squad_join(ctx, squad_name, squads_service, bytes_service)
+        return
+    
+    # Fall back to interactive menu (existing behavior)
     try:
         # Get available squads
         squads = await squads_service.list_squads(str(ctx.guild_id))

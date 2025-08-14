@@ -26,7 +26,7 @@ def upgrade() -> None:
         sa.text("""
             UPDATE bytes_configs 
             SET streak_bonuses = '{"8": 2, "16": 4, "32": 8, "64": 16}'::json
-            WHERE streak_bonuses = '{"7": 2, "14": 4, "30": 10, "60": 20}'::json
+            WHERE streak_bonuses::text = '{"7": 2, "14": 4, "30": 10, "60": 20}'::text
         """)
     )
 
@@ -39,6 +39,6 @@ def downgrade() -> None:
         sa.text("""
             UPDATE bytes_configs 
             SET streak_bonuses = '{"7": 2, "14": 4, "30": 10, "60": 20}'::json
-            WHERE streak_bonuses = '{"8": 2, "16": 4, "32": 8, "64": 16}'::json
+            WHERE streak_bonuses::text = '{"8": 2, "16": 4, "32": 8, "64": 16}'::text
         """)
     )
