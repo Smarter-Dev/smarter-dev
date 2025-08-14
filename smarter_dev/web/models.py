@@ -337,6 +337,13 @@ class Squad(Base):
         doc="Custom welcome message shown when users join this squad"
     )
     
+    # Relationships
+    challenge_submissions: Mapped[list["ChallengeSubmission"]] = relationship(
+        "ChallengeSubmission",
+        back_populates="squad",
+        cascade="all, delete-orphan"
+    )
+    
     # Indexes and constraints for common queries
     __table_args__ = (
         Index("ix_squads_guild_id", "guild_id"),
@@ -1518,6 +1525,11 @@ class Challenge(Base):
         back_populates="challenge",
         cascade="all, delete-orphan"
     )
+    submissions: Mapped[list["ChallengeSubmission"]] = relationship(
+        "ChallengeSubmission",
+        back_populates="challenge",
+        cascade="all, delete-orphan"
+    )
     
     # Database constraints and indexes
     __table_args__ = (
@@ -1751,3 +1763,94 @@ class ScheduledMessage(Base):
         """String representation of the scheduled message."""
         status = "sent" if self.is_sent else "pending"
         return f"<ScheduledMessage(title='{self.title}', scheduled={self.scheduled_time}, status='{status}')>"
+
+
+class ChallengeSubmission(Base):
+    """Model for tracking challenge solution submissions and success records."""
+    
+    __tablename__ = "challenge_submissions"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID,
+        primary_key=True,
+        default=uuid4,
+        doc="Unique identifier for the submission"
+    )
+    
+    # Foreign keys
+    challenge_id: Mapped[UUID] = mapped_column(
+        PostgresUUID,
+        ForeignKey("challenges.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        doc="Reference to the challenge"
+    )
+    squad_id: Mapped[UUID] = mapped_column(
+        PostgresUUID,
+        ForeignKey("squads.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        doc="Reference to the squad making the submission"
+    )
+    
+    # User who submitted
+    user_id: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+        doc="Discord user ID who submitted the solution"
+    )
+    username: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Username of the submitting user for audit purposes"
+    )
+    
+    # Submission data
+    submitted_solution: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="The solution text submitted by the user"
+    )
+    is_correct: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        doc="Whether the submitted solution matches the expected result"
+    )
+    is_first_success: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Whether this is the first correct submission for this squad/challenge"
+    )
+    points_earned: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Points earned for this submission (only for correct first submissions)"
+    )
+    
+    # Timestamps
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the solution was submitted"
+    )
+    
+    # Relationships
+    challenge: Mapped["Challenge"] = relationship("Challenge", back_populates="submissions")
+    squad: Mapped["Squad"] = relationship("Squad", back_populates="challenge_submissions")
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_challenge_submissions_challenge_squad", "challenge_id", "squad_id"),
+        Index("ix_challenge_submissions_user_submitted", "user_id", "submitted_at"),
+        Index("ix_challenge_submissions_first_success", "is_first_success", "submitted_at"),
+    )
+    
+    def __repr__(self) -> str:
+        """String representation of the challenge submission."""
+        status = "correct" if self.is_correct else "incorrect"
+        first = " (first success)" if self.is_first_success else ""
+        return f"<ChallengeSubmission(challenge_id={self.challenge_id}, squad_id={self.squad_id}, status='{status}'{first})>"
