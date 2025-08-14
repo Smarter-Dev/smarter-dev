@@ -721,6 +721,100 @@ class BytesService(BaseService):
             )
             raise ServiceError(f"Failed to transfer bytes: {e}") from e
     
+    async def award_campaign_bytes(
+        self,
+        guild_id: str,
+        user_id: str,
+        username: str,
+        amount: int,
+        reason: str,
+        campaign_title: str = None
+    ) -> dict:
+        """Award bytes to a user for campaign achievements.
+        
+        Args:
+            guild_id: Discord guild ID
+            user_id: User's Discord ID
+            username: User's display name
+            amount: Amount of bytes to award
+            reason: Reason for the award
+            campaign_title: Optional campaign name for context
+            
+        Returns:
+            Dictionary with award result and updated balance
+            
+        Raises:
+            ValidationError: If inputs are invalid
+            ServiceError: On service failures
+        """
+        self._ensure_initialized()
+        
+        # Validate inputs
+        self._validate_discord_id("guild_id", guild_id)
+        self._validate_discord_id("user_id", user_id)
+        
+        if not username or not username.strip():
+            raise ValidationError("username", "Username is required")
+        
+        if amount <= 0:
+            raise ValidationError("amount", "Award amount must be positive")
+        
+        if not reason or not reason.strip():
+            raise ValidationError("reason", "Award reason is required")
+        
+        try:
+            # Create system transaction for the award
+            award_data = {
+                "giver_id": "SYSTEM_CAMPAIGN",
+                "giver_username": "Campaign System",
+                "receiver_id": str(user_id),
+                "receiver_username": username,
+                "amount": amount,
+                "reason": f"Campaign reward: {reason}" + (f" ({campaign_title})" if campaign_title else "")
+            }
+            
+            # Execute award via transfer endpoint
+            response = await self._api_client.post(
+                f"/guilds/{guild_id}/bytes/transactions",
+                json_data=award_data,
+                timeout=15.0
+            )
+            
+            if response.status_code >= 400:
+                error_data = response.json()
+                error_message = error_data.get('detail', f'API error: {response.status_code}')
+                raise APIError(f"Failed to award bytes: {error_message}", status_code=response.status_code)
+            
+            transaction_data = response.json()
+            
+            # Get updated balance
+            try:
+                updated_balance = await self.get_balance(guild_id, user_id, use_cache=False)
+            except Exception:
+                # Don't fail the award if we can't get the updated balance
+                updated_balance = None
+            
+            # Invalidate related caches
+            await self._invalidate_balance_cache(guild_id, user_id)
+            await self._invalidate_leaderboard_cache(guild_id)
+            
+            logger.info(f"Awarded {amount} bytes to {user_id} in guild {guild_id} for: {reason}")
+            
+            return {
+                "success": True,
+                "amount_awarded": amount,
+                "reason": reason,
+                "transaction_id": transaction_data.get("id"),
+                "new_balance": updated_balance.balance if updated_balance else None,
+                "campaign_title": campaign_title
+            }
+            
+        except APIError:
+            raise
+        except Exception as e:
+            self._log_error("award_campaign_bytes", e, guild_id=guild_id, user_id=user_id, amount=amount)
+            raise ServiceError(f"Failed to award campaign bytes: {e}") from e
+    
     async def get_config(
         self,
         guild_id: str,

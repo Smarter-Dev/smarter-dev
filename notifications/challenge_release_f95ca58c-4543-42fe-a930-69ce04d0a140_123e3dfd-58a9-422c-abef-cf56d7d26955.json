@@ -1,0 +1,12 @@
+{
+  "type": "challenge_release",
+  "timestamp": "2025-08-12T20:28:04.418024+00:00",
+  "campaign_id": "f95ca58c-4543-42fe-a930-69ce04d0a140",
+  "campaign_name": "Test Campaign",
+  "challenge_id": "123e3dfd-58a9-422c-abef-cf56d7d26955",
+  "challenge_title": "Challenge 2",
+  "challenge_description": "Second challenge",
+  "challenge_position": 2,
+  "channel_id": "123456789012345678",
+  "guild_id": "123456789012345678"
+}

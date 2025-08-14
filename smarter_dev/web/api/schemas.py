@@ -640,3 +640,185 @@ class HelpConversationStatsResponse(BaseAPIModel):
     top_users: List[dict] = Field(..., description="Most active users")
     conversation_types: dict = Field(..., description="Breakdown by interaction type")
     resolution_rate: float = Field(..., description="Percentage of resolved conversations")
+
+
+# ============================================================================
+# Campaign Challenge Schemas
+# ============================================================================
+
+class CampaignResponse(BaseAPIModel):
+    """Response model for campaigns."""
+    
+    id: UUID = Field(description="Campaign ID")
+    title: str = Field(description="Campaign title")
+    description: Optional[str] = Field(None, description="Campaign description")
+    guild_id: Optional[str] = Field(None, description="Discord guild ID (null for global campaigns)")
+    participant_type: str = Field(description="Participant type: 'player' or 'squad'")
+    status: str = Field(description="Campaign status: 'draft', 'active', 'completed', 'cancelled'")
+    start_date: Optional[datetime] = Field(None, description="Campaign start date")
+    end_date: Optional[datetime] = Field(None, description="Campaign end date")
+    challenge_release_delay_hours: int = Field(description="Hours between challenge releases")
+    scoring_strategy: str = Field(description="Scoring strategy: 'time_based' or 'point_based'")
+    scoring_config: dict = Field(description="Scoring configuration parameters")
+    created_at: datetime = Field(description="Creation timestamp")
+    updated_at: datetime = Field(description="Last update timestamp")
+    
+    @field_serializer('start_date', 'end_date', 'created_at', 'updated_at')
+    def serialize_datetime(self, value: Optional[datetime]) -> Optional[str]:
+        return value.isoformat() if value else None
+
+
+class CampaignCreate(BaseAPIModel):
+    """Request model for creating a campaign."""
+    
+    title: str = Field(min_length=1, max_length=200, description="Campaign title")
+    description: Optional[str] = Field(None, max_length=1000, description="Campaign description")
+    guild_id: Optional[str] = Field(None, description="Discord guild ID (null for global)")
+    participant_type: str = Field(description="Participant type: 'player' or 'squad'")
+    start_date: Optional[datetime] = Field(None, description="Campaign start date")
+    end_date: Optional[datetime] = Field(None, description="Campaign end date")
+    challenge_release_delay_hours: int = Field(ge=1, le=168, default=24, description="Hours between releases")
+    scoring_strategy: str = Field(default="time_based", description="Scoring strategy")
+    scoring_config: Optional[dict] = Field(default_factory=dict, description="Scoring configuration")
+    
+    @field_validator('participant_type')
+    @classmethod
+    def validate_participant_type(cls, v: str) -> str:
+        if v not in ['player', 'squad']:
+            raise ValueError("participant_type must be 'player' or 'squad'")
+        return v
+    
+    @field_validator('scoring_strategy')
+    @classmethod  
+    def validate_scoring_strategy(cls, v: str) -> str:
+        if v not in ['time_based', 'point_based']:
+            raise ValueError("scoring_strategy must be 'time_based' or 'point_based'")
+        return v
+    
+    @field_validator('guild_id')
+    @classmethod
+    def validate_guild_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            try:
+                id_int = int(v)
+                if id_int <= 0:
+                    raise ValueError("Guild ID must be positive")
+            except ValueError:
+                raise ValueError("Invalid Discord guild ID format")
+        return v
+
+
+class CampaignUpdate(BaseAPIModel):
+    """Request model for updating a campaign."""
+    
+    title: Optional[str] = Field(None, min_length=1, max_length=200, description="Campaign title")
+    description: Optional[str] = Field(None, max_length=1000, description="Campaign description")
+    start_date: Optional[datetime] = Field(None, description="Campaign start date")
+    end_date: Optional[datetime] = Field(None, description="Campaign end date")
+    challenge_release_delay_hours: Optional[int] = Field(None, ge=1, le=168, description="Hours between releases")
+    scoring_config: Optional[dict] = Field(None, description="Scoring configuration")
+
+
+class CampaignListResponse(BaseAPIModel):
+    """Response model for paginated campaign listings."""
+    
+    items: List[CampaignResponse] = Field(description="List of campaigns")
+    total: int = Field(description="Total number of campaigns")
+    page: int = Field(description="Current page number")
+    size: int = Field(description="Number of items per page")
+    pages: int = Field(description="Total number of pages")
+
+
+class ChallengeResponse(BaseAPIModel):
+    """Response model for challenges."""
+    
+    id: UUID = Field(description="Challenge ID")
+    campaign_id: UUID = Field(description="Campaign ID")
+    title: str = Field(description="Challenge title")
+    description: Optional[str] = Field(None, description="Challenge description")
+    difficulty: str = Field(description="Challenge difficulty")
+    problem_statement: str = Field(description="Problem statement")
+    generation_script: str = Field(description="Input generation script")
+    expected_output_format: Optional[str] = Field(None, description="Expected output format")
+    time_limit_minutes: Optional[int] = Field(None, description="Time limit in minutes")
+    memory_limit_mb: Optional[int] = Field(None, description="Memory limit in MB")
+    order_index: int = Field(description="Order within campaign")
+    release_date: Optional[datetime] = Field(None, description="When challenge was released")
+    script_updated_at: datetime = Field(description="When generation script was last updated")
+    created_at: datetime = Field(description="Creation timestamp")
+    updated_at: datetime = Field(description="Last update timestamp")
+    
+    @field_serializer('release_date', 'script_updated_at', 'created_at', 'updated_at')
+    def serialize_datetime(self, value: Optional[datetime]) -> Optional[str]:
+        return value.isoformat() if value else None
+
+
+class ChallengeCreate(BaseAPIModel):
+    """Request model for creating a challenge."""
+    
+    title: str = Field(min_length=1, max_length=200, description="Challenge title")
+    description: Optional[str] = Field(None, max_length=2000, description="Challenge description") 
+    difficulty: str = Field(description="Challenge difficulty")
+    problem_statement: str = Field(min_length=1, description="Problem statement")
+    generation_script: str = Field(min_length=1, description="Python script for input generation")
+    expected_output_format: Optional[str] = Field(None, max_length=500, description="Expected output format")
+    time_limit_minutes: Optional[int] = Field(None, ge=1, le=1440, description="Time limit")
+    memory_limit_mb: Optional[int] = Field(None, ge=1, le=8192, description="Memory limit")
+    order_index: Optional[int] = Field(None, ge=0, description="Order within campaign")
+    
+    @field_validator('difficulty')
+    @classmethod
+    def validate_difficulty(cls, v: str) -> str:
+        if v not in ['easy', 'medium', 'hard']:
+            raise ValueError("difficulty must be 'easy', 'medium', or 'hard'")
+        return v
+
+
+class ChallengeUpdate(BaseAPIModel):
+    """Request model for updating a challenge."""
+    
+    title: Optional[str] = Field(None, min_length=1, max_length=200, description="Challenge title")
+    description: Optional[str] = Field(None, max_length=2000, description="Challenge description")
+    problem_statement: Optional[str] = Field(None, min_length=1, description="Problem statement")
+    generation_script: Optional[str] = Field(None, min_length=1, description="Input generation script")
+    expected_output_format: Optional[str] = Field(None, max_length=500, description="Expected output format")
+    time_limit_minutes: Optional[int] = Field(None, ge=1, le=1440, description="Time limit")
+    memory_limit_mb: Optional[int] = Field(None, ge=1, le=8192, description="Memory limit")
+
+
+class SubmissionResponse(BaseAPIModel):
+    """Response model for challenge submissions."""
+    
+    id: UUID = Field(description="Submission ID")
+    challenge_id: UUID = Field(description="Challenge ID")
+    participant_id: str = Field(description="Participant ID (user or squad)")
+    participant_type: str = Field(description="Participant type: 'player' or 'squad'")
+    submitted_result: str = Field(description="Submitted answer")
+    is_correct: bool = Field(description="Whether submission was correct")
+    points_awarded: int = Field(description="Points awarded")
+    submission_timestamp: datetime = Field(description="Submission timestamp")
+    
+    @field_serializer('submission_timestamp')
+    def serialize_datetime(self, value: datetime) -> str:
+        return value.isoformat()
+
+
+class SubmissionCreate(BaseAPIModel):
+    """Request model for creating a challenge submission."""
+    
+    submitted_result: str = Field(min_length=1, description="Submitted answer")
+
+
+class CampaignStatsResponse(BaseAPIModel):
+    """Response model for campaign statistics."""
+    
+    campaign_id: UUID = Field(description="Campaign ID")
+    total_challenges: int = Field(description="Total number of challenges")
+    released_challenges: int = Field(description="Number of released challenges")
+    total_participants: int = Field(description="Total unique participants")
+    total_submissions: int = Field(description="Total submissions")
+    correct_submissions: int = Field(description="Number of correct submissions")
+    success_rate: float = Field(description="Overall success rate percentage")
+    avg_points_per_participant: float = Field(description="Average points per participant")
+    top_participants: List[dict] = Field(description="Top scoring participants")
+    challenge_completion_rates: List[dict] = Field(description="Completion rate per challenge")

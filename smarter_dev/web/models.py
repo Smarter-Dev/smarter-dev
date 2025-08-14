@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -1249,3 +1249,583 @@ class ForumAgentResponse(Base):
         """String representation of the forum agent response."""
         status = "responded" if self.responded else "evaluated"
         return f"<ForumAgentResponse(agent_id='{self.agent_id}', thread_id='{self.thread_id}', status='{status}')>"
+
+
+class Campaign(Base):
+    """Campaign definition for challenge competitions.
+    
+    Represents a competition where players or squads compete through
+    a series of challenges. Supports both individual and team-based
+    competitions with flexible scoring systems.
+    """
+    
+    __tablename__ = "campaigns"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique campaign identifier"
+    )
+    
+    # Guild context
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord guild (server) snowflake ID"
+    )
+    
+    # Campaign metadata
+    name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Display name of the campaign"
+    )
+    description: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Optional campaign description"
+    )
+    
+    # Campaign type and settings
+    campaign_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        doc="Type: 'player' or 'squad'"
+    )
+    state: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="draft",
+        doc="State: 'draft', 'active', 'completed'"
+    )
+    
+    # Timing configuration
+    start_date: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        doc="When the campaign starts"
+    )
+    release_delay_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1440,  # 24 hours
+        doc="Minutes between challenge releases"
+    )
+    
+    # Scoring configuration
+    scoring_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="time_based",
+        doc="Scoring type: 'time_based' or 'point_based'"
+    )
+    starting_points: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Starting points for point-based scoring"
+    )
+    points_decrease_step: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Point decrease per position for point-based scoring"
+    )
+    
+    # Discord integration
+    announcement_channel_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        doc="Discord channel for campaign announcements"
+    )
+    
+    # Indexes and constraints
+    __table_args__ = (
+        Index("ix_campaigns_guild_id", "guild_id"),
+        Index("ix_campaigns_state", "state"),
+        Index("ix_campaigns_start_date", "start_date"),
+        Index("ix_campaigns_guild_state", "guild_id", "state"),
+        CheckConstraint("campaign_type IN ('player', 'squad')", name="ck_campaigns_type"),
+        CheckConstraint("state IN ('draft', 'active', 'completed')", name="ck_campaigns_state"),
+        CheckConstraint("scoring_type IN ('time_based', 'point_based')", name="ck_campaigns_scoring_type"),
+        CheckConstraint("release_delay_minutes > 0", name="ck_campaigns_release_delay_positive"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize Campaign with default values."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('id', uuid4())
+        kwargs.setdefault('state', 'draft')
+        kwargs.setdefault('campaign_type', 'player')
+        kwargs.setdefault('scoring_type', 'time_based')
+        kwargs.setdefault('release_delay_minutes', 1440)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        super().__init__(**kwargs)
+    
+    @property
+    def is_active(self) -> bool:
+        """Check if the campaign is currently active."""
+        return self.state == "active"
+    
+    @property
+    def is_completed(self) -> bool:
+        """Check if the campaign is completed."""
+        return self.state == "completed"
+    
+    @property
+    def is_draft(self) -> bool:
+        """Check if the campaign is in draft state."""
+        return self.state == "draft"
+    
+    def can_transition_to(self, new_state: str) -> bool:
+        """Check if campaign can transition to a new state."""
+        valid_transitions = {
+            "draft": ["active"],
+            "active": ["completed"],
+            "completed": []  # No transitions from completed
+        }
+        return new_state in valid_transitions.get(self.state, [])
+    
+    def __repr__(self) -> str:
+        """String representation of the campaign."""
+        return f"<Campaign(name='{self.name}', type='{self.campaign_type}', state='{self.state}')>"
+
+
+class Challenge(Base):
+    """Individual challenge within a campaign.
+    
+    Represents a single challenge in a campaign sequence. Challenges
+    are unlocked sequentially based on the campaign's release schedule.
+    Each challenge has a Python script for generating unique inputs.
+    """
+    
+    __tablename__ = "challenges"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique challenge identifier"
+    )
+    
+    # Campaign relationship
+    campaign_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("campaigns.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        doc="Campaign this challenge belongs to"
+    )
+    
+    # Challenge ordering and metadata
+    order_position: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        doc="Order position within the campaign (1-based)"
+    )
+    title: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        doc="Challenge title"
+    )
+    description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Challenge description in Markdown"
+    )
+    
+    # Generation script
+    generation_script: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Python script for generating inputs"
+    )
+    script_updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        doc="When generation script was last updated"
+    )
+    
+    # Private metadata (not shown to participants)
+    categories: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        doc="Categories/tags for admin organization"
+    )
+    difficulty_level: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Difficulty level (1-10)"
+    )
+    
+    # Release tracking
+    released_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="When the challenge was actually released (null if not yet released)"
+    )
+    
+    # Indexes and constraints
+    __table_args__ = (
+        Index("ix_challenges_campaign_id", "campaign_id"),
+        Index("ix_challenges_campaign_order", "campaign_id", "order_position"),
+        Index("ix_challenges_script_updated", "script_updated_at"),
+        Index("ix_challenges_released_at", "released_at"),
+        Index("ix_challenges_campaign_released", "campaign_id", "released_at"),
+        UniqueConstraint("campaign_id", "order_position", name="uq_challenges_campaign_order"),
+        CheckConstraint("order_position > 0", name="ck_challenges_order_positive"),
+        CheckConstraint("difficulty_level >= 1 AND difficulty_level <= 10", name="ck_challenges_difficulty_range"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize Challenge with default values."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('id', uuid4())
+        kwargs.setdefault('script_updated_at', now)
+        kwargs.setdefault('categories', [])
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        super().__init__(**kwargs)
+    
+    @property
+    def is_first_challenge(self) -> bool:
+        """Check if this is the first challenge in the campaign."""
+        return self.order_position == 1
+    
+    @property
+    def is_released(self) -> bool:
+        """Check if this challenge has been released."""
+        return self.released_at is not None
+    
+    def get_release_time(self, campaign_start_date: datetime, release_delay_minutes: int) -> datetime:
+        """Calculate when this challenge should be released."""
+        minutes_delay = (self.order_position - 1) * release_delay_minutes
+        return campaign_start_date + timedelta(minutes=minutes_delay)
+    
+    def should_be_released(self, campaign_start_date: datetime, release_delay_minutes: int) -> bool:
+        """Check if this challenge should be released based on current time."""
+        if self.is_released:
+            return False  # Already released
+        
+        release_time = self.get_release_time(campaign_start_date, release_delay_minutes)
+        return datetime.now(timezone.utc) >= release_time
+    
+    def update_script(self, new_script: str) -> None:
+        """Update the generation script and timestamp."""
+        self.generation_script = new_script
+        self.script_updated_at = datetime.now(timezone.utc)
+    
+    def __repr__(self) -> str:
+        """String representation of the challenge."""
+        return f"<Challenge(title='{self.title}', position={self.order_position}, campaign_id='{self.campaign_id}')>"
+
+
+class GeneratedInputCache(Base):
+    """Cache for generated challenge inputs per participant.
+    
+    Stores generated inputs for challenges to ensure consistency
+    and avoid re-generating inputs multiple times. Tracks validity
+    to handle script updates that invalidate cached inputs.
+    """
+    
+    __tablename__ = "generated_input_cache"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique cache entry identifier"
+    )
+    
+    # Challenge relationship
+    challenge_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("challenges.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        doc="Challenge this input was generated for"
+    )
+    
+    # Participant identification
+    participant_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        doc="Player ID or Squad ID depending on campaign type"
+    )
+    participant_type: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        doc="Type: 'player' or 'squad'"
+    )
+    
+    # Generated data
+    input_json: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        doc="Generated input data as JSON"
+    )
+    expected_result: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Expected result for validation"
+    )
+    
+    # Cache validity
+    is_valid: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        doc="Whether this cache entry is still valid"
+    )
+    generation_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        doc="When this input was generated"
+    )
+    first_request_timestamp: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="When participant first requested this input"
+    )
+    
+    # Indexes and constraints
+    __table_args__ = (
+        Index("ix_generated_input_cache_challenge_id", "challenge_id"),
+        Index("ix_generated_input_cache_participant", "participant_id", "participant_type"),
+        Index("ix_generated_input_cache_validity", "is_valid"),
+        Index("ix_generated_input_cache_challenge_participant", "challenge_id", "participant_id", "participant_type"),
+        UniqueConstraint("challenge_id", "participant_id", "participant_type", name="uq_generated_input_cache_challenge_participant"),
+        CheckConstraint("participant_type IN ('player', 'squad')", name="ck_generated_input_cache_participant_type"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize GeneratedInputCache with default values."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('id', uuid4())
+        kwargs.setdefault('is_valid', True)
+        kwargs.setdefault('generation_timestamp', now)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        super().__init__(**kwargs)
+    
+    def invalidate(self) -> None:
+        """Mark this cache entry as invalid."""
+        self.is_valid = False
+    
+    def mark_first_request(self) -> None:
+        """Mark the first request timestamp if not already set."""
+        if self.first_request_timestamp is None:
+            self.first_request_timestamp = datetime.now(timezone.utc)
+    
+    def __repr__(self) -> str:
+        """String representation of the generated input cache."""
+        return f"<GeneratedInputCache(challenge_id='{self.challenge_id}', participant='{self.participant_id}', valid={self.is_valid})>"
+
+
+class ChallengeSubmission(Base):
+    """Records of challenge submissions by participants.
+    
+    Tracks all submission attempts including correct and incorrect
+    submissions. Used for scoring, analytics, and preventing
+    duplicate submissions.
+    """
+    
+    __tablename__ = "challenge_submissions"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique submission identifier"
+    )
+    
+    # Challenge relationship
+    challenge_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("challenges.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        doc="Challenge this submission is for"
+    )
+    
+    # Participant identification
+    participant_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        doc="Player ID or Squad ID depending on campaign type"
+    )
+    participant_type: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        doc="Type: 'player' or 'squad'"
+    )
+    
+    # Submission data
+    submitted_result: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Participant's submitted answer"
+    )
+    is_correct: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        doc="Whether the submission was correct"
+    )
+    points_awarded: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="Points awarded for this submission"
+    )
+    
+    # Timing data
+    submission_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+        doc="When the submission was made"
+    )
+    
+    # Indexes and constraints
+    __table_args__ = (
+        Index("ix_challenge_submissions_challenge_id", "challenge_id"),
+        Index("ix_challenge_submissions_participant", "participant_id", "participant_type"),
+        Index("ix_challenge_submissions_timestamp", "submission_timestamp"),
+        Index("ix_challenge_submissions_challenge_participant", "challenge_id", "participant_id", "participant_type"),
+        Index("ix_challenge_submissions_correct", "is_correct"),
+        CheckConstraint("participant_type IN ('player', 'squad')", name="ck_challenge_submissions_participant_type"),
+        CheckConstraint("points_awarded >= 0", name="ck_challenge_submissions_points_non_negative"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize ChallengeSubmission with default values."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('id', uuid4())
+        kwargs.setdefault('points_awarded', 0)
+        kwargs.setdefault('submission_timestamp', now)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        super().__init__(**kwargs)
+    
+    @property
+    def is_successful(self) -> bool:
+        """Check if this was a successful submission."""
+        return self.is_correct
+    
+    def __repr__(self) -> str:
+        """String representation of the challenge submission."""
+        status = "correct" if self.is_correct else "incorrect"
+        return f"<ChallengeSubmission(challenge_id='{self.challenge_id}', participant='{self.participant_id}', status='{status}', points={self.points_awarded})>"
+
+
+class SubmissionRateLimit(Base):
+    """Rate limiting tracking for challenge submissions.
+    
+    Implements sliding window rate limiting by recording
+    submission timestamps. Used to enforce submission
+    rate limits per participant.
+    """
+    
+    __tablename__ = "submission_rate_limits"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique rate limit entry identifier"
+    )
+    
+    # Participant identification
+    participant_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Player ID or Squad ID depending on campaign type"
+    )
+    participant_type: Mapped[str] = mapped_column(
+        String(10),
+        nullable=False,
+        doc="Type: 'player' or 'squad'"
+    )
+    
+    # Rate limit tracking
+    submission_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+        doc="When the submission attempt was made"
+    )
+    
+    # Indexes and constraints
+    __table_args__ = (
+        Index("ix_submission_rate_limits_participant", "participant_id", "participant_type"),
+        Index("ix_submission_rate_limits_timestamp", "submission_timestamp"),
+        Index("ix_submission_rate_limits_participant_timestamp", "participant_id", "participant_type", "submission_timestamp"),
+        CheckConstraint("participant_type IN ('player', 'squad')", name="ck_submission_rate_limits_participant_type"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize SubmissionRateLimit with default values."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('id', uuid4())
+        kwargs.setdefault('submission_timestamp', now)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        super().__init__(**kwargs)
+    
+    @classmethod
+    def is_rate_limited(cls, session, participant_id: str, participant_type: str, 
+                       max_per_minute: int = 1, max_per_5_minutes: int = 3,
+                       current_time: Optional[datetime] = None) -> bool:
+        """Check if participant is rate limited based on submission history.
+        
+        Args:
+            session: Database session
+            participant_id: Participant identifier
+            participant_type: 'player' or 'squad'
+            max_per_minute: Maximum submissions per minute
+            max_per_5_minutes: Maximum submissions per 5 minutes  
+            current_time: Current time (defaults to now)
+            
+        Returns:
+            True if rate limited, False if submission allowed
+        """
+        if current_time is None:
+            current_time = datetime.now(timezone.utc)
+        
+        # Check 1-minute window
+        minute_ago = current_time - timedelta(minutes=1)
+        minute_count = session.query(cls).filter(
+            cls.participant_id == participant_id,
+            cls.participant_type == participant_type,
+            cls.submission_timestamp >= minute_ago
+        ).count()
+        
+        if minute_count >= max_per_minute:
+            return True
+        
+        # Check 5-minute window
+        five_minutes_ago = current_time - timedelta(minutes=5)
+        five_minute_count = session.query(cls).filter(
+            cls.participant_id == participant_id,
+            cls.participant_type == participant_type,
+            cls.submission_timestamp >= five_minutes_ago
+        ).count()
+        
+        return five_minute_count >= max_per_5_minutes
+    
+    def __repr__(self) -> str:
+        """String representation of the submission rate limit."""
+        return f"<SubmissionRateLimit(participant='{self.participant_id}', type='{self.participant_type}', timestamp='{self.submission_timestamp}')>"
