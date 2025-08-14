@@ -59,6 +59,8 @@ async def handle_modal_interaction(event: hikari.InteractionCreateEvent) -> None
         # Handle bytes transfer modal
         if custom_id.startswith("send_bytes_modal:"):
             await handle_send_bytes_modal(event)
+        elif custom_id.startswith("submit_solution_modal:"):
+            await handle_solution_submission_modal(event)
         else:
             logger.warning(f"Unhandled modal interaction: {custom_id}")
     
@@ -121,6 +123,53 @@ async def handle_send_bytes_modal(event: hikari.InteractionCreateEvent) -> None:
         
     except Exception as e:
         logger.exception(f"Error in send bytes modal handler: {e}")
+        # Clean up handler even on error
+        if handler_key in bot.d['modal_handlers']:
+            del bot.d['modal_handlers'][handler_key]
+        raise
+
+
+async def handle_solution_submission_modal(event: hikari.InteractionCreateEvent) -> None:
+    """Handle solution submission modal submission.
+    
+    Args:
+        event: The modal interaction event
+    """
+    if not isinstance(event.interaction, hikari.ModalInteraction):
+        return
+        
+    # Parse custom_id to get challenge ID
+    custom_id_parts = event.interaction.custom_id.split(":")
+    if len(custom_id_parts) != 2:
+        logger.error(f"Invalid submit_solution_modal custom_id format: {event.interaction.custom_id}")
+        return
+    
+    challenge_id = custom_id_parts[1]
+    user_id = str(event.interaction.user.id)
+    
+    # Find the handler
+    handler_key = f"submit_solution_modal:{challenge_id}:{user_id}"
+    
+    # Get bot instance from event
+    bot = event.app
+    if not hasattr(bot, 'd') or 'modal_handlers' not in bot.d:
+        logger.error("No modal handlers found in bot data")
+        return
+    
+    handler = bot.d['modal_handlers'].get(handler_key)
+    if not handler:
+        logger.error(f"No handler found for key: {handler_key}")
+        return
+    
+    try:
+        # Call the handler's submit method
+        await handler.handle_submit(event.interaction)
+        
+        # Clean up the handler after use
+        del bot.d['modal_handlers'][handler_key]
+        
+    except Exception as e:
+        logger.exception(f"Error in solution submission modal handler: {e}")
         # Clean up handler even on error
         if handler_key in bot.d['modal_handlers']:
             del bot.d['modal_handlers'][handler_key]
@@ -991,6 +1040,8 @@ async def handle_challenge_cancel_get_input_interaction(event: hikari.Interactio
 async def handle_challenge_submit_solution_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle 'Submit Solution' button interactions for challenges.
     
+    Shows modal dialog for solution submission.
+    
     Args:
         event: The interaction event
     """
@@ -1001,31 +1052,101 @@ async def handle_challenge_submit_solution_interaction(event: hikari.Interaction
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
     
     if not guild_id:
-        logger.error("Challenge submit solution interaction without guild context")
-        return
-    
-    logger.info(f"Challenge submit solution interaction from user {user_id} in guild {guild_id}")
-    
-    try:
-        # For now, send a placeholder response
-        # In the future, this could open a modal for solution submission
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
-            content="📤 **Submit Solution**\n\nSolution submission interface will be available here. This feature is coming soon!\n\nFor now, you can work on the challenge and we'll add submission functionality in the next update.",
+            content="❌ This command can only be used in a server.",
             flags=hikari.MessageFlag.EPHEMERAL
         )
+        return
+    
+    # Parse challenge ID from custom_id
+    custom_id_parts = event.interaction.custom_id.split(":")
+    if len(custom_id_parts) != 2 or custom_id_parts[0] != "submit_solution":
+        logger.error(f"Invalid submit_solution custom_id format: {event.interaction.custom_id}")
+        await event.interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_CREATE,
+            content="❌ Invalid challenge request format.",
+            flags=hikari.MessageFlag.EPHEMERAL
+        )
+        return
+    
+    challenge_id = custom_id_parts[1]
+    
+    logger.info(f"Challenge submit solution interaction from user {user_id} in guild {guild_id} for challenge {challenge_id}")
+    
+    try:
+        # Get the API client from the bot
+        api_client = None
+        
+        if hasattr(event.app, 'd') and hasattr(event.app.d, '_services'):
+            # Try to get any service that has an API client
+            for service_name, service in event.app.d._services.items():
+                if hasattr(service, '_api_client'):
+                    api_client = service._api_client
+                    break
+        
+        if not api_client:
+            logger.error("No API client available")
+            await event.interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_CREATE,
+                content="❌ Service not available. Please try again later.",
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
+            return
+        
+        # Get challenge information for the modal title
+        challenge_title = "Challenge"
+        try:
+            response = await api_client.get(f"/challenges/{challenge_id}")
+            if response.status_code == 200:
+                data = response.json()
+                challenge_info = data.get("challenge", {})
+                challenge_title = challenge_info.get("title", "Challenge")
+        except Exception as e:
+            logger.warning(f"Could not get challenge title: {e}")
+        
+        # Create and show the submission modal
+        from smarter_dev.bot.views.challenge_views import create_solution_submission_modal, SolutionSubmissionModalHandler
+        
+        modal = create_solution_submission_modal(challenge_id, challenge_title)
+        
+        # Create modal handler
+        handler = SolutionSubmissionModalHandler(
+            challenge_id=challenge_id,
+            challenge_title=challenge_title,
+            guild_id=guild_id,
+            user=event.interaction.user,
+            api_client=api_client
+        )
+        
+        # Store the handler in bot data for later use
+        if not hasattr(event.app, 'd'):
+            event.app.d = {}
+        if 'modal_handlers' not in event.app.d:
+            event.app.d['modal_handlers'] = {}
+        
+        handler_key = f"submit_solution_modal:{challenge_id}:{user_id}"
+        event.app.d['modal_handlers'][handler_key] = handler
+        
+        # Show the modal
+        await event.interaction.create_modal_response(
+            modal.title,
+            modal.custom_id,
+            components=modal.components
+        )
+        
+        logger.info(f"Solution submission modal shown for challenge {challenge_id} to user {user_id}")
         
     except Exception as e:
         logger.exception(f"Error in challenge submit solution interaction: {e}")
         
         # Send error response
         try:
-            if not event.interaction.is_responded():
-                await event.interaction.create_initial_response(
-                    hikari.ResponseType.MESSAGE_CREATE,
-                    content="❌ Failed to open solution submission. Please try again later.",
-                    flags=hikari.MessageFlag.EPHEMERAL
-                )
+            await event.interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_CREATE,
+                content="❌ Failed to open solution submission. Please try again later.",
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
         except Exception as e2:
             logger.error(f"Failed to send challenge submit solution error response: {e2}")
 

@@ -199,18 +199,18 @@ class ScheduledMessageService(BaseService):
         Returns:
             Formatted message text
         """
-        # Create a simple message with title and description (no emoji)
+        # Create a message with h1 markdown header
         if description:
-            message = f"**{title}**\n{description}"
+            message = f"# {title}\n{description}"
         else:
-            message = f"**{title}**"
+            message = f"# {title}"
         
         # Limit message length to Discord's limit (2000 characters)
         if len(message) > 2000:
             # Truncate description if needed
-            max_desc_length = 2000 - len(f"**{title}**\n") - 3  # 3 for "..."
+            max_desc_length = 2000 - len(f"# {title}\n") - 3  # 3 for "..."
             truncated_desc = description[:max_desc_length] + "..."
-            message = f"**{title}**\n{truncated_desc}"
+            message = f"# {title}\n{truncated_desc}"
         
         return message
     
@@ -225,10 +225,19 @@ class ScheduledMessageService(BaseService):
             channel_id_int = int(channel_id)
             
             # Send message without components (no buttons)
-            await self._bot.rest.create_message(
+            sent_message = await self._bot.rest.create_message(
                 channel_id_int,
                 content=message
             )
+            
+            # Pin the message to the channel
+            try:
+                await self._bot.rest.pin_message(channel_id_int, sent_message.id)
+                logger.info(f"Pinned scheduled message {sent_message.id} in channel {channel_id}")
+            except hikari.ForbiddenError:
+                logger.warning(f"No permission to pin message in channel {channel_id}")
+            except Exception as pin_error:
+                logger.error(f"Failed to pin message in channel {channel_id}: {pin_error}")
             
         except ValueError as e:
             logger.error(f"Invalid channel ID format: {channel_id}")

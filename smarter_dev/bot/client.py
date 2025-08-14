@@ -652,6 +652,11 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         bot.load_extensions("smarter_dev.bot.plugins.events")
         logger.info("✓ Loaded events plugin")
         
+        # Load challenges plugin
+        logger.info("Loading challenges plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.challenges")
+        logger.info("✓ Loaded challenges plugin")
+        
         logger.info("✓ All plugins loaded successfully")
     except Exception as e:
         logger.error(f"Failed to load plugins: {e}")
