@@ -174,6 +174,137 @@ async def mark_challenge_announced(
         )
 
 
+@router.get("/scoreboard")
+async def get_scoreboard(
+    guild_id: str = Query(..., description="Discord guild ID"),
+    session: AsyncSession = Depends(get_db_session),
+    api_key = Depends(verify_api_key),
+) -> Dict[str, Any]:
+    """Get the challenge scoreboard for the most recently begun campaign.
+    
+    Returns squad rankings based on total points earned from successful challenge submissions.
+    
+    Args:
+        guild_id: Discord guild ID (query parameter)
+        
+    Returns:
+        Dictionary with campaign info, scoreboard data, and statistics
+    """
+    try:
+        # Get the most recently begun campaign for the guild
+        campaign_ops = CampaignOperations(session)
+        current_campaign = await campaign_ops.get_most_recent_campaign(guild_id)
+        
+        if not current_campaign:
+            # No campaign found - check for upcoming campaigns
+            return {
+                "campaign": None,
+                "scoreboard": [],
+                "total_submissions": 0,
+                "total_challenges": 0
+            }
+        
+        # Get scoreboard data for the campaign
+        submission_ops = ChallengeSubmissionOperations(session)
+        scoreboard_data = await submission_ops.get_campaign_scoreboard(current_campaign.id)
+        
+        # Get total submission and challenge counts for stats
+        total_submissions = await submission_ops.get_campaign_submission_count(current_campaign.id)
+        total_challenges = await campaign_ops.get_campaign_challenge_count(current_campaign.id)
+        
+        # Format campaign data
+        campaign_data = {
+            "id": str(current_campaign.id),
+            "name": current_campaign.title,
+            "start_date": current_campaign.start_time.strftime("%B %d, %Y") if current_campaign.start_time else None,
+            "end_date": None,  # Campaign model doesn't have end_time field
+            "is_active": current_campaign.is_active,
+            "guild_id": current_campaign.guild_id
+        }
+        
+        # Format scoreboard data
+        formatted_scoreboard = []
+        for entry in scoreboard_data:
+            formatted_entry = {
+                "squad_name": entry["squad_name"],
+                "total_points": entry["total_points"] or 0,
+                "successful_submissions": entry["successful_submissions"] or 0,
+                "squad_id": str(entry["squad_id"])
+            }
+            formatted_scoreboard.append(formatted_entry)
+        
+        logger.info(f"Retrieved scoreboard for campaign {current_campaign.id} with {len(formatted_scoreboard)} squads")
+        
+        return {
+            "campaign": campaign_data,
+            "scoreboard": formatted_scoreboard,
+            "total_submissions": total_submissions,
+            "total_challenges": total_challenges
+        }
+        
+    except DatabaseOperationError as e:
+        logger.error(f"Database error getting scoreboard: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve scoreboard data"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error getting scoreboard: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@router.get("/upcoming-campaign")
+async def get_upcoming_campaign(
+    guild_id: str = Query(..., description="Discord guild ID"),
+    session: AsyncSession = Depends(get_db_session),
+    api_key = Depends(verify_api_key),
+) -> Dict[str, Any]:
+    """Get the next upcoming campaign for a guild.
+    
+    Used by the bot to show upcoming campaign info when no current campaign exists.
+    
+    Args:
+        guild_id: Discord guild ID (query parameter)
+        
+    Returns:
+        Dictionary with upcoming campaign info or None
+    """
+    try:
+        # Get the next upcoming campaign (start time in future)
+        query = select(Campaign).where(
+            and_(
+                Campaign.guild_id == guild_id,
+                Campaign.start_time > datetime.now(timezone.utc)
+            )
+        ).order_by(Campaign.start_time.asc()).limit(1)
+        
+        result = await session.execute(query)
+        upcoming_campaign = result.scalar_one_or_none()
+        
+        if not upcoming_campaign:
+            return {"campaign": None}
+        
+        campaign_data = {
+            "id": str(upcoming_campaign.id),
+            "name": upcoming_campaign.title,
+            "start_date": upcoming_campaign.start_time.strftime("%B %d, %Y at %I:%M %p UTC") if upcoming_campaign.start_time else None,
+            "description": upcoming_campaign.description,
+            "guild_id": upcoming_campaign.guild_id
+        }
+        
+        return {"campaign": campaign_data}
+        
+    except Exception as e:
+        logger.error(f"Unexpected error getting upcoming campaign: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
 @router.get("/{challenge_id}")
 async def get_challenge(
     challenge_id: UUID,
@@ -499,137 +630,6 @@ async def submit_solution(
         raise
     except Exception as e:
         logger.error(f"Unexpected error submitting solution: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
-
-
-@router.get("/scoreboard")
-async def get_scoreboard(
-    guild_id: str = Query(..., description="Discord guild ID"),
-    session: AsyncSession = Depends(get_db_session),
-    api_key = Depends(verify_api_key),
-) -> Dict[str, Any]:
-    """Get the challenge scoreboard for the most recently begun campaign.
-    
-    Returns squad rankings based on total points earned from successful challenge submissions.
-    
-    Args:
-        guild_id: Discord guild ID (query parameter)
-        
-    Returns:
-        Dictionary with campaign info, scoreboard data, and statistics
-    """
-    try:
-        # Get the most recently begun campaign for the guild
-        campaign_ops = CampaignOperations(session)
-        current_campaign = await campaign_ops.get_most_recent_campaign(guild_id)
-        
-        if not current_campaign:
-            # No campaign found - check for upcoming campaigns
-            return {
-                "campaign": None,
-                "scoreboard": [],
-                "total_submissions": 0,
-                "total_challenges": 0
-            }
-        
-        # Get scoreboard data for the campaign
-        submission_ops = ChallengeSubmissionOperations(session)
-        scoreboard_data = await submission_ops.get_campaign_scoreboard(current_campaign.id)
-        
-        # Get total submission and challenge counts for stats
-        total_submissions = await submission_ops.get_campaign_submission_count(current_campaign.id)
-        total_challenges = await campaign_ops.get_campaign_challenge_count(current_campaign.id)
-        
-        # Format campaign data
-        campaign_data = {
-            "id": str(current_campaign.id),
-            "name": current_campaign.title,
-            "start_date": current_campaign.start_time.strftime("%B %d, %Y") if current_campaign.start_time else None,
-            "end_date": current_campaign.end_time.strftime("%B %d, %Y") if current_campaign.end_time else None,
-            "is_active": current_campaign.is_active,
-            "guild_id": current_campaign.guild_id
-        }
-        
-        # Format scoreboard data
-        formatted_scoreboard = []
-        for entry in scoreboard_data:
-            formatted_entry = {
-                "squad_name": entry["squad_name"],
-                "total_points": entry["total_points"] or 0,
-                "successful_submissions": entry["successful_submissions"] or 0,
-                "squad_id": str(entry["squad_id"])
-            }
-            formatted_scoreboard.append(formatted_entry)
-        
-        logger.info(f"Retrieved scoreboard for campaign {current_campaign.id} with {len(formatted_scoreboard)} squads")
-        
-        return {
-            "campaign": campaign_data,
-            "scoreboard": formatted_scoreboard,
-            "total_submissions": total_submissions,
-            "total_challenges": total_challenges
-        }
-        
-    except DatabaseOperationError as e:
-        logger.error(f"Database error getting scoreboard: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve scoreboard data"
-        )
-    except Exception as e:
-        logger.error(f"Unexpected error getting scoreboard: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
-
-
-@router.get("/upcoming-campaign")
-async def get_upcoming_campaign(
-    guild_id: str = Query(..., description="Discord guild ID"),
-    session: AsyncSession = Depends(get_db_session),
-    api_key = Depends(verify_api_key),
-) -> Dict[str, Any]:
-    """Get the next upcoming campaign for a guild.
-    
-    Used by the bot to show upcoming campaign info when no current campaign exists.
-    
-    Args:
-        guild_id: Discord guild ID (query parameter)
-        
-    Returns:
-        Dictionary with upcoming campaign info or None
-    """
-    try:
-        # Get the next upcoming campaign (start time in future)
-        query = select(Campaign).where(
-            and_(
-                Campaign.guild_id == guild_id,
-                Campaign.start_time > datetime.now(timezone.utc)
-            )
-        ).order_by(Campaign.start_time.asc()).limit(1)
-        
-        result = await session.execute(query)
-        upcoming_campaign = result.scalar_one_or_none()
-        
-        if not upcoming_campaign:
-            return {"campaign": None}
-        
-        campaign_data = {
-            "id": str(upcoming_campaign.id),
-            "name": upcoming_campaign.title,
-            "start_date": upcoming_campaign.start_time.strftime("%B %d, %Y at %I:%M %p UTC") if upcoming_campaign.start_time else None,
-            "description": upcoming_campaign.description,
-            "guild_id": upcoming_campaign.guild_id
-        }
-        
-        return {"campaign": campaign_data}
-        
-    except Exception as e:
-        logger.error(f"Unexpected error getting upcoming campaign: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"
