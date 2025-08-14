@@ -2821,6 +2821,8 @@ class CampaignOperations:
     async def get_most_recent_campaign(self, guild_id: str) -> Optional[Campaign]:
         """Get the most recently begun campaign for a guild.
         
+        Prioritizes active campaigns over inactive ones.
+        
         Args:
             guild_id: Discord guild ID
             
@@ -2828,6 +2830,22 @@ class CampaignOperations:
             Most recent campaign if found, None otherwise
         """
         try:
+            # First try to get an active campaign
+            query = select(Campaign).where(
+                and_(
+                    Campaign.guild_id == guild_id,
+                    Campaign.start_time <= datetime.now(timezone.utc),
+                    Campaign.is_active.is_(True)
+                )
+            ).order_by(desc(Campaign.start_time)).limit(1)
+            
+            result = await self.session.execute(query)
+            active_campaign = result.scalar_one_or_none()
+            
+            if active_campaign:
+                return active_campaign
+            
+            # If no active campaign, fall back to most recent started campaign
             query = select(Campaign).where(
                 and_(
                     Campaign.guild_id == guild_id,
