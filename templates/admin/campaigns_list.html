@@ -1,0 +1,232 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block page_title %}Challenge Campaigns{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item active">Campaigns</li>
+{% endblock %}
+
+{% block page_actions %}
+<div class="col-auto ms-auto d-print-none">
+    <div class="btn-list">
+        <a href="/admin/guilds/{{ guild.id }}/campaigns/create" class="btn btn-primary">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-plus"></use>
+            </svg>
+            Create Campaign
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Success/Error Messages -->
+{% if request.query_params.get("created") %}
+<div class="alert alert-success alert-dismissible" role="alert">
+    <div class="d-flex">
+        <div>
+            <svg class="icon alert-icon" width="24" height="24">
+                <use xlink:href="#tabler-check"></use>
+            </svg>
+        </div>
+        <div>Campaign created successfully!</div>
+    </div>
+    <a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
+</div>
+{% endif %}
+
+{% if request.query_params.get("updated") %}
+<div class="alert alert-success alert-dismissible" role="alert">
+    <div class="d-flex">
+        <div>
+            <svg class="icon alert-icon" width="24" height="24">
+                <use xlink:href="#tabler-check"></use>
+            </svg>
+        </div>
+        <div>Campaign updated successfully!</div>
+    </div>
+    <a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
+</div>
+{% endif %}
+
+{% if request.query_params.get("deleted") %}
+<div class="alert alert-success alert-dismissible" role="alert">
+    <div class="d-flex">
+        <div>
+            <svg class="icon alert-icon" width="24" height="24">
+                <use xlink:href="#tabler-check"></use>
+            </svg>
+        </div>
+        <div>Campaign deleted successfully!</div>
+    </div>
+    <a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
+</div>
+{% endif %}
+
+<!-- Campaigns List -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg class="icon me-2" width="24" height="24">
+                        <use xlink:href="#tabler-trophy"></use>
+                    </svg>
+                    Challenge Campaigns
+                </h3>
+                <div class="card-actions">
+                    <span class="text-muted">{{ total_count }} total</span>
+                </div>
+            </div>
+            
+            {% if campaigns %}
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-vcenter card-table">
+                        <thead>
+                            <tr>
+                                <th>Campaign</th>
+                                <th>Status</th>
+                                <th>Start Time</th>
+                                <th>Release Cadence</th>
+                                <th>Challenges</th>
+                                <th>Created</th>
+                                <th class="w-1"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for campaign in campaigns %}
+                            <tr>
+                                <td>
+                                    <div class="d-flex py-1 align-items-center">
+                                        <div class="flex-fill">
+                                            <div class="font-weight-medium">{{ campaign.title }}</div>
+                                            {% if campaign.description %}
+                                            <div class="text-muted">
+                                                {{ campaign.description[:100] }}{% if campaign.description|length > 100 %}...{% endif %}
+                                            </div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    {% if campaign.is_active %}
+                                        {% if campaign.is_started %}
+                                        <span class="badge bg-green">Running</span>
+                                        {% else %}
+                                        <span class="badge bg-yellow">Scheduled</span>
+                                        {% endif %}
+                                    {% else %}
+                                    <span class="badge bg-secondary">Inactive</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="text-muted">
+                                        <span data-utc-time="{{ campaign.start_time.strftime('%Y-%m-%dT%H:%M:%S') }}" data-format="datetime-short">{{ campaign.start_time.strftime("%Y-%m-%d %H:%M") }} UTC</span>
+                                    </div>
+                                    {% if not campaign.is_started and campaign.days_until_start is not none %}
+                                    <div class="text-muted small">
+                                        {{ campaign.days_until_start }} days to go
+                                    </div>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if campaign.release_cadence_hours < 24 %}
+                                    {{ campaign.release_cadence_hours }} hours
+                                    {% else %}
+                                    {{ campaign.release_cadence_hours // 24 }} day{% if campaign.release_cadence_hours // 24 > 1 %}s{% endif %}
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" class="text-decoration-none">
+                                        {{ campaign.challenges|length }} challenges
+                                    </a>
+                                </td>
+                                <td>
+                                    <div class="text-muted" data-utc-time="{{ campaign.created_at.strftime('%Y-%m-%dT%H:%M:%S') }}" data-format="date">{{ campaign.created_at.strftime("%Y-%m-%d") }}</div>
+                                    <div class="text-muted small">by {{ campaign.created_by }}</div>
+                                </td>
+                                <td>
+                                    <div class="btn-group" role="group">
+                                        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" 
+                                           class="btn btn-sm btn-outline-primary" title="Manage Challenges">
+                                            <svg class="icon" width="16" height="16">
+                                                <use xlink:href="#tabler-list"></use>
+                                            </svg>
+                                        </a>
+                                        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/edit" 
+                                           class="btn btn-sm btn-outline-secondary" title="Edit Campaign">
+                                            <svg class="icon" width="16" height="16">
+                                                <use xlink:href="#tabler-edit"></use>
+                                            </svg>
+                                        </a>
+                                        <form method="post" action="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/delete" 
+                                              onsubmit="return confirm('Are you sure you want to delete this campaign?')" class="d-inline">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete Campaign">
+                                                <svg class="icon" width="16" height="16">
+                                                    <use xlink:href="#tabler-trash"></use>
+                                                </svg>
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- Pagination -->
+            {% if total_pages > 1 %}
+            <div class="card-footer">
+                <nav aria-label="Campaign pagination">
+                    <ul class="pagination pagination-sm mb-0">
+                        {% if page > 1 %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ page - 1 }}">Previous</a>
+                        </li>
+                        {% endif %}
+                        
+                        {% for p in range(1, total_pages + 1) %}
+                        <li class="page-item {% if p == page %}active{% endif %}">
+                            <a class="page-link" href="?page={{ p }}">{{ p }}</a>
+                        </li>
+                        {% endfor %}
+                        
+                        {% if page < total_pages %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ page + 1 }}">Next</a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </nav>
+            </div>
+            {% endif %}
+            
+            {% else %}
+            <!-- Empty State -->
+            <div class="card-body">
+                <div class="text-center py-5">
+                    <svg class="icon mb-3" width="48" height="48">
+                        <use xlink:href="#tabler-trophy"></use>
+                    </svg>
+                    <h3>No campaigns yet</h3>
+                    <p class="text-muted">Get started by creating your first challenge campaign.</p>
+                    <a href="/admin/guilds/{{ guild.id }}/campaigns/create" class="btn btn-primary">
+                        <svg class="icon me-2" width="24" height="24">
+                            <use xlink:href="#tabler-plus"></use>
+                        </svg>
+                        Create Campaign
+                    </a>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

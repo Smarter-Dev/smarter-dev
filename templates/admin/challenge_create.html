@@ -1,0 +1,197 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block page_title %}Create Challenge{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/campaigns">Campaigns</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges">{{ campaign.title }}</a></li>
+<li class="breadcrumb-item active">Create Challenge</li>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg class="icon me-2" width="24" height="24">
+                        <use xlink:href="#tabler-plus"></use>
+                    </svg>
+                    Create New Challenge
+                </h3>
+                <div class="card-actions">
+                    <span class="badge bg-blue">{{ campaign.title }}</span>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- Error Messages -->
+                {% if errors %}
+                <div class="alert alert-danger">
+                    <h4 class="alert-title">Please correct the following errors:</h4>
+                    <ul class="mb-0">
+                        {% for error in errors %}
+                        <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                
+                <form method="post" enctype="multipart/form-data" class="needs-validation" novalidate>
+                    <!-- Challenge Title -->
+                    <div class="mb-3">
+                        <label class="form-label required">Challenge Title</label>
+                        <input type="text" 
+                               class="form-control" 
+                               name="title" 
+                               placeholder="e.g., Day 1: Two Sum Problem"
+                               value="{{ form_data.title if form_data else '' }}"
+                               required>
+                        <div class="form-hint">A clear, descriptive title for the challenge</div>
+                    </div>
+                    
+                    <!-- Challenge Description -->
+                    <div class="mb-3">
+                        <label class="form-label required">Description</label>
+                        <textarea class="form-control" 
+                                  name="description" 
+                                  rows="6"
+                                  placeholder="Describe the problem, provide examples, explain constraints, and specify input/output format..."
+                                  required>{{ form_data.description if form_data else '' }}</textarea>
+                        <div class="form-hint">Detailed problem description with examples and constraints</div>
+                    </div>
+                    
+                    
+                    <!-- Python Script Upload -->
+                    <div class="mb-4">
+                        <label class="form-label">Python Script</label>
+                        <input type="file" 
+                               class="form-control" 
+                               name="python_script"
+                               accept=".py"
+                               id="script-upload">
+                        <div class="form-hint">Optional: Upload a Python script (.py file) related to this challenge</div>
+                        
+                        <!-- File preview area -->
+                        <div id="file-preview" class="mt-2" style="display: none;">
+                            <div class="alert alert-info">
+                                <div class="d-flex align-items-center">
+                                    <svg class="icon me-2" width="24" height="24">
+                                        <use xlink:href="#tabler-file-text"></use>
+                                    </svg>
+                                    <div>
+                                        <strong>Selected file:</strong> <span id="file-name"></span><br>
+                                        <small id="file-size" class="text-muted"></small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Form Actions -->
+                    <div class="form-footer">
+                        <button type="submit" class="btn btn-primary">
+                            <svg class="icon me-2" width="24" height="24">
+                                <use xlink:href="#tabler-check"></use>
+                            </svg>
+                            Create Challenge
+                        </button>
+                        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" class="btn btn-link">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Help Panel -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg class="icon me-2" width="24" height="24">
+                        <use xlink:href="#tabler-help"></use>
+                    </svg>
+                    Challenge Creation Tips
+                </h3>
+            </div>
+            <div class="card-body">
+                <h4>Writing Good Challenges</h4>
+                <ul class="list-unstyled">
+                    <li><strong>Clear Title:</strong> Use descriptive, specific names</li>
+                    <li><strong>Complete Description:</strong> Include problem statement, examples, and constraints</li>
+                    <li><strong>Python Script:</strong> Optional reference solution or test cases</li>
+                </ul>
+                
+                <h4>Challenge Order</h4>
+                <p class="small text-muted">
+                    Challenges are automatically numbered in creation order. They will be released according to the campaign schedule starting from position 1.
+                </p>
+                
+                <h4>File Upload Guidelines</h4>
+                <ul class="list-unstyled">
+                    <li>• Only .py files are accepted</li>
+                    <li>• Maximum file size: 1MB</li>
+                    <li>• Files are stored securely</li>
+                    <li>• Optional but recommended for complex challenges</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg class="icon me-2" width="24" height="24">
+                        <use xlink:href="#tabler-info-circle"></use>
+                    </svg>
+                    Campaign Info
+                </h3>
+            </div>
+            <div class="card-body">
+                <dl class="row">
+                    <dt class="col-5">Campaign:</dt>
+                    <dd class="col-7">{{ campaign.title }}</dd>
+                    
+                    <dt class="col-5">Start Time:</dt>
+                    <dd class="col-7" data-utc-time="{{ campaign.start_time.strftime('%Y-%m-%dT%H:%M:%S') }}" data-format="datetime-short">{{ campaign.start_time.strftime("%Y-%m-%d %H:%M") }} UTC</dd>
+                    
+                    <dt class="col-5">Release Cadence:</dt>
+                    <dd class="col-7">
+                        {% if campaign.release_cadence_hours < 24 %}
+                        {{ campaign.release_cadence_hours }} hours
+                        {% else %}
+                        {{ campaign.release_cadence_hours // 24 }} day{% if campaign.release_cadence_hours // 24 > 1 %}s{% endif %}
+                        {% endif %}
+                    </dd>
+                    
+                    <dt class="col-5">Existing Challenges:</dt>
+                    <dd class="col-7">{{ campaign.challenges|length }} challenges</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const fileInput = document.getElementById('script-upload');
+    const filePreview = document.getElementById('file-preview');
+    const fileName = document.getElementById('file-name');
+    const fileSize = document.getElementById('file-size');
+    
+    fileInput.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        
+        if (file) {
+            fileName.textContent = file.name;
+            fileSize.textContent = `Size: ${(file.size / 1024).toFixed(1)} KB`;
+            filePreview.style.display = 'block';
+        } else {
+            filePreview.style.display = 'none';
+        }
+    });
+});
+</script>
+{% endblock %}

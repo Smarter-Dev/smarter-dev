@@ -1,0 +1,277 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block page_title %}Scheduled Messages{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/campaigns">Campaigns</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges">{{ campaign.title }}</a></li>
+<li class="breadcrumb-item active">Scheduled Messages</li>
+{% endblock %}
+
+{% block page_actions %}
+<div class="col-auto ms-auto d-print-none">
+    <div class="btn-list">
+        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" class="btn btn-outline-primary">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-list"></use>
+            </svg>
+            Challenges
+        </a>
+        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/edit" class="btn btn-outline-primary">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-settings"></use>
+            </svg>
+            Campaign Settings
+        </a>
+        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/create" class="btn btn-primary">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-plus"></use>
+            </svg>
+            Add Scheduled Message
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Success/Error Messages -->
+{% if request.query_params.get("created") %}
+<div class="alert alert-success alert-dismissible" role="alert">
+    <div class="d-flex">
+        <div>
+            <svg class="icon alert-icon" width="24" height="24">
+                <use xlink:href="#tabler-check"></use>
+            </svg>
+        </div>
+        <div>Scheduled message created successfully!</div>
+    </div>
+    <a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
+</div>
+{% endif %}
+
+{% if request.query_params.get("updated") %}
+<div class="alert alert-success alert-dismissible" role="alert">
+    <div class="d-flex">
+        <div>
+            <svg class="icon alert-icon" width="24" height="24">
+                <use xlink:href="#tabler-check"></use>
+            </svg>
+        </div>
+        <div>Scheduled message updated successfully!</div>
+    </div>
+    <a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
+</div>
+{% endif %}
+
+{% if request.query_params.get("deleted") %}
+<div class="alert alert-success alert-dismissible" role="alert">
+    <div class="d-flex">
+        <div>
+            <svg class="icon alert-icon" width="24" height="24">
+                <use xlink:href="#tabler-check"></use>
+            </svg>
+        </div>
+        <div>Scheduled message deleted successfully!</div>
+    </div>
+    <a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
+</div>
+{% endif %}
+
+<!-- Campaign Header -->
+<div class="row mb-4">
+    <div class="col">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg class="icon me-2" width="24" height="24">
+                        <use xlink:href="#tabler-calendar-time"></use>
+                    </svg>
+                    Campaign: {{ campaign.title }}
+                </h3>
+                <div class="card-actions">
+                    {% if campaign.is_active %}
+                        {% if campaign.is_started %}
+                        <span class="badge bg-green">Running</span>
+                        {% else %}
+                        <span class="badge bg-yellow">Scheduled</span>
+                        {% endif %}
+                    {% else %}
+                    <span class="badge bg-secondary">Inactive</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">{{ campaign.description }}</p>
+                <div class="row">
+                    <div class="col-md-6">
+                        <strong>Start Time:</strong> 
+                        <span data-utc-time="{{ campaign.start_time.strftime('%Y-%m-%dT%H:%M:%S') }}" data-format="datetime">
+                            {{ campaign.start_time.strftime("%Y-%m-%d %H:%M UTC") }}
+                        </span>
+                    </div>
+                    <div class="col-md-6">
+                        <strong>Release Cadence:</strong> {{ campaign.release_cadence_hours }} hours
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scheduled Messages Table -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Scheduled Messages</h3>
+    </div>
+    {% if scheduled_messages %}
+    <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Scheduled Time</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th class="w-1">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for message in scheduled_messages %}
+                <tr>
+                    <td>
+                        <div class="d-flex py-1 align-items-center">
+                            <span class="avatar me-2">
+                                {% if message.is_sent %}
+                                <svg class="icon" width="24" height="24">
+                                    <use xlink:href="#tabler-check"></use>
+                                </svg>
+                                {% else %}
+                                <svg class="icon" width="24" height="24">
+                                    <use xlink:href="#tabler-clock"></use>
+                                </svg>
+                                {% endif %}
+                            </span>
+                            <div class="flex-fill">
+                                <div class="font-weight-medium">{{ message.title }}</div>
+                                {% if message.description %}
+                                <div class="text-muted">{{ message.description[:100] }}{% if message.description|length > 100 %}...{% endif %}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <span data-utc-time="{{ message.scheduled_time.strftime('%Y-%m-%dT%H:%M:%S') }}" data-format="datetime">
+                            {{ message.scheduled_time.strftime("%Y-%m-%d %H:%M UTC") }}
+                        </span>
+                    </td>
+                    <td>
+                        {% if message.is_sent %}
+                            <span class="badge bg-green">Sent</span>
+                            {% if message.sent_at %}
+                            <div class="text-muted small">
+                                <span data-utc-time="{{ message.sent_at.strftime('%Y-%m-%dT%H:%M:%S') }}" data-format="datetime">
+                                    {{ message.sent_at.strftime("%Y-%m-%d %H:%M UTC") }}
+                                </span>
+                            </div>
+                            {% endif %}
+                        {% else %}
+                            <span class="badge bg-blue">Scheduled</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span data-utc-time="{{ message.created_at.strftime('%Y-%m-%dT%H:%M:%S') }}" data-format="date">
+                            {{ message.created_at.strftime("%Y-%m-%d") }}
+                        </span>
+                        <div class="text-muted small">{{ message.created_by }}</div>
+                    </td>
+                    <td>
+                        <div class="btn-list flex-nowrap">
+                            <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/{{ message.id }}/edit" 
+                               class="btn btn-sm btn-outline-primary">
+                                <svg class="icon" width="16" height="16">
+                                    <use xlink:href="#tabler-edit"></use>
+                                </svg>
+                                Edit
+                            </a>
+                            <div class="dropdown">
+                                <button class="btn btn-sm btn-outline-secondary dropdown-toggle" 
+                                        type="button" data-bs-toggle="dropdown">
+                                    <svg class="icon" width="16" height="16">
+                                        <use xlink:href="#tabler-dots-vertical"></use>
+                                    </svg>
+                                </button>
+                                <div class="dropdown-menu">
+                                    <form method="post" 
+                                          action="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/{{ message.id }}/delete"
+                                          onsubmit="return confirm('Are you sure you want to delete this scheduled message?');">
+                                        <button type="submit" class="dropdown-item text-danger">
+                                            <svg class="icon dropdown-item-icon" width="16" height="16">
+                                                <use xlink:href="#tabler-trash"></use>
+                                            </svg>
+                                            Delete
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="card-body">
+        <div class="empty">
+            <div class="empty-img">
+                <svg class="icon icon-lg" width="48" height="48">
+                    <use xlink:href="#tabler-calendar-time"></use>
+                </svg>
+            </div>
+            <p class="empty-title">No scheduled messages yet</p>
+            <p class="empty-subtitle text-muted">
+                Get started by creating your first scheduled message for this campaign.
+            </p>
+            <div class="empty-action">
+                <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/create" 
+                   class="btn btn-primary">
+                    <svg class="icon me-2" width="24" height="24">
+                        <use xlink:href="#tabler-plus"></use>
+                    </svg>
+                    Create first scheduled message
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Client-side timezone conversion -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Convert UTC times to local timezone
+    document.querySelectorAll('[data-utc-time]').forEach(element => {
+        const utcTime = element.getAttribute('data-utc-time');
+        const format = element.getAttribute('data-format') || 'datetime';
+        
+        if (utcTime) {
+            const date = new Date(utcTime + 'Z'); // Add Z to indicate UTC
+            let formatted;
+            
+            if (format === 'date') {
+                formatted = date.toLocaleDateString();
+            } else {
+                formatted = date.toLocaleString();
+            }
+            
+            element.textContent = formatted;
+            element.setAttribute('title', `UTC: ${utcTime}`);
+        }
+    });
+});
+</script>
+{% endblock %}
