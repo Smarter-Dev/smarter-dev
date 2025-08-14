@@ -131,6 +131,10 @@
             background-color: #ae3ec9 !important;
             color: #ffffff !important;
         }
+        .badge.bg-secondary {
+            background-color: #667085 !important;
+            color: #ffffff !important;
+        }
         {% block extra_styles %}{% endblock %}
     </style>
 </head>
@@ -257,6 +261,12 @@
             <symbol id="tabler-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="9,18 15,12 9,6"></polyline>
             </symbol>
+            <symbol id="tabler-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6,9 12,15 18,9"></polyline>
+            </symbol>
+            <symbol id="tabler-chevron-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="18,15 12,9 6,15"></polyline>
+            </symbol>
             <symbol id="tabler-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
@@ -320,6 +330,22 @@
                 <circle cx="12" cy="12" r="10"></circle>
                 <line x1="15" y1="9" x2="9" y2="15"></line>
                 <line x1="9" y1="9" x2="15" y2="15"></line>
+            </symbol>
+            <symbol id="tabler-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="8" y1="6" x2="21" y2="6"></line>
+                <line x1="8" y1="12" x2="21" y2="12"></line>
+                <line x1="8" y1="18" x2="21" y2="18"></line>
+                <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                <line x1="3" y1="18" x2="3.01" y2="18"></line>
+            </symbol>
+            <symbol id="tabler-trophy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+                <path d="m7 4v3a5 5 0 0 0 10 0V4"></path>
+                <path d="M7 2h10"></path>
+                <path d="m16 4 1.621.973A2 2 0 0 1 19 7v0a2 2 0 0 1-1.379 1.897L16 9"></path>
+                <path d="m8 4-1.621.973A2 2 0 0 0 5 7v0a2 2 0 0 0 1.379 1.897L8 9"></path>
             </symbol>
         </defs>
     </svg>
@@ -506,6 +532,62 @@
     
     <!-- Tabler Core -->
     <script src="https://unpkg.com/@tabler/core@latest/dist/js/tabler.min.js"></script>
+    
+    <!-- Timezone conversion utility -->
+    <script>
+        // Convert UTC timestamps to local timezone
+        function convertUTCToLocal() {
+            const utcElements = document.querySelectorAll('[data-utc-time]');
+            
+            utcElements.forEach(element => {
+                const utcTime = element.getAttribute('data-utc-time');
+                if (!utcTime) return;
+                
+                try {
+                    // Parse the UTC time - handle different formats
+                    let utcDate;
+                    if (utcTime.includes('T')) {
+                        // ISO format - ensure it's treated as UTC
+                        utcDate = utcTime.endsWith('Z') ? new Date(utcTime) : new Date(utcTime + 'Z');
+                    } else {
+                        // Assume it's a simple datetime string, treat as UTC
+                        utcDate = new Date(utcTime + ' UTC');
+                    }
+                    
+                    // Check if the date is valid
+                    if (isNaN(utcDate.getTime())) {
+                        console.warn('Invalid date parsed:', utcTime);
+                        return;
+                    }
+                    
+                    // Format for local timezone
+                    const formatType = element.getAttribute('data-format') || 'datetime';
+                    let formatted;
+                    
+                    if (formatType === 'date') {
+                        formatted = utcDate.toLocaleDateString();
+                    } else if (formatType === 'time') {
+                        formatted = utcDate.toLocaleTimeString();
+                    } else if (formatType === 'datetime-short') {
+                        formatted = utcDate.toLocaleDateString() + ' ' + 
+                                   utcDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    } else {
+                        // Default datetime format
+                        formatted = utcDate.toLocaleDateString() + ' ' + 
+                                   utcDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    }
+                    
+                    // Update the element content
+                    element.textContent = formatted + ' (local)';
+                } catch (error) {
+                    console.warn('Failed to convert UTC time:', utcTime, error);
+                }
+            });
+        }
+        
+        // Run conversion when page loads
+        document.addEventListener('DOMContentLoaded', convertUTCToLocal);
+    </script>
     
     <!-- Additional scripts -->
     {% block scripts %}{% endblock %}

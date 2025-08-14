@@ -268,10 +268,14 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         from smarter_dev.bot.services.bytes_service import BytesService
         from smarter_dev.bot.services.squads_service import SquadsService
         from smarter_dev.bot.services.forum_agent_service import ForumAgentService
+        from smarter_dev.bot.services.challenge_service import ChallengeService
+        from smarter_dev.bot.services.scheduled_message_service import ScheduledMessageService
         
         bytes_service = BytesService(api_client, cache_manager)
         squads_service = SquadsService(api_client, cache_manager)
         forum_agent_service = ForumAgentService(api_client, cache_manager)
+        challenge_service = ChallengeService(api_client, cache_manager, bot)
+        scheduled_message_service = ScheduledMessageService(api_client, cache_manager, bot)
         
         # Initialize services
         logger.info("Initializing bytes service...")
@@ -286,23 +290,37 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         await forum_agent_service.initialize()
         logger.info("✓ Forum agent service initialized")
         
+        logger.info("Initializing challenge service...")
+        await challenge_service.initialize()
+        logger.info("✓ Challenge service initialized")
+        
+        logger.info("Initializing scheduled message service...")
+        await scheduled_message_service.initialize()
+        logger.info("✓ Scheduled message service initialized")
+        
         # Verify service health
         logger.info("Verifying service health...")
         try:
             bytes_health = await bytes_service.health_check()
             squads_health = await squads_service.health_check()
             forum_agent_health = await forum_agent_service.health_check()
+            challenge_health = await challenge_service.health_check()
+            scheduled_message_health = await scheduled_message_service.health_check()
             
-            logger.info(f"Bytes service health: {bytes_health.status}")
-            logger.info(f"Squads service health: {squads_health.status}")
-            logger.info(f"Forum agent service health: {forum_agent_health.status}")
+            logger.info(f"Bytes service health: {'healthy' if bytes_health.is_healthy else 'unhealthy'}")
+            logger.info(f"Squads service health: {'healthy' if squads_health.is_healthy else 'unhealthy'}")
+            logger.info(f"Forum agent service health: {'healthy' if forum_agent_health.is_healthy else 'unhealthy'}")
+            logger.info(f"Challenge service health: {'healthy' if challenge_health.is_healthy else 'unhealthy'}")
+            logger.info(f"Scheduled message service health: {'healthy' if scheduled_message_health.is_healthy else 'unhealthy'}")
             
-            if bytes_health.status != "healthy":
+            if not bytes_health.is_healthy:
                 logger.warning(f"Bytes service not healthy: {bytes_health.details}")
-            if squads_health.status != "healthy":
+            if not squads_health.is_healthy:
                 logger.warning(f"Squads service not healthy: {squads_health.details}")
-            if forum_agent_health.status != "healthy":
+            if not forum_agent_health.is_healthy:
                 logger.warning(f"Forum agent service not healthy: {forum_agent_health.details}")
+            if not challenge_health.is_healthy:
+                logger.warning(f"Challenge service not healthy: {challenge_health.details}")
                 
         except Exception as e:
             logger.error(f"Failed to check service health: {e}")
@@ -316,12 +334,16 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d['bytes_service'] = bytes_service
         bot.d['squads_service'] = squads_service
         bot.d['forum_agent_service'] = forum_agent_service
+        bot.d['challenge_service'] = challenge_service
+        bot.d['scheduled_message_service'] = scheduled_message_service
         
         # Store services in d for plugin access (primary)
         bot.d['_services'] = {
             'bytes_service': bytes_service,
             'squads_service': squads_service,
-            'forum_agent_service': forum_agent_service
+            'forum_agent_service': forum_agent_service,
+            'challenge_service': challenge_service,
+            'scheduled_message_service': scheduled_message_service
         }
         
         logger.info("✓ Bot services setup complete")
@@ -575,6 +597,13 @@ async def cleanup_bot_services(bot: lightbulb.BotApp) -> None:
     logger.info("Cleaning up bot services...")
     
     try:
+        # Clean up services
+        if hasattr(bot, 'd') and 'challenge_service' in bot.d:
+            await bot.d['challenge_service'].cleanup()
+        
+        if hasattr(bot, 'd') and 'scheduled_message_service' in bot.d:
+            await bot.d['scheduled_message_service'].cleanup()
+        
         # Clean up cache manager (if used)
         if hasattr(bot, 'd') and 'cache_manager' in bot.d and bot.d['cache_manager']:
             await bot.d['cache_manager'].cleanup()

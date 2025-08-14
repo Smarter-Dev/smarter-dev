@@ -17,7 +17,7 @@ from sqlalchemy import JSON
 from sqlalchemy import String
 from sqlalchemy import Text
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
-from sqlalchemy.orm import Mapped
+from sqlalchemy.orm import Mapped, relationship
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.sql import func
 
@@ -1249,3 +1249,505 @@ class ForumAgentResponse(Base):
         """String representation of the forum agent response."""
         status = "responded" if self.responded else "evaluated"
         return f"<ForumAgentResponse(agent_id='{self.agent_id}', thread_id='{self.thread_id}', status='{status}')>"
+
+
+class Campaign(Base):
+    """Campaign definition for challenge competitions.
+    
+    Represents a timed series of challenges that are released on a schedule
+    with configurable announcement channels and scoring systems.
+    """
+    
+    __tablename__ = "campaigns"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique campaign identifier"
+    )
+    
+    # Guild context
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord guild (server) snowflake ID"
+    )
+    
+    # Campaign metadata
+    title: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        doc="Campaign title/name"
+    )
+    description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="",
+        doc="Detailed campaign description and rules"
+    )
+    
+    # Campaign schedule
+    start_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+        doc="When the campaign begins and first challenge is released"
+    )
+    release_cadence_hours: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=24,
+        doc="Hours between challenge releases (1-168)"
+    )
+    
+    # Discord integration
+    announcement_channels: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        doc="List of Discord channel IDs for challenge announcements"
+    )
+    
+    # Campaign status
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        doc="Whether this campaign is active and running"
+    )
+    
+    # Audit fields
+    created_by: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Username or identifier of who created this campaign"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the campaign was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the campaign was last modified"
+    )
+    
+    # Relationships
+    challenges: Mapped[list["Challenge"]] = relationship(
+        "Challenge",
+        back_populates="campaign",
+        cascade="all, delete-orphan",
+        order_by="Challenge.order_position"
+    )
+    scheduled_messages: Mapped[list["ScheduledMessage"]] = relationship(
+        "ScheduledMessage",
+        back_populates="campaign",
+        cascade="all, delete-orphan",
+        order_by="ScheduledMessage.scheduled_time"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_campaigns_guild_id", "guild_id"),
+        Index("ix_campaigns_guild_active", "guild_id", "is_active"),
+        Index("ix_campaigns_start_time", "start_time"),
+        Index("ix_campaigns_created_by", "created_by"),
+        UniqueConstraint("guild_id", "title", name="uq_campaigns_guild_title"),
+        # Validation constraints
+        CheckConstraint("release_cadence_hours >= 1 AND release_cadence_hours <= 168", name="ck_campaigns_cadence_range"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize Campaign with default timestamps."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        kwargs.setdefault('release_cadence_hours', 24)
+        kwargs.setdefault('description', '')
+        kwargs.setdefault('announcement_channels', [])
+        super().__init__(**kwargs)
+    
+    @property
+    def is_started(self) -> bool:
+        """Check if the campaign has started."""
+        return datetime.now(timezone.utc) >= self.start_time
+    
+    @property
+    def days_until_start(self) -> Optional[int]:
+        """Get days until campaign starts (None if already started)."""
+        if self.is_started:
+            return None
+        delta = self.start_time - datetime.now(timezone.utc)
+        return delta.days
+    
+    def __repr__(self) -> str:
+        """String representation of the campaign."""
+        status = "active" if self.is_active else "inactive"
+        return f"<Campaign(title='{self.title}', guild_id='{self.guild_id}', status='{status}')>"
+
+
+class Challenge(Base):
+    """Individual challenge within a campaign.
+    
+    Represents a single coding challenge with input generation and solution
+    validation scripts, released according to the campaign schedule.
+    """
+    
+    __tablename__ = "challenges"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique challenge identifier"
+    )
+    
+    # Campaign relationship
+    campaign_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("campaigns.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        doc="Campaign this challenge belongs to"
+    )
+    
+    # Challenge metadata
+    title: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        doc="Challenge title/name"
+    )
+    description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Problem statement and requirements"
+    )
+    
+    # Challenge configuration
+    order_position: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        index=True,
+        doc="Order position in campaign (1-based)"
+    )
+    points_value: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=100,
+        doc="Base points awarded for correct solution"
+    )
+    
+    # Challenge scripts
+    python_script: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Main Python script content for the challenge"
+    )
+    input_generator_script: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Python script to generate personalized inputs"
+    )
+    solution_validator_script: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Python script to validate submitted answers"
+    )
+    
+    # Release tracking
+    is_released: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        doc="Whether this challenge has been released to participants"
+    )
+    released_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc="Timestamp when the challenge was released"
+    )
+    
+    # Announcement tracking
+    is_announced: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        doc="Whether this challenge has been announced to Discord channels"
+    )
+    announced_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc="Timestamp when the challenge was announced to Discord channels"
+    )
+    
+    # Audit timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the challenge was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the challenge was last modified"
+    )
+    
+    # Relationships
+    campaign: Mapped["Campaign"] = relationship(
+        "Campaign",
+        back_populates="challenges"
+    )
+    challenge_inputs: Mapped[list["ChallengeInput"]] = relationship(
+        "ChallengeInput",
+        back_populates="challenge",
+        cascade="all, delete-orphan"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_challenges_campaign_id", "campaign_id"),
+        Index("ix_challenges_campaign_position", "campaign_id", "order_position"),
+        Index("ix_challenges_is_released", "is_released"),
+        Index("ix_challenges_released_at", "released_at"),
+        Index("ix_challenges_is_announced", "is_announced"),
+        Index("ix_challenges_announced_at", "announced_at"),
+        UniqueConstraint("campaign_id", "order_position", name="uq_challenges_campaign_position"),
+        # Validation constraints
+        CheckConstraint("order_position >= 1", name="ck_challenges_position_positive"),
+        CheckConstraint("points_value >= 0", name="ck_challenges_points_non_negative"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize Challenge with default timestamps."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        kwargs.setdefault('points_value', 100)
+        kwargs.setdefault('is_released', False)
+        kwargs.setdefault('is_announced', False)
+        
+        # Auto-set timestamps if flags are True
+        if kwargs.get('is_released', False) and 'released_at' not in kwargs:
+            kwargs['released_at'] = now
+        
+        if kwargs.get('is_announced', False) and 'announced_at' not in kwargs:
+            kwargs['announced_at'] = now
+            
+        super().__init__(**kwargs)
+    
+    def calculate_release_time(self, campaign_start_time: datetime, release_cadence_hours: int) -> datetime:
+        """Calculate when this challenge should be released based on campaign schedule."""
+        from datetime import timedelta
+        hours_offset = (self.order_position - 1) * release_cadence_hours
+        return campaign_start_time + timedelta(hours=hours_offset)
+    
+    def should_be_released(self, campaign_start_time: datetime, release_cadence_hours: int) -> bool:
+        """Check if this challenge should be released based on current time."""
+        release_time = self.calculate_release_time(campaign_start_time, release_cadence_hours)
+        return datetime.now(timezone.utc) >= release_time
+    
+    def __repr__(self) -> str:
+        """String representation of the challenge."""
+        status = "released" if self.is_released else "pending"
+        return f"<Challenge(title='{self.title}', position={self.order_position}, status='{status}')>"
+
+
+class ChallengeInput(Base):
+    """Squad-specific input data for challenges.
+    
+    Stores generated inputs and expected results for challenges on a per-squad basis.
+    All members of the same squad receive the same input data to ensure fairness
+    and consistent problem-solving conditions.
+    """
+    
+    __tablename__ = "challenge_inputs"
+    
+    # Compound primary key (challenge_id, squad_id)
+    challenge_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("challenges.id", ondelete="CASCADE"),
+        primary_key=True,
+        doc="UUID of the challenge"
+    )
+    squad_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("squads.id", ondelete="CASCADE"),
+        primary_key=True,
+        doc="UUID of the squad"
+    )
+    
+    # Generated data
+    input_data: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Generated input data for the challenge (JSON string or plain text)"
+    )
+    result_data: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Expected result/solution for the input data"
+    )
+    
+    # Note: created_at and updated_at are automatically added by Base class
+    
+    # Relationships
+    challenge: Mapped["Challenge"] = relationship(
+        "Challenge",
+        doc="Challenge this input belongs to"
+    )
+    squad: Mapped["Squad"] = relationship(
+        "Squad",
+        doc="Squad this input is generated for"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_challenge_inputs_challenge_id", "challenge_id"),
+        Index("ix_challenge_inputs_squad_id", "squad_id"),
+        Index("ix_challenge_inputs_created_at", "created_at"),
+    )
+    
+    # No custom __init__ needed - Base class handles timestamps
+    
+    def __repr__(self) -> str:
+        """String representation of the challenge input."""
+        return f"<ChallengeInput(challenge_id={self.challenge_id}, squad_id={self.squad_id})>"
+
+
+class ScheduledMessage(Base):
+    """Scheduled message definition for campaigns.
+    
+    Represents messages that are sent at specific times to campaign announcement channels.
+    Unlike challenges, these messages have no interactive buttons and are informational only.
+    """
+    
+    __tablename__ = "scheduled_messages"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique scheduled message identifier"
+    )
+    
+    # Campaign relationship
+    campaign_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("campaigns.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        doc="Campaign this scheduled message belongs to"
+    )
+    
+    # Message content
+    title: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        doc="Message title"
+    )
+    description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="",
+        doc="Detailed message description"
+    )
+    
+    # Scheduling
+    scheduled_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+        doc="When this message should be sent"
+    )
+    
+    # Status tracking
+    is_sent: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        doc="Whether this scheduled message has been sent"
+    )
+    sent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="When the message was actually sent"
+    )
+    
+    # Audit fields
+    created_by: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Username or identifier of who created this message"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the message was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the message was last modified"
+    )
+    
+    # Relationships
+    campaign: Mapped["Campaign"] = relationship(
+        "Campaign",
+        back_populates="scheduled_messages"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_scheduled_messages_campaign_id", "campaign_id"),
+        Index("ix_scheduled_messages_scheduled_time", "scheduled_time"),
+        Index("ix_scheduled_messages_is_sent", "is_sent"),
+        Index("ix_scheduled_messages_sent_at", "sent_at"),
+        Index("ix_scheduled_messages_campaign_time", "campaign_id", "scheduled_time"),
+        # Validation constraints
+        CheckConstraint("scheduled_time IS NOT NULL", name="ck_scheduled_messages_time_required"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize ScheduledMessage with default timestamps."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        kwargs.setdefault('description', '')
+        kwargs.setdefault('is_sent', False)
+        
+        # Auto-set sent_at if is_sent is True
+        if kwargs.get('is_sent', False) and 'sent_at' not in kwargs:
+            kwargs['sent_at'] = now
+            
+        super().__init__(**kwargs)
+    
+    @property
+    def is_due(self) -> bool:
+        """Check if this scheduled message is due to be sent."""
+        return not self.is_sent and datetime.now(timezone.utc) >= self.scheduled_time
+    
+    def __repr__(self) -> str:
+        """String representation of the scheduled message."""
+        status = "sent" if self.is_sent else "pending"
+        return f"<ScheduledMessage(title='{self.title}', scheduled={self.scheduled_time}, status='{status}')>"

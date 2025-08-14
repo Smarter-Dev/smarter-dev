@@ -1,0 +1,442 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block page_title %}Edit Campaign{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/campaigns">Campaigns</a></li>
+<li class="breadcrumb-item active">{{ campaign.title }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg class="icon me-2" width="24" height="24">
+                        <use xlink:href="#tabler-edit"></use>
+                    </svg>
+                    Edit Campaign: {{ campaign.title }}
+                </h3>
+                <div class="card-actions">
+                    {% if campaign.is_active %}
+                        {% if campaign.is_started %}
+                        <span class="badge bg-green">Running</span>
+                        {% else %}
+                        <span class="badge bg-yellow">Scheduled</span>
+                        {% endif %}
+                    {% else %}
+                    <span class="badge bg-secondary">Inactive</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- Error Messages -->
+                {% if errors %}
+                <div class="alert alert-danger">
+                    <h4 class="alert-title">Please correct the following errors:</h4>
+                    <ul class="mb-0">
+                        {% for error in errors %}
+                        <li>{{ error }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                
+                <form method="post" class="needs-validation" novalidate>
+                    <!-- Campaign Title -->
+                    <div class="mb-3">
+                        <label class="form-label required">Campaign Title</label>
+                        <input type="text" 
+                               class="form-control" 
+                               name="title" 
+                               placeholder="e.g., Advent of Code 2024"
+                               value="{{ form_data.title if form_data else campaign.title }}"
+                               required>
+                        <div class="form-hint">A unique name for your challenge campaign</div>
+                    </div>
+                    
+                    <!-- Campaign Description -->
+                    <div class="mb-3">
+                        <label class="form-label required">Description</label>
+                        <textarea class="form-control" 
+                                  name="description" 
+                                  rows="4"
+                                  placeholder="Describe your campaign, its goals, and rules..."
+                                  required>{{ form_data.description if form_data else campaign.description }}</textarea>
+                        <div class="form-hint">Detailed information about the campaign that participants will see</div>
+                    </div>
+                    
+                    <!-- Start Time -->
+                    <div class="mb-3">
+                        <label class="form-label required">Start Time</label>
+                        <input type="datetime-local" 
+                               class="form-control" 
+                               name="start_time"
+                               value="{{ form_data.start_time if form_data else campaign.start_time.strftime('%Y-%m-%dT%H:%M') }}"
+                               required>
+                        <div class="form-hint">When the first challenge will be released (UTC time)</div>
+                        {% if campaign.is_started %}
+                        <div class="text-warning small mt-1">
+                            <svg class="icon" width="16" height="16">
+                                <use xlink:href="#tabler-alert-triangle"></use>
+                            </svg>
+                            Campaign has already started. Changing start time may affect scheduled releases.
+                        </div>
+                        {% endif %}
+                    </div>
+                    
+                    <!-- Release Cadence -->
+                    <div class="mb-3">
+                        <label class="form-label required">Release Cadence</label>
+                        <div class="input-group">
+                            <input type="number" 
+                                   class="form-control" 
+                                   name="release_cadence_hours"
+                                   min="1" 
+                                   max="168"
+                                   value="{{ form_data.release_cadence_hours if form_data else campaign.release_cadence_hours }}"
+                                   required>
+                            <span class="input-group-text">hours</span>
+                        </div>
+                        <div class="form-hint">How often new challenges are released (1-168 hours)</div>
+                    </div>
+                    
+                    <!-- Announcement Channels -->
+                    <div class="mb-3">
+                        <label class="form-label required">Announcement Channels</label>
+                        {% if channels %}
+                        <div class="channel-selector position-relative">
+                            <div class="input-group">
+                                <span class="input-group-text">
+                                    <svg class="icon" width="16" height="16">
+                                        <use xlink:href="#tabler-search"></use>
+                                    </svg>
+                                </span>
+                                <input type="text" 
+                                       class="form-control" 
+                                       id="channel-search" 
+                                       placeholder="Click to select channels..."
+                                       autocomplete="off"
+                                       readonly
+                                       style="cursor: pointer;">
+                                <button type="button" 
+                                        class="btn btn-outline-secondary" 
+                                        id="channel-dropdown-btn">
+                                    <span id="selected-count">None selected</span>
+                                    <svg class="icon ms-1" width="16" height="16">
+                                        <use xlink:href="#tabler-chevron-down"></use>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <div class="channel-dropdown-menu position-absolute w-100 bg-white border rounded shadow-sm" 
+                                 id="channel-dropdown" 
+                                 style="display: none; z-index: 1050; max-height: 350px; top: 100%; left: 0;">
+                                <div class="p-2 border-bottom bg-light">
+                                    <input type="text" 
+                                           class="form-control form-control-sm" 
+                                           id="channel-filter" 
+                                           placeholder="Type to search channels..."
+                                           autocomplete="off">
+                                </div>
+                                <div style="max-height: 250px; overflow-y: auto;">
+                                    <div class="p-2">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="select-all-channels">
+                                            <label class="form-check-label fw-bold" for="select-all-channels">
+                                                Select All Visible
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <hr class="my-0">
+                                    {% for channel in channels %}
+                                    <div class="channel-option px-2 py-1">
+                                        <div class="form-check">
+                                            <input class="form-check-input channel-checkbox" 
+                                                   type="checkbox" 
+                                                   name="announcement_channels" 
+                                                   value="{{ channel.id }}"
+                                                   id="channel-{{ channel.id }}"
+                                                   {% if form_data %}
+                                                       {% if channel.id in form_data.getlist('announcement_channels') %}checked{% endif %}
+                                                   {% else %}
+                                                       {% if channel.id in campaign.announcement_channels %}checked{% endif %}
+                                                   {% endif %}>
+                                            <label class="form-check-label w-100" for="channel-{{ channel.id }}">
+                                                <div class="d-flex align-items-center">
+                                                    <strong>#{{ channel.name }}</strong>
+                                                    <span class="text-muted ms-auto">{{ channel.type_name }}</span>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-hint">Select channels where campaign announcements will be posted</div>
+                        
+                        <!-- Selected Channels Display -->
+                        <div id="selected-channels" class="mt-2" style="display: none;">
+                            <small class="text-muted">Selected channels:</small>
+                            <div id="selected-channels-list" class="mt-1"></div>
+                        </div>
+                        
+                        {% else %}
+                        <div class="alert alert-warning">
+                            <svg class="icon alert-icon" width="24" height="24">
+                                <use xlink:href="#tabler-alert-triangle"></use>
+                            </svg>
+                            No suitable channels found. Make sure the bot has permission to view channels in this server.
+                        </div>
+                        {% endif %}
+                    </div>
+                    
+                    <!-- Campaign Status -->
+                    <div class="mb-4">
+                        <label class="form-label">Campaign Status</label>
+                        <label class="form-check form-switch">
+                            <input class="form-check-input" 
+                                   type="checkbox" 
+                                   name="is_active"
+                                   {% if form_data %}
+                                       {% if form_data.get('is_active') %}checked{% endif %}
+                                   {% else %}
+                                       {% if campaign.is_active %}checked{% endif %}
+                                   {% endif %}>
+                            <span class="form-check-label">Campaign is active</span>
+                        </label>
+                        <div class="form-hint">Inactive campaigns won't release new challenges or accept submissions</div>
+                    </div>
+                    
+                    <!-- Form Actions -->
+                    <div class="form-footer">
+                        <button type="submit" class="btn btn-primary">
+                            <svg class="icon me-2" width="24" height="24">
+                                <use xlink:href="#tabler-check"></use>
+                            </svg>
+                            Update Campaign
+                        </button>
+                        <a href="/admin/guilds/{{ guild.id }}/campaigns" class="btn btn-link">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Campaign Info Panel -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg class="icon me-2" width="24" height="24">
+                        <use xlink:href="#tabler-info-circle"></use>
+                    </svg>
+                    Campaign Info
+                </h3>
+            </div>
+            <div class="card-body">
+                <dl class="row">
+                    <dt class="col-5">Created:</dt>
+                    <dd class="col-7" data-utc-time="{{ campaign.created_at.strftime('%Y-%m-%dT%H:%M:%S') }}" data-format="date">{{ campaign.created_at.strftime("%Y-%m-%d") }}</dd>
+                    
+                    <dt class="col-5">Created by:</dt>
+                    <dd class="col-7">{{ campaign.created_by }}</dd>
+                    
+                    <dt class="col-5">Last updated:</dt>
+                    <dd class="col-7" data-utc-time="{{ campaign.updated_at.strftime('%Y-%m-%dT%H:%M:%S') }}" data-format="date">{{ campaign.updated_at.strftime("%Y-%m-%d") }}</dd>
+                    
+                    <dt class="col-5">Status:</dt>
+                    <dd class="col-7">
+                        {% if campaign.is_active %}
+                            {% if campaign.is_started %}
+                            <span class="badge bg-green">Running</span>
+                            {% else %}
+                            <span class="badge bg-yellow">Scheduled</span>
+                            {% endif %}
+                        {% else %}
+                        <span class="badge bg-secondary">Inactive</span>
+                        {% endif %}
+                    </dd>
+                </dl>
+                
+                <div class="mt-3">
+                    <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" 
+                       class="btn btn-outline-primary w-100">
+                        <svg class="icon me-2" width="24" height="24">
+                            <use xlink:href="#tabler-list"></use>
+                        </svg>
+                        Manage Challenges
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card mt-3">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg class="icon me-2" width="24" height="24">
+                        <use xlink:href="#tabler-help"></use>
+                    </svg>
+                    Editing Tips
+                </h3>
+            </div>
+            <div class="card-body">
+                <ul class="list-unstyled small">
+                    <li>• Changes to active campaigns take effect immediately</li>
+                    <li>• Modifying start time affects challenge scheduling</li>
+                    <li>• Channel changes affect future announcements only</li>
+                    <li>• Deactivating stops new challenge releases</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const dropdownBtn = document.getElementById('channel-dropdown-btn');
+    const dropdown = document.getElementById('channel-dropdown');
+    const filterInput = document.getElementById('channel-filter');
+    const selectAllCheckbox = document.getElementById('select-all-channels');
+    const channelCheckboxes = document.querySelectorAll('.channel-checkbox');
+    const selectedCountSpan = document.getElementById('selected-count');
+    const selectedChannelsDiv = document.getElementById('selected-channels');
+    const selectedChannelsList = document.getElementById('selected-channels-list');
+    
+    let isDropdownOpen = false;
+    
+    // Toggle dropdown visibility
+    function toggleDropdown() {
+        isDropdownOpen = !isDropdownOpen;
+        dropdown.style.display = isDropdownOpen ? 'block' : 'none';
+        
+        if (isDropdownOpen) {
+            filterInput.focus();
+            // Update the chevron icon
+            const chevron = dropdownBtn.querySelector('svg');
+            chevron.innerHTML = '<use xlink:href="#tabler-chevron-up"></use>';
+        } else {
+            const chevron = dropdownBtn.querySelector('svg');
+            chevron.innerHTML = '<use xlink:href="#tabler-chevron-down"></use>';
+        }
+    }
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.channel-selector') && isDropdownOpen) {
+            toggleDropdown();
+        }
+    });
+    
+    // Dropdown button click
+    dropdownBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleDropdown();
+    });
+    
+    // Make the main input field clickable too
+    const mainInput = document.getElementById('channel-search');
+    mainInput.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleDropdown();
+    });
+    
+    // Prevent dropdown from closing when clicking inside
+    dropdown.addEventListener('click', function(e) {
+        e.stopPropagation();
+    });
+    
+    // Search/filter functionality
+    filterInput.addEventListener('input', function() {
+        const searchTerm = this.value.toLowerCase();
+        document.querySelectorAll('.channel-option').forEach(option => {
+            const channelName = option.querySelector('label').textContent.toLowerCase();
+            option.style.display = channelName.includes(searchTerm) ? 'block' : 'none';
+        });
+        updateSelectAllState();
+    });
+    
+    // Select all functionality
+    selectAllCheckbox.addEventListener('change', function() {
+        const visibleCheckboxes = Array.from(channelCheckboxes).filter(cb => 
+            cb.closest('.channel-option').style.display !== 'none'
+        );
+        visibleCheckboxes.forEach(checkbox => {
+            checkbox.checked = this.checked;
+        });
+        updateSelectedCount();
+        updateSelectedChannelsList();
+        updateSelectAllState();
+    });
+    
+    // Individual checkbox changes
+    channelCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            updateSelectedCount();
+            updateSelectedChannelsList();
+            updateSelectAllState();
+        });
+    });
+    
+    function updateSelectedCount() {
+        const selectedCount = Array.from(channelCheckboxes).filter(cb => cb.checked).length;
+        selectedCountSpan.textContent = selectedCount === 0 ? 'None selected' : 
+                                       selectedCount === 1 ? '1 channel' : 
+                                       `${selectedCount} channels`;
+    }
+    
+    function updateSelectedChannelsList() {
+        const selectedChannels = Array.from(channelCheckboxes)
+            .filter(cb => cb.checked)
+            .map(cb => {
+                const label = cb.closest('.channel-option').querySelector('label');
+                const channelName = label.textContent.trim().split('\n')[0].replace('#', '').trim();
+                return channelName;
+            });
+        
+        if (selectedChannels.length > 0) {
+            selectedChannelsList.innerHTML = selectedChannels
+                .map(name => `<span class="badge bg-blue me-1 mb-1">#${name}</span>`)
+                .join('');
+            selectedChannelsDiv.style.display = 'block';
+        } else {
+            selectedChannelsDiv.style.display = 'none';
+        }
+    }
+    
+    function updateSelectAllState() {
+        const visibleCheckboxes = Array.from(channelCheckboxes).filter(cb => 
+            cb.closest('.channel-option').style.display !== 'none'
+        );
+        const checkedVisibleCount = visibleCheckboxes.filter(cb => cb.checked).length;
+        
+        if (visibleCheckboxes.length === 0) {
+            selectAllCheckbox.checked = false;
+            selectAllCheckbox.indeterminate = false;
+        } else if (checkedVisibleCount === 0) {
+            selectAllCheckbox.checked = false;
+            selectAllCheckbox.indeterminate = false;
+        } else if (checkedVisibleCount === visibleCheckboxes.length) {
+            selectAllCheckbox.checked = true;
+            selectAllCheckbox.indeterminate = false;
+        } else {
+            selectAllCheckbox.checked = false;
+            selectAllCheckbox.indeterminate = true;
+        }
+    }
+    
+    // Initialize
+    updateSelectedCount();
+    updateSelectedChannelsList();
+    updateSelectAllState();
+});
+</script>
+{% endblock %}

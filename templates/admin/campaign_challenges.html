@@ -1,0 +1,246 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block page_title %}Campaign Challenges{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/campaigns">Campaigns</a></li>
+<li class="breadcrumb-item active">{{ campaign.title }}</li>
+{% endblock %}
+
+{% block page_actions %}
+<div class="col-auto ms-auto d-print-none">
+    <div class="btn-list">
+        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages" class="btn btn-outline-secondary">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-calendar-time"></use>
+            </svg>
+            Scheduled Messages
+        </a>
+        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/edit" class="btn btn-outline-primary">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-settings"></use>
+            </svg>
+            Campaign Settings
+        </a>
+        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges/create" class="btn btn-primary">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-plus"></use>
+            </svg>
+            Add Challenge
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Success/Error Messages -->
+{% if request.query_params.get("created") %}
+<div class="alert alert-success alert-dismissible" role="alert">
+    <div class="d-flex">
+        <div>
+            <svg class="icon alert-icon" width="24" height="24">
+                <use xlink:href="#tabler-check"></use>
+            </svg>
+        </div>
+        <div>Challenge created successfully!</div>
+    </div>
+    <a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
+</div>
+{% endif %}
+
+<!-- Campaign Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg class="icon me-2" width="24" height="24">
+                        <use xlink:href="#tabler-trophy"></use>
+                    </svg>
+                    {{ campaign.title }}
+                </h3>
+                <div class="card-actions">
+                    {% if campaign.is_active %}
+                        {% if campaign.is_started %}
+                        <span class="badge bg-green">Running</span>
+                        {% else %}
+                        <span class="badge bg-yellow">Scheduled</span>
+                        {% endif %}
+                    {% else %}
+                    <span class="badge bg-secondary">Inactive</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-8">
+                        <p class="text-muted">{{ campaign.description }}</p>
+                    </div>
+                    <div class="col-md-4">
+                        <dl class="row">
+                            <dt class="col-5">Starts:</dt>
+                            <dd class="col-7" data-utc-time="{{ campaign.start_time.strftime('%Y-%m-%dT%H:%M:%S') }}" data-format="datetime-short">{{ campaign.start_time.strftime("%Y-%m-%d %H:%M") }} UTC</dd>
+                            
+                            <dt class="col-5">Cadence:</dt>
+                            <dd class="col-7">
+                                {% if campaign.release_cadence_hours < 24 %}
+                                {{ campaign.release_cadence_hours }} hours
+                                {% else %}
+                                {{ campaign.release_cadence_hours // 24 }} day{% if campaign.release_cadence_hours // 24 > 1 %}s{% endif %}
+                                {% endif %}
+                            </dd>
+                            
+                            <dt class="col-5">Channels:</dt>
+                            <dd class="col-7">{{ campaign.announcement_channels|length }} channels</dd>
+                        </dl>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Challenges List -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">
+                    <svg class="icon me-2" width="24" height="24">
+                        <use xlink:href="#tabler-list"></use>
+                    </svg>
+                    Challenges
+                    {% if challenges %}
+                    <span class="badge bg-secondary ms-2">{{ challenges|length }}</span>
+                    {% endif %}
+                </h3>
+            </div>
+            
+            {% if challenges %}
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-vcenter card-table">
+                        <thead>
+                            <tr>
+                                <th>Order</th>
+                                <th>Challenge</th>
+                                <th>Release Status</th>
+                                <th>Release Time</th>
+                                <th>Created</th>
+                                <th class="w-1"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for challenge in challenges %}
+                            <tr>
+                                <td>
+                                    <div class="d-flex align-items-center">
+                                        <span class="badge bg-blue me-2">{{ challenge.order_position }}</span>
+                                    </div>
+                                </td>
+                                <td>
+                                    <div class="d-flex py-1 align-items-center">
+                                        <div class="flex-fill">
+                                            <div class="font-weight-medium">{{ challenge.title }}</div>
+                                            {% if challenge.description %}
+                                            <div class="text-muted small">
+                                                {{ challenge.description[:80] }}{% if challenge.description|length > 80 %}...{% endif %}
+                                            </div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </td>
+                                <td>
+                                    {% if challenge.is_released %}
+                                    <span class="badge bg-green">Released</span>
+                                    {% else %}
+                                    <span class="badge bg-yellow">Pending</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% set release_time = challenge.calculate_release_time(campaign.start_time, campaign.release_cadence_hours) %}
+                                    <div class="text-muted" data-utc-time="{{ release_time.strftime('%Y-%m-%dT%H:%M:%S') }}" data-format="datetime-short">
+                                        {{ release_time.strftime("%Y-%m-%d %H:%M") }} UTC
+                                    </div>
+                                    {% if not challenge.is_released %}
+                                        {% if challenge.should_be_released(campaign.start_time, campaign.release_cadence_hours) %}
+                                        <div class="text-warning small">Should be released</div>
+                                        {% else %}
+                                        <div class="text-muted small">
+                                            Scheduled
+                                        </div>
+                                        {% endif %}
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="text-muted" data-utc-time="{{ challenge.created_at.strftime('%Y-%m-%dT%H:%M:%S') }}" data-format="date">{{ challenge.created_at.strftime("%Y-%m-%d") }}</div>
+                                </td>
+                                <td>
+                                    <div class="btn-group" role="group">
+                                        <button class="btn btn-sm btn-outline-primary" 
+                                                onclick="alert('Challenge editing coming soon!')"
+                                                title="Edit Challenge">
+                                            <svg class="icon" width="16" height="16">
+                                                <use xlink:href="#tabler-edit"></use>
+                                            </svg>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary" 
+                                                onclick="alert('Challenge details coming soon!')"
+                                                title="View Details">
+                                            <svg class="icon" width="16" height="16">
+                                                <use xlink:href="#tabler-eye"></use>
+                                            </svg>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger" 
+                                                onclick="alert('Challenge deletion coming soon!')"
+                                                title="Delete Challenge">
+                                            <svg class="icon" width="16" height="16">
+                                                <use xlink:href="#tabler-trash"></use>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% else %}
+            <!-- Empty State -->
+            <div class="card-body">
+                <div class="text-center py-5">
+                    <svg class="icon mb-3" width="48" height="48">
+                        <use xlink:href="#tabler-list"></use>
+                    </svg>
+                    <h3>No challenges yet</h3>
+                    <p class="text-muted">Add your first challenge to get this campaign started.</p>
+                    <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges/create" class="btn btn-primary">
+                        <svg class="icon me-2" width="24" height="24">
+                            <use xlink:href="#tabler-plus"></use>
+                        </svg>
+                        Add Challenge
+                    </a>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Development Notice -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="alert alert-info">
+            <svg class="icon alert-icon" width="24" height="24">
+                <use xlink:href="#tabler-info-circle"></use>
+            </svg>
+            <strong>Coming Soon:</strong> Challenge creation, editing, input generation scripts, and submission management are under development. You can currently create and configure campaigns, and we'll be adding challenge management features next.
+        </div>
+    </div>
+</div>
+{% endblock %}

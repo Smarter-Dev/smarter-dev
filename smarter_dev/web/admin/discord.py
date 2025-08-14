@@ -65,6 +65,50 @@ class DiscordRole:
         return f"#{self.color:06x}" if self.color else "#99aab5"
 
 
+@dataclass
+class DiscordChannel:
+    """Discord channel information."""
+    id: str
+    name: str
+    type: int
+    position: int
+    parent_id: Optional[str] = None
+    topic: Optional[str] = None
+    
+    @property
+    def type_name(self) -> str:
+        """Get the channel type as a human-readable string."""
+        channel_types = {
+            0: "Text",
+            1: "DM", 
+            2: "Voice",
+            3: "Group DM",
+            4: "Category",
+            5: "Announcement",
+            10: "Announcement Thread",
+            11: "Public Thread",
+            12: "Private Thread",
+            13: "Stage Voice",
+            15: "Forum",
+            16: "Media"
+        }
+        return channel_types.get(self.type, f"Unknown ({self.type})")
+    
+    @property
+    def is_text_based(self) -> bool:
+        """Check if this channel supports text messages."""
+        # Text channels that support sending messages
+        text_types = {0, 5, 10, 11, 12, 15, 16}  # Text, Announcement, threads, Forum, Media
+        return self.type in text_types
+    
+    @property
+    def supports_announcements(self) -> bool:
+        """Check if this channel is suitable for campaign announcements."""
+        # Text and announcement channels are good for announcements
+        announcement_types = {0, 5}  # Text, Announcement
+        return self.type in announcement_types
+
+
 class DiscordClient:
     """Discord REST API client for admin interface."""
     
@@ -245,6 +289,69 @@ class DiscordClient:
         except Exception as e:
             logger.error(f"Unexpected error fetching member count for guild {guild_id}: {e}")
             return 0
+    
+    async def get_guild_channels(self, guild_id: str) -> List[DiscordChannel]:
+        """Get all channels in a guild.
+        
+        Args:
+            guild_id: Discord guild ID
+            
+        Returns:
+            List of channel information sorted by position
+        """
+        try:
+            data = await self._make_request("GET", f"/guilds/{guild_id}/channels")
+            
+            channels = []
+            for channel_data in data:
+                channel = DiscordChannel(
+                    id=channel_data["id"],
+                    name=channel_data["name"],
+                    type=channel_data["type"],
+                    position=channel_data.get("position", 0),
+                    parent_id=channel_data.get("parent_id"),
+                    topic=channel_data.get("topic")
+                )
+                channels.append(channel)
+            
+            # Sort by position (and then by name for consistency)
+            channels.sort(key=lambda c: (c.position, c.name.lower()))
+            
+            logger.debug(f"Retrieved {len(channels)} channels for guild {guild_id}")
+            return channels
+        
+        except DiscordAPIError:
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error fetching channels for guild {guild_id}: {e}")
+            raise DiscordAPIError(f"Failed to fetch guild channels: {e}")
+    
+    async def get_announcement_channels(self, guild_id: str) -> List[DiscordChannel]:
+        """Get channels suitable for campaign announcements.
+        
+        Args:
+            guild_id: Discord guild ID
+            
+        Returns:
+            List of text and announcement channels
+        """
+        try:
+            all_channels = await self.get_guild_channels(guild_id)
+            
+            # Filter to only channels that support announcements
+            announcement_channels = [
+                channel for channel in all_channels 
+                if channel.supports_announcements
+            ]
+            
+            logger.debug(f"Found {len(announcement_channels)} announcement channels in guild {guild_id}")
+            return announcement_channels
+        
+        except DiscordAPIError:
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error fetching announcement channels for guild {guild_id}: {e}")
+            raise DiscordAPIError(f"Failed to fetch announcement channels: {e}")
 
 
 # Global Discord client instance
@@ -327,3 +434,15 @@ async def get_guild_roles(guild_id: str) -> List[DiscordRole]:
     """Get all roles in a guild."""
     client = get_discord_client()
     return await client.get_guild_roles(guild_id)
+
+
+async def get_guild_channels(guild_id: str) -> List[DiscordChannel]:
+    """Get all channels in a guild."""
+    client = get_discord_client()
+    return await client.get_guild_channels(guild_id)
+
+
+async def get_valid_announcement_channels(guild_id: str) -> List[DiscordChannel]:
+    """Get channels suitable for campaign announcements."""
+    client = get_discord_client()
+    return await client.get_announcement_channels(guild_id)

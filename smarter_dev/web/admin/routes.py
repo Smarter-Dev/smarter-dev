@@ -28,7 +28,17 @@ from smarter_dev.web.admin.views import (
     forum_agent_toggle,
     forum_agent_analytics,
     get_forum_response_details,
-    forum_agents_bulk
+    forum_agents_bulk,
+    campaigns_list,
+    campaign_create,
+    campaign_edit,
+    campaign_delete,
+    campaign_challenges,
+    challenge_create,
+    scheduled_messages_list,
+    scheduled_message_create,
+    scheduled_message_edit,
+    scheduled_message_delete
 )
 
 
@@ -73,4 +83,18 @@ admin_routes = [
     Route("/blogs/create", admin_required(blog_create), methods=["GET", "POST"], name="admin_blog_create"),
     Route("/blogs/{blog_id}/edit", admin_required(blog_edit), methods=["GET", "POST"], name="admin_blog_edit"),
     Route("/blogs/{blog_id}/delete", admin_required(blog_delete), methods=["POST"], name="admin_blog_delete"),
+    
+    # Campaign management
+    Route("/guilds/{guild_id}/campaigns", admin_required(campaigns_list), name="admin_campaigns"),
+    Route("/guilds/{guild_id}/campaigns/create", admin_required(campaign_create), methods=["GET", "POST"], name="admin_campaign_create"),
+    Route("/guilds/{guild_id}/campaigns/{campaign_id}/edit", admin_required(campaign_edit), methods=["GET", "POST"], name="admin_campaign_edit"),
+    Route("/guilds/{guild_id}/campaigns/{campaign_id}/delete", admin_required(campaign_delete), methods=["POST"], name="admin_campaign_delete"),
+    Route("/guilds/{guild_id}/campaigns/{campaign_id}/challenges", admin_required(campaign_challenges), name="admin_campaign_challenges"),
+    Route("/guilds/{guild_id}/campaigns/{campaign_id}/challenges/create", admin_required(challenge_create), methods=["GET", "POST"], name="admin_challenge_create"),
+    
+    # Scheduled message management
+    Route("/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages", admin_required(scheduled_messages_list), name="admin_scheduled_messages"),
+    Route("/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages/create", admin_required(scheduled_message_create), methods=["GET", "POST"], name="admin_scheduled_message_create"),
+    Route("/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages/{message_id}/edit", admin_required(scheduled_message_edit), methods=["GET", "POST"], name="admin_scheduled_message_edit"),
+    Route("/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages/{message_id}/delete", admin_required(scheduled_message_delete), methods=["POST"], name="admin_scheduled_message_delete"),
 ]

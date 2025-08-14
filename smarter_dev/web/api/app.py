@@ -28,6 +28,8 @@ from smarter_dev.web.api.routers.bytes import router as bytes_router
 from smarter_dev.web.api.routers.squads import router as squads_router
 from smarter_dev.web.api.routers.admin import router as admin_router
 from smarter_dev.web.api.routers.forum_agents_simple import router as forum_agents_router
+from smarter_dev.web.api.routers.challenges import router as challenges_router
+from smarter_dev.web.api.routers.scheduled_messages import router as scheduled_messages_router
 from smarter_dev.web.api.schemas import ErrorResponse, ValidationErrorResponse, ErrorDetail
 from smarter_dev.web.crud import DatabaseOperationError, NotFoundError, ConflictError
 from smarter_dev.web.security_headers import SecurityHeadersMiddleware
@@ -382,6 +384,16 @@ api.include_router(
 api.include_router(
     forum_agents_router,
     tags=["Forum Agents"]
+)
+
+api.include_router(
+    challenges_router,
+    tags=["Challenge Management"]
+)
+
+api.include_router(
+    scheduled_messages_router,
+    tags=["Scheduled Message Management"]
 )
 
 

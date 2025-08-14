@@ -24,14 +24,19 @@ from smarter_dev.web.models import (
     HelpConversation,
     BlogPost,
     ForumAgent,
-    ForumAgentResponse
+    ForumAgentResponse,
+    Campaign,
+    Challenge,
+    ScheduledMessage
 )
-from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, APIKeyOperations, ForumAgentOperations, ConflictError
+from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, APIKeyOperations, ForumAgentOperations, CampaignOperations, ScheduledMessageOperations, ConflictError
 from smarter_dev.web.security import generate_secure_api_key
+from smarter_dev.web.admin.auth import admin_required
 from smarter_dev.web.admin.discord import (
     get_bot_guilds,
     get_guild_info,
     get_guild_roles,
+    get_valid_announcement_channels,
     GuildNotFoundError,
     DiscordAPIError
 )
@@ -1973,6 +1978,897 @@ async def forum_agents_bulk(request: Request) -> Response:
         context = {
             "request": request,
             "error": "Failed to perform bulk operation",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+# ============================================================================
+# Campaign Management Views
+# ============================================================================
+
+async def campaigns_list(request: Request) -> Response:
+    """Display list of all campaigns for a guild."""
+    guild_id = request.path_params["guild_id"]
+    
+    try:
+        # Get guild info
+        guild = await get_guild_info(guild_id)
+        
+        # Get campaigns with pagination
+        page = int(request.query_params.get("page", 1))
+        size = 20
+        offset = (page - 1) * size
+        
+        async with get_db_session_context() as session:
+            campaign_ops = CampaignOperations(session)
+            campaigns, total_count = await campaign_ops.get_campaigns_by_guild(
+                guild_id=guild_id,
+                limit=size,
+                offset=offset
+            )
+            
+            # Calculate pagination info
+            total_pages = (total_count + size - 1) // size
+            
+            context = {
+                "request": request,
+                "guild": guild,
+                "campaigns": campaigns,
+                "page": page,
+                "total_pages": total_pages,
+                "total_count": total_count,
+                "title": f"Campaigns - {guild.name}"
+            }
+            
+        return templates.TemplateResponse("admin/campaigns_list.html", context)
+        
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found or bot not in guild",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error in campaigns list for guild {guild_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to load campaigns",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def campaign_create(request: Request) -> Response:
+    """Create a new campaign."""
+    guild_id = request.path_params["guild_id"]
+    
+    try:
+        # Get guild info
+        guild = await get_guild_info(guild_id)
+        
+        if request.method == "GET":
+            # Get announcement channels for form
+            try:
+                channels = await get_valid_announcement_channels(guild_id)
+            except DiscordAPIError:
+                channels = []
+                logger.warning(f"Failed to fetch channels for guild {guild_id}, using empty list")
+            
+            context = {
+                "request": request,
+                "guild": guild,
+                "channels": channels,
+                "title": f"Create Campaign - {guild.name}"
+            }
+            return templates.TemplateResponse("admin/campaign_create.html", context)
+        
+        elif request.method == "POST":
+            # Handle form submission
+            form_data = await request.form()
+            
+            # Validate form data
+            title = form_data.get("title", "").strip()
+            description = form_data.get("description", "").strip()
+            start_time_str = form_data.get("start_time", "").strip()
+            release_cadence_hours = form_data.get("release_cadence_hours", "24")
+            announcement_channels = form_data.getlist("announcement_channels")
+            
+            # Scheduled message fields
+            scheduled_message_title = form_data.get("scheduled_message_title", "").strip()
+            scheduled_message_description = form_data.get("scheduled_message_description", "").strip()
+            scheduled_message_time_str = form_data.get("scheduled_message_time", "").strip()
+            
+            errors = []
+            
+            if not title:
+                errors.append("Title is required")
+            if not description:
+                errors.append("Description is required")
+            if not start_time_str:
+                errors.append("Start time is required")
+            if not announcement_channels:
+                errors.append("At least one announcement channel is required")
+            
+            try:
+                release_cadence_hours = int(release_cadence_hours)
+                if not (1 <= release_cadence_hours <= 168):
+                    errors.append("Release cadence must be between 1 and 168 hours")
+            except (ValueError, TypeError):
+                errors.append("Invalid release cadence")
+                release_cadence_hours = 24
+            
+            # Parse start time
+            start_time = None
+            if start_time_str:
+                try:
+                    from datetime import datetime, timezone
+                    # Expect format: YYYY-MM-DDTHH:MM
+                    start_time = datetime.fromisoformat(start_time_str.replace("T", " "))
+                    # Ensure it's timezone-aware (assume UTC if no timezone)
+                    if start_time.tzinfo is None:
+                        start_time = start_time.replace(tzinfo=timezone.utc)
+                    
+                    # Validate start time is in future
+                    if start_time <= datetime.now(timezone.utc):
+                        errors.append("Start time must be in the future")
+                except ValueError:
+                    errors.append("Invalid start time format")
+            
+            # Parse scheduled message time (optional)
+            scheduled_message_time = None
+            if scheduled_message_time_str:
+                try:
+                    from datetime import datetime, timezone
+                    # Expect format: YYYY-MM-DDTHH:MM
+                    scheduled_message_time = datetime.fromisoformat(scheduled_message_time_str.replace("T", " "))
+                    # Ensure it's timezone-aware (assume UTC if no timezone)
+                    if scheduled_message_time.tzinfo is None:
+                        scheduled_message_time = scheduled_message_time.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    errors.append("Invalid scheduled message time format")
+            
+            # Validate scheduled message fields - if time is provided, title must be provided too
+            if scheduled_message_time and not scheduled_message_title:
+                errors.append("Scheduled message title is required when scheduled message time is set")
+            
+            if errors:
+                # Get channels again for form redisplay
+                try:
+                    channels = await get_valid_announcement_channels(guild_id)
+                except DiscordAPIError:
+                    channels = []
+                
+                context = {
+                    "request": request,
+                    "guild": guild,
+                    "channels": channels,
+                    "errors": errors,
+                    "form_data": form_data,
+                    "title": f"Create Campaign - {guild.name}"
+                }
+                return templates.TemplateResponse("admin/campaign_create.html", context, status_code=400)
+            
+            # Create campaign
+            async with get_db_session_context() as session:
+                campaign_ops = CampaignOperations(session)
+                
+                try:
+                    campaign = await campaign_ops.create_campaign(
+                        guild_id=guild_id,
+                        title=title,
+                        description=description,
+                        start_time=start_time,
+                        release_cadence_hours=release_cadence_hours,
+                        announcement_channels=announcement_channels,
+                        created_by="admin",  # TODO: Get actual admin user
+                        scheduled_message_title=scheduled_message_title or None,
+                        scheduled_message_description=scheduled_message_description or None,
+                        scheduled_message_time=scheduled_message_time
+                    )
+                    
+                    # Redirect to campaigns list with success message
+                    return RedirectResponse(
+                        url=f"/admin/guilds/{guild_id}/campaigns?created=1",
+                        status_code=302
+                    )
+                    
+                except ConflictError as e:
+                    errors.append(str(e))
+                    # Get channels again for form redisplay
+                    try:
+                        channels = await get_valid_announcement_channels(guild_id)
+                    except DiscordAPIError:
+                        channels = []
+                    
+                    context = {
+                        "request": request,
+                        "guild": guild,
+                        "channels": channels,
+                        "errors": errors,
+                        "form_data": form_data,
+                        "title": f"Create Campaign - {guild.name}"
+                    }
+                    return templates.TemplateResponse("admin/campaign_create.html", context, status_code=400)
+    
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found or bot not in guild",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error in campaign create for guild {guild_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to create campaign",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def campaign_edit(request: Request) -> Response:
+    """Edit an existing campaign."""
+    guild_id = request.path_params["guild_id"]
+    campaign_id = request.path_params["campaign_id"]
+    
+    try:
+        # Get guild info
+        guild = await get_guild_info(guild_id)
+        
+        async with get_db_session_context() as session:
+            campaign_ops = CampaignOperations(session)
+            campaign = await campaign_ops.get_campaign_by_id(campaign_id, guild_id)
+            
+            if not campaign:
+                context = {
+                    "request": request,
+                    "error": "Campaign not found",
+                    "title": "Campaign Not Found"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            if request.method == "GET":
+                # Get announcement channels for form
+                try:
+                    channels = await get_valid_announcement_channels(guild_id)
+                except DiscordAPIError:
+                    channels = []
+                
+                context = {
+                    "request": request,
+                    "guild": guild,
+                    "campaign": campaign,
+                    "channels": channels,
+                    "title": f"Edit Campaign - {campaign.title}"
+                }
+                return templates.TemplateResponse("admin/campaign_edit.html", context)
+            
+            elif request.method == "POST":
+                # Handle form submission
+                form_data = await request.form()
+                
+                # Validate form data (similar to create)
+                title = form_data.get("title", "").strip()
+                description = form_data.get("description", "").strip()
+                start_time_str = form_data.get("start_time", "").strip()
+                release_cadence_hours = form_data.get("release_cadence_hours", "24")
+                announcement_channels = form_data.getlist("announcement_channels")
+                is_active = form_data.get("is_active") == "on"
+                
+                errors = []
+                
+                if not title:
+                    errors.append("Title is required")
+                if not description:
+                    errors.append("Description is required")
+                if not start_time_str:
+                    errors.append("Start time is required")
+                if not announcement_channels:
+                    errors.append("At least one announcement channel is required")
+                
+                try:
+                    release_cadence_hours = int(release_cadence_hours)
+                    if not (1 <= release_cadence_hours <= 168):
+                        errors.append("Release cadence must be between 1 and 168 hours")
+                except (ValueError, TypeError):
+                    errors.append("Invalid release cadence")
+                    release_cadence_hours = 24
+                
+                # Parse start time
+                start_time = None
+                if start_time_str:
+                    try:
+                        from datetime import datetime, timezone
+                        start_time = datetime.fromisoformat(start_time_str.replace("T", " "))
+                        if start_time.tzinfo is None:
+                            start_time = start_time.replace(tzinfo=timezone.utc)
+                    except ValueError:
+                        errors.append("Invalid start time format")
+                
+                if errors:
+                    try:
+                        channels = await get_valid_announcement_channels(guild_id)
+                    except DiscordAPIError:
+                        channels = []
+                    
+                    context = {
+                        "request": request,
+                        "guild": guild,
+                        "campaign": campaign,
+                        "channels": channels,
+                        "errors": errors,
+                        "form_data": form_data,
+                        "title": f"Edit Campaign - {campaign.title}"
+                    }
+                    return templates.TemplateResponse("admin/campaign_edit.html", context, status_code=400)
+                
+                # Update campaign
+                try:
+                    updated_campaign = await campaign_ops.update_campaign(
+                        campaign_id=campaign.id,
+                        guild_id=guild_id,
+                        title=title,
+                        description=description,
+                        start_time=start_time,
+                        release_cadence_hours=release_cadence_hours,
+                        announcement_channels=announcement_channels,
+                        is_active=is_active
+                    )
+                    
+                    if updated_campaign:
+                        return RedirectResponse(
+                            url=f"/admin/guilds/{guild_id}/campaigns?updated=1",
+                            status_code=302
+                        )
+                    else:
+                        errors.append("Failed to update campaign")
+                        
+                except ConflictError as e:
+                    errors.append(str(e))
+                
+                if errors:
+                    try:
+                        channels = await get_valid_announcement_channels(guild_id)
+                    except DiscordAPIError:
+                        channels = []
+                    
+                    context = {
+                        "request": request,
+                        "guild": guild,
+                        "campaign": campaign,
+                        "channels": channels,
+                        "errors": errors,
+                        "form_data": form_data,
+                        "title": f"Edit Campaign - {campaign.title}"
+                    }
+                    return templates.TemplateResponse("admin/campaign_edit.html", context, status_code=400)
+    
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found or bot not in guild",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error in campaign edit for guild {guild_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to edit campaign",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def campaign_delete(request: Request) -> Response:
+    """Delete (deactivate) a campaign."""
+    guild_id = request.path_params["guild_id"]
+    campaign_id = request.path_params["campaign_id"]
+    
+    try:
+        async with get_db_session_context() as session:
+            campaign_ops = CampaignOperations(session)
+            success = await campaign_ops.delete_campaign(campaign_id, guild_id)
+            
+            if success:
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/campaigns?deleted=1",
+                    status_code=302
+                )
+            else:
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/campaigns?error=not_found",
+                    status_code=302
+                )
+    
+    except Exception as e:
+        logger.error(f"Error deleting campaign {campaign_id} in guild {guild_id}: {e}")
+        return RedirectResponse(
+            url=f"/admin/guilds/{guild_id}/campaigns?error=delete_failed",
+            status_code=302
+        )
+
+
+async def campaign_challenges(request: Request) -> Response:
+    """Manage challenges within a campaign."""
+    guild_id = request.path_params["guild_id"]
+    campaign_id = request.path_params["campaign_id"]
+    
+    try:
+        # Get guild info
+        guild = await get_guild_info(guild_id)
+        
+        async with get_db_session_context() as session:
+            campaign_ops = CampaignOperations(session)
+            campaign = await campaign_ops.get_campaign_with_challenges(campaign_id, guild_id)
+            
+            if not campaign:
+                context = {
+                    "request": request,
+                    "error": "Campaign not found",
+                    "title": "Campaign Not Found"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            context = {
+                "request": request,
+                "guild": guild,
+                "campaign": campaign,
+                "challenges": campaign.challenges,
+                "title": f"Challenges - {campaign.title}"
+            }
+            
+        return templates.TemplateResponse("admin/campaign_challenges.html", context)
+        
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found or bot not in guild",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error in campaign challenges for guild {guild_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to load campaign challenges",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+@admin_required
+async def challenge_create(request: Request) -> Response:
+    """Create a new challenge in a campaign."""
+    guild_id = request.path_params["guild_id"]
+    campaign_id = request.path_params["campaign_id"]
+    
+    try:
+        # Get guild info
+        guild = await get_guild_info(guild_id)
+        
+        async with get_db_session_context() as session:
+            campaign_ops = CampaignOperations(session)
+            campaign = await campaign_ops.get_campaign_by_id(UUID(campaign_id), guild_id)
+            
+            if not campaign:
+                context = {
+                    "request": request,
+                    "error": "Campaign not found",
+                    "title": "Campaign Not Found"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            if request.method == "GET":
+                context = {
+                    "request": request,
+                    "guild": guild,
+                    "campaign": campaign,
+                    "title": f"Create Challenge - {campaign.title}"
+                }
+                return templates.TemplateResponse("admin/challenge_create.html", context)
+            
+            elif request.method == "POST":
+                form = await request.form()
+                errors = []
+                
+                # Validate required fields
+                title = form.get("title", "").strip()
+                description = form.get("description", "").strip()
+                
+                if not title:
+                    errors.append("Challenge title is required")
+                if not description:
+                    errors.append("Challenge description is required")
+                
+                # Handle file upload
+                python_script = None
+                script_file = form.get("python_script")
+                if script_file and hasattr(script_file, 'file'):
+                    try:
+                        content = await script_file.read()
+                        python_script = content.decode('utf-8')
+                        
+                        # Basic validation for Python files
+                        if not script_file.filename.endswith('.py'):
+                            errors.append("Script file must be a .py file")
+                    except Exception as e:
+                        errors.append(f"Error reading script file: {str(e)}")
+                
+                if errors:
+                    context = {
+                        "request": request,
+                        "guild": guild,
+                        "campaign": campaign,
+                        "errors": errors,
+                        "form_data": form,
+                        "title": f"Create Challenge - {campaign.title}"
+                    }
+                    return templates.TemplateResponse("admin/challenge_create.html", context, status_code=400)
+                
+                # Get next order position
+                max_position = 0
+                if campaign.challenges:
+                    max_position = max(c.order_position for c in campaign.challenges)
+                
+                # Create challenge
+                challenge_ops = CampaignOperations(session)
+                await challenge_ops.create_challenge(
+                    campaign_id=UUID(campaign_id),
+                    title=title,
+                    description=description,
+                    order_position=max_position + 1,
+                    python_script=python_script,
+                    input_generator_script=python_script  # Use the same script for input generation
+                )
+                
+                # Redirect to campaign challenges page
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/campaigns/{campaign_id}/challenges?created=1",
+                    status_code=302
+                )
+        
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found or bot not in guild",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error creating challenge for campaign {campaign_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to create challenge",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+# ============================================================================
+# Scheduled Message Management Views
+# ============================================================================
+
+async def scheduled_messages_list(request: Request) -> Response:
+    """Display list of all scheduled messages for a campaign."""
+    guild_id = request.path_params["guild_id"]
+    campaign_id = request.path_params["campaign_id"]
+    
+    try:
+        # Get guild info
+        guild = await get_guild_info(guild_id)
+        
+        async with get_db_session_context() as session:
+            # Get campaign
+            campaign_ops = CampaignOperations(session)
+            campaign = await campaign_ops.get_campaign_by_id(UUID(campaign_id), guild_id)
+            
+            if not campaign:
+                context = {
+                    "request": request,
+                    "error": "Campaign not found",
+                    "title": "Campaign Not Found"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            # Get scheduled messages
+            message_ops = ScheduledMessageOperations(session)
+            scheduled_messages = await message_ops.get_scheduled_messages_by_campaign(UUID(campaign_id))
+            
+            context = {
+                "request": request,
+                "guild": guild,
+                "campaign": campaign,
+                "scheduled_messages": scheduled_messages,
+                "title": f"Scheduled Messages - {campaign.title}"
+            }
+            
+        return templates.TemplateResponse("admin/scheduled_messages_list.html", context)
+        
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found or bot not in guild",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error in scheduled messages list for campaign {campaign_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to load scheduled messages",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def scheduled_message_create(request: Request) -> Response:
+    """Create a new scheduled message for a campaign."""
+    guild_id = request.path_params["guild_id"]
+    campaign_id = request.path_params["campaign_id"]
+    
+    try:
+        # Get guild info
+        guild = await get_guild_info(guild_id)
+        
+        async with get_db_session_context() as session:
+            # Get campaign
+            campaign_ops = CampaignOperations(session)
+            campaign = await campaign_ops.get_campaign_by_id(UUID(campaign_id), guild_id)
+            
+            if not campaign:
+                context = {
+                    "request": request,
+                    "error": "Campaign not found",
+                    "title": "Campaign Not Found"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            if request.method == "GET":
+                context = {
+                    "request": request,
+                    "guild": guild,
+                    "campaign": campaign,
+                    "title": f"Create Scheduled Message - {campaign.title}"
+                }
+                return templates.TemplateResponse("admin/scheduled_message_create.html", context)
+            
+            elif request.method == "POST":
+                # Handle form submission
+                form_data = await request.form()
+                
+                # Validate form data
+                title = form_data.get("title", "").strip()
+                description = form_data.get("description", "").strip()
+                scheduled_time_str = form_data.get("scheduled_time", "").strip()
+                
+                errors = []
+                
+                if not title:
+                    errors.append("Title is required")
+                if not description:
+                    errors.append("Description is required")
+                if not scheduled_time_str:
+                    errors.append("Scheduled time is required")
+                
+                # Parse scheduled time
+                scheduled_time = None
+                if scheduled_time_str:
+                    try:
+                        from datetime import datetime, timezone
+                        # Expect format: YYYY-MM-DDTHH:MM
+                        scheduled_time = datetime.fromisoformat(scheduled_time_str.replace("T", " "))
+                        # Ensure it's timezone-aware (assume UTC if no timezone)
+                        if scheduled_time.tzinfo is None:
+                            scheduled_time = scheduled_time.replace(tzinfo=timezone.utc)
+                        
+                        # Validate scheduled time is in future
+                        if scheduled_time <= datetime.now(timezone.utc):
+                            errors.append("Scheduled time must be in the future")
+                    except ValueError:
+                        errors.append("Invalid scheduled time format")
+                
+                if errors:
+                    context = {
+                        "request": request,
+                        "guild": guild,
+                        "campaign": campaign,
+                        "errors": errors,
+                        "form_data": form_data,
+                        "title": f"Create Scheduled Message - {campaign.title}"
+                    }
+                    return templates.TemplateResponse("admin/scheduled_message_create.html", context, status_code=400)
+                
+                # Create scheduled message
+                message_ops = ScheduledMessageOperations(session)
+                await message_ops.create_scheduled_message(
+                    campaign_id=UUID(campaign_id),
+                    title=title,
+                    description=description,
+                    scheduled_time=scheduled_time,
+                    created_by="admin"  # TODO: Get actual admin username from session
+                )
+                
+                # Redirect to scheduled messages list
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages?created=1",
+                    status_code=302
+                )
+        
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found or bot not in guild",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error creating scheduled message for campaign {campaign_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to create scheduled message",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def scheduled_message_edit(request: Request) -> Response:
+    """Edit a scheduled message."""
+    guild_id = request.path_params["guild_id"]
+    campaign_id = request.path_params["campaign_id"]
+    message_id = request.path_params["message_id"]
+    
+    try:
+        # Get guild info
+        guild = await get_guild_info(guild_id)
+        
+        async with get_db_session_context() as session:
+            # Get campaign
+            campaign_ops = CampaignOperations(session)
+            campaign = await campaign_ops.get_campaign_by_id(UUID(campaign_id), guild_id)
+            
+            if not campaign:
+                context = {
+                    "request": request,
+                    "error": "Campaign not found",
+                    "title": "Campaign Not Found"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            # Get scheduled message
+            message_ops = ScheduledMessageOperations(session)
+            scheduled_message = await message_ops.get_scheduled_message_by_id(UUID(message_id), UUID(campaign_id))
+            
+            if not scheduled_message:
+                context = {
+                    "request": request,
+                    "error": "Scheduled message not found",
+                    "title": "Scheduled Message Not Found"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            if request.method == "GET":
+                context = {
+                    "request": request,
+                    "guild": guild,
+                    "campaign": campaign,
+                    "scheduled_message": scheduled_message,
+                    "title": f"Edit Scheduled Message - {scheduled_message.title}"
+                }
+                return templates.TemplateResponse("admin/scheduled_message_edit.html", context)
+            
+            elif request.method == "POST":
+                # Handle form submission
+                form_data = await request.form()
+                
+                # Validate form data
+                title = form_data.get("title", "").strip()
+                description = form_data.get("description", "").strip()
+                scheduled_time_str = form_data.get("scheduled_time", "").strip()
+                
+                errors = []
+                
+                if not title:
+                    errors.append("Title is required")
+                if not description:
+                    errors.append("Description is required")
+                if not scheduled_time_str:
+                    errors.append("Scheduled time is required")
+                
+                # Parse scheduled time
+                scheduled_time = None
+                if scheduled_time_str:
+                    try:
+                        from datetime import datetime, timezone
+                        # Expect format: YYYY-MM-DDTHH:MM
+                        scheduled_time = datetime.fromisoformat(scheduled_time_str.replace("T", " "))
+                        # Ensure it's timezone-aware (assume UTC if no timezone)
+                        if scheduled_time.tzinfo is None:
+                            scheduled_time = scheduled_time.replace(tzinfo=timezone.utc)
+                        
+                        # Only validate future time if message hasn't been sent yet
+                        if not scheduled_message.is_sent and scheduled_time <= datetime.now(timezone.utc):
+                            errors.append("Scheduled time must be in the future")
+                    except ValueError:
+                        errors.append("Invalid scheduled time format")
+                
+                if errors:
+                    context = {
+                        "request": request,
+                        "guild": guild,
+                        "campaign": campaign,
+                        "scheduled_message": scheduled_message,
+                        "errors": errors,
+                        "form_data": form_data,
+                        "title": f"Edit Scheduled Message - {scheduled_message.title}"
+                    }
+                    return templates.TemplateResponse("admin/scheduled_message_edit.html", context, status_code=400)
+                
+                # Update scheduled message
+                await message_ops.update_scheduled_message(
+                    message_id=UUID(message_id),
+                    campaign_id=UUID(campaign_id),
+                    title=title,
+                    description=description,
+                    scheduled_time=scheduled_time
+                )
+                
+                # Redirect to scheduled messages list
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages?updated=1",
+                    status_code=302
+                )
+        
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found or bot not in guild",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error editing scheduled message {message_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to edit scheduled message",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def scheduled_message_delete(request: Request) -> Response:
+    """Delete a scheduled message."""
+    guild_id = request.path_params["guild_id"]
+    campaign_id = request.path_params["campaign_id"]
+    message_id = request.path_params["message_id"]
+    
+    try:
+        async with get_db_session_context() as session:
+            message_ops = ScheduledMessageOperations(session)
+            deleted = await message_ops.delete_scheduled_message(UUID(message_id), UUID(campaign_id))
+            
+            if not deleted:
+                context = {
+                    "request": request,
+                    "error": "Scheduled message not found",
+                    "title": "Scheduled Message Not Found"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            # Redirect to scheduled messages list
+            return RedirectResponse(
+                url=f"/admin/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages?deleted=1",
+                status_code=302
+            )
+        
+    except Exception as e:
+        logger.error(f"Error deleting scheduled message {message_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to delete scheduled message",
             "title": "Error"
         }
         return templates.TemplateResponse("admin/error.html", context, status_code=500)
