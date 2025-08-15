@@ -3299,6 +3299,97 @@ class ChallengeSubmissionOperations:
         except Exception as e:
             raise DatabaseOperationError(f"Failed to get campaign scoreboard: {e}") from e
     
+    async def get_detailed_campaign_scoreboard(self, campaign_id: UUID) -> Dict[str, Any]:
+        """Get detailed scoreboard data organized by challenge.
+        
+        Args:
+            campaign_id: Campaign UUID
+            
+        Returns:
+            Dictionary with challenge breakdown and overall squad totals
+        """
+        try:
+            # Get all successful submissions organized by challenge
+            submissions_query = select(
+                Challenge.title.label("challenge_title"),
+                Challenge.id.label("challenge_id"),
+                ChallengeSubmission.points_earned,
+                Squad.name.label("squad_name"),
+                Squad.id.label("squad_id")
+            ).select_from(
+                Challenge
+            ).join(
+                ChallengeSubmission, Challenge.id == ChallengeSubmission.challenge_id
+            ).join(
+                Squad, ChallengeSubmission.squad_id == Squad.id
+            ).where(
+                and_(
+                    Challenge.campaign_id == campaign_id,
+                    ChallengeSubmission.is_correct == True,
+                    ChallengeSubmission.is_first_success == True
+                )
+            ).order_by(Challenge.title, Squad.name)
+            
+            result = await self.session.execute(submissions_query)
+            submissions = result.fetchall()
+            
+            # Group data by challenge
+            challenges_breakdown = {}
+            squad_totals = {}
+            
+            for submission in submissions:
+                challenge_title = submission.challenge_title
+                squad_name = submission.squad_name
+                squad_id = submission.squad_id
+                points = submission.points_earned or 0
+                
+                # Track challenge breakdown
+                if challenge_title not in challenges_breakdown:
+                    challenges_breakdown[challenge_title] = []
+                
+                challenges_breakdown[challenge_title].append({
+                    "squad_name": squad_name,
+                    "squad_id": str(squad_id),
+                    "points_earned": points
+                })
+                
+                # Track squad totals
+                if squad_id not in squad_totals:
+                    squad_totals[squad_id] = {
+                        "squad_name": squad_name,
+                        "squad_id": str(squad_id),
+                        "total_points": 0,
+                        "challenges_completed": 0
+                    }
+                
+                squad_totals[squad_id]["total_points"] += points
+                squad_totals[squad_id]["challenges_completed"] += 1
+            
+            # Convert to lists and sort
+            challenges_list = []
+            for challenge_title, squads in challenges_breakdown.items():
+                # Sort squads by points descending
+                squads.sort(key=lambda x: x["points_earned"], reverse=True)
+                challenges_list.append({
+                    "challenge_title": challenge_title,
+                    "submissions": squads
+                })
+            
+            # Sort challenges alphabetically
+            challenges_list.sort(key=lambda x: x["challenge_title"])
+            
+            # Convert squad totals to list and sort by total points
+            squad_totals_list = list(squad_totals.values())
+            squad_totals_list.sort(key=lambda x: x["total_points"], reverse=True)
+            
+            return {
+                "challenges_breakdown": challenges_list,
+                "squad_totals": squad_totals_list
+            }
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get detailed campaign scoreboard: {e}") from e
+    
     async def get_campaign_submission_count(self, campaign_id: UUID) -> int:
         """Get the total number of submissions for a campaign.
         
