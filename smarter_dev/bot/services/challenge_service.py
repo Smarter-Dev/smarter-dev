@@ -171,15 +171,24 @@ class ChallengeService(BaseService):
         # Create the announcement message
         announcement_text = self._format_challenge_announcement(title, description)
         
-        # Send announcement to each channel
+        # Send announcement to each channel with retry logic
         successful_announcements = 0
+        failed_channels = []
         for channel_id in announcement_channels:
-            try:
-                await self._send_challenge_message(channel_id, announcement_text, challenge_id)
+            success = await self._send_challenge_with_retry(channel_id, announcement_text, challenge_id, title)
+            if success:
                 successful_announcements += 1
-                logger.info(f"Announced challenge '{title}' to channel {channel_id}")
-            except Exception as e:
-                logger.error(f"Failed to announce challenge '{title}' to channel {channel_id}: {e}")
+            else:
+                failed_channels.append(channel_id)
+        
+        # If some channels failed, retry them with longer backoff
+        if failed_channels:
+            logger.warning(f"Retrying {len(failed_channels)} failed channels with extended backoff")
+            await asyncio.sleep(30)  # Wait 30 seconds before retrying failed channels
+            for channel_id in failed_channels:
+                success = await self._send_challenge_with_retry(channel_id, announcement_text, challenge_id, title, max_retries=5)
+                if success:
+                    successful_announcements += 1
         
         if successful_announcements > 0:
             # Mark the challenge as announced and released in the database
@@ -189,6 +198,51 @@ class ChallengeService(BaseService):
                 logger.info(f"Marked challenge '{title}' as announced and released ({successful_announcements}/{len(announcement_channels)} channels)")
             except Exception as e:
                 logger.error(f"Failed to mark challenge {challenge_id} as announced/released: {e}")
+        else:
+            logger.error(f"Failed to announce challenge '{title}' to any channels")
+    
+    async def _send_challenge_with_retry(self, channel_id: str, message: str, challenge_id: str, title: str, max_retries: int = 3) -> bool:
+        """Send a challenge announcement with retry logic.
+        
+        Args:
+            channel_id: Discord channel ID
+            message: Message text to send
+            challenge_id: Challenge UUID for button interactions
+            title: Challenge title for logging
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            True if message was sent successfully, False otherwise
+        """
+        for attempt in range(max_retries + 1):
+            try:
+                await self._send_challenge_message(channel_id, message, challenge_id)
+                logger.info(f"Successfully announced challenge '{title}' to channel {channel_id}")
+                return True
+            except ServiceError as e:
+                if "Channel not found" in str(e) or "Invalid channel ID" in str(e):
+                    logger.error(f"Channel {channel_id} is invalid or not found, skipping")
+                    return False
+                elif "No permission" in str(e):
+                    logger.error(f"No permission to send to channel {channel_id}, skipping")
+                    return False
+                else:
+                    if attempt < max_retries:
+                        wait_time = (2 ** attempt) * 1.5  # Exponential backoff: 1.5s, 3s, 6s
+                        logger.warning(f"Failed to announce challenge to channel {channel_id}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error(f"Failed to announce challenge '{title}' to channel {channel_id} after {max_retries} retries: {e}")
+                        return False
+            except Exception as e:
+                if attempt < max_retries:
+                    wait_time = (2 ** attempt) * 1.5
+                    logger.warning(f"Unexpected error announcing to channel {channel_id}, retrying in {wait_time}s: {e}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to announce to channel {channel_id} after {max_retries} retries: {e}")
+                    return False
+        return False
     
     def _format_challenge_announcement(self, title: str, description: str) -> str:
         """Format the challenge announcement message.
@@ -251,14 +305,8 @@ class ChallengeService(BaseService):
                 mentions_everyone=True
             )
             
-            # Pin the message to the channel
-            try:
-                await self._bot.rest.pin_message(channel_id_int, sent_message.id)
-                logger.info(f"Pinned challenge announcement message {sent_message.id} in channel {channel_id}")
-            except hikari.ForbiddenError:
-                logger.warning(f"No permission to pin message in channel {channel_id}")
-            except Exception as pin_error:
-                logger.error(f"Failed to pin message in channel {channel_id}: {pin_error}")
+            # Pin the message with retry logic
+            await self._pin_message_with_retry(channel_id_int, sent_message.id)
             
         except ValueError as e:
             logger.error(f"Invalid channel ID format: {channel_id}")
@@ -272,6 +320,42 @@ class ChallengeService(BaseService):
         except Exception as e:
             logger.error(f"Failed to send message to channel {channel_id}: {e}")
             raise ServiceError(f"Failed to send message to channel {channel_id}: {str(e)}") from e
+    
+    async def _pin_message_with_retry(self, channel_id: int, message_id: int, max_retries: int = 3) -> None:
+        """Pin a message with retry logic.
+        
+        Args:
+            channel_id: Discord channel ID
+            message_id: Message ID to pin
+            max_retries: Maximum number of retry attempts
+        """
+        for attempt in range(max_retries + 1):
+            try:
+                await self._bot.rest.pin_message(channel_id, message_id)
+                logger.info(f"Successfully pinned challenge message {message_id} in channel {channel_id}")
+                return
+            except hikari.ForbiddenError:
+                logger.warning(f"No permission to pin message in channel {channel_id}")
+                return  # No point retrying permission errors
+            except hikari.RateLimitTooLongError as e:
+                logger.warning(f"Rate limit too long for pinning in channel {channel_id}: {e}")
+                return  # Don't retry if rate limit is too long
+            except (hikari.RateLimitedError, hikari.InternalServerError) as e:
+                if attempt < max_retries:
+                    wait_time = (2 ** attempt) * 2  # Exponential backoff: 2s, 4s, 8s
+                    logger.warning(f"Failed to pin challenge message, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries}): {e}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to pin challenge message {message_id} after {max_retries} retries: {e}")
+                    return
+            except Exception as e:
+                if attempt < max_retries:
+                    wait_time = (2 ** attempt) * 2
+                    logger.warning(f"Unexpected error pinning challenge message, retrying in {wait_time}s: {e}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to pin challenge message {message_id} after {max_retries} retries: {e}")
+                    return
     
     async def _mark_challenge_announced(self, challenge_id: str) -> None:
         """Mark a challenge as announced in the database.
