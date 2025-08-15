@@ -305,6 +305,76 @@ async def get_upcoming_campaign(
         )
 
 
+@router.get("/detailed-scoreboard")
+async def get_detailed_scoreboard(
+    guild_id: str = Query(..., description="Discord guild ID"),
+    session: AsyncSession = Depends(get_db_session),
+    api_key = Depends(verify_api_key),
+) -> Dict[str, Any]:
+    """Get detailed scoreboard with points breakdown by challenge.
+    
+    Returns squad rankings with detailed breakdown of points earned per challenge.
+    
+    Args:
+        guild_id: Discord guild ID (query parameter)
+        
+    Returns:
+        Dictionary with campaign info, detailed scoreboard data, and statistics
+    """
+    try:
+        # Get the most recently begun campaign for the guild
+        campaign_ops = CampaignOperations(session)
+        current_campaign = await campaign_ops.get_most_recent_campaign(guild_id)
+        
+        if not current_campaign:
+            return {
+                "campaign": None,
+                "detailed_scoreboard": [],
+                "total_submissions": 0,
+                "total_challenges": 0
+            }
+        
+        # Get detailed scoreboard data for the campaign
+        submission_ops = ChallengeSubmissionOperations(session)
+        detailed_data = await submission_ops.get_detailed_campaign_scoreboard(current_campaign.id)
+        
+        # Get total submission and challenge counts for stats
+        total_submissions = await submission_ops.get_campaign_submission_count(current_campaign.id)
+        total_challenges = await campaign_ops.get_campaign_challenge_count(current_campaign.id)
+        
+        # Format campaign data
+        campaign_data = {
+            "id": str(current_campaign.id),
+            "name": current_campaign.title,
+            "start_date": current_campaign.start_time.strftime("%B %d, %Y") if current_campaign.start_time else None,
+            "end_date": None,
+            "is_active": current_campaign.is_active,
+            "guild_id": current_campaign.guild_id
+        }
+        
+        logger.info(f"Retrieved detailed scoreboard for campaign {current_campaign.id} with {len(detailed_data)} entries")
+        
+        return {
+            "campaign": campaign_data,
+            "detailed_scoreboard": detailed_data,
+            "total_submissions": total_submissions,
+            "total_challenges": total_challenges
+        }
+        
+    except DatabaseOperationError as e:
+        logger.error(f"Database error getting detailed scoreboard: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve detailed scoreboard data"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error getting detailed scoreboard: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
 @router.get("/{challenge_id}")
 async def get_challenge(
     challenge_id: UUID,
