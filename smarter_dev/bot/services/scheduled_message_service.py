@@ -171,15 +171,24 @@ class ScheduledMessageService(BaseService):
         # Create the message content
         message_text = self._format_scheduled_message(title, description)
         
-        # Send message to each channel (no buttons for scheduled messages)
+        # Send message to each channel with retry logic
         successful_sends = 0
+        failed_channels = []
         for channel_id in announcement_channels:
-            try:
-                await self._send_message_to_channel(channel_id, message_text)
+            success = await self._send_message_with_retry(channel_id, message_text, title)
+            if success:
                 successful_sends += 1
-                logger.info(f"Sent scheduled message '{title}' to channel {channel_id}")
-            except Exception as e:
-                logger.error(f"Failed to send scheduled message '{title}' to channel {channel_id}: {e}")
+            else:
+                failed_channels.append(channel_id)
+        
+        # If some channels failed, retry them with longer backoff
+        if failed_channels:
+            logger.warning(f"Retrying {len(failed_channels)} failed channels with extended backoff")
+            await asyncio.sleep(30)  # Wait 30 seconds before retrying failed channels
+            for channel_id in failed_channels:
+                success = await self._send_message_with_retry(channel_id, message_text, title, max_retries=5)
+                if success:
+                    successful_sends += 1
         
         if successful_sends > 0:
             # Mark the scheduled message as sent in the database
@@ -188,6 +197,50 @@ class ScheduledMessageService(BaseService):
                 logger.info(f"Marked scheduled message '{message_id}' as sent ({successful_sends}/{len(announcement_channels)} channels)")
             except Exception as e:
                 logger.error(f"Failed to mark scheduled message as sent for message {message_id}: {e}")
+        else:
+            logger.error(f"Failed to send scheduled message '{title}' to any channels")
+    
+    async def _send_message_with_retry(self, channel_id: str, message: str, title: str, max_retries: int = 3) -> bool:
+        """Send a message to a Discord channel with retry logic.
+        
+        Args:
+            channel_id: Discord channel ID
+            message: Message text to send
+            title: Message title for logging
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            True if message was sent successfully, False otherwise
+        """
+        for attempt in range(max_retries + 1):
+            try:
+                await self._send_message_to_channel(channel_id, message)
+                logger.info(f"Successfully sent scheduled message '{title}' to channel {channel_id}")
+                return True
+            except ServiceError as e:
+                if "Channel not found" in str(e) or "Invalid channel ID" in str(e):
+                    logger.error(f"Channel {channel_id} is invalid or not found, skipping")
+                    return False
+                elif "No permission" in str(e):
+                    logger.error(f"No permission to send to channel {channel_id}, skipping")
+                    return False
+                else:
+                    if attempt < max_retries:
+                        wait_time = (2 ** attempt) * 1.5  # Exponential backoff: 1.5s, 3s, 6s
+                        logger.warning(f"Failed to send message to channel {channel_id}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error(f"Failed to send scheduled message '{title}' to channel {channel_id} after {max_retries} retries: {e}")
+                        return False
+            except Exception as e:
+                if attempt < max_retries:
+                    wait_time = (2 ** attempt) * 1.5
+                    logger.warning(f"Unexpected error sending to channel {channel_id}, retrying in {wait_time}s: {e}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to send to channel {channel_id} after {max_retries} retries: {e}")
+                    return False
+        return False
     
     def _format_scheduled_message(self, title: str, description: str) -> str:
         """Format the scheduled message content.
@@ -215,7 +268,7 @@ class ScheduledMessageService(BaseService):
         return message
     
     async def _send_message_to_channel(self, channel_id: str, message: str) -> None:
-        """Send a message to a Discord channel (without buttons).
+        """Send a message to a Discord channel and pin it.
         
         Args:
             channel_id: Discord channel ID
@@ -230,14 +283,8 @@ class ScheduledMessageService(BaseService):
                 content=message
             )
             
-            # Pin the message to the channel
-            try:
-                await self._bot.rest.pin_message(channel_id_int, sent_message.id)
-                logger.info(f"Pinned scheduled message {sent_message.id} in channel {channel_id}")
-            except hikari.ForbiddenError:
-                logger.warning(f"No permission to pin message in channel {channel_id}")
-            except Exception as pin_error:
-                logger.error(f"Failed to pin message in channel {channel_id}: {pin_error}")
+            # Pin the message with retry logic
+            await self._pin_message_with_retry(channel_id_int, sent_message.id)
             
         except ValueError as e:
             logger.error(f"Invalid channel ID format: {channel_id}")
@@ -251,6 +298,42 @@ class ScheduledMessageService(BaseService):
         except Exception as e:
             logger.error(f"Failed to send message to channel {channel_id}: {e}")
             raise ServiceError(f"Failed to send message to channel {channel_id}: {str(e)}") from e
+    
+    async def _pin_message_with_retry(self, channel_id: int, message_id: int, max_retries: int = 3) -> None:
+        """Pin a message with retry logic.
+        
+        Args:
+            channel_id: Discord channel ID
+            message_id: Message ID to pin
+            max_retries: Maximum number of retry attempts
+        """
+        for attempt in range(max_retries + 1):
+            try:
+                await self._bot.rest.pin_message(channel_id, message_id)
+                logger.info(f"Successfully pinned message {message_id} in channel {channel_id}")
+                return
+            except hikari.ForbiddenError:
+                logger.warning(f"No permission to pin message in channel {channel_id}")
+                return  # No point retrying permission errors
+            except hikari.RateLimitTooLongError as e:
+                logger.warning(f"Rate limit too long for pinning in channel {channel_id}: {e}")
+                return  # Don't retry if rate limit is too long
+            except (hikari.RateLimitedError, hikari.InternalServerError) as e:
+                if attempt < max_retries:
+                    wait_time = (2 ** attempt) * 2  # Exponential backoff: 2s, 4s, 8s
+                    logger.warning(f"Failed to pin message, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries}): {e}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to pin message {message_id} after {max_retries} retries: {e}")
+                    return
+            except Exception as e:
+                if attempt < max_retries:
+                    wait_time = (2 ** attempt) * 2
+                    logger.warning(f"Unexpected error pinning message, retrying in {wait_time}s: {e}")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Failed to pin message {message_id} after {max_retries} retries: {e}")
+                    return
     
     async def _mark_scheduled_message_sent(self, message_id: str) -> None:
         """Mark a scheduled message as sent in the database.
