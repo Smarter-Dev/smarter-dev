@@ -309,11 +309,11 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
                     
                     # Build submissions text
                     submissions_text = ""
-                    for j, submission in enumerate(submissions[:3]):  # Show top 3 submissions per challenge
+                    for j, submission in enumerate(submissions):  # Show all submissions
                         squad_name = submission.get("squad_name", "Unknown Squad")
                         points = submission.get("points_earned", 0)
                         
-                        # Add medal for top submission
+                        # Add medal for top 3 submissions
                         if j == 0:
                             medal = "🥇"
                         elif j == 1:
@@ -327,8 +327,6 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
                     
                     if not submissions_text:
                         submissions_text = "No submissions yet"
-                    elif len(submissions) > 3:
-                        submissions_text += f"... and {len(submissions) - 3} more submissions"
                     
                     embed.add_field(
                         name=f"{challenge_title}",
