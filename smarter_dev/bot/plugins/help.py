@@ -127,7 +127,8 @@ async def generate_help_response(
     guild_id: str = None,
     channel_id: str = None,
     user_username: str = None,
-    interaction_type: str = "unknown"
+    interaction_type: str = "unknown",
+    bot_id: str = None
 ) -> str:
     """Generate a help response with rate limiting and conversation storage.
     
@@ -139,6 +140,7 @@ async def generate_help_response(
         channel_id: Discord channel ID 
         user_username: Username for conversation record
         interaction_type: 'slash_command' or 'mention'
+        bot_id: The bot's Discord user ID for context identification
         
     Returns:
         str: Generated response or rate limit message
@@ -163,7 +165,7 @@ async def generate_help_response(
         start_time = datetime.now(timezone.utc)
         
         # Generate response with token tracking
-        response, tokens_used = help_agent.generate_response(user_question, context_messages)
+        response, tokens_used = help_agent.generate_response(user_question, context_messages, bot_id)
         
         # Calculate response time
         end_time = datetime.now(timezone.utc)
@@ -243,8 +245,11 @@ async def help_command(ctx: lightbulb.Context) -> None:
     context_messages = await gather_message_context(
         ctx.bot, 
         ctx.channel_id, 
-        limit=5
+        limit=10
     )
+    
+    # Get bot user for ID
+    bot_user = ctx.bot.get_me()
     
     # Generate response with conversation storage
     response = await generate_help_response(
@@ -254,7 +259,8 @@ async def help_command(ctx: lightbulb.Context) -> None:
         guild_id=str(ctx.guild_id) if ctx.guild_id else None,
         channel_id=str(ctx.channel_id),
         user_username=ctx.user.display_name or ctx.user.username,
-        interaction_type="slash_command"
+        interaction_type="slash_command",
+        bot_id=str(bot_user.id) if bot_user else None
     )
     
     # Edit the deferred response with the actual content
@@ -296,7 +302,7 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
         context_messages = await gather_message_context(
             plugin.bot, 
             event.channel_id, 
-            limit=6  # Get 6 to account for current message
+            limit=11  # Get 11 to account for current message
         )
         
         # Remove the current message from context
@@ -304,7 +310,7 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
             context_messages = [
                 msg for msg in context_messages 
                 if msg.content != event.content
-            ][-5:]  # Keep last 5
+            ][-10:]  # Keep last 10
         
         # Generate response with conversation storage (typing indicator will continue during this)
         response = await generate_help_response(
@@ -314,7 +320,8 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
             guild_id=str(event.guild_id) if event.guild_id else None,
             channel_id=str(event.channel_id),
             user_username=event.author.display_name or event.author.username,
-            interaction_type="mention"
+            interaction_type="mention",
+            bot_id=str(bot_user.id)
         )
     
     # Send public response as a reply (typing indicator stops automatically when we send the message)
