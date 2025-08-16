@@ -163,8 +163,18 @@ async def scoreboard_command(ctx: lightbulb.Context) -> None:
                 text="Tip: Join a squad with /squads join to participate in challenges!"
             )
 
+            # Add share button
+            share_button = hikari.impl.InteractiveButtonBuilder(
+                style=hikari.ButtonStyle.PRIMARY,
+                custom_id="share_scoreboard",
+                emoji="📤",
+                label="Share"
+            )
+            
+            action_row = hikari.impl.MessageActionRowBuilder()
+            action_row.add_component(share_button)
 
-            await ctx.edit_last_response(content=None, embed=embed)
+            await ctx.edit_last_response(content=None, embed=embed, components=[action_row])
 
         except APIError as api_error:
             logger.error(f"API error in scoreboard command: {api_error}")
@@ -378,8 +388,18 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
                 text="This shows detailed points breakdown for each completed challenge"
             )
 
+            # Add share button
+            share_button = hikari.impl.InteractiveButtonBuilder(
+                style=hikari.ButtonStyle.PRIMARY,
+                custom_id="share_breakdown",
+                emoji="📤",
+                label="Share"
+            )
+            
+            action_row = hikari.impl.MessageActionRowBuilder()
+            action_row.add_component(share_button)
 
-            await ctx.edit_last_response(content=None, embed=embed)
+            await ctx.edit_last_response(content=None, embed=embed, components=[action_row])
 
         except APIError as api_error:
             logger.error(f"API error in breakdown command: {api_error}")

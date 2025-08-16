@@ -204,6 +204,10 @@ async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> 
             await handle_squad_list_share_interaction(event)
         elif custom_id.startswith("share_tldr:"):
             await handle_tldr_share_interaction(event)
+        elif custom_id == "share_scoreboard":
+            await handle_scoreboard_share_interaction(event)
+        elif custom_id == "share_breakdown":
+            await handle_breakdown_share_interaction(event)
         elif custom_id.startswith("get_input:"):
             await handle_challenge_get_input_interaction(event)
         elif custom_id.startswith("confirm_get_input:"):
@@ -706,6 +710,128 @@ async def handle_tldr_share_interaction(event: hikari.InteractionCreateEvent) ->
                 )
         except Exception as e2:
             logger.error(f"Failed to send TLDR share error response: {e2}")
+
+
+async def handle_scoreboard_share_interaction(event: hikari.InteractionCreateEvent) -> None:
+    """Handle scoreboard share button interactions.
+    
+    Args:
+        event: The interaction event
+    """
+    if not isinstance(event.interaction, hikari.ComponentInteraction):
+        return
+        
+    user_id = str(event.interaction.user.id)
+    guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
+    
+    if not guild_id:
+        logger.error("Scoreboard share interaction without guild context")
+        return
+    
+    logger.info(f"Scoreboard share interaction from user {user_id} in guild {guild_id}")
+    
+    try:
+        # Get the original embed from the interaction message
+        original_message = event.interaction.message
+        if not original_message or not original_message.embeds:
+            logger.error("No original message/embed found for scoreboard share")
+            await event.interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_CREATE,
+                content="❌ Original scoreboard not found.",
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
+            return
+        
+        # Get the original embed
+        original_embed = original_message.embeds[0]
+        
+        # Acknowledge the interaction first
+        await event.interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_CREATE,
+            content="📤 Sharing scoreboard...",
+            flags=hikari.MessageFlag.EPHEMERAL
+        )
+        
+        # Send the embed as a public message in the same channel
+        channel = event.interaction.get_channel()
+        if channel:
+            await channel.send(embed=original_embed)
+            logger.info(f"Shared scoreboard in channel {channel.id}")
+        else:
+            logger.error("Could not get channel for scoreboard share")
+            
+    except Exception as e:
+        logger.exception(f"Error in scoreboard share interaction: {e}")
+        try:
+            if not event.interaction.is_responded():
+                await event.interaction.create_initial_response(
+                    hikari.ResponseType.MESSAGE_CREATE,
+                    content="❌ Failed to share scoreboard.",
+                    flags=hikari.MessageFlag.EPHEMERAL
+                )
+        except Exception as e2:
+            logger.error(f"Failed to send scoreboard share error response: {e2}")
+
+
+async def handle_breakdown_share_interaction(event: hikari.InteractionCreateEvent) -> None:
+    """Handle breakdown share button interactions.
+    
+    Args:
+        event: The interaction event
+    """
+    if not isinstance(event.interaction, hikari.ComponentInteraction):
+        return
+        
+    user_id = str(event.interaction.user.id)
+    guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
+    
+    if not guild_id:
+        logger.error("Breakdown share interaction without guild context")
+        return
+    
+    logger.info(f"Breakdown share interaction from user {user_id} in guild {guild_id}")
+    
+    try:
+        # Get the original embed from the interaction message
+        original_message = event.interaction.message
+        if not original_message or not original_message.embeds:
+            logger.error("No original message/embed found for breakdown share")
+            await event.interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_CREATE,
+                content="❌ Original breakdown not found.",
+                flags=hikari.MessageFlag.EPHEMERAL
+            )
+            return
+        
+        # Get the original embed
+        original_embed = original_message.embeds[0]
+        
+        # Acknowledge the interaction first
+        await event.interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_CREATE,
+            content="📤 Sharing breakdown...",
+            flags=hikari.MessageFlag.EPHEMERAL
+        )
+        
+        # Send the embed as a public message in the same channel
+        channel = event.interaction.get_channel()
+        if channel:
+            await channel.send(embed=original_embed)
+            logger.info(f"Shared breakdown in channel {channel.id}")
+        else:
+            logger.error("Could not get channel for breakdown share")
+            
+    except Exception as e:
+        logger.exception(f"Error in breakdown share interaction: {e}")
+        try:
+            if not event.interaction.is_responded():
+                await event.interaction.create_initial_response(
+                    hikari.ResponseType.MESSAGE_CREATE,
+                    content="❌ Failed to share breakdown.",
+                    flags=hikari.MessageFlag.EPHEMERAL
+                )
+        except Exception as e2:
+            logger.error(f"Failed to send breakdown share error response: {e2}")
 
 
 async def handle_challenge_get_input_interaction(event: hikari.InteractionCreateEvent) -> None:
