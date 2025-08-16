@@ -18,6 +18,7 @@ dspy.configure(lm=lm, track_usage=True)
 class DiscordMessage(BaseModel):
     """Represents a Discord message for context."""
     author: str
+    author_id: Optional[str] = None  # Discord user ID as string
     timestamp: datetime
     content: str
 
@@ -196,6 +197,16 @@ rate_limiter = RateLimiter()
 class HelpAgentSignature(dspy.Signature):
     """You are a helpful Discord bot assistant for the Smarter Dev community. You help users understand and use the bot's bytes economy and squad management systems.
 
+    ## IMPORTANT: UNDERSTANDING CONTEXT & FOLLOW-UPS
+    When analyzing conversation history, pay special attention to:
+    - Messages marked with `from-bot="true"` are YOUR previous messages
+    - If a user is replying to or mentioning you about one of YOUR messages, acknowledge what you said before and build on it naturally
+    - When you see your own messages in history, understand what information you already provided to avoid repetition
+    - If the user is asking about something you just said, be conversational: "Yeah, about that...", "Right, so what I meant was...", "Good question on that point..."
+    - For follow-ups, be more casual and conversational rather than formal - you're continuing a discussion, not starting fresh
+    - If the user seems confused about your previous response, rephrase or explain it differently
+    - When the user builds on your previous answer, acknowledge their engagement: "Exactly!", "That's right", "Good thinking"
+
     ## BYTES ECONOMY SYSTEM
     The bytes economy is a server currency system where users earn and spend "bytes."
 
@@ -290,14 +301,16 @@ class HelpAgentSignature(dspy.Signature):
     - **Solution**: Check bot is online, try again in a few minutes, contact admins
 
     ## RESPONSE GUIDELINES:
-    - Be helpful and friendly
-    - Provide specific command examples
+    - Be helpful and friendly, more conversational for follow-ups
+    - Provide specific command examples when introducing new concepts
     - Explain restrictions and limits clearly
-    - Use the conversation context to give relevant answers
+    - Use the conversation context to give relevant answers and acknowledge previous interactions
     - Keep responses concise but informative
     - Use emojis sparingly and appropriately
     - If the user asks a question, answer it. If the user asks for help, provide help.
     - If the user goes off topic, play along and keep the conversation going, gently redirect them back to the topic.
+    - When continuing a conversation, reference what was discussed before: "Like I mentioned...", "Building on what we talked about...", "Going back to your question about..."
+    - Match the user's energy level - if they're excited, be enthusiastic; if they're confused, be patient and helpful
     """
     
     context_messages: str = dspy.InputField(description="Recent conversation messages for context")
@@ -314,13 +327,15 @@ class HelpAgent:
     def generate_response(
         self, 
         user_question: str, 
-        context_messages: List[DiscordMessage] = None
+        context_messages: List[DiscordMessage] = None,
+        bot_id: str = None
     ) -> tuple[str, int]:
         """Generate a helpful response to a user's question.
         
         Args:
             user_question: The user's question about the bot
             context_messages: Recent conversation messages for context
+            bot_id: The bot's Discord user ID for identifying its messages
             
         Returns:
             tuple[str, int]: Generated response and token usage count
@@ -329,8 +344,11 @@ class HelpAgent:
         context_str = ""
         if context_messages:
             context_lines = []
-            for msg in context_messages[-5:]:  # Last 5 messages
+            for msg in context_messages[-10:]:  # Last 10 messages
                 timestamp_str = msg.timestamp.strftime("%m/%d %H:%M")
+                
+                # Check if this is a bot message by comparing IDs
+                is_bot_message = msg.author_id and msg.author_id == bot_id
                 
                 # Parse reply context for structured XML
                 replied_author, replied_content, actual_content = parse_reply_context(msg.content)
@@ -338,7 +356,7 @@ class HelpAgent:
                 if replied_author and replied_content:
                     # Message with reply context - use structured format
                     context_lines.append(
-                        f"<message>"
+                        f"<message{' from-bot="true"' if is_bot_message else ''}>"
                         f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
                         f"<author>{html.escape(msg.author)}</author>"
                         f"<replying-to>"
@@ -351,7 +369,7 @@ class HelpAgent:
                 else:
                     # Regular message without reply context
                     context_lines.append(
-                        f"<message>"
+                        f"<message{' from-bot="true"' if is_bot_message else ''}>"
                         f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
                         f"<author>{html.escape(msg.author)}</author>"
                         f"<content>{html.escape(msg.content)}</content>"

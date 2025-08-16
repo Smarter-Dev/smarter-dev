@@ -171,6 +171,7 @@ async def gather_message_context(
             # Convert to our message format
             discord_msg = DiscordMessage(
                 author=message.author.display_name or message.author.username,
+                author_id=str(message.author.id),  # Include author ID for bot detection
                 timestamp=message.created_at.replace(tzinfo=timezone.utc),
                 content=content
             )
