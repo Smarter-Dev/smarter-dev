@@ -760,15 +760,20 @@ async def handle_scoreboard_share_interaction(event: hikari.InteractionCreateEve
         else:
             logger.error("Could not get channel for scoreboard share")
             
+    except hikari.ForbiddenError as e:
+        logger.error(f"Missing permissions to share scoreboard in channel: {e}")
+        try:
+            await event.interaction.edit_initial_response(
+                content="❌ I don't have permission to send messages in this channel. Please ask a server admin to grant me the 'Send Messages' permission.",
+            )
+        except Exception as e2:
+            logger.error(f"Failed to send scoreboard share permission error response: {e2}")
     except Exception as e:
         logger.exception(f"Error in scoreboard share interaction: {e}")
         try:
-            if not event.interaction.is_responded():
-                await event.interaction.create_initial_response(
-                    hikari.ResponseType.MESSAGE_CREATE,
-                    content="❌ Failed to share scoreboard.",
-                    flags=hikari.MessageFlag.EPHEMERAL
-                )
+            await event.interaction.edit_initial_response(
+                content="❌ Failed to share scoreboard. Please try again.",
+            )
         except Exception as e2:
             logger.error(f"Failed to send scoreboard share error response: {e2}")
 
@@ -821,15 +826,20 @@ async def handle_breakdown_share_interaction(event: hikari.InteractionCreateEven
         else:
             logger.error("Could not get channel for breakdown share")
             
+    except hikari.ForbiddenError as e:
+        logger.error(f"Missing permissions to share breakdown in channel: {e}")
+        try:
+            await event.interaction.edit_initial_response(
+                content="❌ I don't have permission to send messages in this channel. Please ask a server admin to grant me the 'Send Messages' permission.",
+            )
+        except Exception as e2:
+            logger.error(f"Failed to send breakdown share permission error response: {e2}")
     except Exception as e:
         logger.exception(f"Error in breakdown share interaction: {e}")
         try:
-            if not event.interaction.is_responded():
-                await event.interaction.create_initial_response(
-                    hikari.ResponseType.MESSAGE_CREATE,
-                    content="❌ Failed to share breakdown.",
-                    flags=hikari.MessageFlag.EPHEMERAL
-                )
+            await event.interaction.edit_initial_response(
+                content="❌ Failed to share breakdown. Please try again.",
+            )
         except Exception as e2:
             logger.error(f"Failed to send breakdown share error response: {e2}")
 
