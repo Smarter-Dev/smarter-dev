@@ -6,6 +6,7 @@ buttons, and other interactive elements used by the bot commands.
 
 from __future__ import annotations
 
+import asyncio
 import hikari
 import logging
 from typing import Dict, Any
@@ -980,9 +981,24 @@ async def _show_input_generation_confirmation(event: hikari.InteractionCreateEve
         hikari.ResponseType.MESSAGE_CREATE,
         content="⚠️ **Challenge Input Generation**\n\n"
                "This will generate input data for your squad. **Once you get the input data, your score timer will start!**\n\n"
-               "Are you sure you want to proceed?",
-        components=[action_row]
+               "Are you sure you want to proceed?\n\n"
+               "*This message will auto-delete in 60 seconds*",
+        components=[action_row],
+        flags=hikari.MessageFlag.EPHEMERAL
     )
+    
+    # Schedule auto-deletion after 60 seconds
+    async def delete_after_delay():
+        try:
+            await asyncio.sleep(60)
+            # Try to delete the message
+            await event.interaction.delete_initial_response()
+        except Exception as e:
+            # Message may already be deleted or interaction expired
+            logger.debug(f"Could not auto-delete confirmation message: {e}")
+    
+    # Start the deletion task in the background
+    asyncio.create_task(delete_after_delay())
 
 
 async def _provide_challenge_input_directly(
@@ -1047,10 +1063,11 @@ async def _provide_challenge_input_directly(
         file_content = input_data.encode('utf-8')
         file_attachment = hikari.Bytes(file_content, filename)
         
-        # Send response with file attachment (non-ephemeral so squad can see)
+        # Send response with file attachment (non-ephemeral so squad can see) with user mention
+        user_mention = f"<@{user_id}>"
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
-            content=f"📥 **{challenge_title}**",
+            content=f"{user_mention} requested the challenge input:\n\n📥 **{challenge_title}**",
             attachment=file_attachment
         )
         
@@ -1078,8 +1095,9 @@ async def handle_challenge_confirm_get_input_interaction(event: hikari.Interacti
     
     if not guild_id:
         await event.interaction.create_initial_response(
-            hikari.ResponseType.MESSAGE_CREATE,
-            content="❌ This command can only be used in a server."
+            hikari.ResponseType.MESSAGE_UPDATE,
+            content="❌ This command can only be used in a server.",
+            components=[]
         )
         return
     
@@ -1088,8 +1106,9 @@ async def handle_challenge_confirm_get_input_interaction(event: hikari.Interacti
     if len(custom_id_parts) != 2 or custom_id_parts[0] != "confirm_get_input":
         logger.error(f"Invalid confirm_get_input custom_id format: {event.interaction.custom_id}")
         await event.interaction.create_initial_response(
-            hikari.ResponseType.MESSAGE_CREATE,
-            content="❌ Invalid challenge request format."
+            hikari.ResponseType.MESSAGE_UPDATE,
+            content="❌ Invalid challenge request format.",
+            components=[]
         )
         return
     
@@ -1111,12 +1130,14 @@ async def handle_challenge_confirm_get_input_interaction(event: hikari.Interacti
         if not api_client:
             logger.error("No API client available")
             await event.interaction.create_initial_response(
-                hikari.ResponseType.MESSAGE_CREATE,
-                content="❌ Service not available. Please try again later."
+                hikari.ResponseType.MESSAGE_UPDATE,
+                content="❌ Service not available. Please try again later.",
+                components=[]
             )
             return
         
-        # Generate and provide the challenge input
+        # Use the existing function to provide challenge input
+        # It will generate new input if needed and properly format the response
         await _provide_challenge_input_directly(event, api_client, challenge_id, guild_id, user_id)
         
     except Exception as e:
@@ -1126,8 +1147,9 @@ async def handle_challenge_confirm_get_input_interaction(event: hikari.Interacti
         try:
             if not event.interaction.is_responded():
                 await event.interaction.create_initial_response(
-                    hikari.ResponseType.MESSAGE_CREATE,
-                    content="❌ Failed to get challenge input. Please try again later."
+                    hikari.ResponseType.MESSAGE_UPDATE,
+                    content="❌ Failed to get challenge input. Please try again later.",
+                    components=[]
                 )
         except Exception as e2:
             logger.error(f"Failed to send confirm get input error response: {e2}")
@@ -1147,8 +1169,9 @@ async def handle_challenge_cancel_get_input_interaction(event: hikari.Interactio
     
     if not guild_id:
         await event.interaction.create_initial_response(
-            hikari.ResponseType.MESSAGE_CREATE,
-            content="❌ This command can only be used in a server."
+            hikari.ResponseType.MESSAGE_UPDATE,
+            content="❌ This command can only be used in a server.",
+            components=[]
         )
         return
     
@@ -1157,8 +1180,9 @@ async def handle_challenge_cancel_get_input_interaction(event: hikari.Interactio
     if len(custom_id_parts) != 2 or custom_id_parts[0] != "cancel_get_input":
         logger.error(f"Invalid cancel_get_input custom_id format: {event.interaction.custom_id}")
         await event.interaction.create_initial_response(
-            hikari.ResponseType.MESSAGE_CREATE,
-            content="❌ Invalid challenge request format."
+            hikari.ResponseType.MESSAGE_UPDATE,
+            content="❌ Invalid challenge request format.",
+            components=[]
         )
         return
     
@@ -1166,11 +1190,22 @@ async def handle_challenge_cancel_get_input_interaction(event: hikari.Interactio
     
     logger.info(f"Challenge cancel get input interaction from user {user_id} in guild {guild_id} for challenge {challenge_id}")
     
-    # Just send a cancellation message
+    # Delete the confirmation message by updating it
     await event.interaction.create_initial_response(
-        hikari.ResponseType.MESSAGE_CREATE,
-        content="❌ **Input Generation Cancelled**\n\nYour score timer has not started. You can request input later when you're ready."
+        hikari.ResponseType.MESSAGE_UPDATE,
+        content="❌ **Input Generation Cancelled**\n\nYour score timer has not started. You can request input later when you're ready.",
+        components=[]
     )
+    
+    # Delete the cancellation message after 5 seconds
+    async def delete_after_delay():
+        try:
+            await asyncio.sleep(5)
+            await event.interaction.delete_initial_response()
+        except Exception:
+            pass  # Message may already be deleted
+    
+    asyncio.create_task(delete_after_delay())
 
 
 async def handle_challenge_submit_solution_interaction(event: hikari.InteractionCreateEvent) -> None:

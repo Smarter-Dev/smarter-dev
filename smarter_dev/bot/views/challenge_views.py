@@ -149,11 +149,13 @@ class SolutionSubmissionModalHandler:
                 squad_info = response_data.get("squad", {})
                 
                 # Create response message based on correctness
+                user_mention = f"<@{self.user.id}>"
                 if is_correct:
                     if is_first_success:
                         # First correct solution for the squad
                         points_line = f"🎯 **Points Earned:** {points_earned}\n" if points_earned is not None else ""
                         content = (
+                            f"{user_mention} submitted a solution:\n\n"
                             f"🎉 **Correct Solution!**\n\n"
                             f"**Challenge:** {challenge_info.get('title', self.challenge_title)}\n"
                             f"**Squad:** {squad_info.get('name', 'Your Squad')}\n\n"
@@ -165,14 +167,15 @@ class SolutionSubmissionModalHandler:
                     else:
                         # Correct but not the first
                         content = (
+                            f"{user_mention} submitted a solution:\n\n"
                             f"✅ **Correct Solution!**\n\n"
                             f"**Challenge:** {challenge_info.get('title', self.challenge_title)}\n"
                             f"**Squad:** {squad_info.get('name', 'Your Squad')}\n\n"
                             f"Your solution is correct! Your squad has already successfully solved this challenge."
                         )
-                        flags = hikari.MessageFlag.EPHEMERAL  # Private message
+                        flags = hikari.MessageFlag.NONE  # Public message to show who submitted
                 else:
-                    # Incorrect solution
+                    # Incorrect solution - keep this private to avoid embarrassment
                     content = (
                         f"❌ **Incorrect Solution**\n\n"
                         f"**Challenge:** {challenge_info.get('title', self.challenge_title)}\n"
