@@ -164,6 +164,7 @@ async def scoreboard_command(ctx: lightbulb.Context) -> None:
             )
 
             # Add share button
+            logger.info("Adding share button to scoreboard")
             share_button = hikari.impl.InteractiveButtonBuilder(
                 style=hikari.ButtonStyle.PRIMARY,
                 custom_id="share_scoreboard",
@@ -173,7 +174,8 @@ async def scoreboard_command(ctx: lightbulb.Context) -> None:
             
             action_row = hikari.impl.MessageActionRowBuilder()
             action_row.add_component(share_button)
-
+            
+            logger.info(f"Components being sent: {[action_row]}")
             await ctx.edit_last_response(content=None, embed=embed, components=[action_row])
 
         except APIError as api_error:
@@ -389,6 +391,7 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
             )
 
             # Add share button
+            logger.info("Adding share button to breakdown")
             share_button = hikari.impl.InteractiveButtonBuilder(
                 style=hikari.ButtonStyle.PRIMARY,
                 custom_id="share_breakdown",
@@ -398,7 +401,8 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
             
             action_row = hikari.impl.MessageActionRowBuilder()
             action_row.add_component(share_button)
-
+            
+            logger.info(f"Breakdown components being sent: {[action_row]}")
             await ctx.edit_last_response(content=None, embed=embed, components=[action_row])
 
         except APIError as api_error:
