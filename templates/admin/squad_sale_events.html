@@ -196,19 +196,19 @@
                             <td>
                                 <div class="btn-group" role="group">
                                     <button type="button" class="btn btn-sm btn-outline-primary" 
-                                            onclick="editSaleEvent('{{ event.id }}', {{ event.name|tojson }}, {{ event.description|tojson }}, '{{ event.start_time.isoformat() }}', {{ event.duration_hours }}, {{ event.join_discount_percent }}, {{ event.switch_discount_percent }}, {{ event.is_active|lower }})">
+                                            onclick="editSaleEvent({{ event.id|tojson }}, {{ event.name|tojson }}, {{ event.description|tojson }}, {{ event.start_time.isoformat()|tojson }}, {{ event.duration_hours }}, {{ event.join_discount_percent }}, {{ event.switch_discount_percent }}, {{ event.is_active|lower }})">
                                         <svg class="icon icon-sm" width="16" height="16">
                                             <use xlink:href="#tabler-edit"></use>
                                         </svg>
                                     </button>
                                     <button type="button" class="btn btn-sm btn-outline-{{ 'success' if not event.is_active else 'warning' }}" 
-                                            onclick="toggleSaleEvent('{{ event.id }}', {{ event.is_active|lower }})">
+                                            onclick="toggleSaleEvent({{ event.id|tojson }}, {{ event.is_active|lower }})">
                                         <svg class="icon icon-sm" width="16" height="16">
                                             <use xlink:href="#tabler-{{ 'eye' if not event.is_active else 'eye-off' }}"></use>
                                         </svg>
                                     </button>
                                     <button type="button" class="btn btn-sm btn-outline-danger" 
-                                            onclick="deleteSaleEvent('{{ event.id }}', {{ event.name|tojson }})">
+                                            onclick="deleteSaleEvent({{ event.id|tojson }}, {{ event.name|tojson }})">
                                         <svg class="icon icon-sm" width="16" height="16">
                                             <use xlink:href="#tabler-trash"></use>
                                         </svg>
