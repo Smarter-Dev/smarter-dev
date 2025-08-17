@@ -196,7 +196,7 @@
                             <td>
                                 <div class="btn-group" role="group">
                                     <button type="button" class="btn btn-sm btn-outline-primary" 
-                                            onclick="editSaleEvent('{{ event.id }}', '{{ event.name }}', '{{ event.description }}', '{{ event.start_time.isoformat() }}', {{ event.duration_hours }}, {{ event.join_discount_percent }}, {{ event.switch_discount_percent }}, {{ event.is_active|lower }})">
+                                            onclick="editSaleEvent('{{ event.id }}', {{ event.name|tojson }}, {{ event.description|tojson }}, '{{ event.start_time.isoformat() }}', {{ event.duration_hours }}, {{ event.join_discount_percent }}, {{ event.switch_discount_percent }}, {{ event.is_active|lower }})">
                                         <svg class="icon icon-sm" width="16" height="16">
                                             <use xlink:href="#tabler-edit"></use>
                                         </svg>
