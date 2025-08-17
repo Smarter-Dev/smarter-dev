@@ -434,8 +434,10 @@ window.editSaleEvent = function(eventId, name, description, startTime, duration,
     
     // Convert UTC time to local for datetime-local input
     const utcTime = new Date(startTime);
-    utcTime.setMinutes(utcTime.getMinutes() - utcTime.getTimezoneOffset());
-    document.getElementById('edit_start_time').value = utcTime.toISOString().slice(0, 16);
+    // datetime-local input expects the time in user's local timezone
+    // Use toISOString() and remove the 'Z' to get local representation
+    const localISOString = new Date(utcTime.getTime() - (utcTime.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+    document.getElementById('edit_start_time').value = localISOString;
     
     document.getElementById('editSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/edit';
     

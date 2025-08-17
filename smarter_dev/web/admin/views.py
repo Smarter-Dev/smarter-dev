@@ -3008,11 +3008,24 @@ async def squad_sale_event_edit(request: Request) -> Response:
             form = await request.form()
             
             try:
-                from datetime import datetime
+                from datetime import datetime, timezone
+                
+                # Handle datetime with proper timezone handling
+                start_time_str = form.get("start_time")
+                if start_time_str:
+                    # datetime-local input gives us local time without timezone info
+                    # We treat this as UTC since the frontend shows UTC time in local format
+                    start_time = datetime.fromisoformat(start_time_str.replace("T", " "))
+                    # Ensure it's timezone-aware (assume UTC for consistency)
+                    if start_time.tzinfo is None:
+                        start_time = start_time.replace(tzinfo=timezone.utc)
+                else:
+                    start_time = event.start_time  # Keep existing if not provided
+                
                 updates = {
                     "name": form.get("name"),
                     "description": form.get("description") or "",
-                    "start_time": datetime.fromisoformat(form.get("start_time").replace("T", " ")),
+                    "start_time": start_time,
                     "duration_hours": int(form.get("duration_hours")),
                     "join_discount_percent": int(form.get("join_discount_percent", 0)),
                     "switch_discount_percent": int(form.get("switch_discount_percent", 0)),
