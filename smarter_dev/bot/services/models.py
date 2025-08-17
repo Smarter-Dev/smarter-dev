@@ -284,6 +284,10 @@ class Squad:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     
+    # Sale cost information (populated from API with sale discounts applied)
+    join_cost_info: Optional[Dict[str, any]] = None
+    switch_cost_info: Optional[Dict[str, any]] = None
+    
     def __post_init__(self):
         """Validate squad data."""
         if not self.guild_id.strip():
@@ -311,6 +315,46 @@ class Squad:
         """Check if squad has a switching cost."""
         return self.switch_cost > 0
     
+    @property
+    def current_join_cost(self) -> int:
+        """Get the current join cost including any sale discounts."""
+        if self.join_cost_info:
+            return self.join_cost_info.get("current_cost", self.switch_cost)
+        return self.switch_cost
+    
+    @property
+    def current_switch_cost(self) -> int:
+        """Get the current switch cost including any sale discounts."""
+        if self.switch_cost_info:
+            return self.switch_cost_info.get("current_cost", self.switch_cost)
+        return self.switch_cost
+    
+    @property
+    def has_join_sale(self) -> bool:
+        """Check if there's an active sale for joining this squad."""
+        return (self.join_cost_info and 
+                self.join_cost_info.get("is_on_sale", False))
+    
+    @property
+    def has_switch_sale(self) -> bool:
+        """Check if there's an active sale for switching to this squad."""
+        return (self.switch_cost_info and 
+                self.switch_cost_info.get("is_on_sale", False))
+    
+    @property
+    def join_discount_percent(self) -> Optional[int]:
+        """Get the join discount percentage if there's an active sale."""
+        if self.join_cost_info:
+            return self.join_cost_info.get("discount_percent")
+        return None
+    
+    @property
+    def switch_discount_percent(self) -> Optional[int]:
+        """Get the switch discount percentage if there's an active sale."""
+        if self.switch_cost_info:
+            return self.switch_cost_info.get("discount_percent")
+        return None
+    
     def to_embed_dict(self) -> Dict[str, any]:
         """Convert to dictionary suitable for Discord embed fields."""
         result = {
@@ -327,7 +371,33 @@ class Squad:
             result["Description"] = self.description
         
         if self.has_switch_cost:
-            result["Switch Cost"] = f"{self.switch_cost:,} bytes"
+            # Show join/switch costs with sale information
+            if self.has_join_sale or self.has_switch_sale:
+                cost_parts = []
+                
+                # Join cost
+                join_cost = self.current_join_cost
+                if self.has_join_sale:
+                    join_discount = self.join_discount_percent
+                    cost_parts.append(f"Join: ~~{self.switch_cost:,}~~ **{join_cost:,}** bytes ({join_discount}% off)")
+                else:
+                    cost_parts.append(f"Join: {join_cost:,} bytes")
+                
+                # Switch cost (if different from join)
+                switch_cost = self.current_switch_cost
+                if self.has_switch_sale:
+                    switch_discount = self.switch_discount_percent
+                    cost_parts.append(f"Switch: ~~{self.switch_cost:,}~~ **{switch_cost:,}** bytes ({switch_discount}% off)")
+                else:
+                    cost_parts.append(f"Switch: {switch_cost:,} bytes")
+                
+                result["Cost"] = " | ".join(cost_parts)
+                
+                # Add sale indicator
+                if self.has_join_sale or self.has_switch_sale:
+                    result["🔥 ON SALE"] = "Limited time discount active!"
+            else:
+                result["Cost"] = f"{self.switch_cost:,} bytes"
         
         result["Status"] = "Active" if self.is_active else "Inactive"
         

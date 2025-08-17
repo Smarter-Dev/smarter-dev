@@ -1,0 +1,603 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Squad Sale Events - {{ guild.name }}{% endblock %}
+
+{% block page_title %}Squad Sale Events{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item active">Squad Sale Events</li>
+{% endblock %}
+
+{% block page_actions %}
+<div class="col-auto ms-auto d-print-none">
+    <div class="btn-list">
+        <a href="/admin/guilds/{{ guild.id }}" class="btn btn-outline-primary">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-arrow-left"></use>
+            </svg>
+            Back to Guild
+        </a>
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createSaleEventModal">
+            <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-plus"></use>
+            </svg>
+            Create Sale Event
+        </button>
+    </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Guild Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" class="guild-icon me-3">
+                    {% else %}
+                    <div class="guild-icon-placeholder me-3">{{ guild.name[0].upper() }}</div>
+                    {% endif %}
+                    <div>
+                        <h3 class="mb-1">{{ guild.name }}</h3>
+                        <div class="text-muted">Squad Sale Events & Discount Management</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Active Sale Events Summary -->
+{% if active_events %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card border-primary">
+            <div class="card-header bg-primary text-white">
+                <h4 class="card-title mb-0">
+                    <svg class="icon me-2" width="24" height="24">
+                        <use xlink:href="#tabler-clock"></use>
+                    </svg>
+                    Currently Active Sales
+                </h4>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for event in active_events %}
+                    <div class="col-md-6 col-lg-4 mb-3">
+                        <div class="card border-success">
+                            <div class="card-body p-3">
+                                <h5 class="card-title text-success mb-2">{{ event.name }}</h5>
+                                <p class="text-muted small mb-2">{{ event.description }}</p>
+                                <div class="row text-center">
+                                    <div class="col-6">
+                                        <div class="fw-bold text-success">{{ event.join_discount_percent }}%</div>
+                                        <div class="text-muted small">Join Discount</div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="fw-bold text-success">{{ event.switch_discount_percent }}%</div>
+                                        <div class="text-muted small">Switch Discount</div>
+                                    </div>
+                                </div>
+                                {% if event.time_remaining_hours %}
+                                <div class="mt-2 text-center">
+                                    <span class="badge bg-warning">{{ event.time_remaining_hours }}h remaining</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Sale Events Table -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="card-title">Sale Events</h3>
+                <div class="card-actions">
+                    <div class="btn-group" role="group">
+                        <input type="radio" class="btn-check" name="filter" id="filter-all" autocomplete="off" checked>
+                        <label class="btn btn-outline-secondary btn-sm" for="filter-all">All</label>
+                        
+                        <input type="radio" class="btn-check" name="filter" id="filter-active" autocomplete="off">
+                        <label class="btn btn-outline-secondary btn-sm" for="filter-active">Active</label>
+                        
+                        <input type="radio" class="btn-check" name="filter" id="filter-upcoming" autocomplete="off">
+                        <label class="btn btn-outline-secondary btn-sm" for="filter-upcoming">Upcoming</label>
+                        
+                        <input type="radio" class="btn-check" name="filter" id="filter-ended" autocomplete="off">
+                        <label class="btn btn-outline-secondary btn-sm" for="filter-ended">Ended</label>
+                    </div>
+                </div>
+            </div>
+            
+            {% if events %}
+            <div class="table-responsive">
+                <table class="table table-vcenter card-table">
+                    <thead>
+                        <tr>
+                            <th>Event Name</th>
+                            <th>Discounts</th>
+                            <th>Schedule</th>
+                            <th>Status</th>
+                            <th>Created By</th>
+                            <th class="w-1">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for event in events %}
+                        <tr data-event-status="{% if event.is_currently_active %}active{% elif event.has_ended %}ended{% elif not event.has_started %}upcoming{% else %}inactive{% endif %}">
+                            <td>
+                                <div class="fw-bold">{{ event.name }}</div>
+                                {% if event.description %}
+                                <div class="text-muted small">{{ event.description[:100] }}{% if event.description|length > 100 %}...{% endif %}</div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="row text-center">
+                                    <div class="col-6">
+                                        <span class="badge bg-primary text-white">{{ event.join_discount_percent }}%</span>
+                                        <div class="text-muted small">Join</div>
+                                    </div>
+                                    <div class="col-6">
+                                        <span class="badge bg-primary text-white">{{ event.switch_discount_percent }}%</span>
+                                        <div class="text-muted small">Switch</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                <div class="small">
+                                    <div><strong>Start:</strong> <span class="local-time" data-utc="{{ event.start_time.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ event.start_time.strftime('%Y-%m-%d %H:%M UTC') }}</span></div>
+                                    <div><strong>End:</strong> <span class="local-time" data-utc="{{ event.end_time.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ event.end_time.strftime('%Y-%m-%d %H:%M UTC') }}</span></div>
+                                    <div><strong>Duration:</strong> {{ event.duration_hours }}h</div>
+                                </div>
+                            </td>
+                            <td>
+                                {% if event.is_currently_active %}
+                                    <span class="badge bg-success text-white">
+                                        ⏰ Active
+                                        {% if event.time_remaining_hours %}
+                                        <br><small>{{ event.time_remaining_hours }}h left</small>
+                                        {% endif %}
+                                    </span>
+                                {% elif event.has_ended %}
+                                    <span class="badge bg-secondary text-white">
+                                        ✅ Ended
+                                    </span>
+                                {% elif not event.has_started %}
+                                    <span class="badge bg-warning text-dark">
+                                        📅 Upcoming
+                                        {% if event.days_until_start %}
+                                        <br><small>{{ event.days_until_start }}d</small>
+                                        {% endif %}
+                                    </span>
+                                {% elif not event.is_active %}
+                                    <span class="badge bg-danger text-white">
+                                        ❌ Disabled
+                                    </span>
+                                {% else %}
+                                    <span class="badge bg-secondary text-white">Inactive</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="small">{{ event.created_by }}</div>
+                                <div class="text-muted small">{{ event.created_at.strftime('%Y-%m-%d') }}</div>
+                            </td>
+                            <td>
+                                <div class="btn-group" role="group">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" 
+                                            onclick="editSaleEvent('{{ event.id }}', '{{ event.name }}', '{{ event.description }}', '{{ event.start_time.isoformat() }}', {{ event.duration_hours }}, {{ event.join_discount_percent }}, {{ event.switch_discount_percent }}, {{ event.is_active|lower }})">
+                                        <svg class="icon icon-sm" width="16" height="16">
+                                            <use xlink:href="#tabler-edit"></use>
+                                        </svg>
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-{{ 'success' if not event.is_active else 'warning' }}" 
+                                            onclick="toggleSaleEvent('{{ event.id }}', {{ event.is_active|lower }})">
+                                        <svg class="icon icon-sm" width="16" height="16">
+                                            <use xlink:href="#tabler-{{ 'eye' if not event.is_active else 'eye-off' }}"></use>
+                                        </svg>
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" 
+                                            onclick="deleteSaleEvent('{{ event.id }}', '{{ event.name }}')">
+                                        <svg class="icon icon-sm" width="16" height="16">
+                                            <use xlink:href="#tabler-trash"></use>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="card-body text-center">
+                <div class="empty">
+                    <div class="empty-icon">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-calendar-off"></use>
+                        </svg>
+                    </div>
+                    <p class="empty-title">No sale events found</p>
+                    <p class="empty-subtitle text-muted">
+                        Create your first squad sale event to start offering discounts on squad joining and switching.
+                    </p>
+                    <div class="empty-action">
+                        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createSaleEventModal">
+                            <svg class="icon me-2" width="24" height="24">
+                                <use xlink:href="#tabler-plus"></use>
+                            </svg>
+                            Create Sale Event
+                        </button>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Create Sale Event Modal -->
+<div class="modal fade" id="createSaleEventModal" tabindex="-1" aria-labelledby="createSaleEventModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="createSaleEventModalLabel">Create Sale Event</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="createSaleEventForm" method="post" action="/admin/guilds/{{ guild.id }}/squad-sale-events">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="create_name" class="form-label">Event Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="create_name" name="name" required maxlength="100" 
+                                   placeholder="e.g., Black Friday Squad Sale">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="create_duration_hours" class="form-label">Duration (hours) <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="create_duration_hours" name="duration_hours" 
+                                   required min="1" max="720" value="24">
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="create_description" class="form-label">Description</label>
+                        <textarea class="form-control" id="create_description" name="description" rows="3" maxlength="500"
+                                  placeholder="Describe the sale event..."></textarea>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="create_start_time" class="form-label">Start Time (Local) <span class="text-danger">*</span></label>
+                            <input type="datetime-local" class="form-control" id="create_start_time" name="start_time" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <div class="form-label">End Time (Calculated)</div>
+                            <div class="form-control-plaintext" id="calculated_end_time">Select start time and duration</div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="create_join_discount" class="form-label">Join Discount %</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="create_join_discount" name="join_discount_percent" 
+                                       min="0" max="100" value="0">
+                                <span class="input-group-text">%</span>
+                            </div>
+                            <div class="form-text">Discount for first-time squad joining</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="create_switch_discount" class="form-label">Switch Discount %</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="create_switch_discount" name="switch_discount_percent" 
+                                       min="0" max="100" value="0">
+                                <span class="input-group-text">%</span>
+                            </div>
+                            <div class="form-text">Discount for switching between squads</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Sale Event</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Sale Event Modal -->
+<div class="modal fade" id="editSaleEventModal" tabindex="-1" aria-labelledby="editSaleEventModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="editSaleEventModalLabel">Edit Sale Event</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="editSaleEventForm" method="post">
+                <input type="hidden" id="edit_event_id" name="event_id">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="edit_name" class="form-label">Event Name <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="edit_name" name="name" required maxlength="100">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="edit_duration_hours" class="form-label">Duration (hours) <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" id="edit_duration_hours" name="duration_hours" 
+                                   required min="1" max="720">
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="edit_description" class="form-label">Description</label>
+                        <textarea class="form-control" id="edit_description" name="description" rows="3" maxlength="500"></textarea>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="edit_start_time" class="form-label">Start Time (Local) <span class="text-danger">*</span></label>
+                            <input type="datetime-local" class="form-control" id="edit_start_time" name="start_time" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <div class="form-label">Status</div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="edit_is_active" name="is_active" value="true">
+                                <label class="form-check-label" for="edit_is_active">Active</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="edit_join_discount" class="form-label">Join Discount %</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="edit_join_discount" name="join_discount_percent" 
+                                       min="0" max="100">
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="edit_switch_discount" class="form-label">Switch Discount %</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" id="edit_switch_discount" name="switch_discount_percent" 
+                                       min="0" max="100">
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update Sale Event</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="deleteSaleEventModal" tabindex="-1" aria-labelledby="deleteSaleEventModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteSaleEventModalLabel">Confirm Deletion</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete the sale event "<span id="delete_event_name"></span>"?</p>
+                <p class="text-danger">This action cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form id="deleteSaleEventForm" method="post" class="d-inline">
+                    <input type="hidden" id="delete_event_id" name="event_id">
+                    <button type="submit" class="btn btn-danger">Delete</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Wait for all scripts to load before defining functions
+document.addEventListener('DOMContentLoaded', function() {
+    // Ensure Tabler/Bootstrap is loaded by waiting briefly
+    setTimeout(function() {
+        defineGlobalFunctions();
+    }, 100);
+});
+
+function defineGlobalFunctions() {
+    // Test function to verify script execution
+    window.testFunction = function() {
+        return "Script is running";
+    };
+
+// Calculate end time when start time or duration changes
+function updateCalculatedEndTime() {
+    const startTimeInput = document.getElementById('create_start_time');
+    const durationInput = document.getElementById('create_duration_hours');
+    const endTimeDisplay = document.getElementById('calculated_end_time');
+    
+    if (startTimeInput.value && durationInput.value) {
+        const startTime = new Date(startTimeInput.value);
+        const duration = parseInt(durationInput.value);
+        const endTime = new Date(startTime.getTime() + (duration * 60 * 60 * 1000));
+        
+        endTimeDisplay.textContent = endTime.toLocaleString('en-US', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: 'UTC',
+            timeZoneName: 'short'
+        });
+    } else {
+        endTimeDisplay.textContent = 'Select start time and duration';
+    }
+}
+
+// Set minimum start time to current time
+function setMinimumStartTime() {
+    const now = new Date();
+    // Convert to local timezone for datetime-local input
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    const minDateTime = now.toISOString().slice(0, 16);
+    
+    document.getElementById('create_start_time').min = minDateTime;
+    document.getElementById('edit_start_time').min = minDateTime;
+}
+
+// Filter events by status
+function filterEvents(status) {
+    const rows = document.querySelectorAll('tbody tr[data-event-status]');
+    rows.forEach(row => {
+        if (status === 'all' || row.dataset.eventStatus === status) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
+}
+
+
+// Convert UTC times to local time
+function convertUTCTimesToLocal() {
+    const elements = document.querySelectorAll('.local-time');
+    
+    elements.forEach((element) => {
+        const utcTime = element.getAttribute('data-utc');
+        
+        if (utcTime) {
+            const date = new Date(utcTime);
+            
+            if (!isNaN(date.getTime())) {
+                const localTime = date.toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                });
+                element.textContent = localTime + ' (local)';
+            }
+        }
+    });
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    
+    setMinimumStartTime();
+    
+    // Convert times to local timezone
+    convertUTCTimesToLocal();
+    
+    // Add event listeners for time calculation
+    document.getElementById('create_start_time').addEventListener('change', updateCalculatedEndTime);
+    document.getElementById('create_duration_hours').addEventListener('input', updateCalculatedEndTime);
+    
+    // Add event listeners for filter buttons
+    document.querySelectorAll('input[name="filter"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            filterEvents(this.id.replace('filter-', ''));
+        });
+    });
+    
+    // Show success/error messages
+    {% if messages %}
+    {% for category, message in messages %}
+    const alertClass = '{{ category }}' === 'error' ? 'alert-danger' : 'alert-success';
+    const alertHtml = '<div class="alert ' + alertClass + ' alert-dismissible fade show" role="alert">' +
+        '{{ message|e }}' +
+        '<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>' +
+        '</div>';
+    document.querySelector('.content').insertAdjacentHTML('afterbegin', alertHtml);
+    {% endfor %}
+    {% endif %}
+});
+
+// Define global functions that need Bootstrap
+window.editSaleEvent = function(eventId, name, description, startTime, duration, joinDiscount, switchDiscount, isActive) {
+    document.getElementById('edit_event_id').value = eventId;
+    document.getElementById('edit_name').value = name;
+    document.getElementById('edit_description').value = description;
+    document.getElementById('edit_duration_hours').value = duration;
+    document.getElementById('edit_join_discount').value = joinDiscount;
+    document.getElementById('edit_switch_discount').value = switchDiscount;
+    document.getElementById('edit_is_active').checked = isActive;
+    
+    // Convert UTC time to local for datetime-local input
+    const utcTime = new Date(startTime);
+    utcTime.setMinutes(utcTime.getMinutes() - utcTime.getTimezoneOffset());
+    document.getElementById('edit_start_time').value = utcTime.toISOString().slice(0, 16);
+    
+    document.getElementById('editSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/edit';
+    
+    // Check if bootstrap is available, fallback if not
+    if (typeof bootstrap !== 'undefined') {
+        new bootstrap.Modal(document.getElementById('editSaleEventModal')).show();
+    } else {
+        // Fallback: manually show modal
+        const modal = document.getElementById('editSaleEventModal');
+        modal.style.display = 'block';
+        modal.classList.add('show');
+        document.body.classList.add('modal-open');
+    }
+};
+
+window.toggleSaleEvent = async function(eventId, currentStatus) {
+    try {
+        const response = await fetch('/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/toggle', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Failed to toggle sale event status');
+        }
+    } catch (error) {
+        alert('Error toggling sale event status: ' + error.message);
+    }
+};
+
+window.deleteSaleEvent = function(eventId, eventName) {
+    document.getElementById('delete_event_id').value = eventId;
+    document.getElementById('delete_event_name').textContent = eventName;
+    document.getElementById('deleteSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/delete';
+    
+    // Check if bootstrap is available, fallback if not
+    if (typeof bootstrap !== 'undefined') {
+        new bootstrap.Modal(document.getElementById('deleteSaleEventModal')).show();
+    } else {
+        // Fallback: manually show modal
+        const modal = document.getElementById('deleteSaleEventModal');
+        modal.style.display = 'block';
+        modal.classList.add('show');
+        document.body.classList.add('modal-open');
+    }
+};
+
+}
+</script>
+{% endblock %}

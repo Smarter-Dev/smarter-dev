@@ -23,6 +23,7 @@ from smarter_dev.web.models import (
     BytesConfig,
     Squad,
     SquadMembership,
+    SquadSaleEvent,
     APIKey,
     ForumAgent,
     ForumAgentResponse,
@@ -292,6 +293,8 @@ class SquadOperations:
             
             # Check if user already in any squad in this guild
             current_membership = await self.get_user_squad(session, guild_id, user_id)
+            is_switch = current_membership is not None  # Determine if this is a switch or first join
+            
             if current_membership:
                 raise ConflictError(f"User already in squad {current_membership.name}")
             
@@ -301,17 +304,33 @@ class SquadOperations:
                 if member_count >= squad.max_members:
                     raise ConflictError(f"Squad {squad.name} is full")
             
-            # Check and deduct switch cost if required
+            # Check and deduct switch cost if required (with sale discounts)
             if squad.switch_cost > 0:
+                # Check for active sale events and calculate discounted cost
+                sale_ops = SquadSaleEventOperations(session)
+                
+                discounted_cost, active_sale_event = await sale_ops.calculate_discounted_cost(
+                    guild_id=guild_id,
+                    original_cost=squad.switch_cost,
+                    is_switch=is_switch
+                )
+                
+                # Create appropriate transaction description
+                if active_sale_event and discounted_cost < squad.switch_cost:
+                    discount_percent = active_sale_event.switch_discount_percent if is_switch else active_sale_event.join_discount_percent
+                    transaction_reason = f"Squad {'switch' if is_switch else 'join'} fee: {squad.name} ({discount_percent}% off - {active_sale_event.name})"
+                else:
+                    transaction_reason = f"Squad {'switch' if is_switch else 'join'} fee: {squad.name}"
+                
                 bytes_ops = BytesOperations()
-                # Create system charge transaction for squad join fee
+                # Create system charge transaction for squad join/switch fee
                 await bytes_ops.create_system_charge(
                     session,
                     guild_id,
                     user_id,
                     username or f"User {user_id}",  # Use provided username or fallback
-                    squad.switch_cost,
-                    f"Squad join fee: {squad.name}"
+                    discounted_cost,
+                    transaction_reason
                 )
             
             # Create membership
@@ -360,6 +379,103 @@ class SquadOperations:
             raise
         except Exception as e:
             raise DatabaseOperationError(f"Failed to leave squad: {e}") from e
+    
+    async def switch_squad(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        user_id: str,
+        new_squad_id: UUID,
+        username: Optional[str] = None
+    ) -> SquadMembership:
+        """Switch a user from their current squad to a new squad with sale discount support.
+        
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            user_id: Discord user snowflake ID
+            new_squad_id: UUID of the squad to switch to
+            username: Optional username for transaction logging
+            
+        Returns:
+            SquadMembership: New membership record
+            
+        Raises:
+            NotFoundError: If user not in any squad or new squad doesn't exist
+            ConflictError: If new squad is full, inactive, or same as current
+            DatabaseOperationError: If operation fails
+        """
+        try:
+            # Check current membership
+            current_membership = await self.get_user_squad(session, guild_id, user_id)
+            if not current_membership:
+                raise NotFoundError(f"User {user_id} not in any squad")
+            
+            # Prevent switching to the same squad
+            if current_membership.id == new_squad_id:
+                raise ConflictError("User is already in this squad")
+            
+            # Get new squad and validate
+            new_squad = await self.get_squad(session, new_squad_id)
+            if not new_squad.is_active:
+                raise ConflictError(f"Squad {new_squad.name} is not active")
+            
+            # Prevent switching to default squads
+            if new_squad.is_default:
+                raise ConflictError("Cannot manually switch to the default squad. Users are automatically assigned when earning bytes.")
+            
+            # Check squad capacity
+            if new_squad.max_members:
+                member_count = await self._get_squad_member_count(session, new_squad_id)
+                if member_count >= new_squad.max_members:
+                    raise ConflictError(f"Squad {new_squad.name} is full")
+            
+            # Check and deduct switch cost if required (with sale discounts)
+            if new_squad.switch_cost > 0:
+                # Check for active sale events and calculate discounted cost
+                sale_ops = SquadSaleEventOperations(session)
+                
+                discounted_cost, active_sale_event = await sale_ops.calculate_discounted_cost(
+                    guild_id=guild_id,
+                    original_cost=new_squad.switch_cost,
+                    is_switch=True  # This is always a switch operation
+                )
+                
+                # Create appropriate transaction description
+                if active_sale_event and discounted_cost < new_squad.switch_cost:
+                    discount_percent = active_sale_event.switch_discount_percent
+                    transaction_reason = f"Squad switch fee: {current_membership.name} → {new_squad.name} ({discount_percent}% off - {active_sale_event.name})"
+                else:
+                    transaction_reason = f"Squad switch fee: {current_membership.name} → {new_squad.name}"
+                
+                bytes_ops = BytesOperations()
+                # Create system charge transaction for squad switch fee
+                await bytes_ops.create_system_charge(
+                    session,
+                    guild_id,
+                    user_id,
+                    username or f"User {user_id}",
+                    discounted_cost,
+                    transaction_reason
+                )
+            
+            # Remove from current squad
+            await self.leave_squad(session, guild_id, user_id)
+            
+            # Create new membership
+            new_membership = SquadMembership(
+                squad_id=new_squad_id,
+                user_id=user_id,
+                guild_id=guild_id
+            )
+            session.add(new_membership)
+            
+            return new_membership
+            
+        except (NotFoundError, ConflictError):
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to switch squad: {e}") from e
     
     async def get_user_squad(
         self,
@@ -3659,3 +3775,361 @@ class ScheduledMessageOperations:
             
         except Exception as e:
             raise DatabaseOperationError(f"Failed to get scheduled message with campaign: {e}") from e
+
+
+class SquadSaleEventOperations:
+    """Database operations for squad sale event management system.
+    
+    Handles all squad sale event-related database operations including creation,
+    management, and queries for time-based discount events.
+    """
+    
+    def __init__(self, session: AsyncSession):
+        """Initialize with database session.
+        
+        Args:
+            session: SQLAlchemy async session
+        """
+        self.session = session
+    
+    async def create_sale_event(
+        self,
+        guild_id: str,
+        name: str,
+        description: str,
+        start_time: datetime,
+        duration_hours: int,
+        join_discount_percent: int,
+        switch_discount_percent: int,
+        created_by: str
+    ) -> SquadSaleEvent:
+        """Create a new squad sale event.
+        
+        Args:
+            guild_id: Discord guild ID
+            name: Event name
+            description: Event description
+            start_time: When event starts (UTC)
+            duration_hours: How long event lasts
+            join_discount_percent: Discount percent for joining squads (0-100)
+            switch_discount_percent: Discount percent for switching squads (0-100)
+            created_by: Admin who created the event
+            
+        Returns:
+            Created sale event
+            
+        Raises:
+            ConflictError: If event name already exists in guild
+            DatabaseOperationError: For database errors
+        """
+        try:
+            sale_event = SquadSaleEvent(
+                guild_id=guild_id,
+                name=name,
+                description=description,
+                start_time=start_time,
+                duration_hours=duration_hours,
+                join_discount_percent=join_discount_percent,
+                switch_discount_percent=switch_discount_percent,
+                created_by=created_by
+            )
+            
+            self.session.add(sale_event)
+            await self.session.commit()
+            await self.session.refresh(sale_event)
+            
+            return sale_event
+            
+        except IntegrityError as e:
+            await self.session.rollback()
+            if "uq_squad_sale_events_guild_name" in str(e):
+                raise ConflictError(f"Sale event with name '{name}' already exists in this guild")
+            raise DatabaseOperationError(f"Failed to create sale event: {e}") from e
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to create sale event: {e}") from e
+    
+    async def get_sale_events_by_guild(
+        self,
+        guild_id: str,
+        active_only: bool = False,
+        limit: Optional[int] = None,
+        offset: int = 0
+    ) -> Tuple[List[SquadSaleEvent], int]:
+        """Get sale events for a guild with optional filtering.
+        
+        Args:
+            guild_id: Discord guild ID
+            active_only: Whether to filter to active events only
+            limit: Maximum number of events to return
+            offset: Number of events to skip
+            
+        Returns:
+            Tuple of (events, total_count)
+        """
+        try:
+            # Build base query
+            query = select(SquadSaleEvent).where(SquadSaleEvent.guild_id == guild_id)
+            
+            if active_only:
+                query = query.where(SquadSaleEvent.is_active == True)
+            
+            # Get total count
+            count_query = select(func.count(SquadSaleEvent.id)).where(SquadSaleEvent.guild_id == guild_id)
+            if active_only:
+                count_query = count_query.where(SquadSaleEvent.is_active == True)
+            
+            total_result = await self.session.execute(count_query)
+            total_count = total_result.scalar() or 0
+            
+            # Apply ordering, limit, and offset
+            query = query.order_by(desc(SquadSaleEvent.start_time))
+            
+            if limit is not None:
+                query = query.limit(limit)
+            if offset > 0:
+                query = query.offset(offset)
+            
+            result = await self.session.execute(query)
+            events = result.scalars().all()
+            
+            return list(events), total_count
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get sale events: {e}") from e
+    
+    async def get_sale_event_by_id(
+        self,
+        event_id: UUID,
+        guild_id: Optional[str] = None
+    ) -> Optional[SquadSaleEvent]:
+        """Get a sale event by its ID.
+        
+        Args:
+            event_id: Sale event UUID
+            guild_id: Optional guild ID to verify ownership
+            
+        Returns:
+            Sale event if found, None otherwise
+        """
+        try:
+            query = select(SquadSaleEvent).where(SquadSaleEvent.id == event_id)
+            
+            if guild_id is not None:
+                query = query.where(SquadSaleEvent.guild_id == guild_id)
+            
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get sale event: {e}") from e
+    
+    async def update_sale_event(
+        self,
+        event_id: UUID,
+        guild_id: str,
+        **updates
+    ) -> Optional[SquadSaleEvent]:
+        """Update a sale event.
+        
+        Args:
+            event_id: Sale event UUID
+            guild_id: Discord guild ID for verification
+            **updates: Fields to update
+            
+        Returns:
+            Updated sale event if found, None otherwise
+            
+        Raises:
+            ConflictError: If name conflict occurs
+            DatabaseOperationError: For database errors
+        """
+        try:
+            # Get existing sale event
+            event = await self.get_sale_event_by_id(event_id, guild_id)
+            if not event:
+                return None
+            
+            # Update fields
+            for field, value in updates.items():
+                if hasattr(event, field):
+                    setattr(event, field, value)
+            
+            event.updated_at = datetime.now(timezone.utc)
+            
+            await self.session.commit()
+            await self.session.refresh(event)
+            
+            return event
+            
+        except IntegrityError as e:
+            await self.session.rollback()
+            if "uq_squad_sale_events_guild_name" in str(e):
+                raise ConflictError(f"Sale event with this name already exists in the guild")
+            raise DatabaseOperationError(f"Failed to update sale event: {e}") from e
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to update sale event: {e}") from e
+    
+    async def delete_sale_event(self, event_id: UUID, guild_id: str) -> bool:
+        """Delete a sale event.
+        
+        Args:
+            event_id: Sale event UUID
+            guild_id: Discord guild ID for verification
+            
+        Returns:
+            True if event was found and deleted, False otherwise
+        """
+        try:
+            event = await self.get_sale_event_by_id(event_id, guild_id)
+            if not event:
+                return False
+            
+            await self.session.delete(event)
+            await self.session.commit()
+            return True
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to delete sale event: {e}") from e
+    
+    async def get_active_sale_events(self, guild_id: str) -> List[SquadSaleEvent]:
+        """Get currently active sale events for a guild.
+        
+        An event is active if:
+        1. is_active = True
+        2. Current time is between start_time and end_time
+        
+        Args:
+            guild_id: Discord guild ID
+            
+        Returns:
+            List of currently active sale events
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            
+            # Get all active events from database
+            query = select(SquadSaleEvent).where(
+                and_(
+                    SquadSaleEvent.guild_id == guild_id,
+                    SquadSaleEvent.is_active == True
+                )
+            ).order_by(SquadSaleEvent.start_time)
+            
+            result = await self.session.execute(query)
+            all_active_events = list(result.scalars().all())
+            
+            # Filter by time in Python to ensure accuracy
+            currently_active = []
+            for event in all_active_events:
+                if event.is_currently_active:
+                    currently_active.append(event)
+            
+            return currently_active
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get active sale events: {e}") from e
+    
+    async def toggle_sale_event(self, event_id: UUID, guild_id: str) -> Optional[SquadSaleEvent]:
+        """Toggle sale event active status.
+        
+        Args:
+            event_id: Sale event UUID
+            guild_id: Discord guild ID for verification
+            
+        Returns:
+            Updated sale event if found, None otherwise
+        """
+        try:
+            event = await self.get_sale_event_by_id(event_id, guild_id)
+            if not event:
+                return None
+            
+            event.is_active = not event.is_active
+            event.updated_at = datetime.now(timezone.utc)
+            
+            await self.session.commit()
+            await self.session.refresh(event)
+            
+            return event
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to toggle sale event: {e}") from e
+    
+    async def get_best_discount_for_action(
+        self,
+        guild_id: str,
+        is_switch: bool
+    ) -> Optional[int]:
+        """Get the best available discount percentage for a specific action.
+        
+        Args:
+            guild_id: Discord guild ID
+            is_switch: True if this is a squad switch, False if first join
+            
+        Returns:
+            Best discount percentage (0-100) or None if no active events
+        """
+        try:
+            active_events = await self.get_active_sale_events(guild_id)
+            
+            if not active_events:
+                return None
+            
+            # Find the highest discount for the specified action
+            best_discount = 0
+            for event in active_events:
+                discount = event.switch_discount_percent if is_switch else event.join_discount_percent
+                best_discount = max(best_discount, discount)
+            
+            return best_discount if best_discount > 0 else None
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get best discount: {e}") from e
+    
+    async def calculate_discounted_cost(
+        self,
+        guild_id: str,
+        original_cost: int,
+        is_switch: bool
+    ) -> tuple[int, Optional[SquadSaleEvent]]:
+        """Calculate discounted cost and return the event providing the best discount.
+        
+        Args:
+            guild_id: Discord guild ID
+            original_cost: Original cost before discount
+            is_switch: True if this is a squad switch, False if first join
+            
+        Returns:
+            Tuple of (discounted_cost, best_event_or_none)
+        """
+        try:
+            active_events = await self.get_active_sale_events(guild_id)
+            
+            if not active_events:
+                return original_cost, None
+            
+            # Find the event with the best discount for this action
+            best_discount = 0
+            best_event = None
+            
+            for event in active_events:
+                discount = event.switch_discount_percent if is_switch else event.join_discount_percent
+                if discount > best_discount:
+                    best_discount = discount
+                    best_event = event
+            
+            if best_discount == 0:
+                return original_cost, None
+            
+            # Calculate discounted cost
+            discount_amount = int(original_cost * best_discount / 100)
+            discounted_cost = max(0, original_cost - discount_amount)
+            
+            return discounted_cost, best_event
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to calculate discounted cost: {e}") from e

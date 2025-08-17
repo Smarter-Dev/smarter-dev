@@ -75,8 +75,8 @@ class SquadSelectView:
             # Skip default squads - they cannot be manually joined
             if getattr(squad, 'is_default', False):
                 continue
-            # Calculate join cost (always costs the squad's switch_cost)
-            switch_cost = squad.switch_cost
+            # Calculate join cost (use sale-discounted cost if available)
+            switch_cost = squad.current_join_cost if hasattr(squad, 'current_join_cost') else squad.switch_cost
             # Skip showing cost if user is already in this squad
             if self.current_squad and self.current_squad.id == squad.id:
                 switch_cost = 0
@@ -95,10 +95,14 @@ class SquadSelectView:
             elif squad.is_default:
                 description = "🏠 Default squad - Auto-assigned when earning bytes"
             elif switch_cost > 0:
+                # Check if it's on sale
+                has_sale = hasattr(squad, 'has_join_sale') and squad.has_join_sale
+                sale_suffix = " (Sale)" if has_sale else ""
+                
                 if can_afford:
-                    description = f"Cost: {switch_cost:,} bytes"
+                    description = f"Cost: {switch_cost:,} bytes{sale_suffix}"
                 else:
-                    description = f"⚠️ Need {switch_cost:,} bytes (you have {self.user_balance:,})"
+                    description = f"⚠️ Need {switch_cost:,} bytes{sale_suffix} (you have {self.user_balance:,})"
             else:
                 description = "Free to join!"
             

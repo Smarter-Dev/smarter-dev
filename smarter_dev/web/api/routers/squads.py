@@ -39,16 +39,114 @@ from smarter_dev.web.api.schemas import (
     SquadLeaveRequest,
     SquadMembersResponse,
     UserSquadResponse,
+    SquadCostInfo,
+    ActiveSaleEventResponse,
     SuccessResponse
 )
 from smarter_dev.web.crud import (
     SquadOperations,
+    SquadSaleEventOperations,
     DatabaseOperationError,
     NotFoundError,
     ConflictError
 )
 
 router = APIRouter()
+
+
+async def _add_cost_info_to_squad(
+    squad: dict,
+    guild_id: str,
+    session: AsyncSession
+) -> dict:
+    """Add cost information with sale discounts to a squad response.
+    
+    Args:
+        squad: Squad data dictionary
+        guild_id: Discord guild ID
+        session: Database session
+        
+    Returns:
+        Squad data with cost info added
+    """
+    if squad['switch_cost'] > 0:
+        sale_ops = SquadSaleEventOperations(session)
+        
+        # Calculate join cost (first time joining)
+        join_discounted_cost, join_sale_event = await sale_ops.calculate_discounted_cost(
+            guild_id=guild_id,
+            original_cost=squad['switch_cost'],
+            is_switch=False
+        )
+        
+        # Calculate switch cost (switching from another squad)
+        switch_discounted_cost, switch_sale_event = await sale_ops.calculate_discounted_cost(
+            guild_id=guild_id,
+            original_cost=squad['switch_cost'],
+            is_switch=True
+        )
+        
+        # Create join cost info
+        join_active_sale = None
+        join_discount_percent = None
+        if join_sale_event and join_discounted_cost < squad['switch_cost']:
+            join_discount_percent = join_sale_event.join_discount_percent
+            join_active_sale = ActiveSaleEventResponse(
+                event_name=join_sale_event.name,
+                event_id=join_sale_event.id,
+                join_discount_percent=join_sale_event.join_discount_percent,
+                switch_discount_percent=join_sale_event.switch_discount_percent,
+                time_remaining_hours=join_sale_event.time_remaining_hours,
+                end_time=join_sale_event.end_time
+            )
+        
+        squad['join_cost_info'] = SquadCostInfo(
+            original_cost=squad['switch_cost'],
+            current_cost=join_discounted_cost,
+            discount_percent=join_discount_percent,
+            active_sale=join_active_sale,
+            is_on_sale=join_discounted_cost < squad['switch_cost']
+        )
+        
+        # Create switch cost info
+        switch_active_sale = None
+        switch_discount_percent = None
+        if switch_sale_event and switch_discounted_cost < squad['switch_cost']:
+            switch_discount_percent = switch_sale_event.switch_discount_percent
+            switch_active_sale = ActiveSaleEventResponse(
+                event_name=switch_sale_event.name,
+                event_id=switch_sale_event.id,
+                join_discount_percent=switch_sale_event.join_discount_percent,
+                switch_discount_percent=switch_sale_event.switch_discount_percent,
+                time_remaining_hours=switch_sale_event.time_remaining_hours,
+                end_time=switch_sale_event.end_time
+            )
+        
+        squad['switch_cost_info'] = SquadCostInfo(
+            original_cost=squad['switch_cost'],
+            current_cost=switch_discounted_cost,
+            discount_percent=switch_discount_percent,
+            active_sale=switch_active_sale,
+            is_on_sale=switch_discounted_cost < squad['switch_cost']
+        )
+    else:
+        # No cost, so no sale discounts apply
+        squad['join_cost_info'] = SquadCostInfo(
+            original_cost=0,
+            current_cost=0,
+            discount_percent=None,
+            active_sale=None,
+            is_on_sale=False
+        )
+        squad['switch_cost_info'] = SquadCostInfo(
+            original_cost=0,
+            current_cost=0,
+            discount_percent=None,
+            active_sale=None,
+            is_on_sale=False
+        )
+    
+    return squad
 
 
 @router.get("/", response_model=List[SquadResponse])
@@ -62,17 +160,21 @@ async def list_squads(
     """List all squads in a guild.
     
     Returns all squads for the guild, optionally including inactive ones.
-    Each squad includes current member count and configuration details.
+    Each squad includes current member count, cost information, and sale discounts.
     """
     squad_ops = SquadOperations()
     squads = await squad_ops.get_guild_squads(db, guild_id, active_only=not include_inactive)
     
-    # Convert to response models and add member counts
+    # Convert to response models and add member counts and cost info
     squad_responses = []
     for squad in squads:
         member_count = await squad_ops._get_squad_member_count(db, squad.id)
         squad_data = squad.__dict__.copy()
         squad_data['member_count'] = member_count
+        
+        # Add cost information with sale discounts
+        squad_data = await _add_cost_info_to_squad(squad_data, guild_id, db)
+        
         squad_responses.append(SquadResponse.model_validate(squad_data))
     
     return squad_responses
@@ -134,6 +236,9 @@ async def get_squad(
         member_count = await squad_ops._get_squad_member_count(db, squad_id)
         squad_data = squad.__dict__.copy()
         squad_data['member_count'] = member_count
+        
+        # Add cost information with sale discounts
+        squad_data = await _add_cost_info_to_squad(squad_data, guild_id, db)
         
         return SquadResponse.model_validate(squad_data)
     except NotFoundError as e:

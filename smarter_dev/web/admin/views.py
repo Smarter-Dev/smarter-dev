@@ -20,6 +20,7 @@ from smarter_dev.web.models import (
     BytesConfig,
     Squad,
     SquadMembership,
+    SquadSaleEvent,
     APIKey,
     HelpConversation,
     BlogPost,
@@ -29,7 +30,7 @@ from smarter_dev.web.models import (
     Challenge,
     ScheduledMessage
 )
-from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, APIKeyOperations, ForumAgentOperations, CampaignOperations, ScheduledMessageOperations, ConflictError
+from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, SquadSaleEventOperations, APIKeyOperations, ForumAgentOperations, CampaignOperations, ScheduledMessageOperations, ConflictError
 from smarter_dev.web.security import generate_secure_api_key
 from smarter_dev.web.admin.auth import admin_required
 from smarter_dev.web.admin.discord import (
@@ -2869,6 +2870,231 @@ async def scheduled_message_delete(request: Request) -> Response:
         context = {
             "request": request,
             "error": "Failed to delete scheduled message",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def squad_sale_events_list(request: Request) -> Response:
+    """Squad sale events management for a guild."""
+    guild_id = request.path_params["guild_id"]
+    
+    try:
+        # Verify guild exists and get info
+        guild = await get_guild_info(guild_id)
+        
+        async with get_db_session_context() as session:
+            sale_ops = SquadSaleEventOperations(session)
+            
+            if request.method == "GET":
+                # Get all sale events for the guild
+                events, _ = await sale_ops.get_sale_events_by_guild(guild_id)
+                
+                # Get currently active events
+                active_events = await sale_ops.get_active_sale_events(guild_id)
+                
+                # Add computed properties to events
+                for event in events:
+                    # These properties are computed in the model
+                    pass
+                
+                return templates.TemplateResponse(
+                    request,
+                    "admin/squad_sale_events.html",
+                    {
+                        "guild": guild,
+                        "events": events,
+                        "active_events": active_events
+                    }
+                )
+            
+            # POST - Handle sale event creation
+            form = await request.form()
+            success_message = None
+            
+            try:
+                from datetime import datetime
+                await sale_ops.create_sale_event(
+                    guild_id=guild_id,
+                    name=form.get("name"),
+                    description=form.get("description") or "",
+                    start_time=datetime.fromisoformat(form.get("start_time").replace("T", " ")),
+                    duration_hours=int(form.get("duration_hours")),
+                    join_discount_percent=int(form.get("join_discount_percent", 0)),
+                    switch_discount_percent=int(form.get("switch_discount_percent", 0)),
+                    created_by="admin"
+                )
+                await session.commit()
+                success_message = "Sale event created successfully!"
+                logger.info(f"Created sale event '{form.get('name')}' in guild {guild_id}")
+                
+                # Redirect to avoid duplicate submission
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/squad-sale-events?success=created",
+                    status_code=302
+                )
+                
+            except ConflictError as e:
+                error_message = str(e)
+                events, _ = await sale_ops.get_sale_events_by_guild(guild_id)
+                active_events = await sale_ops.get_active_sale_events(guild_id)
+                
+                return templates.TemplateResponse(
+                    request,
+                    "admin/squad_sale_events.html",
+                    {
+                        "guild": guild,
+                        "events": events,
+                        "active_events": active_events,
+                        "messages": [("error", error_message)]
+                    }
+                )
+            
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found or bot not in guild",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error in squad sale events list for guild {guild_id}: {e}")
+        context = {
+            "request": request,
+            "error": "An error occurred while loading sale events",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def squad_sale_event_edit(request: Request) -> Response:
+    """Edit a squad sale event."""
+    guild_id = request.path_params["guild_id"]
+    event_id = UUID(request.path_params["event_id"])
+    
+    try:
+        # Verify guild exists
+        guild = await get_guild_info(guild_id)
+        
+        async with get_db_session_context() as session:
+            sale_ops = SquadSaleEventOperations(session)
+            
+            # Get the event
+            event = await sale_ops.get_sale_event_by_id(event_id, guild_id)
+            if not event:
+                context = {
+                    "request": request,
+                    "error": "Sale event not found",
+                    "title": "Sale Event Not Found"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            # Handle form submission
+            form = await request.form()
+            
+            try:
+                from datetime import datetime
+                updates = {
+                    "name": form.get("name"),
+                    "description": form.get("description") or "",
+                    "start_time": datetime.fromisoformat(form.get("start_time").replace("T", " ")),
+                    "duration_hours": int(form.get("duration_hours")),
+                    "join_discount_percent": int(form.get("join_discount_percent", 0)),
+                    "switch_discount_percent": int(form.get("switch_discount_percent", 0)),
+                    "is_active": form.get("is_active") == "true"
+                }
+                
+                await sale_ops.update_sale_event(event_id, guild_id, **updates)
+                await session.commit()
+                
+                logger.info(f"Updated sale event {event_id} in guild {guild_id}")
+                
+                # Redirect to sale events list
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/squad-sale-events?success=updated",
+                    status_code=302
+                )
+                
+            except ConflictError as e:
+                context = {
+                    "request": request,
+                    "error": str(e),
+                    "title": "Update Error"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=400)
+            
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found or bot not in guild",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error editing sale event {event_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to update sale event",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def squad_sale_event_toggle(request: Request) -> Response:
+    """Toggle a squad sale event's active status."""
+    guild_id = request.path_params["guild_id"]
+    event_id = UUID(request.path_params["event_id"])
+    
+    try:
+        async with get_db_session_context() as session:
+            sale_ops = SquadSaleEventOperations(session)
+            
+            updated_event = await sale_ops.toggle_sale_event(event_id, guild_id)
+            if not updated_event:
+                return Response(status_code=404)
+            
+            await session.commit()
+            logger.info(f"Toggled sale event {event_id} to {'active' if updated_event.is_active else 'inactive'}")
+            
+            return Response(status_code=200)
+            
+    except Exception as e:
+        logger.error(f"Error toggling sale event {event_id}: {e}")
+        return Response(status_code=500)
+
+
+async def squad_sale_event_delete(request: Request) -> Response:
+    """Delete a squad sale event."""
+    guild_id = request.path_params["guild_id"]
+    event_id = UUID(request.path_params["event_id"])
+    
+    try:
+        async with get_db_session_context() as session:
+            sale_ops = SquadSaleEventOperations(session)
+            
+            deleted = await sale_ops.delete_sale_event(event_id, guild_id)
+            if not deleted:
+                context = {
+                    "request": request,
+                    "error": "Sale event not found",
+                    "title": "Sale Event Not Found"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            await session.commit()
+            logger.info(f"Deleted sale event {event_id} in guild {guild_id}")
+            
+            # Redirect to sale events list
+            return RedirectResponse(
+                url=f"/admin/guilds/{guild_id}/squad-sale-events?success=deleted",
+                status_code=302
+            )
+            
+    except Exception as e:
+        logger.error(f"Error deleting sale event {event_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to delete sale event",
             "title": "Error"
         }
         return templates.TemplateResponse("admin/error.html", context, status_code=500)
