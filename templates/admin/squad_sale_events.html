@@ -195,20 +195,29 @@
                             </td>
                             <td>
                                 <div class="btn-group" role="group">
-                                    <button type="button" class="btn btn-sm btn-outline-primary" 
-                                            onclick="editSaleEvent({{ event.id|string|tojson }}, {{ event.name|tojson }}, {{ event.description|tojson }}, {{ event.start_time.isoformat()|tojson }}, {{ event.duration_hours }}, {{ event.join_discount_percent }}, {{ event.switch_discount_percent }}, {{ event.is_active|lower }})">
+                                    <button type="button" class="btn btn-sm btn-outline-primary edit-sale-event-btn"
+                                            data-event-id="{{ event.id }}"
+                                            data-event-name="{{ event.name }}"
+                                            data-event-description="{{ event.description }}"
+                                            data-event-start-time="{{ event.start_time.isoformat() }}"
+                                            data-event-duration="{{ event.duration_hours }}"
+                                            data-event-join-discount="{{ event.join_discount_percent }}"
+                                            data-event-switch-discount="{{ event.switch_discount_percent }}"
+                                            data-event-active="{{ event.is_active|lower }}">
                                         <svg class="icon icon-sm" width="16" height="16">
                                             <use xlink:href="#tabler-edit"></use>
                                         </svg>
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-outline-{{ 'success' if not event.is_active else 'warning' }}" 
-                                            onclick="toggleSaleEvent({{ event.id|string|tojson }}, {{ event.is_active|lower }})">
+                                    <button type="button" class="btn btn-sm btn-outline-{{ 'success' if not event.is_active else 'warning' }} toggle-sale-event-btn"
+                                            data-event-id="{{ event.id }}"
+                                            data-event-active="{{ event.is_active|lower }}">
                                         <svg class="icon icon-sm" width="16" height="16">
                                             <use xlink:href="#tabler-{{ 'eye' if not event.is_active else 'eye-off' }}"></use>
                                         </svg>
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-outline-danger" 
-                                            onclick="deleteSaleEvent({{ event.id|string|tojson }}, {{ event.name|tojson }})">
+                                    <button type="button" class="btn btn-sm btn-outline-danger delete-sale-event-btn"
+                                            data-event-id="{{ event.id }}"
+                                            data-event-name="{{ event.name }}">
                                         <svg class="icon icon-sm" width="16" height="16">
                                             <use xlink:href="#tabler-trash"></use>
                                         </svg>
@@ -517,6 +526,38 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('input[name="filter"]').forEach(radio => {
         radio.addEventListener('change', function() {
             filterEvents(this.id.replace('filter-', ''));
+        });
+    });
+    
+    // Add event listeners for sale event buttons
+    document.querySelectorAll('.edit-sale-event-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const eventId = this.dataset.eventId;
+            const name = this.dataset.eventName;
+            const description = this.dataset.eventDescription;
+            const startTime = this.dataset.eventStartTime;
+            const duration = parseInt(this.dataset.eventDuration);
+            const joinDiscount = parseInt(this.dataset.eventJoinDiscount);
+            const switchDiscount = parseInt(this.dataset.eventSwitchDiscount);
+            const isActive = this.dataset.eventActive === 'true';
+            
+            editSaleEvent(eventId, name, description, startTime, duration, joinDiscount, switchDiscount, isActive);
+        });
+    });
+    
+    document.querySelectorAll('.toggle-sale-event-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const eventId = this.dataset.eventId;
+            const currentStatus = this.dataset.eventActive === 'true';
+            toggleSaleEvent(eventId, currentStatus);
+        });
+    });
+    
+    document.querySelectorAll('.delete-sale-event-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const eventId = this.dataset.eventId;
+            const eventName = this.dataset.eventName;
+            deleteSaleEvent(eventId, eventName);
         });
     });
     
