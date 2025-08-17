@@ -422,19 +422,70 @@
 
 {% block scripts %}
 <script>
-// Wait for all scripts to load before defining functions
-document.addEventListener('DOMContentLoaded', function() {
-    // Ensure Tabler/Bootstrap is loaded by waiting briefly
-    setTimeout(function() {
-        defineGlobalFunctions();
-    }, 100);
-});
+// Define global functions first
+window.editSaleEvent = function(eventId, name, description, startTime, duration, joinDiscount, switchDiscount, isActive) {
+    document.getElementById('edit_event_id').value = eventId;
+    document.getElementById('edit_name').value = name;
+    document.getElementById('edit_description').value = description;
+    document.getElementById('edit_duration_hours').value = duration;
+    document.getElementById('edit_join_discount').value = joinDiscount;
+    document.getElementById('edit_switch_discount').value = switchDiscount;
+    document.getElementById('edit_is_active').checked = isActive;
+    
+    // Convert UTC time to local for datetime-local input
+    const utcTime = new Date(startTime);
+    utcTime.setMinutes(utcTime.getMinutes() - utcTime.getTimezoneOffset());
+    document.getElementById('edit_start_time').value = utcTime.toISOString().slice(0, 16);
+    
+    document.getElementById('editSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/edit';
+    
+    // Check if bootstrap is available, fallback if not
+    if (typeof bootstrap !== 'undefined') {
+        new bootstrap.Modal(document.getElementById('editSaleEventModal')).show();
+    } else {
+        // Fallback: manually show modal
+        const modal = document.getElementById('editSaleEventModal');
+        modal.style.display = 'block';
+        modal.classList.add('show');
+        document.body.classList.add('modal-open');
+    }
+};
 
-function defineGlobalFunctions() {
-    // Test function to verify script execution
-    window.testFunction = function() {
-        return "Script is running";
-    };
+window.toggleSaleEvent = async function(eventId, currentStatus) {
+    try {
+        const response = await fetch('/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/toggle', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Failed to toggle sale event status');
+        }
+    } catch (error) {
+        alert('Error toggling sale event status: ' + error.message);
+    }
+};
+
+window.deleteSaleEvent = function(eventId, eventName) {
+    document.getElementById('delete_event_id').value = eventId;
+    document.getElementById('delete_event_name').textContent = eventName;
+    document.getElementById('deleteSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/delete';
+    
+    // Check if bootstrap is available, fallback if not
+    if (typeof bootstrap !== 'undefined') {
+        new bootstrap.Modal(document.getElementById('deleteSaleEventModal')).show();
+    } else {
+        // Fallback: manually show modal
+        const modal = document.getElementById('deleteSaleEventModal');
+        modal.style.display = 'block';
+        modal.classList.add('show');
+        document.body.classList.add('modal-open');
+    }
+};
 
 // Calculate end time when start time or duration changes
 function updateCalculatedEndTime() {
@@ -574,71 +625,5 @@ document.addEventListener('DOMContentLoaded', function() {
     {% endif %}
 });
 
-// Define global functions that need Bootstrap
-window.editSaleEvent = function(eventId, name, description, startTime, duration, joinDiscount, switchDiscount, isActive) {
-    document.getElementById('edit_event_id').value = eventId;
-    document.getElementById('edit_name').value = name;
-    document.getElementById('edit_description').value = description;
-    document.getElementById('edit_duration_hours').value = duration;
-    document.getElementById('edit_join_discount').value = joinDiscount;
-    document.getElementById('edit_switch_discount').value = switchDiscount;
-    document.getElementById('edit_is_active').checked = isActive;
-    
-    // Convert UTC time to local for datetime-local input
-    const utcTime = new Date(startTime);
-    utcTime.setMinutes(utcTime.getMinutes() - utcTime.getTimezoneOffset());
-    document.getElementById('edit_start_time').value = utcTime.toISOString().slice(0, 16);
-    
-    document.getElementById('editSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/edit';
-    
-    // Check if bootstrap is available, fallback if not
-    if (typeof bootstrap !== 'undefined') {
-        new bootstrap.Modal(document.getElementById('editSaleEventModal')).show();
-    } else {
-        // Fallback: manually show modal
-        const modal = document.getElementById('editSaleEventModal');
-        modal.style.display = 'block';
-        modal.classList.add('show');
-        document.body.classList.add('modal-open');
-    }
-};
-
-window.toggleSaleEvent = async function(eventId, currentStatus) {
-    try {
-        const response = await fetch('/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/toggle', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            }
-        });
-        
-        if (response.ok) {
-            location.reload();
-        } else {
-            alert('Failed to toggle sale event status');
-        }
-    } catch (error) {
-        alert('Error toggling sale event status: ' + error.message);
-    }
-};
-
-window.deleteSaleEvent = function(eventId, eventName) {
-    document.getElementById('delete_event_id').value = eventId;
-    document.getElementById('delete_event_name').textContent = eventName;
-    document.getElementById('deleteSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/delete';
-    
-    // Check if bootstrap is available, fallback if not
-    if (typeof bootstrap !== 'undefined') {
-        new bootstrap.Modal(document.getElementById('deleteSaleEventModal')).show();
-    } else {
-        // Fallback: manually show modal
-        const modal = document.getElementById('deleteSaleEventModal');
-        modal.style.display = 'block';
-        modal.classList.add('show');
-        document.body.classList.add('modal-open');
-    }
-};
-
-}
 </script>
 {% endblock %}
