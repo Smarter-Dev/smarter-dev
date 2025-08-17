@@ -208,7 +208,7 @@
                                         </svg>
                                     </button>
                                     <button type="button" class="btn btn-sm btn-outline-danger" 
-                                            onclick="deleteSaleEvent('{{ event.id }}', '{{ event.name }}')">
+                                            onclick="deleteSaleEvent('{{ event.id }}', {{ event.name|tojson }})">
                                         <svg class="icon icon-sm" width="16" height="16">
                                             <use xlink:href="#tabler-trash"></use>
                                         </svg>
