@@ -3010,13 +3010,13 @@ async def squad_sale_event_edit(request: Request) -> Response:
             try:
                 from datetime import datetime, timezone
                 
-                # Handle datetime with proper timezone handling
+                # Handle datetime - treat input as UTC
                 start_time_str = form.get("start_time")
                 if start_time_str:
-                    # datetime-local input gives us local time without timezone info
-                    # We treat this as UTC since the frontend shows UTC time in local format
+                    # datetime-local input gives us time without timezone info
+                    # We treat this as UTC since the UI is labeled as UTC
                     start_time = datetime.fromisoformat(start_time_str.replace("T", " "))
-                    # Ensure it's timezone-aware (assume UTC for consistency)
+                    # Ensure it's timezone-aware as UTC
                     if start_time.tzinfo is None:
                         start_time = start_time.replace(tzinfo=timezone.utc)
                 else:

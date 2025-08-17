@@ -287,7 +287,7 @@
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label for="create_start_time" class="form-label">Start Time (Local) <span class="text-danger">*</span></label>
+                            <label for="create_start_time" class="form-label">Start Time (UTC) <span class="text-danger">*</span></label>
                             <input type="datetime-local" class="form-control" id="create_start_time" name="start_time" required>
                         </div>
                         <div class="col-md-6 mb-3">
@@ -356,7 +356,7 @@
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label for="edit_start_time" class="form-label">Start Time (Local) <span class="text-danger">*</span></label>
+                            <label for="edit_start_time" class="form-label">Start Time (UTC) <span class="text-danger">*</span></label>
                             <input type="datetime-local" class="form-control" id="edit_start_time" name="start_time" required>
                         </div>
                         <div class="col-md-6 mb-3">
@@ -432,12 +432,10 @@ window.editSaleEvent = function(eventId, name, description, startTime, duration,
     document.getElementById('edit_switch_discount').value = switchDiscount;
     document.getElementById('edit_is_active').checked = isActive;
     
-    // Convert UTC time to local for datetime-local input
+    // Display UTC time in the datetime-local input (treating it as UTC)
     const utcTime = new Date(startTime);
-    // datetime-local input expects the time in user's local timezone
-    // Use toISOString() and remove the 'Z' to get local representation
-    const localISOString = new Date(utcTime.getTime() - (utcTime.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
-    document.getElementById('edit_start_time').value = localISOString;
+    // Remove timezone info to display the UTC time as-is
+    document.getElementById('edit_start_time').value = utcTime.toISOString().slice(0, 16);
     
     document.getElementById('editSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/edit';
     
