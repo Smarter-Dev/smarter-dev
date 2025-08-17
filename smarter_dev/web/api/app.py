@@ -26,6 +26,7 @@ from smarter_dev.shared.database import init_database, close_database
 from smarter_dev.web.api.routers.auth import router as auth_router
 from smarter_dev.web.api.routers.bytes import router as bytes_router
 from smarter_dev.web.api.routers.squads import router as squads_router
+from smarter_dev.web.api.routers.squad_sale_events import router as squad_sale_events_router
 from smarter_dev.web.api.routers.admin import router as admin_router
 from smarter_dev.web.api.routers.forum_agents_simple import router as forum_agents_router
 from smarter_dev.web.api.routers.challenges import router as challenges_router
@@ -374,6 +375,12 @@ api.include_router(
     squads_router,
     prefix="/guilds/{guild_id}/squads",
     tags=["Squad Management"]
+)
+
+api.include_router(
+    squad_sale_events_router,
+    prefix="/guilds/{guild_id}",
+    tags=["Squad Sale Events"]
 )
 
 api.include_router(

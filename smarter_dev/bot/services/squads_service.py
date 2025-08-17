@@ -462,15 +462,30 @@ class SquadsService(BaseService):
                     reason=f"The {target_squad.name} squad is full! (Maximum: {target_squad.max_members} members)"
                 )
             
-            # Calculate join cost (always costs the squad's switch_cost)
-            join_cost = target_squad.switch_cost
+            # Calculate join cost including any sale discounts
+            # Determine if this is a join (first time) or switch operation
+            is_switching = current_squad is not None
+            join_cost = target_squad.current_switch_cost if is_switching else target_squad.current_join_cost
             
             # Check if user has sufficient balance
             if join_cost > current_balance:
+                action_type = "Switching to" if is_switching else "Joining"
+                cost_message = f"{join_cost:,} bytes"
+                
+                # Add sale information to cost message if applicable
+                if is_switching and target_squad.has_switch_sale:
+                    original_cost = target_squad.switch_cost
+                    discount = target_squad.switch_discount_percent
+                    cost_message = f"~~{original_cost:,}~~ **{join_cost:,}** bytes ({discount}% off sale!)"
+                elif not is_switching and target_squad.has_join_sale:
+                    original_cost = target_squad.switch_cost
+                    discount = target_squad.join_discount_percent
+                    cost_message = f"~~{original_cost:,}~~ **{join_cost:,}** bytes ({discount}% off sale!)"
+                
                 return JoinSquadResult(
                     success=False,
                     cost=join_cost,
-                    reason=f"Insufficient bytes! Joining the {target_squad.name} squad costs {join_cost} bytes, but you only have {current_balance}."
+                    reason=f"Insufficient bytes! {action_type} the {target_squad.name} squad costs {cost_message}, but you only have {current_balance:,} bytes."
                 )
             
             # Attempt to join squad via API

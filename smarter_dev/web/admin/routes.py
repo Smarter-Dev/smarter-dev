@@ -38,7 +38,11 @@ from smarter_dev.web.admin.views import (
     scheduled_messages_list,
     scheduled_message_create,
     scheduled_message_edit,
-    scheduled_message_delete
+    scheduled_message_delete,
+    squad_sale_events_list,
+    squad_sale_event_edit,
+    squad_sale_event_toggle,
+    squad_sale_event_delete
 )
 
 
@@ -57,6 +61,12 @@ admin_routes = [
     Route("/guilds/{guild_id}", admin_required(guild_detail), name="admin_guild_detail"),
     Route("/guilds/{guild_id}/bytes", admin_required(bytes_config), methods=["GET", "POST"], name="admin_bytes_config"),
     Route("/guilds/{guild_id}/squads", admin_required(squads_config), methods=["GET", "POST"], name="admin_squads_config"),
+    
+    # Squad sale events management
+    Route("/guilds/{guild_id}/squad-sale-events", admin_required(squad_sale_events_list), methods=["GET", "POST"], name="admin_squad_sale_events"),
+    Route("/guilds/{guild_id}/squad-sale-events/{event_id}/edit", admin_required(squad_sale_event_edit), methods=["POST"], name="admin_squad_sale_event_edit"),
+    Route("/guilds/{guild_id}/squad-sale-events/{event_id}/toggle", admin_required(squad_sale_event_toggle), methods=["POST"], name="admin_squad_sale_event_toggle"),
+    Route("/guilds/{guild_id}/squad-sale-events/{event_id}/delete", admin_required(squad_sale_event_delete), methods=["POST"], name="admin_squad_sale_event_delete"),
     
     # Forum agent management
     Route("/guilds/{guild_id}/forum-agents", admin_required(forum_agents_list), name="admin_forum_agents"),

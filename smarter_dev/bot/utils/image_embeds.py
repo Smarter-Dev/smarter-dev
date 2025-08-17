@@ -1017,8 +1017,15 @@ class EmbedImageGenerator:
                 cost_text = "Default"
                 cost_color = "#f59e0b"  # Amber for default squads
             elif squad.switch_cost > 0:
-                cost_text = f"{squad.switch_cost:,} bytes"
-                cost_color = "#11FF00"  # Green for costs (positive feeling)
+                # Use current join cost which includes sale discounts
+                current_cost = squad.current_join_cost if hasattr(squad, 'current_join_cost') else squad.switch_cost
+                if hasattr(squad, 'has_join_sale') and squad.has_join_sale:
+                    # Show sale price
+                    cost_text = f"{current_cost:,} bytes (Sale)"
+                    cost_color = "#FF6B35"  # Orange for sale price
+                else:
+                    cost_text = f"{current_cost:,} bytes"
+                    cost_color = "#11FF00"  # Green for regular costs
             else:
                 cost_text = "Free"
                 cost_color = "#11FF00"  # Green for free
@@ -1115,7 +1122,16 @@ class EmbedImageGenerator:
         # Skip stats header - go directly to stats content
         
         # Create full-width table for stats
-        switch_cost_display = "N/A (default)" if getattr(squad, 'is_default', False) else f"{squad.switch_cost:,} bytes"
+        if getattr(squad, 'is_default', False):
+            switch_cost_display = "N/A (default)"
+        else:
+            # Use current join cost which includes sale discounts
+            current_cost = squad.current_join_cost if hasattr(squad, 'current_join_cost') else squad.switch_cost
+            if hasattr(squad, 'has_join_sale') and squad.has_join_sale:
+                switch_cost_display = f"{current_cost:,} bytes (Sale)"
+            else:
+                switch_cost_display = f"{current_cost:,} bytes"
+        
         stats_items = [
             ("Members", f"{len(members)}" + (f"/{squad.max_members}" if squad.max_members else "")),
             ("Join Cost", switch_cost_display),

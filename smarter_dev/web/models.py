@@ -1854,3 +1854,188 @@ class ChallengeSubmission(Base):
         status = "correct" if self.is_correct else "incorrect"
         first = " (first success)" if self.is_first_success else ""
         return f"<ChallengeSubmission(challenge_id={self.challenge_id}, squad_id={self.squad_id}, status='{status}'{first})>"
+
+
+class SquadSaleEvent(Base):
+    """Squad sale event model for timed discount events on squad joining/switching.
+    
+    Allows administrators to create special sale events with configurable discounts
+    for squad joining and switching costs. Events are time-based with automatic
+    start/end based on duration.
+    """
+    
+    __tablename__ = "squad_sale_events"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique identifier for the sale event"
+    )
+    
+    # Guild context
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord guild (server) snowflake ID"
+    )
+    
+    # Event metadata
+    name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Name of the sale event"
+    )
+    description: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+        default="",
+        doc="Description of the sale event"
+    )
+    
+    # Event timing
+    start_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+        doc="When the sale event starts"
+    )
+    duration_hours: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        doc="Duration of the sale event in hours"
+    )
+    
+    # Discount configuration
+    join_discount_percent: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="Percentage discount for joining a squad (0-100)"
+    )
+    switch_discount_percent: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="Percentage discount for switching squads (0-100)"
+    )
+    
+    # Event status
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        doc="Whether this sale event is active"
+    )
+    
+    # Audit fields
+    created_by: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Username or identifier of who created this event"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the event was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the event was last modified"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_squad_sale_events_guild_id", "guild_id"),
+        Index("ix_squad_sale_events_guild_active", "guild_id", "is_active"),
+        Index("ix_squad_sale_events_start_time", "start_time"),
+        Index("ix_squad_sale_events_created_by", "created_by"),
+        UniqueConstraint("guild_id", "name", name="uq_squad_sale_events_guild_name"),
+        # Validation constraints
+        CheckConstraint("join_discount_percent >= 0 AND join_discount_percent <= 100", name="ck_squad_sale_events_join_discount_range"),
+        CheckConstraint("switch_discount_percent >= 0 AND switch_discount_percent <= 100", name="ck_squad_sale_events_switch_discount_range"),
+        CheckConstraint("duration_hours >= 1", name="ck_squad_sale_events_duration_positive"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize SquadSaleEvent with default timestamps."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        kwargs.setdefault('description', '')
+        kwargs.setdefault('join_discount_percent', 0)
+        kwargs.setdefault('switch_discount_percent', 0)
+        kwargs.setdefault('is_active', True)
+        super().__init__(**kwargs)
+    
+    @property
+    def end_time(self) -> datetime:
+        """Calculate when the sale event ends."""
+        from datetime import timedelta
+        return self.start_time + timedelta(hours=self.duration_hours)
+    
+    @property
+    def is_currently_active(self) -> bool:
+        """Check if the sale event is currently active based on time and status."""
+        if not self.is_active:
+            return False
+        now = datetime.now(timezone.utc)
+        return self.start_time <= now <= self.end_time
+    
+    @property
+    def days_until_start(self) -> Optional[int]:
+        """Get days until sale starts (None if already started)."""
+        if self.has_started:
+            return None
+        delta = self.start_time - datetime.now(timezone.utc)
+        return delta.days
+    
+    @property
+    def has_started(self) -> bool:
+        """Check if the sale event has started."""
+        return datetime.now(timezone.utc) >= self.start_time
+    
+    @property
+    def has_ended(self) -> bool:
+        """Check if the sale event has ended."""
+        return datetime.now(timezone.utc) > self.end_time
+    
+    @property
+    def time_remaining_hours(self) -> Optional[int]:
+        """Get hours remaining in the sale (None if not active)."""
+        if not self.is_currently_active:
+            return None
+        delta = self.end_time - datetime.now(timezone.utc)
+        return max(0, int(delta.total_seconds() // 3600))
+    
+    def calculate_discounted_cost(self, original_cost: int, is_switch: bool) -> int:
+        """Calculate the discounted cost for squad joining/switching.
+        
+        Args:
+            original_cost: The original cost before discount
+            is_switch: True if this is a squad switch, False if first join
+            
+        Returns:
+            The discounted cost
+        """
+        if not self.is_currently_active:
+            return original_cost
+        
+        discount_percent = self.switch_discount_percent if is_switch else self.join_discount_percent
+        if discount_percent == 0:
+            return original_cost
+        
+        discount_amount = int(original_cost * discount_percent / 100)
+        return max(0, original_cost - discount_amount)
+    
+    def __repr__(self) -> str:
+        """String representation of the squad sale event."""
+        status = "active" if self.is_currently_active else "inactive"
+        return f"<SquadSaleEvent(name='{self.name}', guild_id='{self.guild_id}', status='{status}')>"

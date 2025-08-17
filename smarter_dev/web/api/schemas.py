@@ -206,12 +206,16 @@ class SquadResponse(BaseAPIModel):
     description: Optional[str] = Field(description="Squad description")
     welcome_message: Optional[str] = Field(description="Custom welcome message")
     max_members: Optional[int] = Field(description="Maximum member limit")
-    switch_cost: int = Field(description="Cost to join squad")
+    switch_cost: int = Field(description="Original cost to join squad")
     member_count: int = Field(description="Current member count")
     is_active: bool = Field(description="Whether squad is active")
     is_default: bool = Field(description="Whether this is the default squad for auto-assignment")
     created_at: datetime = Field(description="Squad creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")
+    
+    # Sale information fields (populated dynamically)
+    join_cost_info: Optional[SquadCostInfo] = Field(None, description="Cost information for joining this squad")
+    switch_cost_info: Optional[SquadCostInfo] = Field(None, description="Cost information for switching to this squad")
     
     @field_serializer('created_at', 'updated_at')
     def serialize_datetime(self, value: datetime) -> str:
@@ -640,3 +644,147 @@ class HelpConversationStatsResponse(BaseAPIModel):
     top_users: List[dict] = Field(..., description="Most active users")
     conversation_types: dict = Field(..., description="Breakdown by interaction type")
     resolution_rate: float = Field(..., description="Percentage of resolved conversations")
+
+
+# ============================================================================
+# Squad Sale Event Schemas
+# ============================================================================
+
+class SquadSaleEventCreate(BaseAPIModel):
+    """Request model for creating a squad sale event."""
+    
+    name: str = Field(min_length=1, max_length=100, description="Name of the sale event")
+    description: str = Field(max_length=500, description="Description of the sale event")
+    start_time: datetime = Field(description="When the sale event starts (UTC)")
+    duration_hours: int = Field(ge=1, le=720, description="Duration of the sale event in hours (1-720)")
+    join_discount_percent: int = Field(ge=0, le=100, description="Percentage discount for joining squads (0-100)")
+    switch_discount_percent: int = Field(ge=0, le=100, description="Percentage discount for switching squads (0-100)")
+    
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: str) -> str:
+        """Validate sale event name."""
+        v = v.strip()
+        if not v:
+            raise ValueError("Name cannot be empty")
+        return v
+    
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v: str) -> str:
+        """Validate sale event description."""
+        return v.strip()
+    
+    @field_validator('start_time')
+    @classmethod
+    def validate_start_time(cls, v: datetime) -> datetime:
+        """Validate start time is in the future."""
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+        if v <= now:
+            raise ValueError("Start time must be in the future")
+        return v
+
+
+class SquadSaleEventUpdate(BaseAPIModel):
+    """Request model for updating a squad sale event."""
+    
+    name: Optional[str] = Field(None, min_length=1, max_length=100, description="Name of the sale event")
+    description: Optional[str] = Field(None, max_length=500, description="Description of the sale event") 
+    start_time: Optional[datetime] = Field(None, description="When the sale event starts (UTC)")
+    duration_hours: Optional[int] = Field(None, ge=1, le=720, description="Duration of the sale event in hours")
+    join_discount_percent: Optional[int] = Field(None, ge=0, le=100, description="Percentage discount for joining squads")
+    switch_discount_percent: Optional[int] = Field(None, ge=0, le=100, description="Percentage discount for switching squads")
+    is_active: Optional[bool] = Field(None, description="Whether the sale event is active")
+    
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v: Optional[str]) -> Optional[str]:
+        """Validate sale event name."""
+        if v is not None:
+            v = v.strip()
+            if not v:
+                raise ValueError("Name cannot be empty")
+        return v
+    
+    @field_validator('description')
+    @classmethod
+    def validate_description(cls, v: Optional[str]) -> Optional[str]:
+        """Validate sale event description."""
+        return v.strip() if v is not None else v
+
+
+class SquadSaleEventResponse(BaseAPIModel):
+    """Response model for squad sale event."""
+    
+    id: UUID = Field(description="Unique identifier for the sale event")
+    guild_id: str = Field(description="Discord guild ID")
+    name: str = Field(description="Name of the sale event")
+    description: str = Field(description="Description of the sale event")
+    start_time: datetime = Field(description="When the sale event starts")
+    duration_hours: int = Field(description="Duration of the sale event in hours")
+    join_discount_percent: int = Field(description="Percentage discount for joining squads")
+    switch_discount_percent: int = Field(description="Percentage discount for switching squads")
+    is_active: bool = Field(description="Whether this sale event is active")
+    created_by: str = Field(description="Who created this event")
+    created_at: datetime = Field(description="When the event was created")
+    updated_at: datetime = Field(description="When the event was last updated")
+    
+    # Computed fields
+    end_time: Optional[datetime] = Field(None, description="When the sale event ends")
+    is_currently_active: Optional[bool] = Field(None, description="Whether the event is currently active")
+    has_started: Optional[bool] = Field(None, description="Whether the event has started")
+    has_ended: Optional[bool] = Field(None, description="Whether the event has ended")
+    time_remaining_hours: Optional[int] = Field(None, description="Hours remaining in the sale")
+    days_until_start: Optional[int] = Field(None, description="Days until sale starts")
+    
+    @field_serializer('start_time', 'created_at', 'updated_at', 'end_time')
+    def serialize_datetime(self, value: Optional[datetime]) -> Optional[str]:
+        return value.isoformat() if value else None
+
+
+class SquadSaleEventListResponse(BaseAPIModel):
+    """Response model for paginated sale event listings."""
+    
+    items: List[SquadSaleEventResponse] = Field(description="List of sale events")
+    total: int = Field(description="Total number of sale events")
+    page: int = Field(description="Current page number")
+    size: int = Field(description="Number of items per page")
+    pages: int = Field(description="Total number of pages")
+
+
+class SquadSaleEventCreateResponse(BaseAPIModel):
+    """Response model for sale event creation."""
+    
+    id: UUID = Field(description="Created sale event ID")
+    message: str = Field(description="Success message")
+    created_at: datetime = Field(description="Creation timestamp")
+    
+    @field_serializer('created_at')
+    def serialize_datetime(self, value: datetime) -> str:
+        return value.isoformat()
+
+
+class ActiveSaleEventResponse(BaseAPIModel):
+    """Response model for active sale events affecting costs."""
+    
+    event_name: str = Field(description="Name of the active sale event")
+    event_id: UUID = Field(description="ID of the active sale event")
+    join_discount_percent: int = Field(description="Discount percentage for joining")
+    switch_discount_percent: int = Field(description="Discount percentage for switching")
+    time_remaining_hours: Optional[int] = Field(None, description="Hours remaining in sale")
+    end_time: datetime = Field(description="When the sale ends")
+    
+    @field_serializer('end_time')
+    def serialize_datetime(self, value: datetime) -> str:
+        return value.isoformat()
+
+
+class SquadCostInfo(BaseAPIModel):
+    """Cost information including sale discounts."""
+    
+    original_cost: int = Field(description="Original cost before any discounts")
+    current_cost: int = Field(description="Current cost after applying best available discount")
+    discount_percent: Optional[int] = Field(None, description="Discount percentage applied (0-100)")
+    active_sale: Optional[ActiveSaleEventResponse] = Field(None, description="Active sale event providing discount")
+    is_on_sale: bool = Field(description="Whether this action is currently discounted")
