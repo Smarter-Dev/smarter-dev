@@ -2898,14 +2898,29 @@ async def squad_sale_events_list(request: Request) -> Response:
                     # These properties are computed in the model
                     pass
                 
+                # Check for success message
+                success_param = request.query_params.get("success")
+                success_message = None
+                if success_param == "updated":
+                    success_message = "Sale event updated successfully!"
+                elif success_param == "created":
+                    success_message = "Sale event created successfully!"
+                elif success_param == "deleted":
+                    success_message = "Sale event deleted successfully!"
+                
+                context = {
+                    "guild": guild,
+                    "events": events,
+                    "active_events": active_events
+                }
+                
+                if success_message:
+                    context["messages"] = [("success", success_message)]
+                
                 return templates.TemplateResponse(
                     request,
                     "admin/squad_sale_events.html",
-                    {
-                        "guild": guild,
-                        "events": events,
-                        "active_events": active_events
-                    }
+                    context
                 )
             
             # POST - Handle sale event creation
