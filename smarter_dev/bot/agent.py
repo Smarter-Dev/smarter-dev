@@ -246,6 +246,12 @@ class ConversationalMentionSignature(dspy.Signature):
     - If someone needs detailed command help, suggest `/help` for comprehensive info
     - Focus on being helpful while maintaining the conversational flow
 
+    ## RATE LIMIT AWARENESS
+    - If the user is near their rate limit (1 request remaining), gently wrap up the conversation
+    - Suggest they can continue chatting later or use specific commands like `/bytes` or `/squads`
+    - Keep the wrap-up natural and friendly, not abrupt: "Well, I should let you go for now..."
+    - Don't make it feel punitive - more like a natural conversation ending
+
     ## EXAMPLES OF GOOD RESPONSES:
     - "Hey! I saw you talking about automation - that sounds really cool! Are you working on anything specific?"
     - "Oh nice! That's exactly what the bytes system is for. You can send bytes to people with `/bytes send` if you want to tip them for helping!"
@@ -255,6 +261,7 @@ class ConversationalMentionSignature(dspy.Signature):
     
     context_messages: str = dspy.InputField(description="Recent conversation messages for context")
     user_mention: str = dspy.InputField(description="What the user said when mentioning the bot")
+    remaining_requests: int = dspy.InputField(description="Number of help requests user has remaining before rate limit")
     response: str = dspy.OutputField(description="Conversational response that engages with the discussion")
 
 
@@ -379,6 +386,7 @@ class HelpAgentSignature(dspy.Signature):
     
     context_messages: str = dspy.InputField(description="Recent conversation messages for context")
     user_question: str = dspy.InputField(description="The user's question about the bot")
+    remaining_requests: int = dspy.InputField(description="Number of help requests user has remaining before rate limit")
     response: str = dspy.OutputField(description="Helpful response explaining bot functionality")
 
 
@@ -394,7 +402,8 @@ class HelpAgent:
         user_question: str, 
         context_messages: List[DiscordMessage] = None,
         bot_id: str = None,
-        interaction_type: str = "slash_command"
+        interaction_type: str = "slash_command",
+        remaining_requests: int = 10
     ) -> tuple[str, int]:
         """Generate a helpful response to a user's question.
         
@@ -403,6 +412,7 @@ class HelpAgent:
             context_messages: Recent conversation messages for context
             bot_id: The bot's Discord user ID for identifying its messages
             interaction_type: "slash_command" for /help, "mention" for @mentions
+            remaining_requests: Number of help requests user has remaining before rate limit
             
         Returns:
             tuple[str, int]: Generated response and token usage count
@@ -449,13 +459,15 @@ class HelpAgent:
             # Use conversational mention agent
             result = self._mention_agent(
                 context_messages=f"<history>{context_str}</history>",
-                user_mention=user_question
+                user_mention=user_question,
+                remaining_requests=remaining_requests
             )
         else:
             # Use detailed help agent for slash commands
             result = self._help_agent(
                 context_messages=f"<history>{context_str}</history>",
-                user_question=user_question
+                user_question=user_question,
+                remaining_requests=remaining_requests
             )
         
         # Get token usage from DSPy prediction using robust extraction methods
