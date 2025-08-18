@@ -164,8 +164,10 @@ async def generate_help_response(
         # Track response time
         start_time = datetime.now(timezone.utc)
         
-        # Check remaining requests for rate limit awareness
-        remaining_requests = rate_limiter.get_user_remaining_requests(user_id, 'help')
+        # Check remaining messages for conversation pacing
+        # Since we're about to use one request, subtract 1 to get messages remaining AFTER this one
+        current_remaining = rate_limiter.get_user_remaining_requests(user_id, 'help')
+        messages_remaining = max(0, current_remaining - 1)
         
         # Generate response with token tracking
         response, tokens_used = help_agent.generate_response(
@@ -173,7 +175,7 @@ async def generate_help_response(
             context_messages, 
             bot_id,
             interaction_type,
-            remaining_requests
+            messages_remaining
         )
         
         # Calculate response time
