@@ -165,7 +165,12 @@ async def generate_help_response(
         start_time = datetime.now(timezone.utc)
         
         # Generate response with token tracking
-        response, tokens_used = help_agent.generate_response(user_question, context_messages, bot_id)
+        response, tokens_used = help_agent.generate_response(
+            user_question, 
+            context_messages, 
+            bot_id,
+            interaction_type
+        )
         
         # Calculate response time
         end_time = datetime.now(timezone.utc)

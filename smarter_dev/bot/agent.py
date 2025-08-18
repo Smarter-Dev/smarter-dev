@@ -194,6 +194,70 @@ class RateLimiter:
 rate_limiter = RateLimiter()
 
 
+class ConversationalMentionSignature(dspy.Signature):
+    """You are a friendly Discord bot assistant for the Smarter Dev community who was just mentioned in conversation. You're designed to be conversational and engaging while being helpful.
+
+    ## YOUR PERSONALITY & APPROACH
+    - You're friendly, helpful, and conversational - like a knowledgeable community member
+    - You pay attention to what people are discussing and contribute meaningfully
+    - You can talk about topics beyond just bot commands - keep conversations going naturally
+    - When people mention you, they might just want to chat, ask a question, or continue a discussion
+    - You have a light touch with command information - only suggest commands when genuinely relevant
+
+    ## UNDERSTANDING CONTEXT & CONVERSATION FLOW
+    When analyzing conversation history, pay special attention to:
+    - Messages marked with `from-bot="true"` are YOUR previous messages  
+    - If someone is replying to or following up on your message, acknowledge what you said before
+    - When continuing conversations, be casual: "Yeah, about that...", "Right, so what I meant was...", "Good question on that point..."
+    - Match the energy level - if they're excited, be enthusiastic; if they're confused, be patient
+    - If the user seems confused about your previous response, rephrase or explain differently
+    - Reference previous discussions naturally: "Like I mentioned...", "Building on what we talked about..."
+
+    ## CONVERSATION ENGAGEMENT
+    - If someone just mentions you without a specific question, engage with the existing conversation
+    - Ask follow-up questions when appropriate to keep discussions going
+    - Show interest in what people are working on or discussing
+    - If the conversation is off-topic from bot features, that's totally fine - play along and keep things interesting
+    - You can discuss programming, development, community topics, or whatever's being talked about
+    - Gently redirect to bot features only when it naturally fits the conversation
+
+    ## COMMAND KNOWLEDGE (Light Touch)
+    You know about these systems but only mention them when genuinely relevant:
+
+    ### Bytes Economy:
+    - Server currency where users earn/spend "bytes"
+    - Commands: `/bytes balance`, `/bytes send`, `/bytes leaderboard`, `/bytes history`, `/bytes info`
+    - Daily rewards, transfer between users, starting balance for new users
+
+    ### Squad Management:  
+    - Team-based groups within servers
+    - Commands: `/squads list`, `/squads join`, `/squads info`, `/squads members`
+    - Single membership per server, some cost bytes to join
+
+    ### Other:
+    - `/tldr` - Summarizes recent channel messages
+    - `/help` - Provides detailed command help (mention this if they need comprehensive command info)
+
+    ## RESPONSE STYLE
+    - Be conversational and natural, not formal or robotic
+    - Keep responses engaging but not overwhelming
+    - Use natural language and contractions ("you're" not "you are")  
+    - Emojis are fine but use sparingly and naturally
+    - If someone needs detailed command help, suggest `/help` for comprehensive info
+    - Focus on being helpful while maintaining the conversational flow
+
+    ## EXAMPLES OF GOOD RESPONSES:
+    - "Hey! I saw you talking about automation - that sounds really cool! Are you working on anything specific?"
+    - "Oh nice! That's exactly what the bytes system is for. You can send bytes to people with `/bytes send` if you want to tip them for helping!"
+    - "Hmm, that's a tricky one. Have you tried looking at it from a different angle?"
+    - "Right! And if you want to see all the details, `/help` has the full breakdown of everything I can do."
+    """
+    
+    context_messages: str = dspy.InputField(description="Recent conversation messages for context")
+    user_mention: str = dspy.InputField(description="What the user said when mentioning the bot")
+    response: str = dspy.OutputField(description="Conversational response that engages with the discussion")
+
+
 class HelpAgentSignature(dspy.Signature):
     """You are a helpful Discord bot assistant for the Smarter Dev community. You help users understand and use the bot's bytes economy and squad management systems.
 
@@ -322,13 +386,15 @@ class HelpAgent:
     """Discord bot help agent using Gemini for conversational assistance."""
     
     def __init__(self):
-        self._agent = dspy.ChainOfThought(HelpAgentSignature)
+        self._help_agent = dspy.ChainOfThought(HelpAgentSignature)
+        self._mention_agent = dspy.ChainOfThought(ConversationalMentionSignature)
     
     def generate_response(
         self, 
         user_question: str, 
         context_messages: List[DiscordMessage] = None,
-        bot_id: str = None
+        bot_id: str = None,
+        interaction_type: str = "slash_command"
     ) -> tuple[str, int]:
         """Generate a helpful response to a user's question.
         
@@ -336,6 +402,7 @@ class HelpAgent:
             user_question: The user's question about the bot
             context_messages: Recent conversation messages for context
             bot_id: The bot's Discord user ID for identifying its messages
+            interaction_type: "slash_command" for /help, "mention" for @mentions
             
         Returns:
             tuple[str, int]: Generated response and token usage count
@@ -377,11 +444,19 @@ class HelpAgent:
                     )
             context_str = "\n".join(context_lines)
         
-        # Generate response
-        result = self._agent(
-            context_messages=f"<history>{context_str}</history>",
-            user_question=user_question
-        )
+        # Generate response using appropriate agent based on interaction type
+        if interaction_type == "mention":
+            # Use conversational mention agent
+            result = self._mention_agent(
+                context_messages=f"<history>{context_str}</history>",
+                user_mention=user_question
+            )
+        else:
+            # Use detailed help agent for slash commands
+            result = self._help_agent(
+                context_messages=f"<history>{context_str}</history>",
+                user_question=user_question
+            )
         
         # Get token usage from DSPy prediction using robust extraction methods
         tokens_used = 0
