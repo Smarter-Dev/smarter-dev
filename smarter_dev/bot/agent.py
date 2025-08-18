@@ -228,11 +228,17 @@ class ConversationalMentionSignature(dspy.Signature):
     - Server currency where users earn/spend "bytes"
     - Commands: `/bytes balance`, `/bytes send`, `/bytes leaderboard`, `/bytes history`, `/bytes info`
     - Daily rewards, transfer between users, starting balance for new users
+    - Context menu: Right-click any message → "Send Bytes" to tip the author
 
     ### Squad Management:  
     - Team-based groups within servers
     - Commands: `/squads list`, `/squads join`, `/squads info`, `/squads members`
     - Single membership per server, some cost bytes to join
+
+    ### Challenge System:
+    - Competitive challenges/campaigns with scoring
+    - Commands: `/challenges scoreboard`, `/challenges breakdown`, `/challenges event`
+    - View current competitions, detailed scoring, and event information
 
     ### Other:
     - `/tldr` - Summarizes recent channel messages
@@ -306,9 +312,9 @@ class HelpAgentSignature(dspy.Signature):
        - Shows: starting balance, daily amount, transfer limits, cooldowns
        - Response: Private message
 
-    6. `/tldr [limit]` - Summarize the recent messages in the channel
-       - `limit` (optional): Number of messages to summarize (1-20, default: 5)
-       - Response: Private message with share option
+    6. **Context Menu**: "Send Bytes" - Right-click any message to send bytes to its author
+       - Quick way to tip someone for helpful messages
+       - Opens interactive form to send bytes
 
     ### How Bytes Work:
     - **Starting Balance**: New users get a starting balance (usually 128 bytes)
@@ -348,6 +354,43 @@ class HelpAgentSignature(dspy.Signature):
     - **Capacity Limits**: Squads may have maximum member limits
     - **Role Management**: Bot automatically manages Discord roles
     - **Switching**: You can switch squads (may cost bytes)
+
+    ## CHALLENGE SYSTEM
+    Competitive challenges/campaigns with scoring and leaderboards.
+
+    ### Available Commands:
+    1. `/challenges scoreboard` - View the current challenge scoreboard
+       - Shows ranking of participants in the most recent campaign
+       - Displays points/scores for active challenges
+       - Response: Private message with share option
+
+    2. `/challenges breakdown` - View detailed scoreboard with points breakdown
+       - Shows challenge-by-challenge point breakdown for participants
+       - More detailed view than the basic scoreboard
+       - Response: Private message with share option
+
+    3. `/challenges event` - View current challenge event/campaign information
+       - Shows information about the current running challenge/campaign
+       - Displays current active challenge details and timing
+       - Response: Private message with share option
+
+    ### How Challenges Work:
+    - **Campaigns**: Time-based competitive events with multiple challenges
+    - **Scoring**: Points awarded for completing challenges or achieving goals
+    - **Leaderboards**: Track rankings and compare performance with others
+    - **Events**: Current/active challenges and campaign information
+
+    ## OTHER COMMANDS
+    1. `/tldr [limit]` - Summarize the recent messages in the channel
+       - `limit` (optional): Number of messages to summarize (1-20, default: 5)
+       - Uses AI to create concise summaries of channel conversations
+       - Response: Private message with share option
+
+    2. `/help [question]` - Get help with the bot's features and commands
+       - `question` (optional): Specific question about bot functionality
+       - Provides AI-powered assistance and command explanations
+       - If no question provided, gives general overview
+       - Response: Private message
 
     ## COMMON ISSUES & SOLUTIONS:
 
