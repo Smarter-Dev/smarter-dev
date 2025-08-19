@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Smarter Dev Admin{% endblock %}</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="stylesheet" href="https://unpkg.com/@tabler/core@latest/dist/css/tabler.min.css">
+    <link rel="stylesheet" href="/static/css/admin-sidebar.css">
+    <style>
+        .navbar-brand-autodark {
+            color: #fff !important;
+        }
+        .navbar-dark {
+            background-color: #1a1d29 !important;
+        }
+        /* Improve header contrast */
+        .page-header .breadcrumb-item a {
+            color: #fff !important;
+            text-decoration: none;
+        }
+        .page-header .breadcrumb-item a:hover {
+            color: #e1e5e9 !important;
+            text-decoration: underline;
+        }
+        .page-header .breadcrumb-item.active,
+        .page-header .breadcrumb-item {
+            color: #e1e5e9 !important;
+        }
+        .page-header .page-title {
+            color: #fff !important;
+        }
+        .page-header {
+            background: linear-gradient(135deg, #1a1d29 0%, #2c3142 100%);
+            border-bottom: 1px solid #3a3f5c;
+        }
+        /* Dark theme overrides - handled by admin-sidebar.css */
+        {% block extra_styles %}{% endblock %}
+    </style>
+</head>
+<body>
+    <!-- Tabler Icons Sprite -->
+    <svg xmlns="http://www.w3.org/2000/svg" style="display: none;">
+        <defs>
+            <symbol id="tabler-arrow-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path>
+            </symbol>
+            <symbol id="tabler-arrow-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path>
+            </symbol>
+            <symbol id="tabler-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 5v14"></path><path d="M5 12h14"></path>
+            </symbol>
+            <symbol id="tabler-device-floppy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 4h10l4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"></path>
+                <circle cx="12" cy="14" r="2"></circle>
+                <polyline points="14,4 14,8 8,8 8,4"></polyline>
+            </symbol>
+            <symbol id="tabler-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="m22 21-2-2"></path>
+                <circle cx="17" cy="17" r="3"></circle>
+            </symbol>
+            <symbol id="tabler-building-community" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 9l5 5v7h-5v-4m0 4h-5v-7l5-5m1 1v-6a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17h-8"></path>
+                <path d="M13 7h4"></path>
+                <path d="M13 11h4"></path>
+                <path d="M13 15h4"></path>
+            </symbol>
+            <symbol id="tabler-coin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="9"></circle>
+                <path d="M14.5 8a2.5 2.5 0 0 0-2.5-2.5A2.5 2.5 0 0 0 9.5 8"></path>
+                <path d="M14.5 16a2.5 2.5 0 0 1-2.5 2.5A2.5 2.5 0 0 1 9.5 16"></path>
+            </symbol>
+            <symbol id="tabler-dashboard" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="13" r="2"></circle>
+                <path d="M13.45 11.55 15.5 9.5"></path>
+                <path d="M6.4 20a9 9 0 1 1 11.2 0Z"></path>
+            </symbol>
+            <symbol id="tabler-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 8V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2v-2"></path>
+                <path d="M7 12h14l-3-3m0 6 3-3"></path>
+            </symbol>
+            <symbol id="tabler-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+            </symbol>
+            <symbol id="tabler-external-link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15,3 21,3 21,9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+            </symbol>
+            <symbol id="tabler-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path>
+                <path d="M21 3v5h-5"></path>
+                <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path>
+                <path d="M3 21v-5h5"></path>
+            </symbol>
+            <symbol id="tabler-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20,6 9,17 4,12"></polyline>
+            </symbol>
+            <symbol id="tabler-alert-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </symbol>
+            <symbol id="tabler-alert-triangle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+                <path d="M12 9v4"></path>
+                <path d="m12 17 .01 0"></path>
+            </symbol>
+            <symbol id="tabler-error-404" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 7v4a1 1 0 0 0 1 1h3"></path>
+                <path d="M7 7v10"></path>
+                <path d="M10 8v8a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-2a1 1 0 0 0-1 1z"></path>
+                <path d="M17 7v4a1 1 0 0 0 1 1h3"></path>
+                <path d="M21 7v10"></path>
+            </symbol>
+            <symbol id="tabler-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+            </symbol>
+            <symbol id="tabler-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m9.88 9.88a3 3 0 1 0 4.24 4.24"></path>
+                <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 11 8 11 8a13.16 13.16 0 0 1-1.67 2.68"></path>
+                <path d="M6.61 6.61A13.526 13.526 0 0 0 1 12s4 8 11 8a9.74 9.74 0 0 0 5-1.34"></path>
+                <line x1="2" y1="2" x2="22" y2="22"></line>
+            </symbol>
+            <symbol id="tabler-robot" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 7h10a2 2 0 0 1 2 2v1l1 1v3l-1 1v3a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-3l-1-1v-3l1-1V9a2 2 0 0 1 2-2z"></path>
+                <path d="M10 16h4"></path>
+                <circle cx="8.5" cy="11.5" r=".5" fill="currentColor"></circle>
+                <circle cx="15.5" cy="11.5" r=".5" fill="currentColor"></circle>
+                <path d="M9 7 8 3"></path>
+                <path d="M16 7l1-4"></path>
+            </symbol>
+            <symbol id="tabler-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M7 7H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-1"></path>
+                <path d="M20.385 6.585a2.1 2.1 0 0 0-2.97-2.97L9 12v3h3l8.385-8.415z"></path>
+                <path d="M16 5l3 3"></path>
+            </symbol>
+            <symbol id="tabler-article" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2z"></path>
+                <path d="M14 2v4a1 1 0 0 0 1 1h4"></path>
+                <path d="M7 13h10"></path>
+                <path d="M7 17h7"></path>
+            </symbol>
+            <symbol id="tabler-chart-bar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 13a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-7z"></path>
+                <path d="M15 9a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V9z"></path>
+                <path d="M9 5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1h-4a1 1 0 0 1-1-1V5z"></path>
+            </symbol>
+            <symbol id="tabler-check-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="16,8 10,14 8,12"></polyline>
+            </symbol>
+            <symbol id="tabler-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="15,18 9,12 15,6"></polyline>
+            </symbol>
+            <symbol id="tabler-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9,18 15,12 9,6"></polyline>
+            </symbol>
+            <symbol id="tabler-chevron-down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6,9 12,15 18,9"></polyline>
+            </symbol>
+            <symbol id="tabler-chevron-up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="18,15 12,9 6,15"></polyline>
+            </symbol>
+            <symbol id="tabler-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </symbol>
+            <symbol id="tabler-dots-vertical" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="1"></circle>
+                <circle cx="12" cy="5" r="1"></circle>
+                <circle cx="12" cy="19" r="1"></circle>
+            </symbol>
+            <symbol id="tabler-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+                <polyline points="9,22 9,12 15,12 15,22"></polyline>
+            </symbol>
+            <symbol id="tabler-info-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+            </symbol>
+            <symbol id="tabler-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="8" cy="15" r="4"></circle>
+                <path d="M10.85 12.15L19 4"></path>
+                <path d="M18 5l1.5-1.5"></path>
+                <path d="M15 8l-5 5"></path>
+            </symbol>
+            <symbol id="tabler-message-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 9h8"></path>
+                <path d="M8 13h6"></path>
+                <path d="M18 4a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3h-5l-5 3v-3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3h12z"></path>
+            </symbol>
+            <symbol id="tabler-messages" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 14l-3-3h-7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v10"></path>
+                <path d="M14 15v2a1 1 0 0 1-1 1H6l-3 3V11a1 1 0 0 1 1-1h2"></path>
+            </symbol>
+            <symbol id="tabler-player-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="6" y="4" width="4" height="16"></rect>
+                <rect x="14" y="4" width="4" height="16"></rect>
+            </symbol>
+            <symbol id="tabler-player-play" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="5,3 19,12 5,21"></polygon>
+            </symbol>
+            <symbol id="tabler-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="M21 21l-4.35-4.35"></path>
+            </symbol>
+            <symbol id="tabler-shield-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M13.5 3.1c-.5-.1-1-.1-1.5-.1C8 3 4.5 4.5 4.5 9s2 9 7.5 9c2.5 0 4.5-.5 6-1.5"></path>
+                <path d="M22 2L2 22"></path>
+                <path d="M22 22L2 2"></path>
+            </symbol>
+            <symbol id="tabler-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3,6 5,6 21,6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                <line x1="10" y1="11" x2="10" y2="17"></line>
+                <line x1="14" y1="11" x2="14" y2="17"></line>
+            </symbol>
+            <symbol id="tabler-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </symbol>
+            <symbol id="tabler-x-circle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="15" y1="9" x2="9" y2="15"></line>
+                <line x1="9" y1="9" x2="15" y2="15"></line>
+            </symbol>
+            <symbol id="tabler-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="8" y1="6" x2="21" y2="6"></line>
+                <line x1="8" y1="12" x2="21" y2="12"></line>
+                <line x1="8" y1="18" x2="21" y2="18"></line>
+                <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                <line x1="3" y1="18" x2="3.01" y2="18"></line>
+            </symbol>
+            <symbol id="tabler-trophy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+                <path d="m7 4v3a5 5 0 0 0 10 0V4"></path>
+                <path d="M7 2h10"></path>
+                <path d="m16 4 1.621.973A2 2 0 0 1 19 7v0a2 2 0 0 1-1.379 1.897L16 9"></path>
+                <path d="m8 4-1.621.973A2 2 0 0 0 5 7v0a2 2 0 0 0 1.379 1.897L8 9"></path>
+            </symbol>
+            <symbol id="tabler-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 2v4"></path>
+                <path d="M16 2v4"></path>
+                <rect width="18" height="18" x="3" y="4" rx="2"></rect>
+                <path d="M3 10h18"></path>
+            </symbol>
+            <symbol id="tabler-menu-2" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+            </symbol>
+        </defs>
+    </svg>
+    
+    <div class="admin-layout">
+        <!-- Primary Sidebar -->
+        <nav class="sidebar sidebar-primary" id="primary-sidebar" role="navigation" aria-label="Main navigation">
+            <div class="sidebar-header">
+                <a href="/admin" class="sidebar-brand">
+                    <img src="/static/favicon.png" width="32" height="32" alt="Smarter Dev" class="sidebar-brand-image">
+                    <span class="sidebar-brand-text">Smarter Dev</span>
+                </a>
+                <button type="button" class="btn btn-link sidebar-toggle d-lg-none" aria-label="Toggle sidebar">
+                    <svg class="icon" width="24" height="24">
+                        <use xlink:href="#tabler-x"></use>
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="sidebar-content">
+                <nav class="nav nav-pills nav-sidebar">
+                    <a class="nav-link {% if request.url.path == '/admin' or request.url.path == '/admin/' %}active{% endif %}" href="/admin" aria-current="{% if request.url.path == '/admin' or request.url.path == '/admin/' %}page{% endif %}">
+                        <span class="nav-link-icon">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-dashboard"></use>
+                            </svg>
+                        </span>
+                        <span class="nav-link-title">Dashboard</span>
+                    </a>
+                    
+                    <a class="nav-link {% if '/guilds' in request.url.path %}active{% endif %}" href="/admin/guilds" aria-current="{% if '/guilds' in request.url.path %}page{% endif %}">
+                        <span class="nav-link-icon">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-building-community"></use>
+                            </svg>
+                        </span>
+                        <span class="nav-link-title">Guilds</span>
+                    </a>
+                    
+                    <a class="nav-link {% if '/conversations' in request.url.path %}active{% endif %}" href="/admin/conversations" aria-current="{% if '/conversations' in request.url.path %}page{% endif %}">
+                        <span class="nav-link-icon">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-messages"></use>
+                            </svg>
+                        </span>
+                        <span class="nav-link-title">Conversations</span>
+                    </a>
+                    
+                    <a class="nav-link {% if '/api-keys' in request.url.path %}active{% endif %}" href="/admin/api-keys" aria-current="{% if '/api-keys' in request.url.path %}page{% endif %}">
+                        <span class="nav-link-icon">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-key"></use>
+                            </svg>
+                        </span>
+                        <span class="nav-link-title">API Keys</span>
+                    </a>
+                    
+                    <a class="nav-link {% if '/blogs' in request.url.path %}active{% endif %}" href="/admin/blogs" aria-current="{% if '/blogs' in request.url.path %}page{% endif %}">
+                        <span class="nav-link-icon">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-article"></use>
+                            </svg>
+                        </span>
+                        <span class="nav-link-title">Blog</span>
+                    </a>
+                </nav>
+            </div>
+            
+            <div class="sidebar-footer">
+                <div class="nav-item dropdown dropup">
+                    <a href="#" class="nav-link d-flex lh-1 text-reset p-2" data-bs-toggle="dropdown" aria-label="Open user menu">
+                        <span class="avatar avatar-sm">
+                            {{ request.session.get('username', 'A')[0].upper() }}
+                        </span>
+                        <div class="d-none d-xl-block ps-2">
+                            <div>{{ request.session.get('username', 'Admin') }}</div>
+                            <div class="mt-1 small text-muted">Administrator</div>
+                        </div>
+                    </a>
+                    <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
+                        <form action="/admin/logout" method="post" class="dropdown-item-text">
+                            <button type="submit" class="btn btn-link p-0 text-decoration-none">
+                                <svg class="icon me-2" width="24" height="24">
+                                    <use xlink:href="#tabler-logout"></use>
+                                </svg>
+                                Logout
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </nav>
+        
+        <!-- Secondary Sidebar (Guild Context) -->
+        {% block secondary_sidebar %}
+        {% if guild %}
+        <nav class="sidebar sidebar-secondary" id="secondary-sidebar" role="navigation" aria-label="Guild navigation">
+            <div class="sidebar-header">
+                <div class="guild-selector">
+                    <select class="form-select" id="guild-selector" onchange="handleGuildChange()" aria-label="Select guild">
+                        {% if guilds %}
+                            {% for g in guilds %}
+                            <option value="{{ g.id }}" {% if g.id == guild.id %}selected{% endif %}>
+                                {{ g.name }}
+                            </option>
+                            {% endfor %}
+                        {% else %}
+                            <option value="{{ guild.id }}">{{ guild.name }}</option>
+                        {% endif %}
+                    </select>
+                </div>
+            </div>
+            
+            <div class="sidebar-content">
+                <nav class="nav nav-pills nav-sidebar">
+                    <a class="nav-link {% if request.url.path.endswith('/bytes') %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/bytes" aria-current="{% if request.url.path.endswith('/bytes') %}page{% endif %}">
+                        <span class="nav-link-icon">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-coin"></use>
+                            </svg>
+                        </span>
+                        <span class="nav-link-title">Bytes</span>
+                    </a>
+                    
+                    <a class="nav-link {% if request.url.path.endswith('/squads') %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/squads" aria-current="{% if request.url.path.endswith('/squads') %}page{% endif %}">
+                        <span class="nav-link-icon">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-users"></use>
+                            </svg>
+                        </span>
+                        <span class="nav-link-title">Squads</span>
+                    </a>
+                    
+                    <a class="nav-link {% if 'squad-sale-events' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/squad-sale-events" aria-current="{% if 'squad-sale-events' in request.url.path %}page{% endif %}">
+                        <span class="nav-link-icon">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-calendar"></use>
+                            </svg>
+                        </span>
+                        <span class="nav-link-title">Events</span>
+                    </a>
+                    
+                    <a class="nav-link {% if 'forum-agents' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/forum-agents" aria-current="{% if 'forum-agents' in request.url.path %}page{% endif %}">
+                        <span class="nav-link-icon">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-robot"></use>
+                            </svg>
+                        </span>
+                        <span class="nav-link-title">Forum Agents</span>
+                    </a>
+                    
+                    <a class="nav-link {% if 'campaigns' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/campaigns" aria-current="{% if 'campaigns' in request.url.path %}page{% endif %}">
+                        <span class="nav-link-icon">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-trophy"></use>
+                            </svg>
+                        </span>
+                        <span class="nav-link-title">Campaigns</span>
+                    </a>
+                </nav>
+            </div>
+        </nav>
+        {% endif %}
+        {% endblock %}
+        
+        <!-- Main Content -->
+        <main class="main-content" role="main">
+            <!-- Page header -->
+            {% block page_header %}
+            <div class="page-header d-print-none">
+                <!-- Mobile Menu Button -->
+                <button type="button" class="btn btn-primary sidebar-mobile-toggle d-lg-none" data-bs-toggle="offcanvas" data-bs-target="#mobile-sidebar" aria-controls="mobile-sidebar" aria-label="Toggle navigation">
+                    <svg class="icon" width="24" height="24">
+                        <use xlink:href="#tabler-menu-2"></use>
+                    </svg>
+                </button>
+                
+                <div class="container-fluid">
+                    <div class="row g-2 align-items-center">
+                        <div class="col">
+                            {% block breadcrumb %}
+                            <div class="page-pretitle">
+                                <nav aria-label="breadcrumb">
+                                    <ol class="breadcrumb">
+                                        <li class="breadcrumb-item"><a href="/admin">Admin</a></li>
+                                        {% block breadcrumb_items %}{% endblock %}
+                                    </ol>
+                                </nav>
+                            </div>
+                            {% endblock %}
+                            <h1 class="page-title">
+                                {% block page_title %}Admin Dashboard{% endblock %}
+                            </h1>
+                        </div>
+                        {% block page_actions %}{% endblock %}
+                    </div>
+                </div>
+            </div>
+            {% endblock %}
+            
+            <!-- Page body -->
+            <div class="page-body">
+                <div class="container-fluid">
+                    <!-- Flash messages -->
+                    {% if success %}
+                    <div class="alert alert-success alert-dismissible" role="alert">
+                        <div class="d-flex">
+                            <div>
+                                <svg class="icon alert-icon" width="24" height="24">
+                                    <use xlink:href="#tabler-check"></use>
+                                </svg>
+                            </div>
+                            <div>
+                                {{ success }}
+                            </div>
+                        </div>
+                        <a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
+                    </div>
+                    {% endif %}
+                    
+                    {% if error %}
+                    <div class="alert alert-danger alert-dismissible" role="alert">
+                        <div class="d-flex">
+                            <div>
+                                <svg class="icon alert-icon" width="24" height="24">
+                                    <use xlink:href="#tabler-alert-circle"></use>
+                                </svg>
+                            </div>
+                            <div>
+                                {{ error }}
+                            </div>
+                        </div>
+                        <a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
+                    </div>
+                    {% endif %}
+                    
+                    {% if warning %}
+                    <div class="alert alert-warning alert-dismissible" role="alert">
+                        <div class="d-flex">
+                            <div>
+                                <svg class="icon alert-icon" width="24" height="24">
+                                    <use xlink:href="#tabler-alert-triangle"></use>
+                                </svg>
+                            </div>
+                            <div>
+                                {{ warning }}
+                            </div>
+                        </div>
+                        <a class="btn-close" data-bs-dismiss="alert" aria-label="close"></a>
+                    </div>
+                    {% endif %}
+                    
+                    <!-- Page content -->
+                    {% block content %}{% endblock %}
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Mobile Sidebar Offcanvas -->
+    <div class="offcanvas offcanvas-start" tabindex="-1" id="mobile-sidebar" aria-labelledby="mobile-sidebar-label">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title" id="mobile-sidebar-label">
+                <img src="/static/favicon.png" width="24" height="24" alt="Smarter Dev" class="me-2">
+                Smarter Dev Admin
+            </h5>
+            <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        </div>
+        <div class="offcanvas-body">
+            <!-- Stacked Navigation for Mobile -->
+            <nav class="nav nav-pills flex-column">
+                <!-- Main Navigation -->
+                <a class="nav-link {% if request.url.path == '/admin' or request.url.path == '/admin/' %}active{% endif %}" href="/admin">
+                    <span class="nav-link-icon">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-dashboard"></use>
+                        </svg>
+                    </span>
+                    <span class="nav-link-title">Dashboard</span>
+                </a>
+                
+                <a class="nav-link {% if '/guilds' in request.url.path %}active{% endif %}" href="/admin/guilds">
+                    <span class="nav-link-icon">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-building-community"></use>
+                        </svg>
+                    </span>
+                    <span class="nav-link-title">Guilds</span>
+                </a>
+                
+                <a class="nav-link {% if '/conversations' in request.url.path %}active{% endif %}" href="/admin/conversations">
+                    <span class="nav-link-icon">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-messages"></use>
+                        </svg>
+                    </span>
+                    <span class="nav-link-title">Conversations</span>
+                </a>
+                
+                <a class="nav-link {% if '/api-keys' in request.url.path %}active{% endif %}" href="/admin/api-keys">
+                    <span class="nav-link-icon">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-key"></use>
+                        </svg>
+                    </span>
+                    <span class="nav-link-title">API Keys</span>
+                </a>
+                
+                <a class="nav-link {% if '/blogs' in request.url.path %}active{% endif %}" href="/admin/blogs">
+                    <span class="nav-link-icon">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-article"></use>
+                        </svg>
+                    </span>
+                    <span class="nav-link-title">Blog</span>
+                </a>
+                
+                {% if guild %}
+                <!-- Guild Section -->
+                <hr class="my-3">
+                <h6 class="sidebar-heading px-3">{{ guild.name }}</h6>
+                
+                <!-- Guild Selector -->
+                <div class="px-3 mb-2">
+                    <select class="form-select form-select-sm" id="mobile-guild-selector" onchange="handleMobileGuildChange()" aria-label="Select guild">
+                        {% if guilds %}
+                            {% for g in guilds %}
+                            <option value="{{ g.id }}" {% if g.id == guild.id %}selected{% endif %}>
+                                {{ g.name }}
+                            </option>
+                            {% endfor %}
+                        {% else %}
+                            <option value="{{ guild.id }}">{{ guild.name }}</option>
+                        {% endif %}
+                    </select>
+                </div>
+                
+                <!-- Guild Navigation -->
+                <a class="nav-link {% if request.url.path.endswith('/bytes') %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/bytes">
+                    <span class="nav-link-icon">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-coin"></use>
+                        </svg>
+                    </span>
+                    <span class="nav-link-title">Bytes</span>
+                </a>
+                
+                <a class="nav-link {% if request.url.path.endswith('/squads') %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/squads">
+                    <span class="nav-link-icon">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-users"></use>
+                        </svg>
+                    </span>
+                    <span class="nav-link-title">Squads</span>
+                </a>
+                
+                <a class="nav-link {% if 'squad-sale-events' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/squad-sale-events">
+                    <span class="nav-link-icon">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-calendar"></use>
+                        </svg>
+                    </span>
+                    <span class="nav-link-title">Events</span>
+                </a>
+                
+                <a class="nav-link {% if 'forum-agents' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/forum-agents">
+                    <span class="nav-link-icon">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-robot"></use>
+                        </svg>
+                    </span>
+                    <span class="nav-link-title">Forum Agents</span>
+                </a>
+                
+                <a class="nav-link {% if 'campaigns' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/campaigns">
+                    <span class="nav-link-icon">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-trophy"></use>
+                        </svg>
+                    </span>
+                    <span class="nav-link-title">Campaigns</span>
+                </a>
+                {% endif %}
+                
+                <!-- Logout Section -->
+                <hr class="my-3">
+                <div class="px-3 mb-2">
+                    <div class="small text-muted mb-1">{{ request.session.get('username', 'Admin') }}</div>
+                    <form action="/admin/logout" method="post" class="d-inline">
+                        <button type="submit" class="btn btn-outline-danger btn-sm w-100">
+                            <svg class="icon me-2" width="16" height="16">
+                                <use xlink:href="#tabler-logout"></use>
+                            </svg>
+                            Logout
+                        </button>
+                    </form>
+                </div>
+            </nav>
+        </div>
+    </div>
+    
+    <!-- Tabler Core -->
+    <script src="https://unpkg.com/@tabler/core@latest/dist/js/tabler.min.js"></script>
+    
+    <!-- Timezone conversion utility -->
+    <script>
+        // Convert UTC timestamps to local timezone
+        function convertUTCToLocal() {
+            const utcElements = document.querySelectorAll('[data-utc-time]');
+            
+            utcElements.forEach(element => {
+                const utcTime = element.getAttribute('data-utc-time');
+                if (!utcTime) return;
+                
+                try {
+                    // Parse the UTC time - handle different formats
+                    let utcDate;
+                    if (utcTime.includes('T')) {
+                        // ISO format - ensure it's treated as UTC
+                        utcDate = utcTime.endsWith('Z') ? new Date(utcTime) : new Date(utcTime + 'Z');
+                    } else {
+                        // Assume it's a simple datetime string, treat as UTC
+                        utcDate = new Date(utcTime + ' UTC');
+                    }
+                    
+                    // Check if the date is valid
+                    if (isNaN(utcDate.getTime())) {
+                        console.warn('Invalid date parsed:', utcTime);
+                        return;
+                    }
+                    
+                    // Format for local timezone
+                    const formatType = element.getAttribute('data-format') || 'datetime';
+                    let formatted;
+                    
+                    if (formatType === 'date') {
+                        formatted = utcDate.toLocaleDateString();
+                    } else if (formatType === 'time') {
+                        formatted = utcDate.toLocaleTimeString();
+                    } else if (formatType === 'datetime-short') {
+                        formatted = utcDate.toLocaleDateString() + ' ' + 
+                                   utcDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    } else {
+                        // Default datetime format
+                        formatted = utcDate.toLocaleDateString() + ' ' + 
+                                   utcDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    }
+                    
+                    // Update the element content
+                    element.textContent = formatted + ' (local)';
+                } catch (error) {
+                    console.warn('Failed to convert UTC time:', utcTime, error);
+                }
+            });
+        }
+        
+        // Guild selector functionality
+        function handleGuildChange() {
+            const guildSelector = document.getElementById('guild-selector');
+            if (guildSelector && guildSelector.value) {
+                const currentPath = window.location.pathname;
+                const pathParts = currentPath.split('/');
+                
+                // Find guild ID in the path and replace it
+                const guildIndex = pathParts.indexOf('guilds') + 1;
+                if (guildIndex > 0 && guildIndex < pathParts.length) {
+                    pathParts[guildIndex] = guildSelector.value;
+                    const newPath = pathParts.join('/');
+                    window.location.href = newPath;
+                }
+            }
+        }
+        
+        // Mobile guild selector functionality
+        function handleMobileGuildChange() {
+            const mobileGuildSelector = document.getElementById('mobile-guild-selector');
+            if (mobileGuildSelector && mobileGuildSelector.value) {
+                const currentPath = window.location.pathname;
+                const pathParts = currentPath.split('/');
+                
+                // Find guild ID in the path and replace it
+                const guildIndex = pathParts.indexOf('guilds') + 1;
+                if (guildIndex > 0 && guildIndex < pathParts.length) {
+                    pathParts[guildIndex] = mobileGuildSelector.value;
+                    const newPath = pathParts.join('/');
+                    window.location.href = newPath;
+                }
+            }
+        }
+        
+        // Run conversion when page loads
+        document.addEventListener('DOMContentLoaded', convertUTCToLocal);
+    </script>
+    
+    <!-- Additional scripts -->
+    {% block scripts %}{% endblock %}
+</body>
+</html>

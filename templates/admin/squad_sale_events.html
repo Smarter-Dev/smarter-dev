@@ -1,4 +1,4 @@
-{% extends "admin/base.html" %}
+{% extends "admin/base_sidebar.html" %}
 
 {% block title %}Squad Sale Events - {{ guild.name }}{% endblock %}
 
@@ -136,7 +136,7 @@
                     </thead>
                     <tbody>
                         {% for event in events %}
-                        <tr data-event-status="{% if event.is_currently_active %}active{% elif event.has_ended %}ended{% elif not event.has_started %}upcoming{% else %}inactive{% endif %}">
+                        <tr data-event-status="{% if event.is_currently_active %}active{% elif event.has_ended %}ended{% else %}upcoming{% endif %}">
                             <td>
                                 <div class="fw-bold">{{ event.name }}</div>
                                 {% if event.description %}
@@ -194,33 +194,18 @@
                                 <div class="text-muted small">{{ event.created_at.strftime('%Y-%m-%d') }}</div>
                             </td>
                             <td>
-                                <div class="btn-group" role="group">
-                                    <button type="button" class="btn btn-sm btn-outline-primary edit-sale-event-btn"
-                                            data-event-id="{{ event.id }}"
-                                            data-event-name="{{ event.name }}"
-                                            data-event-description="{{ event.description }}"
-                                            data-event-start-time="{{ event.start_time.isoformat() }}"
-                                            data-event-duration="{{ event.duration_hours }}"
-                                            data-event-join-discount="{{ event.join_discount_percent }}"
-                                            data-event-switch-discount="{{ event.switch_discount_percent }}"
-                                            data-event-active="{{ event.is_active|lower }}">
-                                        <svg class="icon icon-sm" width="16" height="16">
-                                            <use xlink:href="#tabler-edit"></use>
-                                        </svg>
+                                <div class="d-flex gap-1">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" 
+                                            onclick="editSaleEvent('{{ event.id }}', '{{ event.name }}', '{{ event.description }}', '{{ event.start_time.isoformat() }}', {{ event.duration_hours }}, {{ event.join_discount_percent }}, {{ event.switch_discount_percent }}, {{ event.is_active|lower }})">
+                                        Edit
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-outline-{{ 'success' if not event.is_active else 'warning' }} toggle-sale-event-btn"
-                                            data-event-id="{{ event.id }}"
-                                            data-event-active="{{ event.is_active|lower }}">
-                                        <svg class="icon icon-sm" width="16" height="16">
-                                            <use xlink:href="#tabler-{{ 'eye' if not event.is_active else 'eye-off' }}"></use>
-                                        </svg>
+                                    <button type="button" class="btn btn-sm btn-outline-{{ 'success' if not event.is_active else 'warning' }}" 
+                                            onclick="toggleSaleEvent('{{ event.id }}', {{ event.is_active|lower }})">
+                                        {% if event.is_active %}Disable{% else %}Enable{% endif %}
                                     </button>
-                                    <button type="button" class="btn btn-sm btn-outline-danger delete-sale-event-btn"
-                                            data-event-id="{{ event.id }}"
-                                            data-event-name="{{ event.name }}">
-                                        <svg class="icon icon-sm" width="16" height="16">
-                                            <use xlink:href="#tabler-trash"></use>
-                                        </svg>
+                                    <button type="button" class="btn btn-sm btn-outline-danger" 
+                                            onclick="deleteSaleEvent('{{ event.id }}', '{{ event.name }}')">
+                                        Delete
                                     </button>
                                 </div>
                             </td>
@@ -287,7 +272,7 @@
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label for="create_start_time" class="form-label">Start Time (UTC) <span class="text-danger">*</span></label>
+                            <label for="create_start_time" class="form-label">Start Time (Local) <span class="text-danger">*</span></label>
                             <input type="datetime-local" class="form-control" id="create_start_time" name="start_time" required>
                         </div>
                         <div class="col-md-6 mb-3">
@@ -356,7 +341,7 @@
                     
                     <div class="row">
                         <div class="col-md-6 mb-3">
-                            <label for="edit_start_time" class="form-label">Start Time (UTC) <span class="text-danger">*</span></label>
+                            <label for="edit_start_time" class="form-label">Start Time (Local) <span class="text-danger">*</span></label>
                             <input type="datetime-local" class="form-control" id="edit_start_time" name="start_time" required>
                         </div>
                         <div class="col-md-6 mb-3">
@@ -422,70 +407,19 @@
 
 {% block scripts %}
 <script>
-// Define global functions first
-window.editSaleEvent = function(eventId, name, description, startTime, duration, joinDiscount, switchDiscount, isActive) {
-    document.getElementById('edit_event_id').value = eventId;
-    document.getElementById('edit_name').value = name;
-    document.getElementById('edit_description').value = description;
-    document.getElementById('edit_duration_hours').value = duration;
-    document.getElementById('edit_join_discount').value = joinDiscount;
-    document.getElementById('edit_switch_discount').value = switchDiscount;
-    document.getElementById('edit_is_active').checked = isActive;
-    
-    // Display UTC time in the datetime-local input (treating it as UTC)
-    const utcTime = new Date(startTime);
-    // Remove timezone info to display the UTC time as-is
-    document.getElementById('edit_start_time').value = utcTime.toISOString().slice(0, 16);
-    
-    document.getElementById('editSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/edit';
-    
-    // Check if bootstrap is available, fallback if not
-    if (typeof bootstrap !== 'undefined') {
-        new bootstrap.Modal(document.getElementById('editSaleEventModal')).show();
-    } else {
-        // Fallback: manually show modal
-        const modal = document.getElementById('editSaleEventModal');
-        modal.style.display = 'block';
-        modal.classList.add('show');
-        document.body.classList.add('modal-open');
-    }
-};
+// Wait for all scripts to load before defining functions
+document.addEventListener('DOMContentLoaded', function() {
+    // Ensure Tabler/Bootstrap is loaded by waiting briefly
+    setTimeout(function() {
+        defineGlobalFunctions();
+    }, 100);
+});
 
-window.toggleSaleEvent = async function(eventId, currentStatus) {
-    try {
-        const response = await fetch('/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/toggle', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            }
-        });
-        
-        if (response.ok) {
-            location.reload();
-        } else {
-            alert('Failed to toggle sale event status');
-        }
-    } catch (error) {
-        alert('Error toggling sale event status: ' + error.message);
-    }
-};
-
-window.deleteSaleEvent = function(eventId, eventName) {
-    document.getElementById('delete_event_id').value = eventId;
-    document.getElementById('delete_event_name').textContent = eventName;
-    document.getElementById('deleteSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/delete';
-    
-    // Check if bootstrap is available, fallback if not
-    if (typeof bootstrap !== 'undefined') {
-        new bootstrap.Modal(document.getElementById('deleteSaleEventModal')).show();
-    } else {
-        // Fallback: manually show modal
-        const modal = document.getElementById('deleteSaleEventModal');
-        modal.style.display = 'block';
-        modal.classList.add('show');
-        document.body.classList.add('modal-open');
-    }
-};
+function defineGlobalFunctions() {
+    // Test function to verify script execution
+    window.testFunction = function() {
+        return "Script is running";
+    };
 
 // Calculate end time when start time or duration changes
 function updateCalculatedEndTime() {
@@ -523,8 +457,8 @@ function setMinimumStartTime() {
     document.getElementById('edit_start_time').min = minDateTime;
 }
 
-// Filter events by status
-function filterEvents(status) {
+// Filter events by status - make it a global function
+window.filterEvents = function(status) {
     const rows = document.querySelectorAll('tbody tr[data-event-status]');
     rows.forEach(row => {
         if (status === 'all' || row.dataset.eventStatus === status) {
@@ -533,7 +467,7 @@ function filterEvents(status) {
             row.style.display = 'none';
         }
     });
-}
+};
 
 
 // Convert UTC times to local time
@@ -580,38 +514,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // Add event listeners for sale event buttons
-    document.querySelectorAll('.edit-sale-event-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-            const eventId = this.dataset.eventId;
-            const name = this.dataset.eventName;
-            const description = this.dataset.eventDescription;
-            const startTime = this.dataset.eventStartTime;
-            const duration = parseInt(this.dataset.eventDuration);
-            const joinDiscount = parseInt(this.dataset.eventJoinDiscount);
-            const switchDiscount = parseInt(this.dataset.eventSwitchDiscount);
-            const isActive = this.dataset.eventActive === 'true';
-            
-            editSaleEvent(eventId, name, description, startTime, duration, joinDiscount, switchDiscount, isActive);
-        });
-    });
-    
-    document.querySelectorAll('.toggle-sale-event-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-            const eventId = this.dataset.eventId;
-            const currentStatus = this.dataset.eventActive === 'true';
-            toggleSaleEvent(eventId, currentStatus);
-        });
-    });
-    
-    document.querySelectorAll('.delete-sale-event-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-            const eventId = this.dataset.eventId;
-            const eventName = this.dataset.eventName;
-            deleteSaleEvent(eventId, eventName);
-        });
-    });
-    
     // Show success/error messages
     {% if messages %}
     {% for category, message in messages %}
@@ -625,5 +527,73 @@ document.addEventListener('DOMContentLoaded', function() {
     {% endif %}
 });
 
+// Define global functions that need Bootstrap
+window.editSaleEvent = function(eventId, name, description, startTime, duration, joinDiscount, switchDiscount, isActive) {
+    document.getElementById('edit_event_id').value = eventId;
+    document.getElementById('edit_name').value = name;
+    document.getElementById('edit_description').value = description;
+    document.getElementById('edit_duration_hours').value = duration;
+    document.getElementById('edit_join_discount').value = joinDiscount;
+    document.getElementById('edit_switch_discount').value = switchDiscount;
+    document.getElementById('edit_is_active').checked = isActive;
+    
+    // Convert UTC time to local for datetime-local input
+    const utcTime = new Date(startTime);
+    utcTime.setMinutes(utcTime.getMinutes() - utcTime.getTimezoneOffset());
+    document.getElementById('edit_start_time').value = utcTime.toISOString().slice(0, 16);
+    
+    document.getElementById('editSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/edit';
+    
+    // Show the modal - use jQuery/Tabler approach
+    const modalElement = document.getElementById('editSaleEventModal');
+    
+    // Create a temporary trigger and click it to use Tabler's modal system
+    const trigger = document.createElement('button');
+    trigger.style.display = 'none';
+    trigger.setAttribute('data-bs-toggle', 'modal');
+    trigger.setAttribute('data-bs-target', '#editSaleEventModal');
+    document.body.appendChild(trigger);
+    trigger.click();
+    document.body.removeChild(trigger);
+};
+
+window.toggleSaleEvent = async function(eventId, currentStatus) {
+    try {
+        const response = await fetch('/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/toggle', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+        
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Failed to toggle sale event status');
+        }
+    } catch (error) {
+        alert('Error toggling sale event status: ' + error.message);
+    }
+};
+
+window.deleteSaleEvent = function(eventId, eventName) {
+    document.getElementById('delete_event_id').value = eventId;
+    document.getElementById('delete_event_name').textContent = eventName;
+    document.getElementById('deleteSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/delete';
+    
+    // Show the modal - use jQuery/Tabler approach
+    const modalElement = document.getElementById('deleteSaleEventModal');
+    
+    // Create a temporary trigger and click it to use Tabler's modal system
+    const trigger = document.createElement('button');
+    trigger.style.display = 'none';
+    trigger.setAttribute('data-bs-toggle', 'modal');
+    trigger.setAttribute('data-bs-target', '#deleteSaleEventModal');
+    document.body.appendChild(trigger);
+    trigger.click();
+    document.body.removeChild(trigger);
+};
+
+}
 </script>
 {% endblock %}

@@ -1,4 +1,4 @@
-{% extends "admin/base.html" %}
+{% extends "admin/base_sidebar.html" %}
 
 {% block title %}Squad Management - {{ guild.name }}{% endblock %}
 
@@ -12,20 +12,12 @@
 
 {% block page_actions %}
 <div class="col-auto ms-auto d-print-none">
-    <div class="btn-list">
-        <a href="/admin/guilds/{{ guild.id }}" class="btn btn-outline-primary">
-            <svg class="icon me-2" width="24" height="24">
-                <use xlink:href="#tabler-arrow-left"></use>
-            </svg>
-            Back to Guild
-        </a>
-        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createSquadModal">
-            <svg class="icon me-2" width="24" height="24">
-                <use xlink:href="#tabler-plus"></use>
-            </svg>
-            Create Squad
-        </button>
-    </div>
+    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createSquadModal">
+        <svg class="icon me-2" width="24" height="24">
+            <use xlink:href="#tabler-plus"></use>
+        </svg>
+        Create Squad
+    </button>
 </div>
 {% endblock %}
 
@@ -389,8 +381,8 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <a href="#" class="btn btn-link link-secondary" data-bs-dismiss="modal">Cancel</a>
-                    <button type="submit" class="btn btn-primary ms-auto">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
                         <svg class="icon me-2" width="24" height="24">
                             <use xlink:href="#tabler-plus"></use>
                         </svg>
@@ -468,8 +460,8 @@
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <a href="#" class="btn btn-link link-secondary" data-bs-dismiss="modal">Cancel</a>
-                    <button type="submit" class="btn btn-primary ms-auto">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">
                         <svg class="icon me-2" width="24" height="24">
                             <use xlink:href="#tabler-device-floppy"></use>
                         </svg>
@@ -490,7 +482,7 @@
                 <div>This will permanently delete the squad and remove all members.</div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-link link-secondary me-auto" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <form method="post" style="display: inline;" id="deleteSquadForm">
                     <input type="hidden" name="action" value="delete">
                     <input type="hidden" name="squad_id" id="delete_squad_id">

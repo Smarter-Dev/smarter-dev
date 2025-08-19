@@ -1,4 +1,4 @@
-{% extends "admin/base.html" %}
+{% extends "admin/base_sidebar.html" %}
 
 {% block title %}Bytes Configuration - {{ guild.name }}{% endblock %}
 
@@ -10,16 +10,6 @@
 <li class="breadcrumb-item active">Bytes Config</li>
 {% endblock %}
 
-{% block page_actions %}
-<div class="col-auto ms-auto d-print-none">
-    <a href="/admin/guilds/{{ guild.id }}" class="btn btn-outline-primary">
-        <svg class="icon me-2" width="24" height="24">
-            <use xlink:href="#tabler-arrow-left"></use>
-        </svg>
-        Back to Guild
-    </a>
-</div>
-{% endblock %}
 
 {% block content %}
 <!-- Guild Header -->
