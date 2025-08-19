@@ -280,11 +280,19 @@ async def guild_detail(request: Request) -> Response:
             )
             stats = guild_stats_result.first()
         
+        # Get all guilds for the dropdown
+        try:
+            all_guilds = await get_bot_guilds()
+        except Exception as e:
+            logger.warning(f"Failed to get all guilds for dropdown: {e}")
+            all_guilds = [guild]  # Fallback to just current guild
+        
         return templates.TemplateResponse(
             request,
             "admin/guild_detail.html",
             {
                 "guild": guild,
+                "guilds": all_guilds,
                 "top_users": top_users,
                 "recent_transactions": recent_transactions,
                 "config": config,
@@ -356,11 +364,19 @@ async def bytes_config(request: Request) -> Response:
                         # If creation fails, return defaults without saving
                         config = BytesConfig.get_defaults(guild_id)
                 
+                # Get all guilds for the dropdown
+                try:
+                    all_guilds = await get_bot_guilds()
+                except Exception as e:
+                    logger.warning(f"Failed to get all guilds for dropdown: {e}")
+                    all_guilds = [guild]
+                
                 return templates.TemplateResponse(
                     request,
                     "admin/bytes_config.html",
                     {
                         "guild": guild,
+                        "guilds": all_guilds,
                         "config": config
                     }
                 )
@@ -420,11 +436,19 @@ async def bytes_config(request: Request) -> Response:
                 
                 logger.info(f"Updated bytes config for guild {guild_id}")
                 
+                # Get all guilds for the dropdown
+                try:
+                    all_guilds = await get_bot_guilds()
+                except Exception as e:
+                    logger.warning(f"Failed to get all guilds for dropdown: {e}")
+                    all_guilds = [guild]
+                
                 return templates.TemplateResponse(
                     request,
                     "admin/bytes_config.html",
                     {
                         "guild": guild,
+                        "guilds": all_guilds,
                         "config": config,
                         "success": "Configuration updated successfully!"
                     }
@@ -436,11 +460,19 @@ async def bytes_config(request: Request) -> Response:
                     config = await config_ops.get_config(session, guild_id)
                 except Exception:
                     config = BytesConfig.get_defaults(guild_id)
+                # Get all guilds for the dropdown
+                try:
+                    all_guilds = await get_bot_guilds()
+                except Exception as e:
+                    logger.warning(f"Failed to get all guilds for dropdown: {e}")
+                    all_guilds = [guild]
+                
                 return templates.TemplateResponse(
                     request,
                     "admin/bytes_config.html",
                     {
                         "guild": guild,
+                        "guilds": all_guilds,
                         "config": config,
                         "error": "Invalid configuration values. Please check your input."
                     },
@@ -2898,29 +2930,22 @@ async def squad_sale_events_list(request: Request) -> Response:
                     # These properties are computed in the model
                     pass
                 
-                # Check for success message
-                success_param = request.query_params.get("success")
-                success_message = None
-                if success_param == "updated":
-                    success_message = "Sale event updated successfully!"
-                elif success_param == "created":
-                    success_message = "Sale event created successfully!"
-                elif success_param == "deleted":
-                    success_message = "Sale event deleted successfully!"
-                
-                context = {
-                    "guild": guild,
-                    "events": events,
-                    "active_events": active_events
-                }
-                
-                if success_message:
-                    context["messages"] = [("success", success_message)]
+                # Get all guilds for the dropdown
+                try:
+                    all_guilds = await get_bot_guilds()
+                except Exception as e:
+                    logger.warning(f"Failed to get all guilds for dropdown: {e}")
+                    all_guilds = [guild]
                 
                 return templates.TemplateResponse(
                     request,
                     "admin/squad_sale_events.html",
-                    context
+                    {
+                        "guild": guild,
+                        "guilds": all_guilds,
+                        "events": events,
+                        "active_events": active_events
+                    }
                 )
             
             # POST - Handle sale event creation
@@ -3008,24 +3033,11 @@ async def squad_sale_event_edit(request: Request) -> Response:
             form = await request.form()
             
             try:
-                from datetime import datetime, timezone
-                
-                # Handle datetime - treat input as UTC
-                start_time_str = form.get("start_time")
-                if start_time_str:
-                    # datetime-local input gives us time without timezone info
-                    # We treat this as UTC since the UI is labeled as UTC
-                    start_time = datetime.fromisoformat(start_time_str.replace("T", " "))
-                    # Ensure it's timezone-aware as UTC
-                    if start_time.tzinfo is None:
-                        start_time = start_time.replace(tzinfo=timezone.utc)
-                else:
-                    start_time = event.start_time  # Keep existing if not provided
-                
+                from datetime import datetime
                 updates = {
                     "name": form.get("name"),
                     "description": form.get("description") or "",
-                    "start_time": start_time,
+                    "start_time": datetime.fromisoformat(form.get("start_time").replace("T", " ")),
                     "duration_hours": int(form.get("duration_hours")),
                     "join_discount_percent": int(form.get("join_discount_percent", 0)),
                     "switch_discount_percent": int(form.get("switch_discount_percent", 0)),

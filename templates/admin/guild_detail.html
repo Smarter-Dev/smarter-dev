@@ -1,4 +1,4 @@
-{% extends "admin/base.html" %}
+{% extends "admin/base_sidebar.html" %}
 
 {% block title %}{{ guild.name }} - Guild Management{% endblock %}
 
@@ -9,42 +9,6 @@
 <li class="breadcrumb-item active">{{ guild.name }}</li>
 {% endblock %}
 
-{% block page_actions %}
-<div class="col-auto ms-auto d-print-none">
-    <div class="btn-list">
-        <a href="/admin/guilds/{{ guild.id }}/bytes" class="btn btn-primary">
-            <svg class="icon me-2" width="24" height="24">
-                <use xlink:href="#tabler-coin"></use>
-            </svg>
-            Configure Bytes
-        </a>
-        <a href="/admin/guilds/{{ guild.id }}/squads" class="btn btn-outline-primary">
-            <svg class="icon me-2" width="24" height="24">
-                <use xlink:href="#tabler-users"></use>
-            </svg>
-            Manage Squads
-        </a>
-        <a href="/admin/guilds/{{ guild.id }}/squad-sale-events" class="btn btn-outline-warning">
-            <svg class="icon me-2" width="24" height="24">
-                <use xlink:href="#tabler-discount"></use>
-            </svg>
-            Squad Sale Events
-        </a>
-        <a href="/admin/guilds/{{ guild.id }}/forum-agents" class="btn btn-outline-success">
-            <svg class="icon me-2" width="24" height="24">
-                <use xlink:href="#tabler-robot"></use>
-            </svg>
-            Forum Agents
-        </a>
-        <a href="/admin/guilds/{{ guild.id }}/campaigns" class="btn btn-outline-info">
-            <svg class="icon me-2" width="24" height="24">
-                <use xlink:href="#tabler-trophy"></use>
-            </svg>
-            Campaigns
-        </a>
-    </div>
-</div>
-{% endblock %}
 
 {% block content %}
 <!-- Guild Info Header -->
@@ -217,14 +181,6 @@
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">Squad Overview</h3>
-                <div class="card-actions">
-                    <a href="/admin/guilds/{{ guild.id }}/squads" class="btn btn-primary btn-sm">
-                        <svg class="icon me-1" width="16" height="16">
-                            <use xlink:href="#tabler-users"></use>
-                        </svg>
-                        Manage Squads
-                    </a>
-                </div>
             </div>
             <div class="card-body">
                 {% if squads %}
@@ -269,9 +225,7 @@
                         <use xlink:href="#tabler-users"></use>
                     </svg>
                     <p>No squads configured for this guild.</p>
-                    <a href="/admin/guilds/{{ guild.id }}/squads" class="btn btn-primary">
-                        Create First Squad
-                    </a>
+                    <p class="text-muted small">Use the Squads section in the navigation to create and manage squads.</p>
                 </div>
                 {% endif %}
             </div>
@@ -285,14 +239,6 @@
         <div class="card">
             <div class="card-header">
                 <h3 class="card-title">Forum Agents</h3>
-                <div class="card-actions">
-                    <a href="/admin/guilds/{{ guild.id }}/forum-agents" class="btn btn-success btn-sm">
-                        <svg class="icon me-1" width="16" height="16">
-                            <use xlink:href="#tabler-robot"></use>
-                        </svg>
-                        Manage Agents
-                    </a>
-                </div>
             </div>
             <div class="card-body">
                 <div class="text-center text-muted py-4">
@@ -301,9 +247,7 @@
                     </svg>
                     <p>AI-powered forum monitoring agents for this guild.</p>
                     <p class="small">Create agents to automatically respond to forum posts based on custom criteria.</p>
-                    <a href="/admin/guilds/{{ guild.id }}/forum-agents" class="btn btn-success">
-                        Configure Forum Agents
-                    </a>
+                    <p class="text-muted small">Use the Forum Agents section in the navigation to configure agents.</p>
                 </div>
             </div>
         </div>

@@ -71,15 +71,18 @@ async def resolve_mentions(content: str, bot: hikari.GatewayBot) -> str:
     return content
 
 
-async def format_reply_context(message: hikari.Message, bot: hikari.GatewayBot) -> str:
-    """Format reply context for a message that replies to another message.
+async def extract_reply_context(message: hikari.Message, bot: hikari.GatewayBot) -> tuple[str, str, str]:
+    """Extract reply context from a message that replies to another message.
     
     Args:
         message: The message that contains a reply
         bot: Discord bot instance to fetch referenced message
         
     Returns:
-        Formatted string with reply context and response
+        Tuple of (replied_author, replied_content, message_content):
+        - replied_author: Author of the message being replied to (None if no reply)
+        - replied_content: Content of the message being replied to (None if no reply)
+        - message_content: The actual message content without inline reply formatting
     """
     content = message.content or ""
     
@@ -93,19 +96,20 @@ async def format_reply_context(message: hikari.Message, bot: hikari.GatewayBot) 
             # Resolve mentions in the replied message too
             replied_content = await resolve_mentions(replied_content, bot)
             
-            # Format with quoted reply context
-            if replied_content.strip():
-                content = f"> {replied_author}: {replied_content}{'...' if len(replied_msg.content or '') > 100 else ''}\n{content}"
-            else:
-                # Handle cases where replied message has no text (like images/embeds)
-                content = f"> {replied_author}: [attachment/embed]\n{content}"
+            # Handle cases where replied message has no text (like images/embeds)
+            if not replied_content.strip():
+                replied_content = "[attachment/embed]"
+            elif len(replied_msg.content or '') > 100:
+                replied_content += "..."
+                
+            return replied_author, replied_content, content
                 
         except Exception as e:
-            logger.debug(f"Failed to format reply context: {e}")
-            # If we can't get the replied message, just indicate it's a reply
-            content = f"> [replied to message]\n{content}"
+            logger.debug(f"Failed to extract reply context: {e}")
+            # If we can't get the replied message, use fallback
+            return "[unknown]", "[message]", content
     
-    return content
+    return None, None, content
 
 
 async def gather_message_context(
@@ -146,8 +150,8 @@ async def gather_message_context(
                 logger.debug(f"Skipped short message: '{message.content[:20]}...'")
                 continue
             
-            # Build message content starting with reply context
-            content = await format_reply_context(message, bot)
+            # Extract reply context separately
+            replied_author, replied_content, content = await extract_reply_context(message, bot)
             
             # Add attachment information for context
             if message.attachments:
@@ -173,7 +177,9 @@ async def gather_message_context(
                 author=message.author.display_name or message.author.username,
                 author_id=str(message.author.id),  # Include author ID for bot detection
                 timestamp=message.created_at.replace(tzinfo=timezone.utc),
-                content=content
+                content=content,
+                replied_to_author=replied_author,
+                replied_to_content=replied_content
             )
             messages.append(discord_msg)
             
