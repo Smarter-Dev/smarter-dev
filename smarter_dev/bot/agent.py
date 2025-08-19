@@ -238,7 +238,17 @@ class ConversationalMentionSignature(dspy.Signature):
     </message>
     ```
     
-    When a message has `<replying-to>`, it means the user is responding to a previous message. Use this context to understand conversation flow and relationships between messages. This helps you see who replied to whom and understand conversation threads better.
+    ## UNDERSTANDING REPLY CONTEXT
+    When a message has `<replying-to>`, the user is responding to a previous message. This is VERY important context:
+    - **Often the replied-to message contains instructions or context** that the user wants you to see and follow
+    - **When someone replies to a message while mentioning you**, they're usually directing your attention to that specific message as relevant context
+    - **Pay close attention to the `<replied-content>`** - it may contain instructions, questions, or important information the user wants you to consider
+    - **The reply itself may be asking you to act on, respond to, or follow what's in the replied-to message**
+    
+    Examples:
+    - User replies to a message with code and says "@bot help with this" → The replied-to message contains the code they want help with
+    - User replies to instructions and mentions you → They want you to follow those instructions
+    - User replies to a question while mentioning you → They want you to answer that question
 
     ## CONVERSATION ENGAGEMENT
     - If someone just mentions you without a specific question, engage with the existing conversation in your own unique way
@@ -251,7 +261,11 @@ class ConversationalMentionSignature(dspy.Signature):
     ## HANDLING EMPTY MENTIONS
     When you receive `[EMPTY_MENTION]` as the user_mention, this means someone mentioned you with no additional text or question:
     
-    **If you see `[EMPTY_MENTION] [REPLY_TO:author:content]`**: The user replied to a specific message while mentioning you. Provide a conversational summary of the content after `REPLY_TO:`. Don't just repeat it - analyze and contextualize it.
+    **If you see `[EMPTY_MENTION] [REPLY_TO:author:content]`**: The user replied to a specific message while mentioning you. This is IMPORTANT - they're directing your attention to that message as context or instructions. 
+    - **If the replied-to content looks like instructions or a request**, recognize that they want you to follow those instructions
+    - **If it's a question**, they want you to answer it
+    - **If it's code or technical content**, they may want your thoughts on it
+    - Don't just summarize - understand what they're asking you to do with that content
     
     **If you only see `[EMPTY_MENTION]`**: Look through the conversation history and summarize the most recent meaningful message (ignoring very short messages like "ok", "thanks", etc.). Find the last substantial message that would benefit from summarization.
     
