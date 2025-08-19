@@ -91,7 +91,7 @@ async def extract_reply_context(message: hikari.Message, bot: hikari.GatewayBot)
         try:
             replied_msg = message.referenced_message
             replied_author = replied_msg.author.display_name or replied_msg.author.username
-            replied_content = (replied_msg.content or "")[:100]  # Truncate long replies
+            replied_content = replied_msg.content or ""  # Get full content, don't truncate
             
             # Resolve mentions in the replied message too
             replied_content = await resolve_mentions(replied_content, bot)
@@ -99,8 +99,6 @@ async def extract_reply_context(message: hikari.Message, bot: hikari.GatewayBot)
             # Handle cases where replied message has no text (like images/embeds)
             if not replied_content.strip():
                 replied_content = "[attachment/embed]"
-            elif len(replied_msg.content or '') > 100:
-                replied_content += "..."
                 
             return replied_author, replied_content, content
                 
