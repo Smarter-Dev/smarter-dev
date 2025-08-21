@@ -2,30 +2,14 @@
 
 {% block title %}Create API Key - Smarter Dev Admin{% endblock %}
 
-{% block content %}
-<div class="page-header d-print-none">
-    <div class="container-xl">
-        <div class="row g-2 align-items-center">
-            <div class="col">
-                <nav aria-label="breadcrumb">
-                    <ol class="breadcrumb">
-                        <li class="breadcrumb-item"><a href="/admin/api-keys">API Keys</a></li>
-                        <li class="breadcrumb-item active" aria-current="page">Create</li>
-                    </ol>
-                </nav>
-                <div class="page-pretitle">
-                    System Management
-                </div>
-                <h2 class="page-title">
-                    Create API Key
-                </h2>
-            </div>
-        </div>
-    </div>
-</div>
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/api-keys">API Keys</a></li>
+<li class="breadcrumb-item active" aria-current="page">Create</li>
+{% endblock %}
 
-<div class="page-body">
-    <div class="container-xl">
+{% block page_title %}Create API Key{% endblock %}
+
+{% block content %}
         <div class="row row-deck row-cards">
             <div class="col-8">
                 <div class="card">
@@ -174,6 +158,4 @@
                 </div>
             </div>
         </div>
-    </div>
-</div>
 {% endblock %}

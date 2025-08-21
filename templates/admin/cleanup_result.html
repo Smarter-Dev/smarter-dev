@@ -2,31 +2,16 @@
 
 {% block title %}Cleanup Result - Smarter Dev Admin{% endblock %}
 
-{% block content %}
-<div class="page-header d-print-none">
-    <div class="container-xl">
-        <div class="row g-2 align-items-center">
-            <div class="col">
-                <div class="page-pretitle">
-                    <nav aria-label="breadcrumb">
-                        <ol class="breadcrumb">
-                            <li class="breadcrumb-item"><a href="/admin">Admin</a></li>
-                            <li class="breadcrumb-item"><a href="/admin/conversations">Conversations</a></li>
-                            <li class="breadcrumb-item"><a href="/admin/conversations/cleanup">Cleanup</a></li>
-                            <li class="breadcrumb-item active">Result</li>
-                        </ol>
-                    </nav>
-                </div>
-                <h2 class="page-title">
-                    Cleanup Result
-                </h2>
-            </div>
-        </div>
-    </div>
-</div>
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin">Admin</a></li>
+<li class="breadcrumb-item"><a href="/admin/conversations">Conversations</a></li>
+<li class="breadcrumb-item"><a href="/admin/conversations/cleanup">Cleanup</a></li>
+<li class="breadcrumb-item active">Result</li>
+{% endblock %}
 
-<div class="page-body">
-    <div class="container-xl">
+{% block page_title %}Cleanup Result{% endblock %}
+
+{% block content %}
         <div class="row justify-content-center">
             <div class="col-md-8">
                 <div class="card">
@@ -125,6 +110,4 @@
                 </div>
             </div>
         </div>
-    </div>
-</div>
 {% endblock %}
