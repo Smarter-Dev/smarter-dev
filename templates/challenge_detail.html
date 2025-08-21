@@ -169,7 +169,7 @@
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <div class="table-responsive">
-                        <table class="table table-sm">
+                        <table class="table table-dark table-sm">
                             <thead>
                                 <tr>
                                     <th>Participant</th>
@@ -185,7 +185,7 @@
                                         <strong>{{ submission.username }}</strong>
                                     </td>
                                     <td>
-                                        <span class="badge bg-light text-dark">{{ submission.squad_name }}</span>
+                                        <span class="badge bg-secondary">{{ submission.squad_name }}</span>
                                     </td>
                                     <td>
                                         {% if submission.is_correct %}
@@ -194,7 +194,7 @@
                                         <span class="badge bg-danger">✗ Incorrect</span>
                                         {% endif %}
                                     </td>
-                                    <td class="text-muted small">
+                                    <td class="small">
                                         {{ submission.submitted_at.strftime('%m/%d %I:%M %p') }}
                                     </td>
                                 </tr>
