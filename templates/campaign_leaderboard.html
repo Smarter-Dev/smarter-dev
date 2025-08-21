@@ -1,0 +1,250 @@
+{% extends "public_base.html" %}
+
+{% block title %}{{ campaign.title }} Leaderboard - Smarter Dev{% endblock %}
+
+{% block content %}
+<div class="container my-5">
+    <!-- Leaderboard Header -->
+    <div class="row mb-4">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="/">Home</a></li>
+                    <li class="breadcrumb-item"><a href="/campaigns">Campaigns</a></li>
+                    <li class="breadcrumb-item"><a href="/campaigns/{{ campaign.id }}">{{ campaign.title }}</a></li>
+                    <li class="breadcrumb-item active">Leaderboard</li>
+                </ol>
+            </nav>
+        </div>
+    </div>
+
+    <div class="row mb-5">
+        <div class="col-12">
+            <div class="mb-4">
+                <h1 class="display-6 fw-bold mb-2">{{ campaign.title }}</h1>
+                <h3 class="text-muted">Leaderboard</h3>
+            </div>
+            
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h5 class="card-title mb-0">Campaign Stats</h5>
+                        {% if campaign.is_active %}
+                            {% if campaign.status == 'active' %}
+                            <span class="badge bg-success">Active Campaign</span>
+                            {% elif campaign.status == 'completed' %}
+                            <span class="badge bg-secondary">Completed</span>
+                            {% endif %}
+                        {% else %}
+                        <span class="badge bg-light text-dark">Inactive</span>
+                        {% endif %}
+                    </div>
+                    <div class="row text-center">
+                        <div class="col-4">
+                            <div class="fw-bold text-primary fs-4">{{ total_challenges }}</div>
+                            <div class="small text-muted">Challenges</div>
+                        </div>
+                        <div class="col-4">
+                            <div class="fw-bold text-success fs-4">{{ total_submissions }}</div>
+                            <div class="small text-muted">Submissions</div>
+                        </div>
+                        <div class="col-4">
+                            <div class="fw-bold text-warning fs-4">{{ total_participants }}</div>
+                            <div class="small text-muted">Participants</div>
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    
+                    <div class="d-grid">
+                        <a href="/campaigns/{{ campaign.id }}" class="btn btn-outline-primary">
+                            <i class="fas fa-arrow-left me-2"></i>Back to Campaign
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaderboard -->
+    <div class="row">
+        <div class="col-12">
+            {% if leaderboard %}
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-light">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <i class="fas fa-trophy me-2"></i>Squad Rankings
+                        </h5>
+                        <small class="text-muted">Total {{ leaderboard | length }} squads participating</small>
+                    </div>
+                </div>
+                
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th class="text-center" style="width: 80px;">Rank</th>
+                                    <th>Squad</th>
+                                    <th class="text-center">Challenges Solved</th>
+                                    <th class="text-center">Total Points</th>
+                                    <th class="text-center">Success Rate</th>
+                                    <th class="text-center">Last Submission</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for entry in leaderboard %}
+                                <tr {% if loop.index <= 3 %}class="table-warning"{% endif %}>
+                                    <td class="text-center fw-bold">
+                                        {% if loop.index == 1 %}
+                                        <i class="fas fa-crown text-warning fs-4"></i>
+                                        {% elif loop.index == 2 %}
+                                        <i class="fas fa-medal text-secondary fs-4"></i>
+                                        {% elif loop.index == 3 %}
+                                        <i class="fas fa-award text-warning fs-4"></i>
+                                        {% else %}
+                                        <span class="badge bg-light text-dark">{{ loop.index }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <div class="avatar avatar-sm me-3" style="background-color: {{ entry.squad_color or '#6c757d' }};">
+                                                {{ entry.squad_name[0].upper() }}
+                                            </div>
+                                            <div>
+                                                <div class="fw-bold">{{ entry.squad_name }}</div>
+                                                <div class="small text-muted">{{ entry.member_count }} members</div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td class="text-center">
+                                        <div class="fw-bold text-success">{{ entry.challenges_solved }}</div>
+                                        <div class="small text-muted">of {{ total_challenges }}</div>
+                                    </td>
+                                    <td class="text-center">
+                                        <div class="fw-bold text-primary fs-5">{{ entry.total_points }}</div>
+                                    </td>
+                                    <td class="text-center">
+                                        {% set success_rate = (entry.correct_submissions / entry.total_submissions * 100) if entry.total_submissions > 0 else 0 %}
+                                        <div class="fw-bold">{{ "%.1f"|format(success_rate) }}%</div>
+                                        <div class="small text-muted">{{ entry.correct_submissions }}/{{ entry.total_submissions }}</div>
+                                    </td>
+                                    <td class="text-center">
+                                        {% if entry.last_submission_at %}
+                                        <div class="small">{{ entry.last_submission_at.strftime('%m/%d %I:%M %p') }}</div>
+                                        {% else %}
+                                        <div class="small text-muted">No submissions</div>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Challenge-by-Challenge Breakdown -->
+            {% if challenge_breakdown %}
+            <div class="card border-0 shadow-sm mt-4">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chart-bar me-2"></i>Challenge Breakdown
+                    </h5>
+                </div>
+                
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Challenge</th>
+                                    <th class="text-center">Points</th>
+                                    <th class="text-center">Submissions</th>
+                                    <th class="text-center">Success Rate</th>
+                                    <th class="text-center">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for challenge in challenge_breakdown %}
+                                <tr>
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <div>
+                                                <div class="fw-bold">
+                                                    {% if challenge.is_released %}
+                                                    <a href="/challenges/{{ challenge.id }}" class="text-decoration-none">{{ challenge.title }}</a>
+                                                    {% else %}
+                                                    {{ challenge.title }}
+                                                    {% endif %}
+                                                </div>
+                                                {% if challenge.released_at %}
+                                                <div class="small text-muted">Released {{ challenge.released_at.strftime('%m/%d %I:%M %p') }}</div>
+                                                {% endif %}
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td class="text-center fw-bold text-primary">{{ challenge.points_value }}</td>
+                                    <td class="text-center">{{ challenge.submission_count }}</td>
+                                    <td class="text-center">
+                                        {% if challenge.submission_count > 0 %}
+                                        {% set success_rate = (challenge.correct_submissions / challenge.submission_count * 100) %}
+                                        <div class="fw-bold">{{ "%.1f"|format(success_rate) }}%</div>
+                                        <div class="small text-muted">{{ challenge.correct_submissions }}/{{ challenge.submission_count }}</div>
+                                        {% else %}
+                                        <span class="text-muted">-</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-center">
+                                        {% if challenge.is_released %}
+                                        <span class="badge bg-success">Released</span>
+                                        {% else %}
+                                        <span class="badge bg-warning text-dark">Locked</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+            
+            {% else %}
+            <div class="text-center py-5">
+                <div class="display-1 mb-3">🏆</div>
+                <h3 class="text-muted">No submissions yet</h3>
+                <p class="text-muted">Be the first to solve a challenge and appear on the leaderboard!</p>
+                <a href="/campaigns/{{ campaign.id }}" class="btn btn-primary">
+                    View Challenges
+                </a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<style>
+.avatar {
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    font-size: 0.9rem;
+}
+
+.table-hover tbody tr:hover {
+    background-color: rgba(0,0,0,.075);
+}
+
+.table-warning {
+    background-color: rgba(255, 193, 7, 0.1) !important;
+}
+</style>
+{% endblock %}
