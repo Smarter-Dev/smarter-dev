@@ -16,7 +16,7 @@ from starlette.templating import Jinja2Templates
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_db_session_context
-from smarter_dev.web.models import Campaign, Challenge, ChallengeSubmission
+from smarter_dev.web.models import Campaign, Challenge, ChallengeSubmission, Squad
 
 templates = Jinja2Templates(directory="templates")
 
@@ -315,25 +315,44 @@ async def challenge_detail(request: Request) -> Response:
         submission_result = await session.execute(submission_count_query)
         submission_count = submission_result.scalar() or 0
         
-        # Get recent submissions for display (limit 10, most recent first)
-        recent_submissions_query = (
-            select(ChallengeSubmission)
+        # Get pagination parameters
+        page = int(request.query_params.get('page', 1))
+        per_page = 10
+        offset = (page - 1) * per_page
+        
+        # Get submissions with squad names (paginated)
+        submissions_query = (
+            select(ChallengeSubmission, Squad.name.label('squad_name'))
+            .join(Squad, ChallengeSubmission.squad_id == Squad.id)
             .where(ChallengeSubmission.challenge_id == challenge.id)
             .order_by(desc(ChallengeSubmission.submitted_at))
-            .limit(10)
+            .offset(offset)
+            .limit(per_page)
         )
         
-        recent_submissions_result = await session.execute(recent_submissions_query)
-        recent_submissions = recent_submissions_result.scalars().all()
+        submissions_result = await session.execute(submissions_query)
+        submissions_data = submissions_result.all()
         
-        # Add squad names to submissions (you'd need to join with Squad table)
-        # For now, we'll use a placeholder
+        # Get total count for pagination
+        total_submissions_query = (
+            select(func.count(ChallengeSubmission.id))
+            .where(ChallengeSubmission.challenge_id == challenge.id)
+        )
+        total_result = await session.execute(total_submissions_query)
+        total_submissions = total_result.scalar() or 0
+        
+        # Format submissions data
         enhanced_submissions = []
-        for submission in recent_submissions:
+        for submission, squad_name in submissions_data:
             enhanced_submissions.append({
                 **submission.__dict__,
-                'squad_name': 'Squad Name',  # TODO: Join with Squad table
+                'squad_name': squad_name,
             })
+        
+        # Calculate pagination info
+        total_pages = (total_submissions + per_page - 1) // per_page
+        has_prev = page > 1
+        has_next = page < total_pages
         
         # Determine challenge status
         now = datetime.now(timezone.utc)
@@ -356,8 +375,13 @@ async def challenge_detail(request: Request) -> Response:
         {
             "challenge": challenge,
             "submission_count": submission_count,
-            "recent_submissions": enhanced_submissions,
+            "submissions": enhanced_submissions,
             "campaign_challenge_count": campaign_challenge_count,
+            "page": page,
+            "total_pages": total_pages,
+            "has_prev": has_prev,
+            "has_next": has_next,
+            "total_submissions": total_submissions,
         }
     )
 
