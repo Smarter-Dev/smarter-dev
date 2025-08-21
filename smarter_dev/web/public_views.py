@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 from uuid import UUID
 
@@ -354,15 +354,34 @@ async def challenge_detail(request: Request) -> Response:
         has_prev = page > 1
         has_next = page < total_pages
         
-        # Determine challenge status
+        # Determine challenge status with proper logic
         now = datetime.now(timezone.utc)
-        if challenge.is_released:
-            if challenge.campaign.start_time <= now:
+        campaign = challenge.campaign
+        
+        # Get all challenges in the campaign sorted by order
+        all_challenges = sorted(campaign.challenges, key=lambda c: c.order_position)
+        
+        # Calculate campaign end time
+        campaign_duration = len(all_challenges) * campaign.release_cadence_hours
+        campaign_end_time = campaign.start_time + timedelta(hours=campaign_duration)
+        
+        if not challenge.is_released:
+            challenge_status = 'locked'
+        elif now > campaign_end_time:
+            # Campaign has ended, all challenges are completed
+            challenge_status = 'completed'
+        else:
+            # Find the most recently released challenge
+            most_recent_released = None
+            for ch in all_challenges:
+                if ch.is_released and ch.released_at <= now:
+                    most_recent_released = ch
+            
+            # Challenge is active if it's the most recently released and campaign is ongoing
+            if most_recent_released and challenge.id == most_recent_released.id:
                 challenge_status = 'active'
             else:
                 challenge_status = 'completed'
-        else:
-            challenge_status = 'locked'
         
         challenge.status = challenge_status
         
