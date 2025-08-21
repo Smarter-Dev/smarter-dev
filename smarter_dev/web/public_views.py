@@ -346,6 +346,9 @@ async def challenge_detail(request: Request) -> Response:
             challenge_status = 'locked'
         
         challenge.status = challenge_status
+        
+        # Get the challenge count for the campaign while we're still in session
+        campaign_challenge_count = len(challenge.campaign.challenges)
     
     return templates.TemplateResponse(
         request,
@@ -354,6 +357,7 @@ async def challenge_detail(request: Request) -> Response:
             "challenge": challenge,
             "submission_count": submission_count,
             "recent_submissions": enhanced_submissions,
+            "campaign_challenge_count": campaign_challenge_count,
         }
     )
 
