@@ -1,0 +1,103 @@
+{% extends "public_base.html" %}
+
+{% block title %}Challenges - Smarter Dev{% endblock %}
+
+{% block content %}
+<div class="container" style="max-width: 720px;">
+    <div class="text-center mb-5 mt-4">
+        <h1 class="display-4 fw-bold" style="font-family: 'Bruno Ace SC', sans-serif; color: #00E1FF; margin-bottom: 1rem; line-height: 1.2;">Challenge Campaigns</h1>
+        <p class="lead" style="font-size: 1.2rem; opacity: 0.8; margin-bottom: 2rem;">Test your skills with our coding challenges and compete with other developers</p>
+    </div>
+
+    {% if campaigns %}
+    <div class="campaigns-grid" style="display: grid; gap: 2rem;">
+        {% for campaign in campaigns %}
+        <div class="campaign-card" style="background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(0, 225, 255, 0.2); border-radius: 16px; padding: 2rem; transition: all 0.3s ease;"
+             onmouseover="this.style.background='rgba(255, 255, 255, 0.08)'; this.style.borderColor='rgba(0, 225, 255, 0.4)'; this.style.transform='translateY(-2px)'"
+             onmouseout="this.style.background='rgba(255, 255, 255, 0.05)'; this.style.borderColor='rgba(0, 225, 255, 0.2)'; this.style.transform='translateY(0)'">
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h5 class="card-title fw-bold mb-0">{{ campaign.title }}</h5>
+                            {% if campaign.is_active %}
+                                {% if campaign.status == 'upcoming' %}
+                                <span class="badge bg-warning text-dark">Upcoming</span>
+                                {% elif campaign.status == 'active' %}
+                                <span class="badge bg-success">Active</span>
+                                {% elif campaign.status == 'completed' %}
+                                <span class="badge bg-secondary">Completed</span>
+                                {% endif %}
+                            {% else %}
+                            <span class="badge bg-light text-dark">Inactive</span>
+                            {% endif %}
+                        </div>
+                        <p class="card-text text-muted small mb-3">{{ campaign.description | strip_markdown(150) }}</p>
+                    </div>
+
+                    <div class="campaign-stats mb-3">
+                        <div class="row text-center">
+                            <div class="col-4">
+                                <div class="fw-bold text-primary">{{ campaign.challenge_count }}</div>
+                                <div class="small text-muted">Challenges</div>
+                            </div>
+                            <div class="col-4">
+                                <div class="fw-bold text-success">{{ campaign.submission_count }}</div>
+                                <div class="small text-muted">Submissions</div>
+                            </div>
+                            <div class="col-4">
+                                <div class="fw-bold text-warning">{{ campaign.participant_count }}</div>
+                                <div class="small text-muted">Participants</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="campaign-timing mb-3">
+                        <div class="small text-muted">
+                            <i class="fas fa-calendar-alt me-1"></i>
+                            {% if campaign.status == 'upcoming' %}
+                            Starts {{ campaign.start_time.strftime('%B %d, %Y at %I:%M %p') }}
+                            {% elif campaign.status == 'active' %}
+                            Started {{ campaign.start_time.strftime('%B %d, %Y') }}
+                            {% else %}
+                            Ran from {{ campaign.start_time.strftime('%B %d, %Y') }}
+                            {% endif %}
+                        </div>
+                        {% if campaign.status == 'active' and campaign.next_challenge_time %}
+                        <div class="small text-info mt-1">
+                            <i class="fas fa-clock me-1"></i>
+                            Next challenge: {{ campaign.next_challenge_time.strftime('%B %d at %I:%M %p') }}
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mt-auto">
+                        <a href="/campaigns/{{ campaign.id }}" class="btn btn-primary w-100">
+                            View Campaign
+                        </a>
+                    </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center py-5">
+        <div class="display-1 mb-3">🏆</div>
+        <h3 style="color: rgba(255, 255, 255, 0.6);">No campaigns yet</h3>
+        <p style="color: rgba(255, 255, 255, 0.6);">Check back soon for exciting coding challenges!</p>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.campaign-card {
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.campaign-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.1) !important;
+}
+
+.campaign-stats .fw-bold {
+    font-size: 1.25rem;
+}
+</style>
+{% endblock %}

@@ -23,6 +23,8 @@ from smarter_dev.web.http_methods_middleware import create_http_methods_middlewa
 # Import blog models and database
 from smarter_dev.web.models import BlogPost
 from smarter_dev.shared.database import get_db_session_context
+# Import public views
+from smarter_dev.web.public_views import campaigns_list, campaign_detail, challenge_detail, campaign_leaderboard
 
 import markdown
 import re
@@ -172,6 +174,11 @@ routes = [
     Route("/about", about_us),
     Route("/blog", blog_list),
     Route("/blog/{slug}", blog_post_detail),
+    # Public campaign and challenge routes
+    Route("/campaigns", campaigns_list),
+    Route("/campaigns/{campaign_id}", campaign_detail),
+    Route("/campaigns/{campaign_id}/leaderboard", campaign_leaderboard),
+    Route("/challenges/{challenge_id}", challenge_detail),
 ]
 
 exception_handlers = {
@@ -215,4 +222,4 @@ app.mount("/api", api)
 app.mount("/admin", Mount("", routes=admin_routes))
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8888, reload=True)
