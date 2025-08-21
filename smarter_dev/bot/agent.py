@@ -963,16 +963,22 @@ class ForumMonitorSignature(dspy.Signature):
     - Acknowledge when you're unsure or need more information
     - Don't respond to spam, off-topic, or inappropriate content
 
+    ## CONFIDENCE SCORE - CRITICAL UNDERSTANDING
+    The confidence score represents your confidence that you SHOULD SEND A MESSAGE:
+    - **1.0**: Maximum confidence you should respond
+    - **0.0**: Should NOT respond
+    Higher values mean you are more confident that sending a response would be valuable.
+
     ## OUTPUT FORMAT
     - **decision**: Clear explanation of why you should/shouldn't respond
-    - **confidence**: Numeric confidence score (0.0 to 1.0) in your decision
+    - **confidence**: MESSAGE SEND confidence score (0.0 to 1.0) - higher means more likely to send
     - **response**: Your actual response (empty string if not responding)
     """
     
     system_prompt: str = dspy.InputField(description="Your specific role and response criteria")
     post_context: str = dspy.InputField(description="Complete forum post information including title, content, author, tags, and attachments")
     decision: str = dspy.OutputField(description="Explanation of whether and why to respond")
-    confidence: float = dspy.OutputField(description="Confidence score (0.0-1.0) in the decision")
+    confidence: float = dspy.OutputField(description="Message send confidence score (0.0-1.0) - higher values mean more confident you should send a response")
     response: str = dspy.OutputField(description="Generated response content (empty if not responding)")
 
 
