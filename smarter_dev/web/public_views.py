@@ -288,11 +288,13 @@ async def challenge_detail(request: Request) -> Response:
         )
     
     async with get_db_session_context() as session:
-        # Get challenge with campaign
+        # Get challenge with campaign and campaign's challenges
         challenge_query = (
             select(Challenge)
             .where(Challenge.id == challenge_uuid)
-            .options(selectinload(Challenge.campaign))
+            .options(
+                selectinload(Challenge.campaign).selectinload(Campaign.challenges)
+            )
         )
         
         result = await session.execute(challenge_query)
