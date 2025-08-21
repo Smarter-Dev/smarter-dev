@@ -2,40 +2,30 @@
 
 {% block title %}Edit Blog Post - Smarter Dev Admin{% endblock %}
 
-{% block content %}
-<div class="page-header d-print-none">
-    <div class="container-xl">
-        <div class="row g-2 align-items-center">
-            <div class="col">
-                <nav aria-label="breadcrumb">
-                    <ol class="breadcrumb">
-                        <li class="breadcrumb-item"><a href="/admin">Dashboard</a></li>
-                        <li class="breadcrumb-item"><a href="/admin/blogs">Blog Posts</a></li>
-                        <li class="breadcrumb-item active" aria-current="page">Edit</li>
-                    </ol>
-                </nav>
-                <h2 class="page-title">
-                    Edit Blog Post
-                </h2>
-            </div>
-            <div class="col-auto ms-auto d-print-none">
-                <div class="btn-list">
-                    {% if blog_post and blog_post.is_published %}
-                    <a href="/blog/{{ blog_post.slug }}" class="btn btn-outline-secondary d-none d-sm-inline-block" target="_blank">
-                        <svg class="icon" width="24" height="24">
-                            <use xlink:href="#tabler-external-link"></use>
-                        </svg>
-                        View post
-                    </a>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin">Dashboard</a></li>
+<li class="breadcrumb-item"><a href="/admin/blogs">Blog Posts</a></li>
+<li class="breadcrumb-item active" aria-current="page">Edit</li>
+{% endblock %}
+
+{% block page_title %}Edit Blog Post{% endblock %}
+
+{% block page_actions %}
+<div class="col-auto ms-auto d-print-none">
+    <div class="btn-list">
+        {% if blog_post and blog_post.is_published %}
+        <a href="/blog/{{ blog_post.slug }}" class="btn btn-outline-secondary d-none d-sm-inline-block" target="_blank">
+            <svg class="icon" width="24" height="24">
+                <use xlink:href="#tabler-external-link"></use>
+            </svg>
+            View post
+        </a>
+        {% endif %}
     </div>
 </div>
+{% endblock %}
 
-<div class="page-body">
-    <div class="container-xl">
+{% block content %}
         {% if error %}
         <div class="alert alert-danger" role="alert">
             {{ error }}
@@ -185,6 +175,4 @@
                 </div>
             </div>
         </div>
-    </div>
-</div>
 {% endblock %}

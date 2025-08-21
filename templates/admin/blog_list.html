@@ -2,37 +2,27 @@
 
 {% block title %}Blog Posts - Smarter Dev Admin{% endblock %}
 
-{% block content %}
-<div class="page-header d-print-none">
-    <div class="container-xl">
-        <div class="row g-2 align-items-center">
-            <div class="col">
-                <nav aria-label="breadcrumb">
-                    <ol class="breadcrumb">
-                        <li class="breadcrumb-item"><a href="/admin">Dashboard</a></li>
-                        <li class="breadcrumb-item active" aria-current="page">Blog Posts</li>
-                    </ol>
-                </nav>
-                <h2 class="page-title">
-                    Blog Posts
-                </h2>
-            </div>
-            <div class="col-auto ms-auto d-print-none">
-                <div class="btn-list">
-                    <a href="/admin/blogs/create" class="btn btn-primary d-none d-sm-inline-block">
-                        <svg class="icon" width="24" height="24">
-                            <use xlink:href="#tabler-plus"></use>
-                        </svg>
-                        Create blog post
-                    </a>
-                </div>
-            </div>
-        </div>
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin">Dashboard</a></li>
+<li class="breadcrumb-item active" aria-current="page">Blog Posts</li>
+{% endblock %}
+
+{% block page_title %}Blog Posts{% endblock %}
+
+{% block page_actions %}
+<div class="col-auto ms-auto d-print-none">
+    <div class="btn-list">
+        <a href="/admin/blogs/create" class="btn btn-primary d-none d-sm-inline-block">
+            <svg class="icon" width="24" height="24">
+                <use xlink:href="#tabler-plus"></use>
+            </svg>
+            Create blog post
+        </a>
     </div>
 </div>
+{% endblock %}
 
-<div class="page-body">
-    <div class="container-xl">
+{% block content %}
         {% if success %}
         <div class="alert alert-success" role="alert">
             {{ success }}
@@ -132,6 +122,4 @@
                 </div>
             </div>
         </div>
-    </div>
-</div>
 {% endblock %}

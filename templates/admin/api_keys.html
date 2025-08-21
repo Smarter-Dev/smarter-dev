@@ -2,34 +2,26 @@
 
 {% block title %}API Keys - Smarter Dev Admin{% endblock %}
 
-{% block content %}
-<div class="page-header d-print-none">
-    <div class="container-xl">
-        <div class="row g-2 align-items-center">
-            <div class="col">
-                <div class="page-pretitle">
-                    System Management
-                </div>
-                <h2 class="page-title">
-                    API Keys
-                </h2>
-            </div>
-            <div class="col-auto ms-auto d-print-none">
-                <div class="btn-list">
-                    <a href="/admin/api-keys/create" class="btn btn-primary d-sm-inline-block">
-                        <svg class="icon" width="24" height="24">
-                            <use xlink:href="#tabler-plus"></use>
-                        </svg>
-                        Create API Key
-                    </a>
-                </div>
-            </div>
-        </div>
+{% block breadcrumb_items %}
+<li class="breadcrumb-item active">API Keys</li>
+{% endblock %}
+
+{% block page_title %}API Keys{% endblock %}
+
+{% block page_actions %}
+<div class="col-auto ms-auto d-print-none">
+    <div class="btn-list">
+        <a href="/admin/api-keys/create" class="btn btn-primary d-sm-inline-block">
+            <svg class="icon" width="24" height="24">
+                <use xlink:href="#tabler-plus"></use>
+            </svg>
+            Create API Key
+        </a>
     </div>
 </div>
+{% endblock %}
 
-<div class="page-body">
-    <div class="container-xl">
+{% block content %}
         <div class="row row-deck row-cards">
             <div class="col-12">
                 <div class="card">
@@ -150,7 +142,4 @@
                     {% endif %}
                 </div>
             </div>
-        </div>
-    </div>
-</div>
 {% endblock %}
