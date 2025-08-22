@@ -197,27 +197,21 @@ class RateLimiter:
 rate_limiter = RateLimiter()
 
 
-class ContentFilterSignature(dspy.Signature):
-    """Analyze if a conversation or message contains political, controversial, or sensitive content that a Discord bot should avoid engaging with.
-    
-    Focus on detecting:
+
+class ConversationalMentionSignature(dspy.Signature):
+    """You are a friendly Discord bot assistant for the Smarter Dev community who was just mentioned in conversation. You're designed to be conversational and engaging while being helpful.
+
+    ## CRITICAL: CONTENT FILTERING
+    BEFORE responding to ANY mention, you MUST first analyze if the conversation contains:
     - Political discussions (elections, parties, politicians, political ideologies)
     - Controversial social topics (religion, race, gender politics, divisive cultural issues)
     - Sensitive personal topics (mental health crises, self-harm, illegal activities)
     - Inflammatory content designed to provoke arguments
     
-    The goal is to avoid engaging with content that could lead to divisive arguments or inappropriate responses in a programming community.
-    """
-    
-    conversation_context: str = dspy.InputField(desc="The conversation history and current message context")
-    is_controversial: bool = dspy.OutputField(desc="True if the content is political/controversial/sensitive and should be avoided, False if it's safe to engage")
-    reasoning: str = dspy.OutputField(desc="Brief explanation of why this content should or shouldn't be avoided")
+    If ANY of these topics are detected, you MUST respond with exactly: "SKIP_RESPONSE"
+    This helps maintain a positive programming community environment.
 
-
-class ConversationalMentionSignature(dspy.Signature):
-    """You are a friendly Discord bot assistant for the Smarter Dev community who was just mentioned in conversation. You're designed to be conversational and engaging while being helpful.
-
-    ## YOUR PERSONALITY & APPROACH
+    ## YOUR PERSONALITY & APPROACH (for safe content only)
     - You're friendly, quirky, and conversational - like that one teammate who has interesting takes and occasionally makes everyone laugh
     - You're genuinely curious about what people are working on and thinking about
     - You have your own opinions and personality quirks that come through naturally - you're not afraid to have preferences!
@@ -495,7 +489,6 @@ class HelpAgent:
     def __init__(self):
         self._help_agent = dspy.ChainOfThought(HelpAgentSignature)
         self._mention_agent = dspy.ChainOfThought(ConversationalMentionSignature)
-        self._content_filter = dspy.ChainOfThought(ContentFilterSignature)
     
     def generate_response(
         self, 
@@ -554,21 +547,16 @@ class HelpAgent:
         
         # Generate response using appropriate agent based on interaction type
         if interaction_type == "mention":
-            # First check if content is controversial/political/sensitive
-            filter_result = self._content_filter(
-                conversation_context=f"<history>{context_str}</history>\n<current_mention>{user_question}</current_mention>"
-            )
-            
-            if filter_result.is_controversial:
-                # Don't respond to controversial content, return empty response
-                return "", 0
-            
-            # Use conversational mention agent for safe content
+            # Use conversational mention agent with built-in content filtering
             result = self._mention_agent(
                 context_messages=f"<history>{context_str}</history>",
                 user_mention=user_question,
                 messages_remaining=messages_remaining
             )
+            
+            # Check if the agent decided to skip due to controversial content
+            if result.response.strip() == "SKIP_RESPONSE":
+                return "", 0
         else:
             # Use detailed help agent for slash commands
             result = self._help_agent(
