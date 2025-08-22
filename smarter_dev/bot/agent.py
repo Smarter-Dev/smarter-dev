@@ -197,6 +197,23 @@ class RateLimiter:
 rate_limiter = RateLimiter()
 
 
+class ContentFilterSignature(dspy.Signature):
+    """Analyze if a conversation or message contains political, controversial, or sensitive content that a Discord bot should avoid engaging with.
+    
+    Focus on detecting:
+    - Political discussions (elections, parties, politicians, political ideologies)
+    - Controversial social topics (religion, race, gender politics, divisive cultural issues)
+    - Sensitive personal topics (mental health crises, self-harm, illegal activities)
+    - Inflammatory content designed to provoke arguments
+    
+    The goal is to avoid engaging with content that could lead to divisive arguments or inappropriate responses in a programming community.
+    """
+    
+    conversation_context: str = dspy.InputField(desc="The conversation history and current message context")
+    is_controversial: bool = dspy.OutputField(desc="True if the content is political/controversial/sensitive and should be avoided, False if it's safe to engage")
+    reasoning: str = dspy.OutputField(desc="Brief explanation of why this content should or shouldn't be avoided")
+
+
 class ConversationalMentionSignature(dspy.Signature):
     """You are a friendly Discord bot assistant for the Smarter Dev community who was just mentioned in conversation. You're designed to be conversational and engaging while being helpful.
 
@@ -478,6 +495,7 @@ class HelpAgent:
     def __init__(self):
         self._help_agent = dspy.ChainOfThought(HelpAgentSignature)
         self._mention_agent = dspy.ChainOfThought(ConversationalMentionSignature)
+        self._content_filter = dspy.ChainOfThought(ContentFilterSignature)
     
     def generate_response(
         self, 
@@ -536,7 +554,16 @@ class HelpAgent:
         
         # Generate response using appropriate agent based on interaction type
         if interaction_type == "mention":
-            # Use conversational mention agent
+            # First check if content is controversial/political/sensitive
+            filter_result = self._content_filter(
+                conversation_context=f"<history>{context_str}</history>\n<current_mention>{user_question}</current_mention>"
+            )
+            
+            if filter_result.is_controversial:
+                # Don't respond to controversial content, return empty response
+                return "", 0
+            
+            # Use conversational mention agent for safe content
             result = self._mention_agent(
                 context_messages=f"<history>{context_str}</history>",
                 user_mention=user_question,
