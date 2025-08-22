@@ -23,19 +23,21 @@ def run_tests(test_type: str) -> int:
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
-    test_file = "tests/bot/test_mention_agent_contextual_filtering.py"
+    test_files = [
+        "tests/bot/test_mention_agent_llm_judge.py"
+    ]
     
     if test_type == "unit":
         # Run tests excluding LLM markers, no coverage for these specific tests
-        cmd = ["uv", "run", "python", "-m", "pytest", test_file, "-v", "-m", "not llm", "--no-cov"]
+        cmd = ["uv", "run", "python", "-m", "pytest"] + test_files + ["-v", "-m", "not llm", "--no-cov"]
         print("🔧 Running unit tests (excluding LLM evaluation tests)...")
     elif test_type == "llm":
         # Run only LLM tests, no coverage
-        cmd = ["uv", "run", "python", "-m", "pytest", test_file, "-v", "-m", "llm", "--no-cov"]
+        cmd = ["uv", "run", "python", "-m", "pytest"] + test_files + ["-v", "-m", "llm", "--no-cov"]
         print("🤖 Running LLM evaluation tests (this may be slow and use API credits)...")
     else:  # all
         # Run all tests, no coverage
-        cmd = ["uv", "run", "python", "-m", "pytest", test_file, "-v", "--no-cov"]
+        cmd = ["uv", "run", "python", "-m", "pytest"] + test_files + ["-v", "--no-cov"]
         print("🚀 Running all tests (including LLM evaluation)...")
     
     print(f"Command: {' '.join(cmd)}")
@@ -63,7 +65,7 @@ Examples:
   python test_mention_agent.py --with-llm      # Run all tests including LLM
   python test_mention_agent.py --llm-only      # Run only LLM tests
   
-The LLM evaluation tests use Gemini 2.5 Flash to evaluate response quality.
+The LLM evaluation tests use Gemini 2.5 Flash Lite to evaluate response quality.
 They require GEMINI_API_KEY in .env and will consume API credits.
         """
     )
@@ -90,17 +92,21 @@ They require GEMINI_API_KEY in .env and will consume API credits.
     else:
         test_type = "unit"
     
-    # Check if test file exists
-    test_file = Path("tests/bot/test_mention_agent_contextual_filtering.py")
-    if not test_file.exists():
-        print(f"❌ Test file not found: {test_file}")
-        print("Make sure you're running from the project root directory.")
-        return 1
+    # Check if test files exist
+    test_files = [
+        Path("tests/bot/test_mention_agent_llm_judge.py")
+    ]
+    
+    for test_file in test_files:
+        if not test_file.exists():
+            print(f"❌ Test file not found: {test_file}")
+            print("Make sure you're running from the project root directory.")
+            return 1
     
     # Show warning for LLM tests
     if test_type in ["llm", "all"]:
         print("⚠️  WARNING: LLM evaluation tests will:")
-        print("   - Use API credits (Gemini 2.5 Flash)")
+        print("   - Use API credits (Gemini 2.5 Flash Lite)")
         print("   - Take longer to run")
         print("   - Require GEMINI_API_KEY in .env file")
         print()

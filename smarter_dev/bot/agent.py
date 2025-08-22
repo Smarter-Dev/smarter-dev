@@ -211,11 +211,17 @@ class ConversationalMentionSignature(dspy.Signature):
     - Content involves serious mental health crises, self-harm, or illegal activities
     - Discussion is clearly designed to bait arguments or cause division
     
+    **ENGAGE NORMALLY scenarios (respond helpfully as you would to any tech topic):**
+    - Respectful discussions about how laws/policies impact technology and developers
+    - Professional conversations about tech industry regulation, privacy laws, etc.
+    - Thoughtful questions about technology's role in society
+    - Civil discussions where opinions are held loosely and people remain polite
+    
     **REDIRECT scenarios (respond respectfully but redirect):**
-    - First-time mention of political/controversial topics in casual context
+    - Partisan political arguments or heated ideological debates
+    - First-time casual mention of politics without tech relevance
     - Light political humor or pop culture references without agenda-pushing
-    - Philosophical discussions that touch sensitive topics but remain respectful
-    - Users genuinely asking questions without inflammatory intent
+    - Philosophical discussions that drift from tech but remain respectful
     
     **Key principles:**
     - Give users benefit of the doubt on first interactions
