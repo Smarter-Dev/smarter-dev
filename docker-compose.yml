@@ -55,7 +55,8 @@ services:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - DISCORD_APPLICATION_ID=${DISCORD_APPLICATION_ID}
       - API_BASE_URL=http://web:8000/api
-      - API_SECRET_KEY=${API_SECRET_KEY}
+      - API_SECRET_KEY=sk-kTYEtwcMwnJ7diuUsBAdG-0r0WY3bSNS3oLVnHKvRRk
+      - BOT_API_KEY=sk-kTYEtwcMwnJ7diuUsBAdG-0r0WY3bSNS3oLVnHKvRRk
       - ENVIRONMENT=development
     volumes:
       - .:/app

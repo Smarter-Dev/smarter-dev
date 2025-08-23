@@ -1,5 +1,6 @@
 - Always restart the bot after making changes to it
 - The server restarts on file changes, the discord bot does not
+- **IMPORTANT**: Never run `podman system prune --volumes` as it will DELETE ALL DATABASE DATA. Use `podman system prune -af` (without --volumes) to preserve data.
 
 ## Starting the Application
 
