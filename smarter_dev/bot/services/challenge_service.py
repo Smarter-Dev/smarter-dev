@@ -37,6 +37,7 @@ class ChallengeService(BaseService):
         self._bot = bot
         self._announcement_task: Optional[asyncio.Task] = None
         self._running = False
+        self._queued_challenges: set = set()  # Track challenges already queued to prevent duplicates
     
     async def initialize(self) -> None:
         """Initialize the challenge service and start the announcement scheduler."""
@@ -103,38 +104,72 @@ class ChallengeService(BaseService):
         """Main loop for checking and announcing challenges."""
         while self._running:
             try:
-                await self._check_and_announce_challenges()
+                # Check every 30 seconds for upcoming challenges
+                await self._check_and_queue_challenges()
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.error(f"Error in challenge announcement loop: {e}")
             
-            # Wait 1 minute before checking again  
+            # Wait 30 seconds before checking again for more precise timing
             try:
-                await asyncio.sleep(60)  # 1 minute
+                await asyncio.sleep(30)  # 30 seconds
             except asyncio.CancelledError:
                 break
     
-    async def _check_and_announce_challenges(self) -> None:
-        """Check for challenges that need to be announced and announce them."""
+    async def _check_and_queue_challenges(self) -> None:
+        """Check for challenges and queue them for precise timing."""
         try:
-            # Get all active campaigns with pending challenges
-            pending_challenges = await self._get_pending_announcements()
+            # Get challenges scheduled in the next 45 seconds
+            upcoming_challenges = await self._get_upcoming_announcements()
             
-            if not pending_challenges:
-                logger.debug("No challenges pending announcement")
+            if not upcoming_challenges:
+                logger.debug("No challenges scheduled in the next 45 seconds")
                 return
             
-            logger.info(f"Found {len(pending_challenges)} challenges pending announcement")
+            logger.info(f"Found {len(upcoming_challenges)} challenges scheduled in the next 45 seconds")
             
-            for challenge_data in pending_challenges:
-                try:
-                    await self._announce_challenge(challenge_data)
-                except Exception as e:
-                    logger.error(f"Failed to announce challenge {challenge_data.get('id', 'unknown')}: {e}")
+            # Queue each challenge to be announced at exactly the right time
+            for challenge_data in upcoming_challenges:
+                challenge_id = challenge_data.get("id")
+                if challenge_id not in self._queued_challenges:
+                    self._queued_challenges.add(challenge_id)
+                    asyncio.create_task(self._queue_and_announce_challenge(challenge_data))
+                    logger.debug(f"Queued challenge {challenge_id} for announcement")
+                else:
+                    logger.debug(f"Challenge {challenge_id} already queued, skipping")
             
         except Exception as e:
-            logger.error(f"Error checking for pending announcements: {e}")
+            logger.error(f"Error checking for upcoming challenges: {e}")
+    
+    async def _queue_and_announce_challenge(self, challenge_data: Dict[str, Any]) -> None:
+        """Queue a challenge to be announced at exactly the scheduled time."""
+        challenge_id = None
+        try:
+            challenge_id = challenge_data.get("id")
+            release_time_str = challenge_data.get("release_time")
+            title = challenge_data.get("title", "Challenge")
+            
+            # Parse release time
+            release_time = datetime.fromisoformat(release_time_str.replace('Z', '+00:00'))
+            current_time = datetime.now(timezone.utc)
+            
+            # Calculate delay until exact release time
+            delay_seconds = (release_time - current_time).total_seconds()
+            
+            if delay_seconds > 0:
+                logger.info(f"Queuing challenge '{title}' to announce in {delay_seconds:.1f} seconds")
+                await asyncio.sleep(delay_seconds)
+            
+            # Announce the challenge at exactly the scheduled time
+            await self._announce_challenge(challenge_data)
+            
+        except Exception as e:
+            logger.error(f"Failed to queue and announce challenge {challenge_data.get('id', 'unknown')}: {e}")
+        finally:
+            # Remove from queued set after processing
+            if challenge_id and challenge_id in self._queued_challenges:
+                self._queued_challenges.remove(challenge_id)
     
     async def _get_pending_announcements(self) -> List[Dict[str, Any]]:
         """Get challenges that should be announced but haven't been yet.
@@ -150,8 +185,53 @@ class ChallengeService(BaseService):
             logger.error(f"Failed to get pending announcements: {e}")
             return []
     
+    async def _get_upcoming_announcements(self) -> List[Dict[str, Any]]:
+        """Get challenges that will be announced in the next 45 seconds.
+        
+        Returns:
+            List of challenge data dictionaries
+        """
+        try:
+            # Get challenges scheduled for the next 45 seconds
+            response = await self._api_client.get("/challenges/upcoming-announcements?seconds=45")
+            data = response.json()
+            return data.get("challenges", [])
+        except Exception as e:
+            logger.error(f"Failed to get upcoming announcements: {e}")
+            return []
+    
+    async def _get_squad_channels(self, guild_id: str) -> Dict[str, Dict[str, Any]]:
+        """Get all announcement channels for active squads in a guild with squad info.
+        
+        Args:
+            guild_id: Discord guild ID
+            
+        Returns:
+            Dict mapping channel IDs to squad information (including role_id)
+        """
+        try:
+            response = await self._api_client.get(f"/guilds/{guild_id}/squads/")
+            data = response.json()
+            
+            # Extract announcement channels from active squads with their info
+            channels = {}
+            for squad in data:
+                if squad.get("is_active") and squad.get("announcement_channel"):
+                    channels[squad["announcement_channel"]] = {
+                        "name": squad.get("name"),
+                        "role_id": squad.get("role_id")
+                    }
+            
+            if channels:
+                logger.debug(f"Found {len(channels)} squad announcement channels for guild {guild_id}")
+            
+            return channels
+        except Exception as e:
+            logger.error(f"Failed to get squad channels for guild {guild_id}: {e}")
+            return {}
+    
     async def _announce_challenge(self, challenge_data: Dict[str, Any]) -> None:
-        """Announce a challenge to its campaign's Discord channels.
+        """Announce a challenge to squad channels only.
         
         Args:
             challenge_data: Challenge data from the API
@@ -160,32 +240,34 @@ class ChallengeService(BaseService):
         title = challenge_data.get("title", "New Challenge")
         description = challenge_data.get("description", "")
         guild_id = challenge_data.get("guild_id")
-        announcement_channels = challenge_data.get("announcement_channels", [])
         
-        if not guild_id or not announcement_channels:
-            logger.warning(f"Challenge {challenge_id} missing guild_id or announcement_channels")
+        # Get squad channels for this guild (challenges only go to squad channels)
+        squad_channels = await self._get_squad_channels(guild_id)
+        
+        if not guild_id or not squad_channels:
+            logger.warning(f"Challenge {challenge_id} missing guild_id or no squad channels configured")
             return
         
-        logger.info(f"Announcing challenge '{title}' to {len(announcement_channels)} channels in guild {guild_id}")
+        logger.info(f"Announcing challenge '{title}' to {len(squad_channels)} squad channels in guild {guild_id}")
         
-        # Create the announcement message
-        announcement_text = self._format_challenge_announcement(title, description)
-        
-        # Send announcement to each channel with retry logic
+        # Send announcement to each squad channel with retry logic and role mentions
         successful_announcements = 0
         failed_channels = []
-        for channel_id in announcement_channels:
+        for channel_id, squad_info in squad_channels.items():
+            # Format message with squad role mention
+            announcement_text = self._format_challenge_announcement(title, description, squad_info.get("role_id"))
             success = await self._send_challenge_with_retry(channel_id, announcement_text, challenge_id, title)
             if success:
                 successful_announcements += 1
             else:
-                failed_channels.append(channel_id)
+                failed_channels.append((channel_id, squad_info))
         
         # If some channels failed, retry them with longer backoff
         if failed_channels:
             logger.warning(f"Retrying {len(failed_channels)} failed channels with extended backoff")
             await asyncio.sleep(30)  # Wait 30 seconds before retrying failed channels
-            for channel_id in failed_channels:
+            for channel_id, squad_info in failed_channels:
+                announcement_text = self._format_challenge_announcement(title, description, squad_info.get("role_id"))
                 success = await self._send_challenge_with_retry(channel_id, announcement_text, challenge_id, title, max_retries=5)
                 if success:
                     successful_announcements += 1
@@ -195,7 +277,7 @@ class ChallengeService(BaseService):
             try:
                 await self._mark_challenge_announced(challenge_id)
                 await self._mark_challenge_released(challenge_id)
-                logger.info(f"Marked challenge '{title}' as announced and released ({successful_announcements}/{len(announcement_channels)} channels)")
+                logger.info(f"Marked challenge '{title}' as announced and released ({successful_announcements}/{len(squad_channels)} squad channels)")
             except Exception as e:
                 logger.error(f"Failed to mark challenge {challenge_id} as announced/released: {e}")
         else:
@@ -244,25 +326,30 @@ class ChallengeService(BaseService):
                     return False
         return False
     
-    def _format_challenge_announcement(self, title: str, description: str) -> str:
-        """Format the challenge announcement message.
+    def _format_challenge_announcement(self, title: str, description: str, role_id: Optional[str] = None) -> str:
+        """Format the challenge announcement message with squad role mention.
         
         Args:
             title: Challenge title
             description: Challenge description
+            role_id: Discord role ID to mention (optional)
             
         Returns:
-            Formatted announcement text
+            Formatted announcement text with role mention
         """
-        # Create announcement with @here mention and h1 markdown header
-        announcement = f"@here\n\n# {title}\n{description}"
+        # Add role mention at the beginning if role_id is provided
+        mention = f"<@&{role_id}>\n\n" if role_id else ""
+        
+        # Create announcement with role mention and h1 markdown header
+        announcement = f"{mention}# {title}\n{description}"
         
         # Limit message length to Discord's limit (2000 characters)
         if len(announcement) > 2000:
-            # Truncate description if needed
-            max_desc_length = 2000 - len(f"@here\n\n# {title}\n") - 3  # 3 for "..."
+            # Account for mention length when truncating
+            mention_length = len(mention)
+            max_desc_length = 2000 - len(f"# {title}\n") - mention_length - 3  # 3 for "..."
             truncated_desc = description[:max_desc_length] + "..."
-            announcement = f"@here\n\n# {title}\n{truncated_desc}"
+            announcement = f"{mention}# {title}\n{truncated_desc}"
         
         return announcement
     
@@ -297,12 +384,12 @@ class ChallengeService(BaseService):
             action_row.add_component(get_input_button)
             action_row.add_component(submit_solution_button)
             
-            # Send message using the bot's REST API with buttons and allowed mentions
+            # Send message using the bot's REST API with buttons, role mentions allowed
             sent_message = await self._bot.rest.create_message(
                 channel_id_int,
                 content=message,
                 components=[action_row],
-                mentions_everyone=True
+                role_mentions=True  # Allow role mentions to ping users
             )
             
             # Pin the message with retry logic
