@@ -9,8 +9,9 @@ from __future__ import annotations
 import logging
 from typing import List, Dict, Any
 from uuid import UUID
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.database import get_db_session
@@ -20,6 +21,63 @@ from smarter_dev.web.crud import ScheduledMessageOperations, CampaignOperations,
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/scheduled-messages", tags=["scheduled-messages"])
+
+
+@router.get("/upcoming")
+async def get_upcoming_scheduled_messages(
+    seconds: int = Query(default=45, description="Look ahead seconds"),
+    session: AsyncSession = Depends(get_db_session),
+    api_key = Depends(verify_api_key),
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Get scheduled messages that will be sent in the next N seconds.
+    
+    Args:
+        seconds: Number of seconds to look ahead (default 45)
+        
+    Returns:
+        Dictionary with list of scheduled message data for bot queuing
+    """
+    try:
+        message_ops = ScheduledMessageOperations(session)
+        upcoming_time = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+        scheduled_messages = await message_ops.get_upcoming_scheduled_messages(upcoming_time)
+        
+        # Format scheduled messages for bot consumption
+        message_list = []
+        for message in scheduled_messages:
+            campaign = message.campaign
+            message_data = {
+                "id": str(message.id),
+                "title": message.title,
+                "description": message.description,
+                "announcement_channel_message": message.announcement_channel_message,
+                "scheduled_time": message.scheduled_time.isoformat(),
+                "guild_id": campaign.guild_id,
+                "announcement_channels": campaign.announcement_channels,
+                "campaign": {
+                    "id": str(campaign.id),
+                    "title": campaign.title,
+                    "is_active": campaign.is_active,
+                }
+            }
+            message_list.append(message_data)
+        
+        logger.debug(f"Retrieved {len(message_list)} scheduled messages for next {seconds} seconds")
+        
+        return {"scheduled_messages": message_list}
+        
+    except DatabaseOperationError as e:
+        logger.error(f"Database error getting upcoming scheduled messages: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve upcoming scheduled messages"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error getting upcoming scheduled messages: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
 
 
 @router.get("/pending")
@@ -44,6 +102,7 @@ async def get_pending_scheduled_messages(
                 "id": str(message.id),
                 "title": message.title,
                 "description": message.description,
+                "announcement_channel_message": message.announcement_channel_message,
                 "scheduled_time": message.scheduled_time.isoformat(),
                 "guild_id": campaign.guild_id,
                 "announcement_channels": campaign.announcement_channels,

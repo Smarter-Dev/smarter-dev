@@ -2858,6 +2858,46 @@ class CampaignOperations:
         except Exception as e:
             raise DatabaseOperationError(f"Failed to get pending announcements: {e}") from e
     
+    async def get_upcoming_announcements(self, upcoming_time: datetime) -> List[Challenge]:
+        """Get challenges that will be announced soon.
+        
+        Args:
+            upcoming_time: Time limit to check up to
+            
+        Returns:
+            List of challenges that will be announced soon
+        """
+        try:
+            # Find challenges that:
+            # 1. Haven't been announced yet (is_announced = False)
+            # 2. Are part of active campaigns
+            # Then filter by release time in Python
+            
+            now = datetime.now(timezone.utc)
+            
+            query = select(Challenge).join(Campaign).where(
+                and_(
+                    Challenge.is_announced == False,
+                    Campaign.is_active == True
+                )
+            ).options(selectinload(Challenge.campaign))
+            
+            result = await self.session.execute(query)
+            all_pending = list(result.scalars().all())
+            
+            # Filter by release time in Python for upcoming window
+            upcoming_challenges = []
+            for challenge in all_pending:
+                campaign = challenge.campaign
+                release_time = challenge.calculate_release_time(campaign.start_time, campaign.release_cadence_hours)
+                if now < release_time <= upcoming_time:
+                    upcoming_challenges.append(challenge)
+            
+            return upcoming_challenges
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get upcoming announcements: {e}") from e
+    
     async def mark_challenge_announced(self, challenge_id: UUID) -> bool:
         """Mark a challenge as announced.
         
@@ -3552,16 +3592,18 @@ class ScheduledMessageOperations:
         title: str,
         description: str,
         scheduled_time: datetime,
-        created_by: str
+        created_by: str,
+        announcement_channel_message: Optional[str] = None
     ) -> ScheduledMessage:
         """Create a new scheduled message for a campaign.
         
         Args:
             campaign_id: Campaign UUID
             title: Message title
-            description: Message description
+            description: Message description (sent to squad channels)
             scheduled_time: When to send the message (UTC)
             created_by: Admin who created the scheduled message
+            announcement_channel_message: Optional message for campaign channels
             
         Returns:
             Created scheduled message
@@ -3574,6 +3616,7 @@ class ScheduledMessageOperations:
                 campaign_id=campaign_id,
                 title=title,
                 description=description,
+                announcement_channel_message=announcement_channel_message,
                 scheduled_time=scheduled_time,
                 created_by=created_by
             )
@@ -3727,6 +3770,33 @@ class ScheduledMessageOperations:
             
         except Exception as e:
             raise DatabaseOperationError(f"Failed to get pending scheduled messages: {e}") from e
+    
+    async def get_upcoming_scheduled_messages(self, upcoming_time: datetime) -> List[ScheduledMessage]:
+        """Get scheduled messages that will be sent soon.
+        
+        Args:
+            upcoming_time: Time limit to check up to
+            
+        Returns:
+            List of scheduled messages that will be sent soon
+        """
+        try:
+            now = datetime.now(timezone.utc)
+            
+            query = select(ScheduledMessage).join(Campaign).where(
+                and_(
+                    ScheduledMessage.is_sent == False,
+                    ScheduledMessage.scheduled_time > now,
+                    ScheduledMessage.scheduled_time <= upcoming_time,
+                    Campaign.is_active == True
+                )
+            ).options(selectinload(ScheduledMessage.campaign))
+            
+            result = await self.session.execute(query)
+            return list(result.scalars().all())
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get upcoming scheduled messages: {e}") from e
     
     async def mark_scheduled_message_sent(self, message_id: UUID) -> bool:
         """Mark a scheduled message as sent.
