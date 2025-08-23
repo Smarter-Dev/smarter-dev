@@ -37,9 +37,26 @@ uv run python test_mention_agent.py --with-llm
 ```
 
 **Requirements:**
-- `GEMINI_API_KEY` environment variable in `.env` file
+- API key in `.env` file: `GEMINI_API_KEY` (default) or `OPENAI_API_KEY` (for OpenAI models)
 - API credits will be consumed
 - Tests take longer to run
+
+**Model Selection:**
+The project supports switching LLM models system-wide using environment variables:
+
+- `LLM_MODEL`: Main bot model (default: `gemini/gemini-2.0-flash-lite`)
+- `LLM_JUDGE_MODEL`: Judge evaluation model (default: `gemini/gemini-2.5-flash-lite`)
+
+  ```bash
+  # Use GPT-5 Nano for both bot and judge
+  LLM_MODEL=gpt-5-nano-2025-08-07 LLM_JUDGE_MODEL=gpt-5-nano-2025-08-07 uv run python test_mention_agent.py --llm-only
+  
+  # Use GPT-5 Nano for main bot, Gemini for judge
+  LLM_MODEL=gpt-5-nano-2025-08-07 uv run python -m smarter_dev.bot.client
+  
+  # Use different Gemini models
+  LLM_MODEL=gemini/gemini-2.5-flash LLM_JUDGE_MODEL=gemini/gemini-2.5-flash uv run python test_mention_agent.py --llm-only
+  ```
 
 **Comprehensive scenarios evaluated:**
 - ✅ Regular programming conversations (should engage normally)
