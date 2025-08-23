@@ -58,15 +58,25 @@
                         <div class="form-hint">A clear title for your scheduled message</div>
                     </div>
                     
-                    <!-- Message Description -->
+                    <!-- Primary Message (Squad Channels) -->
                     <div class="mb-3">
-                        <label class="form-label required">Message Content</label>
+                        <label class="form-label required">Primary Message Content</label>
                         <textarea class="form-control" 
                                   name="description" 
                                   rows="6"
-                                  placeholder="Enter the message content that will be sent to announcement channels..."
+                                  placeholder="Enter the message content that will be sent to squad channels..."
                                   required>{{ form_data.description if form_data else scheduled_message.description }}</textarea>
-                        <div class="form-hint">The content of your message that will be sent to all announcement channels</div>
+                        <div class="form-hint">This message will be sent to all squad announcement channels</div>
+                    </div>
+                    
+                    <!-- Optional Campaign Announcement Channel Message -->
+                    <div class="mb-3">
+                        <label class="form-label">Campaign Channel Message (Optional)</label>
+                        <textarea class="form-control" 
+                                  name="announcement_channel_message" 
+                                  rows="6"
+                                  placeholder="Optional: Different message for campaign announcement channels. If left empty, the primary message will be used...">{{ form_data.announcement_channel_message if form_data else scheduled_message.announcement_channel_message }}</textarea>
+                        <div class="form-hint">Optional: Specify a different message for campaign announcement channels. Leave empty to use the primary message.</div>
                     </div>
                     
                     <!-- Scheduled Time -->
