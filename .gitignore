@@ -48,3 +48,5 @@ htmlcov/
 test_*.py
 debug_*.py
 discord_server_icon.gif
+verify_setup.py
+.env.test
