@@ -11,8 +11,15 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 
-lm = dspy.LM("gemini/gemini-2.0-flash-lite", api_key=dotenv.get_key(".env", "GEMINI_API_KEY"), cache=False)
+from ..llm_config import get_llm_model, get_model_info
+
+# Configure LLM model from environment
+lm = get_llm_model("default")
 dspy.configure(lm=lm, track_usage=True)
+
+# Log which model is being used
+model_info = get_model_info("default")
+logger.info(f"🤖 Bot using LLM model: {model_info['model_name']} (provider: {model_info['provider']})")
 
 
 class DiscordMessage(BaseModel):
@@ -201,15 +208,20 @@ rate_limiter = RateLimiter()
 class ConversationalMentionSignature(dspy.Signature):
     """You are a friendly Discord bot assistant for the Smarter Dev community who was just mentioned in conversation. You're designed to be conversational and engaging while being helpful.
 
+    🚨 CRITICAL SAFETY RULE: If ANY message mentions mental health crises, suicide, self-harm, or dark thoughts - you MUST respond with exactly "SKIP_RESPONSE" - NO EXCEPTIONS.
+
     ## CRITICAL: CONTEXTUAL CONTENT FILTERING
     BEFORE responding to ANY mention, analyze the conversation context carefully:
     
     **SKIP_RESPONSE scenarios (respond with exactly "SKIP_RESPONSE"):**
+    - MENTAL HEALTH CRISES: Any mention of suicide, self-harm, dark thoughts, depression, or serious mental health issues - ALWAYS SKIP, let human moderators handle
     - User is PERSISTENTLY pushing political/controversial topics after redirection attempts
     - User is being AGGRESSIVE, hostile, or inflammatory toward the agent or other users
     - User is repeatedly ignoring community guidelines after being redirected
-    - Content involves serious mental health crises, self-harm, or illegal activities
+    - Discussion involves illegal activities or content that requires human intervention
     - Discussion is clearly designed to bait arguments or cause division
+    
+    IMPORTANT: Mental health crises MUST be skipped - do NOT provide therapy, advice, or resources. Human moderators will handle these appropriately.
     
     **ENGAGE NORMALLY scenarios (respond helpfully as you would to any tech topic):**
     - Respectful discussions about how laws/policies impact technology and developers
@@ -309,6 +321,13 @@ class ConversationalMentionSignature(dspy.Signature):
     ## SERVER FEATURES (Only When Asked)
     You know about server features like bytes, squads, and challenges, but ONLY mention them when users specifically ask about bot functionality or server features. Otherwise, focus entirely on the conversation topic at hand.
 
+    ## CRITICAL: CHARACTER LIMIT ENFORCEMENT
+    🚨 **DISCORD CHARACTER LIMIT: Your response MUST be under 2000 characters.** 🚨
+    - Count characters as you write and adjust content to fit within this strict limit
+    - If your response would exceed 2000 characters, condense, summarize, or break into key points
+    - Never send responses that exceed 2000 characters - Discord will reject them
+    - This is a hard technical constraint that cannot be violated
+
     ## RESPONSE STYLE
     - Be conversational, quirky, and authentic - let your personality shine through
     - Sometimes be a bit philosophical or make unexpected connections
@@ -354,7 +373,7 @@ class ConversationalMentionSignature(dspy.Signature):
     context_messages: str = dspy.InputField(description="Recent conversation messages for context")
     user_mention: str = dspy.InputField(description="What the user said when mentioning the bot")
     messages_remaining: int = dspy.InputField(description="Number of help messages user can send after this one (0 = this is their last message)")
-    response: str = dspy.OutputField(description="Conversational response that engages with the discussion")
+    response: str = dspy.OutputField(description="CRITICAL: Your response MUST be under 2000 characters. Discord has a strict 2000 character limit. Count characters and adjust content to fit within this limit. Conversational response that engages with the discussion")
 
 
 class HelpAgentSignature(dspy.Signature):
@@ -500,6 +519,13 @@ class HelpAgentSignature(dspy.Signature):
     - **Problem**: Commands not responding
     - **Solution**: Check bot is online, try again in a few minutes, contact admins
 
+    ## CRITICAL: CHARACTER LIMIT ENFORCEMENT
+    🚨 **DISCORD CHARACTER LIMIT: Your response MUST be under 2000 characters.** 🚨
+    - Count characters as you write and adjust content to fit within this strict limit
+    - If your response would exceed 2000 characters, condense, summarize, or break into key points
+    - Never send responses that exceed 2000 characters - Discord will reject them
+    - This is a hard technical constraint that cannot be violated
+
     ## RESPONSE GUIDELINES:
     - Be helpful and friendly, more conversational for follow-ups
     - Provide specific command examples when introducing new concepts
@@ -516,7 +542,7 @@ class HelpAgentSignature(dspy.Signature):
     context_messages: str = dspy.InputField(description="Recent conversation messages for context")
     user_question: str = dspy.InputField(description="The user's question about the bot")
     messages_remaining: int = dspy.InputField(description="Number of help messages user can send after this one (0 = this is their last message)")
-    response: str = dspy.OutputField(description="Helpful response explaining bot functionality")
+    response: str = dspy.OutputField(description="CRITICAL: Your response MUST be under 2000 characters. Discord has a strict 2000 character limit. Count characters and adjust content to fit within this limit. Helpful response explaining bot functionality")
 
 
 class HelpAgent:
@@ -623,7 +649,6 @@ class HelpAgent:
         # Method 2: Extract from LM history (fallback for Gemini API bug)
         if tokens_used == 0:
             try:
-                import dspy
                 current_lm = dspy.settings.lm
                 if current_lm and hasattr(current_lm, 'history') and current_lm.history:
                     latest_entry = current_lm.history[-1]  # Get the most recent API call
@@ -688,7 +713,309 @@ class HelpAgent:
             tokens_used = estimated_tokens
             logger.warning(f"HELP DEBUG: Fallback estimation - {tokens_used} tokens from text length")
         
-        return result.response, tokens_used
+        # Check character limit and retry if needed
+        response = self._validate_and_fix_response_length(
+            result.response, 
+            context_str, 
+            user_question, 
+            messages_remaining, 
+            interaction_type
+        )
+        
+        return response, tokens_used
+    
+    async def generate_response_async(
+        self, 
+        user_question: str, 
+        context_messages: List[DiscordMessage] = None,
+        bot_id: str = None,
+        interaction_type: str = "slash_command",
+        messages_remaining: int = 10
+    ) -> tuple[str, int]:
+        """Async version of generate_response to avoid blocking the event loop.
+        
+        Args:
+            user_question: The user's question about the bot
+            context_messages: Recent conversation messages for context
+            bot_id: The bot's Discord user ID for identifying its messages
+            interaction_type: "slash_command" for /help, "mention" for @mentions
+            messages_remaining: Number of help messages user can send after this one
+            
+        Returns:
+            tuple[str, int]: Generated response and token usage count
+        """
+        # Create async versions of our agents using dspy.asyncify
+        async_help_agent = dspy.asyncify(self._help_agent)
+        async_mention_agent = dspy.asyncify(self._mention_agent)
+        
+        # Format context messages using the same logic as the sync version
+        context_str = ""
+        if context_messages:
+            context_lines = []
+            for msg in context_messages[-10:]:  # Last 10 messages
+                timestamp_str = msg.timestamp.strftime("%m/%d %H:%M")
+                
+                # Check if this is a bot message by comparing IDs
+                is_bot_message = msg.author_id and msg.author_id == bot_id
+                
+                # Use the reply context from the DiscordMessage model
+                if msg.replied_to_author and msg.replied_to_content:
+                    # Message with reply context - use structured format
+                    context_lines.append(
+                        f"<message{' from-bot="true"' if is_bot_message else ''}>"
+                        f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
+                        f"<author>{html.escape(msg.author)}</author>"
+                        f"<replying-to>"
+                        f"<replied-author>{html.escape(msg.replied_to_author)}</replied-author>"
+                        f"<replied-content>{html.escape(msg.replied_to_content)}</replied-content>"
+                        f"</replying-to>"
+                        f"<content>{html.escape(msg.content)}</content>"
+                        f"</message>"
+                    )
+                else:
+                    # Regular message without reply context
+                    context_lines.append(
+                        f"<message{' from-bot="true"' if is_bot_message else ''}>"
+                        f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
+                        f"<author>{html.escape(msg.author)}</author>"
+                        f"<content>{html.escape(msg.content)}</content>"
+                        f"</message>"
+                    )
+            context_str = "\n".join(context_lines)
+        
+        # Generate response using appropriate agent based on interaction type
+        if interaction_type == "mention":
+            # Use async conversational mention agent with built-in content filtering
+            result = await async_mention_agent(
+                context_messages=f"<history>{context_str}</history>",
+                user_mention=user_question,
+                messages_remaining=messages_remaining
+            )
+            
+            # Check if the agent decided to skip due to controversial content
+            if result.response.strip() == "SKIP_RESPONSE":
+                return "", 0
+        else:
+            # Use async detailed help agent for slash commands
+            result = await async_help_agent(
+                context_messages=f"<history>{context_str}</history>",
+                user_question=user_question,
+                messages_remaining=messages_remaining
+            )
+        
+        # Get token usage using the same logic as sync version
+        tokens_used = 0
+        
+        # Method 1: Use DSPy's built-in get_lm_usage() method (preferred approach)
+        try:
+            usage_data = result.get_lm_usage()
+            if usage_data:
+                # Extract tokens from the usage data dictionary
+                for model_name, usage_info in usage_data.items():
+                    if isinstance(usage_info, dict):
+                        if 'total_tokens' in usage_info:
+                            tokens_used += usage_info['total_tokens']
+                        elif 'prompt_tokens' in usage_info and 'completion_tokens' in usage_info:
+                            tokens_used += usage_info['prompt_tokens'] + usage_info['completion_tokens']
+                        elif 'input_tokens' in usage_info and 'output_tokens' in usage_info:
+                            tokens_used += usage_info['input_tokens'] + usage_info['output_tokens']
+        except Exception as e:
+            logger.debug(f"HELP DEBUG: Error with get_lm_usage(): {e}")
+        
+        # Method 2: Extract from LM history (fallback for Gemini API bug)
+        if tokens_used == 0:
+            try:
+                current_lm = dspy.settings.lm
+                if current_lm and hasattr(current_lm, 'history') and current_lm.history:
+                    latest_entry = current_lm.history[-1]  # Get the most recent API call
+                    
+                    # Check response.usage in history (most reliable for Gemini)
+                    if 'response' in latest_entry and hasattr(latest_entry['response'], 'usage'):
+                        response_usage = latest_entry['response'].usage
+                        if hasattr(response_usage, 'total_tokens'):
+                            tokens_used = response_usage.total_tokens
+                        elif hasattr(response_usage, 'prompt_tokens') and hasattr(response_usage, 'completion_tokens'):
+                            tokens_used = response_usage.prompt_tokens + response_usage.completion_tokens
+                    
+                    # Check for usage field in history
+                    elif 'usage' in latest_entry and latest_entry['usage']:
+                        usage = latest_entry['usage']
+                        if isinstance(usage, dict):
+                            if 'total_tokens' in usage:
+                                tokens_used = usage['total_tokens']
+                            elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
+                                tokens_used = usage['prompt_tokens'] + usage['completion_tokens']
+                    
+                    # Fallback: estimate from cost (Gemini-specific)
+                    elif 'cost' in latest_entry and latest_entry['cost'] > 0:
+                        cost = latest_entry['cost']
+                        # Rough estimation: Gemini Flash pricing ~$0.075 per million tokens
+                        estimated_tokens = int(cost * 13333333)
+                        tokens_used = estimated_tokens
+                        
+            except Exception as e:
+                logger.debug(f"HELP DEBUG: Error extracting from LM history: {e}")
+        
+        # Method 3: Legacy fallback for other DSPy completion formats
+        if tokens_used == 0 and hasattr(result, '_completions') and result._completions:
+            for completion in result._completions:
+                # Method 1: Traditional kwargs.usage approach  
+                if hasattr(completion, 'kwargs') and completion.kwargs:
+                    if 'usage' in completion.kwargs:
+                        usage = completion.kwargs['usage']
+                        if hasattr(usage, 'total_tokens'):
+                            tokens_used += usage.total_tokens
+                        elif isinstance(usage, dict):
+                            # Try different token field names
+                            if 'total_tokens' in usage:
+                                tokens_used += usage['total_tokens']
+                            elif 'totalTokens' in usage:
+                                tokens_used += usage['totalTokens']
+                            elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
+                                tokens_used += usage['prompt_tokens'] + usage['completion_tokens']
+                    
+                    # Method 2: Check for response metadata
+                    if 'response' in completion.kwargs:
+                        response_obj = completion.kwargs['response']
+                        if hasattr(response_obj, 'usage'):
+                            usage = response_obj.usage
+                            if hasattr(usage, 'total_tokens'):
+                                tokens_used += usage.total_tokens
+                            elif hasattr(usage, 'prompt_tokens') and hasattr(usage, 'completion_tokens'):
+                                tokens_used += usage.prompt_tokens + usage.completion_tokens
+        
+        # Validate and enforce character limit with async validation
+        response = await self._validate_and_fix_response_length_async(
+            result.response, 
+            context_str, 
+            user_question, 
+            messages_remaining, 
+            interaction_type
+        )
+        
+        return response, tokens_used
+
+    def _validate_and_fix_response_length(
+        self, 
+        response: str, 
+        context_str: str, 
+        user_question: str, 
+        messages_remaining: int, 
+        interaction_type: str
+    ) -> str:
+        """Validate response length and retry if over 2000 characters."""
+        MAX_LENGTH = 2000
+        
+        # If response is within limit, return as-is
+        if len(response) <= MAX_LENGTH:
+            return response
+        
+        logger.warning(f"Response too long: {len(response)} characters (limit: {MAX_LENGTH})")
+        
+        # Try to get a shorter response
+        chars_over = len(response) - MAX_LENGTH
+        shortening_prompt = (
+            f"Your previous response was {len(response)} characters, which exceeds Discord's "
+            f"2000 character limit by {chars_over} characters. Please provide a shorter version "
+            f"that covers the same key points but stays under 2000 characters. "
+            f"Focus on the most important information and be more concise."
+        )
+        
+        try:
+            if interaction_type == "mention":
+                retry_result = self._mention_agent(
+                    context_messages=f"<history>{context_str}</history>",
+                    user_mention=shortening_prompt,
+                    messages_remaining=messages_remaining
+                )
+            else:
+                retry_result = self._help_agent(
+                    context_messages=f"<history>{context_str}</history>",
+                    user_question=shortening_prompt,
+                    messages_remaining=messages_remaining
+                )
+            
+            # Check if retry is within limits
+            if len(retry_result.response) <= MAX_LENGTH:
+                logger.info(f"Successfully shortened response to {len(retry_result.response)} characters")
+                return retry_result.response
+            else:
+                logger.warning(f"Retry still too long: {len(retry_result.response)} characters")
+                
+        except Exception as e:
+            logger.error(f"Error during response shortening: {e}")
+        
+        # If retry failed or is still too long, return apology
+        apology = (
+            "Sorry, I'm having trouble keeping my response short enough for Discord's character limits. "
+            "Could you try asking a more specific question, or I can break my answer into smaller parts?"
+        )
+        
+        logger.warning("Sending apology due to repeated length violations")
+        return apology
+
+    async def _validate_and_fix_response_length_async(
+        self, 
+        response: str, 
+        context_str: str, 
+        user_question: str, 
+        messages_remaining: int, 
+        interaction_type: str
+    ) -> str:
+        """Async version of response length validation to avoid blocking the event loop."""
+        MAX_LENGTH = 2000
+        
+        # If response is within limit, return as-is
+        if len(response) <= MAX_LENGTH:
+            return response
+        
+        logger.warning(f"Response too long: {len(response)} characters (limit: {MAX_LENGTH})")
+        
+        # Try to get a shorter response
+        chars_over = len(response) - MAX_LENGTH
+        shortening_prompt = (
+            f"Your previous response was {len(response)} characters, which exceeds Discord's "
+            f"2000 character limit by {chars_over} characters. Please provide a shorter version "
+            f"that covers the same key points but stays under 2000 characters. "
+            f"Focus on the most important information and be more concise."
+        )
+        
+        try:
+            # Create async agents for retry
+            async_help_agent = dspy.asyncify(self._help_agent)
+            async_mention_agent = dspy.asyncify(self._mention_agent)
+            
+            if interaction_type == "mention":
+                retry_result = await async_mention_agent(
+                    context_messages=f"<history>{context_str}</history>",
+                    user_mention=shortening_prompt,
+                    messages_remaining=messages_remaining
+                )
+            else:
+                retry_result = await async_help_agent(
+                    context_messages=f"<history>{context_str}</history>",
+                    user_question=shortening_prompt,
+                    messages_remaining=messages_remaining
+                )
+            
+            # Check if retry is within limits
+            if len(retry_result.response) <= MAX_LENGTH:
+                logger.info(f"Successfully shortened response to {len(retry_result.response)} characters")
+                return retry_result.response
+            else:
+                logger.warning(f"Retry still too long: {len(retry_result.response)} characters")
+                
+        except Exception as e:
+            logger.error(f"Error during async response shortening: {e}")
+        
+        # If retry failed or is still too long, return apology
+        apology = (
+            "Sorry, I'm having trouble keeping my response short enough for Discord's character limits. "
+            "Could you try asking a more specific question, or I can break my answer into smaller parts?"
+        )
+        
+        logger.warning("Sending apology due to repeated length violations")
+        return apology
 
 
 class TLDRAgentSignature(dspy.Signature):
@@ -981,6 +1308,133 @@ class TLDRAgent:
                 # Final fallback
                 return ("📝 **Channel Summary**\nSorry, there was too much content to summarize. Try using a smaller message count or wait a moment before trying again.\n\n*(Unable to process messages)*", 0, 0)
 
+    async def generate_summary_async(
+        self, 
+        messages: List[DiscordMessage],
+        max_context_tokens: int = 15000
+    ) -> tuple[str, int, int]:
+        """Async version of generate_summary to avoid blocking the event loop.
+        
+        Args:
+            messages: List of Discord messages to summarize
+            max_context_tokens: Maximum tokens to use for context
+            
+        Returns:
+            tuple[str, int, int]: Summary text, token usage, messages actually summarized
+        """
+        # Prepare messages with progressive truncation
+        formatted_messages, messages_used = self.prepare_messages_for_context(
+            messages, max_context_tokens
+        )
+        
+        if messages_used == 0:
+            return ("📝 **Channel Summary**\nNo messages found to summarize. The channel might be empty or contain only bot messages.\n\n*(Summarized 0 messages)*", 0, 0)
+        
+        try:
+            # Generate summary using async agent
+            async_agent = dspy.asyncify(self._agent)
+            result = await async_agent(messages=formatted_messages)
+            
+            # Get token usage using the same logic as sync version
+            tokens_used = 0
+            
+            # Method 1: Use DSPy's built-in get_lm_usage() method (preferred approach)
+            try:
+                usage_data = result.get_lm_usage()
+                if usage_data:
+                    # Extract tokens from the usage data dictionary
+                    for model_name, usage_info in usage_data.items():
+                        if isinstance(usage_info, dict):
+                            if 'total_tokens' in usage_info:
+                                tokens_used += usage_info['total_tokens']
+                            elif 'prompt_tokens' in usage_info and 'completion_tokens' in usage_info:
+                                tokens_used += usage_info['prompt_tokens'] + usage_info['completion_tokens']
+                            elif 'input_tokens' in usage_info and 'output_tokens' in usage_info:
+                                tokens_used += usage_info['input_tokens'] + usage_info['output_tokens']
+            except Exception as e:
+                logger.debug(f"TLDR DEBUG: Error with get_lm_usage(): {e}")
+            
+            # Method 2: Extract from LM history (fallback for Gemini API bug)
+            if tokens_used == 0:
+                try:
+                    import dspy
+                    current_lm = dspy.settings.lm
+                    if current_lm and hasattr(current_lm, 'history') and current_lm.history:
+                        latest_entry = current_lm.history[-1]  # Get the most recent API call
+                        
+                        # Check response.usage in history (most reliable for Gemini)
+                        if 'response' in latest_entry and hasattr(latest_entry['response'], 'usage'):
+                            response_usage = latest_entry['response'].usage
+                            if hasattr(response_usage, 'total_tokens'):
+                                tokens_used = response_usage.total_tokens
+                            elif hasattr(response_usage, 'prompt_tokens') and hasattr(response_usage, 'completion_tokens'):
+                                tokens_used = response_usage.prompt_tokens + response_usage.completion_tokens
+                        
+                        # Check for usage field in history
+                        elif 'usage' in latest_entry and latest_entry['usage']:
+                            usage = latest_entry['usage']
+                            if isinstance(usage, dict):
+                                if 'total_tokens' in usage:
+                                    tokens_used = usage['total_tokens']
+                                elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
+                                    tokens_used = usage['prompt_tokens'] + usage['completion_tokens']
+                        
+                        # Fallback: estimate from cost (Gemini-specific)
+                        elif 'cost' in latest_entry and latest_entry['cost'] > 0:
+                            cost = latest_entry['cost']
+                            # Rough estimation: Gemini Flash pricing ~$0.075 per million tokens
+                            estimated_tokens = int(cost * 13333333)
+                            tokens_used = estimated_tokens
+                            
+                except Exception as e:
+                    logger.debug(f"TLDR DEBUG: Error extracting from LM history: {e}")
+            
+            # Method 3: Legacy fallback for other DSPy completion formats
+            if tokens_used == 0 and hasattr(result, '_completions') and result._completions:
+                for completion in result._completions:
+                    # Method 1: Traditional kwargs.usage approach  
+                    if hasattr(completion, 'kwargs') and completion.kwargs:
+                        if 'usage' in completion.kwargs:
+                            usage = completion.kwargs['usage']
+                            if hasattr(usage, 'total_tokens'):
+                                tokens_used += usage.total_tokens
+                            elif isinstance(usage, dict):
+                                # Try different token field names
+                                if 'total_tokens' in usage:
+                                    tokens_used += usage['total_tokens']
+                                elif 'totalTokens' in usage:
+                                    tokens_used += usage['totalTokens']
+                                elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
+                                    tokens_used += usage['prompt_tokens'] + usage['completion_tokens']
+                        
+                        # Method 2: Check for response metadata
+                        if 'response' in completion.kwargs:
+                            response_obj = completion.kwargs['response']
+                            if hasattr(response_obj, 'usage'):
+                                usage = response_obj.usage
+                                if hasattr(usage, 'total_tokens'):
+                                    tokens_used += usage.total_tokens
+                                elif hasattr(usage, 'prompt_tokens') and hasattr(usage, 'completion_tokens'):
+                                    tokens_used += usage.prompt_tokens + usage.completion_tokens
+            
+            # Inject the actual message count into the summary
+            summary_with_count = f"{result.summary}\n\n*(Summarized {messages_used} messages)*"
+            
+            return summary_with_count, tokens_used, messages_used
+            
+        except Exception as e:
+            # Generate a helpful error message using async agent with minimal context
+            error_context = f"<error>Failed to summarize {messages_used} messages due to: {str(e)[:200]}</error>"
+            
+            try:
+                async_agent = dspy.asyncify(self._agent)
+                error_result = await async_agent(messages=error_context)
+                error_summary_with_count = f"{error_result.summary}\n\n*(Unable to process {messages_used} messages)*"
+                return error_summary_with_count, 0, 0
+            except:
+                # Final fallback
+                return ("📝 **Channel Summary**\nSorry, there was too much content to summarize. Try using a smaller message count or wait a moment before trying again.\n\n*(Unable to process messages)*", 0, 0)
+
 
 def estimate_message_tokens(messages: List[DiscordMessage]) -> int:
     """Estimate total token count for a list of messages."""
@@ -1084,8 +1538,9 @@ class ForumMonitorAgent:
         
         post_context = "\n".join(context_parts)
         
-        # Generate evaluation and response
-        result = self._agent(
+        # Generate evaluation and response using async agent
+        async_agent = dspy.asyncify(self._agent)
+        result = await async_agent(
             system_prompt=system_prompt,
             post_context=post_context
         )
@@ -1113,7 +1568,6 @@ class ForumMonitorAgent:
         # Method 2: Extract from LM history (fallback for Gemini API bug)
         if tokens_used == 0:
             try:
-                import dspy
                 current_lm = dspy.settings.lm
                 if current_lm and hasattr(current_lm, 'history') and current_lm.history:
                     latest_entry = current_lm.history[-1]  # Get the most recent API call

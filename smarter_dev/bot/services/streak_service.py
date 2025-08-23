@@ -128,6 +128,10 @@ class StreakService:
         if last_daily is None:
             return True
         
+        # Convert datetime to date if needed
+        if hasattr(last_daily, 'date'):
+            last_daily = last_daily.date()
+        
         # Can't claim if already claimed today
         if last_daily == current_date:
             return False
@@ -163,6 +167,10 @@ class StreakService:
         # New user starts with streak of 1
         if last_daily is None:
             return 1
+        
+        # Convert datetime to date if needed
+        if hasattr(last_daily, 'date'):
+            last_daily = last_daily.date()
         
         # Calculate yesterday's date
         yesterday = current_date - timedelta(days=1)
@@ -238,6 +246,10 @@ class StreakService:
         if last_daily is None:
             return False  # New user, no streak to break
         
+        # Convert datetime to date if needed
+        if hasattr(last_daily, 'date'):
+            last_daily = last_daily.date()
+        
         yesterday = current_date - timedelta(days=1)
         
         # Streak is broken if last claim was before yesterday
@@ -260,6 +272,10 @@ class StreakService:
         """
         if last_daily is None:
             return None
+        
+        # Convert datetime to date if needed
+        if hasattr(last_daily, 'date'):
+            last_daily = last_daily.date()
         
         # Handle data corruption (future dates) gracefully
         if last_daily >= current_date:

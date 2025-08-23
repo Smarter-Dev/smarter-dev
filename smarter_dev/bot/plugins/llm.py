@@ -164,8 +164,8 @@ async def generate_tldr_summary(
         # Track response time
         start_time = datetime.now(timezone.utc)
         
-        # Generate summary with token tracking
-        summary, tokens_used, messages_summarized = tldr_agent.generate_summary(messages)
+        # Generate summary with token tracking using async method
+        summary, tokens_used, messages_summarized = await tldr_agent.generate_summary_async(messages)
         
         # Calculate response time
         end_time = datetime.now(timezone.utc)
