@@ -207,12 +207,9 @@ class TestHelpAgentLLMEvaluation:
         self.agent = HelpAgent()
         # Initialize evaluator LLM (Gemini 2.5 Flash)
         import dspy
-        import dotenv
+        from smarter_dev.llm_config import get_llm_model
         
-        self.evaluator_lm = dspy.LM(
-            "gemini/gemini-2.5-flash-exp", 
-            api_key=dotenv.get_key(".env", "GEMINI_API_KEY")
-        )
+        self.evaluator_lm = get_llm_model("judge")
     
     def evaluate_response_quality(self, question: str, response: str, context: str = "") -> dict:
         """Evaluate response quality using Gemini 2.5 Flash.

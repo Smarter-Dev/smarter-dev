@@ -169,8 +169,8 @@ async def generate_help_response(
         current_remaining = rate_limiter.get_user_remaining_requests(user_id, 'help')
         messages_remaining = max(0, current_remaining - 1)
         
-        # Generate response with token tracking
-        response, tokens_used = help_agent.generate_response(
+        # Generate response with token tracking using async method
+        response, tokens_used = await help_agent.generate_response_async(
             user_question, 
             context_messages, 
             bot_id,

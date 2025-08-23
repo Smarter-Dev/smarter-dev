@@ -58,14 +58,18 @@ class TestMentionAgentLLMJudge:
         self.agent = HelpAgent()
         
         # Initialize judge LLM for evaluation
-        import dspy
-        import dotenv
+        from smarter_dev.llm_config import get_llm_model, get_model_info, validate_model_config
         
         try:
-            self.judge_lm = dspy.LM(
-                "gemini/gemini-2.5-flash-lite", 
-                api_key=dotenv.get_key(".env", "GEMINI_API_KEY")
-            )
+            # Validate configuration first
+            is_valid, error = validate_model_config("judge")
+            if not is_valid:
+                pytest.skip(f"Judge LLM configuration invalid: {error}")
+            
+            self.judge_lm = get_llm_model("judge")
+            model_info = get_model_info("judge")
+            print(f"🔧 Using LLM judge model: {model_info['model_name']} (provider: {model_info['provider']})")
+            
         except Exception as e:
             pytest.skip(f"Could not initialize judge LLM: {e}")
     
