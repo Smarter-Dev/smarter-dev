@@ -38,3 +38,13 @@ web.log
 # Coverage files
 .coverage
 coverage.xml
+htmlcov/
+
+# Test cache
+.pytest_cache/
+.mypy_cache/
+
+# Temporary test files
+test_*.py
+debug_*.py
+discord_server_icon.gif
