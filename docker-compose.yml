@@ -13,7 +13,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U smarter_dev -d smarter_dev"]
       interval: 10s
@@ -83,7 +82,7 @@ services:
       - .:/app
       - /app/.venv
     working_dir: /app
-    command: uv run python -m smarter_dev.bot
+    command: uv run python -m smarter_dev.bot.client
     restart: unless-stopped
     networks:
       - smarter_dev
