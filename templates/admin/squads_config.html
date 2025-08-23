@@ -118,6 +118,9 @@
                                 
                                 <div class="small text-muted">
                                     <strong>Role ID:</strong> {{ squad.role_id }}<br>
+                                    {% if squad.announcement_channel %}
+                                    <strong>Channel:</strong> <span class="text-info">{{ squad.announcement_channel }}</span><br>
+                                    {% endif %}
                                     <strong>Created:</strong> {{ squad.created_at.strftime("%Y-%m-%d") }}
                                     {% if squad.is_full %}
                                     <br><span class="badge bg-warning">Full</span>
@@ -354,6 +357,20 @@
                         </div>
                     </div>
                     
+                    <div class="mb-3">
+                        <label class="form-label">Announcement Channel</label>
+                        <select class="form-select" name="announcement_channel">
+                            <option value="">No announcement channel</option>
+                            {% for channel in channels %}
+                            <option value="{{ channel.id }}">
+                                #{{ channel.name }} 
+                                {% if channel.category %}({{ channel.category }}){% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-hint">Discord channel where squad announcements will be sent</div>
+                    </div>
+                    
                     <div class="row">
                         <div class="col-lg-6 mb-3">
                             <label class="form-label">Switch Cost</label>
@@ -436,6 +453,20 @@
                         </div>
                     </div>
                     
+                    <div class="mb-3">
+                        <label class="form-label">Announcement Channel</label>
+                        <select class="form-select" name="announcement_channel" id="edit_announcement_channel">
+                            <option value="">No announcement channel</option>
+                            {% for channel in channels %}
+                            <option value="{{ channel.id }}">
+                                #{{ channel.name }} 
+                                {% if channel.category %}({{ channel.category }}){% endif %}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-hint">Discord channel where squad announcements will be sent</div>
+                    </div>
+                    
                     <div class="row">
                         <div class="col-lg-6 mb-3">
                             <label class="form-label">Max Members</label>
@@ -512,6 +543,7 @@ const squads = {
         name: {{ squad.name | tojson }},
         description: {{ (squad.description or "") | tojson }},
         welcome_message: {{ (squad.welcome_message or "") | tojson }},
+        announcement_channel: {{ (squad.announcement_channel or "") | tojson }},
         switch_cost: {{ squad.switch_cost }},
         max_members: {% if squad.max_members %}{{ squad.max_members }}{% else %}null{% endif %},
         is_active: {{ squad.is_active | lower }},
@@ -534,6 +566,7 @@ function editSquad(squadId) {
     document.getElementById('edit_name').value = squad.name;
     document.getElementById('edit_description').value = squad.description || '';
     document.getElementById('edit_welcome_message').value = squad.welcome_message || '';
+    document.getElementById('edit_announcement_channel').value = squad.announcement_channel || '';
     document.getElementById('edit_switch_cost').value = squad.switch_cost;
     document.getElementById('edit_max_members').value = squad.max_members || '';
     document.getElementById('edit_is_active').checked = squad.is_active;

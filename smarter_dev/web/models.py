@@ -336,6 +336,11 @@ class Squad(Base):
         nullable=True,
         doc="Custom welcome message shown when users join this squad"
     )
+    announcement_channel: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        doc="Discord channel ID for squad announcements (optional)"
+    )
     
     # Relationships
     challenge_submissions: Mapped[list["ChallengeSubmission"]] = relationship(
@@ -1678,7 +1683,12 @@ class ScheduledMessage(Base):
         Text,
         nullable=False,
         default="",
-        doc="Detailed message description"
+        doc="Detailed message description (sent to squad channels)"
+    )
+    announcement_channel_message: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Optional message for campaign announcement channels (if not set, description is used)"
     )
     
     # Scheduling
