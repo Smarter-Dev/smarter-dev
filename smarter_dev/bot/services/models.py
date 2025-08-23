@@ -276,6 +276,7 @@ class Squad:
     name: str
     description: Optional[str] = None
     welcome_message: Optional[str] = None
+    announcement_channel: Optional[str] = None
     switch_cost: int = 0
     max_members: Optional[int] = None
     member_count: int = 0

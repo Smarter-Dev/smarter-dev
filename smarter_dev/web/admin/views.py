@@ -511,6 +511,13 @@ async def squads_config(request: Request) -> Response:
         guild = await get_guild_info(guild_id)
         guild_roles = await get_guild_roles(guild_id)
         
+        # Get announcement channels for the guild
+        try:
+            channels = await get_valid_announcement_channels(guild_id)
+        except DiscordAPIError:
+            channels = []
+            logger.warning(f"Failed to fetch channels for guild {guild_id}, using empty list")
+        
         async with get_db_session_context() as session:
             squad_ops = SquadOperations()
             
@@ -536,7 +543,8 @@ async def squads_config(request: Request) -> Response:
                         "guild": guild,
                         "guild_roles": guild_roles,
                         "squads": squads,
-                        "squad_members": squad_members
+                        "squad_members": squad_members,
+                        "channels": channels
                     }
                 )
             
@@ -554,6 +562,7 @@ async def squads_config(request: Request) -> Response:
                         name=form.get("name"),
                         description=form.get("description") or None,
                         welcome_message=form.get("welcome_message") or None,
+                        announcement_channel=form.get("announcement_channel") or None,
                         switch_cost=int(form.get("switch_cost", 50)),
                         max_members=int(form.get("max_members")) if form.get("max_members") else None,
                         is_default=form.get("is_default") == "on"
@@ -568,6 +577,7 @@ async def squads_config(request: Request) -> Response:
                         "name": form.get("name"),
                         "description": form.get("description") or None,
                         "welcome_message": form.get("welcome_message") or None,
+                        "announcement_channel": form.get("announcement_channel") or None,
                         "switch_cost": int(form.get("switch_cost")),
                         "max_members": int(form.get("max_members")) if form.get("max_members") else None,
                         "is_active": form.get("is_active") == "on",
@@ -602,6 +612,7 @@ async def squads_config(request: Request) -> Response:
                         "guild_roles": guild_roles,
                         "squads": squads,
                         "squad_members": squad_members,
+                        "channels": channels,
                         "success": success_message
                     }
                 )
@@ -621,6 +632,7 @@ async def squads_config(request: Request) -> Response:
                         "guild_roles": guild_roles,
                         "squads": squads,
                         "squad_members": squad_members,
+                        "channels": channels,
                         "error": "Invalid squad configuration. Please check your input."
                     },
                     status_code=400
@@ -651,6 +663,7 @@ async def squads_config(request: Request) -> Response:
                         "guild_roles": guild_roles,
                         "squads": squads,
                         "squad_members": squad_members,
+                        "channels": channels,
                         "error": error_msg
                     },
                     status_code=400
@@ -2676,6 +2689,7 @@ async def scheduled_message_create(request: Request) -> Response:
                 # Validate form data
                 title = form_data.get("title", "").strip()
                 description = form_data.get("description", "").strip()
+                announcement_channel_message = form_data.get("announcement_channel_message", "").strip() or None
                 scheduled_time_str = form_data.get("scheduled_time", "").strip()
                 
                 errors = []
@@ -2721,6 +2735,7 @@ async def scheduled_message_create(request: Request) -> Response:
                     campaign_id=UUID(campaign_id),
                     title=title,
                     description=description,
+                    announcement_channel_message=announcement_channel_message,
                     scheduled_time=scheduled_time,
                     created_by="admin"  # TODO: Get actual admin username from session
                 )
@@ -2800,6 +2815,7 @@ async def scheduled_message_edit(request: Request) -> Response:
                 # Validate form data
                 title = form_data.get("title", "").strip()
                 description = form_data.get("description", "").strip()
+                announcement_channel_message = form_data.get("announcement_channel_message", "").strip() or None
                 scheduled_time_str = form_data.get("scheduled_time", "").strip()
                 
                 errors = []
@@ -2846,6 +2862,7 @@ async def scheduled_message_edit(request: Request) -> Response:
                     campaign_id=UUID(campaign_id),
                     title=title,
                     description=description,
+                    announcement_channel_message=announcement_channel_message,
                     scheduled_time=scheduled_time
                 )
                 
