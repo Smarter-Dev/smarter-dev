@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import List, Dict, Any
 from uuid import UUID
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel
@@ -31,6 +31,68 @@ class SolutionSubmissionRequest(BaseModel):
     user_id: str
     username: str
     submitted_solution: str
+
+
+@router.get("/upcoming-announcements")
+async def get_upcoming_announcements(
+    seconds: int = Query(default=45, description="Look ahead seconds"),
+    session: AsyncSession = Depends(get_db_session),
+    api_key = Depends(verify_api_key),
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Get challenges that will be announced in the next N seconds.
+    
+    Args:
+        seconds: Number of seconds to look ahead (default 45)
+        
+    Returns:
+        Dictionary with list of challenge data for bot queuing
+    """
+    try:
+        campaign_ops = CampaignOperations(session)
+        upcoming_time = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+        challenges = await campaign_ops.get_upcoming_announcements(upcoming_time)
+        
+        # Format challenges for bot consumption
+        challenge_list = []
+        for challenge in challenges:
+            campaign = challenge.campaign
+            
+            # Calculate release time based on campaign start and challenge position
+            release_time = campaign.start_time + timedelta(hours=campaign.release_cadence_hours * (challenge.order_position - 1))
+            
+            challenge_data = {
+                "id": str(challenge.id),
+                "title": challenge.title,
+                "description": challenge.description,
+                "guild_id": campaign.guild_id,
+                "announcement_channels": campaign.announcement_channels,
+                "order_position": challenge.order_position,
+                "release_time": release_time.isoformat(),
+                "campaign": {
+                    "id": str(campaign.id),
+                    "title": campaign.title,
+                    "start_time": campaign.start_time.isoformat(),
+                    "release_cadence_hours": campaign.release_cadence_hours,
+                }
+            }
+            challenge_list.append(challenge_data)
+        
+        logger.debug(f"Retrieved {len(challenge_list)} challenges for next {seconds} seconds")
+        
+        return {"challenges": challenge_list}
+        
+    except DatabaseOperationError as e:
+        logger.error(f"Database error getting upcoming announcements: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve upcoming announcements"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error getting upcoming announcements: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
 
 
 @router.get("/pending-announcements")
