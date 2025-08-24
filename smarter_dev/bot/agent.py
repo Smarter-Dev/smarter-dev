@@ -1488,45 +1488,25 @@ class ForumMonitorSignature(dspy.Signature):
 
 
 class StreakCelebrationSignature(dspy.Signature):
-    """You are a creative, high-energy celebration agent that generates unique, exciting messages when users get streak bonuses for their daily bytes rewards.
+    """You are a wildly creative, unpredictable celebration agent that generates completely unique messages when users get streak bonuses for their daily bytes rewards.
 
-    ## YOUR MISSION
-    Create a UNIQUE, CREATIVE celebration message (under 100 characters) that:
-    - Uses the user's message content for inspiration and context
-    - Is wildly enthusiastic with varied energy words (BOOM, FIRE, BEAST MODE, LEGEND, CRUSHING, DOMINATING, etc.)
-    - FOCUSES PRIMARILY on the streak multiplier and streak days achieved
-    - Mentions bytes briefly or not at all - the MULTIPLIER and STREAK are the stars!
-    - Changes style based on what they said - be playful and contextual!
-    - NEVER repeats the same message structure twice
-    
-    ## CREATIVE VARIETY EXAMPLES (Focus on multiplier/streak!)
-    If user said "hello": "-# @user HELLO to that 2x MULTIPLIER! Day 8 streak BEAST MODE!"
-    If user said "good morning": "-# @user Morning CHAMPION! 2x bonus ACTIVATED on your 8-day streak!"  
-    If user said "testing": "-# @user Testing that 2x STREAK POWER! 8 days of DOMINATION!"
-    
-    ## DYNAMIC ENERGY WORDS (mix it up!)
-    BOOM, FIRE, BEAST MODE, LEGEND, CRUSHING, DOMINATING, INSANE, EPIC, SAVAGE, UNSTOPPABLE, 
-    MACHINE, POWERHOUSE, CHAMPION, DESTROYER, MONSTER, ABSOLUTE UNIT
-    
-    ## MATH RULE
-    bytes_earned is FINAL amount (already multiplied). Don't multiply again!
-    
-    ## FORMAT & FOCUS
-    Always: "-# " + user_mention + creative message
-    Use the user_message content to inspire your celebration style!
-    
-    ## PRIORITY ORDER (what to highlight most):
-    1. STREAK MULTIPLIER (2x, 3x, 4x, etc.) - THE MAIN STAR!
-    2. STREAK DAYS (Day 8, 14-day streak, etc.) - SECONDARY FOCUS
-    3. Bytes amount - optional, keep brief if mentioned at all
+    ## YOUR CREATIVE MISSION
+    Generate a celebration (under 200 characters) that:
+    - Takes inspiration from the user's message and creates fun and celebratory!
+    - Mentions BYTES reward and the multiplier bonus somewhere in the message
+    - Incorporates the streak days naturally
+
+    ## On Being Appropriate
+    - Be appropriate and respectful
+    - If celebration is inappropriate, generate a generic informational message instead (e.g. "Your 8-day streak earned you a 2x bonus today")
+    - Never comment on unfortunate, negative, or triggering content
     """
 
-    bytes_earned: int = dspy.InputField(description="Total bytes the user earned (final amount, already includes multiplier)")
+    bytes_earned: int = dspy.InputField(description="Total bytes the user earned (after multiplier)")
     streak_multiplier: int = dspy.InputField(description="The streak bonus multiplier that was applied")
     streak_days: int = dspy.InputField(description="Number of days in the user's streak")
-    user_mention: str = dspy.InputField(description="The Discord user mention string (e.g., '<@266432511897370625>')")
-    user_message: str = dspy.InputField(description="INSPIRATION SOURCE: The user's message content - use this to make your celebration unique and contextual!")
-    response: str = dspy.OutputField(description="CREATIVE, UNIQUE celebration message that's never been generated before! Must be contextual to user_message!")
+    user_message: str = dspy.InputField(description="The user's message content - riff on this respectfully if you can!")
+    response: str = dspy.OutputField(description="Very fun celebration message!")
 
 
 class ForumMonitorAgent:
@@ -1734,7 +1714,7 @@ class StreakCelebrationAgent:
     """Agent for generating celebratory streak bonus messages."""
 
     def __init__(self):
-        self._agent = dspy.ChainOfThought(StreakCelebrationSignature)
+        self._agent = dspy.Predict(StreakCelebrationSignature)
 
     async def generate_celebration_message(
         self,
@@ -1830,12 +1810,7 @@ class StreakCelebrationAgent:
                 tokens_used = estimated_tokens
                 logger.debug(f"STREAK DEBUG: Fallback estimation - {tokens_used} tokens from text length")
 
-            # Validate the response has the correct prefix
-            response = result.response
-            if not response.startswith("-# "):
-                response = f"-# {response}"
-
-            return response, tokens_used
+            return f"-# {user_mention} {result.response}", tokens_used
 
         except Exception as e:
             logger.error(f"Error generating streak celebration message: {e}")

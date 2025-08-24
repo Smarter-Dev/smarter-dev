@@ -85,9 +85,9 @@ async def store_streak_celebration(
         async with APIClient(
             base_url=settings.api_base_url,
             api_key=settings.bot_api_key,
-            timeout=10.0
+            default_timeout=10.0
         ) as client:
-            response = await client.post("/admin/conversations", json=conversation_data)
+            response = await client.post("/admin/conversations", json_data=conversation_data)
             if response.status_code in (200, 201):
                 logger.debug(f"✅ Stored streak celebration for user {user_id} (session: {session_id})")
                 return True
