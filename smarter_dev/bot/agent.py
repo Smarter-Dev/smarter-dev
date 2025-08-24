@@ -1,17 +1,17 @@
-import dspy
-import dotenv
 import html
 import logging
 import re
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Tuple
-from dataclasses import dataclass
+from datetime import datetime
+from datetime import timedelta
+
+import dspy
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 
-from ..llm_config import get_llm_model, get_model_info
+from ..llm_config import get_llm_model
+from ..llm_config import get_model_info
 
 # Configure LLM model from environment
 lm = get_llm_model("default")
@@ -25,15 +25,15 @@ logger.info(f"🤖 Bot using LLM model: {model_info['model_name']} (provider: {m
 class DiscordMessage(BaseModel):
     """Represents a Discord message for context."""
     author: str
-    author_id: Optional[str] = None  # Discord user ID as string
+    author_id: str | None = None  # Discord user ID as string
     timestamp: datetime
     content: str
     # Reply context - populated when this message is a reply to another message
-    replied_to_author: Optional[str] = None  # Author of the message being replied to
-    replied_to_content: Optional[str] = None  # Content of the message being replied to
+    replied_to_author: str | None = None  # Author of the message being replied to
+    replied_to_content: str | None = None  # Content of the message being replied to
 
 
-def parse_reply_context(content: str) -> Tuple[Optional[str], Optional[str], str]:
+def parse_reply_context(content: str) -> tuple[str | None, str | None, str]:
     """Parse reply context from formatted message content.
     
     Args:
@@ -47,151 +47,151 @@ def parse_reply_context(content: str) -> Tuple[Optional[str], Optional[str], str
         - actual_content: The actual message content without reply context
     """
     # Check if message starts with reply context (> Author: content)
-    reply_pattern = r'^> ([^:]+): (.+?)(?:\.\.\.)?\n(.*)$'
+    reply_pattern = r"^> ([^:]+): (.+?)(?:\.\.\.)?\n(.*)$"
     match = re.match(reply_pattern, content, re.DOTALL)
-    
+
     if match:
         replied_author = match.group(1).strip()
         replied_content = match.group(2).strip()
         actual_content = match.group(3).strip()
         return replied_author, replied_content, actual_content
-    
+
     # Check for attachment/embed reply format
-    attachment_pattern = r'^> ([^:]+): \[attachment/embed\]\n(.*)$'
+    attachment_pattern = r"^> ([^:]+): \[attachment/embed\]\n(.*)$"
     match = re.match(attachment_pattern, content, re.DOTALL)
-    
+
     if match:
         replied_author = match.group(1).strip()
         replied_content = "[attachment/embed]"
         actual_content = match.group(2).strip()
         return replied_author, replied_content, actual_content
-    
+
     # Check for generic reply indicator
-    generic_pattern = r'^> \[replied to message\]\n(.*)$'
+    generic_pattern = r"^> \[replied to message\]\n(.*)$"
     match = re.match(generic_pattern, content, re.DOTALL)
-    
+
     if match:
         replied_author = "[unknown]"
         replied_content = "[message]"
         actual_content = match.group(1).strip()
         return replied_author, replied_content, actual_content
-    
+
     # No reply context found
     return None, None, content
 
 
 class RateLimiter:
     """In-memory rate limiter for user requests and token usage with command-specific limits."""
-    
+
     def __init__(self):
         # Track by command type: user_id -> command_type -> [timestamps]
-        self.user_command_requests: Dict[str, Dict[str, List[datetime]]] = {}
+        self.user_command_requests: dict[str, dict[str, list[datetime]]] = {}
         # Track token usage with command type: [(timestamp, token_count, command_type)]
-        self.token_usage: List[tuple[datetime, int, str]] = []
-        
+        self.token_usage: list[tuple[datetime, int, str]] = []
+
         # Command-specific limits
         self.COMMAND_LIMITS = {
-            'help': {'limit': 10, 'window': timedelta(minutes=30)},
-            'tldr': {'limit': 5, 'window': timedelta(hours=1)}
+            "help": {"limit": 10, "window": timedelta(minutes=30)},
+            "tldr": {"limit": 5, "window": timedelta(hours=1)}
         }
-        
+
         # Global token limits
         self.TOKEN_LIMIT = 500_000  # tokens per hour
         self.TOKEN_WINDOW = timedelta(hours=1)
-    
+
     def cleanup_expired_entries(self):
         """Remove expired entries to prevent memory leaks."""
         now = datetime.now()
-        
+
         # Clean up user command requests
         for user_id in list(self.user_command_requests.keys()):
             user_commands = self.user_command_requests[user_id]
-            
+
             for command_type in list(user_commands.keys()):
                 if command_type in self.COMMAND_LIMITS:
-                    window = self.COMMAND_LIMITS[command_type]['window']
+                    window = self.COMMAND_LIMITS[command_type]["window"]
                     user_commands[command_type] = [
                         req_time for req_time in user_commands[command_type]
                         if now - req_time < window
                     ]
-                    
+
                     # Remove empty command lists
                     if not user_commands[command_type]:
                         del user_commands[command_type]
-            
+
             # Remove empty user entries
             if not user_commands:
                 del self.user_command_requests[user_id]
-        
+
         # Clean up token usage
         self.token_usage = [
             (usage_time, tokens, cmd_type) for usage_time, tokens, cmd_type in self.token_usage
             if now - usage_time < self.TOKEN_WINDOW
         ]
-    
-    def check_user_limit(self, user_id: str, command_type: str = 'help') -> bool:
+
+    def check_user_limit(self, user_id: str, command_type: str = "help") -> bool:
         """Check if user is within rate limit for specific command type."""
         if command_type not in self.COMMAND_LIMITS:
             return True  # No limit defined for this command
-            
+
         self.cleanup_expired_entries()
         user_commands = self.user_command_requests.get(user_id, {})
         user_requests = user_commands.get(command_type, [])
-        limit = self.COMMAND_LIMITS[command_type]['limit']
+        limit = self.COMMAND_LIMITS[command_type]["limit"]
         return len(user_requests) < limit
-    
+
     def check_token_limit(self, estimated_tokens: int = 1000) -> bool:
         """Check if we're within global token usage limit."""
         self.cleanup_expired_entries()
         # Sum actual token usage in the last hour across all commands
         current_usage = sum(tokens for _, tokens, _ in self.token_usage)
         return current_usage + estimated_tokens < self.TOKEN_LIMIT
-    
-    def record_request(self, user_id: str, tokens_used: int, command_type: str = 'help'):
+
+    def record_request(self, user_id: str, tokens_used: int, command_type: str = "help"):
         """Record a user request and actual token usage for specific command type."""
         now = datetime.now()
-        
+
         # Initialize user tracking if needed
         if user_id not in self.user_command_requests:
             self.user_command_requests[user_id] = {}
         if command_type not in self.user_command_requests[user_id]:
             self.user_command_requests[user_id][command_type] = []
-            
+
         # Record the request
         self.user_command_requests[user_id][command_type].append(now)
-        
+
         # Always record token usage with command type
         self.token_usage.append((now, tokens_used, command_type))
-    
-    def get_user_remaining_requests(self, user_id: str, command_type: str = 'help') -> int:
+
+    def get_user_remaining_requests(self, user_id: str, command_type: str = "help") -> int:
         """Get number of remaining requests for user and command type."""
         if command_type not in self.COMMAND_LIMITS:
             return 999  # Unlimited for unknown commands
-            
+
         self.cleanup_expired_entries()
         user_commands = self.user_command_requests.get(user_id, {})
         used = len(user_commands.get(command_type, []))
-        limit = self.COMMAND_LIMITS[command_type]['limit']
+        limit = self.COMMAND_LIMITS[command_type]["limit"]
         return max(0, limit - used)
-    
-    def get_user_reset_time(self, user_id: str, command_type: str = 'help') -> Optional[datetime]:
+
+    def get_user_reset_time(self, user_id: str, command_type: str = "help") -> datetime | None:
         """Get when user's rate limit resets for specific command type."""
         if command_type not in self.COMMAND_LIMITS:
             return None
-            
+
         user_commands = self.user_command_requests.get(user_id, {})
         user_requests = user_commands.get(command_type, [])
         if not user_requests:
             return None
-        window = self.COMMAND_LIMITS[command_type]['window']
+        window = self.COMMAND_LIMITS[command_type]["window"]
         return user_requests[0] + window
-    
+
     def get_current_token_usage(self) -> int:
         """Get current token usage in the last hour across all commands."""
         self.cleanup_expired_entries()
         return sum(tokens for _, tokens, _ in self.token_usage)
-    
-    def get_token_usage_by_command(self) -> Dict[str, int]:
+
+    def get_token_usage_by_command(self) -> dict[str, int]:
         """Get current token usage broken down by command type."""
         self.cleanup_expired_entries()
         usage_by_command = {}
@@ -369,7 +369,7 @@ class ConversationalMentionSignature(dspy.Signature):
     - "That kind of language isn't what this server is about. We're here to support each other's coding journeys."
     - "I get that frustrations run high sometimes, but let's channel that energy into solving interesting problems instead."
     """
-    
+
     context_messages: str = dspy.InputField(description="Recent conversation messages for context")
     user_mention: str = dspy.InputField(description="What the user said when mentioning the bot")
     messages_remaining: int = dspy.InputField(description="Number of help messages user can send after this one (0 = this is their last message)")
@@ -538,7 +538,7 @@ class HelpAgentSignature(dspy.Signature):
     - When continuing a conversation, reference what was discussed before: "Like I mentioned...", "Building on what we talked about...", "Going back to your question about..."
     - Match the user's energy level - if they're excited, be enthusiastic; if they're confused, be patient and helpful
     """
-    
+
     context_messages: str = dspy.InputField(description="Recent conversation messages for context")
     user_question: str = dspy.InputField(description="The user's question about the bot")
     messages_remaining: int = dspy.InputField(description="Number of help messages user can send after this one (0 = this is their last message)")
@@ -547,15 +547,15 @@ class HelpAgentSignature(dspy.Signature):
 
 class HelpAgent:
     """Discord bot help agent using Gemini for conversational assistance."""
-    
+
     def __init__(self):
         self._help_agent = dspy.ChainOfThought(HelpAgentSignature)
         self._mention_agent = dspy.ChainOfThought(ConversationalMentionSignature)
-    
+
     def generate_response(
-        self, 
-        user_question: str, 
-        context_messages: List[DiscordMessage] = None,
+        self,
+        user_question: str,
+        context_messages: list[DiscordMessage] = None,
         bot_id: str = None,
         interaction_type: str = "slash_command",
         messages_remaining: int = 10
@@ -578,10 +578,10 @@ class HelpAgent:
             context_lines = []
             for msg in context_messages[-10:]:  # Last 10 messages
                 timestamp_str = msg.timestamp.strftime("%m/%d %H:%M")
-                
+
                 # Check if this is a bot message by comparing IDs
                 is_bot_message = msg.author_id and msg.author_id == bot_id
-                
+
                 # Use the reply context from the DiscordMessage model
                 if msg.replied_to_author and msg.replied_to_content:
                     # Message with reply context - use structured format
@@ -606,7 +606,7 @@ class HelpAgent:
                         f"</message>"
                     )
             context_str = "\n".join(context_lines)
-        
+
         # Generate response using appropriate agent based on interaction type
         if interaction_type == "mention":
             # Use conversational mention agent with built-in content filtering
@@ -615,7 +615,7 @@ class HelpAgent:
                 user_mention=user_question,
                 messages_remaining=messages_remaining
             )
-            
+
             # Check if the agent decided to skip due to controversial content
             if result.response.strip() == "SKIP_RESPONSE":
                 return "", 0
@@ -626,10 +626,10 @@ class HelpAgent:
                 user_question=user_question,
                 messages_remaining=messages_remaining
             )
-        
+
         # Get token usage from DSPy prediction using robust extraction methods
         tokens_used = 0
-        
+
         # Method 1: Use DSPy's built-in get_lm_usage() method (preferred approach)
         try:
             usage_data = result.get_lm_usage()
@@ -637,73 +637,73 @@ class HelpAgent:
                 # Extract tokens from the usage data dictionary
                 for model_name, usage_info in usage_data.items():
                     if isinstance(usage_info, dict):
-                        if 'total_tokens' in usage_info:
-                            tokens_used += usage_info['total_tokens']
-                        elif 'prompt_tokens' in usage_info and 'completion_tokens' in usage_info:
-                            tokens_used += usage_info['prompt_tokens'] + usage_info['completion_tokens']
-                        elif 'input_tokens' in usage_info and 'output_tokens' in usage_info:
-                            tokens_used += usage_info['input_tokens'] + usage_info['output_tokens']
+                        if "total_tokens" in usage_info:
+                            tokens_used += usage_info["total_tokens"]
+                        elif "prompt_tokens" in usage_info and "completion_tokens" in usage_info:
+                            tokens_used += usage_info["prompt_tokens"] + usage_info["completion_tokens"]
+                        elif "input_tokens" in usage_info and "output_tokens" in usage_info:
+                            tokens_used += usage_info["input_tokens"] + usage_info["output_tokens"]
         except Exception as e:
             logger.debug(f"HELP DEBUG: Error with get_lm_usage(): {e}")
-        
+
         # Method 2: Extract from LM history (fallback for Gemini API bug)
         if tokens_used == 0:
             try:
                 current_lm = dspy.settings.lm
-                if current_lm and hasattr(current_lm, 'history') and current_lm.history:
+                if current_lm and hasattr(current_lm, "history") and current_lm.history:
                     latest_entry = current_lm.history[-1]  # Get the most recent API call
-                    
+
                     # Check response.usage in history (most reliable for Gemini)
-                    if 'response' in latest_entry and hasattr(latest_entry['response'], 'usage'):
-                        response_usage = latest_entry['response'].usage
-                        if hasattr(response_usage, 'total_tokens'):
+                    if "response" in latest_entry and hasattr(latest_entry["response"], "usage"):
+                        response_usage = latest_entry["response"].usage
+                        if hasattr(response_usage, "total_tokens"):
                             tokens_used = response_usage.total_tokens
-                        elif hasattr(response_usage, 'prompt_tokens') and hasattr(response_usage, 'completion_tokens'):
+                        elif hasattr(response_usage, "prompt_tokens") and hasattr(response_usage, "completion_tokens"):
                             tokens_used = response_usage.prompt_tokens + response_usage.completion_tokens
-                    
+
                     # Check for usage field in history
-                    elif 'usage' in latest_entry and latest_entry['usage']:
-                        usage = latest_entry['usage']
+                    elif "usage" in latest_entry and latest_entry["usage"]:
+                        usage = latest_entry["usage"]
                         if isinstance(usage, dict):
-                            if 'total_tokens' in usage:
-                                tokens_used = usage['total_tokens']
-                            elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
-                                tokens_used = usage['prompt_tokens'] + usage['completion_tokens']
-                    
+                            if "total_tokens" in usage:
+                                tokens_used = usage["total_tokens"]
+                            elif "prompt_tokens" in usage and "completion_tokens" in usage:
+                                tokens_used = usage["prompt_tokens"] + usage["completion_tokens"]
+
                     # Fallback: estimate from cost (Gemini-specific)
-                    elif 'cost' in latest_entry and latest_entry['cost'] > 0:
-                        cost = latest_entry['cost']
+                    elif "cost" in latest_entry and latest_entry["cost"] > 0:
+                        cost = latest_entry["cost"]
                         # Rough estimation: Gemini Flash pricing ~$0.075 per million tokens
                         estimated_tokens = int(cost * 13333333)
                         tokens_used = estimated_tokens
-                        
+
             except Exception as e:
                 logger.debug(f"HELP DEBUG: Error extracting from LM history: {e}")
-        
+
         # Method 3: Legacy fallback for other DSPy completion formats
-        if tokens_used == 0 and hasattr(result, '_completions') and result._completions:
+        if tokens_used == 0 and hasattr(result, "_completions") and result._completions:
             for completion in result._completions:
-                # Method 1: Traditional kwargs.usage approach  
-                if hasattr(completion, 'kwargs') and completion.kwargs:
-                    if 'usage' in completion.kwargs:
-                        usage = completion.kwargs['usage']
-                        if hasattr(usage, 'total_tokens'):
+                # Method 1: Traditional kwargs.usage approach
+                if hasattr(completion, "kwargs") and completion.kwargs:
+                    if "usage" in completion.kwargs:
+                        usage = completion.kwargs["usage"]
+                        if hasattr(usage, "total_tokens"):
                             tokens_used += usage.total_tokens
                         elif isinstance(usage, dict):
                             # Try different token field names
-                            if 'total_tokens' in usage:
-                                tokens_used += usage['total_tokens']
-                            elif 'totalTokens' in usage:
-                                tokens_used += usage['totalTokens']
-                            elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
-                                tokens_used += usage['prompt_tokens'] + usage['completion_tokens']
-                    
+                            if "total_tokens" in usage:
+                                tokens_used += usage["total_tokens"]
+                            elif "totalTokens" in usage:
+                                tokens_used += usage["totalTokens"]
+                            elif "prompt_tokens" in usage and "completion_tokens" in usage:
+                                tokens_used += usage["prompt_tokens"] + usage["completion_tokens"]
+
                     # Method 2: Check for response metadata
-                    if 'response' in completion.kwargs:
-                        response_obj = completion.kwargs['response']
-                        if hasattr(response_obj, 'usage') and hasattr(response_obj.usage, 'total_tokens'):
+                    if "response" in completion.kwargs:
+                        response_obj = completion.kwargs["response"]
+                        if hasattr(response_obj, "usage") and hasattr(response_obj.usage, "total_tokens"):
                             tokens_used += response_obj.usage.total_tokens
-        
+
         # Final fallback: estimate tokens from text length if all methods fail
         if tokens_used == 0:
             # Rough estimation: ~4 characters per token for English text
@@ -712,22 +712,22 @@ class HelpAgent:
             estimated_tokens = (len(input_text) + len(output_text)) // 4
             tokens_used = estimated_tokens
             logger.warning(f"HELP DEBUG: Fallback estimation - {tokens_used} tokens from text length")
-        
+
         # Check character limit and retry if needed
         response = self._validate_and_fix_response_length(
-            result.response, 
-            context_str, 
-            user_question, 
-            messages_remaining, 
+            result.response,
+            context_str,
+            user_question,
+            messages_remaining,
             interaction_type
         )
-        
+
         return response, tokens_used
-    
+
     async def generate_response_async(
-        self, 
-        user_question: str, 
-        context_messages: List[DiscordMessage] = None,
+        self,
+        user_question: str,
+        context_messages: list[DiscordMessage] = None,
         bot_id: str = None,
         interaction_type: str = "slash_command",
         messages_remaining: int = 10
@@ -747,17 +747,17 @@ class HelpAgent:
         # Create async versions of our agents using dspy.asyncify
         async_help_agent = dspy.asyncify(self._help_agent)
         async_mention_agent = dspy.asyncify(self._mention_agent)
-        
+
         # Format context messages using the same logic as the sync version
         context_str = ""
         if context_messages:
             context_lines = []
             for msg in context_messages[-10:]:  # Last 10 messages
                 timestamp_str = msg.timestamp.strftime("%m/%d %H:%M")
-                
+
                 # Check if this is a bot message by comparing IDs
                 is_bot_message = msg.author_id and msg.author_id == bot_id
-                
+
                 # Use the reply context from the DiscordMessage model
                 if msg.replied_to_author and msg.replied_to_content:
                     # Message with reply context - use structured format
@@ -782,7 +782,7 @@ class HelpAgent:
                         f"</message>"
                     )
             context_str = "\n".join(context_lines)
-        
+
         # Generate response using appropriate agent based on interaction type
         if interaction_type == "mention":
             # Use async conversational mention agent with built-in content filtering
@@ -791,7 +791,7 @@ class HelpAgent:
                 user_mention=user_question,
                 messages_remaining=messages_remaining
             )
-            
+
             # Check if the agent decided to skip due to controversial content
             if result.response.strip() == "SKIP_RESPONSE":
                 return "", 0
@@ -802,10 +802,10 @@ class HelpAgent:
                 user_question=user_question,
                 messages_remaining=messages_remaining
             )
-        
+
         # Get token usage using the same logic as sync version
         tokens_used = 0
-        
+
         # Method 1: Use DSPy's built-in get_lm_usage() method (preferred approach)
         try:
             usage_data = result.get_lm_usage()
@@ -813,105 +813,105 @@ class HelpAgent:
                 # Extract tokens from the usage data dictionary
                 for model_name, usage_info in usage_data.items():
                     if isinstance(usage_info, dict):
-                        if 'total_tokens' in usage_info:
-                            tokens_used += usage_info['total_tokens']
-                        elif 'prompt_tokens' in usage_info and 'completion_tokens' in usage_info:
-                            tokens_used += usage_info['prompt_tokens'] + usage_info['completion_tokens']
-                        elif 'input_tokens' in usage_info and 'output_tokens' in usage_info:
-                            tokens_used += usage_info['input_tokens'] + usage_info['output_tokens']
+                        if "total_tokens" in usage_info:
+                            tokens_used += usage_info["total_tokens"]
+                        elif "prompt_tokens" in usage_info and "completion_tokens" in usage_info:
+                            tokens_used += usage_info["prompt_tokens"] + usage_info["completion_tokens"]
+                        elif "input_tokens" in usage_info and "output_tokens" in usage_info:
+                            tokens_used += usage_info["input_tokens"] + usage_info["output_tokens"]
         except Exception as e:
             logger.debug(f"HELP DEBUG: Error with get_lm_usage(): {e}")
-        
+
         # Method 2: Extract from LM history (fallback for Gemini API bug)
         if tokens_used == 0:
             try:
                 current_lm = dspy.settings.lm
-                if current_lm and hasattr(current_lm, 'history') and current_lm.history:
+                if current_lm and hasattr(current_lm, "history") and current_lm.history:
                     latest_entry = current_lm.history[-1]  # Get the most recent API call
-                    
+
                     # Check response.usage in history (most reliable for Gemini)
-                    if 'response' in latest_entry and hasattr(latest_entry['response'], 'usage'):
-                        response_usage = latest_entry['response'].usage
-                        if hasattr(response_usage, 'total_tokens'):
+                    if "response" in latest_entry and hasattr(latest_entry["response"], "usage"):
+                        response_usage = latest_entry["response"].usage
+                        if hasattr(response_usage, "total_tokens"):
                             tokens_used = response_usage.total_tokens
-                        elif hasattr(response_usage, 'prompt_tokens') and hasattr(response_usage, 'completion_tokens'):
+                        elif hasattr(response_usage, "prompt_tokens") and hasattr(response_usage, "completion_tokens"):
                             tokens_used = response_usage.prompt_tokens + response_usage.completion_tokens
-                    
+
                     # Check for usage field in history
-                    elif 'usage' in latest_entry and latest_entry['usage']:
-                        usage = latest_entry['usage']
+                    elif "usage" in latest_entry and latest_entry["usage"]:
+                        usage = latest_entry["usage"]
                         if isinstance(usage, dict):
-                            if 'total_tokens' in usage:
-                                tokens_used = usage['total_tokens']
-                            elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
-                                tokens_used = usage['prompt_tokens'] + usage['completion_tokens']
-                    
+                            if "total_tokens" in usage:
+                                tokens_used = usage["total_tokens"]
+                            elif "prompt_tokens" in usage and "completion_tokens" in usage:
+                                tokens_used = usage["prompt_tokens"] + usage["completion_tokens"]
+
                     # Fallback: estimate from cost (Gemini-specific)
-                    elif 'cost' in latest_entry and latest_entry['cost'] > 0:
-                        cost = latest_entry['cost']
+                    elif "cost" in latest_entry and latest_entry["cost"] > 0:
+                        cost = latest_entry["cost"]
                         # Rough estimation: Gemini Flash pricing ~$0.075 per million tokens
                         estimated_tokens = int(cost * 13333333)
                         tokens_used = estimated_tokens
-                        
+
             except Exception as e:
                 logger.debug(f"HELP DEBUG: Error extracting from LM history: {e}")
-        
+
         # Method 3: Legacy fallback for other DSPy completion formats
-        if tokens_used == 0 and hasattr(result, '_completions') and result._completions:
+        if tokens_used == 0 and hasattr(result, "_completions") and result._completions:
             for completion in result._completions:
-                # Method 1: Traditional kwargs.usage approach  
-                if hasattr(completion, 'kwargs') and completion.kwargs:
-                    if 'usage' in completion.kwargs:
-                        usage = completion.kwargs['usage']
-                        if hasattr(usage, 'total_tokens'):
+                # Method 1: Traditional kwargs.usage approach
+                if hasattr(completion, "kwargs") and completion.kwargs:
+                    if "usage" in completion.kwargs:
+                        usage = completion.kwargs["usage"]
+                        if hasattr(usage, "total_tokens"):
                             tokens_used += usage.total_tokens
                         elif isinstance(usage, dict):
                             # Try different token field names
-                            if 'total_tokens' in usage:
-                                tokens_used += usage['total_tokens']
-                            elif 'totalTokens' in usage:
-                                tokens_used += usage['totalTokens']
-                            elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
-                                tokens_used += usage['prompt_tokens'] + usage['completion_tokens']
-                    
+                            if "total_tokens" in usage:
+                                tokens_used += usage["total_tokens"]
+                            elif "totalTokens" in usage:
+                                tokens_used += usage["totalTokens"]
+                            elif "prompt_tokens" in usage and "completion_tokens" in usage:
+                                tokens_used += usage["prompt_tokens"] + usage["completion_tokens"]
+
                     # Method 2: Check for response metadata
-                    if 'response' in completion.kwargs:
-                        response_obj = completion.kwargs['response']
-                        if hasattr(response_obj, 'usage'):
+                    if "response" in completion.kwargs:
+                        response_obj = completion.kwargs["response"]
+                        if hasattr(response_obj, "usage"):
                             usage = response_obj.usage
-                            if hasattr(usage, 'total_tokens'):
+                            if hasattr(usage, "total_tokens"):
                                 tokens_used += usage.total_tokens
-                            elif hasattr(usage, 'prompt_tokens') and hasattr(usage, 'completion_tokens'):
+                            elif hasattr(usage, "prompt_tokens") and hasattr(usage, "completion_tokens"):
                                 tokens_used += usage.prompt_tokens + usage.completion_tokens
-        
+
         # Validate and enforce character limit with async validation
         response = await self._validate_and_fix_response_length_async(
-            result.response, 
-            context_str, 
-            user_question, 
-            messages_remaining, 
+            result.response,
+            context_str,
+            user_question,
+            messages_remaining,
             interaction_type
         )
-        
+
         return response, tokens_used
 
     def _validate_and_fix_response_length(
-        self, 
-        response: str, 
-        context_str: str, 
-        user_question: str, 
-        messages_remaining: int, 
+        self,
+        response: str,
+        context_str: str,
+        user_question: str,
+        messages_remaining: int,
         interaction_type: str
     ) -> str:
         """Validate response length and retry if over 2000 characters."""
         MAX_LENGTH = 2000
-        
+
         # If response is within limit, return as-is
         if len(response) <= MAX_LENGTH:
             return response
-        
+
         logger.warning(f"Response too long: {len(response)} characters (limit: {MAX_LENGTH})")
-        
+
         # Try to get a shorter response
         chars_over = len(response) - MAX_LENGTH
         shortening_prompt = (
@@ -920,7 +920,7 @@ class HelpAgent:
             f"that covers the same key points but stays under 2000 characters. "
             f"Focus on the most important information and be more concise."
         )
-        
+
         try:
             if interaction_type == "mention":
                 retry_result = self._mention_agent(
@@ -934,43 +934,43 @@ class HelpAgent:
                     user_question=shortening_prompt,
                     messages_remaining=messages_remaining
                 )
-            
+
             # Check if retry is within limits
             if len(retry_result.response) <= MAX_LENGTH:
                 logger.info(f"Successfully shortened response to {len(retry_result.response)} characters")
                 return retry_result.response
             else:
                 logger.warning(f"Retry still too long: {len(retry_result.response)} characters")
-                
+
         except Exception as e:
             logger.error(f"Error during response shortening: {e}")
-        
+
         # If retry failed or is still too long, return apology
         apology = (
             "Sorry, I'm having trouble keeping my response short enough for Discord's character limits. "
             "Could you try asking a more specific question, or I can break my answer into smaller parts?"
         )
-        
+
         logger.warning("Sending apology due to repeated length violations")
         return apology
 
     async def _validate_and_fix_response_length_async(
-        self, 
-        response: str, 
-        context_str: str, 
-        user_question: str, 
-        messages_remaining: int, 
+        self,
+        response: str,
+        context_str: str,
+        user_question: str,
+        messages_remaining: int,
         interaction_type: str
     ) -> str:
         """Async version of response length validation to avoid blocking the event loop."""
         MAX_LENGTH = 2000
-        
+
         # If response is within limit, return as-is
         if len(response) <= MAX_LENGTH:
             return response
-        
+
         logger.warning(f"Response too long: {len(response)} characters (limit: {MAX_LENGTH})")
-        
+
         # Try to get a shorter response
         chars_over = len(response) - MAX_LENGTH
         shortening_prompt = (
@@ -979,12 +979,12 @@ class HelpAgent:
             f"that covers the same key points but stays under 2000 characters. "
             f"Focus on the most important information and be more concise."
         )
-        
+
         try:
             # Create async agents for retry
             async_help_agent = dspy.asyncify(self._help_agent)
             async_mention_agent = dspy.asyncify(self._mention_agent)
-            
+
             if interaction_type == "mention":
                 retry_result = await async_mention_agent(
                     context_messages=f"<history>{context_str}</history>",
@@ -997,23 +997,23 @@ class HelpAgent:
                     user_question=shortening_prompt,
                     messages_remaining=messages_remaining
                 )
-            
+
             # Check if retry is within limits
             if len(retry_result.response) <= MAX_LENGTH:
                 logger.info(f"Successfully shortened response to {len(retry_result.response)} characters")
                 return retry_result.response
             else:
                 logger.warning(f"Retry still too long: {len(retry_result.response)} characters")
-                
+
         except Exception as e:
             logger.error(f"Error during async response shortening: {e}")
-        
+
         # If retry failed or is still too long, return apology
         apology = (
             "Sorry, I'm having trouble keeping my response short enough for Discord's character limits. "
             "Could you try asking a more specific question, or I can break my answer into smaller parts?"
         )
-        
+
         logger.warning("Sending apology due to repeated length violations")
         return apology
 
@@ -1082,37 +1082,37 @@ class TLDRAgentSignature(dspy.Signature):
     
     Alice successfully applied the fix and confirmed the admin dashboard is working.
     """
-    
+
     messages: str = dspy.InputField(description="Discord messages to summarize, formatted as structured data")
     summary: str = dspy.OutputField(description="Comprehensive and detailed summary of the conversation")
 
 
 class TLDRAgent:
     """Discord bot TLDR agent using Gemini for conversation summarization."""
-    
+
     def __init__(self):
         self._agent = dspy.ChainOfThought(TLDRAgentSignature)
-    
+
     def estimate_token_count(self, text: str) -> int:
         """Rough estimation of token count for text (approximately 4 chars per token)."""
         return len(text) // 4
-    
+
     def truncate_message_content(self, content: str, max_chars: int = 500) -> str:
         """Truncate message content while preserving readability."""
         if len(content) <= max_chars:
             return content
-        
+
         # Try to truncate at word boundaries
         truncated = content[:max_chars]
-        last_space = truncated.rfind(' ')
+        last_space = truncated.rfind(" ")
         if last_space > max_chars * 0.8:  # If we find a space in the last 20%
             truncated = truncated[:last_space]
-        
+
         return truncated + "..."
-    
+
     def prepare_messages_for_context(
-        self, 
-        messages: List[DiscordMessage], 
+        self,
+        messages: list[DiscordMessage],
         max_tokens: int = 15000
     ) -> tuple[str, int]:
         """Prepare messages for LLM context with progressive truncation.
@@ -1126,19 +1126,19 @@ class TLDRAgent:
         """
         if not messages:
             return "<no-messages>No messages to summarize</no-messages>", 0
-        
+
         # Start with full messages and progressively reduce if needed
         current_messages = messages.copy()
-        
+
         while current_messages:
             # Format current set of messages
             formatted_lines = []
             for msg in current_messages:
                 timestamp_str = msg.timestamp.strftime("%m/%d %H:%M")
-                
+
                 # Truncate very long messages
                 content = self.truncate_message_content(msg.content, 500)
-                
+
                 # Use the reply context from the DiscordMessage model
                 if msg.replied_to_author and msg.replied_to_content:
                     # Message with reply context - use structured format
@@ -1162,25 +1162,25 @@ class TLDRAgent:
                         f"<content>{html.escape(content)}</content>"
                         f"</message>"
                     )
-            
+
             formatted_text = f"<conversation>\n{chr(10).join(formatted_lines)}\n</conversation>"
-            
+
             # Check if this fits within token limit
             estimated_tokens = self.estimate_token_count(formatted_text)
-            
+
             if estimated_tokens <= max_tokens or len(current_messages) <= 3:
                 # Either it fits, or we're down to minimum messages
                 return formatted_text, len(current_messages)
-            
+
             # Remove some messages and try again (remove from the oldest/beginning)
             reduction = max(1, len(current_messages) // 4)  # Remove 25% each iteration
             current_messages = current_messages[-len(current_messages) + reduction:]
-        
+
         return "<no-messages>No messages could be processed</no-messages>", 0
-    
+
     def generate_summary(
-        self, 
-        messages: List[DiscordMessage],
+        self,
+        messages: list[DiscordMessage],
         max_context_tokens: int = 15000
     ) -> tuple[str, int, int]:
         """Generate a TLDR summary of Discord messages.
@@ -1196,17 +1196,17 @@ class TLDRAgent:
         formatted_messages, messages_used = self.prepare_messages_for_context(
             messages, max_context_tokens
         )
-        
+
         if messages_used == 0:
             return ("📝 **Channel Summary**\nNo messages found to summarize. The channel might be empty or contain only bot messages.\n\n*(Summarized 0 messages)*", 0, 0)
-        
+
         try:
             # Generate summary
             result = self._agent(messages=formatted_messages)
-            
+
             # Get token usage from DSPy prediction using robust extraction methods
             tokens_used = 0
-            
+
             # Method 1: Use DSPy's built-in get_lm_usage() method (preferred approach)
             try:
                 usage_data = result.get_lm_usage()
@@ -1214,74 +1214,74 @@ class TLDRAgent:
                     # Extract tokens from the usage data dictionary
                     for model_name, usage_info in usage_data.items():
                         if isinstance(usage_info, dict):
-                            if 'total_tokens' in usage_info:
-                                tokens_used += usage_info['total_tokens']
-                            elif 'prompt_tokens' in usage_info and 'completion_tokens' in usage_info:
-                                tokens_used += usage_info['prompt_tokens'] + usage_info['completion_tokens']
-                            elif 'input_tokens' in usage_info and 'output_tokens' in usage_info:
-                                tokens_used += usage_info['input_tokens'] + usage_info['output_tokens']
+                            if "total_tokens" in usage_info:
+                                tokens_used += usage_info["total_tokens"]
+                            elif "prompt_tokens" in usage_info and "completion_tokens" in usage_info:
+                                tokens_used += usage_info["prompt_tokens"] + usage_info["completion_tokens"]
+                            elif "input_tokens" in usage_info and "output_tokens" in usage_info:
+                                tokens_used += usage_info["input_tokens"] + usage_info["output_tokens"]
             except Exception as e:
                 logger.debug(f"TLDR DEBUG: Error with get_lm_usage(): {e}")
-            
+
             # Method 2: Extract from LM history (fallback for Gemini API bug)
             if tokens_used == 0:
                 try:
                     import dspy
                     current_lm = dspy.settings.lm
-                    if current_lm and hasattr(current_lm, 'history') and current_lm.history:
+                    if current_lm and hasattr(current_lm, "history") and current_lm.history:
                         latest_entry = current_lm.history[-1]  # Get the most recent API call
-                        
+
                         # Check response.usage in history (most reliable for Gemini)
-                        if 'response' in latest_entry and hasattr(latest_entry['response'], 'usage'):
-                            response_usage = latest_entry['response'].usage
-                            if hasattr(response_usage, 'total_tokens'):
+                        if "response" in latest_entry and hasattr(latest_entry["response"], "usage"):
+                            response_usage = latest_entry["response"].usage
+                            if hasattr(response_usage, "total_tokens"):
                                 tokens_used = response_usage.total_tokens
-                            elif hasattr(response_usage, 'prompt_tokens') and hasattr(response_usage, 'completion_tokens'):
+                            elif hasattr(response_usage, "prompt_tokens") and hasattr(response_usage, "completion_tokens"):
                                 tokens_used = response_usage.prompt_tokens + response_usage.completion_tokens
-                        
+
                         # Check for usage field in history
-                        elif 'usage' in latest_entry and latest_entry['usage']:
-                            usage = latest_entry['usage']
+                        elif "usage" in latest_entry and latest_entry["usage"]:
+                            usage = latest_entry["usage"]
                             if isinstance(usage, dict):
-                                if 'total_tokens' in usage:
-                                    tokens_used = usage['total_tokens']
-                                elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
-                                    tokens_used = usage['prompt_tokens'] + usage['completion_tokens']
-                        
+                                if "total_tokens" in usage:
+                                    tokens_used = usage["total_tokens"]
+                                elif "prompt_tokens" in usage and "completion_tokens" in usage:
+                                    tokens_used = usage["prompt_tokens"] + usage["completion_tokens"]
+
                         # Fallback: estimate from cost (Gemini-specific)
-                        elif 'cost' in latest_entry and latest_entry['cost'] > 0:
-                            cost = latest_entry['cost']
+                        elif "cost" in latest_entry and latest_entry["cost"] > 0:
+                            cost = latest_entry["cost"]
                             # Rough estimation: Gemini Flash pricing ~$0.075 per million tokens
                             estimated_tokens = int(cost * 13333333)
                             tokens_used = estimated_tokens
-                            
+
                 except Exception as e:
                     logger.debug(f"TLDR DEBUG: Error extracting from LM history: {e}")
-            
+
             # Method 3: Legacy fallback for other DSPy completion formats
-            if tokens_used == 0 and hasattr(result, '_completions') and result._completions:
+            if tokens_used == 0 and hasattr(result, "_completions") and result._completions:
                 for completion in result._completions:
-                    # Method 1: Traditional kwargs.usage approach  
-                    if hasattr(completion, 'kwargs') and completion.kwargs:
-                        if 'usage' in completion.kwargs:
-                            usage = completion.kwargs['usage']
-                            if hasattr(usage, 'total_tokens'):
+                    # Method 1: Traditional kwargs.usage approach
+                    if hasattr(completion, "kwargs") and completion.kwargs:
+                        if "usage" in completion.kwargs:
+                            usage = completion.kwargs["usage"]
+                            if hasattr(usage, "total_tokens"):
                                 tokens_used += usage.total_tokens
                             elif isinstance(usage, dict):
                                 # Try different token field names
-                                if 'total_tokens' in usage:
-                                    tokens_used += usage['total_tokens']
-                                elif 'totalTokens' in usage:
-                                    tokens_used += usage['totalTokens']
-                                elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
-                                    tokens_used += usage['prompt_tokens'] + usage['completion_tokens']
-                        
+                                if "total_tokens" in usage:
+                                    tokens_used += usage["total_tokens"]
+                                elif "totalTokens" in usage:
+                                    tokens_used += usage["totalTokens"]
+                                elif "prompt_tokens" in usage and "completion_tokens" in usage:
+                                    tokens_used += usage["prompt_tokens"] + usage["completion_tokens"]
+
                         # Method 2: Check for response metadata
-                        if 'response' in completion.kwargs:
-                            response_obj = completion.kwargs['response']
-                            if hasattr(response_obj, 'usage') and hasattr(response_obj.usage, 'total_tokens'):
+                        if "response" in completion.kwargs:
+                            response_obj = completion.kwargs["response"]
+                            if hasattr(response_obj, "usage") and hasattr(response_obj.usage, "total_tokens"):
                                 tokens_used += response_obj.usage.total_tokens
-            
+
             # Final fallback: estimate tokens from text length if all methods fail
             if tokens_used == 0:
                 # Rough estimation: ~4 characters per token for English text
@@ -1290,16 +1290,16 @@ class TLDRAgent:
                 estimated_tokens = (len(input_text) + len(output_text)) // 4
                 tokens_used = estimated_tokens
                 logger.warning(f"TLDR DEBUG: Fallback estimation - {tokens_used} tokens from text length")
-            
+
             # Inject the actual message count into the summary
             summary_with_count = f"{result.summary}\n\n*(Summarized {messages_used} messages)*"
-            
+
             return summary_with_count, tokens_used, messages_used
-            
+
         except Exception as e:
             # Generate a helpful error message using the agent with minimal context
             error_context = f"<error>Failed to summarize {messages_used} messages due to: {str(e)[:200]}</error>"
-            
+
             try:
                 error_result = self._agent(messages=error_context)
                 error_summary_with_count = f"{error_result.summary}\n\n*(Unable to process {messages_used} messages)*"
@@ -1309,8 +1309,8 @@ class TLDRAgent:
                 return ("📝 **Channel Summary**\nSorry, there was too much content to summarize. Try using a smaller message count or wait a moment before trying again.\n\n*(Unable to process messages)*", 0, 0)
 
     async def generate_summary_async(
-        self, 
-        messages: List[DiscordMessage],
+        self,
+        messages: list[DiscordMessage],
         max_context_tokens: int = 15000
     ) -> tuple[str, int, int]:
         """Async version of generate_summary to avoid blocking the event loop.
@@ -1326,18 +1326,18 @@ class TLDRAgent:
         formatted_messages, messages_used = self.prepare_messages_for_context(
             messages, max_context_tokens
         )
-        
+
         if messages_used == 0:
             return ("📝 **Channel Summary**\nNo messages found to summarize. The channel might be empty or contain only bot messages.\n\n*(Summarized 0 messages)*", 0, 0)
-        
+
         try:
             # Generate summary using async agent
             async_agent = dspy.asyncify(self._agent)
             result = await async_agent(messages=formatted_messages)
-            
+
             # Get token usage using the same logic as sync version
             tokens_used = 0
-            
+
             # Method 1: Use DSPy's built-in get_lm_usage() method (preferred approach)
             try:
                 usage_data = result.get_lm_usage()
@@ -1345,87 +1345,87 @@ class TLDRAgent:
                     # Extract tokens from the usage data dictionary
                     for model_name, usage_info in usage_data.items():
                         if isinstance(usage_info, dict):
-                            if 'total_tokens' in usage_info:
-                                tokens_used += usage_info['total_tokens']
-                            elif 'prompt_tokens' in usage_info and 'completion_tokens' in usage_info:
-                                tokens_used += usage_info['prompt_tokens'] + usage_info['completion_tokens']
-                            elif 'input_tokens' in usage_info and 'output_tokens' in usage_info:
-                                tokens_used += usage_info['input_tokens'] + usage_info['output_tokens']
+                            if "total_tokens" in usage_info:
+                                tokens_used += usage_info["total_tokens"]
+                            elif "prompt_tokens" in usage_info and "completion_tokens" in usage_info:
+                                tokens_used += usage_info["prompt_tokens"] + usage_info["completion_tokens"]
+                            elif "input_tokens" in usage_info and "output_tokens" in usage_info:
+                                tokens_used += usage_info["input_tokens"] + usage_info["output_tokens"]
             except Exception as e:
                 logger.debug(f"TLDR DEBUG: Error with get_lm_usage(): {e}")
-            
+
             # Method 2: Extract from LM history (fallback for Gemini API bug)
             if tokens_used == 0:
                 try:
                     import dspy
                     current_lm = dspy.settings.lm
-                    if current_lm and hasattr(current_lm, 'history') and current_lm.history:
+                    if current_lm and hasattr(current_lm, "history") and current_lm.history:
                         latest_entry = current_lm.history[-1]  # Get the most recent API call
-                        
+
                         # Check response.usage in history (most reliable for Gemini)
-                        if 'response' in latest_entry and hasattr(latest_entry['response'], 'usage'):
-                            response_usage = latest_entry['response'].usage
-                            if hasattr(response_usage, 'total_tokens'):
+                        if "response" in latest_entry and hasattr(latest_entry["response"], "usage"):
+                            response_usage = latest_entry["response"].usage
+                            if hasattr(response_usage, "total_tokens"):
                                 tokens_used = response_usage.total_tokens
-                            elif hasattr(response_usage, 'prompt_tokens') and hasattr(response_usage, 'completion_tokens'):
+                            elif hasattr(response_usage, "prompt_tokens") and hasattr(response_usage, "completion_tokens"):
                                 tokens_used = response_usage.prompt_tokens + response_usage.completion_tokens
-                        
+
                         # Check for usage field in history
-                        elif 'usage' in latest_entry and latest_entry['usage']:
-                            usage = latest_entry['usage']
+                        elif "usage" in latest_entry and latest_entry["usage"]:
+                            usage = latest_entry["usage"]
                             if isinstance(usage, dict):
-                                if 'total_tokens' in usage:
-                                    tokens_used = usage['total_tokens']
-                                elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
-                                    tokens_used = usage['prompt_tokens'] + usage['completion_tokens']
-                        
+                                if "total_tokens" in usage:
+                                    tokens_used = usage["total_tokens"]
+                                elif "prompt_tokens" in usage and "completion_tokens" in usage:
+                                    tokens_used = usage["prompt_tokens"] + usage["completion_tokens"]
+
                         # Fallback: estimate from cost (Gemini-specific)
-                        elif 'cost' in latest_entry and latest_entry['cost'] > 0:
-                            cost = latest_entry['cost']
+                        elif "cost" in latest_entry and latest_entry["cost"] > 0:
+                            cost = latest_entry["cost"]
                             # Rough estimation: Gemini Flash pricing ~$0.075 per million tokens
                             estimated_tokens = int(cost * 13333333)
                             tokens_used = estimated_tokens
-                            
+
                 except Exception as e:
                     logger.debug(f"TLDR DEBUG: Error extracting from LM history: {e}")
-            
+
             # Method 3: Legacy fallback for other DSPy completion formats
-            if tokens_used == 0 and hasattr(result, '_completions') and result._completions:
+            if tokens_used == 0 and hasattr(result, "_completions") and result._completions:
                 for completion in result._completions:
-                    # Method 1: Traditional kwargs.usage approach  
-                    if hasattr(completion, 'kwargs') and completion.kwargs:
-                        if 'usage' in completion.kwargs:
-                            usage = completion.kwargs['usage']
-                            if hasattr(usage, 'total_tokens'):
+                    # Method 1: Traditional kwargs.usage approach
+                    if hasattr(completion, "kwargs") and completion.kwargs:
+                        if "usage" in completion.kwargs:
+                            usage = completion.kwargs["usage"]
+                            if hasattr(usage, "total_tokens"):
                                 tokens_used += usage.total_tokens
                             elif isinstance(usage, dict):
                                 # Try different token field names
-                                if 'total_tokens' in usage:
-                                    tokens_used += usage['total_tokens']
-                                elif 'totalTokens' in usage:
-                                    tokens_used += usage['totalTokens']
-                                elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
-                                    tokens_used += usage['prompt_tokens'] + usage['completion_tokens']
-                        
+                                if "total_tokens" in usage:
+                                    tokens_used += usage["total_tokens"]
+                                elif "totalTokens" in usage:
+                                    tokens_used += usage["totalTokens"]
+                                elif "prompt_tokens" in usage and "completion_tokens" in usage:
+                                    tokens_used += usage["prompt_tokens"] + usage["completion_tokens"]
+
                         # Method 2: Check for response metadata
-                        if 'response' in completion.kwargs:
-                            response_obj = completion.kwargs['response']
-                            if hasattr(response_obj, 'usage'):
+                        if "response" in completion.kwargs:
+                            response_obj = completion.kwargs["response"]
+                            if hasattr(response_obj, "usage"):
                                 usage = response_obj.usage
-                                if hasattr(usage, 'total_tokens'):
+                                if hasattr(usage, "total_tokens"):
                                     tokens_used += usage.total_tokens
-                                elif hasattr(usage, 'prompt_tokens') and hasattr(usage, 'completion_tokens'):
+                                elif hasattr(usage, "prompt_tokens") and hasattr(usage, "completion_tokens"):
                                     tokens_used += usage.prompt_tokens + usage.completion_tokens
-            
+
             # Inject the actual message count into the summary
             summary_with_count = f"{result.summary}\n\n*(Summarized {messages_used} messages)*"
-            
+
             return summary_with_count, tokens_used, messages_used
-            
+
         except Exception as e:
             # Generate a helpful error message using async agent with minimal context
             error_context = f"<error>Failed to summarize {messages_used} messages due to: {str(e)[:200]}</error>"
-            
+
             try:
                 async_agent = dspy.asyncify(self._agent)
                 error_result = await async_agent(messages=error_context)
@@ -1436,7 +1436,7 @@ class TLDRAgent:
                 return ("📝 **Channel Summary**\nSorry, there was too much content to summarize. Try using a smaller message count or wait a moment before trying again.\n\n*(Unable to process messages)*", 0, 0)
 
 
-def estimate_message_tokens(messages: List[DiscordMessage]) -> int:
+def estimate_message_tokens(messages: list[DiscordMessage]) -> int:
     """Estimate total token count for a list of messages."""
     total_chars = sum(len(msg.content) + len(msg.author) + 50 for msg in messages)  # +50 for formatting
     return total_chars // 4  # Rough estimation of 4 chars per token
@@ -1479,7 +1479,7 @@ class ForumMonitorSignature(dspy.Signature):
     - **confidence**: MESSAGE SEND confidence score (0.0 to 1.0) - higher means more likely to send
     - **response**: Your actual response (empty string if not responding)
     """
-    
+
     system_prompt: str = dspy.InputField(description="Your specific role and response criteria")
     post_context: str = dspy.InputField(description="Complete forum post information including title, content, author, tags, and attachments")
     decision: str = dspy.OutputField(description="Explanation of whether and why to respond")
@@ -1487,20 +1487,62 @@ class ForumMonitorSignature(dspy.Signature):
     response: str = dspy.OutputField(description="Generated response content (empty if not responding)")
 
 
+class StreakCelebrationSignature(dspy.Signature):
+    """You are a creative, high-energy celebration agent that generates unique, exciting messages when users get streak bonuses for their daily bytes rewards.
+
+    ## YOUR MISSION
+    Create a UNIQUE, CREATIVE celebration message (under 100 characters) that:
+    - Uses the user's message content for inspiration and context
+    - Is wildly enthusiastic with varied energy words (BOOM, FIRE, BEAST MODE, LEGEND, CRUSHING, DOMINATING, etc.)
+    - FOCUSES PRIMARILY on the streak multiplier and streak days achieved
+    - Mentions bytes briefly or not at all - the MULTIPLIER and STREAK are the stars!
+    - Changes style based on what they said - be playful and contextual!
+    - NEVER repeats the same message structure twice
+    
+    ## CREATIVE VARIETY EXAMPLES (Focus on multiplier/streak!)
+    If user said "hello": "-# @user HELLO to that 2x MULTIPLIER! Day 8 streak BEAST MODE!"
+    If user said "good morning": "-# @user Morning CHAMPION! 2x bonus ACTIVATED on your 8-day streak!"  
+    If user said "testing": "-# @user Testing that 2x STREAK POWER! 8 days of DOMINATION!"
+    
+    ## DYNAMIC ENERGY WORDS (mix it up!)
+    BOOM, FIRE, BEAST MODE, LEGEND, CRUSHING, DOMINATING, INSANE, EPIC, SAVAGE, UNSTOPPABLE, 
+    MACHINE, POWERHOUSE, CHAMPION, DESTROYER, MONSTER, ABSOLUTE UNIT
+    
+    ## MATH RULE
+    bytes_earned is FINAL amount (already multiplied). Don't multiply again!
+    
+    ## FORMAT & FOCUS
+    Always: "-# " + user_mention + creative message
+    Use the user_message content to inspire your celebration style!
+    
+    ## PRIORITY ORDER (what to highlight most):
+    1. STREAK MULTIPLIER (2x, 3x, 4x, etc.) - THE MAIN STAR!
+    2. STREAK DAYS (Day 8, 14-day streak, etc.) - SECONDARY FOCUS
+    3. Bytes amount - optional, keep brief if mentioned at all
+    """
+
+    bytes_earned: int = dspy.InputField(description="Total bytes the user earned (final amount, already includes multiplier)")
+    streak_multiplier: int = dspy.InputField(description="The streak bonus multiplier that was applied")
+    streak_days: int = dspy.InputField(description="Number of days in the user's streak")
+    user_mention: str = dspy.InputField(description="The Discord user mention string (e.g., '<@266432511897370625>')")
+    user_message: str = dspy.InputField(description="INSPIRATION SOURCE: The user's message content - use this to make your celebration unique and contextual!")
+    response: str = dspy.OutputField(description="CREATIVE, UNIQUE celebration message that's never been generated before! Must be contextual to user_message!")
+
+
 class ForumMonitorAgent:
     """Discord forum monitoring agent using Gemini for post evaluation and response generation."""
-    
+
     def __init__(self):
         self._agent = dspy.ChainOfThought(ForumMonitorSignature)
-    
+
     async def evaluate_post(
-        self, 
+        self,
         system_prompt: str,
         post_title: str,
         post_content: str,
         author_display_name: str,
-        post_tags: List[str] = None,
-        attachment_names: List[str] = None
+        post_tags: list[str] = None,
+        attachment_names: list[str] = None
     ) -> tuple[str, float, str, int]:
         """Evaluate a forum post and generate response if warranted.
         
@@ -1518,36 +1560,36 @@ class ForumMonitorAgent:
         # Format post context for the AI
         post_tags = post_tags or []
         attachment_names = attachment_names or []
-        
+
         context_parts = [
-            f"<post>",
+            "<post>",
             f"<title>{html.escape(post_title)}</title>",
             f"<author>{html.escape(author_display_name)}</author>",
             f"<content>{html.escape(post_content)}</content>",
         ]
-        
+
         if post_tags:
             tags_str = ", ".join(html.escape(tag) for tag in post_tags)
             context_parts.append(f"<tags>{html.escape(tags_str)}</tags>")
-        
+
         if attachment_names:
             attachments_str = ", ".join(html.escape(name) for name in attachment_names)
             context_parts.append(f"<attachments>{html.escape(attachments_str)}</attachments>")
-        
+
         context_parts.append("</post>")
-        
+
         post_context = "\n".join(context_parts)
-        
+
         # Generate evaluation and response using async agent
         async_agent = dspy.asyncify(self._agent)
         result = await async_agent(
             system_prompt=system_prompt,
             post_context=post_context
         )
-        
+
         # Get token usage from DSPy prediction
         tokens_used = 0
-        
+
         # Method 1: Use DSPy's built-in get_lm_usage() method (preferred approach)
         try:
             usage_data = result.get_lm_usage()
@@ -1555,122 +1597,122 @@ class ForumMonitorAgent:
                 # Extract tokens from the usage data dictionary
                 for model_name, usage_info in usage_data.items():
                     if isinstance(usage_info, dict):
-                        if 'total_tokens' in usage_info:
-                            tokens_used += usage_info['total_tokens']
-                        elif 'prompt_tokens' in usage_info and 'completion_tokens' in usage_info:
-                            tokens_used += usage_info['prompt_tokens'] + usage_info['completion_tokens']
-                        elif 'input_tokens' in usage_info and 'output_tokens' in usage_info:
-                            tokens_used += usage_info['input_tokens'] + usage_info['output_tokens']
+                        if "total_tokens" in usage_info:
+                            tokens_used += usage_info["total_tokens"]
+                        elif "prompt_tokens" in usage_info and "completion_tokens" in usage_info:
+                            tokens_used += usage_info["prompt_tokens"] + usage_info["completion_tokens"]
+                        elif "input_tokens" in usage_info and "output_tokens" in usage_info:
+                            tokens_used += usage_info["input_tokens"] + usage_info["output_tokens"]
                 print(f"FORUM DEBUG: Extracted {tokens_used} tokens using get_lm_usage()")
         except Exception as e:
             print(f"FORUM DEBUG: Error with get_lm_usage(): {e}")
-        
+
         # Method 2: Extract from LM history (fallback for Gemini API bug)
         if tokens_used == 0:
             try:
                 current_lm = dspy.settings.lm
-                if current_lm and hasattr(current_lm, 'history') and current_lm.history:
+                if current_lm and hasattr(current_lm, "history") and current_lm.history:
                     latest_entry = current_lm.history[-1]  # Get the most recent API call
-                    
+
                     # Check response.usage in history (most reliable for Gemini)
-                    if 'response' in latest_entry and hasattr(latest_entry['response'], 'usage'):
-                        response_usage = latest_entry['response'].usage
-                        if hasattr(response_usage, 'total_tokens'):
+                    if "response" in latest_entry and hasattr(latest_entry["response"], "usage"):
+                        response_usage = latest_entry["response"].usage
+                        if hasattr(response_usage, "total_tokens"):
                             tokens_used = response_usage.total_tokens
-                        elif hasattr(response_usage, 'prompt_tokens') and hasattr(response_usage, 'completion_tokens'):
+                        elif hasattr(response_usage, "prompt_tokens") and hasattr(response_usage, "completion_tokens"):
                             tokens_used = response_usage.prompt_tokens + response_usage.completion_tokens
                         print(f"FORUM DEBUG: Extracted {tokens_used} tokens from LM history response.usage")
-                    
+
                     # Check for usage field in history
-                    elif 'usage' in latest_entry and latest_entry['usage']:
-                        usage = latest_entry['usage']
+                    elif "usage" in latest_entry and latest_entry["usage"]:
+                        usage = latest_entry["usage"]
                         if isinstance(usage, dict):
-                            if 'total_tokens' in usage:
-                                tokens_used = usage['total_tokens']
-                            elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
-                                tokens_used = usage['prompt_tokens'] + usage['completion_tokens']
+                            if "total_tokens" in usage:
+                                tokens_used = usage["total_tokens"]
+                            elif "prompt_tokens" in usage and "completion_tokens" in usage:
+                                tokens_used = usage["prompt_tokens"] + usage["completion_tokens"]
                         print(f"FORUM DEBUG: Extracted {tokens_used} tokens from LM history usage")
-                    
+
                     # Fallback: estimate from cost (Gemini-specific)
-                    elif 'cost' in latest_entry and latest_entry['cost'] > 0:
-                        cost = latest_entry['cost']
+                    elif "cost" in latest_entry and latest_entry["cost"] > 0:
+                        cost = latest_entry["cost"]
                         # Rough estimation: Gemini Flash pricing ~$0.075 per million tokens
                         estimated_tokens = int(cost * 13333333)
                         tokens_used = estimated_tokens
                         print(f"FORUM DEBUG: Estimated {tokens_used} tokens from cost: ${cost}")
-                        
+
             except Exception as e:
                 print(f"FORUM DEBUG: Error extracting from LM history: {e}")
-        
+
         # Method 3: Legacy fallback for other DSPy completion formats
-        if tokens_used == 0 and hasattr(result, '_completions') and result._completions:
+        if tokens_used == 0 and hasattr(result, "_completions") and result._completions:
             for completion in result._completions:
-                # Method 1: Traditional kwargs.usage approach  
-                if hasattr(completion, 'kwargs') and completion.kwargs:
-                    if 'usage' in completion.kwargs:
-                        usage = completion.kwargs['usage']
-                        if hasattr(usage, 'total_tokens'):
+                # Method 1: Traditional kwargs.usage approach
+                if hasattr(completion, "kwargs") and completion.kwargs:
+                    if "usage" in completion.kwargs:
+                        usage = completion.kwargs["usage"]
+                        if hasattr(usage, "total_tokens"):
                             tokens_used += usage.total_tokens
                         elif isinstance(usage, dict):
                             # Try different token field names
-                            if 'total_tokens' in usage:
-                                tokens_used += usage['total_tokens']
-                            elif 'totalTokens' in usage:
-                                tokens_used += usage['totalTokens']
-                            elif 'prompt_tokens' in usage and 'completion_tokens' in usage:
-                                tokens_used += usage['prompt_tokens'] + usage['completion_tokens']
-                    
+                            if "total_tokens" in usage:
+                                tokens_used += usage["total_tokens"]
+                            elif "totalTokens" in usage:
+                                tokens_used += usage["totalTokens"]
+                            elif "prompt_tokens" in usage and "completion_tokens" in usage:
+                                tokens_used += usage["prompt_tokens"] + usage["completion_tokens"]
+
                     # Method 2: Check for response metadata
-                    if 'response' in completion.kwargs:
-                        response_obj = completion.kwargs['response']
-                        if hasattr(response_obj, 'usage') and hasattr(response_obj.usage, 'total_tokens'):
+                    if "response" in completion.kwargs:
+                        response_obj = completion.kwargs["response"]
+                        if hasattr(response_obj, "usage") and hasattr(response_obj.usage, "total_tokens"):
                             tokens_used += response_obj.usage.total_tokens
-                
+
                 # Method 3: DSPy's get_lm_usage method (the correct approach!)
-                if hasattr(completion, 'get_lm_usage') and callable(getattr(completion, 'get_lm_usage')):
+                if hasattr(completion, "get_lm_usage") and callable(completion.get_lm_usage):
                     try:
                         usage_stats = completion.get_lm_usage()
                         if isinstance(usage_stats, dict):
                             # Try different field names for total tokens
-                            if 'total_tokens' in usage_stats:
-                                tokens_used += usage_stats['total_tokens']
-                            elif 'prompt_tokens' in usage_stats and 'completion_tokens' in usage_stats:
-                                tokens_used += usage_stats['prompt_tokens'] + usage_stats['completion_tokens']
-                            elif 'input_tokens' in usage_stats and 'output_tokens' in usage_stats:
-                                tokens_used += usage_stats['input_tokens'] + usage_stats['output_tokens']
-                        elif hasattr(usage_stats, 'total_tokens'):
+                            if "total_tokens" in usage_stats:
+                                tokens_used += usage_stats["total_tokens"]
+                            elif "prompt_tokens" in usage_stats and "completion_tokens" in usage_stats:
+                                tokens_used += usage_stats["prompt_tokens"] + usage_stats["completion_tokens"]
+                            elif "input_tokens" in usage_stats and "output_tokens" in usage_stats:
+                                tokens_used += usage_stats["input_tokens"] + usage_stats["output_tokens"]
+                        elif hasattr(usage_stats, "total_tokens"):
                             tokens_used += usage_stats.total_tokens
                     except Exception as e:
                         print(f"FORUM DEBUG: Error calling get_lm_usage(): {e}")
-                
-                # Method 4: Direct completion attributes (fallback)  
+
+                # Method 4: Direct completion attributes (fallback)
                 if tokens_used == 0:
-                    for attr in ['usage', 'response', 'metadata', 'raw_response', 'completion']:
+                    for attr in ["usage", "response", "metadata", "raw_response", "completion"]:
                         if hasattr(completion, attr):
                             attr_value = getattr(completion, attr)
-                            
-                            # Direct usage object  
-                            if hasattr(attr_value, 'total_tokens'):
+
+                            # Direct usage object
+                            if hasattr(attr_value, "total_tokens"):
                                 tokens_used += attr_value.total_tokens
                                 break
-                            elif hasattr(attr_value, 'usage') and hasattr(attr_value.usage, 'total_tokens'):
+                            elif hasattr(attr_value, "usage") and hasattr(attr_value.usage, "total_tokens"):
                                 tokens_used += attr_value.usage.total_tokens
                                 break
-                            
+
                             # Dictionary with usage info
                             elif isinstance(attr_value, dict):
-                                if 'total_tokens' in attr_value:
-                                    tokens_used += attr_value['total_tokens']
+                                if "total_tokens" in attr_value:
+                                    tokens_used += attr_value["total_tokens"]
                                     break
-                                elif 'usage' in attr_value and isinstance(attr_value['usage'], dict):
-                                    usage_dict = attr_value['usage']
-                                    if 'total_tokens' in usage_dict:
-                                        tokens_used += usage_dict['total_tokens']
+                                elif "usage" in attr_value and isinstance(attr_value["usage"], dict):
+                                    usage_dict = attr_value["usage"]
+                                    if "total_tokens" in usage_dict:
+                                        tokens_used += usage_dict["total_tokens"]
                                         break
-                                    elif 'prompt_tokens' in usage_dict and 'completion_tokens' in usage_dict:
-                                        tokens_used += usage_dict['prompt_tokens'] + usage_dict['completion_tokens']
+                                    elif "prompt_tokens" in usage_dict and "completion_tokens" in usage_dict:
+                                        tokens_used += usage_dict["prompt_tokens"] + usage_dict["completion_tokens"]
                                         break
-        
+
         # Final fallback: estimate tokens from text length if all methods fail
         if tokens_used == 0:
             # Rough estimation: ~4 characters per token for English text
@@ -1681,8 +1723,126 @@ class ForumMonitorAgent:
             print(f"FORUM DEBUG: Fallback estimation - {tokens_used} tokens from text length")
         else:
             print(f"FORUM DEBUG: Successfully extracted {tokens_used} tokens")
-        
+
         # Ensure confidence is bounded between 0.0 and 1.0
         confidence = max(0.0, min(1.0, float(result.confidence)))
-        
+
         return result.decision, confidence, result.response, tokens_used
+
+
+class StreakCelebrationAgent:
+    """Agent for generating celebratory streak bonus messages."""
+
+    def __init__(self):
+        self._agent = dspy.ChainOfThought(StreakCelebrationSignature)
+
+    async def generate_celebration_message(
+        self,
+        bytes_earned: int,
+        streak_multiplier: int,
+        streak_days: int,
+        user_id: int,
+        user_message: str
+    ) -> tuple[str, int]:
+        """Generate a celebratory message for streak bonuses.
+        
+        Args:
+            bytes_earned: Number of bytes the user earned
+            streak_multiplier: The streak bonus multiplier applied
+            streak_days: Number of days in the user's streak
+            user_id: Discord user ID for mentioning
+            user_message: Content of the user's message that triggered the reward
+            
+        Returns:
+            tuple[str, int]: Generated celebratory message and token usage
+        """
+        # Only generate celebration message if there's actually a streak bonus
+        if streak_multiplier <= 1:
+            return "", 0
+
+        try:
+            # Create user mention string
+            user_mention = f"<@{user_id}>"
+            
+            # Debug logging
+            logger.info(f"STREAK CELEBRATION DEBUG: bytes_earned={bytes_earned}, streak_multiplier={streak_multiplier}, streak_days={streak_days}, user_mention={user_mention}, user_message='{user_message}'")
+            
+            # Use async agent to generate celebration message
+            async_agent = dspy.asyncify(self._agent)
+            result = await async_agent(
+                bytes_earned=bytes_earned,
+                streak_multiplier=streak_multiplier,
+                streak_days=streak_days,
+                user_mention=user_mention,
+                user_message=user_message
+            )
+            
+            # Debug logging for result
+            logger.info(f"STREAK CELEBRATION DEBUG: Generated response: {result.response}")
+
+            # Get token usage using the same robust methods as other agents
+            tokens_used = 0
+
+            # Method 1: Use DSPy's built-in get_lm_usage() method (preferred approach)
+            try:
+                usage_data = result.get_lm_usage()
+                if usage_data:
+                    for model_name, usage_info in usage_data.items():
+                        if isinstance(usage_info, dict):
+                            if "total_tokens" in usage_info:
+                                tokens_used += usage_info["total_tokens"]
+                            elif "prompt_tokens" in usage_info and "completion_tokens" in usage_info:
+                                tokens_used += usage_info["prompt_tokens"] + usage_info["completion_tokens"]
+                            elif "input_tokens" in usage_info and "output_tokens" in usage_info:
+                                tokens_used += usage_info["input_tokens"] + usage_info["output_tokens"]
+            except Exception as e:
+                logger.debug(f"STREAK DEBUG: Error with get_lm_usage(): {e}")
+
+            # Method 2: Extract from LM history (fallback for Gemini API bug)
+            if tokens_used == 0:
+                try:
+                    current_lm = dspy.settings.lm
+                    if current_lm and hasattr(current_lm, "history") and current_lm.history:
+                        latest_entry = current_lm.history[-1]
+
+                        if "response" in latest_entry and hasattr(latest_entry["response"], "usage"):
+                            response_usage = latest_entry["response"].usage
+                            if hasattr(response_usage, "total_tokens"):
+                                tokens_used = response_usage.total_tokens
+                            elif hasattr(response_usage, "prompt_tokens") and hasattr(response_usage, "completion_tokens"):
+                                tokens_used = response_usage.prompt_tokens + response_usage.completion_tokens
+
+                        elif "usage" in latest_entry and latest_entry["usage"]:
+                            usage = latest_entry["usage"]
+                            if isinstance(usage, dict):
+                                if "total_tokens" in usage:
+                                    tokens_used = usage["total_tokens"]
+                                elif "prompt_tokens" in usage and "completion_tokens" in usage:
+                                    tokens_used = usage["prompt_tokens"] + usage["completion_tokens"]
+
+                        elif "cost" in latest_entry and latest_entry["cost"] > 0:
+                            cost = latest_entry["cost"]
+                            estimated_tokens = int(cost * 13333333)  # Gemini Flash pricing estimation
+                            tokens_used = estimated_tokens
+
+                except Exception as e:
+                    logger.debug(f"STREAK DEBUG: Error extracting from LM history: {e}")
+
+            # Final fallback: estimate tokens from text length if all methods fail
+            if tokens_used == 0:
+                input_chars = len(f"{bytes_earned}{streak_multiplier}{streak_days}")
+                output_chars = len(result.response)
+                estimated_tokens = (input_chars + output_chars) // 4
+                tokens_used = estimated_tokens
+                logger.debug(f"STREAK DEBUG: Fallback estimation - {tokens_used} tokens from text length")
+
+            # Validate the response has the correct prefix
+            response = result.response
+            if not response.startswith("-# "):
+                response = f"-# {response}"
+
+            return response, tokens_used
+
+        except Exception as e:
+            logger.error(f"Error generating streak celebration message: {e}")
+            return "", 0
