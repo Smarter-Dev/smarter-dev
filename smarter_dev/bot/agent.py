@@ -1764,9 +1764,6 @@ class StreakCelebrationAgent:
             # Create user mention string
             user_mention = f"<@{user_id}>"
             
-            # Debug logging
-            logger.info(f"STREAK CELEBRATION DEBUG: bytes_earned={bytes_earned}, streak_multiplier={streak_multiplier}, streak_days={streak_days}, user_mention={user_mention}, user_message='{user_message}'")
-            
             # Use async agent to generate celebration message
             async_agent = dspy.asyncify(self._agent)
             result = await async_agent(
@@ -1776,9 +1773,6 @@ class StreakCelebrationAgent:
                 user_mention=user_mention,
                 user_message=user_message
             )
-            
-            # Debug logging for result
-            logger.info(f"STREAK CELEBRATION DEBUG: Generated response: {result.response}")
 
             # Get token usage using the same robust methods as other agents
             tokens_used = 0
