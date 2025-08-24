@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import uuid
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
@@ -14,8 +15,90 @@ import lightbulb
 
 from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
+from smarter_dev.bot.services.api_client import APIClient
 
 logger = logging.getLogger(__name__)
+
+
+async def store_streak_celebration(
+    guild_id: str,
+    channel_id: str,
+    user_id: str,
+    user_username: str,
+    user_message: str,
+    bot_response: str,
+    tokens_used: int,
+    streak_days: int,
+    streak_multiplier: int,
+    bytes_earned: int,
+    response_time_ms: int | None = None
+) -> bool:
+    """Store a streak celebration interaction in the database for auditing and analytics.
+    
+    Args:
+        guild_id: Discord guild ID
+        channel_id: Discord channel ID
+        user_id: Discord user ID
+        user_username: Username at time of interaction
+        user_message: User's message that triggered the streak
+        bot_response: Bot's celebration response
+        tokens_used: AI tokens consumed
+        streak_days: Number of days in the streak
+        streak_multiplier: Streak bonus multiplier
+        bytes_earned: Total bytes earned
+        response_time_ms: Response generation time
+        
+    Returns:
+        bool: True if stored successfully, False otherwise
+    """
+    try:
+        # Generate session ID
+        session_id = str(uuid.uuid4())
+        
+        # Prepare conversation data
+        conversation_data = {
+            "session_id": session_id,
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "user_id": user_id,
+            "user_username": user_username,
+            "interaction_type": "streak_celebration",
+            "context_messages": [],  # No context needed for streak celebrations
+            "user_question": user_message[:2000],  # User's triggering message
+            "bot_response": bot_response[:4000],  # Celebration message
+            "tokens_used": tokens_used,
+            "response_time_ms": response_time_ms,
+            "retention_policy": "standard",
+            "is_sensitive": False,
+            # Streak-specific metadata for analytics
+            "command_metadata": {
+                "command_type": "streak_celebration",
+                "streak_days": streak_days,
+                "streak_multiplier": streak_multiplier,
+                "bytes_earned": bytes_earned,
+                "message_length": len(user_message)
+            }
+        }
+        
+        # Store conversation via API
+        settings = get_settings()
+        async with APIClient(
+            base_url=settings.api_base_url,
+            api_key=settings.bot_api_key,
+            timeout=10.0
+        ) as client:
+            response = await client.post("/admin/conversations", json=conversation_data)
+            if response.status_code in (200, 201):
+                logger.debug(f"✅ Stored streak celebration for user {user_id} (session: {session_id})")
+                return True
+            else:
+                logger.warning(f"❌ Failed to store streak celebration: HTTP {response.status_code}")
+                return False
+                
+    except Exception as e:
+        logger.error(f"❌ Error storing streak celebration: {e}")
+        return False
+
 
 # Cache to track users who have already claimed their daily reward today
 # Format: {f"{guild_id}:{user_id}": "YYYY-MM-DD"}
@@ -815,6 +898,9 @@ async def run_bot() -> None:
                 # Generate celebratory message for streak bonuses
                 if result.streak_bonus and result.streak_bonus > 1:
                     try:
+                        # Record start time for response time tracking
+                        start_time = datetime.now()
+                        
                         # Get or create streak celebration agent
                         streak_agent = getattr(bot, "d", {}).get("streak_celebration_agent")
                         if not streak_agent:
@@ -833,6 +919,9 @@ async def run_bot() -> None:
                             user_message=event.message.content or ""
                         )
 
+                        # Calculate response time
+                        response_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+
                         # Send the celebration message with the @ mention built in
                         if celebration_message:
                             await bot.rest.create_message(
@@ -841,6 +930,21 @@ async def run_bot() -> None:
                                 user_mentions=[event.author.id]
                             )
                             logger.info(f"✅ Posted streak celebration message for {event.author} (streak: {result.streak}, multiplier: {result.streak_bonus}x)")
+
+                            # Store the streak celebration interaction for analytics
+                            await store_streak_celebration(
+                                guild_id=str(event.guild_id),
+                                channel_id=str(event.channel_id),
+                                user_id=str(event.author.id),
+                                user_username=event.author.username,
+                                user_message=event.message.content or "",
+                                bot_response=celebration_message,
+                                tokens_used=tokens_used,
+                                streak_days=result.streak or 0,
+                                streak_multiplier=result.streak_bonus or 1,
+                                bytes_earned=result.earned or 0,
+                                response_time_ms=response_time_ms
+                            )
 
                     except Exception as e:
                         logger.error(f"Failed to generate or post streak celebration message: {e}")
