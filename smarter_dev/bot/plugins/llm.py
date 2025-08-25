@@ -249,7 +249,8 @@ async def tldr_command(ctx: lightbulb.Context) -> None:
         ctx.channel_id, 
         limit=message_count,
         skip_short_messages=False,
-        min_message_length=10
+        min_message_length=10,
+        guild_id=ctx.guild_id
     )
     
     if not messages:
