@@ -13,8 +13,60 @@ from datetime import timezone
 from typing import List
 
 from smarter_dev.bot.agent import DiscordMessage
+from smarter_dev.bot.cache import bot_cache
 
 logger = logging.getLogger(__name__)
+
+
+async def fetch_channel_info(bot: hikari.GatewayBot, channel_id: int) -> dict:
+    """Fetch channel information for context using cache.
+    
+    Args:
+        bot: Discord bot instance
+        channel_id: Channel ID to fetch info for
+        
+    Returns:
+        Dict with channel_name, channel_description, channel_type, and is_forum_thread info
+    """
+    return await bot_cache.get_channel_info(bot, channel_id)
+
+
+async def fetch_user_roles(bot: hikari.GatewayBot, guild_id: int, user_id: int, guild_roles: dict[int, str] = None) -> list[str]:
+    """Fetch role names for a user in a guild.
+    
+    Args:
+        bot: Discord bot instance
+        guild_id: Guild ID where the user is
+        user_id: User ID to get roles for
+        guild_roles: Optional pre-fetched guild roles dictionary (role_id -> role_name)
+        
+    Returns:
+        List of role names (excluding @everyone)
+    """
+    try:
+        member = await bot.rest.fetch_member(guild_id, user_id)
+        
+        role_names = []
+        for role_id in member.role_ids:
+            # Use pre-fetched roles if available, otherwise fetch individually
+            if guild_roles and role_id in guild_roles:
+                role_name = guild_roles[role_id]
+                if role_name != "@everyone":
+                    role_names.append(role_name)
+            else:
+                try:
+                    role = await bot.rest.fetch_role(guild_id, role_id)
+                    if role and role.name != "@everyone":
+                        role_names.append(role.name)
+                except Exception:
+                    # If we can't get role info, skip it
+                    continue
+        
+        return role_names
+        
+    except Exception as e:
+        logger.debug(f"Failed to fetch user roles for {user_id} in guild {guild_id}: {e}")
+        return []
 
 
 async def resolve_mentions(content: str, bot: hikari.GatewayBot) -> str:
@@ -36,8 +88,7 @@ async def resolve_mentions(content: str, bot: hikari.GatewayBot) -> str:
     for user_id_str in user_mentions:
         user_id = int(user_id_str)
         try:
-            user = await bot.rest.fetch_user(user_id)
-            username = user.display_name or user.username
+            username = await bot_cache.get_user_name(bot, user_id)
             # Replace both <@123> and <@!123> formats
             content = re.sub(f'<@!?{user_id}>', f'@{username}', content)
         except Exception:
@@ -50,9 +101,10 @@ async def resolve_mentions(content: str, bot: hikari.GatewayBot) -> str:
     for channel_id_str in channel_mentions:
         channel_id = int(channel_id_str)
         try:
-            channel = await bot.rest.fetch_channel(channel_id)
-            if hasattr(channel, 'name') and channel.name:
-                content = re.sub(f'<#{channel_id}>', f'#{channel.name}', content)
+            channel_info = await bot_cache.get_channel_info(bot, channel_id)
+            channel_name = channel_info.get("channel_name")
+            if channel_name:
+                content = re.sub(f'<#{channel_id}>', f'#{channel_name}', content)
             else:
                 content = re.sub(f'<#{channel_id}>', f'#channel{channel_id}', content)
         except Exception:
@@ -115,7 +167,8 @@ async def gather_message_context(
     channel_id: int, 
     limit: int = 5,
     skip_short_messages: bool = False,
-    min_message_length: int = 10
+    min_message_length: int = 10,
+    guild_id: int = None
 ) -> List[DiscordMessage]:
     """Gather recent messages from a channel for context.
     
@@ -131,6 +184,14 @@ async def gather_message_context(
     """
     try:
         messages = []
+        
+        # Fetch channel information for context
+        channel_info = await fetch_channel_info(bot, channel_id)
+        
+        # Get guild roles from cache if we have guild context
+        guild_roles = {}
+        if guild_id:
+            guild_roles = await bot_cache.get_guild_roles(bot, guild_id)
         
         # When filtering short messages, we need to fetch more to ensure we get enough
         # Otherwise fetch exactly what we need since we include all messages
@@ -169,6 +230,17 @@ async def gather_message_context(
             
             # Resolve Discord mentions to readable usernames (after reply formatting)
             content = await resolve_mentions(content, bot)
+            
+            # Get user roles if we have guild context
+            author_roles = []
+            if guild_id and not message.author.is_bot:
+                author_roles = await fetch_user_roles(bot, guild_id, message.author.id, guild_roles)
+            
+            # Check if this user is the original poster in a forum thread
+            is_original_poster = (
+                channel_info.get("is_forum_thread", False) and 
+                channel_info.get("original_poster_id") == message.author.id
+            )
                 
             # Convert to our message format
             discord_msg = DiscordMessage(
@@ -177,7 +249,15 @@ async def gather_message_context(
                 timestamp=message.created_at.replace(tzinfo=timezone.utc),
                 content=content,
                 replied_to_author=replied_author,
-                replied_to_content=replied_content
+                replied_to_content=replied_content,
+                # Channel context
+                channel_name=channel_info.get("channel_name"),
+                channel_description=channel_info.get("channel_description"),
+                channel_type=channel_info.get("channel_type"),
+                # User roles (excluding bots)
+                author_roles=author_roles,
+                # Forum context
+                is_original_poster=is_original_poster
             )
             messages.append(discord_msg)
             

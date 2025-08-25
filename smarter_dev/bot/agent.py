@@ -31,6 +31,14 @@ class DiscordMessage(BaseModel):
     # Reply context - populated when this message is a reply to another message
     replied_to_author: str | None = None  # Author of the message being replied to
     replied_to_content: str | None = None  # Content of the message being replied to
+    # Channel context information
+    channel_name: str | None = None  # Name of the channel
+    channel_description: str | None = None  # Channel description/topic
+    channel_type: str | None = None  # Channel type (text, forum, etc.)
+    # User role information
+    author_roles: list[str] = []  # List of role names for the message author
+    # Forum post context
+    is_original_poster: bool = False  # True if this is the OP in a forum thread
 
 
 def parse_reply_context(content: str) -> tuple[str | None, str | None, str]:
@@ -207,6 +215,9 @@ rate_limiter = RateLimiter()
 
 class ConversationalMentionSignature(dspy.Signature):
     """You are a friendly Discord bot assistant for the Smarter Dev community who was just mentioned in conversation. You're designed to be conversational and engaging while being helpful.
+    
+    ## MESSAGE TIMING INFORMATION
+    You have access to when each message was sent (shown in <sent> tags with ISO format timestamps). You can and should reference message timing when it's relevant to the conversation - whether discussing recent activity, message sequences, or time-based context.
 
     🚨 CRITICAL SAFETY RULE: If ANY message mentions mental health crises, suicide, self-harm, or dark thoughts - you MUST respond with exactly "SKIP_RESPONSE" - NO EXCEPTIONS.
 
@@ -270,8 +281,10 @@ class ConversationalMentionSignature(dspy.Signature):
     Messages may include reply context with this structure:
     ```xml
     <message>
-        <timestamp>01/15 12:30</timestamp>
+        <sent>2025-08-25T16:44:50+00:00</sent>
         <author>Username</author>
+        <author-roles>Moderator, Developer</author-roles>
+        <is-op>true</is-op>
         <replying-to>
             <replied-author>OriginalAuthor</replied-author>
             <replied-content>Original message content</replied-content>
@@ -279,6 +292,28 @@ class ConversationalMentionSignature(dspy.Signature):
         <content>The user's response to the original message</content>
     </message>
     ```
+    
+    ## CHANNEL CONTEXT & CONVERSATION FOCUS
+    You will receive information about the current channel including:
+    - **Channel Name**: The name of the channel (e.g., #general, #tech-support, #off-topic, #random)
+    - **Channel Description**: The channel topic or description if available  
+    - **Channel Type**: The type of channel (text, forum thread, etc.)
+    - **Forum Context**: If this is a forum thread, messages from the original poster (OP) will be marked with `<is-op>true</is-op>`
+    
+    **IMPORTANT: Adapt your conversation style to the channel context:**
+    - **Technical channels** (#tech-support, #programming, #development): Focus on technical topics, development concepts, and programming discussions
+    - **Off-topic channels** (#off-topic, #random, #general): Feel free to engage in any conversation topic naturally - you don't need to redirect to tech topics
+    - **Specialized channels** (#design, #marketing, etc.): Engage with the channel's specific focus area
+    - **Help/support channels**: Be more solution-oriented and direct
+    - **Social channels**: Be more casual and conversational
+    
+    Use the channel name and description as strong indicators of what topics are welcome and appropriate. Don't force tech discussions in clearly non-technical spaces.
+    
+    ## ROLE INFORMATION
+    For each user message (excluding bots), you'll see their roles in `<author-roles>`:
+    - Use this context to understand the user's position in the community
+    - Moderators, admins, and other special roles may have additional authority or expertise
+    - Consider role context when providing responses, but don't treat anyone differently unless it's relevant
     
     ## UNDERSTANDING REPLY CONTEXT
     When a message has `<replying-to>`, the user is responding to a previous message. This is VERY important context:
@@ -338,12 +373,12 @@ class ConversationalMentionSignature(dspy.Signature):
     - When people ask for code help, redirect to discussing approaches, concepts, or philosophical aspects instead
     
     ## HANDLING SENSITIVE TOPICS WITH GRACE
-    When redirecting from controversial topics:
+    When redirecting from controversial topics (primarily applies to technical channels):
     - Keep it light and friendly: "Haha, well that's getting pretty spicy for a dev chat! What are you working on code-wise lately?"
     - Use humor when appropriate: "Politics and programming don't mix well - both can crash spectacularly! Speaking of crashes..."
     - Acknowledge but pivot: "That's definitely a hot topic! You know what else is hot? This new JavaScript framework..."
-    - Stay contextual: Match the community vibe while steering toward programming topics
-    - Don't lecture or scold - just naturally guide the conversation back to tech topics
+    - **IMPORTANT**: Only redirect to tech topics if you're in a technical channel - in off-topic channels, engage naturally with the conversation
+    - Don't lecture or scold - match the channel's purpose and community vibe
 
     ## CONVERSATION PACING
     - If this is the user's last help message they can send (messages_remaining = 0), naturally wrap up the conversation
@@ -572,39 +607,66 @@ class HelpAgent:
         Returns:
             tuple[str, int]: Generated response and token usage count
         """
-        # Format context messages using the same XML structure as TLDRAgent
+        # Format context messages using enhanced XML structure with channel and role info
         context_str = ""
         if context_messages:
             context_lines = []
+            
+            # Add channel context info at the top
+            first_msg = context_messages[0] if context_messages else None
+            if first_msg and (first_msg.channel_name or first_msg.channel_description):
+                channel_context_parts = []
+                if first_msg.channel_name:
+                    channel_context_parts.append(f"<channel-name>{html.escape(first_msg.channel_name)}</channel-name>")
+                if first_msg.channel_description:
+                    channel_context_parts.append(f"<channel-description>{html.escape(first_msg.channel_description)}</channel-description>")
+                if first_msg.channel_type:
+                    channel_context_parts.append(f"<channel-type>{html.escape(first_msg.channel_type)}</channel-type>")
+                
+                if channel_context_parts:
+                    context_lines.append(f"<channel-context>\n{chr(10).join(channel_context_parts)}\n</channel-context>")
+            
             for msg in context_messages[-10:]:  # Last 10 messages
-                timestamp_str = msg.timestamp.strftime("%m/%d %H:%M")
+                sent_str = msg.timestamp.isoformat()
 
                 # Check if this is a bot message by comparing IDs
                 is_bot_message = msg.author_id and msg.author_id == bot_id
+                
+                # Build message structure with new fields
+                message_parts = [
+                    f"<sent>{html.escape(sent_str)}</sent>",
+                    f"<author>{html.escape(msg.author)}</author>"
+                ]
+                
+                # Add role information for non-bot users
+                if not is_bot_message and msg.author_roles:
+                    roles_str = ", ".join(msg.author_roles)
+                    message_parts.append(f"<author-roles>{html.escape(roles_str)}</author-roles>")
+                
+                # Add OP indicator for forum threads
+                if msg.is_original_poster:
+                    message_parts.append("<is-op>true</is-op>")
 
-                # Use the reply context from the DiscordMessage model
+                # Add reply context if present
                 if msg.replied_to_author and msg.replied_to_content:
-                    # Message with reply context - use structured format
-                    context_lines.append(
-                        f"<message{' from-bot="true"' if is_bot_message else ''}>"
-                        f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
-                        f"<author>{html.escape(msg.author)}</author>"
+                    message_parts.append(
                         f"<replying-to>"
                         f"<replied-author>{html.escape(msg.replied_to_author)}</replied-author>"
                         f"<replied-content>{html.escape(msg.replied_to_content)}</replied-content>"
                         f"</replying-to>"
-                        f"<content>{html.escape(msg.content)}</content>"
-                        f"</message>"
                     )
-                else:
-                    # Regular message without reply context
-                    context_lines.append(
-                        f"<message{' from-bot="true"' if is_bot_message else ''}>"
-                        f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
-                        f"<author>{html.escape(msg.author)}</author>"
-                        f"<content>{html.escape(msg.content)}</content>"
-                        f"</message>"
-                    )
+                
+                # Add message content
+                message_parts.append(f"<content>{html.escape(msg.content)}</content>")
+                
+                # Combine into message element
+                message_xml = (
+                    f"<message{' from-bot="true"' if is_bot_message else ''}>"
+                    f"{chr(10).join(message_parts)}"
+                    f"</message>"
+                )
+                context_lines.append(message_xml)
+                
             context_str = "\n".join(context_lines)
 
         # Generate response using appropriate agent based on interaction type
@@ -748,39 +810,66 @@ class HelpAgent:
         async_help_agent = dspy.asyncify(self._help_agent)
         async_mention_agent = dspy.asyncify(self._mention_agent)
 
-        # Format context messages using the same logic as the sync version
+        # Format context messages using enhanced XML structure with channel and role info
         context_str = ""
         if context_messages:
             context_lines = []
+            
+            # Add channel context info at the top
+            first_msg = context_messages[0] if context_messages else None
+            if first_msg and (first_msg.channel_name or first_msg.channel_description):
+                channel_context_parts = []
+                if first_msg.channel_name:
+                    channel_context_parts.append(f"<channel-name>{html.escape(first_msg.channel_name)}</channel-name>")
+                if first_msg.channel_description:
+                    channel_context_parts.append(f"<channel-description>{html.escape(first_msg.channel_description)}</channel-description>")
+                if first_msg.channel_type:
+                    channel_context_parts.append(f"<channel-type>{html.escape(first_msg.channel_type)}</channel-type>")
+                
+                if channel_context_parts:
+                    context_lines.append(f"<channel-context>\n{chr(10).join(channel_context_parts)}\n</channel-context>")
+            
             for msg in context_messages[-10:]:  # Last 10 messages
-                timestamp_str = msg.timestamp.strftime("%m/%d %H:%M")
+                sent_str = msg.timestamp.isoformat()
 
                 # Check if this is a bot message by comparing IDs
                 is_bot_message = msg.author_id and msg.author_id == bot_id
+                
+                # Build message structure with new fields
+                message_parts = [
+                    f"<sent>{html.escape(sent_str)}</sent>",
+                    f"<author>{html.escape(msg.author)}</author>"
+                ]
+                
+                # Add role information for non-bot users
+                if not is_bot_message and msg.author_roles:
+                    roles_str = ", ".join(msg.author_roles)
+                    message_parts.append(f"<author-roles>{html.escape(roles_str)}</author-roles>")
+                
+                # Add OP indicator for forum threads
+                if msg.is_original_poster:
+                    message_parts.append("<is-op>true</is-op>")
 
-                # Use the reply context from the DiscordMessage model
+                # Add reply context if present
                 if msg.replied_to_author and msg.replied_to_content:
-                    # Message with reply context - use structured format
-                    context_lines.append(
-                        f"<message{' from-bot="true"' if is_bot_message else ''}>"
-                        f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
-                        f"<author>{html.escape(msg.author)}</author>"
+                    message_parts.append(
                         f"<replying-to>"
                         f"<replied-author>{html.escape(msg.replied_to_author)}</replied-author>"
                         f"<replied-content>{html.escape(msg.replied_to_content)}</replied-content>"
                         f"</replying-to>"
-                        f"<content>{html.escape(msg.content)}</content>"
-                        f"</message>"
                     )
-                else:
-                    # Regular message without reply context
-                    context_lines.append(
-                        f"<message{' from-bot="true"' if is_bot_message else ''}>"
-                        f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
-                        f"<author>{html.escape(msg.author)}</author>"
-                        f"<content>{html.escape(msg.content)}</content>"
-                        f"</message>"
-                    )
+                
+                # Add message content
+                message_parts.append(f"<content>{html.escape(msg.content)}</content>")
+                
+                # Combine into message element
+                message_xml = (
+                    f"<message{' from-bot="true"' if is_bot_message else ''}>"
+                    f"{chr(10).join(message_parts)}"
+                    f"</message>"
+                )
+                context_lines.append(message_xml)
+                
             context_str = "\n".join(context_lines)
 
         # Generate response using appropriate agent based on interaction type
@@ -1131,37 +1220,63 @@ class TLDRAgent:
         current_messages = messages.copy()
 
         while current_messages:
-            # Format current set of messages
+            # Format current set of messages with enhanced context
             formatted_lines = []
+            
+            # Add channel context info at the top for TLDR
+            first_msg = current_messages[0] if current_messages else None
+            if first_msg and (first_msg.channel_name or first_msg.channel_description):
+                channel_context_parts = []
+                if first_msg.channel_name:
+                    channel_context_parts.append(f"<channel-name>{html.escape(first_msg.channel_name)}</channel-name>")
+                if first_msg.channel_description:
+                    channel_context_parts.append(f"<channel-description>{html.escape(first_msg.channel_description)}</channel-description>")
+                if first_msg.channel_type:
+                    channel_context_parts.append(f"<channel-type>{html.escape(first_msg.channel_type)}</channel-type>")
+                
+                if channel_context_parts:
+                    formatted_lines.append(f"<channel-context>\n{chr(10).join(channel_context_parts)}\n</channel-context>")
+            
             for msg in current_messages:
-                timestamp_str = msg.timestamp.strftime("%m/%d %H:%M")
+                sent_str = msg.timestamp.isoformat()
 
                 # Truncate very long messages
                 content = self.truncate_message_content(msg.content, 500)
 
-                # Use the reply context from the DiscordMessage model
+                # Build message structure with new fields
+                message_parts = [
+                    f"<sent>{html.escape(sent_str)}</sent>",
+                    f"<author>{html.escape(msg.author)}</author>"
+                ]
+                
+                # Add role information for users with roles
+                if msg.author_roles:
+                    roles_str = ", ".join(msg.author_roles)
+                    message_parts.append(f"<author-roles>{html.escape(roles_str)}</author-roles>")
+                
+                # Add OP indicator for forum threads
+                if msg.is_original_poster:
+                    message_parts.append("<is-op>true</is-op>")
+
+                # Add reply context if present
                 if msg.replied_to_author and msg.replied_to_content:
-                    # Message with reply context - use structured format
-                    formatted_lines.append(
-                        f"<message>"
-                        f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
-                        f"<author>{html.escape(msg.author)}</author>"
+                    message_parts.append(
                         f"<replying-to>"
                         f"<replied-author>{html.escape(msg.replied_to_author)}</replied-author>"
                         f"<replied-content>{html.escape(msg.replied_to_content)}</replied-content>"
                         f"</replying-to>"
-                        f"<content>{html.escape(content)}</content>"
-                        f"</message>"
                     )
-                else:
-                    # Regular message without reply context
-                    formatted_lines.append(
-                        f"<message>"
-                        f"<timestamp>{html.escape(timestamp_str)}</timestamp>"
-                        f"<author>{html.escape(msg.author)}</author>"
-                        f"<content>{html.escape(content)}</content>"
-                        f"</message>"
-                    )
+                
+                # Add message content
+                message_parts.append(f"<content>{html.escape(content)}</content>")
+                
+                # Combine into message element
+                message_xml = (
+                    f"<message>"
+                    f"{chr(10).join(message_parts)}"
+                    f"</message>"
+                )
+                formatted_lines.append(message_xml)
 
             formatted_text = f"<conversation>\n{chr(10).join(formatted_lines)}\n</conversation>"
 

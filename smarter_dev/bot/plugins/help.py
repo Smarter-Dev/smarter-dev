@@ -256,7 +256,8 @@ async def help_command(ctx: lightbulb.Context) -> None:
     context_messages = await gather_message_context(
         ctx.bot, 
         ctx.channel_id, 
-        limit=10
+        limit=10,
+        guild_id=ctx.guild_id
     )
     
     # Get bot user for ID
@@ -322,7 +323,8 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
         context_messages = await gather_message_context(
             plugin.bot, 
             event.channel_id, 
-            limit=11  # Get 11 to account for current message
+            limit=11,  # Get 11 to account for current message
+            guild_id=event.guild_id
         )
         
         # Remove the current message from context
