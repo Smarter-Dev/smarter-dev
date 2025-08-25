@@ -42,7 +42,12 @@ from smarter_dev.web.admin.views import (
     squad_sale_events_list,
     squad_sale_event_edit,
     squad_sale_event_toggle,
-    squad_sale_event_delete
+    squad_sale_event_delete,
+    repeating_messages_list,
+    repeating_message_create,
+    repeating_message_edit,
+    repeating_message_delete,
+    repeating_message_toggle
 )
 
 
@@ -107,4 +112,11 @@ admin_routes = [
     Route("/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages/create", admin_required(scheduled_message_create), methods=["GET", "POST"], name="admin_scheduled_message_create"),
     Route("/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages/{message_id}/edit", admin_required(scheduled_message_edit), methods=["GET", "POST"], name="admin_scheduled_message_edit"),
     Route("/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages/{message_id}/delete", admin_required(scheduled_message_delete), methods=["POST"], name="admin_scheduled_message_delete"),
+    
+    # Repeating message management
+    Route("/guilds/{guild_id}/repeating-messages", admin_required(repeating_messages_list), methods=["GET", "POST"], name="admin_repeating_messages"),
+    Route("/guilds/{guild_id}/repeating-messages/create", admin_required(repeating_message_create), methods=["GET", "POST"], name="admin_repeating_message_create"),
+    Route("/guilds/{guild_id}/repeating-messages/{message_id}/edit", admin_required(repeating_message_edit), methods=["GET", "POST"], name="admin_repeating_message_edit"),
+    Route("/guilds/{guild_id}/repeating-messages/{message_id}/delete", admin_required(repeating_message_delete), methods=["POST"], name="admin_repeating_message_delete"),
+    Route("/guilds/{guild_id}/repeating-messages/{message_id}/toggle", admin_required(repeating_message_toggle), methods=["POST"], name="admin_repeating_message_toggle"),
 ]

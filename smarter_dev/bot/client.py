@@ -353,6 +353,9 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         from smarter_dev.bot.services.scheduled_message_service import (
             ScheduledMessageService,
         )
+        from smarter_dev.bot.services.repeating_message_service import (
+            RepeatingMessageService,
+        )
         from smarter_dev.bot.services.squads_service import SquadsService
 
         bytes_service = BytesService(api_client, cache_manager)
@@ -360,6 +363,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         forum_agent_service = ForumAgentService(api_client, cache_manager)
         challenge_service = ChallengeService(api_client, cache_manager, bot)
         scheduled_message_service = ScheduledMessageService(api_client, cache_manager, bot)
+        repeating_message_service = RepeatingMessageService(api_client, cache_manager, bot)
 
         # Initialize services
         logger.info("Initializing bytes service...")
@@ -382,6 +386,10 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         await scheduled_message_service.initialize()
         logger.info("✓ Scheduled message service initialized")
 
+        logger.info("Initializing repeating message service...")
+        await repeating_message_service.initialize()
+        logger.info("✓ Repeating message service initialized")
+
         # Verify service health
         logger.info("Verifying service health...")
         try:
@@ -390,12 +398,14 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             forum_agent_health = await forum_agent_service.health_check()
             challenge_health = await challenge_service.health_check()
             scheduled_message_health = await scheduled_message_service.health_check()
+            repeating_message_health = await repeating_message_service.health_check()
 
             logger.info(f"Bytes service health: {'healthy' if bytes_health.is_healthy else 'unhealthy'}")
             logger.info(f"Squads service health: {'healthy' if squads_health.is_healthy else 'unhealthy'}")
             logger.info(f"Forum agent service health: {'healthy' if forum_agent_health.is_healthy else 'unhealthy'}")
             logger.info(f"Challenge service health: {'healthy' if challenge_health.is_healthy else 'unhealthy'}")
             logger.info(f"Scheduled message service health: {'healthy' if scheduled_message_health.is_healthy else 'unhealthy'}")
+            logger.info(f"Repeating message service health: {'healthy' if repeating_message_health.is_healthy else 'unhealthy'}")
 
             if not bytes_health.is_healthy:
                 logger.warning(f"Bytes service not healthy: {bytes_health.details}")
@@ -405,6 +415,10 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
                 logger.warning(f"Forum agent service not healthy: {forum_agent_health.details}")
             if not challenge_health.is_healthy:
                 logger.warning(f"Challenge service not healthy: {challenge_health.details}")
+            if not scheduled_message_health.is_healthy:
+                logger.warning(f"Scheduled message service not healthy: {scheduled_message_health.details}")
+            if not repeating_message_health.is_healthy:
+                logger.warning(f"Repeating message service not healthy: {repeating_message_health.details}")
 
         except Exception as e:
             logger.error(f"Failed to check service health: {e}")
@@ -420,6 +434,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d["forum_agent_service"] = forum_agent_service
         bot.d["challenge_service"] = challenge_service
         bot.d["scheduled_message_service"] = scheduled_message_service
+        bot.d["repeating_message_service"] = repeating_message_service
 
         # Store services in d for plugin access (primary)
         bot.d["_services"] = {
@@ -427,7 +442,8 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             "squads_service": squads_service,
             "forum_agent_service": forum_agent_service,
             "challenge_service": challenge_service,
-            "scheduled_message_service": scheduled_message_service
+            "scheduled_message_service": scheduled_message_service,
+            "repeating_message_service": repeating_message_service
         }
 
         logger.info("✓ Bot services setup complete")
@@ -688,6 +704,9 @@ async def cleanup_bot_services(bot: lightbulb.BotApp) -> None:
         if hasattr(bot, "d") and "scheduled_message_service" in bot.d:
             await bot.d["scheduled_message_service"].cleanup()
 
+        if hasattr(bot, "d") and "repeating_message_service" in bot.d:
+            await bot.d["repeating_message_service"].cleanup()
+
         # Clean up cache manager (if used)
         if hasattr(bot, "d") and "cache_manager" in bot.d and bot.d["cache_manager"]:
             await bot.d["cache_manager"].cleanup()
@@ -768,7 +787,6 @@ async def run_bot() -> None:
 
     # Create bot
     bot = create_bot(settings)
-
     # Set up event handlers
     @bot.listen()
     async def on_starting(event: hikari.StartingEvent) -> None:
@@ -1064,10 +1082,11 @@ async def run_bot() -> None:
         # For now, we'll skip this to avoid duplicate processing
         # The thread creation event should handle most cases
 
-    # Set up services before loading plugins
+    # Set up services before starting the bot
     logger.info("Setting up bot services...")
     await setup_bot_services(bot)
-
+    logger.info("Bot services setup complete")
+    
     # Load plugins after services are ready
     logger.info("Loading bot plugins...")
     load_plugins(bot)

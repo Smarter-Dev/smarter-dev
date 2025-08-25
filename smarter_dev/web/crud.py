@@ -32,6 +32,7 @@ from smarter_dev.web.models import (
     ChallengeInput,
     ChallengeSubmission,
     ScheduledMessage,
+    RepeatingMessage,
 )
 
 logger = logging.getLogger(__name__)
@@ -4203,3 +4204,257 @@ class SquadSaleEventOperations:
             
         except Exception as e:
             raise DatabaseOperationError(f"Failed to calculate discounted cost: {e}") from e
+
+
+class RepeatingMessageOperations:
+    """Database operations for repeating message management system.
+    
+    Handles all repeating message-related database operations including creation,
+    management, and queries. Follows SOLID principles for clean separation of concerns.
+    """
+    
+    def __init__(self, session: AsyncSession):
+        """Initialize with database session.
+        
+        Args:
+            session: SQLAlchemy async session
+        """
+        self.session = session
+    
+    async def create_repeating_message(
+        self,
+        guild_id: str,
+        channel_id: str,
+        message_content: str,
+        start_time: datetime,
+        interval_minutes: int,
+        created_by: str,
+        role_id: Optional[str] = None
+    ) -> RepeatingMessage:
+        """Create a new repeating message.
+        
+        Args:
+            guild_id: Discord guild ID
+            channel_id: Discord channel ID where messages will be sent
+            message_content: The message text to send repeatedly
+            start_time: UTC datetime when the first message should be sent
+            interval_minutes: Minutes between repeated messages
+            created_by: Admin who created the repeating message
+            role_id: Optional Discord role ID to mention
+            
+        Returns:
+            Created repeating message
+            
+        Raises:
+            DatabaseOperationError: For database errors
+        """
+        try:
+            repeating_message = RepeatingMessage(
+                guild_id=guild_id,
+                channel_id=channel_id,
+                message_content=message_content,
+                role_id=role_id,
+                start_time=start_time,
+                interval_minutes=interval_minutes,
+                created_by=created_by
+            )
+            
+            self.session.add(repeating_message)
+            await self.session.commit()
+            await self.session.refresh(repeating_message)
+            
+            logger.info(f"Created repeating message {repeating_message.id} for guild {guild_id}")
+            return repeating_message
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to create repeating message: {e}") from e
+    
+    async def get_guild_repeating_messages(
+        self,
+        guild_id: str,
+        active_only: bool = False
+    ) -> List[RepeatingMessage]:
+        """Get all repeating messages for a guild.
+        
+        Args:
+            guild_id: Discord guild ID
+            active_only: If True, only return active messages
+            
+        Returns:
+            List of repeating messages
+        """
+        try:
+            stmt = select(RepeatingMessage).where(RepeatingMessage.guild_id == guild_id)
+            
+            if active_only:
+                stmt = stmt.where(RepeatingMessage.is_active == True)
+            
+            stmt = stmt.order_by(RepeatingMessage.created_at.desc())
+            result = await self.session.execute(stmt)
+            return list(result.scalars().all())
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get guild repeating messages: {e}") from e
+    
+    async def get_repeating_message(self, message_id: UUID) -> Optional[RepeatingMessage]:
+        """Get a repeating message by ID.
+        
+        Args:
+            message_id: Repeating message UUID
+            
+        Returns:
+            RepeatingMessage if found, None otherwise
+        """
+        try:
+            stmt = select(RepeatingMessage).where(RepeatingMessage.id == message_id)
+            result = await self.session.execute(stmt)
+            return result.scalar_one_or_none()
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get repeating message: {e}") from e
+    
+    async def update_repeating_message(
+        self,
+        message_id: UUID,
+        **updates
+    ) -> bool:
+        """Update a repeating message.
+        
+        Args:
+            message_id: Repeating message UUID
+            **updates: Fields to update
+            
+        Returns:
+            True if message was updated, False if not found
+        """
+        try:
+            # Add updated_at timestamp
+            updates['updated_at'] = datetime.now(timezone.utc)
+            
+            stmt = (
+                update(RepeatingMessage)
+                .where(RepeatingMessage.id == message_id)
+                .values(**updates)
+            )
+            result = await self.session.execute(stmt)
+            await self.session.commit()
+            
+            return result.rowcount > 0
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to update repeating message: {e}") from e
+    
+    async def delete_repeating_message(self, message_id: UUID) -> bool:
+        """Delete a repeating message.
+        
+        Args:
+            message_id: Repeating message UUID
+            
+        Returns:
+            True if message was deleted, False if not found
+        """
+        try:
+            stmt = delete(RepeatingMessage).where(RepeatingMessage.id == message_id)
+            result = await self.session.execute(stmt)
+            await self.session.commit()
+            
+            return result.rowcount > 0
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to delete repeating message: {e}") from e
+    
+    async def get_due_repeating_messages(self) -> List[RepeatingMessage]:
+        """Get repeating messages that are due to be sent.
+        
+        Rule: Only return messages that should be sent NOW. If we missed xx:11 
+        and it's now xx:13, return the xx:13 message, not the old xx:11 one.
+        
+        Returns:
+            List of repeating messages due for sending
+        """
+        try:
+            from datetime import timedelta
+            current_time = datetime.now(timezone.utc)
+            
+            # Get all active messages that have missed their send time
+            stmt = select(RepeatingMessage).where(
+                and_(
+                    RepeatingMessage.is_active == True,
+                    RepeatingMessage.next_send_time <= current_time
+                )
+            )
+            
+            result = await self.session.execute(stmt)
+            all_overdue_messages = list(result.scalars().all())
+            
+            # For each overdue message, calculate what time it should send NOW
+            # and only return if it matches the current schedule
+            due_now_messages = []
+            
+            for message in all_overdue_messages:
+                # Calculate the current expected send time based on original schedule
+                expected_send_time = message.next_send_time
+                while expected_send_time < current_time:
+                    expected_send_time += timedelta(minutes=message.interval_minutes)
+                
+                # Only include if the current expected time is due now
+                # Allow messages that are due now or within the next 60 seconds
+                seconds_until_expected = (expected_send_time - current_time).total_seconds()
+                if -60 <= seconds_until_expected <= 60:  # Past due up to 1 min, or due within 1 min
+                    # Update the message's next_send_time to the current expected time
+                    message.next_send_time = expected_send_time
+                    due_now_messages.append(message)
+            
+            return due_now_messages
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get due repeating messages: {e}") from e
+    
+    async def mark_message_sent(self, message_id: UUID) -> bool:
+        """Mark a repeating message as sent and update next send time.
+        
+        Args:
+            message_id: Repeating message UUID
+            
+        Returns:
+            True if message was updated, False if not found
+        """
+        try:
+            # Get the message first
+            message = await self.get_repeating_message(message_id)
+            if not message:
+                logger.warning(f"Repeating message {message_id} not found when trying to mark as sent")
+                return False
+            
+            logger.info(f"Marking message {message_id} as sent - before update: next_send_time={message.next_send_time}, total_sent={message.total_sent}")
+            
+            # Update the message statistics and next send time
+            message.update_after_send()
+            
+            await self.session.commit()
+            logger.info(f"Marked repeating message {message_id} as sent - after update: next_send_time={message.next_send_time}, total_sent={message.total_sent}")
+            
+            return True
+            
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(f"Failed to mark repeating message as sent: {e}") from e
+    
+    async def toggle_repeating_message(self, message_id: UUID, is_active: bool) -> bool:
+        """Enable or disable a repeating message.
+        
+        Args:
+            message_id: Repeating message UUID
+            is_active: Whether to enable or disable the message
+            
+        Returns:
+            True if message was updated, False if not found
+        """
+        try:
+            return await self.update_repeating_message(message_id, is_active=is_active)
+            
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to toggle repeating message: {e}") from e

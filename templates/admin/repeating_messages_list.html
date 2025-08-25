@@ -1,0 +1,329 @@
+{% extends "admin/base_sidebar.html" %}
+
+{% block title %}Repeating Messages - {{ guild.name }}{% endblock %}
+
+{% block page_title %}Repeating Messages{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item active">Repeating Messages</li>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <h2 class="page-title">Repeating Messages</h2>
+                <p class="text-muted">Schedule messages to repeat at regular intervals in Discord channels</p>
+            </div>
+            <div>
+                <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createMessageModal">
+                    <svg class="icon" width="24" height="24">
+                        <use xlink:href="#tabler-plus"></use>
+                    </svg>
+                    Create Repeating Message
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if messages %}
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">Active Repeating Messages</h3>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-vcenter card-table">
+            <thead>
+                <tr>
+                    <th>Channel</th>
+                    <th>Message</th>
+                    <th>Role</th>
+                    <th>Interval</th>
+                    <th>Next Send</th>
+                    <th>Stats</th>
+                    <th>Status</th>
+                    <th class="w-1"></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for message in messages %}
+                <tr>
+                    <td>
+                        <div class="d-flex align-items-center">
+                            <svg class="icon me-2" width="24" height="24">
+                                <use xlink:href="#tabler-hash"></use>
+                            </svg>
+                            <div>
+                                <div class="font-weight-medium">#{{ message.channel_id }}</div>
+                                <div class="text-muted small">Channel ID</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <div class="text-truncate" style="max-width: 200px;" title="{{ message.message_content }}">
+                            {{ message.message_content[:50] }}{% if message.message_content|length > 50 %}...{% endif %}
+                        </div>
+                    </td>
+                    <td>
+                        {% if message.role_id %}
+                        <span class="badge bg-blue-lt">
+                            <svg class="icon me-1" width="16" height="16">
+                                <use xlink:href="#tabler-shield"></use>
+                            </svg>
+                            @{% for role in roles %}{% if role.id == message.role_id %}{{ role.name }}{% endif %}{% endfor %}
+                        </span>
+                        {% else %}
+                        <span class="text-muted">None</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge bg-orange-lt">{{ message.interval_minutes }}m</span>
+                    </td>
+                    <td>
+                        <div class="text-sm">
+                            {{ message.next_send_time.strftime("%Y-%m-%d %H:%M UTC") }}
+                            {% if message.is_due %}
+                            <span class="badge bg-red ms-1">DUE</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                    <td>
+                        <div class="text-sm">
+                            <div>{{ message.total_sent }} sent</div>
+                            {% if message.last_sent_at %}
+                            <div class="text-muted">Last: {{ message.last_sent_at.strftime("%m/%d %H:%M") }}</div>
+                            {% endif %}
+                        </div>
+                    </td>
+                    <td>
+                        {% if message.is_active %}
+                        <span class="badge bg-green">Active</span>
+                        {% else %}
+                        <span class="badge bg-gray">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="btn-list flex-nowrap">
+                            <button class="btn btn-sm btn-outline-primary" onclick="editMessage('{{ message.id }}')" title="Edit">
+                                <svg class="icon" width="16" height="16">
+                                    <use xlink:href="#tabler-edit"></use>
+                                </svg>
+                            </button>
+                            <form method="post" action="/admin/guilds/{{ guild.id }}/repeating-messages/{{ message.id }}/toggle" class="d-inline">
+                                <button type="submit" class="btn btn-sm btn-outline-{% if message.is_active %}warning{% else %}success{% endif %}" title="{% if message.is_active %}Disable{% else %}Enable{% endif %}">
+                                    <svg class="icon" width="16" height="16">
+                                        <use xlink:href="#tabler-{% if message.is_active %}player-pause{% else %}player-play{% endif %}"></use>
+                                    </svg>
+                                </button>
+                            </form>
+                            <button class="btn btn-sm btn-outline-danger" onclick="confirmDelete('{{ message.id }}')" title="Delete">
+                                <svg class="icon" width="16" height="16">
+                                    <use xlink:href="#tabler-trash"></use>
+                                </svg>
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% else %}
+<div class="empty">
+    <div class="empty-img"><img src="/static/illustrations/undraw_blank_canvas.svg" height="128" alt="">
+    </div>
+    <p class="empty-title">No repeating messages yet</p>
+    <p class="empty-subtitle text-muted">Get started by creating your first repeating message for this guild.</p>
+    <div class="empty-action">
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createMessageModal">
+            <svg class="icon" width="24" height="24">
+                <use xlink:href="#tabler-plus"></use>
+            </svg>
+            Create your first repeating message
+        </button>
+    </div>
+</div>
+{% endif %}
+
+<!-- Create Message Modal -->
+<div class="modal modal-blur fade" id="createMessageModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Create Repeating Message</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="/admin/guilds/{{ guild.id }}/repeating-messages">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label required">Channel</label>
+                                <select name="channel_id" class="form-select" required>
+                                    <option value="">Select a channel</option>
+                                    {% for channel in channels %}
+                                    <option value="{{ channel.id }}">{{ channel.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <small class="form-hint">Discord channel where the message will be sent</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label">Role to Mention</label>
+                                <select name="role_id" class="form-select">
+                                    <option value="">No role mention</option>
+                                    {% for role in roles %}
+                                    <option value="{{ role.id }}">{{ role.name }}</option>
+                                    {% endfor %}
+                                </select>
+                                <small class="form-hint">Optional role to ping with the message</small>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label required">Message Content</label>
+                        <textarea name="message_content" class="form-control" rows="4" required placeholder="Enter your message content..."></textarea>
+                        <small class="form-hint">The message text that will be sent repeatedly</small>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label required">Start Time (UTC)</label>
+                                <div class="input-group">
+                                    <input type="date" name="start_date" class="form-control" required>
+                                    <input type="time" name="start_time" class="form-control" required>
+                                    <span class="input-group-text">UTC</span>
+                                </div>
+                                <small class="form-hint">Enter time in UTC timezone. Current UTC: <span id="current-utc-time"></span></small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label class="form-label required">Repeat Every</label>
+                                <div class="input-group">
+                                    <input type="number" name="interval_minutes" class="form-control" min="1" required placeholder="60">
+                                    <span class="input-group-text">minutes</span>
+                                </div>
+                                <small class="form-hint">How often to repeat the message (minimum 1 minute)</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn me-auto" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Message</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function editMessage(messageId) {
+    window.location.href = `/admin/guilds/{{ guild.id }}/repeating-messages/${messageId}/edit`;
+}
+
+function confirmDelete(messageId) {
+    if (confirm('Are you sure you want to delete this repeating message? This action cannot be undone.')) {
+        const form = document.createElement('form');
+        form.method = 'post';
+        form.action = `/admin/guilds/{{ guild.id }}/repeating-messages/${messageId}/delete`;
+        document.body.appendChild(form);
+        form.submit();
+    }
+}
+
+// Set default start time to current UTC time + 5 minutes
+document.addEventListener('DOMContentLoaded', function() {
+    const startDateInput = document.querySelector('input[name="start_date"]');
+    const startTimeInput = document.querySelector('input[name="start_time"]');
+    const currentUtcSpan = document.getElementById('current-utc-time');
+    
+    function updateCurrentUtcTime() {
+        const now = new Date();
+        currentUtcSpan.textContent = now.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+    }
+    
+    // Update current UTC time display
+    updateCurrentUtcTime();
+    setInterval(updateCurrentUtcTime, 1000); // Update every second
+    
+    // Set default start date and time to current UTC time + 5 minutes
+    if (startDateInput && startTimeInput && !startDateInput.value && !startTimeInput.value) {
+        const now = new Date();
+        now.setMinutes(now.getMinutes() + 5);
+        
+        // Use UTC date/time directly without timezone conversion
+        const utcDate = now.toISOString().slice(0, 10); // YYYY-MM-DD
+        const utcTime = now.toISOString().slice(11, 16); // HH:MM
+        
+        startDateInput.value = utcDate;
+        startTimeInput.value = utcTime;
+    }
+    
+    // Add form submission handler to validate date/time
+    const form = document.querySelector('#createMessageModal form');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            // Simply validate that both date and time are provided
+            const dateValue = startDateInput.value;
+            const timeValue = startTimeInput.value;
+            
+            if (!dateValue || !timeValue) {
+                alert('Please enter both date and time.');
+                e.preventDefault();
+                return false;
+            }
+            
+            // Create UTC datetime string for validation only
+            const combinedDateTime = `${dateValue}T${timeValue}:00.000Z`;
+            
+            try {
+                const startTime = new Date(combinedDateTime);
+                const now = new Date();
+                
+                // Validate the date is valid
+                if (isNaN(startTime.getTime())) {
+                    alert('Invalid date or time entered.');
+                    e.preventDefault();
+                    return false;
+                }
+                
+                // Check if the start time is in the past
+                if (startTime < now) {
+                    if (!confirm('The selected start time appears to be in the past. Are you sure you want to proceed?')) {
+                        e.preventDefault();
+                        return false;
+                    }
+                }
+                
+                // Show timezone confirmation
+                const utcTime = startTime.toISOString().slice(0, 16).replace('T', ' ');
+                const localTime = startTime.toLocaleString();
+                if (!confirm(`Confirm the start time:\nUTC: ${utcTime}\nLocal: ${localTime}\n\nProceed?`)) {
+                    e.preventDefault();
+                    return false;
+                }
+                
+                // Let the form submit normally - backend will handle combining the fields
+                
+            } catch (error) {
+                console.error('Error processing datetime:', error);
+                alert('Error processing the selected date and time.');
+                e.preventDefault();
+                return false;
+            }
+        });
+    }
+});
+</script>
+
+{% endblock %}

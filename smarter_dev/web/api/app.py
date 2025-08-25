@@ -31,6 +31,7 @@ from smarter_dev.web.api.routers.admin import router as admin_router
 from smarter_dev.web.api.routers.forum_agents_simple import router as forum_agents_router
 from smarter_dev.web.api.routers.challenges import router as challenges_router
 from smarter_dev.web.api.routers.scheduled_messages import router as scheduled_messages_router
+from smarter_dev.web.api.routers.repeating_messages import router as repeating_messages_router
 from smarter_dev.web.api.schemas import ErrorResponse, ValidationErrorResponse, ErrorDetail
 from smarter_dev.web.crud import DatabaseOperationError, NotFoundError, ConflictError
 from smarter_dev.web.security_headers import SecurityHeadersMiddleware
@@ -401,6 +402,11 @@ api.include_router(
 api.include_router(
     scheduled_messages_router,
     tags=["Scheduled Message Management"]
+)
+
+api.include_router(
+    repeating_messages_router,
+    tags=["Repeating Message Management"]
 )
 
 

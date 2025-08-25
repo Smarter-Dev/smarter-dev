@@ -28,9 +28,10 @@ from smarter_dev.web.models import (
     ForumAgentResponse,
     Campaign,
     Challenge,
-    ScheduledMessage
+    ScheduledMessage,
+    RepeatingMessage
 )
-from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, SquadSaleEventOperations, APIKeyOperations, ForumAgentOperations, CampaignOperations, ScheduledMessageOperations, ConflictError
+from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, SquadSaleEventOperations, APIKeyOperations, ForumAgentOperations, CampaignOperations, ScheduledMessageOperations, RepeatingMessageOperations, ConflictError
 from smarter_dev.web.security import generate_secure_api_key
 from smarter_dev.web.admin.auth import admin_required
 from smarter_dev.web.admin.discord import (
@@ -3152,6 +3153,428 @@ async def squad_sale_event_delete(request: Request) -> Response:
         context = {
             "request": request,
             "error": "Failed to delete sale event",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+# Repeating Messages Views
+
+async def repeating_messages_list(request: Request) -> Response:
+    """Repeating messages management for a guild."""
+    guild_id = request.path_params["guild_id"]
+    
+    try:
+        # Verify guild exists and get info
+        guild = await get_guild_info(guild_id)
+        
+        # Get channels info for the guild
+        channels = await get_valid_announcement_channels(guild_id)
+        
+        # Get roles for the guild  
+        roles = await get_guild_roles(guild_id)
+        
+        async with get_db_session_context() as session:
+            message_ops = RepeatingMessageOperations(session)
+            
+            if request.method == "GET":
+                # Get all repeating messages for the guild
+                messages = await message_ops.get_guild_repeating_messages(guild_id)
+                
+                context = {
+                    "request": request,
+                    "guild": guild,
+                    "messages": messages,
+                    "channels": channels,
+                    "roles": roles,
+                    "title": f"Repeating Messages - {guild.name}",
+                    "success": request.query_params.get("success")
+                }
+                
+                return templates.TemplateResponse("admin/repeating_messages_list.html", context)
+            
+            elif request.method == "POST":
+                # Create new repeating message
+                form_data = await request.form()
+                
+                try:
+                    # Parse form data
+                    channel_id = form_data.get("channel_id")
+                    message_content = form_data.get("message_content")
+                    role_id = form_data.get("role_id") or None
+                    interval_minutes = int(form_data.get("interval_minutes"))
+                    
+                    # Handle datetime from separate date and time fields
+                    from datetime import datetime, timezone
+                    start_date = form_data.get("start_date")
+                    start_time = form_data.get("start_time")
+                    
+                    if not start_date or not start_time:
+                        raise ValueError("Start date and time are required")
+                    
+                    # Combine date and time into UTC datetime
+                    # Date format: YYYY-MM-DD, Time format: HH:MM
+                    datetime_str = f"{start_date}T{start_time}:00"
+                    start_datetime = datetime.fromisoformat(datetime_str).replace(tzinfo=timezone.utc)
+                    
+                    # Validate required fields
+                    if not channel_id:
+                        raise ValueError("Channel is required")
+                    if not message_content:
+                        raise ValueError("Message content is required")
+                    if interval_minutes < 1:
+                        raise ValueError("Interval must be at least 1 minute")
+                    
+                    # Create the repeating message
+                    await message_ops.create_repeating_message(
+                        guild_id=guild_id,
+                        channel_id=channel_id,
+                        message_content=message_content,
+                        start_time=start_datetime,
+                        interval_minutes=interval_minutes,
+                        created_by=request.session.get("admin_username", "admin"),
+                        role_id=role_id
+                    )
+                    
+                    # Redirect with success message
+                    return RedirectResponse(
+                        url=f"/admin/guilds/{guild_id}/repeating-messages?success=created",
+                        status_code=302
+                    )
+                    
+                except Exception as e:
+                    # Re-render form with error
+                    messages = await message_ops.get_guild_repeating_messages(guild_id)
+                    context = {
+                        "request": request,
+                        "guild": guild,
+                        "messages": messages,
+                        "channels": channels,
+                        "roles": roles,
+                        "title": f"Repeating Messages - {guild.name}",
+                        "error": str(e)
+                    }
+                    return templates.TemplateResponse("admin/repeating_messages_list.html", context)
+                
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    
+    except Exception as e:
+        logger.error(f"Error in repeating messages for guild {guild_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to load repeating messages",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def repeating_message_create(request: Request) -> Response:
+    """Create repeating message form."""
+    guild_id = request.path_params["guild_id"]
+    
+    try:
+        # Get guild info
+        guild = await get_guild_info(guild_id)
+        
+        # Get channels and roles
+        channels = await get_valid_announcement_channels(guild_id)
+        roles = await get_guild_roles(guild_id)
+        
+        if request.method == "GET":
+            context = {
+                "request": request,
+                "guild": guild,
+                "channels": channels,
+                "roles": roles,
+                "title": f"Create Repeating Message - {guild.name}"
+            }
+            return templates.TemplateResponse("admin/repeating_message_form.html", context)
+        
+        elif request.method == "POST":
+            # Process form submission
+            form_data = await request.form()
+            
+            try:
+                # Parse and validate form data
+                channel_id = form_data.get("channel_id")
+                message_content = form_data.get("message_content")
+                role_id = form_data.get("role_id") or None
+                interval_minutes = int(form_data.get("interval_minutes"))
+                
+                # Handle datetime from separate date and time fields
+                from datetime import datetime, timezone
+                start_date = form_data.get("start_date")
+                start_time = form_data.get("start_time")
+                
+                if not start_date or not start_time:
+                    raise ValueError("Start date and time are required")
+                
+                # Combine date and time into UTC datetime
+                datetime_str = f"{start_date}T{start_time}:00"
+                start_datetime = datetime.fromisoformat(datetime_str).replace(tzinfo=timezone.utc)
+                
+                if not channel_id:
+                    raise ValueError("Channel is required")
+                if not message_content:
+                    raise ValueError("Message content is required")
+                if interval_minutes < 1:
+                    raise ValueError("Interval must be at least 1 minute")
+                
+                # Create the message
+                async with get_db_session_context() as session:
+                    message_ops = RepeatingMessageOperations(session)
+                    await message_ops.create_repeating_message(
+                        guild_id=guild_id,
+                        channel_id=channel_id,
+                        message_content=message_content,
+                        start_time=start_datetime,
+                        interval_minutes=interval_minutes,
+                        created_by=request.session.get("admin_username", "admin"),
+                        role_id=role_id
+                    )
+                
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/repeating-messages?success=created",
+                    status_code=302
+                )
+                
+            except ValueError as e:
+                # LOG FULL STACK TRACE
+                import traceback
+                logger.error(f"=== REPEATING MESSAGE CREATE ERROR STACK TRACE ===")
+                logger.error(f"ValueError: {str(e)}")
+                logger.error(f"Full traceback:\n{traceback.format_exc()}")
+                logger.error(f"Form data was: {dict(form_data)}")
+                logger.error(f"====================================================")
+                
+                context = {
+                    "request": request,
+                    "guild": guild,
+                    "channels": channels,
+                    "roles": roles,
+                    "title": f"Create Repeating Message - {guild.name}",
+                    "error": str(e),
+                    "form_data": form_data
+                }
+                return templates.TemplateResponse("admin/repeating_message_form.html", context)
+    
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    
+    except Exception as e:
+        logger.error(f"Error creating repeating message for guild {guild_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to create repeating message",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def repeating_message_edit(request: Request) -> Response:
+    """Edit repeating message."""
+    guild_id = request.path_params["guild_id"]
+    message_id = UUID(request.path_params["message_id"])
+    
+    try:
+        # Get guild info
+        guild = await get_guild_info(guild_id)
+        
+        async with get_db_session_context() as session:
+            message_ops = RepeatingMessageOperations(session)
+            message = await message_ops.get_repeating_message(message_id)
+            
+            if not message or message.guild_id != guild_id:
+                context = {
+                    "request": request,
+                    "error": "Repeating message not found",
+                    "title": "Message Not Found"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            if request.method == "GET":
+                # Get channels and roles
+                channels = await get_valid_announcement_channels(guild_id)
+                roles = await get_guild_roles(guild_id)
+                
+                context = {
+                    "request": request,
+                    "guild": guild,
+                    "message": message,
+                    "channels": channels,
+                    "roles": roles,
+                    "title": f"Edit Repeating Message - {guild.name}"
+                }
+                return templates.TemplateResponse("admin/repeating_message_edit.html", context)
+            
+            elif request.method == "POST":
+                # Process form submission
+                form_data = await request.form()
+                
+                try:
+                    # Parse form data
+                    updates = {}
+                    
+                    if "channel_id" in form_data:
+                        updates["channel_id"] = form_data.get("channel_id")
+                    if "message_content" in form_data:
+                        updates["message_content"] = form_data.get("message_content")
+                    if "role_id" in form_data:
+                        updates["role_id"] = form_data.get("role_id") or None
+                    if "start_date" in form_data and "start_time" in form_data:
+                        from datetime import datetime, timezone
+                        start_date = form_data.get("start_date")
+                        start_time = form_data.get("start_time")
+                        if start_date and start_time:
+                            datetime_str = f"{start_date}T{start_time}:00"
+                            updates["start_time"] = datetime.fromisoformat(datetime_str).replace(tzinfo=timezone.utc)
+                    if "interval_minutes" in form_data:
+                        updates["interval_minutes"] = int(form_data.get("interval_minutes"))
+                    if "is_active" in form_data:
+                        updates["is_active"] = form_data.get("is_active") == "true"
+                    
+                    # Validate
+                    if "interval_minutes" in updates and updates["interval_minutes"] < 1:
+                        raise ValueError("Interval must be at least 1 minute")
+                    
+                    # Update the message
+                    await message_ops.update_repeating_message(message_id, **updates)
+                    
+                    return RedirectResponse(
+                        url=f"/admin/guilds/{guild_id}/repeating-messages?success=updated",
+                        status_code=302
+                    )
+                    
+                except ValueError as e:
+                    channels = await get_valid_announcement_channels(guild_id)
+                    roles = await get_guild_roles(guild_id)
+                    context = {
+                        "request": request,
+                        "guild": guild,
+                        "message": message,
+                        "channels": channels,
+                        "roles": roles,
+                        "title": f"Edit Repeating Message - {guild.name}",
+                        "error": str(e)
+                    }
+                    return templates.TemplateResponse("admin/repeating_message_edit.html", context)
+    
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": "Guild not found",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    
+    except Exception as e:
+        logger.error(f"Error editing repeating message {message_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to edit repeating message",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def repeating_message_delete(request: Request) -> Response:
+    """Delete repeating message."""
+    guild_id = request.path_params["guild_id"]
+    message_id = UUID(request.path_params["message_id"])
+    
+    try:
+        async with get_db_session_context() as session:
+            message_ops = RepeatingMessageOperations(session)
+            message = await message_ops.get_repeating_message(message_id)
+            
+            if not message or message.guild_id != guild_id:
+                context = {
+                    "request": request,
+                    "error": "Repeating message not found",
+                    "title": "Message Not Found"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            # Delete the message
+            success = await message_ops.delete_repeating_message(message_id)
+            
+            if success:
+                logger.info(f"Deleted repeating message {message_id} in guild {guild_id}")
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/repeating-messages?success=deleted",
+                    status_code=302
+                )
+            else:
+                context = {
+                    "request": request,
+                    "error": "Failed to delete repeating message",
+                    "title": "Error"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=500)
+    
+    except Exception as e:
+        logger.error(f"Error deleting repeating message {message_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to delete repeating message",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def repeating_message_toggle(request: Request) -> Response:
+    """Toggle repeating message active status."""
+    guild_id = request.path_params["guild_id"]
+    message_id = UUID(request.path_params["message_id"])
+    
+    try:
+        async with get_db_session_context() as session:
+            message_ops = RepeatingMessageOperations(session)
+            message = await message_ops.get_repeating_message(message_id)
+            
+            if not message or message.guild_id != guild_id:
+                context = {
+                    "request": request,
+                    "error": "Repeating message not found", 
+                    "title": "Message Not Found"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            
+            # Toggle active status
+            new_status = not message.is_active
+            success = await message_ops.toggle_repeating_message(message_id, new_status)
+            
+            if success:
+                action = "enabled" if new_status else "disabled"
+                logger.info(f"{action.capitalize()} repeating message {message_id} in guild {guild_id}")
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/repeating-messages?success={action}",
+                    status_code=302
+                )
+            else:
+                context = {
+                    "request": request,
+                    "error": "Failed to toggle repeating message",
+                    "title": "Error"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=500)
+    
+    except Exception as e:
+        logger.error(f"Error toggling repeating message {message_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to toggle repeating message",
             "title": "Error"
         }
         return templates.TemplateResponse("admin/error.html", context, status_code=500)
