@@ -200,6 +200,12 @@
                 <path d="M21 14l-3-3h-7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v10"></path>
                 <path d="M14 15v2a1 1 0 0 1-1 1H6l-3 3V11a1 1 0 0 1 1-1h2"></path>
             </symbol>
+            <symbol id="tabler-clock-repeat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <path d="M12 6v6l4 2"></path>
+                <path d="M18.5 4.5 21 7l-2.5 2.5"></path>
+                <path d="M5.5 19.5 3 17l2.5-2.5"></path>
+            </symbol>
             <symbol id="tabler-player-pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <rect x="6" y="4" width="4" height="16"></rect>
                 <rect x="14" y="4" width="4" height="16"></rect>
@@ -415,6 +421,15 @@
                             </svg>
                         </span>
                         <span class="nav-link-title">Campaigns</span>
+                    </a>
+                    
+                    <a class="nav-link {% if 'repeating-messages' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/repeating-messages" aria-current="{% if 'repeating-messages' in request.url.path %}page{% endif %}">
+                        <span class="nav-link-icon">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-clock-repeat"></use>
+                            </svg>
+                        </span>
+                        <span class="nav-link-title">Repeating Messages</span>
                     </a>
                 </nav>
             </div>

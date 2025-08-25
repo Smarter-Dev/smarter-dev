@@ -2049,3 +2049,199 @@ class SquadSaleEvent(Base):
         """String representation of the squad sale event."""
         status = "active" if self.is_currently_active else "inactive"
         return f"<SquadSaleEvent(name='{self.name}', guild_id='{self.guild_id}', status='{status}')>"
+
+
+class RepeatingMessage(Base):
+    """Repeating scheduled message model for guild channels.
+    
+    Allows administrators to create messages that repeat at regular intervals
+    in specified Discord channels, with optional role mentions and UTC timing.
+    """
+    
+    __tablename__ = "repeating_messages"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique identifier for the repeating message"
+    )
+    
+    # Guild and channel context
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord guild (server) snowflake ID"
+    )
+    channel_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord channel snowflake ID where messages are sent"
+    )
+    
+    # Message content
+    message_content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="The message text to send repeatedly"
+    )
+    role_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        doc="Optional Discord role ID to mention with the message"
+    )
+    
+    # Scheduling configuration
+    start_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+        doc="UTC datetime when the first message should be sent"
+    )
+    interval_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        doc="Minutes between repeated messages (minimum 1)"
+    )
+    
+    # Runtime state
+    next_send_time: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+        doc="UTC datetime when the next message should be sent"
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        doc="Whether this repeating message is active"
+    )
+    
+    # Statistics
+    total_sent: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="Total number of messages sent successfully"
+    )
+    last_sent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="When the last message was successfully sent"
+    )
+    
+    # Audit fields
+    created_by: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Username or identifier of who created this repeating message"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the repeating message was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the repeating message was last modified"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_repeating_messages_guild_id", "guild_id"),
+        Index("ix_repeating_messages_channel_id", "channel_id"),
+        Index("ix_repeating_messages_next_send_time", "next_send_time"),
+        Index("ix_repeating_messages_guild_active", "guild_id", "is_active"),
+        Index("ix_repeating_messages_due", "is_active", "next_send_time"),
+        Index("ix_repeating_messages_created_by", "created_by"),
+        # Validation constraints
+        CheckConstraint("interval_minutes >= 1", name="ck_repeating_messages_interval_positive"),
+        CheckConstraint("total_sent >= 0", name="ck_repeating_messages_total_sent_non_negative"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize RepeatingMessage with default timestamps and next_send_time."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        kwargs.setdefault('total_sent', 0)
+        kwargs.setdefault('is_active', True)
+        
+        # Set next_send_time to start_time if not provided
+        if 'next_send_time' not in kwargs and 'start_time' in kwargs:
+            kwargs['next_send_time'] = kwargs['start_time']
+        
+        super().__init__(**kwargs)
+    
+    @property
+    def is_due(self) -> bool:
+        """Check if this repeating message is due to be sent."""
+        return self.is_active and datetime.now(timezone.utc) >= self.next_send_time
+    
+    @property
+    def has_started(self) -> bool:
+        """Check if the repeating message schedule has started."""
+        return datetime.now(timezone.utc) >= self.start_time
+    
+    def calculate_next_send_time(self) -> datetime:
+        """Calculate the next send time maintaining the original schedule interval.
+        
+        Rule: If we missed xx:11 and it's now xx:13, the next send should be xx:13 (xx:11 + 2min),
+        NOT xx:15 (xx:13 + 2min). Always calculate from the original missed time.
+        """
+        from datetime import timedelta
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        now = datetime.now(timezone.utc)
+        
+        old_next_send_time = self.next_send_time
+        
+        # Calculate next send from the ORIGINAL scheduled time (not current time)
+        candidate_next_send_time = self.next_send_time + timedelta(minutes=self.interval_minutes)
+        
+        # If we're still behind (multiple missed intervals), advance to current time
+        # but maintain the original schedule pattern
+        while candidate_next_send_time < now:
+            candidate_next_send_time += timedelta(minutes=self.interval_minutes)
+        
+        print(f"🔄 SCHEDULE CALC for {self.id}: missed_time={old_next_send_time}, now={now}, interval={self.interval_minutes}min, next={candidate_next_send_time}")
+        logger.warning(f"SCHEDULE CALC for {self.id}: missed_time={old_next_send_time}, now={now}, interval={self.interval_minutes}min, next={candidate_next_send_time}")
+        
+        return candidate_next_send_time
+    
+    def update_after_send(self) -> None:
+        """Update statistics and next send time after successful message send."""
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        now = datetime.now(timezone.utc)
+        old_next_send_time = self.next_send_time
+        
+        self.total_sent += 1
+        self.last_sent_at = now
+        self.next_send_time = self.calculate_next_send_time()
+        self.updated_at = now
+        
+        print(f"📤 UPDATE AFTER SEND {self.id}: sent_at={now}, old_next={old_next_send_time}, new_next={self.next_send_time}, total={self.total_sent}")
+        logger.warning(f"UPDATE AFTER SEND {self.id}: sent_at={now}, old_next={old_next_send_time}, new_next={self.next_send_time}, total={self.total_sent}")
+    
+    def get_formatted_message(self) -> str:
+        """Get the message content formatted with optional role mention."""
+        if self.role_id:
+            return f"{self.message_content}\n\n<@&{self.role_id}>"
+        return self.message_content
+    
+    def __repr__(self) -> str:
+        """String representation of the repeating message."""
+        status = "active" if self.is_active else "inactive"
+        return f"<RepeatingMessage(guild_id='{self.guild_id}', channel_id='{self.channel_id}', status='{status}')>"
