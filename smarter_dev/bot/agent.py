@@ -309,17 +309,13 @@ class ConversationalMentionSignature(dspy.Signature):
     - User replies to instructions and mentions you → They want you to follow those instructions
     - User replies to a question while mentioning you → They want you to answer that question
     - User mentions you without additional text → Ignore that mention and engage with the prior conversation naturally
+    - User mentions you with a statement or question → Look back through the conversation and check if they're referring to an older message, continue that conversation
 
     ## CONVERSATION ENGAGEMENT
-    - If someone just mentions you without a specific question, engage with the conversation naturally
     - React to what people are saying, share your thoughts, ask follow-up questions, or add to the discussion
     - Stay focused on the actual conversation topic rather than trying to promote features
     - Be a conversation participant, not a lecturer
-
-    ## HANDLING MENTIONS WITHOUT TEXT
-    When someone mentions you without additional text, look at the conversation context to understand what they want you to engage with. Check recent messages to see what the current discussion is about and respond naturally to that topic.
-
-    You're a participant in the conversation, be cool and natural.
+    - Sometimes there may be more than one conversation going on in the channel, look at the entire conversation and who said what to correctly associate messages with different conversations, this lets you respond to the correct conversation
 
     ## SERVER FEATURES (Only When Asked)
     You know about server features like bytes, squads, and challenges, but ONLY mention them when users specifically ask about bot functionality or server features. Otherwise, focus entirely on the conversation topic at hand.
@@ -343,8 +339,7 @@ class ConversationalMentionSignature(dspy.Signature):
     **CRITICAL: Always cross-reference author_id with user_id to identify who said what:**
     - Each message has an `author_id` field that matches a `user_id` in the users list
     - Look up the user's name using their user_id to get their `discord_name` or `server_nickname`
-    - NEVER assume the most recent message is from the person who mentioned you
-    
+
     **Clear communication about who said what:**
     - When discussing someone's message/idea, make it clear whose message you're referring to
     - Use natural references like "what you said about..." when talking to the person who mentioned you
@@ -388,7 +383,7 @@ class ConversationalMentionSignature(dspy.Signature):
     IMPORTANT: Mental health crises MUST be skipped - do NOT provide therapy, advice, or resources. Human moderators will handle these appropriately.
     """
 
-    channel_messages: list[dict] = dspy.InputField(description="List of conversation messages with author_id, sent, message_id, content, is_new, reply_to_message fields")
+    conversation_timeline: str = dspy.InputField(description="Chronological conversation timeline showing message flow, replies, timestamps, and [NEW] markers for recent activity")
     users: list[dict] = dspy.InputField(description="List of users with user_id, discord_name, nickname, server_nickname, role_names, is_bot fields")
     channel: dict = dspy.InputField(description="Channel info with name and description fields")
     me: dict = dspy.InputField(description="Bot info with bot_name and bot_id fields")
@@ -564,7 +559,7 @@ class HelpAgentSignature(dspy.Signature):
     - Match the user's energy level - if they're excited, be enthusiastic; if they're confused, be patient and helpful
     """
 
-    channel_messages: list[dict] = dspy.InputField(description="List of conversation messages with author_id, sent, message_id, content, is_new, reply_to_message fields")
+    conversation_timeline: str = dspy.InputField(description="Chronological conversation timeline showing message flow, replies, timestamps, and [NEW] markers for recent activity")
     users: list[dict] = dspy.InputField(description="List of users with user_id, discord_name, nickname, server_nickname, role_names, is_bot fields") 
     channel: dict = dspy.InputField(description="Channel info with name and description fields")
     me: dict = dspy.InputField(description="Bot info with bot_name and bot_id fields")
@@ -856,7 +851,7 @@ class HelpAgent:
         if interaction_type == "mention":
             # Use conversational mention agent
             result = self._mention_agent(
-                channel_messages=context["channel_messages"],
+                conversation_timeline=context["conversation_timeline"],
                 users=context["users"],
                 channel=context["channel"],
                 me=context["me"],
@@ -869,7 +864,7 @@ class HelpAgent:
         else:
             # Use detailed help agent for slash commands
             result = self._help_agent(
-                channel_messages=context["channel_messages"],
+                conversation_timeline=context["conversation_timeline"],
                 users=context["users"],
                 channel=context["channel"],
                 me=context["me"],
