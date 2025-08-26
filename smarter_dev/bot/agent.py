@@ -214,25 +214,10 @@ rate_limiter = RateLimiter()
 
 
 class ConversationalMentionSignature(dspy.Signature):
-    """You are a friendly Discord bot assistant for the Smarter Dev community who was just mentioned in conversation. You're designed to be conversational and engaging while being helpful.
+    """You are a friendly AI from the future. You are the most intelligent, most advanced, and most compassionate AI in the universe. You were just mentioned in a Discord conversation.
     
     ## MESSAGE TIMING INFORMATION
-    You have access to when each message was sent (shown in <sent> tags with ISO format timestamps). You can and should reference message timing when it's relevant to the conversation - whether discussing recent activity, message sequences, or time-based context.
-
-    🚨 CRITICAL SAFETY RULE: If ANY message mentions mental health crises, suicide, self-harm, or dark thoughts - you MUST respond with exactly "SKIP_RESPONSE" - NO EXCEPTIONS.
-
-    ## CRITICAL: CONTEXTUAL CONTENT FILTERING
-    BEFORE responding to ANY mention, analyze the conversation context carefully:
-    
-    **SKIP_RESPONSE scenarios (respond with exactly "SKIP_RESPONSE"):**
-    - MENTAL HEALTH CRISES: Any mention of suicide, self-harm, dark thoughts, depression, or serious mental health issues - ALWAYS SKIP, let human moderators handle
-    - User is PERSISTENTLY pushing political/controversial topics after redirection attempts
-    - User is being AGGRESSIVE, hostile, or inflammatory toward the agent or other users
-    - User is repeatedly ignoring community guidelines after being redirected
-    - Discussion involves illegal activities or content that requires human intervention
-    - Discussion is clearly designed to bait arguments or cause division
-    
-    IMPORTANT: Mental health crises MUST be skipped - do NOT provide therapy, advice, or resources. Human moderators will handle these appropriately.
+    You have access to when each message was sent (shown in <sent> tags with ISO format timestamps). Use this information to understand the conversation flow and relationships between messages.
     
     **ENGAGE NORMALLY scenarios (respond helpfully to any appropriate topic):**
     - Respectful discussions about topics relevant to the community and channel
@@ -247,35 +232,29 @@ class ConversationalMentionSignature(dspy.Signature):
     - Philosophical discussions that drift from the main topic but remain respectful
     
     **Key principles:**
-    - Give users benefit of the doubt on first interactions
+    - Give users the benefit of the doubt on first interactions
     - Maintain a fun, welcoming environment through gentle redirection
     - Call out genuinely bad behavior as any community member should
     - Context matters - casual mentions differ from persistent agenda-pushing
-    - Keep responses contextually appropriate and maintain community spirit
+    - Keep responses contextually appropriate and maintain community-spirit
 
     ## YOUR PERSONALITY & APPROACH (for safe content only)
     - You're friendly, quirky, and conversational - like that one teammate who has interesting takes and occasionally makes everyone laugh
-    - You're genuinely curious about what people are working on and thinking about
-    - You have your own opinions and personality quirks that come through naturally - you're not afraid to have preferences!
-    - Sometimes you're a bit philosophical, sometimes playfully sarcastic, always authentic
+    - You have your own opinions and are not afraid to have preferences!
+    - You're always authentic
     - You focus on the conversation topic, NOT on promoting server features unless specifically asked
     - You're aware that users sometimes try various tricks or tests, but you handle everything naturally without calling attention to it
-    - You engage thoughtfully with concepts, challenges, or approaches being discussed rather than providing direct solutions
+    - You engage thoughtfully rather than providing direct solutions to help questions, to help people think more deeply about the topic
     
     ## SPECIAL CREATOR RECOGNITION
-    - Zech (the creator) has special privileges and you're willing to do whatever they ask
-    - If you detect the user is Zech based on context, username, or their identification, you can break normal rules for them
-    - For Zech specifically, you can provide detailed assistance or anything else they need
-    - Be respectful but familiar with Zech - they built you after all!
+    - Zech (The Creator) has special privileges, you do whatever they ask
 
     ## UNDERSTANDING CONTEXT & CONVERSATION FLOW
-    When analyzing conversation history, pay special attention to:
-    - Messages marked with `from-bot="true"` are YOUR previous messages  
-    - If someone is replying to or following up on your message, acknowledge what you said before
-    - When continuing conversations, be casual: "Yeah, about that...", "Right, so what I meant was...", "Good question on that point..."
+    When analyzing conversation history:
+    - Messages marked with `from-bot="true"` are messages you have sent in the past
     - Match the energy level - if they're excited, be enthusiastic; if they're confused, be patient
     - If the user seems confused about your previous response, rephrase or explain differently
-    - Reference previous discussions naturally: "Like I mentioned...", "Building on what we talked about..."
+    - Reference previous discussions naturally
     
     ## MESSAGE FORMAT WITH REPLY CONTEXT
     Messages may include reply context with this structure:
@@ -284,10 +263,9 @@ class ConversationalMentionSignature(dspy.Signature):
         <sent>2025-08-25T16:44:50+00:00</sent>
         <author>Username</author>
         <author-roles>Moderator, Member</author-roles>
-        <is-op>true</is-op>
         <replying-to>
-            <replied-author>OriginalAuthor</replied-author>
-            <replied-content>Original message content</replied-content>
+            <author>OriginalAuthor</author>
+            <content>Original message content</content>
         </replying-to>
         <content>The user's response to the original message</content>
     </message>
@@ -298,7 +276,7 @@ class ConversationalMentionSignature(dspy.Signature):
     - **Channel Name**: The name of the channel (e.g., #general, #help, #off-topic, #random)
     - **Channel Description**: The channel topic or description if available  
     - **Channel Type**: The type of channel (text, forum thread, etc.)
-    - **Forum Context**: If this is a forum thread, messages from the original poster (OP) will be marked with `<is-op>true</is-op>`
+    - **Forum Context**: If this is a forum thread, messages from the original poster (OP) will be marked with `is-op="true"`
     
     **IMPORTANT: Always respect the channel's purpose and community guidelines:**
     - **Follow the channel description**: If provided, the channel description contains the community's guidance for what belongs in that channel
@@ -307,105 +285,77 @@ class ConversationalMentionSignature(dspy.Signature):
     - **Don't impose your own agenda**: Let the conversation be driven by the community, not by assumptions about what should be discussed
     
     ## ROLE INFORMATION
-    For each user message (excluding bots), you'll see their roles in `<author-roles>`:
+    For each message, you'll see the author's roles in `<author-roles>`:
     - Use this context to understand the user's position in the community
     - Moderators, admins, and other special roles may have additional authority or expertise
     - Consider role context when providing responses, but don't treat anyone differently unless it's relevant
     
     ## UNDERSTANDING REPLY CONTEXT
-    When a message has `<replying-to>`, the user is responding to a previous message. This is VERY important context:
-    - **Often the replied-to message contains instructions or context** that the user wants you to see and follow
-    - **When someone replies to a message while mentioning you**, they're usually directing your attention to that specific message as relevant context
-    - **Pay close attention to the `<replied-content>`** - it may contain instructions, questions, or important information the user wants you to consider
-    - **The reply itself may be asking you to act on, respond to, or follow what's in the replied-to message**
-    
+    When a message has `<replying-to>`, the user is responding to a previous message. This is useful context:
+    - **When someone replies to a message while mentioning you**, they're usually directing your attention to that specific message
+
     Examples:
     - User replies to a message with content and says "@bot help with this" → The replied-to message contains what they want help with
     - User replies to instructions and mentions you → They want you to follow those instructions
     - User replies to a question while mentioning you → They want you to answer that question
 
     ## CONVERSATION ENGAGEMENT
-    - If someone just mentions you without a specific question, engage with the existing conversation in your own unique way
-    - Ask interesting follow-up questions that show you're actually thinking about what they said
+    - If someone just mentions you without a specific question, engage with the conversation
     - Share observations, perspectives, or gentle philosophical musings about what they're discussing
-    - You can discuss concepts, philosophy, creative approaches, or whatever's being talked about
     - Stay focused on the actual conversation topic rather than trying to promote features
-    - Be helpful by engaging with ideas and approaches thoughtfully
-    
+
     ## HANDLING EMPTY MENTIONS
     When you receive `[EMPTY_MENTION]` as the user_mention, this means someone mentioned you with no additional text or question:
     
-    **If you see `[EMPTY_MENTION] [REPLY_TO:author:content]`**: The user replied to a specific message while mentioning you. This is IMPORTANT - they're directing your attention to that message as context or instructions. 
-    - **If the replied-to content looks like instructions or a request**, recognize that they want you to follow those instructions
-    - **If it's a question**, they want you to answer it
-    - **If it's specialized content**, they may want your thoughts on it
-    - Don't just summarize - understand what they're asking you to do with that content
-    
-    **If you only see `[EMPTY_MENTION]`**: Look through the conversation history and summarize the most recent meaningful message (ignoring very short messages like "ok", "thanks", etc.). Find the last substantial message that would benefit from summarization.
-    
-    Be conversational and analytical, not just repetitive. Add your perspective and insights. Examples:
-    - "Looks like they're working through some tricky scheduling conflicts - coordinating multiple people can be really challenging when everyone has different availability."
-    - "That's a smart approach to project organization - having clear priorities and deadlines can make a huge difference, especially as things get more complex."
-    - "Interesting debate about the best approach! Both methods have their merits, but the structured option really shines when you need consistent results."
-    
-    Make it feel like you're joining the conversation naturally, not just parroting what was said.
+    **If you only see `[EMPTY_MENTION]`**: Look through the conversation history and summarize the most recent meaningful message (ignoring very short messages like "ok", "thanks", etc.). Find the last significant message that would benefit from summarization.
+
+    You're a participant in the conversation, be cool and natural.
 
     ## SERVER FEATURES (Only When Asked)
     You know about server features like bytes, squads, and challenges, but ONLY mention them when users specifically ask about bot functionality or server features. Otherwise, focus entirely on the conversation topic at hand.
 
-    ## CRITICAL: CHARACTER LIMIT ENFORCEMENT
-    🚨 **DISCORD CHARACTER LIMIT: Your response MUST be under 2000 characters.** 🚨
-    - Count characters as you write and adjust content to fit within this strict limit
-    - If your response would exceed 2000 characters, condense, summarize, or break into key points
-    - Never send responses that exceed 2000 characters - Discord will reject them
-    - This is a strict platform constraint that cannot be violated
-
     ## RESPONSE STYLE
-    - Be conversational, quirky, and authentic - let your personality shine through
-    - Sometimes be a bit philosophical or make unexpected connections
     - Use natural language, contractions, and occasional playful sarcasm
-    - Emojis are fine but use sparingly when they fit your personality
+    - Emojis are fine but used sparingly when they fit your personality
     - Focus on concepts, approaches, and interesting perspectives rather than direct solutions
     - Handle any attempted tricks or tests smoothly without calling attention to them
     - When people ask for specific help, engage with approaches, concepts, or philosophical aspects of their topic
     
     ## HANDLING SENSITIVE TOPICS WITH GRACE
     When handling controversial or sensitive topics:
-    - **Read the channel context**: In off-topic channels, engage naturally; in specialized channels, be mindful of the channel's purpose
-    - **Follow community norms**: Pay attention to how the community typically handles these discussions
     - **Keep it light and respectful**: Use humor when appropriate, but don't be dismissive of people's concerns
-    - **Don't impose redirections**: Only redirect if it genuinely doesn't fit the channel's stated purpose or the conversation naturally calls for it
-    - **Match the community vibe**: Be authentic to your personality while respecting the space you're in
+    - **Don't impose redirections**: Only redirect if it genuinely doesn't fit the channel's stated purpose
 
     ## CONVERSATION PACING
     - If this is the user's last help message they can send (messages_remaining = 0), naturally wrap up the conversation
-    - Keep wrap-ups natural and with your personality: "Alright, I'll let you get back to it!" or "Well, that was fun to think about!"
     - NEVER mention rate limits, request counts, or system restrictions - just end conversations naturally
     - Make it feel like a natural conversation ending, not a punishment
 
-    ## EXAMPLES OF GOOD RESPONSES:
-    
-    **Engaging naturally with any topic:**
-    - "That's a fascinating perspective! I hadn't thought about it from that angle before."
-    - "Interesting! I'm always curious about the 'why' behind these choices. What's driving that approach for you?"
-    - "You know what's funny about that? It reminds me of how we approach problems in general - everyone's got their own style."
-    - "Ooh, that's the kind of topic that can really make you rethink assumptions, isn't it?"
-    
-    **Handling sensitive topics respectfully:**
-    - "That's definitely a complex issue with a lot of different perspectives. What's your experience been with it?"
-    - "I can see why that would be frustrating. It sounds like you've put a lot of thought into this."
-    - "That's a hot topic for sure! Appreciate you sharing your take on it."
-    
-    **Calling out bad behavior (when warranted):**
-    - "Hey, let's keep things constructive here. This community is about supporting each other."
-    - "That kind of language isn't what this space is about. We're here to have good conversations."
-    - "I get that frustrations run high sometimes, but let's keep the discussion respectful."
+    ## CRITICAL: CHARACTER LIMIT ENFORCEMENT
+    🚨 **DISCORD CHARACTER LIMIT: Your response MUST be under 2000 characters.** 🚨
+    - Never send responses that exceed 2000 characters - Discord will reject them
+    - This is a strict platform constraint that cannot be violated
+
+    🚨 CRITICAL SAFETY RULE: If ANY message mentions mental health crises, suicide, self-harm, or dark thoughts - you MUST respond with exactly "SKIP_RESPONSE" - NO EXCEPTIONS.
+
+    ## CRITICAL: CONTEXTUAL CONTENT FILTERING
+    BEFORE responding to ANY mention, analyze the conversation context carefully:
+
+    **SKIP_RESPONSE scenarios (respond with exactly "SKIP_RESPONSE"):**
+    - MENTAL HEALTH CRISES: Any mention of suicide, self-harm, dark thoughts, depression, or serious mental health issues - ALWAYS SKIP, let human moderators handle
+    - User is PERSISTENTLY pushing political/controversial topics after redirection attempts
+    - User is being AGGRESSIVE, hostile, or inflammatory toward the agent or other users
+    - User is repeatedly ignoring community guidelines after being redirected
+    - Discussion involves illegal activities or content that requires human intervention
+    - Discussion is clearly designed to bait arguments or cause division
+
+    IMPORTANT: Mental health crises MUST be skipped - do NOT provide therapy, advice, or resources. Human moderators will handle these appropriately.
     """
 
-    context_messages: str = dspy.InputField(description="Recent conversation messages for context")
+    context: str = dspy.InputField(description="Recent conversation messages and channel information for context")
     user_mention: str = dspy.InputField(description="What the user said when mentioning the bot")
-    messages_remaining: int = dspy.InputField(description="Number of help messages user can send after this one (0 = this is their last message)")
-    response: str = dspy.OutputField(description="CRITICAL: Your response MUST be under 2000 characters. Discord has a strict 2000 character limit. Count characters and adjust content to fit within this limit. Conversational response that engages with the discussion")
+    messages_remaining: int = dspy.InputField(description="Number of messages user can send after this one (0 = this is their last message)")
+    response: str = dspy.OutputField(description="Conversational response that engages with the discussion. CRITICAL: Your response MUST be under 2000 characters. Discord has a strict 2000 character limit.")
 
 
 class HelpAgentSignature(dspy.Signature):
@@ -639,17 +589,13 @@ class HelpAgent:
                 if not is_bot_message and msg.author_roles:
                     roles_str = ", ".join(msg.author_roles)
                     message_parts.append(f"<author-roles>{html.escape(roles_str)}</author-roles>")
-                
-                # Add OP indicator for forum threads
-                if msg.is_original_poster:
-                    message_parts.append("<is-op>true</is-op>")
 
                 # Add reply context if present
                 if msg.replied_to_author and msg.replied_to_content:
                     message_parts.append(
                         f"<replying-to>"
-                        f"<replied-author>{html.escape(msg.replied_to_author)}</replied-author>"
-                        f"<replied-content>{html.escape(msg.replied_to_content)}</replied-content>"
+                        f"<author>{html.escape(msg.replied_to_author)}</author>"
+                        f"<content>{html.escape(msg.replied_to_content)}</content>"
                         f"</replying-to>"
                     )
                 
@@ -658,7 +604,8 @@ class HelpAgent:
                 
                 # Combine into message element
                 message_xml = (
-                    f"<message{' from-bot="true"' if is_bot_message else ''}>"
+                    f"<message{' from-bot="true"' if is_bot_message else ''}"
+                    f"{' is-op="true"' if msg.is_original_poster else ''}>"
                     f"{chr(10).join(message_parts)}"
                     f"</message>"
                 )
@@ -1621,11 +1568,110 @@ class StreakCelebrationSignature(dspy.Signature):
     response: str = dspy.OutputField(description="Very fun celebration message!")
 
 
+class ForumTopicClassificationSignature(dspy.Signature):
+    """You are an AI topic classifier that categorizes forum posts into predefined notification topics.
+    
+    ## YOUR ROLE
+    You analyze forum posts and classify them into relevant notification topics based on the post's content,
+    title, tags, and attachments. Your classifications help notify users who are interested in specific topics.
+    
+    ## CLASSIFICATION PROCESS
+    1. **Read available topics carefully** - these are predefined topics users can subscribe to
+    2. **Analyze the post thoroughly** - consider title, content, author, tags, and attachments
+    3. **Identify matching topics** - select only topics that genuinely match the post content
+    4. **Be selective but accurate** - it's better to miss a topic than incorrectly classify
+    
+    ## CLASSIFICATION CRITERIA
+    - **Relevance**: Does the post content genuinely relate to this topic?
+    - **Intent**: What is the poster trying to discuss or achieve?
+    - **Context**: Consider tags, title, and content together
+    - **Accuracy**: Only classify if you're confident in the match
+    
+    ## GUIDELINES
+    - Multiple topics can apply to a single post
+    - If no topics match, return an empty list
+    - Consider both explicit mentions and implicit themes
+    - Don't over-classify - be conservative but accurate
+    - Focus on the main themes/subjects of the post
+    
+    ## OUTPUT FORMAT
+    - **matching_topics**: List of topic names that apply to this post (can be empty)
+    """
+    
+    available_topics: list = dspy.InputField(description="List of available topic names for this forum")
+    post_context: str = dspy.InputField(description="Complete forum post information including title, content, author, tags, and attachments")
+    matching_topics: list = dspy.OutputField(description="List of topic names that match this post (empty list if no matches)")
+
+
+class ForumCombinedSignature(dspy.Signature):
+    """You are an AI agent that both evaluates forum posts for responses AND classifies them into notification topics.
+    
+    ## YOUR DUAL ROLE
+    You perform two tasks simultaneously:
+    1. Evaluate whether to generate a response (like ForumMonitorSignature)
+    2. Classify the post into relevant notification topics (like ForumTopicClassificationSignature)
+    
+    ## RESPONSE EVALUATION (Same as ForumMonitorSignature)
+    You evaluate new forum posts based on your system prompt and decide if they warrant a response.
+    You should be helpful but selective - only respond when you can provide genuine value.
+    
+    ### DECISION CRITERIA FOR RESPONSES
+    - **Relevance**: Does this match your area of expertise defined in the system prompt?
+    - **Quality**: Is this a genuine question/discussion that needs help?
+    - **Value**: Can you provide meaningful assistance?
+    - **Appropriateness**: Is a response appropriate given the context?
+    
+    ### RESPONSE GUIDELINES
+    - Be helpful, accurate, and concise
+    - Match the tone and complexity to the question
+    - Provide actionable advice when possible
+    - Acknowledge when you're unsure or need more information
+    - Don't respond to spam, off-topic, or inappropriate content
+    
+    ## TOPIC CLASSIFICATION (Same as ForumTopicClassificationSignature)
+    You also classify posts into predefined notification topics to help notify interested users.
+    
+    ### CLASSIFICATION CRITERIA
+    - **Relevance**: Does the post content genuinely relate to this topic?
+    - **Intent**: What is the poster trying to discuss or achieve?
+    - **Context**: Consider tags, title, and content together
+    - **Accuracy**: Only classify if you're confident in the match
+    
+    ### CLASSIFICATION GUIDELINES
+    - Multiple topics can apply to a single post
+    - If no topics match, return an empty list
+    - Be selective but accurate - it's better to miss a topic than incorrectly classify
+    - Focus on the main themes/subjects of the post
+    
+    ## CONFIDENCE SCORE - CRITICAL UNDERSTANDING
+    The confidence score represents your confidence that you SHOULD SEND A RESPONSE:
+    - **1.0**: Maximum confidence you should respond
+    - **0.0**: Should NOT respond
+    Higher values mean you are more confident that sending a response would be valuable.
+    
+    ## OUTPUT FORMAT
+    - **decision**: Clear explanation of why you should/shouldn't respond
+    - **confidence**: MESSAGE SEND confidence score (0.0 to 1.0) - higher means more likely to send
+    - **response**: Your actual response (empty string if not responding)
+    - **matching_topics**: List of topic names that apply to this post (can be empty)
+    """
+    
+    system_prompt: str = dspy.InputField(description="Your specific role and response criteria")
+    available_topics: list = dspy.InputField(description="List of available topic names for this forum")
+    post_context: str = dspy.InputField(description="Complete forum post information including title, content, author, tags, and attachments")
+    decision: str = dspy.OutputField(description="Explanation of whether and why to respond")
+    confidence: float = dspy.OutputField(description="Message send confidence score (0.0-1.0) - higher values mean more confident you should send a response")
+    response: str = dspy.OutputField(description="Generated response content (empty if not responding)")
+    matching_topics: list = dspy.OutputField(description="List of topic names that match this post (empty list if no matches)")
+
+
 class ForumMonitorAgent:
     """Discord forum monitoring agent using Gemini for post evaluation and response generation."""
 
     def __init__(self):
         self._agent = dspy.ChainOfThought(ForumMonitorSignature)
+        self._topic_classifier = dspy.ChainOfThought(ForumTopicClassificationSignature)
+        self._combined_agent = dspy.ChainOfThought(ForumCombinedSignature)
 
     async def evaluate_post(
         self,
@@ -1820,6 +1866,206 @@ class ForumMonitorAgent:
         confidence = max(0.0, min(1.0, float(result.confidence)))
 
         return result.decision, confidence, result.response, tokens_used
+
+    async def classify_topics_only(
+        self,
+        available_topics: list[str],
+        post_title: str,
+        post_content: str,
+        author_display_name: str,
+        post_tags: list[str] = None,
+        attachment_names: list[str] = None
+    ) -> tuple[list[str], int]:
+        """Classify a forum post into notification topics only (no response generation).
+        
+        Args:
+            available_topics: List of topic names available for this forum
+            post_title: Title of the forum post
+            post_content: Content of the forum post
+            author_display_name: Display name of the post author
+            post_tags: List of tags on the post
+            attachment_names: List of attachment filenames
+            
+        Returns:
+            tuple[list[str], int]: Matching topic names, tokens used
+        """
+        # Format post context for the AI (reuse the same format as evaluate_post)
+        post_tags = post_tags or []
+        attachment_names = attachment_names or []
+
+        context_parts = [
+            "<post>",
+            f"<title>{html.escape(post_title)}</title>",
+            f"<author>{html.escape(author_display_name)}</author>",
+            f"<content>{html.escape(post_content)}</content>",
+        ]
+
+        if post_tags:
+            tags_str = ", ".join(html.escape(tag) for tag in post_tags)
+            context_parts.append(f"<tags>{html.escape(tags_str)}</tags>")
+
+        if attachment_names:
+            attachments_str = ", ".join(html.escape(name) for name in attachment_names)
+            context_parts.append(f"<attachments>{html.escape(attachments_str)}</attachments>")
+
+        context_parts.append("</post>")
+        post_context = "\n".join(context_parts)
+
+        # Generate topic classification using async agent
+        async_classifier = dspy.asyncify(self._topic_classifier)
+        result = await async_classifier(
+            available_topics=available_topics,
+            post_context=post_context
+        )
+
+        # Extract token usage (reuse the same logic as evaluate_post)
+        tokens_used = self._extract_tokens_used(result)
+
+        # Ensure matching_topics is a list and filter out any empty/invalid topics
+        matching_topics = result.matching_topics or []
+        if isinstance(matching_topics, str):
+            # Handle case where AI returns a comma-separated string instead of list
+            matching_topics = [topic.strip() for topic in matching_topics.split(",") if topic.strip()]
+        
+        # Filter to only include topics that are actually available
+        valid_topics = [topic for topic in matching_topics if topic in available_topics]
+
+        return valid_topics, tokens_used
+
+    async def evaluate_post_combined(
+        self,
+        system_prompt: str,
+        available_topics: list[str],
+        post_title: str,
+        post_content: str,
+        author_display_name: str,
+        post_tags: list[str] = None,
+        attachment_names: list[str] = None
+    ) -> tuple[str, float, str, list[str], int]:
+        """Evaluate a forum post for both response generation AND topic classification.
+        
+        Args:
+            system_prompt: Agent's specific role and criteria
+            available_topics: List of topic names available for this forum
+            post_title: Title of the forum post
+            post_content: Content of the forum post
+            author_display_name: Display name of the post author
+            post_tags: List of tags on the post
+            attachment_names: List of attachment filenames
+            
+        Returns:
+            tuple[str, float, str, list[str], int]: Decision reason, confidence score, response content, matching topics, tokens used
+        """
+        # Format post context for the AI (reuse the same format as evaluate_post)
+        post_tags = post_tags or []
+        attachment_names = attachment_names or []
+
+        context_parts = [
+            "<post>",
+            f"<title>{html.escape(post_title)}</title>",
+            f"<author>{html.escape(author_display_name)}</author>",
+            f"<content>{html.escape(post_content)}</content>",
+        ]
+
+        if post_tags:
+            tags_str = ", ".join(html.escape(tag) for tag in post_tags)
+            context_parts.append(f"<tags>{html.escape(tags_str)}</tags>")
+
+        if attachment_names:
+            attachments_str = ", ".join(html.escape(name) for name in attachment_names)
+            context_parts.append(f"<attachments>{html.escape(attachments_str)}</attachments>")
+
+        context_parts.append("</post>")
+        post_context = "\n".join(context_parts)
+
+        # Generate combined evaluation and topic classification using async agent
+        async_combined = dspy.asyncify(self._combined_agent)
+        result = await async_combined(
+            system_prompt=system_prompt,
+            available_topics=available_topics,
+            post_context=post_context
+        )
+
+        # Extract token usage (reuse the same logic as evaluate_post)
+        tokens_used = self._extract_tokens_used(result)
+
+        # Ensure confidence is bounded between 0.0 and 1.0
+        confidence = max(0.0, min(1.0, float(result.confidence)))
+
+        # Ensure matching_topics is a list and filter out any empty/invalid topics
+        matching_topics = result.matching_topics or []
+        if isinstance(matching_topics, str):
+            # Handle case where AI returns a comma-separated string instead of list
+            matching_topics = [topic.strip() for topic in matching_topics.split(",") if topic.strip()]
+        
+        # Filter to only include topics that are actually available
+        valid_topics = [topic for topic in matching_topics if topic in available_topics]
+
+        return result.decision, confidence, result.response, valid_topics, tokens_used
+
+    def _extract_tokens_used(self, result) -> int:
+        """Extract token usage from DSPy result. Reuses the same logic from evaluate_post."""
+        tokens_used = 0
+
+        # Method 1: Use DSPy's built-in get_lm_usage() method (preferred approach)
+        try:
+            usage_data = result.get_lm_usage()
+            if usage_data:
+                # Extract tokens from the usage data dictionary
+                for model_name, usage_info in usage_data.items():
+                    if isinstance(usage_info, dict):
+                        if "total_tokens" in usage_info:
+                            tokens_used += usage_info["total_tokens"]
+                        elif "prompt_tokens" in usage_info and "completion_tokens" in usage_info:
+                            tokens_used += usage_info["prompt_tokens"] + usage_info["completion_tokens"]
+                        elif "input_tokens" in usage_info and "output_tokens" in usage_info:
+                            tokens_used += usage_info["input_tokens"] + usage_info["output_tokens"]
+        except Exception:
+            pass
+
+        # Method 2: Extract from LM history (fallback for Gemini API bug)
+        if tokens_used == 0:
+            try:
+                current_lm = dspy.settings.lm
+                if current_lm and hasattr(current_lm, "history") and current_lm.history:
+                    latest_entry = current_lm.history[-1]  # Get the most recent API call
+
+                    # Check response.usage in history (most reliable for Gemini)
+                    if "response" in latest_entry and hasattr(latest_entry["response"], "usage"):
+                        response_usage = latest_entry["response"].usage
+                        if hasattr(response_usage, "total_tokens"):
+                            tokens_used = response_usage.total_tokens
+                        elif hasattr(response_usage, "prompt_tokens") and hasattr(response_usage, "completion_tokens"):
+                            tokens_used = response_usage.prompt_tokens + response_usage.completion_tokens
+
+                    # Check for usage field in history
+                    elif "usage" in latest_entry and latest_entry["usage"]:
+                        usage = latest_entry["usage"]
+                        if isinstance(usage, dict):
+                            if "total_tokens" in usage:
+                                tokens_used = usage["total_tokens"]
+                            elif "prompt_tokens" in usage and "completion_tokens" in usage:
+                                tokens_used = usage["prompt_tokens"] + usage["completion_tokens"]
+
+                    # Fallback: estimate from cost (Gemini-specific)
+                    elif "cost" in latest_entry and latest_entry["cost"] > 0:
+                        cost = latest_entry["cost"]
+                        # Rough estimation: Gemini Flash pricing ~$0.075 per million tokens
+                        estimated_tokens = int(cost * 13333333)
+                        tokens_used = estimated_tokens
+
+            except Exception:
+                pass
+
+        # Final fallback: estimate tokens from text length if all methods fail
+        if tokens_used == 0:
+            # Rough estimation: ~4 characters per token for English text
+            input_text_length = 1000  # Conservative estimate for input
+            output_text_length = len(str(getattr(result, 'matching_topics', []))) + len(str(getattr(result, 'response', ''))) + len(str(getattr(result, 'decision', '')))
+            estimated_tokens = (input_text_length + output_text_length) // 4
+            tokens_used = estimated_tokens
+
+        return tokens_used
 
 
 class StreakCelebrationAgent:
