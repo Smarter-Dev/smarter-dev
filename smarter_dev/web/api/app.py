@@ -29,6 +29,7 @@ from smarter_dev.web.api.routers.squads import router as squads_router
 from smarter_dev.web.api.routers.squad_sale_events import router as squad_sale_events_router
 from smarter_dev.web.api.routers.admin import router as admin_router
 from smarter_dev.web.api.routers.forum_agents_simple import router as forum_agents_router
+from smarter_dev.web.api.routers.forum_notifications import router as forum_notifications_router
 from smarter_dev.web.api.routers.challenges import router as challenges_router
 from smarter_dev.web.api.routers.scheduled_messages import router as scheduled_messages_router
 from smarter_dev.web.api.routers.repeating_messages import router as repeating_messages_router
@@ -392,6 +393,11 @@ api.include_router(
 api.include_router(
     forum_agents_router,
     tags=["Forum Agents"]
+)
+
+api.include_router(
+    forum_notifications_router,
+    tags=["Forum Notifications"]
 )
 
 api.include_router(
