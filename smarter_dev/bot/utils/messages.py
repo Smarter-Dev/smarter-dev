@@ -9,7 +9,7 @@ from __future__ import annotations
 import hikari
 import logging
 import re
-from datetime import timezone
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Set
 
 from smarter_dev.bot.agent import DiscordMessage
@@ -316,7 +316,7 @@ class ConversationContextBuilder:
             trigger_message_id: Message ID that triggered the agent (for marking new messages)
             
         Returns:
-            Dict with channel_messages, users, channel, and me fields
+            Dict with conversation_timeline, users, channel, and me fields
         """
         # Load guild roles if we have guild context
         if self.guild_id:
@@ -326,14 +326,18 @@ class ConversationContextBuilder:
         messages = await self._fetch_base_messages(channel_id, limit=20)
         messages = await self._complete_reply_threads(messages)
         
-        # Build structured context
-        channel_messages = await self._build_message_list(messages, trigger_message_id)
+        # Build user info first so we can enrich the timeline
         users = await self._build_user_list(messages)
+        users_by_id = {user["user_id"]: user for user in users}
+        
+        # Build conversation timeline with enriched user info
+        conversation_timeline = await self._build_conversation_timeline(messages, trigger_message_id, users_by_id)
+        
         channel_info = await self._build_channel_info(channel_id)
         me_info = self._build_me_info()
         
         return {
-            "channel_messages": channel_messages,
+            "conversation_timeline": conversation_timeline,
             "users": users, 
             "channel": channel_info,
             "me": me_info
@@ -418,6 +422,140 @@ class ConversationContextBuilder:
             message_list.append(message_dict)
             
         return message_list
+        
+    async def _build_conversation_timeline(self, messages: List[hikari.Message], trigger_message_id: Optional[int], users_by_id: Dict[str, Dict]) -> str:
+        """Build a human-readable conversation timeline.
+        
+        Args:
+            messages: List of Discord messages
+            trigger_message_id: ID of message that triggered the agent
+            users_by_id: Dict mapping user IDs to user info
+            
+        Returns:
+            String representing the conversation timeline
+        """
+        timeline_parts = []
+        trigger_timestamp = None
+        
+        # Find trigger message timestamp
+        if trigger_message_id:
+            trigger_msg = next((m for m in messages if m.id == trigger_message_id), None)
+            if trigger_msg:
+                trigger_timestamp = trigger_msg.created_at
+        
+        # Build timeline entries
+        for message in messages:
+            # Get user display name
+            user_info = users_by_id.get(str(message.author.id), {})
+            display_name = user_info.get("discord_name", f"User{message.author.id}")
+            
+            # Check if user is bot
+            is_bot = user_info.get("is_bot", False)
+            if is_bot and "bot_name" in user_info:
+                display_name = user_info["bot_name"]
+            
+            # Resolve mentions in content
+            content = await resolve_mentions(message.content or "", self.bot, self.guild_id)
+            
+            # Add attachment info
+            if message.attachments:
+                attachment_info = []
+                for attachment in message.attachments:
+                    if hasattr(attachment, 'filename') and attachment.filename:
+                        attachment_info.append(f"📎 {attachment.filename}")
+                        
+                if attachment_info:
+                    content = f"{content} {' '.join(attachment_info)}".strip()
+            
+            # Determine if message is "new" (recent activity)
+            is_new = False
+            if trigger_timestamp:
+                is_new = (message.created_at >= trigger_timestamp or message.id == trigger_message_id)
+            
+            # Format timestamp
+            time_str = message.created_at.strftime("%H:%M")
+            
+            # Handle reply context
+            reply_context = ""
+            if message.referenced_message:
+                # Find the replied-to message in our list
+                replied_msg = next((m for m in messages if m.id == message.referenced_message.id), None)
+                if replied_msg:
+                    replied_user_info = users_by_id.get(str(replied_msg.author.id), {})
+                    replied_display_name = replied_user_info.get("discord_name", f"User{replied_msg.author.id}")
+                    if replied_user_info.get("is_bot", False) and "bot_name" in replied_user_info:
+                        replied_display_name = replied_user_info["bot_name"]
+                    
+                    replied_content = (replied_msg.content or "")[:50]
+                    if len(replied_msg.content or "") > 50:
+                        replied_content += "..."
+                    
+                    reply_context = f" (replying to {replied_display_name}: \"{replied_content}\")"
+            
+            # Build timeline entry
+            new_indicator = " [NEW]" if is_new else ""
+            timeline_entry = f"[{time_str}] {display_name}{reply_context}: {content}{new_indicator}"
+            
+            timeline_parts.append(timeline_entry)
+        
+        # Add context header
+        channel_name = "#unknown"
+        try:
+            channel = await self.bot.rest.fetch_channel(messages[0].channel_id)
+            if hasattr(channel, 'name'):
+                channel_name = f"#{channel.name}"
+        except Exception:
+            pass
+            
+        header = f"\n=== Conversation in {channel_name} ===\n"
+        footer = "\n=== End of conversation ===\n"
+        
+        # Add summary if conversation is long
+        full_timeline = header + "\n".join(timeline_parts) + footer
+        
+        if len(timeline_parts) > 8:  # Add summary for longer conversations
+            summary = self._generate_conversation_summary(messages, users_by_id)
+            full_timeline = summary + "\n" + full_timeline
+            
+        return full_timeline
+        
+    def _generate_conversation_summary(self, messages: List[hikari.Message], users_by_id: Dict[str, Dict]) -> str:
+        """Generate a brief summary of the conversation."""
+        if len(messages) < 3:
+            return ""
+            
+        # Count participants
+        participants = set()
+        topics = []
+        
+        for message in messages:
+            user_info = users_by_id.get(str(message.author.id), {})
+            display_name = user_info.get("discord_name", f"User{message.author.id}")
+            participants.add(display_name)
+            
+            # Extract potential topics (simple keywords)
+            content = (message.content or "").lower()
+            if len(content) > 20:  # Only consider substantial messages
+                topics.append(content[:50] + "..." if len(content) > 50 else content)
+        
+        participant_list = ", ".join(list(participants)[:5])  # Limit to first 5
+        if len(participants) > 5:
+            participant_list += f" and {len(participants) - 5} others"
+            
+        summary_parts = [
+            f"=== Conversation Summary ===",
+            f"Participants: {participant_list}",
+            f"Messages: {len(messages)} total"
+        ]
+        
+        # Add recent activity note if applicable  
+        recent_messages = [m for m in messages if (datetime.now(timezone.utc) - m.created_at).total_seconds() < 300]
+        if recent_messages:
+            summary_parts.append(f"Recent activity: {len(recent_messages)} new messages in last 5 minutes")
+            
+        summary_parts.append("=" * 30)
+        
+        return "\n".join(summary_parts)
         
     async def _build_user_list(self, messages: List[hikari.Message]) -> List[Dict[str, Any]]:
         """Build the users list from all users mentioned or who sent messages."""
