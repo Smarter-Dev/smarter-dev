@@ -47,6 +47,8 @@ async def get_forum_agents(
                 "system_prompt": agent.system_prompt,
                 "monitored_forums": agent.monitored_forums,
                 "is_active": agent.is_active,
+                "enable_responses": agent.enable_responses,
+                "enable_user_tagging": agent.enable_user_tagging,
                 "response_threshold": agent.response_threshold,
                 "max_responses_per_hour": agent.max_responses_per_hour,
                 "created_by": agent.created_by,
