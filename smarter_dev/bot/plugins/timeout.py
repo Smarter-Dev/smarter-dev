@@ -129,7 +129,7 @@ async def timeout_user(ctx: lightbulb.Context) -> None:
         await ctx.respond("❌ Error checking permissions. Please try again.", flags=hikari.MessageFlag.EPHEMERAL)
         return
     
-    # Defer response as we'll be doing AI processing
+    # Defer response as we'll be doing AI processing (ephemeral so only moderator sees "thinking")
     await ctx.respond(hikari.ResponseType.DEFERRED_MESSAGE_CREATE, flags=hikari.MessageFlag.EPHEMERAL)
     
     try:
@@ -144,6 +144,7 @@ async def timeout_user(ctx: lightbulb.Context) -> None:
         
         # Generate AI-processed public message
         try:
+            logger.info(f"Starting AI message processing for timeout of {target_user.username}")
             from smarter_dev.bot.agent import ForumMonitorAgent
             ai_agent = ForumMonitorAgent()
             
@@ -164,12 +165,12 @@ async def timeout_user(ctx: lightbulb.Context) -> None:
                 Keep it concise (1-2 sentences) and professional.
                 
                 Examples:
-                - Raw: "spamming like crazy" → "has been timed out for excessive messaging"
-                - Raw: "being a total jerk to everyone" → "has been timed out for inappropriate behavior toward other members"  
-                - Raw: "won't stop arguing about politics" → "has been timed out for continuing off-topic discussions after warnings"
+                - Raw: "spamming like crazy" → "<@123456789> has been timed out for excessive messaging"
+                - Raw: "being a total jerk to everyone" → "<@123456789> has been timed out for inappropriate behavior toward other members"  
+                - Raw: "won't stop arguing about politics" → "<@123456789> has been timed out for continuing off-topic discussions after warnings"
                 """
                 
-                username: str = dspy.InputField(description="Username of the timed out user")
+                user_mention: str = dspy.InputField(description="Discord mention of the timed out user")
                 raw_reason: str = dspy.InputField(description="Raw reason provided by the moderator")
                 duration: str = dspy.InputField(description="Human-readable duration (e.g., '10 minutes', '1 hour')")
                 polite_message: str = dspy.OutputField(description="Professional, polite timeout notification message for the channel")
@@ -189,21 +190,25 @@ async def timeout_user(ctx: lightbulb.Context) -> None:
                 duration_display = f"{days} day{'s' if days != 1 else ''}"
             
             # Generate the polite message
+            logger.info(f"Calling AI agent with mention={target_user.mention}, reason={mod_reason}, duration={duration_display}")
             result = await dspy.asyncify(timeout_agent)(
-                username=target_user.username,
+                user_mention=target_user.mention,
                 raw_reason=mod_reason,
                 duration=duration_display
             )
             
             public_message = result.polite_message
+            logger.info(f"AI generated message: {public_message}")
             
         except Exception as e:
-            logger.error(f"Error generating AI message: {e}")
+            logger.error(f"Error generating AI message: {e}", exc_info=True)
             # Fallback to simple message
             public_message = f"{target_user.mention} has been timed out for {duration_display}."
         
-        # Post public message in channel
-        await ctx.edit_last_response(public_message)
+        # Update the ephemeral response for moderator and post public message
+        logger.info(f"Posting public message: {public_message}")
+        await ctx.edit_last_response("✅ Timeout applied successfully.")
+        await ctx.bot.rest.create_message(ctx.channel_id, public_message)
         
         # Send DM to the timed out user
         try:
