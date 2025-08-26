@@ -1525,6 +1525,58 @@ def validate_forum_agent_data(data: Dict[str, Any]) -> tuple[bool, List[str]]:
         data["monitored_forums"] = monitored_forums
         # Note: Empty list is allowed - it means monitor all forum channels
     
+    # User tagging settings validation
+    enable_responses = data.get("enable_responses") == "on"
+    enable_user_tagging = data.get("enable_user_tagging") == "on"
+    
+    # At least one mode must be enabled
+    if not enable_responses and not enable_user_tagging:
+        errors.append("At least one mode must be enabled (responses or user tagging)")
+    
+    # Store boolean values in data
+    data["enable_responses"] = enable_responses
+    data["enable_user_tagging"] = enable_user_tagging
+    
+    # Notification topics validation (only if user tagging is enabled)
+    if enable_user_tagging:
+        notification_topics = data.get("notification_topics", [])
+        if not isinstance(notification_topics, list):
+            errors.append("Notification topics must be a list")
+        else:
+            # Filter out empty strings and limit to 25 topics
+            topics = [topic.strip() for topic in notification_topics if topic and topic.strip()]
+            if len(topics) > 25:
+                errors.append("Maximum 25 notification topics allowed")
+            elif len(topics) == 0:
+                errors.append("At least one notification topic is required when user tagging is enabled")
+            
+            # Validate topic names
+            for topic in topics:
+                if len(topic) > 100:
+                    errors.append(f"Topic name '{topic}' is too long (max 100 characters)")
+                elif len(topic) < 1:
+                    errors.append("Topic names cannot be empty")
+            
+            # Update data with cleaned topics list
+            data["notification_topics"] = topics
+            
+            # Handle topic descriptions (optional)
+            topic_descriptions = data.get("notification_topic_descriptions", [])
+            if isinstance(topic_descriptions, list):
+                descriptions = [desc.strip() if desc else "" for desc in topic_descriptions]
+                # Pad descriptions list to match topics length
+                while len(descriptions) < len(topics):
+                    descriptions.append("")
+                # Trim descriptions list to match topics length
+                descriptions = descriptions[:len(topics)]
+                data["notification_topic_descriptions"] = descriptions
+            else:
+                data["notification_topic_descriptions"] = [""] * len(topics)
+    else:
+        # Clear topics if tagging is disabled
+        data["notification_topics"] = []
+        data["notification_topic_descriptions"] = []
+    
     return len(errors) == 0, errors
 
 
@@ -1602,14 +1654,20 @@ async def forum_agent_create(request: Request) -> Response:
                 "max_responses_per_hour": form_data.get("max_responses_per_hour", "5"),
                 "monitored_forums": form_data.getlist("monitored_forums[]"),
                 "is_active": form_data.get("is_active") == "on",
+                "enable_responses": form_data.get("enable_responses"),
+                "enable_user_tagging": form_data.get("enable_user_tagging"),
+                "notification_topics": form_data.getlist("notification_topics[]"),
+                "notification_topic_descriptions": form_data.getlist("notification_topic_descriptions[]"),
             }
             
             # Validate data
             is_valid, errors = validate_forum_agent_data(data)
             
             # Debug logging
-            logger.info(f"Forum agent form data: {data}")
-            logger.info(f"Validation result: valid={is_valid}, errors={errors}")
+            logger.info(f"Forum agent CREATE form data: {data}")
+            logger.info(f"CREATE validation result: valid={is_valid}, errors={errors}")
+            logger.info(f"CREATE enable_user_tagging: {data.get('enable_user_tagging')}, enable_responses: {data.get('enable_responses')}")
+            logger.info(f"CREATE notification_topics: {data.get('notification_topics')}")
             
             if not is_valid:
                 context = {
@@ -1634,7 +1692,11 @@ async def forum_agent_create(request: Request) -> Response:
                         response_threshold=float(data["response_threshold"]),
                         max_responses_per_hour=int(data["max_responses_per_hour"]),
                         is_active=data.get("is_active", True),
-                        created_by="admin"  # TODO: Get from authenticated user
+                        created_by="admin",  # TODO: Get from authenticated user
+                        enable_user_tagging=data.get("enable_user_tagging", False),
+                        enable_responses=data.get("enable_responses", True),
+                        notification_topics=data.get("notification_topics", []),
+                        notification_topic_descriptions=data.get("notification_topic_descriptions", [])
                     )
                     
                     # Redirect to agents list
@@ -1694,11 +1756,46 @@ async def forum_agent_edit(request: Request) -> Response:
                 return templates.TemplateResponse("admin/error.html", context, status_code=404)
             
             if request.method == "GET":
+                # Load notification topics if agent has tagging enabled
+                notification_topics = []
+                logger.info(f"EDIT DEBUG: Agent {agent.name} - enable_user_tagging: {agent.enable_user_tagging}, enable_responses: {agent.enable_responses}")
+                if agent.enable_user_tagging:
+                    from smarter_dev.web.models import ForumNotificationTopic
+                    from sqlalchemy import select, and_
+                    
+                    # Get topics for all monitored forums (or all forums if none specified)
+                    forums_to_check = agent.monitored_forums or ["*"]
+                    
+                    for forum_id in forums_to_check:
+                        topics_stmt = select(ForumNotificationTopic).where(
+                            and_(
+                                ForumNotificationTopic.guild_id == guild_id,
+                                ForumNotificationTopic.forum_channel_id == forum_id
+                            )
+                        ).order_by(ForumNotificationTopic.topic_name)
+                        
+                        topics_result = await session.execute(topics_stmt)
+                        forum_topics = topics_result.scalars().all()
+                        
+                        for topic in forum_topics:
+                            if topic.topic_name not in [t["name"] for t in notification_topics]:
+                                notification_topics.append({
+                                    "name": topic.topic_name,
+                                    "description": topic.topic_description or ""
+                                })
+                        
+                        # Only process one forum for now (avoid duplicates)
+                        if forum_topics:
+                            break
+                
+                logger.info(f"EDIT DEBUG: Loaded {len(notification_topics)} topics: {[t['name'] for t in notification_topics]}")
+                
                 # Show edit form
                 context = {
                     "request": request,
                     "guild": guild_info,
                     "agent": agent,
+                    "notification_topics": notification_topics,
                     "title": f"Edit Forum Agent: {agent.name}",
                 }
                 return templates.TemplateResponse("admin/forum_agent_edit.html", context)
@@ -1714,6 +1811,10 @@ async def forum_agent_edit(request: Request) -> Response:
                     "max_responses_per_hour": form_data.get("max_responses_per_hour", "5"),
                     "monitored_forums": form_data.getlist("monitored_forums[]"),
                     "is_active": form_data.get("is_active") == "on",
+                    "enable_responses": form_data.get("enable_responses"),
+                    "enable_user_tagging": form_data.get("enable_user_tagging"),
+                    "notification_topics": form_data.getlist("notification_topics[]"),
+                    "notification_topic_descriptions": form_data.getlist("notification_topic_descriptions[]"),
                 }
                 
                 # Validate data
@@ -1722,6 +1823,8 @@ async def forum_agent_edit(request: Request) -> Response:
                 # Debug logging
                 logger.info(f"Forum agent EDIT form data: {data}")
                 logger.info(f"EDIT validation result: valid={is_valid}, errors={errors}")
+                logger.info(f"EDIT enable_user_tagging: {data.get('enable_user_tagging')}, enable_responses: {data.get('enable_responses')}")
+                logger.info(f"EDIT notification_topics: {data.get('notification_topics')}")
                 
                 if not is_valid:
                     context = {
@@ -1745,7 +1848,11 @@ async def forum_agent_edit(request: Request) -> Response:
                         monitored_forums=data["monitored_forums"],
                         response_threshold=float(data["response_threshold"]),
                         max_responses_per_hour=int(data["max_responses_per_hour"]),
-                        is_active=data.get("is_active", True)
+                        is_active=data.get("is_active", True),
+                        enable_user_tagging=data.get("enable_user_tagging", False),
+                        enable_responses=data.get("enable_responses", True),
+                        notification_topics=data.get("notification_topics", []),
+                        notification_topic_descriptions=data.get("notification_topic_descriptions", [])
                     )
                     
                     # Redirect to agents list

@@ -27,6 +27,8 @@ from smarter_dev.web.models import (
     APIKey,
     ForumAgent,
     ForumAgentResponse,
+    ForumNotificationTopic,
+    ForumUserSubscription,
     Campaign,
     Challenge,
     ChallengeInput,
@@ -2030,7 +2032,11 @@ class ForumAgentOperations:
         max_responses_per_hour: int = 5,
         description: str = None,
         is_active: bool = True,
-        created_by: str = "admin"
+        created_by: str = "admin",
+        enable_user_tagging: bool = False,
+        enable_responses: bool = True,
+        notification_topics: List[str] = None,
+        notification_topic_descriptions: List[str] = None
     ) -> ForumAgent:
         """Create a new forum agent.
         
@@ -2044,6 +2050,10 @@ class ForumAgentOperations:
             description: Optional description
             is_active: Whether agent should be active immediately
             created_by: Who created the agent
+            enable_user_tagging: Whether agent should classify posts for user tagging
+            enable_responses: Whether agent should generate responses to posts
+            notification_topics: List of topic names for user notifications
+            notification_topic_descriptions: List of topic descriptions (optional)
             
         Returns:
             Created ForumAgent instance
@@ -2062,10 +2072,22 @@ class ForumAgentOperations:
                 response_threshold=response_threshold,
                 max_responses_per_hour=max_responses_per_hour,
                 is_active=is_active,
-                created_by=created_by
+                created_by=created_by,
+                enable_user_tagging=enable_user_tagging,
+                enable_responses=enable_responses,
+                notification_topics=notification_topics or []
             )
             
             self.session.add(agent)
+            
+            # Sync notification topics if user tagging is enabled
+            if enable_user_tagging and notification_topics:
+                await self.sync_notification_topics(
+                    agent, 
+                    notification_topics, 
+                    notification_topic_descriptions
+                )
+            
             await self.session.commit()
             await self.session.refresh(agent)
             
@@ -2148,12 +2170,27 @@ class ForumAgentOperations:
             if not agent:
                 return None
             
+            # Extract notification topics before applying other updates
+            notification_topics = updates.pop('notification_topics', None)
+            notification_topic_descriptions = updates.pop('notification_topic_descriptions', None)
+            
             # Apply updates
             for field, value in updates.items():
                 if hasattr(agent, field):
                     setattr(agent, field, value)
             
             agent.updated_at = datetime.now(timezone.utc)
+            
+            # Sync notification topics if user tagging is enabled
+            if agent.enable_user_tagging and notification_topics is not None:
+                await self.sync_notification_topics(
+                    agent, 
+                    notification_topics, 
+                    notification_topic_descriptions
+                )
+            elif not agent.enable_user_tagging:
+                # Clear topics if tagging is disabled
+                await self.sync_notification_topics(agent, [])
             
             await self.session.commit()
             await self.session.refresh(agent)
@@ -2459,6 +2496,98 @@ class ForumAgentOperations:
         except Exception as e:
             await self.session.rollback()
             raise DatabaseOperationError(f"Failed to perform bulk operation: {e}") from e
+
+    async def sync_notification_topics(
+        self,
+        agent: ForumAgent,
+        topic_names: List[str],
+        topic_descriptions: List[str] = None
+    ) -> None:
+        """Sync notification topics for a forum agent.
+        
+        Creates ForumNotificationTopic records for each monitored forum channel.
+        Removes topics that are no longer in the list and adds new ones.
+        
+        Args:
+            agent: ForumAgent instance
+            topic_names: List of topic names
+            topic_descriptions: Optional list of topic descriptions
+        """
+        try:
+            if not topic_names:
+                # Remove all topics if none specified
+                delete_stmt = delete(ForumNotificationTopic).where(
+                    and_(
+                        ForumNotificationTopic.guild_id == agent.guild_id,
+                        ForumNotificationTopic.forum_channel_id.in_(agent.monitored_forums or [])
+                    )
+                )
+                await self.session.execute(delete_stmt)
+                return
+
+            # Ensure descriptions list matches topics list length
+            descriptions = topic_descriptions or []
+            while len(descriptions) < len(topic_names):
+                descriptions.append("")
+            
+            # Process each monitored forum (or empty list if monitoring all)
+            forums_to_process = agent.monitored_forums or ["*"]  # "*" represents all forums
+            
+            for forum_id in forums_to_process:
+                # Get existing topics for this forum
+                existing_stmt = select(ForumNotificationTopic).where(
+                    and_(
+                        ForumNotificationTopic.guild_id == agent.guild_id,
+                        ForumNotificationTopic.forum_channel_id == forum_id
+                    )
+                )
+                existing_topics = list((await self.session.execute(existing_stmt)).scalars().all())
+                existing_topic_names = {topic.topic_name for topic in existing_topics}
+                
+                # Remove topics not in the new list
+                topics_to_remove = existing_topic_names - set(topic_names)
+                if topics_to_remove:
+                    remove_stmt = delete(ForumNotificationTopic).where(
+                        and_(
+                            ForumNotificationTopic.guild_id == agent.guild_id,
+                            ForumNotificationTopic.forum_channel_id == forum_id,
+                            ForumNotificationTopic.topic_name.in_(topics_to_remove)
+                        )
+                    )
+                    await self.session.execute(remove_stmt)
+                
+                # Add new topics
+                topics_to_add = set(topic_names) - existing_topic_names
+                for i, topic_name in enumerate(topic_names):
+                    if topic_name in topics_to_add:
+                        new_topic = ForumNotificationTopic(
+                            guild_id=agent.guild_id,
+                            forum_channel_id=forum_id,
+                            topic_name=topic_name,
+                            topic_description=descriptions[i] if i < len(descriptions) else ""
+                        )
+                        self.session.add(new_topic)
+                
+                # Update descriptions for existing topics
+                for i, topic_name in enumerate(topic_names):
+                    if topic_name not in topics_to_add:
+                        # Update existing topic description
+                        update_stmt = update(ForumNotificationTopic).where(
+                            and_(
+                                ForumNotificationTopic.guild_id == agent.guild_id,
+                                ForumNotificationTopic.forum_channel_id == forum_id,
+                                ForumNotificationTopic.topic_name == topic_name
+                            )
+                        ).values(
+                            topic_description=descriptions[i] if i < len(descriptions) else ""
+                        )
+                        await self.session.execute(update_stmt)
+            
+            # Note: We don't commit here - let the calling function handle it
+            
+        except Exception as e:
+            logger.error(f"Error syncing notification topics for agent {agent.id}: {e}")
+            raise DatabaseOperationError(f"Failed to sync notification topics: {e}") from e
 
 
 class CampaignOperations:
