@@ -1057,6 +1057,28 @@ class ForumAgent(Base):
         doc="Maximum number of responses this agent can make per hour"
     )
     
+    # User tagging settings
+    enable_user_tagging: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        doc="Whether this agent performs topic classification for user tagging"
+    )
+    enable_responses: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        doc="Whether this agent generates AI responses to posts"
+    )
+    notification_topics: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        doc="List of topics this agent can classify posts into (max 25)"
+    )
+    
     # Audit fields
     created_by: Mapped[str] = mapped_column(
         String(100),
@@ -1261,6 +1283,187 @@ class ForumAgentResponse(Base):
         """String representation of the forum agent response."""
         status = "responded" if self.responded else "evaluated"
         return f"<ForumAgentResponse(agent_id='{self.agent_id}', thread_id='{self.thread_id}', status='{status}')>"
+
+
+class ForumNotificationTopic(Base):
+    """Available notification topics for forum user tagging.
+    
+    Defines the topics that forum agents can classify posts into for
+    user notifications. Each guild/forum combination can have up to 25 topics.
+    """
+    
+    __tablename__ = "forum_notification_topics"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique identifier for the notification topic"
+    )
+    
+    # Guild and forum context
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord guild (server) snowflake ID"
+    )
+    forum_channel_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord forum channel snowflake ID"
+    )
+    
+    # Topic definition
+    topic_name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Name of the notification topic"
+    )
+    topic_description: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        doc="Optional description of what this topic covers"
+    )
+    
+    # Audit timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the topic was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the topic was last updated"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_forum_notification_topics_guild_id", "guild_id"),
+        Index("ix_forum_notification_topics_forum_channel_id", "forum_channel_id"),
+        Index("ix_forum_notification_topics_guild_forum", "guild_id", "forum_channel_id"),
+        UniqueConstraint("guild_id", "forum_channel_id", "topic_name", name="uq_forum_notification_topics_guild_forum_topic"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize ForumNotificationTopic with default timestamps."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        super().__init__(**kwargs)
+    
+    def __repr__(self) -> str:
+        """String representation of the notification topic."""
+        return f"<ForumNotificationTopic(topic_name='{self.topic_name}', guild_id='{self.guild_id}')>"
+
+
+class ForumUserSubscription(Base):
+    """User subscriptions to forum notification topics.
+    
+    Tracks which users want to be notified about specific topics in
+    specific forum channels, with configurable expiration times.
+    """
+    
+    __tablename__ = "forum_user_subscriptions"
+    
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique identifier for the subscription"
+    )
+    
+    # User and guild context
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord guild (server) snowflake ID"
+    )
+    user_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord user snowflake ID"
+    )
+    username: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        doc="Username for audit purposes (literal @username format)"
+    )
+    forum_channel_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord forum channel snowflake ID"
+    )
+    
+    # Subscription settings
+    subscribed_topics: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        doc="List of topic names the user is subscribed to"
+    )
+    notification_hours: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        doc="Hours until user no longer wants notifications (-1 for forever)"
+    )
+    
+    # Audit timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the subscription was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the subscription was last updated"
+    )
+    
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_forum_user_subscriptions_guild_id", "guild_id"),
+        Index("ix_forum_user_subscriptions_user_id", "user_id"),
+        Index("ix_forum_user_subscriptions_forum_channel_id", "forum_channel_id"),
+        Index("ix_forum_user_subscriptions_guild_forum", "guild_id", "forum_channel_id"),
+        UniqueConstraint("guild_id", "user_id", "forum_channel_id", name="uq_forum_user_subscriptions_guild_user_forum"),
+        CheckConstraint("notification_hours = -1 OR (notification_hours >= 1 AND notification_hours <= 8760)", name="ck_forum_user_subscriptions_notification_hours_valid"),
+    )
+    
+    def __init__(self, **kwargs):
+        """Initialize ForumUserSubscription with default timestamps and subscribed topics."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        kwargs.setdefault('subscribed_topics', [])
+        super().__init__(**kwargs)
+    
+    @property
+    def is_expired(self) -> bool:
+        """Check if this subscription has expired based on notification_hours."""
+        if self.notification_hours == -1:  # Forever
+            return False
+        
+        from datetime import timedelta
+        expiry_time = self.updated_at + timedelta(hours=self.notification_hours)
+        return datetime.now(timezone.utc) > expiry_time
+    
+    def __repr__(self) -> str:
+        """String representation of the user subscription."""
+        return f"<ForumUserSubscription(username='{self.username}', guild_id='{self.guild_id}', topics={len(self.subscribed_topics)})>"
 
 
 class Campaign(Base):
