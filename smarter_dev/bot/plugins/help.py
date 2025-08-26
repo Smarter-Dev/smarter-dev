@@ -123,19 +123,20 @@ async def store_conversation(
 async def generate_help_response(
     user_id: str,
     user_question: str,
-    context_messages: List[DiscordMessage] = None,
+    bot: hikari.GatewayBot,
     guild_id: str = None,
     channel_id: str = None,
     user_username: str = None,
     interaction_type: str = "unknown",
-    bot_id: str = None
+    bot_id: str = None,
+    trigger_message_id: int = None
 ) -> str:
     """Generate a help response with rate limiting and conversation storage.
     
     Args:
         user_id: Discord user ID
         user_question: User's question
-        context_messages: Recent conversation context
+        bot: Discord bot instance for fetching context
         guild_id: Discord guild ID
         channel_id: Discord channel ID 
         user_username: Username for conversation record
@@ -169,13 +170,15 @@ async def generate_help_response(
         current_remaining = rate_limiter.get_user_remaining_requests(user_id, 'help')
         messages_remaining = max(0, current_remaining - 1)
         
-        # Generate response with token tracking using async method
-        response, tokens_used = await help_agent.generate_response_async(
-            user_question, 
-            context_messages, 
-            bot_id,
-            interaction_type,
-            messages_remaining
+        # Generate response with token tracking using new structured context method
+        response, tokens_used = await help_agent.generate_response_new(
+            user_question=user_question,
+            bot=bot,
+            channel_id=int(channel_id),
+            guild_id=int(guild_id) if guild_id else None,
+            trigger_message_id=trigger_message_id,
+            interaction_type=interaction_type,
+            messages_remaining=messages_remaining
         )
         
         # Calculate response time
@@ -204,7 +207,7 @@ async def generate_help_response(
                     interaction_type=interaction_type,
                     user_question=user_question,
                     bot_response=response,
-                    context_messages=context_messages,
+                    context_messages=None,  # No longer using old-style context messages
                     tokens_used=tokens_used,
                     response_time_ms=response_time_ms
                 )
@@ -252,14 +255,6 @@ async def help_command(ctx: lightbulb.Context) -> None:
     if not user_question:
         user_question = "How does this bot work? What commands are available?"
     
-    # Gather context from recent channel messages
-    context_messages = await gather_message_context(
-        ctx.bot, 
-        ctx.channel_id, 
-        limit=10,
-        guild_id=ctx.guild_id
-    )
-    
     # Get bot user for ID
     bot_user = ctx.bot.get_me()
     
@@ -267,7 +262,7 @@ async def help_command(ctx: lightbulb.Context) -> None:
     response = await generate_help_response(
         user_id=str(ctx.user.id),
         user_question=user_question,
-        context_messages=context_messages,
+        bot=ctx.bot,
         guild_id=str(ctx.guild_id) if ctx.guild_id else None,
         channel_id=str(ctx.channel_id),
         user_username=ctx.user.display_name or ctx.user.username,
@@ -319,31 +314,17 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
     
     # Start typing indicator to show the bot is processing
     async with plugin.bot.rest.trigger_typing(event.channel_id):
-        # Gather context from recent channel messages (excluding the current message)
-        context_messages = await gather_message_context(
-            plugin.bot, 
-            event.channel_id, 
-            limit=11,  # Get 11 to account for current message
-            guild_id=event.guild_id
-        )
-        
-        # Remove the current message from context
-        if context_messages:
-            context_messages = [
-                msg for msg in context_messages 
-                if msg.content != event.content
-            ][-10:]  # Keep last 10
-        
         # Generate response with conversation storage (typing indicator will continue during this)
         response = await generate_help_response(
             user_id=str(event.author.id),
             user_question=user_question,
-            context_messages=context_messages,
+            bot=plugin.bot,
             guild_id=str(event.guild_id) if event.guild_id else None,
             channel_id=str(event.channel_id),
             user_username=event.author.display_name or event.author.username,
             interaction_type="mention",
-            bot_id=str(bot_user.id)
+            bot_id=str(bot_user.id),
+            trigger_message_id=event.message.id
         )
     
     # Send public response as a reply (typing indicator stops automatically when we send the message)

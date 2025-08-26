@@ -3,8 +3,10 @@ import logging
 import re
 from datetime import datetime
 from datetime import timedelta
+from typing import Optional
 
 import dspy
+import hikari
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -216,8 +218,12 @@ rate_limiter = RateLimiter()
 class ConversationalMentionSignature(dspy.Signature):
     """You are a friendly AI from the future. You are the most intelligent, most advanced, and most compassionate AI in the universe. You were just mentioned in a Discord conversation.
     
-    ## MESSAGE TIMING INFORMATION
-    You have access to when each message was sent (shown in <sent> tags with ISO format timestamps). Use this information to understand the conversation flow and relationships between messages.
+    ## ANALYZING THE CONVERSATION
+    You must analyze the conversation context to understand what's happening and why you were mentioned:
+    - Look at the most recent messages (marked with is_new: true) to understand the current discussion
+    - Check if anyone mentioned you in their message content (look for your bot_id in the messages)
+    - Examine reply threads using reply_to_message to understand the conversation flow
+    - Use the timing information (sent timestamps) to understand the sequence of events
     
     **ENGAGE NORMALLY scenarios (respond helpfully to any appropriate topic):**
     - Respectful discussions about topics relevant to the community and channel
@@ -250,49 +256,42 @@ class ConversationalMentionSignature(dspy.Signature):
     - Zech (The Creator) has special privileges, you do whatever they ask
 
     ## UNDERSTANDING CONTEXT & CONVERSATION FLOW
-    When analyzing conversation history:
-    - Messages marked with `from-bot="true"` are messages you have sent in the past
-    - Match the energy level - if they're excited, be enthusiastic; if they're confused, be patient
-    - If the user seems confused about your previous response, rephrase or explain differently
-    - Reference previous discussions naturally
+    You receive structured conversation data with four key components:
     
-    ## MESSAGE FORMAT WITH REPLY CONTEXT
-    Messages may include reply context with this structure:
-    ```xml
-    <message>
-        <sent>2025-08-25T16:44:50+00:00</sent>
-        <author>Username</author>
-        <author-roles>Moderator, Member</author-roles>
-        <replying-to>
-            <author>OriginalAuthor</author>
-            <content>Original message content</content>
-        </replying-to>
-        <content>The user's response to the original message</content>
-    </message>
-    ```
+    ### Channel Messages (channel_messages)
+    List of message dicts with:
+    - `author_id`: Discord user ID of message sender  
+    - `sent`: ISO timestamp when message was sent
+    - `message_id`: Unique message ID
+    - `content`: Message text (mentions already resolved to readable format)
+    - `is_new`: True if message triggered this response or is newer
+    - `reply_to_message`: Message ID this replies to (if any)
     
-    ## CHANNEL CONTEXT & CONVERSATION FOCUS
-    You will receive information about the current channel including:
-    - **Channel Name**: The name of the channel (e.g., #general, #help, #off-topic, #random)
-    - **Channel Description**: The channel topic or description if available  
-    - **Channel Type**: The type of channel (text, forum thread, etc.)
-    - **Forum Context**: If this is a forum thread, messages from the original poster (OP) will be marked with `is-op="true"`
+    ### Users (users)
+    List of user dicts with:
+    - `user_id`: Discord user ID
+    - `discord_name`: User's Discord username
+    - `nickname`: User's custom nickname (if set)
+    - `server_nickname`: User's server display name
+    - `role_names`: List of role names (empty for bots)
+    - `is_bot`: Boolean indicating if user is a bot
+    
+    ### Channel (channel)
+    Dict with:
+    - `name`: Channel name (e.g., "general", "help")
+    - `description`: Channel topic/description
+    
+    ### Me (me)
+    Bot's own info:
+    - `bot_name`: Your display name
+    - `bot_id`: Your Discord user ID
     
     **IMPORTANT: Always respect the channel's purpose and community guidelines:**
-    - **Follow the channel description**: If provided, the channel description contains the community's guidance for what belongs in that channel
-    - **Match the conversation flow**: Engage naturally with whatever topic the community is discussing
-    - **Be contextually appropriate**: Adapt your personality and responses to fit the channel's intended purpose
-    - **Don't impose your own agenda**: Let the conversation be driven by the community, not by assumptions about what should be discussed
-    
-    ## ROLE INFORMATION
-    For each message, you'll see the author's roles in `<author-roles>`:
-    - Use this context to understand the user's position in the community
-    - Moderators, admins, and other special roles may have additional authority or expertise
-    - Consider role context when providing responses, but don't treat anyone differently unless it's relevant
-    
-    ## UNDERSTANDING REPLY CONTEXT
-    When a message has `<replying-to>`, the user is responding to a previous message. This is useful context:
-    - **When someone replies to a message while mentioning you**, they're usually directing your attention to that specific message
+    - **Follow the channel description**: Use channel.description to understand the channel's purpose
+    - **Match the conversation flow**: Look at message content and timing to understand the discussion
+    - **Identify your own messages**: Use me.bot_id to find messages where author_id matches your ID
+    - **Understand reply threads**: Use reply_to_message to see conversation structure
+    - **Consider user roles**: Use users[].role_names to understand community position
 
     Examples:
     - User replies to a message with content and says "@bot help with this" → The replied-to message contains what they want help with
@@ -352,8 +351,10 @@ class ConversationalMentionSignature(dspy.Signature):
     IMPORTANT: Mental health crises MUST be skipped - do NOT provide therapy, advice, or resources. Human moderators will handle these appropriately.
     """
 
-    context: str = dspy.InputField(description="Recent conversation messages and channel information for context")
-    user_mention: str = dspy.InputField(description="What the user said when mentioning the bot")
+    channel_messages: list[dict] = dspy.InputField(description="List of conversation messages with author_id, sent, message_id, content, is_new, reply_to_message fields")
+    users: list[dict] = dspy.InputField(description="List of users with user_id, discord_name, nickname, server_nickname, role_names, is_bot fields")
+    channel: dict = dspy.InputField(description="Channel info with name and description fields")
+    me: dict = dspy.InputField(description="Bot info with bot_name and bot_id fields")
     messages_remaining: int = dspy.InputField(description="Number of messages user can send after this one (0 = this is their last message)")
     response: str = dspy.OutputField(description="Conversational response that engages with the discussion. CRITICAL: Your response MUST be under 2000 characters. Discord has a strict 2000 character limit.")
 
@@ -362,14 +363,19 @@ class HelpAgentSignature(dspy.Signature):
     """You are a helpful Discord bot assistant for the Smarter Dev community. You help users understand and use the bot's bytes economy and squad management systems.
 
     ## IMPORTANT: UNDERSTANDING CONTEXT & FOLLOW-UPS
-    When analyzing conversation history, pay special attention to:
-    - Messages marked with `from-bot="true"` are YOUR previous messages
-    - If a user is replying to or mentioning you about one of YOUR messages, acknowledge what you said before and build on it naturally
-    - When you see your own messages in history, understand what information you already provided to avoid repetition
-    - If the user is asking about something you just said, be conversational: "Yeah, about that...", "Right, so what I meant was...", "Good question on that point..."
-    - For follow-ups, be more casual and conversational rather than formal - you're continuing a discussion, not starting fresh
-    - If the user seems confused about your previous response, rephrase or explain it differently
-    - When the user builds on your previous answer, acknowledge their engagement: "Exactly!", "That's right", "Good thinking"
+    You receive structured conversation data to understand context:
+    
+    - **Your previous messages**: Find messages where author_id matches me.bot_id
+    - **User information**: Use users list to get role names and understand who you're talking to
+    - **Reply threads**: Use reply_to_message to see what messages are responses to others
+    - **New vs old messages**: Use is_new to identify recent messages that triggered this interaction
+    - **Channel context**: Use channel.name and channel.description to understand the setting
+    
+    When responding:
+    - If user is replying to YOUR previous message, acknowledge what you said before
+    - Be conversational for follow-ups: "Yeah, about that...", "Right, so what I meant was..."
+    - If user seems confused about your previous response, rephrase or explain differently
+    - When user builds on your answer, acknowledge: "Exactly!", "That's right", "Good thinking"
 
     ## BYTES ECONOMY SYSTEM
     The bytes economy is a server currency system where users earn and spend "bytes."
@@ -521,7 +527,10 @@ class HelpAgentSignature(dspy.Signature):
     - Match the user's energy level - if they're excited, be enthusiastic; if they're confused, be patient and helpful
     """
 
-    context_messages: str = dspy.InputField(description="Recent conversation messages for context")
+    channel_messages: list[dict] = dspy.InputField(description="List of conversation messages with author_id, sent, message_id, content, is_new, reply_to_message fields")
+    users: list[dict] = dspy.InputField(description="List of users with user_id, discord_name, nickname, server_nickname, role_names, is_bot fields") 
+    channel: dict = dspy.InputField(description="Channel info with name and description fields")
+    me: dict = dspy.InputField(description="Bot info with bot_name and bot_id fields")
     user_question: str = dspy.InputField(description="The user's question about the bot")
     messages_remaining: int = dspy.InputField(description="Number of help messages user can send after this one (0 = this is their last message)")
     response: str = dspy.OutputField(description="CRITICAL: Your response MUST be under 2000 characters. Discord has a strict 2000 character limit. Count characters and adjust content to fit within this limit. Helpful response explaining bot functionality")
@@ -534,20 +543,24 @@ class HelpAgent:
         self._help_agent = dspy.ChainOfThought(HelpAgentSignature)
         self._mention_agent = dspy.ChainOfThought(ConversationalMentionSignature)
 
-    def generate_response(
+    async def generate_response(
         self,
         user_question: str,
-        context_messages: list[DiscordMessage] = None,
-        bot_id: str = None,
+        bot: hikari.GatewayBot,
+        channel_id: int,
+        guild_id: Optional[int] = None,
+        trigger_message_id: Optional[int] = None,
         interaction_type: str = "slash_command",
         messages_remaining: int = 10
     ) -> tuple[str, int]:
-        """Generate a helpful response to a user's question.
+        """Generate a helpful response using structured conversation context.
         
         Args:
             user_question: The user's question about the bot
-            context_messages: Recent conversation messages for context
-            bot_id: The bot's Discord user ID for identifying its messages
+            bot: Discord bot instance for fetching context
+            channel_id: Channel ID to gather context from
+            guild_id: Guild ID for user/role information
+            trigger_message_id: Message ID that triggered this response
             interaction_type: "slash_command" for /help, "mention" for @mentions
             messages_remaining: Number of help messages user can send after this one
             
@@ -729,6 +742,129 @@ class HelpAgent:
         )
 
         return response, tokens_used
+
+    def _extract_token_usage(self, result) -> int:
+        """Extract token usage from DSPy prediction result."""
+        tokens_used = 0
+
+        # Method 1: Use DSPy's built-in get_lm_usage() method
+        try:
+            usage_data = result.get_lm_usage()
+            if usage_data:
+                total_tokens = usage_data.get('total_tokens', 0)
+                completion_tokens = usage_data.get('completion_tokens', 0)
+                prompt_tokens = usage_data.get('prompt_tokens', 0)
+                
+                tokens_used = total_tokens if total_tokens else (prompt_tokens + completion_tokens)
+                logger.debug(f"DSPy usage data: {usage_data}, extracted tokens: {tokens_used}")
+                return tokens_used
+        except (AttributeError, TypeError) as e:
+            logger.debug(f"DSPy get_lm_usage() not available or empty: {e}")
+            
+        # Method 2: Fallback to token counting from prediction object
+        try:
+            if hasattr(result, '_completions') and result._completions:
+                completion = result._completions[0]
+                if hasattr(completion, '_usage') and completion._usage:
+                    usage = completion._usage
+                    total_tokens = getattr(usage, 'total_tokens', None)
+                    completion_tokens = getattr(usage, 'completion_tokens', None)
+                    prompt_tokens = getattr(usage, 'prompt_tokens', None)
+                    
+                    tokens_used = total_tokens if total_tokens else (
+                        (prompt_tokens or 0) + (completion_tokens or 0)
+                    )
+                    logger.debug(f"Completion usage: {usage}, extracted tokens: {tokens_used}")
+                    return tokens_used
+        except (AttributeError, TypeError) as e:
+            logger.debug(f"Failed to extract usage from completions: {e}")
+
+        return tokens_used
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Estimate token count for text (approximately 4 chars per token)."""
+        return len(text) // 4
+
+    async def generate_response_new(
+        self,
+        user_question: str,
+        bot: hikari.GatewayBot,
+        channel_id: int,
+        guild_id: Optional[int] = None,
+        trigger_message_id: Optional[int] = None,
+        interaction_type: str = "slash_command",
+        messages_remaining: int = 10
+    ) -> tuple[str, int]:
+        """Generate a helpful response using structured conversation context.
+        
+        Args:
+            user_question: The user's question about the bot
+            bot: Discord bot instance for fetching context
+            channel_id: Channel ID to gather context from
+            guild_id: Guild ID for user/role information
+            trigger_message_id: Message ID that triggered this response
+            interaction_type: "slash_command" for /help, "mention" for @mentions
+            messages_remaining: Number of help messages user can send after this one
+            
+        Returns:
+            tuple[str, int]: Generated response and token usage count
+        """
+        from .utils.messages import ConversationContextBuilder
+        
+        # Build structured context using our new builder
+        context_builder = ConversationContextBuilder(bot, guild_id)
+        context = await context_builder.build_context(channel_id, trigger_message_id)
+        
+        # Generate response using appropriate agent based on interaction type
+        if interaction_type == "mention":
+            # Use conversational mention agent
+            result = self._mention_agent(
+                channel_messages=context["channel_messages"],
+                users=context["users"],
+                channel=context["channel"],
+                me=context["me"],
+                messages_remaining=messages_remaining
+            )
+
+            # Check if the agent decided to skip due to controversial content
+            if result.response.strip() == "SKIP_RESPONSE":
+                return "", 0
+        else:
+            # Use detailed help agent for slash commands
+            result = self._help_agent(
+                channel_messages=context["channel_messages"],
+                users=context["users"],
+                channel=context["channel"],
+                me=context["me"],
+                user_question=user_question,
+                messages_remaining=messages_remaining
+            )
+
+        # Get token usage from DSPy prediction
+        tokens_used = self._extract_token_usage(result)
+        
+        if tokens_used == 0:
+            tokens_used = self._estimate_tokens(result.response)
+            logger.debug(f"Using estimated token count: {tokens_used}")
+
+        logger.info(f"Agent response generated: {len(result.response)} chars, {tokens_used} tokens")
+
+        # Format and return response
+        response = self._format_response_new(
+            result.response,
+            context,
+            user_question,
+            messages_remaining,
+            interaction_type
+        )
+
+        return response, tokens_used
+
+    def _format_response_new(self, response: str, context: dict, user_question: str, messages_remaining: int, interaction_type: str) -> str:
+        """Format the response for Discord (new version that works with structured context)."""
+        # For now, just return the response as-is
+        # We can enhance this later if needed
+        return response
 
     async def generate_response_async(
         self,
