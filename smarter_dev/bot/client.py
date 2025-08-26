@@ -528,17 +528,21 @@ async def extract_forum_post_data(bot: lightbulb.BotApp, thread, initial_message
     )
 
 
-async def post_agent_responses(bot: lightbulb.BotApp, thread_id: int, responses: list[dict]) -> None:
+async def post_agent_responses(bot: lightbulb.BotApp, thread_id: int, responses: list[dict]) -> bool:
     """Post AI agent responses to a Discord thread.
     
     Args:
         bot: Discord bot instance
         thread_id: Thread ID to post responses to
         responses: List of agent response dictionaries
+        
+    Returns:
+        bool: True if any response was posted, False otherwise
     """
     if not responses:
-        return
+        return False
 
+    response_posted = False
     try:
         for response_data in responses:
             # Only post if agent decided to respond
@@ -559,9 +563,56 @@ async def post_agent_responses(bot: lightbulb.BotApp, thread_id: int, responses:
             )
 
             logger.info(f"Posted response to thread {thread_id}")
+            response_posted = True
 
     except Exception as e:
         logger.error(f"Error posting agent responses to thread {thread_id}: {e}")
+    
+    return response_posted
+
+
+async def post_user_notifications(bot: lightbulb.BotApp, thread_id: int, topic_user_map: dict, response_posted: bool) -> None:
+    """Post user notification mentions to a Discord thread, organized by topic.
+    
+    Args:
+        bot: Discord bot instance
+        thread_id: Thread ID to post notifications to
+        topic_user_map: Dictionary mapping topics to sets of user mention strings
+        response_posted: Whether an agent response was already posted
+    """
+    if not topic_user_map:
+        return
+
+    try:
+        # Format notification message organized by topic
+        # Example: -# JavaScript @user1 @user2\n-# Frontend @user3 @user4
+        notification_lines = []
+        all_user_ids = set()
+        
+        for topic, user_mentions in topic_user_map.items():
+            mentions_text = " ".join(sorted(user_mentions))  # Sort for consistency
+            notification_lines.append(f"-# {topic} {mentions_text}")
+            
+            # Collect all unique user IDs for the user_mentions parameter
+            for mention in user_mentions:
+                user_id = int(mention.strip('<@>'))
+                all_user_ids.add(user_id)
+        
+        notification_message = "\n".join(notification_lines)
+
+        # Post the notification message with user mentions enabled
+        await bot.rest.create_message(
+            thread_id,
+            content=notification_message,
+            user_mentions=list(all_user_ids)
+        )
+
+        total_users = len(all_user_ids)
+        total_topics = len(topic_user_map)
+        logger.info(f"Posted user notifications to thread {thread_id}: {total_users} users notified across {total_topics} topics")
+
+    except Exception as e:
+        logger.error(f"Error posting user notifications to thread {thread_id}: {e}")
 
 
 async def resolve_forum_tag_names(bot: lightbulb.BotApp, channel_id: str, tag_ids: list) -> list:
@@ -668,12 +719,19 @@ async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:
         post_data = await extract_forum_post_data(bot, event.thread, initial_message)
         post_data.guild_id = str(event.guild_id)
 
-        # Process the post through all applicable agents
-        responses = await forum_agent_service.process_forum_post(str(event.guild_id), post_data)
+        # Process the post through all applicable agents with user tagging support
+        responses, topic_user_map = await forum_agent_service.process_forum_post_with_tagging(
+            str(event.guild_id), post_data
+        )
 
         # Post responses that should be posted
+        response_posted = False
         if responses:
-            await post_agent_responses(bot, event.thread.id, responses)
+            response_posted = await post_agent_responses(bot, event.thread.id, responses)
+
+        # Send user notifications if there are any
+        if topic_user_map:
+            await post_user_notifications(bot, event.thread.id, topic_user_map, response_posted)
 
     except Exception as e:
         logger.error(f"Error handling forum thread creation: {e}")
@@ -759,6 +817,11 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         logger.info("Loading challenges plugin...")
         bot.load_extensions("smarter_dev.bot.plugins.challenges")
         logger.info("✓ Loaded challenges plugin")
+
+        # Load forum notifications plugin
+        logger.info("Loading forum notifications plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.forum_notifications")
+        logger.info("✓ Loaded forum notifications plugin")
 
         logger.info("✓ All plugins loaded successfully")
     except Exception as e:
