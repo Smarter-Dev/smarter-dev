@@ -38,7 +38,7 @@ async def forum_autocomplete(
         async with aiohttp.ClientSession() as session:
             # Get agents for this guild
             async with session.get(
-                f"{api_base_url}/api/guilds/{guild_id}/forum-agents",
+                f"{api_base_url}/guilds/{guild_id}/forum-agents",
                 headers={"Authorization": f"Bearer {api_key}"}
             ) as response:
                 if response.status >= 400:
