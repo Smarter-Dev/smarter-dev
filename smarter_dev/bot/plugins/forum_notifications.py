@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+import os
+from typing import List, Optional
 
+import aiohttp
 import hikari
 import lightbulb
 
@@ -18,12 +20,73 @@ logger = logging.getLogger(__name__)
 plugin = lightbulb.Plugin("forum_notifications")
 
 
+async def forum_autocomplete(
+    option: hikari.AutocompleteInteractionOption, interaction: hikari.AutocompleteInteraction
+) -> List[hikari.CommandChoice]:
+    """Autocomplete function to show only forums with tagging-enabled agents."""
+    try:
+        guild_id = str(interaction.guild_id)
+        
+        # Get API client
+        api_base_url = os.getenv("API_BASE_URL", "http://localhost:8000")
+        api_key = os.getenv("BOT_API_KEY")
+        
+        if not api_key:
+            logger.error("BOT_API_KEY not found in environment")
+            return []
+            
+        async with aiohttp.ClientSession() as session:
+            # Get agents for this guild
+            async with session.get(
+                f"{api_base_url}/api/guilds/{guild_id}/forum-agents",
+                headers={"Authorization": f"Bearer {api_key}"}
+            ) as response:
+                if response.status >= 400:
+                    logger.error(f"Failed to get forum agents: {response.status}")
+                    return []
+                
+                agents = await response.json()
+                
+                # Find forums that have agents with user tagging enabled
+                tagging_enabled_forums = set()
+                for agent in agents:
+                    if agent.get('enable_user_tagging', False) and agent.get('monitored_forums'):
+                        for forum_id in agent['monitored_forums']:
+                            tagging_enabled_forums.add(forum_id)
+                
+                if not tagging_enabled_forums:
+                    return []
+                
+                # Get guild channels and filter for forum channels with tagging enabled
+                choices = []
+                guild = interaction.get_guild()
+                if guild:
+                    for channel in guild.get_channels().values():
+                        if (channel.type == hikari.ChannelType.GUILD_FORUM and 
+                            str(channel.id) in tagging_enabled_forums and
+                            channel.name.lower().startswith(option.value.lower() if option.value else "")):
+                            choices.append(hikari.CommandChoice(
+                                name=f"#{channel.name}",
+                                value=str(channel.id)
+                            ))
+                            
+                            # Discord limits to 25 choices
+                            if len(choices) >= 25:
+                                break
+                
+                return choices
+                
+    except Exception as e:
+        logger.error(f"Error in forum autocomplete: {e}")
+        return []
+
+
 @plugin.command
 @lightbulb.option(
     "forum",
     "Select the forum channel to configure notifications for",
-    type=hikari.OptionType.CHANNEL,
-    channel_types=[hikari.ChannelType.GUILD_FORUM],
+    type=hikari.OptionType.STRING,
+    autocomplete=forum_autocomplete,
     required=True
 )
 @lightbulb.option(
@@ -42,19 +105,24 @@ async def post_notifications(ctx: lightbulb.Context) -> None:
     """Configure user notification preferences for forum posts by topic."""
     
     # Get the forum channel and duration
-    forum_channel = ctx.options.forum
+    forum_channel_id = ctx.options.forum
     duration_hours = ctx.options.duration_hours
     guild_id = str(ctx.guild_id)
     user_id = str(ctx.author.id)
     username = f"@{ctx.author.username}"
     
-    if not forum_channel:
+    if not forum_channel_id:
         await ctx.respond("❌ Please select a forum channel.", flags=hikari.MessageFlag.EPHEMERAL)
         return
-        
-    # Verify it's actually a forum channel
-    if forum_channel.type != hikari.ChannelType.GUILD_FORUM:
-        await ctx.respond("❌ The selected channel is not a forum channel.", flags=hikari.MessageFlag.EPHEMERAL)
+    
+    # Get the actual channel object for display purposes
+    try:
+        forum_channel = ctx.bot.cache.get_guild_channel(int(forum_channel_id))
+        if not forum_channel or forum_channel.type != hikari.ChannelType.GUILD_FORUM:
+            await ctx.respond("❌ Invalid forum channel selected.", flags=hikari.MessageFlag.EPHEMERAL)
+            return
+    except (ValueError, AttributeError):
+        await ctx.respond("❌ Invalid forum channel selected.", flags=hikari.MessageFlag.EPHEMERAL)
         return
     
     # Validate duration hours
@@ -73,7 +141,7 @@ async def post_notifications(ctx: lightbulb.Context) -> None:
             
             # Get available notification topics for this forum
             response = await client.get(
-                f"/guilds/{guild_id}/forum-channels/{forum_channel.id}/notification-topics"
+                f"/guilds/{guild_id}/forum-channels/{forum_channel_id}/notification-topics"
             )
             
             if response.status_code == 404:
@@ -103,7 +171,7 @@ async def post_notifications(ctx: lightbulb.Context) -> None:
             
             try:
                 subscription_response = await client.get(
-                    f"/guilds/{guild_id}/users/{user_id}/forum-subscriptions/{forum_channel.id}"
+                    f"/guilds/{guild_id}/users/{user_id}/forum-subscriptions/{forum_channel_id}"
                 )
                 
                 if subscription_response.status_code == 200:
@@ -113,7 +181,7 @@ async def post_notifications(ctx: lightbulb.Context) -> None:
             except APIError as e:
                 # Handle 404 (no existing subscription) gracefully - use defaults
                 if e.status_code == 404:
-                    logger.debug(f"No existing subscription found for user {user_id} in forum {forum_channel.id} - using defaults")
+                    logger.debug(f"No existing subscription found for user {user_id} in forum {forum_channel_id} - using defaults")
                 else:
                     # Re-raise other API errors
                     raise
@@ -122,7 +190,7 @@ async def post_notifications(ctx: lightbulb.Context) -> None:
             select_menu = create_topic_select_menu(
                 topics_data,
                 current_subscriptions,
-                str(forum_channel.id),
+                forum_channel_id,
                 user_id,
                 duration_hours
             )
