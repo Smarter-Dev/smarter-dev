@@ -10,7 +10,7 @@ import hikari
 import logging
 import re
 from datetime import timezone
-from typing import List
+from typing import List, Dict, Any, Optional, Set
 
 from smarter_dev.bot.agent import DiscordMessage
 from smarter_dev.bot.cache import bot_cache
@@ -282,3 +282,217 @@ async def gather_message_context(
     except Exception as e:
         logger.warning(f"Failed to gather message context: {e}")
         return []
+
+
+class ConversationContextBuilder:
+    """Builds structured conversation context for DSPy agents."""
+    
+    def __init__(self, bot: hikari.GatewayBot, guild_id: Optional[int] = None):
+        self.bot = bot
+        self.guild_id = guild_id
+        self._guild_roles: Dict[int, str] = {}
+        self._fetched_messages: Dict[int, hikari.Message] = {}
+        
+    async def build_context(
+        self, 
+        channel_id: int, 
+        trigger_message_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Build complete conversation context.
+        
+        Args:
+            channel_id: Channel to gather context from
+            trigger_message_id: Message ID that triggered the agent (for marking new messages)
+            
+        Returns:
+            Dict with channel_messages, users, channel, and me fields
+        """
+        # Load guild roles if we have guild context
+        if self.guild_id:
+            self._guild_roles = await bot_cache.get_guild_roles(self.bot, self.guild_id)
+            
+        # Fetch base messages and complete reply threads
+        messages = await self._fetch_base_messages(channel_id, limit=20)
+        messages = await self._complete_reply_threads(messages)
+        
+        # Build structured context
+        channel_messages = await self._build_message_list(messages, trigger_message_id)
+        users = await self._build_user_list(messages)
+        channel_info = await self._build_channel_info(channel_id)
+        me_info = self._build_me_info()
+        
+        return {
+            "channel_messages": channel_messages,
+            "users": users, 
+            "channel": channel_info,
+            "me": me_info
+        }
+        
+    async def _fetch_base_messages(self, channel_id: int, limit: int = 20) -> List[hikari.Message]:
+        """Fetch the initial set of messages from the channel."""
+        messages = []
+        
+        async for message in self.bot.rest.fetch_messages(channel_id).limit(limit):
+            self._fetched_messages[message.id] = message
+            messages.append(message)
+            
+        return list(reversed(messages))  # Return in chronological order
+        
+    async def _complete_reply_threads(self, messages: List[hikari.Message]) -> List[hikari.Message]:
+        """Recursively fetch any replied-to messages not in the current list."""
+        message_ids = {msg.id for msg in messages}
+        additional_messages = {}
+        
+        def collect_reply_chain(message: hikari.Message):
+            """Recursively collect messages in a reply chain."""
+            if message.referenced_message and message.referenced_message.id not in message_ids:
+                reply_msg = message.referenced_message
+                additional_messages[reply_msg.id] = reply_msg
+                message_ids.add(reply_msg.id)
+                # Recursively check if the replied-to message is also a reply
+                collect_reply_chain(reply_msg)
+                
+        # Check all messages for reply chains
+        for message in messages:
+            collect_reply_chain(message)
+            
+        # Add additional messages to our collection and sort by timestamp
+        all_messages = messages + list(additional_messages.values())
+        return sorted(all_messages, key=lambda m: m.created_at)
+        
+    async def _build_message_list(
+        self, 
+        messages: List[hikari.Message], 
+        trigger_message_id: Optional[int]
+    ) -> List[Dict[str, Any]]:
+        """Build the channel_messages list with proper formatting."""
+        message_list = []
+        trigger_timestamp = None
+        
+        # Find trigger message timestamp
+        if trigger_message_id:
+            trigger_msg = next((m for m in messages if m.id == trigger_message_id), None)
+            if trigger_msg:
+                trigger_timestamp = trigger_msg.created_at
+                
+        for message in messages:
+            # Resolve mentions in content
+            content = await resolve_mentions(message.content or "", self.bot)
+            
+            # Add attachment info
+            if message.attachments:
+                attachment_info = []
+                for attachment in message.attachments:
+                    if hasattr(attachment, 'filename') and attachment.filename:
+                        attachment_info.append(f"📎 {attachment.filename}")
+                        
+                if attachment_info:
+                    content = f"{content} {' '.join(attachment_info)}".strip()
+                    
+            # Determine if message is "new"
+            is_new = False
+            if trigger_timestamp:
+                is_new = (message.created_at >= trigger_timestamp or 
+                         message.id == trigger_message_id)
+                         
+            message_dict = {
+                "author_id": str(message.author.id),
+                "sent": message.created_at.isoformat(),
+                "message_id": str(message.id),
+                "content": content,
+                "is_new": is_new,
+                "reply_to_message": str(message.referenced_message.id) if message.referenced_message else None
+            }
+            
+            message_list.append(message_dict)
+            
+        return message_list
+        
+    async def _build_user_list(self, messages: List[hikari.Message]) -> List[Dict[str, Any]]:
+        """Build the users list from all users mentioned or who sent messages."""
+        user_ids: Set[int] = set()
+        
+        # Collect user IDs from message authors
+        for message in messages:
+            user_ids.add(message.author.id)
+            
+        # Collect user IDs from mentions in message content
+        for message in messages:
+            content = message.content or ""
+            user_mentions = re.findall(r'<@!?(\d+)>', content)
+            for user_id_str in user_mentions:
+                user_ids.add(int(user_id_str))
+                
+        # Build user info for each unique user
+        users = []
+        for user_id in user_ids:
+            user_info = await self._build_user_info(user_id)
+            if user_info:
+                users.append(user_info)
+                
+        return users
+        
+    async def _build_user_info(self, user_id: int) -> Optional[Dict[str, Any]]:
+        """Build user information dict for a single user."""
+        try:
+            user = await bot_cache.get_user_name(self.bot, user_id)
+            
+            # Get member info if we have guild context
+            member = None
+            if self.guild_id:
+                try:
+                    member = await self.bot.rest.fetch_member(self.guild_id, user_id)
+                except Exception:
+                    pass
+                    
+            # Get role names for non-bot users
+            role_names = []
+            is_bot = False
+            
+            if member:
+                is_bot = member.is_bot
+                if not is_bot:
+                    role_names = await fetch_user_roles(self.bot, self.guild_id, user_id, self._guild_roles)
+            else:
+                # Try to determine if user is a bot from cached user info
+                try:
+                    user_obj = await self.bot.rest.fetch_user(user_id)
+                    is_bot = user_obj.is_bot
+                except Exception:
+                    pass
+                    
+            # Get display name - prioritize cached user name
+            discord_name = user if isinstance(user, str) else (
+                user.username if hasattr(user, 'username') and user else f"user{user_id}"
+            )
+                    
+            return {
+                "user_id": str(user_id),
+                "discord_name": discord_name,
+                "nickname": member.nickname if member else None,
+                "server_nickname": member.display_name if member else None,
+                "role_names": role_names,
+                "is_bot": is_bot
+            }
+            
+        except Exception as e:
+            logger.debug(f"Failed to build user info for {user_id}: {e}")
+            return None
+            
+    async def _build_channel_info(self, channel_id: int) -> Dict[str, Any]:
+        """Build channel information dict."""
+        channel_info = await fetch_channel_info(self.bot, channel_id)
+        
+        return {
+            "name": channel_info.get("channel_name"),
+            "description": channel_info.get("channel_description")
+        }
+        
+    def _build_me_info(self) -> Dict[str, Any]:
+        """Build bot's own information."""
+        bot_user = self.bot.get_me()
+        
+        return {
+            "bot_name": bot_user.display_name if bot_user else "Bot",
+            "bot_id": str(bot_user.id) if bot_user else None
+        }
