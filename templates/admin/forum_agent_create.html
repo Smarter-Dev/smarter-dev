@@ -75,6 +75,71 @@ If you decide to respond, provide a helpful, relevant response."></textarea>
                         <div class="form-hint">Leave empty to monitor all forum channels</div>
                     </div>
 
+                    <!-- User Tagging Configuration -->
+                    <div class="card mb-3">
+                        <div class="card-header">
+                            <h4 class="card-title">
+                                <svg class="icon me-2" width="20" height="20">
+                                    <use xlink:href="#tabler-users"></use>
+                                </svg>
+                                User Tagging Settings
+                            </h4>
+                        </div>
+                        <div class="card-body">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-check">
+                                            <input type="checkbox" name="enable_responses" class="form-check-input" checked onchange="updateOperationMode()">
+                                            <span class="form-check-label">Generate AI responses to posts</span>
+                                        </label>
+                                        <div class="form-hint">Enable the agent to respond to forum posts</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-check">
+                                            <input type="checkbox" name="enable_user_tagging" class="form-check-input" onchange="updateOperationMode()">
+                                            <span class="form-check-label">Enable user tagging by topics</span>
+                                        </label>
+                                        <div class="form-hint">Allow users to subscribe to topic notifications</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Operation Mode Display -->
+                            <div class="alert alert-info" id="operation-mode-alert">
+                                <strong>Operation Mode:</strong> <span id="operation-mode">Response Only</span>
+                                <br><small id="operation-mode-desc">This agent will evaluate posts and generate responses when appropriate.</small>
+                            </div>
+
+                            <!-- Topic Management (shown when tagging is enabled) -->
+                            <div id="topic-management" style="display: none;">
+                                <div class="mb-3">
+                                    <label class="form-label">Notification Topics</label>
+                                    <div id="topics-container">
+                                        <div class="input-group mb-2">
+                                            <input type="text" name="notification_topics[]" class="form-control topic-name-input" placeholder="Topic name (e.g. JavaScript, Python, Debugging)" maxlength="100">
+                                            <input type="text" name="notification_topic_descriptions[]" class="form-control" placeholder="Optional description" maxlength="500">
+                                            <button class="btn btn-outline-danger" type="button" tabindex="-1" onclick="removeTopic(this)" style="display: none;">
+                                                <svg class="icon" width="16" height="16">
+                                                    <use xlink:href="#tabler-x"></use>
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="addTopic()">
+                                        <svg class="icon me-1" width="16" height="16">
+                                            <use xlink:href="#tabler-plus"></use>
+                                        </svg>
+                                        Add Topic
+                                    </button>
+                                    <div class="form-hint">Create topics that users can subscribe to (max 25 per forum)</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Advanced Settings -->
                     <div class="card">
                         <div class="card-header">
@@ -158,11 +223,79 @@ function updateRemoveButtons() {
     });
 }
 
+function addTopic() {
+    const container = document.getElementById('topics-container');
+    const topicCount = container.children.length;
+    
+    if (topicCount >= 25) {
+        alert('Maximum 25 topics allowed per forum');
+        return;
+    }
+    
+    const div = document.createElement('div');
+    div.className = 'input-group mb-2';
+    div.innerHTML = `
+        <input type="text" name="notification_topics[]" class="form-control topic-name-input" placeholder="Topic name (e.g. JavaScript, Python, Debugging)" maxlength="100">
+        <input type="text" name="notification_topic_descriptions[]" class="form-control" placeholder="Optional description" maxlength="500">
+        <button class="btn btn-outline-danger" type="button" tabindex="-1" onclick="removeTopic(this)">
+            <svg class="icon" width="16" height="16">
+                <use xlink:href="#tabler-x"></use>
+            </svg>
+        </button>
+    `;
+    container.appendChild(div);
+    updateTopicRemoveButtons();
+    
+    // Focus the newly created topic name input
+    const newTopicInput = div.querySelector('.topic-name-input');
+    if (newTopicInput) {
+        newTopicInput.focus();
+    }
+}
+
+function removeTopic(button) {
+    button.parentElement.remove();
+    updateTopicRemoveButtons();
+}
+
+function updateTopicRemoveButtons() {
+    const removeButtons = document.querySelectorAll('#topics-container .btn-outline-danger');
+    removeButtons.forEach((button, index) => {
+        button.style.display = removeButtons.length > 1 ? 'block' : 'none';
+    });
+}
+
+function updateOperationMode() {
+    const enableResponses = document.querySelector('input[name="enable_responses"]').checked;
+    const enableTagging = document.querySelector('input[name="enable_user_tagging"]').checked;
+    const topicManagement = document.getElementById('topic-management');
+    const operationMode = document.getElementById('operation-mode');
+    const operationModeDesc = document.getElementById('operation-mode-desc');
+    
+    if (enableResponses && enableTagging) {
+        operationMode.textContent = 'Combined Mode';
+        operationModeDesc.textContent = 'This agent will both respond to posts and classify them into topics for user notifications.';
+        topicManagement.style.display = 'block';
+    } else if (enableTagging) {
+        operationMode.textContent = 'Tagging Only';
+        operationModeDesc.textContent = 'This agent will classify posts into topics for user notifications but won\'t generate responses.';
+        topicManagement.style.display = 'block';
+    } else {
+        operationMode.textContent = 'Response Only';
+        operationModeDesc.textContent = 'This agent will evaluate posts and generate responses when appropriate.';
+        topicManagement.style.display = 'none';
+    }
+}
+
 function updateThresholdValue(value) {
     document.getElementById('threshold-value').textContent = Math.round(value * 100) + '%';
 }
 
-// Initialize remove button visibility
-document.addEventListener('DOMContentLoaded', updateRemoveButtons);
+// Initialize everything on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updateRemoveButtons();
+    updateTopicRemoveButtons();
+    updateOperationMode();
+});
 </script>
 {% endblock %}
