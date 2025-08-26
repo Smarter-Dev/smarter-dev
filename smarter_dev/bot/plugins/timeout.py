@@ -203,7 +203,7 @@ async def timeout_user(ctx: lightbulb.Context) -> None:
             public_message = f"{target_user.mention} has been timed out for {duration_display}."
         
         # Post public message in channel
-        await ctx.followup(public_message)
+        await ctx.edit_last_response(public_message)
         
         # Send DM to the timed out user
         try:
