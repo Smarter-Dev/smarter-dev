@@ -823,6 +823,11 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         bot.load_extensions("smarter_dev.bot.plugins.forum_notifications")
         logger.info("✓ Loaded forum notifications plugin")
 
+        # Load timeout plugin
+        logger.info("Loading timeout plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.timeout")
+        logger.info("✓ Loaded timeout plugin")
+
         logger.info("✓ All plugins loaded successfully")
     except Exception as e:
         logger.error(f"Failed to load plugins: {e}")
