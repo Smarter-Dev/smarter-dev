@@ -69,31 +69,42 @@ async def fetch_user_roles(bot: hikari.GatewayBot, guild_id: int, user_id: int, 
         return []
 
 
-async def resolve_mentions(content: str, bot: hikari.GatewayBot) -> str:
-    """Replace Discord user and channel mentions with readable format.
+async def resolve_mentions(content: str, bot: hikari.GatewayBot, guild_id: int = None) -> str:
+    """Replace Discord role and channel mentions with readable format.
+    Keep user mentions as <@user_id> for disambiguation.
     
     Args:
-        content: Message content with potential <@123456> and <#123456> mentions
-        bot: Discord bot instance to resolve user/channel IDs
+        content: Message content with potential <@123456>, <@&123456> and <#123456> mentions
+        bot: Discord bot instance to resolve role/channel IDs
+        guild_id: Guild ID for role resolution (optional)
         
     Returns:
-        Content with mentions resolved to @username and #channel-name format
+        Content with role/channel mentions resolved, user mentions preserved as <@user_id>
     """
     if not content:
         return content
     
-    # Replace user mentions: <@123456789> or <@!123456789>
-    user_mention_pattern = r'<@!?(\d+)>'
-    user_mentions = re.findall(user_mention_pattern, content)
-    for user_id_str in user_mentions:
-        user_id = int(user_id_str)
+    # Normalize user mentions to <@user_id> format (remove the ! if present)
+    user_mention_pattern = r'<@!(\d+)>'
+    content = re.sub(user_mention_pattern, r'<@\1>', content)
+    
+    # Replace role mentions: <@&123456789>
+    role_mention_pattern = r'<@&(\d+)>'
+    role_mentions = re.findall(role_mention_pattern, content)
+    for role_id_str in role_mentions:
+        role_id = int(role_id_str)
         try:
-            username = await bot_cache.get_user_name(bot, user_id)
-            # Replace both <@123> and <@!123> formats
-            content = re.sub(f'<@!?{user_id}>', f'@{username}', content)
+            # Try to fetch the role to get its name
+            if guild_id:
+                role = await bot.rest.fetch_role(guild_id, role_id)
+                if role:
+                    content = re.sub(f'<@&{role_id}>', f'@{role.name}', content)
+                else:
+                    content = re.sub(f'<@&{role_id}>', f'@role{role_id}', content)
+            else:
+                content = re.sub(f'<@&{role_id}>', f'@role{role_id}', content)
         except Exception:
-            # If we can't resolve, use a readable fallback
-            content = re.sub(f'<@!?{user_id}>', f'@user{user_id}', content)
+            content = re.sub(f'<@&{role_id}>', f'@role{role_id}', content)
     
     # Replace channel mentions: <#123456789>
     channel_mention_pattern = r'<#(\d+)>'
@@ -146,7 +157,7 @@ async def extract_reply_context(message: hikari.Message, bot: hikari.GatewayBot)
             replied_content = replied_msg.content or ""  # Get full content, don't truncate
             
             # Resolve mentions in the replied message too
-            replied_content = await resolve_mentions(replied_content, bot)
+            replied_content = await resolve_mentions(replied_content, bot, message.guild_id)
             
             # Handle cases where replied message has no text (like images/embeds)
             if not replied_content.strip():
@@ -229,7 +240,7 @@ async def gather_message_context(
                     content = f"{content} {' '.join(attachment_info)}".strip()
             
             # Resolve Discord mentions to readable usernames (after reply formatting)
-            content = await resolve_mentions(content, bot)
+            content = await resolve_mentions(content, bot, guild_id)
             
             # Get user roles if we have guild context
             author_roles = []
@@ -377,7 +388,7 @@ class ConversationContextBuilder:
                 
         for message in messages:
             # Resolve mentions in content
-            content = await resolve_mentions(message.content or "", self.bot)
+            content = await resolve_mentions(message.content or "", self.bot, self.guild_id)
             
             # Add attachment info
             if message.attachments:

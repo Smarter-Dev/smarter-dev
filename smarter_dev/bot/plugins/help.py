@@ -301,16 +301,9 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
     
     user_question = user_question.strip()
     
-    # Check if this is an empty mention with reply context
+    # If there's no question text, just use empty string - the context will be in the conversation history
     if not user_question:
-        user_question = "[EMPTY_MENTION]"
-        
-        # If user replied to a message while mentioning bot, we need to capture that
-        if event.message.referenced_message:
-            from smarter_dev.bot.utils.messages import extract_reply_context
-            replied_author, replied_content, _ = await extract_reply_context(event.message, plugin.bot)
-            if replied_author and replied_content:
-                user_question += f" [REPLY_TO:{replied_author}:{replied_content}]"
+        user_question = ""
     
     # Start typing indicator to show the bot is processing
     async with plugin.bot.rest.trigger_typing(event.channel_id):
