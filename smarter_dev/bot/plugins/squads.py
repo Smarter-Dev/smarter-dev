@@ -645,9 +645,9 @@ async def members_command(ctx: lightbulb.Context) -> None:
         await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
 
 
-@squads_group.child
+@plugin.command
 @lightbulb.command("beacon", "Send a beacon message to alert your squad")
-@lightbulb.implements(lightbulb.SlashSubCommand)
+@lightbulb.implements(lightbulb.SlashCommand)
 async def beacon_command(ctx: lightbulb.Context) -> None:
     """Handle squad beacon command - send urgent message to squad with role ping."""
     service: SquadsService = getattr(ctx.bot, 'd', {}).get('squads_service')
