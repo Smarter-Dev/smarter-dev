@@ -22,6 +22,59 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+async def _send_squad_join_announcement(
+    bot,
+    guild_id: str,
+    user_id: str,
+    squad,
+    announcement_channel_id: str
+) -> None:
+    """Send a squad join announcement to the squad's announcement channel.
+    
+    Args:
+        bot: The Discord bot instance
+        guild_id: Discord guild ID
+        user_id: User ID who joined the squad
+        squad: Squad object with squad information
+        announcement_channel_id: Channel ID to send announcement to
+    """
+    try:
+        # Only announce for non-default squads
+        if getattr(squad, 'is_default', False):
+            logger.debug(f"Skipping announcement for default squad {squad.name}")
+            return
+        
+        # Get user info for display name
+        try:
+            user = await bot.rest.fetch_user(int(user_id))
+            display_name = user.display_name or user.username
+        except Exception as e:
+            logger.warning(f"Could not fetch user {user_id} for announcement: {e}")
+            display_name = f"User {user_id}"
+        
+        # Create green success embed announcement
+        generator = get_generator()
+        
+        # Create announcement message
+        announcement_title = "New Squad Member!"
+        announcement_description = f"{display_name} has joined {squad.name}!"
+        
+        # Create the green embed image
+        image_file = generator.create_success_embed(announcement_title, announcement_description)
+        
+        # Send the announcement
+        await bot.rest.create_message(
+            channel=int(announcement_channel_id),
+            attachment=image_file
+        )
+        
+        logger.info(f"Successfully sent squad join announcement for {display_name} joining {squad.name}")
+        
+    except Exception as e:
+        logger.error(f"Failed to send squad join announcement for user {user_id} joining squad {squad.name}: {e}")
+        # Don't raise - we don't want squad joins to fail because of announcement issues
+
+
 class SquadSelectView:
     """Interactive squad selection view using Discord select menus.
     
@@ -330,6 +383,19 @@ class SquadSelectView:
                     role_assignment_status = f"\n⚠️ Role assignment error: {str(e)}"
                     logger.error(f"Error during role assignment for user {self.user_id}: {e}")
                 
+                # Send announcement to squad's announcement channel if configured
+                if hasattr(result.squad, 'announcement_channel') and result.squad.announcement_channel:
+                    try:
+                        await _send_squad_join_announcement(
+                            self._bot,
+                            self.guild_id,
+                            self.user_id,
+                            result.squad,
+                            result.squad.announcement_channel
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to send squad join announcement: {e}")
+                
                 # Build clean success description with custom welcome message
                 if result.squad.welcome_message:
                     description = result.squad.welcome_message
@@ -530,7 +596,7 @@ class SquadConfirmView:
 class SquadListShareView:
     """View with share button for squad list command."""
     
-    def __init__(self, squads: List[Squad], guild_name: str, current_squad_id: str = None, guild_roles: dict = None):
+    def __init__(self, squads: List[Squad], guild_name: str, current_squad_id: str = None, guild_roles: dict = None, has_active_campaign: bool = False):
         """Initialize the squad list share view.
         
         Args:
@@ -538,11 +604,13 @@ class SquadListShareView:
             guild_name: Name of the guild
             current_squad_id: ID of user's current squad (if any)
             guild_roles: Dictionary mapping role IDs to colors
+            has_active_campaign: Whether there's an active campaign
         """
         self.squads = squads
         self.guild_name = guild_name
         self.current_squad_id = current_squad_id
         self.guild_roles = guild_roles or {}
+        self.has_active_campaign = has_active_campaign
         self._timeout = 300  # 5 minutes
     
     def build_components(self) -> list[hikari.api.ComponentBuilder]:

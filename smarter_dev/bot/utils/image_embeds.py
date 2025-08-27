@@ -872,7 +872,8 @@ class EmbedImageGenerator:
         squads: list, 
         guild_name: str, 
         current_squad_id: str = None,
-        guild_roles: Optional[Dict[str, int]] = None
+        guild_roles: Optional[Dict[str, int]] = None,
+        has_active_campaign: bool = False
     ) -> hikari.files.Bytes:
         """Create a compact squad list embed image with table layout.
         
@@ -995,22 +996,23 @@ class EmbedImageGenerator:
                 fill=self.TEXT_COLOR
             )
             
-            # Member count
-            member_text = f"{squad.member_count}"
-            if squad.max_members:
-                member_text += f"/{squad.max_members}"
-            
-            member_bbox = table_font.getbbox(member_text)
-            member_width = member_bbox[2] - member_bbox[0]
-            # Right-align the member count in the column to match header
-            member_x = self.PADDING_HORIZONTAL + members_column_start + members_column_width - member_width
-            
-            draw.text(
-                (member_x, row_y), 
-                member_text, 
-                font=table_font, 
-                fill="#00E1FF"  # Cyan for member counts
-            )
+            # Member count (skip for default squad)
+            if not (hasattr(squad, 'is_default') and squad.is_default):
+                member_text = f"{squad.member_count}"
+                if squad.max_members:
+                    member_text += f"/{squad.max_members}"
+                
+                member_bbox = table_font.getbbox(member_text)
+                member_width = member_bbox[2] - member_bbox[0]
+                # Right-align the member count in the column to match header
+                member_x = self.PADDING_HORIZONTAL + members_column_start + members_column_width - member_width
+                
+                draw.text(
+                    (member_x, row_y), 
+                    member_text, 
+                    font=table_font, 
+                    fill="#00E1FF"  # Cyan for member counts
+                )
             
             # Join cost or special status
             if hasattr(squad, 'is_default') and squad.is_default:
@@ -1039,6 +1041,26 @@ class EmbedImageGenerator:
                 cost_text, 
                 font=table_font, 
                 fill=cost_color
+            )
+        
+        # Add campaign warning if applicable
+        if has_active_campaign:
+            # Draw campaign warning in bottom left corner
+            warning_font = self._fonts["text_small"]
+            warning_text = "Campaign active - Switching disabled"
+            warning_color = "#f59e0b"  # Amber/orange color
+            
+            # Position in bottom left with more padding from bottom
+            # Move it up to ensure it's fully visible
+            warning_y = img.height - 105  # Final positioning
+            warning_x = self.PADDING_HORIZONTAL
+            
+            # Draw the warning text
+            draw.text(
+                (warning_x, warning_y),
+                warning_text,
+                font=warning_font,
+                fill=warning_color
             )
         
         # Convert to bytes
