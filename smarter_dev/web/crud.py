@@ -3480,22 +3480,24 @@ class ChallengeSubmissionOperations:
             raise DatabaseOperationError(f"Failed to get squad submissions: {e}") from e
     
     async def _calculate_points(self, challenge_id: UUID, input_generated_at: datetime) -> int:
-        """Calculate points earned based on timing.
+        """Calculate points earned using the dual-phase scoring system.
         
-        Points are based on the campaign's release cadence:
-        - Max points = release_cadence_in_seconds / 30
-        - Points lost = time_taken_in_seconds / 30 (rounded down)
-        - Minimum points = 0
+        Uses a sophisticated scoring system with:
+        - Fixed 4096 max points
+        - Logarithmic decay for first 2 hours (if ≥3 hours remain)
+        - Linear fractional reduction for remaining time
         
         Args:
             challenge_id: UUID of the challenge
-            input_generated_at: When the input was generated (start of timer)
+            input_generated_at: When the input was generated (timer start)
             
         Returns:
-            Points earned (0 or positive integer)
+            Points earned (0-4096)
         """
+        from smarter_dev.web.scoring import calculate_challenge_points
+        
         try:
-            # Get the challenge and its campaign to access release cadence
+            # Get the challenge and its campaign to calculate end time
             challenge_query = select(Challenge).options(
                 selectinload(Challenge.campaign)
             ).where(Challenge.id == challenge_id)
@@ -3504,35 +3506,44 @@ class ChallengeSubmissionOperations:
             challenge = result.scalar_one_or_none()
             
             if not challenge or not challenge.campaign:
-                # If we can't get cadence info, return 0 points
                 return 0
             
-            # Convert release cadence from hours to seconds
-            release_cadence_seconds = challenge.campaign.release_cadence_hours * 3600
+            # Get all challenges in the campaign to count them
+            campaign_challenges_query = select(func.count(Challenge.id)).where(
+                Challenge.campaign_id == challenge.campaign_id
+            )
+            challenges_result = await self.session.execute(campaign_challenges_query)
+            num_challenges = challenges_result.scalar() or 0
             
-            # Calculate max possible points (cadence / 30)
-            max_points = release_cadence_seconds // 30
+            if num_challenges == 0:
+                return 0
             
-            # Calculate time taken from input generation to now
-            current_time = datetime.now(timezone.utc)
-            if input_generated_at.tzinfo is None:
-                input_generated_at = input_generated_at.replace(tzinfo=timezone.utc)
+            # Calculate when the campaign/challenge ends
+            # End time = campaign start + (num_challenges * release_cadence)
+            from datetime import timedelta
+            total_duration = timedelta(hours=num_challenges * challenge.campaign.release_cadence_hours)
+            challenge_end_time = challenge.campaign.start_time + total_duration
             
-            time_taken_seconds = (current_time - input_generated_at).total_seconds()
+            # Get current time for submission
+            submission_time = datetime.now(timezone.utc)
             
-            # Calculate points lost (time taken / 30, rounded down)
-            points_lost = int(time_taken_seconds // 30)
+            # Use the new scoring system
+            points = calculate_challenge_points(
+                input_generated_at,
+                submission_time,
+                challenge_end_time
+            )
             
-            # Calculate final points (max - lost, minimum 0)
-            points_earned = max(0, max_points - points_lost)
+            logger.info(
+                f"New scoring calculation: challenge_id={challenge_id}, "
+                f"input_at={input_generated_at}, submission_at={submission_time}, "
+                f"end_at={challenge_end_time}, points={points}"
+            )
             
-            # Debug logging for points calculation
-            logger.info(f"Points calculation: release_cadence={release_cadence_seconds}s, max_points={max_points}, time_taken={time_taken_seconds}s, points_lost={points_lost}, final_points={points_earned}")
-            
-            return points_earned
+            return points
             
         except Exception as e:
-            # If calculation fails, return 0 points rather than failing the submission
+            logger.error(f"Failed to calculate points: {e}")
             return 0
     
     async def get_campaign_scoreboard(self, campaign_id: UUID) -> List[Dict[str, Any]]:

@@ -8,7 +8,7 @@ All operations are fully testable and Discord-agnostic.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -375,6 +375,41 @@ class SquadsService(BaseService):
             self._log_error("get_user_squad", e, guild_id=guild_id, user_id=user_id)
             raise ServiceError(f"Failed to get user squad: {e}") from e
     
+    async def _check_active_campaign(self, guild_id: str) -> bool:
+        """Check if there's an active campaign preventing squad switches.
+        
+        Args:
+            guild_id: Discord guild ID
+            
+        Returns:
+            True if there's an active campaign, False otherwise
+        """
+        try:
+            # Get current campaign status from scoreboard endpoint
+            response = await self._api_client.get(
+                "/challenges/scoreboard",
+                params={"guild_id": guild_id},
+                timeout=10.0
+            )
+            
+            if response.status_code != 200:
+                logger.warning(f"Failed to check active campaigns: {response.status_code}")
+                return False  # Allow switch if we can't verify
+            
+            data = response.json()
+            campaign = data.get("campaign")
+            
+            # Check if campaign exists and is active
+            if campaign and campaign.get("is_active"):
+                logger.info(f"Active campaign found for guild {guild_id}: {campaign.get('name')}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking for active campaigns: {e}")
+            return False  # Allow switch if check fails
+    
     async def join_squad(
         self,
         guild_id: str,
@@ -424,6 +459,27 @@ class SquadsService(BaseService):
             # Get user's current squad status
             user_squad_response = await self.get_user_squad(guild_id, user_id, use_cache=False)
             current_squad = user_squad_response.squad
+            
+            # Check for active campaigns that prevent squad joins/switches
+            # Exception: Allow joining from default squad to competitive squads
+            has_active_campaign = await self._check_active_campaign(guild_id)
+            if has_active_campaign:
+                # Allow moving from default squad to competitive squads
+                if current_squad and not getattr(current_squad, 'is_default', False):
+                    # Switching between competitive squads - not allowed
+                    reason = "Squad switching is disabled during active challenge campaigns to prevent spying on other squads."
+                    return JoinSquadResult(
+                        success=False,
+                        reason=reason
+                    )
+                elif not current_squad:
+                    # New members with no squad - not allowed
+                    reason = "Squad joining is disabled during active challenge campaigns. Members must remain unaffiliated until the campaign ends."
+                    return JoinSquadResult(
+                        success=False,
+                        reason=reason
+                    )
+                # If current_squad.is_default is True, allow them to proceed
             
             # Get target squad information
             try:
