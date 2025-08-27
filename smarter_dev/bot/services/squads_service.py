@@ -376,13 +376,17 @@ class SquadsService(BaseService):
             raise ServiceError(f"Failed to get user squad: {e}") from e
     
     async def _check_active_campaign(self, guild_id: str) -> bool:
-        """Check if there's an active campaign preventing squad switches.
+        """Check if there's a running campaign preventing squad switches.
+        
+        A campaign is considered running from its start time until the end of the
+        last challenge (which is cadence hours after the last challenge starts).
+        The is_active field is a manual override - if False, campaign is ignored.
         
         Args:
             guild_id: Discord guild ID
             
         Returns:
-            True if there's an active campaign, False otherwise
+            True if there's a running campaign, False otherwise
         """
         try:
             # Get current campaign status from scoreboard endpoint
@@ -393,21 +397,51 @@ class SquadsService(BaseService):
             )
             
             if response.status_code != 200:
-                logger.warning(f"Failed to check active campaigns: {response.status_code}")
+                logger.warning(f"Failed to check campaigns: {response.status_code}")
                 return False  # Allow switch if we can't verify
             
             data = response.json()
             campaign = data.get("campaign")
             
-            # Check if campaign exists and is active
-            if campaign and campaign.get("is_active"):
-                logger.info(f"Active campaign found for guild {guild_id}: {campaign.get('name')}")
-                return True
+            # No campaign or manually disabled
+            if not campaign or not campaign.get("is_active", False):
+                return False
             
-            return False
+            # Parse campaign timing data
+            start_time_str = campaign.get("start_time")
+            num_challenges = campaign.get("num_challenges", 0)
+            cadence_hours = campaign.get("release_cadence_hours", 24)
+            
+            if not start_time_str or num_challenges <= 0:
+                return False
+            
+            try:
+                # Parse the start time
+                start_time = datetime.fromisoformat(start_time_str.replace('Z', '+00:00'))
+                
+                # Calculate when the campaign truly ends:
+                # Start time + (num_challenges * cadence_hours)
+                # This accounts for the last challenge running for cadence hours
+                campaign_duration_hours = num_challenges * cadence_hours
+                campaign_end = start_time + timedelta(hours=campaign_duration_hours)
+                
+                # Check if we're currently within the campaign period
+                now = datetime.now(timezone.utc)
+                if start_time <= now < campaign_end:
+                    logger.info(f"Running campaign found for guild {guild_id}: {campaign.get('name')} "
+                              f"(ends at {campaign_end.isoformat()})")
+                    return True
+                else:
+                    logger.info(f"Campaign {campaign.get('name')} exists but is not currently running "
+                              f"(period: {start_time.isoformat()} to {campaign_end.isoformat()})")
+                    return False
+                    
+            except (ValueError, TypeError) as e:
+                logger.error(f"Error parsing campaign dates: {e}")
+                return False
             
         except Exception as e:
-            logger.error(f"Error checking for active campaigns: {e}")
+            logger.error(f"Error checking for running campaigns: {e}")
             return False  # Allow switch if check fails
     
     async def join_squad(
