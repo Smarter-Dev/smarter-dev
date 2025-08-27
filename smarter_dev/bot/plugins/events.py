@@ -15,6 +15,7 @@ from smarter_dev.bot.views.squad_views import SquadSelectView
 from smarter_dev.bot.views.balance_views import BalanceShareView
 from smarter_dev.bot.views.leaderboard_views import LeaderboardShareView
 from smarter_dev.bot.views.history_views import HistoryShareView
+from smarter_dev.bot.views.beacon_views import handle_beacon_modal_submit
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,8 @@ async def handle_modal_interaction(event: hikari.InteractionCreateEvent) -> None
             await handle_send_bytes_modal(event)
         elif custom_id.startswith("submit_solution_modal:"):
             await handle_solution_submission_modal(event)
+        elif custom_id == "beacon_message_modal":
+            await handle_beacon_message_modal(event)
         else:
             logger.warning(f"Unhandled modal interaction: {custom_id}")
     
@@ -175,6 +178,28 @@ async def handle_solution_submission_modal(event: hikari.InteractionCreateEvent)
         if handler_key in bot.d['modal_handlers']:
             del bot.d['modal_handlers'][handler_key]
         raise
+
+
+async def handle_beacon_message_modal(event: hikari.InteractionCreateEvent) -> None:
+    """Handle beacon message modal submission.
+    
+    Args:
+        event: The modal interaction event
+    """
+    if not isinstance(event.interaction, hikari.ModalInteraction):
+        return
+    
+    # Get the squads service
+    squads_service = getattr(event.app.d, 'squads_service')
+    if not squads_service:
+        squads_service = getattr(event.app.d, '_services', {}).get('squads_service')
+    
+    if not squads_service:
+        logger.error("No squads service found for beacon modal submission")
+        return
+    
+    # Handle the modal submission
+    await handle_beacon_modal_submit(event, squads_service)
 
 
 async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> None:
@@ -583,9 +608,15 @@ async def handle_squad_list_share_interaction(event: hikari.InteractionCreateEve
             )
             return
         
+        # Sort squads to put default squad at the bottom
+        squads.sort(key=lambda s: (getattr(s, 'is_default', False), s.name.lower()))
+        
         # Get user's current squad
         user_squad_response = await service.get_user_squad(guild_id, user_id)
         current_squad_id = user_squad_response.squad.id if user_squad_response.squad else None
+        
+        # Check for active campaign
+        has_active_campaign = await service._check_active_campaign(guild_id)
         
         # Get guild roles for color information
         guild_roles = {}
@@ -601,7 +632,8 @@ async def handle_squad_list_share_interaction(event: hikari.InteractionCreateEve
             squads, 
             guild.name, 
             str(current_squad_id) if current_squad_id else None,
-            guild_roles
+            guild_roles,
+            has_active_campaign=has_active_campaign
         )
         
         # Send as public message
