@@ -274,14 +274,17 @@ async def get_scoreboard(
         total_submissions = await submission_ops.get_campaign_submission_count(current_campaign.id)
         total_challenges = await campaign_ops.get_campaign_challenge_count(current_campaign.id)
         
-        # Format campaign data
+        # Format campaign data with additional fields for squad switching logic
         campaign_data = {
             "id": str(current_campaign.id),
             "name": current_campaign.title,
             "start_date": current_campaign.start_time.strftime("%B %d, %Y") if current_campaign.start_time else None,
+            "start_time": current_campaign.start_time.isoformat() if current_campaign.start_time else None,
             "end_date": None,  # Campaign model doesn't have end_time field
             "is_active": current_campaign.is_active,
-            "guild_id": current_campaign.guild_id
+            "guild_id": current_campaign.guild_id,
+            "release_cadence_hours": current_campaign.release_cadence_hours,
+            "num_challenges": total_challenges
         }
         
         # Format scoreboard data
@@ -404,14 +407,17 @@ async def get_detailed_scoreboard(
         total_submissions = await submission_ops.get_campaign_submission_count(current_campaign.id)
         total_challenges = await campaign_ops.get_campaign_challenge_count(current_campaign.id)
         
-        # Format campaign data
+        # Format campaign data with additional fields for squad switching logic
         campaign_data = {
             "id": str(current_campaign.id),
             "name": current_campaign.title,
             "start_date": current_campaign.start_time.strftime("%B %d, %Y") if current_campaign.start_time else None,
+            "start_time": current_campaign.start_time.isoformat() if current_campaign.start_time else None,
             "end_date": None,
             "is_active": current_campaign.is_active,
-            "guild_id": current_campaign.guild_id
+            "guild_id": current_campaign.guild_id,
+            "release_cadence_hours": current_campaign.release_cadence_hours,
+            "num_challenges": total_challenges
         }
         
         logger.info(f"Retrieved detailed scoreboard for campaign {current_campaign.id} with {len(detailed_data)} entries")
