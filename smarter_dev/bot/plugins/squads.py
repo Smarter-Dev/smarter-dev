@@ -20,6 +20,7 @@ from smarter_dev.bot.utils.embeds import (
 )
 from smarter_dev.bot.utils.image_embeds import get_generator
 from smarter_dev.bot.views.squad_views import SquadSelectView, SquadListShareView
+from smarter_dev.bot.views.beacon_views import create_beacon_message_modal, handle_beacon_modal_submit, is_user_on_cooldown
 from smarter_dev.bot.services.exceptions import (
     ServiceError,
     ValidationError
@@ -33,6 +34,64 @@ logger = logging.getLogger(__name__)
 
 # Create plugin
 plugin = lightbulb.Plugin("squads")
+
+
+async def _send_squad_join_announcement(
+    bot: lightbulb.BotApp,
+    guild_id: str,
+    user: hikari.User,
+    squad,
+    announcement_channel_id: str
+) -> None:
+    """Send a squad join announcement to the squad's announcement channel.
+    
+    Args:
+        bot: The Discord bot instance
+        guild_id: Discord guild ID
+        user: User who joined the squad
+        squad: Squad object with squad information
+        announcement_channel_id: Channel ID to send announcement to
+    """
+    try:
+        # Only announce for non-default squads
+        if getattr(squad, 'is_default', False):
+            logger.debug(f"Skipping announcement for default squad {squad.name}")
+            return
+        
+        # Get the announcement channel
+        try:
+            channel = bot.rest.fetch_channel(int(announcement_channel_id))
+            if not channel:
+                logger.warning(f"Could not find announcement channel {announcement_channel_id} for squad {squad.name}")
+                return
+        except Exception as e:
+            logger.error(f"Error fetching announcement channel {announcement_channel_id}: {e}")
+            return
+        
+        # Create green success embed announcement
+        generator = get_generator()
+        
+        # Get user's display name for the announcement
+        display_name = user.display_name or user.username
+        
+        # Create announcement message
+        announcement_title = "New Squad Member!"
+        announcement_description = f"{display_name} has joined {squad.name}!"
+        
+        # Create the green embed image
+        image_file = generator.create_success_embed(announcement_title, announcement_description)
+        
+        # Send the announcement
+        await bot.rest.create_message(
+            channel=int(announcement_channel_id),
+            attachment=image_file
+        )
+        
+        logger.info(f"Successfully sent squad join announcement for {display_name} joining {squad.name}")
+        
+    except Exception as e:
+        logger.error(f"Failed to send squad join announcement for user {user.id} joining squad {squad.name}: {e}")
+        # Don't raise - we don't want squad joins to fail because of announcement issues
 
 
 @plugin.command
@@ -68,9 +127,15 @@ async def list_command(ctx: lightbulb.Context) -> None:
             await ctx.respond(attachment=image_file)
             return
         
+        # Sort squads to put default squad at the bottom
+        squads.sort(key=lambda s: (getattr(s, 'is_default', False), s.name.lower()))
+        
         # Get user's current squad
         user_squad_response = await service.get_user_squad(str(ctx.guild_id), str(ctx.user.id))
         current_squad_id = user_squad_response.squad.id if user_squad_response.squad else None
+        
+        # Check for active campaign
+        has_active_campaign = await service._check_active_campaign(str(ctx.guild_id))
         
         # Get guild roles for color information
         guild_roles = {}
@@ -85,7 +150,8 @@ async def list_command(ctx: lightbulb.Context) -> None:
             squads, 
             ctx.get_guild().name, 
             str(current_squad_id) if current_squad_id else None,
-            guild_roles
+            guild_roles,
+            has_active_campaign=has_active_campaign
         )
         
         # Create share view
@@ -93,7 +159,8 @@ async def list_command(ctx: lightbulb.Context) -> None:
             squads, 
             ctx.get_guild().name, 
             str(current_squad_id) if current_squad_id else None,
-            guild_roles
+            guild_roles,
+            has_active_campaign=has_active_campaign
         )
         
         # Send as ephemeral message with share button
@@ -252,6 +319,19 @@ async def _handle_direct_squad_join(
             else:
                 description = f"Welcome to {result.squad.name}! We're glad to have you aboard."
             
+            # Send announcement to squad's announcement channel if configured
+            if hasattr(result.squad, 'announcement_channel') and result.squad.announcement_channel:
+                try:
+                    await _send_squad_join_announcement(
+                        ctx.bot,
+                        str(ctx.guild_id),
+                        ctx.user,
+                        result.squad,
+                        result.squad.announcement_channel
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send squad join announcement: {e}")
+            
             generator = get_generator()
             image_file = generator.create_success_embed("SQUAD JOINED", description)
     
@@ -288,6 +368,26 @@ async def join_command(ctx: lightbulb.Context) -> None:
         image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
         await ctx.edit_last_response(attachment=image_file)
         return
+    
+    # Check if there's an active campaign that would prevent squad switching
+    # First get user's current squad to determine if they're trying to switch
+    try:
+        user_squad_response = await squads_service.get_user_squad(str(ctx.guild_id), str(ctx.user.id))
+        current_squad = user_squad_response.squad
+        
+        # Only check campaign if user is in a non-default squad (would be switching)
+        if current_squad and not getattr(current_squad, 'is_default', False):
+            has_active_campaign = await squads_service._check_active_campaign(str(ctx.guild_id))
+            if has_active_campaign:
+                generator = get_generator()
+                image_file = generator.create_error_embed(
+                    "Squad switching is disabled during active challenge campaigns to prevent spying on other squads."
+                )
+                await ctx.edit_last_response(attachment=image_file)
+                return
+    except Exception as e:
+        logger.warning(f"Error checking campaign status: {e}")
+        # Continue if check fails - don't block the command
     
     # Check if user provided a squad name
     squad_name = getattr(ctx.options, 'squad', None)
@@ -543,6 +643,98 @@ async def members_command(ctx: lightbulb.Context) -> None:
         generator = get_generator()
         image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
         await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+
+
+@squads_group.child
+@lightbulb.command("beacon", "Send a beacon message to alert your squad")
+@lightbulb.implements(lightbulb.SlashSubCommand)
+async def beacon_command(ctx: lightbulb.Context) -> None:
+    """Handle squad beacon command - send urgent message to squad with role ping."""
+    service: SquadsService = getattr(ctx.bot, 'd', {}).get('squads_service')
+    if not service:
+        # Fallback to _services dict
+        service = getattr(ctx.bot, 'd', {}).get('_services', {}).get('squads_service')
+    
+    if not service:
+        generator = get_generator()
+        image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        return
+    
+    try:
+        # Check rate limiting first
+        is_on_cooldown, seconds_remaining = is_user_on_cooldown(ctx.user.id)
+        if is_on_cooldown:
+            minutes_remaining = max(1, seconds_remaining // 60)
+            generator = get_generator()
+            image_file = generator.create_error_embed(
+                f"Please wait {minutes_remaining} minute{'s' if minutes_remaining != 1 else ''} before sending another beacon message."
+            )
+            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+            return
+        
+        # Get user's current squad
+        user_squad_response = await service.get_user_squad(str(ctx.guild_id), str(ctx.user.id))
+        
+        if not user_squad_response.is_in_squad:
+            generator = get_generator()
+            image_file = generator.create_error_embed("You must be in a squad to send beacon messages!")
+            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+            return
+        
+        squad = user_squad_response.squad
+        
+        # Check if we're in the correct channel
+        if not squad.announcement_channel:
+            generator = get_generator()
+            image_file = generator.create_error_embed(
+                f"Your squad ({squad.name}) doesn't have an announcement channel configured. "
+                "Contact an administrator to set one up."
+            )
+            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+            return
+        
+        if str(ctx.channel_id) != squad.announcement_channel:
+            # Try to get the channel name for a better error message
+            error_message = f"Beacon messages for {squad.name} can only be sent in your squad's announcement channel!"
+            try:
+                channel = await ctx.bot.rest.fetch_channel(int(squad.announcement_channel))
+                # Filter to ASCII characters only and clean up the name
+                clean_name = ''.join(c for c in channel.name if ord(c) < 128)
+                error_message = f"Beacon messages for {squad.name} can only be sent in #{clean_name}"
+            except Exception as e:
+                logger.debug(f"Could not fetch channel name for {squad.announcement_channel}: {e}")
+                # Use the generic message as fallback
+                pass
+            
+            generator = get_generator()
+            image_file = generator.create_error_embed(error_message)
+            try:
+                await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+            except (hikari.BadRequestError, hikari.NotFoundError):
+                logger.warning("Failed to respond to beacon command - interaction may have expired")
+            return
+        
+        # All checks passed, show the modal
+        modal = create_beacon_message_modal()
+        await ctx.respond_with_modal(
+            modal.title,
+            modal.custom_id,
+            components=modal.components
+        )
+        
+    except ServiceError as e:
+        logger.error(f"Service error in beacon command: {e}")
+        generator = get_generator()
+        image_file = generator.create_error_embed("Failed to verify squad membership. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+    except Exception as e:
+        logger.exception(f"Unexpected error in beacon command: {e}")
+        generator = get_generator()
+        image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
+        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+
+
 
 
 def load(bot: lightbulb.BotApp) -> None:
