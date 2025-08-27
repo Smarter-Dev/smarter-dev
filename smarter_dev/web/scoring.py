@@ -3,9 +3,12 @@
 This module implements a sophisticated scoring system that rewards quick
 problem solving while providing fair scoring windows for all participants.
 
-Scoring phases:
-1. Logarithmic decay (first 1 hour if ≥2 hours remain)
-2. Linear fractional reduction (remaining time)
+Scoring phases when ≥2 hours remain at input request:
+1. Logarithmic decay (first 1 hour, from 4096 to 2048)
+2. Linear fractional reduction (remaining time, from 2048 to 0)
+
+When <2 hours remain at input request:
+- Pure logarithmic decay across full 4096 points over entire duration
 """
 
 from __future__ import annotations
@@ -19,13 +22,12 @@ def calculate_challenge_points(
     submission_time: datetime,
     challenge_end_time: datetime
 ) -> int:
-    """Calculate points for a challenge submission using dual-phase scoring.
+    """Calculate points for a challenge submission using adaptive scoring.
     
     The scoring system uses:
     - Fixed maximum of 4096 points
-    - Logarithmic decay for first 1 hour (if ≥2 hours remain when input requested)
-    - Linear fractional reduction for remaining time
-    - Pure linear decay if <2 hours remain when input requested
+    - If ≥2 hours remain: Logarithmic decay (1 hour) then linear reduction
+    - If <2 hours remain: Pure logarithmic decay over full duration
     
     Args:
         input_generated_at: When the participant requested challenge input (timer start)
@@ -72,8 +74,8 @@ def calculate_challenge_points(
             LOG_PHASE_DURATION
         )
     else:
-        # Pure linear scoring (not enough time for dual-phase)
-        return _calculate_linear_points(
+        # Pure logarithmic scoring over entire duration when <2 hours remain
+        return _calculate_pure_logarithmic_points(
             elapsed_seconds,
             time_remaining_at_input,
             MAX_POINTS
@@ -128,14 +130,15 @@ def _calculate_dual_phase_points(
         return points
 
 
-def _calculate_linear_points(
+def _calculate_pure_logarithmic_points(
     elapsed_seconds: float,
     time_remaining_at_input: float,
     max_points: int
 ) -> int:
-    """Calculate points using pure linear scoring.
+    """Calculate points using pure logarithmic decay over full duration.
     
     Used when less than 2 hours remain at input request time.
+    Applies logarithmic decay across all 4096 points.
     
     Args:
         elapsed_seconds: Time taken to solve (in seconds)
@@ -148,12 +151,17 @@ def _calculate_linear_points(
     if time_remaining_at_input <= 0:
         return 0
     
-    # Linear decay from max_points to 0 over the available time
-    fraction_remaining = max(0, 1 - (elapsed_seconds / time_remaining_at_input))
+    if elapsed_seconds >= time_remaining_at_input:
+        return 0
+    
+    # Logarithmic decay from max_points to 0 over the entire available time
+    # Using the same steep curve formula with power 0.6
+    log_factor = math.log2(1 + elapsed_seconds / time_remaining_at_input)
+    steep_factor = log_factor ** 0.6
+    points_raw = max_points - max_points * steep_factor
     
     # Round up to be generous, but return 0 if time is truly up
-    if fraction_remaining == 0:
+    if points_raw <= 0:
         return 0
-    points_raw = max_points * fraction_remaining
     points = math.ceil(points_raw)
     return points

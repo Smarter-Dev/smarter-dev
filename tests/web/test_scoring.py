@@ -81,15 +81,17 @@ class TestScoringSystem:
         # 2048 * (1/120) = 17.066... rounds up to 18
         assert points == 18
     
-    def test_pure_linear_when_less_than_2_hours_remain(self):
-        """Test pure linear decay when <2 hours remain at input request."""
+    def test_pure_logarithmic_when_less_than_2_hours_remain(self):
+        """Test pure logarithmic decay when <2 hours remain at input request."""
         input_time = datetime(2025, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
         challenge_end = input_time + timedelta(hours=1.5)  # Only 1.5 hours remain
         submission_time = input_time + timedelta(minutes=30)
         
         points = calculate_challenge_points(input_time, submission_time, challenge_end)
-        # Pure linear: 4096 * (1/1.5) = 4096 * 0.666... = 2730.666... rounds up to 2731
-        assert points == 2731
+        # Pure logarithmic: 4096 - 4096 * [log2(1 + 30/90)]^0.6
+        # log2(1.333) ≈ 0.415, 0.415^0.6 ≈ 0.590
+        # 4096 - 4096 * 0.590 ≈ 1680
+        assert points == 1680
     
     def test_exactly_2_hours_remaining_uses_dual_phase(self):
         """Test that exactly 2 hours remaining uses dual-phase scoring."""
@@ -173,8 +175,10 @@ class TestScoringSystem:
         submission_time = input_time + timedelta(minutes=30)
         
         points = calculate_challenge_points(input_time, submission_time, challenge_end)
-        # Should use pure linear: 4096 * (89/119) = 3063.52... rounds up to 3064
-        assert points == 3064
+        # Should use pure logarithmic: 4096 - 4096 * [log2(1 + 30/119)]^0.6
+        # log2(1.252) ≈ 0.324, 0.324^0.6 ≈ 0.509
+        # 4096 - 4096 * 0.509 ≈ 2012
+        assert points == 2012
     
     def test_edge_case_2_hours_1_minute_remaining(self):
         """Test edge case with just over 2 hours remaining."""
@@ -203,23 +207,27 @@ class TestScoringSystem:
         # 2048 * (10/(120*60)) = 2.844... rounds up to 3
         assert points == 3
     
-    def test_equivalent_2048_points_scenarios(self):
-        """Test that both scenarios yield exactly 2048 points despite different scoring methods."""
-        # Scenario 1: Start with 2hrs, complete in 1hr (end of log phase)
-        input_time_1 = datetime(2025, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
-        challenge_end_1 = input_time_1 + timedelta(hours=2)  # 2 hours remain
-        submission_time_1 = input_time_1 + timedelta(hours=1)  # Complete after 1 hour
+    def test_2048_points_at_dual_phase_transition(self):
+        """Test that completing at 1 hour with dual-phase scoring gives exactly 2048 points."""
+        # Start with 2hrs, complete in 1hr (end of log phase)
+        input_time = datetime(2025, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
+        challenge_end = input_time + timedelta(hours=2)  # 2 hours remain
+        submission_time = input_time + timedelta(hours=1)  # Complete after 1 hour
         
-        points_1 = calculate_challenge_points(input_time_1, submission_time_1, challenge_end_1)
+        points = calculate_challenge_points(input_time, submission_time, challenge_end)
         
-        # Scenario 2: Start with 1hr, complete in 30min (halfway through linear)
-        input_time_2 = datetime(2025, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
-        challenge_end_2 = input_time_2 + timedelta(hours=1)  # 1 hour remains
-        submission_time_2 = input_time_2 + timedelta(minutes=30)  # Complete after 30 min
+        # Should give exactly 2048 points at the transition
+        assert points == 2048, f"Should give 2048 at 1hr transition, got {points}"
+    
+    def test_pure_logarithmic_with_1_hour_remaining(self):
+        """Test pure logarithmic scoring with 1 hour total time."""
+        input_time = datetime(2025, 1, 1, 10, 0, 0, tzinfo=timezone.utc)
+        challenge_end = input_time + timedelta(hours=1)  # 1 hour remains
+        submission_time = input_time + timedelta(minutes=30)  # Complete after 30 min
         
-        points_2 = calculate_challenge_points(input_time_2, submission_time_2, challenge_end_2)
+        points = calculate_challenge_points(input_time, submission_time, challenge_end)
         
-        # Both should give exactly 2048 points
-        assert points_1 == 2048, f"Scenario 1 (2hr start, 1hr complete) should give 2048, got {points_1}"
-        assert points_2 == 2048, f"Scenario 2 (1hr start, 30min complete) should give 2048, got {points_2}"
-        assert points_1 == points_2, "Both scenarios should yield identical points"
+        # Pure logarithmic: 4096 - 4096 * [log2(1 + 0.5)]^0.6
+        # log2(1.5) ≈ 0.585, 0.585^0.6 ≈ 0.707
+        # 4096 - 4096 * 0.707 ≈ 1200
+        assert 1100 < points < 1300, f"Expected ~1200 points, got {points}"
