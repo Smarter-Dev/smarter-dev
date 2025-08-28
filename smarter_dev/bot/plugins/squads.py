@@ -665,10 +665,21 @@ async def beacon_command(ctx: lightbulb.Context) -> None:
         # Check rate limiting first
         is_on_cooldown, seconds_remaining = is_user_on_cooldown(ctx.user.id)
         if is_on_cooldown:
-            minutes_remaining = max(1, seconds_remaining // 60)
+            # Format time remaining in hours/minutes
+            if seconds_remaining >= 3600:  # 1 hour or more
+                hours_remaining = seconds_remaining // 3600
+                minutes_part = (seconds_remaining % 3600) // 60
+                if minutes_part > 0:
+                    time_str = f"{hours_remaining} hour{'s' if hours_remaining != 1 else ''} and {minutes_part} minute{'s' if minutes_part != 1 else ''}"
+                else:
+                    time_str = f"{hours_remaining} hour{'s' if hours_remaining != 1 else ''}"
+            else:
+                minutes_remaining = max(1, seconds_remaining // 60)
+                time_str = f"{minutes_remaining} minute{'s' if minutes_remaining != 1 else ''}"
+            
             generator = get_generator()
             image_file = generator.create_error_embed(
-                f"Please wait {minutes_remaining} minute{'s' if minutes_remaining != 1 else ''} before sending another beacon message."
+                f"Please wait {time_str} before sending another beacon message."
             )
             await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
             return
