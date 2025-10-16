@@ -21,5 +21,8 @@ data:
   RATE_LIMIT_REQUESTS: "100"
   RATE_LIMIT_WINDOW: "60"
   
-  # Bot API configuration  
+  # Bot API configuration
   API_BASE_URL: "http://smarter-dev-website:8000/api"
+
+  # LLM Model Configuration - Using Claude Haiku for production
+  LLM_MODEL: "claude-haiku-4-5-20251001"

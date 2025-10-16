@@ -104,18 +104,25 @@ def _get_provider_from_model(model_name: str) -> str:
 
 
 def _get_api_key_for_model(model_name: str) -> Optional[str]:
-    """Get appropriate API key for model."""
+    """Get appropriate API key for model.
+
+    Checks environment variables first (for Kubernetes/Docker environments),
+    then falls back to .env file (for local development).
+    """
     provider = _get_provider_from_model(model_name)
-    
+
     if provider == "openai":
-        return dotenv.get_key(".env", "OPENAI_API_KEY")
+        return os.getenv("OPENAI_API_KEY") or dotenv.get_key(".env", "OPENAI_API_KEY")
     elif provider == "gemini":
-        return dotenv.get_key(".env", "GEMINI_API_KEY")
+        return os.getenv("GEMINI_API_KEY") or dotenv.get_key(".env", "GEMINI_API_KEY")
     elif provider == "anthropic":
-        return dotenv.get_key(".env", "ANTHROPIC_API_KEY")
+        return os.getenv("ANTHROPIC_API_KEY") or dotenv.get_key(".env", "ANTHROPIC_API_KEY")
     else:
-        # Fallback - try common keys
-        return (dotenv.get_key(".env", "OPENAI_API_KEY") or 
+        # Fallback - try common keys from environment first, then .env
+        return (os.getenv("OPENAI_API_KEY") or
+                os.getenv("GEMINI_API_KEY") or
+                os.getenv("ANTHROPIC_API_KEY") or
+                dotenv.get_key(".env", "OPENAI_API_KEY") or
                 dotenv.get_key(".env", "GEMINI_API_KEY") or
                 dotenv.get_key(".env", "ANTHROPIC_API_KEY"))
 

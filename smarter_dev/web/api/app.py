@@ -33,6 +33,7 @@ from smarter_dev.web.api.routers.forum_notifications import router as forum_noti
 from smarter_dev.web.api.routers.challenges import router as challenges_router
 from smarter_dev.web.api.routers.scheduled_messages import router as scheduled_messages_router
 from smarter_dev.web.api.routers.repeating_messages import router as repeating_messages_router
+from smarter_dev.web.api.routers.members import router as members_router
 from smarter_dev.web.api.schemas import ErrorResponse, ValidationErrorResponse, ErrorDetail
 from smarter_dev.web.crud import DatabaseOperationError, NotFoundError, ConflictError
 from smarter_dev.web.security_headers import SecurityHeadersMiddleware
@@ -413,6 +414,11 @@ api.include_router(
 api.include_router(
     repeating_messages_router,
     tags=["Repeating Message Management"]
+)
+
+api.include_router(
+    members_router,
+    tags=["Members"]
 )
 
 

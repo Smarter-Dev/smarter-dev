@@ -65,6 +65,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: gemini-api-key
+                  - name: ANTHROPIC_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: anthropic-api-key
                 resources:
                     requests:
                         cpu: 100m

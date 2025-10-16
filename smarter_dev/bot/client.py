@@ -1150,6 +1150,32 @@ async def run_bot() -> None:
         # For now, we'll skip this to avoid duplicate processing
         # The thread creation event should handle most cases
 
+    @bot.listen()
+    async def on_member_remove(event: hikari.MemberDeleteEvent) -> None:
+        """Cleanup user data when they leave a guild.
+
+        Removes squad memberships and bytes balance for the user in the guild.
+        """
+        try:
+            guild_id = str(getattr(event, "guild_id", ""))
+            user_id = str(getattr(event, "user_id", ""))
+        except Exception:
+            return
+
+        if not guild_id or not user_id:
+            return
+
+        api_client = getattr(bot, "d", {}).get("api_client")
+        if not api_client:
+            logger.warning("API client not available; cannot cleanup user data on leave")
+            return
+
+        try:
+            await api_client.delete(f"/guilds/{guild_id}/members/{user_id}")
+            logger.info(f"Cleaned up member data for user {user_id} in guild {guild_id}")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup member data for user {user_id} in guild {guild_id}: {e}")
+
     # Set up services before starting the bot
     logger.info("Setting up bot services...")
     await setup_bot_services(bot)
