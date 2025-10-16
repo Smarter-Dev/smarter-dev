@@ -4598,3 +4598,47 @@ class RepeatingMessageOperations:
             
         except Exception as e:
             raise DatabaseOperationError(f"Failed to toggle repeating message: {e}") from e
+
+
+class GuildOperations:
+    """Cross-cutting guild-scoped operations.
+
+    Provides helpers that coordinate data across features for a guild.
+    """
+
+    async def remove_user_data(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        user_id: str,
+    ) -> dict:
+        """Remove a user's squad membership and bytes balance in a guild.
+
+        Idempotent: succeeds even if records do not exist. Does not delete
+        transaction history to preserve audit trails.
+
+        Returns a dict with counts of deleted rows.
+        """
+        try:
+            # Delete squad memberships for this user in the guild
+            memberships_result = await session.execute(
+                delete(SquadMembership).where(
+                    SquadMembership.guild_id == guild_id,
+                    SquadMembership.user_id == user_id,
+                )
+            )
+
+            # Delete bytes balance for this user in the guild
+            balances_result = await session.execute(
+                delete(BytesBalance).where(
+                    BytesBalance.guild_id == guild_id,
+                    BytesBalance.user_id == user_id,
+                )
+            )
+
+            return {
+                "deleted_memberships": memberships_result.rowcount or 0,
+                "deleted_balances": balances_result.rowcount or 0,
+            }
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to remove user data: {e}") from e

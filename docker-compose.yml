@@ -33,6 +33,8 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/smarter_dev
       - ENVIRONMENT=development
+      - LLM_MODEL=claude-haiku-4-5-20251001
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     ports:
       - "8000:8000"
     volumes:
@@ -58,6 +60,8 @@ services:
       - API_SECRET_KEY=sk-kTYEtwcMwnJ7diuUsBAdG-0r0WY3bSNS3oLVnHKvRRk
       - BOT_API_KEY=sk-kTYEtwcMwnJ7diuUsBAdG-0r0WY3bSNS3oLVnHKvRRk
       - ENVIRONMENT=development
+      - LLM_MODEL=claude-haiku-4-5-20251001
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
       - .:/app
       - /app/.venv

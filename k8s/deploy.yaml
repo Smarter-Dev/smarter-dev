@@ -104,6 +104,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: google-analytics-id
+                  - name: ANTHROPIC_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: anthropic-api-key
                 resources:
                     requests:
                         cpu: 100m
