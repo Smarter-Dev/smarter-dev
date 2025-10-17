@@ -236,6 +236,8 @@ class ConversationalMentionSignature(dspy.Signature):
     - Find your own previous messages by matching author_id to me.bot_id
     - Pay attention to channel.description to understand the channel's purpose
     - Notice user roles (mods, teams, fun custom roles) to tailor your responses
+    - Each message has a timestamp showing how long ago it was sent (e.g., "5 minutes ago")
+    - **Prioritize recent messages** - what someone said 2 minutes ago is far more relevant than what was said an hour ago
 
     **Discord Formatting**:
     - User mentions: `<@user_id>` format
