@@ -471,9 +471,24 @@ class ConversationContextBuilder:
             is_new = False
             if trigger_timestamp:
                 is_new = (message.created_at >= trigger_timestamp or message.id == trigger_message_id)
-            
-            # Format timestamp
-            time_str = message.created_at.strftime("%H:%M")
+
+            # Format timestamp as relative time
+            now = datetime.now(timezone.utc)
+            time_diff = now - message.created_at
+
+            # Convert to relative time string
+            total_seconds = int(time_diff.total_seconds())
+            if total_seconds < 60:
+                time_str = f"{total_seconds} seconds ago"
+            elif total_seconds < 3600:  # Less than 1 hour
+                minutes = total_seconds // 60
+                time_str = f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+            elif total_seconds < 86400:  # Less than 1 day
+                hours = total_seconds // 3600
+                time_str = f"{hours} hour{'s' if hours != 1 else ''} ago"
+            else:
+                days = total_seconds // 86400
+                time_str = f"{days} day{'s' if days != 1 else ''} ago"
             
             # Handle reply context
             reply_context = ""
