@@ -192,6 +192,9 @@ class MentionAgent(BaseAgent):
                 messages_remaining=messages_remaining
             )
 
+            logger.debug(f"ReAct agent result: {result}")
+            logger.debug(f"ReAct response text: {result.response}")
+
             # Check if the agent decided to skip due to controversial content
             if result.response.strip() == "SKIP_RESPONSE":
                 logger.info("Agent decided to skip response due to sensitive content")
