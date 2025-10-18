@@ -1,6 +1,6 @@
 """Help agent plugin for Discord bot conversational assistance.
 
-This module provides a /help command and @mention handler that uses AI to answer
+This module provides a /help command that uses AI to answer
 user questions about the bot's functionality, particularly the bytes economy
 and squad management systems.
 """
@@ -14,7 +14,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, TYPE_CHECKING
 
-from smarter_dev.bot.agent import HelpAgent, DiscordMessage, rate_limiter
+from smarter_dev.bot.agents.help_agent import help_agent
+from smarter_dev.bot.agents.models import DiscordMessage
+from smarter_dev.bot.services.rate_limiter import rate_limiter
 from smarter_dev.bot.utils.messages import gather_message_context
 
 if TYPE_CHECKING:
@@ -24,9 +26,6 @@ logger = logging.getLogger(__name__)
 
 # Create plugin
 plugin = lightbulb.Plugin("help")
-
-# Global help agent instance
-help_agent = HelpAgent()
 
 
 
@@ -170,14 +169,13 @@ async def generate_help_response(
         current_remaining = rate_limiter.get_user_remaining_requests(user_id, 'help')
         messages_remaining = max(0, current_remaining - 1)
         
-        # Generate response with token tracking using new structured context method
-        response, tokens_used = await help_agent.generate_response_new(
+        # Generate response with token tracking using new agent
+        response, tokens_used = await help_agent.generate_response(
             user_question=user_question,
             bot=bot,
             channel_id=int(channel_id),
             guild_id=int(guild_id) if guild_id else None,
             trigger_message_id=trigger_message_id,
-            interaction_type=interaction_type,
             messages_remaining=messages_remaining
         )
         
@@ -275,55 +273,6 @@ async def help_command(ctx: lightbulb.Context) -> None:
     
     logger.info(f"Help command used by {ctx.user.display_name or ctx.user.username} ({ctx.user.id}): {user_question[:50]}...")
 
-
-@plugin.listener(hikari.MessageCreateEvent)
-async def on_message_create(event: hikari.MessageCreateEvent) -> None:
-    """Handle @mention messages to provide help responses."""
-    
-    # Skip if no message content or if it's from a bot
-    if not event.content or event.author.is_bot:
-        return
-    
-    # Skip if not a guild message
-    if not event.guild_id:
-        return
-    
-    # Check if bot is mentioned
-    bot_user = plugin.bot.get_me()
-    if not bot_user or bot_user.id not in event.message.user_mentions_ids:
-        return
-    
-    # Extract the question (remove bot mention)
-    user_question = event.content
-    for user_id in event.message.user_mentions_ids:
-        if user_id == bot_user.id:
-            user_question = user_question.replace(f"<@{user_id}>", "").replace(f"<@!{user_id}>", "")
-    
-    user_question = user_question.strip()
-    
-    # If there's no question text, just use empty string - the context will be in the conversation history
-    if not user_question:
-        user_question = ""
-    
-    # Start typing indicator to show the bot is processing
-    async with plugin.bot.rest.trigger_typing(event.channel_id):
-        # Generate response with conversation storage (typing indicator will continue during this)
-        response = await generate_help_response(
-            user_id=str(event.author.id),
-            user_question=user_question,
-            bot=plugin.bot,
-            guild_id=str(event.guild_id) if event.guild_id else None,
-            channel_id=str(event.channel_id),
-            user_username=event.author.display_name or event.author.username,
-            interaction_type="mention",
-            bot_id=str(bot_user.id),
-            trigger_message_id=event.message.id
-        )
-    
-    # Send public response as a reply (typing indicator stops automatically when we send the message)
-    await plugin.bot.rest.create_message(event.channel_id, response, reply=event.message)
-    
-    logger.info(f"Help mention handled for {event.author.display_name or event.author.username} ({event.author.id}): {user_question[:50]}...")
 
 
 def load(bot: lightbulb.BotApp) -> None:
