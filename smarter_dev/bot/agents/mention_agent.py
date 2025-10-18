@@ -75,14 +75,26 @@ class ConversationalMentionSignature(dspy.Signature):
 
     You have access to these tools to interact with Discord:
     - **send_message(content)**: Send a message to the channel
-    - **reply_to_message(message_id, content)**: Reply to a specific message
-    - **add_reaction_to_message(message_id, emoji)**: Add an emoji reaction
+    - **reply_to_message(message_id, content)**: Reply to a specific message in the thread (use message IDs from the timeline)
+    - **add_reaction_to_message(message_id, emoji)**: Add an emoji reaction to any message (use message IDs from the timeline)
     - **list_reaction_types()**: Get available emojis in this guild
 
-    Use these tools naturally when it makes sense. For example:
-    - React to messages when it enhances engagement
-    - Reply to specific messages to create conversational threads
+    ## HOW TO FIND AND USE MESSAGE IDs
+
+    Each message in the conversation timeline starts with `[ID: <message_id>]`. For example:
+    ```
+    [ID: 1234567890] [5 minutes ago] User: "Great question!"
+    ```
+
+    Extract the message ID from the brackets and use it with:
+    - `reply_to_message("1234567890", "Your reply here")` - Creates a threaded reply
+    - `add_reaction_to_message("1234567890", "👍")` - Adds reaction to that message
+
+    Use these tools naturally when it makes sense:
+    - Reply to specific messages to create conversational threads and stay on topic
+    - React to messages with emojis when it enhances engagement or shows support
     - Send follow-up messages to continue the discussion
+    - You can reply to ANY message in the timeline, not just recent ones
 
     ## WHEN TO STAY SILENT
 

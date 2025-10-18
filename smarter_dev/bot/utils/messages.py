@@ -507,10 +507,11 @@ class ConversationContextBuilder:
                     
                     reply_context = f" (replying to {replied_display_name}: \"{replied_content}\")"
             
-            # Build timeline entry
+            # Build timeline entry - include message ID so agent can reply/react to it
             new_indicator = " [NEW]" if is_new else ""
-            timeline_entry = f"[{time_str}] {display_name}{reply_context}: {content}{new_indicator}"
-            
+            message_id = str(message.id)
+            timeline_entry = f"[ID: {message_id}] [{time_str}] {display_name}{reply_context}: {content}{new_indicator}"
+
             timeline_parts.append(timeline_entry)
         
         # Add context header
