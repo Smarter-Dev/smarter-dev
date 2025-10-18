@@ -73,6 +73,13 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             reply_to_message("1234567890", "Great question! Here's what I think...")
         """
         try:
+            # Validate message_id is numeric
+            if not message_id or not message_id.strip().isdigit():
+                return {
+                    "success": False,
+                    "error": f"Invalid message_id '{message_id}' - must be a numeric Discord message ID"
+                }
+
             logger.debug(f"[Tool] reply_to_message called for message {message_id}")
             message = await bot.rest.create_message(
                 int(channel_id),
@@ -98,15 +105,31 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
         Args:
             message_id: Discord message ID (extract from timeline's [ID: ...] prefix)
-            emoji: Emoji to add (Unicode like "👍", "❤️", "😂" or custom guild emoji)
+            emoji: Emoji to add (Unicode like "👍", "❤️", "😂" or custom in format "emoji_name:id")
 
         Returns:
             dict with 'success' boolean and 'result' or 'error' string
 
         Example:
             add_reaction_to_message("1234567890", "👍")
+            add_reaction_to_message("1234567890", "laughing:123456789")
         """
         try:
+            # Validate message_id is numeric
+            if not message_id or not message_id.strip().isdigit():
+                return {
+                    "success": False,
+                    "error": f"Invalid message_id '{message_id}' - must be a numeric Discord message ID"
+                }
+
+            # Clean up emoji format if it's in mention format <:name:id> or <emoji:id>
+            emoji = emoji.strip()
+            if emoji.startswith('<') and emoji.endswith('>'):
+                # Strip angle brackets: <:emoji_name:123> -> :emoji_name:123
+                emoji = emoji[1:-1]
+                # If it still has a colon at start, keep as is (for custom emoji format)
+                # Otherwise this might be invalid
+
             logger.debug(f"[Tool] add_reaction_to_message called for message {message_id} with emoji {emoji}")
             await bot.rest.add_reaction(
                 int(channel_id),
