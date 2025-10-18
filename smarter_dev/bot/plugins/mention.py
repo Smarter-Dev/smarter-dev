@@ -117,7 +117,11 @@ async def store_conversation(
 
 @plugin.listener(hikari.MessageCreateEvent)
 async def on_message_create(event: hikari.MessageCreateEvent) -> None:
-    """Handle @mention messages to provide conversational responses."""
+    """Handle @mention messages to provide conversational responses via ReAct agent.
+
+    The agent will send its own messages directly using tools, so this plugin
+    only needs to track metrics and store conversations in the database.
+    """
 
     # Skip if no message content or if it's from a bot
     if not event.content or event.author.is_bot:
@@ -150,9 +154,11 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
         # Track response time
         start_time = datetime.now(timezone.utc)
 
-        # Generate response using mention agent
+        # Show typing indicator while agent processes
         async with plugin.bot.rest.trigger_typing(event.channel_id):
-            response, tokens_used = await mention_agent.generate_response(
+            # Generate response using mention agent
+            # Agent will send messages directly via tools
+            success, tokens_used, response_text = await mention_agent.generate_response(
                 bot=plugin.bot,
                 channel_id=event.channel_id,
                 guild_id=event.guild_id,
@@ -164,18 +170,15 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
         end_time = datetime.now(timezone.utc)
         response_time_ms = int((end_time - start_time).total_seconds() * 1000)
 
-        # Only send response if agent didn't skip
-        if response:
+        # If agent successfully sent a message, record metrics and store conversation
+        if success and response_text:
             # Record token usage
             if tokens_used == 0:
-                tokens_used = max(50, len(response) // 4)  # Rough estimate
+                tokens_used = max(50, len(response_text) // 4)  # Rough estimate
 
             rate_limiter.record_request(str(event.author.id), tokens_used, 'mention')
 
-            logger.info(f"Mention response generated: {len(response)} chars, {tokens_used} tokens in {response_time_ms}ms")
-
-            # Send response as a reply
-            await plugin.bot.rest.create_message(event.channel_id, response, reply=event.message)
+            logger.info(f"Mention response sent: {len(response_text)} chars, {tokens_used} tokens in {response_time_ms}ms")
 
             # Store conversation in database if we have the required context
             if event.guild_id:
@@ -187,32 +190,21 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
                         user_username=event.author.display_name or event.author.username,
                         interaction_type="mention",
                         user_question=user_question,
-                        bot_response=response,
+                        bot_response=response_text,
                         context_messages=None,
                         tokens_used=tokens_used,
                         response_time_ms=response_time_ms
                     )
                 except Exception as storage_error:
-                    # Don't fail the response if storage fails
+                    # Don't fail if storage fails - agent already sent response
                     logger.warning(f"Failed to store conversation for {event.author.id}: {storage_error}")
         else:
-            # Agent decided to skip (e.g., harmful content)
-            logger.info(f"Mention skipped by agent for user {event.author.id}")
+            # Agent decided to skip (e.g., harmful content) or encountered an error
+            logger.info(f"Mention not processed for user {event.author.id} (success={success}, has_response={response_text is not None})")
 
     except Exception as e:
-        error_msg = str(e).lower()
-        logger.error(f"Failed to generate mention response: {e}")
-
-        # Provide specific error messages
-        if "overloaded" in error_msg or "503" in error_msg:
-            await plugin.bot.rest.create_message(event.channel_id,
-                "🔄 I'm a bit overloaded right now. Try again in a moment!", reply=event.message)
-        elif "unavailable" in error_msg or "502" in error_msg:
-            await plugin.bot.rest.create_message(event.channel_id,
-                "⚠️ I'm experiencing technical issues. Please try again later!", reply=event.message)
-        else:
-            await plugin.bot.rest.create_message(event.channel_id,
-                "❌ Something went wrong. Please try again!", reply=event.message)
+        logger.error(f"Error in mention handler: {e}", exc_info=True)
+        # Agent should have handled this, but log any unhandled exceptions
 
 
 def load(bot: lightbulb.BotApp) -> None:
