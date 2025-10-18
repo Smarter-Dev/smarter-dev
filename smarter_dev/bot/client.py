@@ -803,6 +803,11 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         bot.load_extensions("smarter_dev.bot.plugins.help")
         logger.info("✓ Loaded help plugin")
 
+        # Load mention handler plugin
+        logger.info("Loading mention plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.mention")
+        logger.info("✓ Loaded mention plugin")
+
         # Load LLM features plugin
         logger.info("Loading LLM plugin...")
         bot.load_extensions("smarter_dev.bot.plugins.llm")
