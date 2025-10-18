@@ -13,7 +13,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, TYPE_CHECKING
 
-from smarter_dev.bot.agent import TLDRAgent, DiscordMessage, rate_limiter
+from smarter_dev.bot.agent import TLDRAgent, estimate_message_tokens
+from smarter_dev.bot.agents.models import DiscordMessage
+from smarter_dev.bot.services.rate_limiter import rate_limiter
 from smarter_dev.bot.utils.messages import gather_message_context
 from smarter_dev.bot.views.tldr_views import TLDRShareView
 
