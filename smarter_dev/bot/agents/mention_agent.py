@@ -172,7 +172,8 @@ class MentionAgent(BaseAgent):
             )
 
             # Generate response using the ReAct agent (agent will call send_message tool)
-            result = react_agent(
+            # Use acall() for async execution of tools
+            result = await react_agent.acall(
                 conversation_timeline=context["conversation_timeline"],
                 users=context["users"],
                 channel=context["channel"],
