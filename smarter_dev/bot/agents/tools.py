@@ -30,11 +30,17 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
     async def send_message(content: str) -> dict:
         """Send a message to the channel where the bot was mentioned.
 
+        Use this for sending standalone messages that continue the conversation.
+        For replying to a specific message, use reply_to_message instead.
+
         Args:
-            content: Message content to send
+            content: Message content to send (max 2000 characters for Discord)
 
         Returns:
-            dict with 'success' and 'result' or 'error' keys
+            dict with 'success' boolean and 'result' or 'error' string
+
+        Example:
+            send_message("That's a great point!")
         """
         try:
             logger.debug(f"[Tool] send_message called in channel {channel_id}")
@@ -51,14 +57,20 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             }
 
     async def reply_to_message(message_id: str, content: str) -> dict:
-        """Reply to a specific message in the current channel.
+        """Reply to a specific message in the current channel, creating a threaded reply.
+
+        Message IDs appear in the conversation timeline as [ID: <number>] at the start of each line.
+        Extract the number and pass it as message_id to create contextual threaded replies.
 
         Args:
-            message_id: ID of the message to reply to
-            content: Reply content
+            message_id: Discord message ID (extract from timeline's [ID: ...] prefix)
+            content: Reply content (max 2000 characters for Discord)
 
         Returns:
-            dict with 'success' and 'result' or 'error' keys
+            dict with 'success' boolean and 'result' or 'error' string
+
+        Example:
+            reply_to_message("1234567890", "Great question! Here's what I think...")
         """
         try:
             logger.debug(f"[Tool] reply_to_message called for message {message_id}")
@@ -81,12 +93,18 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
     async def add_reaction_to_message(message_id: str, emoji: str) -> dict:
         """Add an emoji reaction to a message in the current channel.
 
+        Message IDs appear in the conversation timeline as [ID: <number>] at the start of each line.
+        You can react to any message in the timeline to show engagement or support.
+
         Args:
-            message_id: ID of the message to react to
-            emoji: Emoji to add (Unicode emoji, e.g., "👍" or custom emoji ID)
+            message_id: Discord message ID (extract from timeline's [ID: ...] prefix)
+            emoji: Emoji to add (Unicode like "👍", "❤️", "😂" or custom guild emoji)
 
         Returns:
-            dict with 'success' and 'result' or 'error' keys
+            dict with 'success' boolean and 'result' or 'error' string
+
+        Example:
+            add_reaction_to_message("1234567890", "👍")
         """
         try:
             logger.debug(f"[Tool] add_reaction_to_message called for message {message_id} with emoji {emoji}")
@@ -109,8 +127,15 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
     async def list_reaction_types() -> dict:
         """List available emojis for the guild (both Unicode and custom emojis).
 
+        Call this to discover what emojis you can use with add_reaction_to_message.
+        Includes common Unicode emojis plus any custom emojis defined in this guild.
+
         Returns:
-            dict with 'success' and 'emoji_list' or 'error' keys
+            dict with 'success' boolean and 'emoji_list' array, or 'error' string
+            Each emoji in the list has 'name', 'type' (unicode/custom), and optional 'id' for custom
+
+        Example:
+            list_reaction_types() -> {"success": True, "emoji_list": [...], "count": 45}
         """
         try:
             logger.debug(f"[Tool] list_reaction_types called for guild {guild_id}")
