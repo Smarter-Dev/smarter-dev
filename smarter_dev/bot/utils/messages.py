@@ -12,7 +12,7 @@ import re
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Set
 
-from smarter_dev.bot.agent import DiscordMessage
+from smarter_dev.bot.agents.models import DiscordMessage
 from smarter_dev.bot.cache import bot_cache
 
 logger = logging.getLogger(__name__)
