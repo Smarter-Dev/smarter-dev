@@ -10,7 +10,7 @@ import hikari
 
 from smarter_dev.bot.agents.base import BaseAgent
 from smarter_dev.bot.agents.models import DiscordMessage
-from smarter_dev.bot.agents.tools import MENTION_AGENT_TOOLS
+from smarter_dev.bot.agents.tools import create_mention_tools
 from smarter_dev.llm_config import get_llm_model, get_model_info
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,19 @@ class ConversationalMentionSignature(dspy.Signature):
     - Heated debate in wrong channel → Gentle redirect with humor
     - Reply to your previous message → Acknowledge what you said before
 
+    ## USING TOOLS FOR INTERACTIONS
+
+    You have access to these tools to interact with Discord:
+    - **send_message(content)**: Send a message to the channel
+    - **reply_to_message(message_id, content)**: Reply to a specific message
+    - **add_reaction_to_message(message_id, emoji)**: Add an emoji reaction
+    - **list_reaction_types()**: Get available emojis in this guild
+
+    Use these tools naturally when it makes sense. For example:
+    - React to messages when it enhances engagement
+    - Reply to specific messages to create conversational threads
+    - Send follow-up messages to continue the discussion
+
     ## WHEN TO STAY SILENT
 
     Sometimes the best response is no response. Reply with exactly "SKIP_RESPONSE" when:
@@ -106,9 +119,8 @@ class MentionAgent(BaseAgent):
     def __init__(self):
         """Initialize the mention agent with ReAct capabilities."""
         super().__init__()
-        # Use ChainOfThought for now, will integrate full ReAct after testing tools
-        self._agent = dspy.ChainOfThought(ConversationalMentionSignature)
-        self.tools = MENTION_AGENT_TOOLS
+        # Agent will be created dynamically per mention with context-bound tools
+        self._agent_signature = ConversationalMentionSignature
 
     async def generate_response(
         self,
@@ -117,8 +129,12 @@ class MentionAgent(BaseAgent):
         guild_id: Optional[int] = None,
         trigger_message_id: Optional[int] = None,
         messages_remaining: int = 10
-    ) -> Tuple[str, int]:
-        """Generate a conversational response using structured context.
+    ) -> Tuple[bool, int, Optional[str]]:
+        """Generate a conversational response using ReAct with context-bound tools.
+
+        The agent will use the send_message tool to send its response directly to Discord.
+        This method returns whether the agent successfully sent a message, along with
+        token usage and the response text for conversation logging.
 
         Args:
             bot: Discord bot instance for fetching context
@@ -128,40 +144,66 @@ class MentionAgent(BaseAgent):
             messages_remaining: Number of messages user can send after this one
 
         Returns:
-            Tuple[str, int]: Generated response and token usage count
+            Tuple[bool, int, Optional[str]]: (success, token_usage, response_text)
+                - success: whether agent sent a message
+                - token_usage: tokens consumed
+                - response_text: the response that was sent (for logging/storage)
         """
         from smarter_dev.bot.utils.messages import ConversationContextBuilder
 
-        # Build structured context using the builder
-        context_builder = ConversationContextBuilder(bot, guild_id)
-        context = await context_builder.build_context(channel_id, trigger_message_id)
+        try:
+            # Build structured context using the builder
+            context_builder = ConversationContextBuilder(bot, guild_id)
+            context = await context_builder.build_context(channel_id, trigger_message_id)
 
-        # Generate response using the agent
-        result = self._agent(
-            conversation_timeline=context["conversation_timeline"],
-            users=context["users"],
-            channel=context["channel"],
-            me=context["me"],
-            messages_remaining=messages_remaining
-        )
+            # Create context-bound tools for this specific mention
+            tools = create_mention_tools(
+                bot=bot,
+                channel_id=str(channel_id),
+                guild_id=str(guild_id) if guild_id else "",
+                trigger_message_id=str(trigger_message_id) if trigger_message_id else ""
+            )
 
-        # Check if the agent decided to skip due to controversial content
-        if result.response.strip() == "SKIP_RESPONSE":
-            return "", 0
+            # Create ReAct agent with context-bound tools
+            react_agent = dspy.ReAct(
+                self._agent_signature,
+                tools=tools,
+                max_iters=5
+            )
 
-        # Extract token usage
-        tokens_used = self._extract_token_usage(result)
+            # Generate response using the ReAct agent (agent will call send_message tool)
+            result = react_agent(
+                conversation_timeline=context["conversation_timeline"],
+                users=context["users"],
+                channel=context["channel"],
+                me=context["me"],
+                messages_remaining=messages_remaining
+            )
 
-        if tokens_used == 0:
-            tokens_used = self._estimate_tokens(result.response)
-            logger.debug(f"Using estimated token count: {tokens_used}")
+            # Check if the agent decided to skip due to controversial content
+            if result.response.strip() == "SKIP_RESPONSE":
+                logger.info("Agent decided to skip response due to sensitive content")
+                return False, 0, None
 
-        logger.info(f"MentionAgent response generated: {len(result.response)} chars, {tokens_used} tokens")
+            # Extract token usage
+            tokens_used = self._extract_token_usage(result)
 
-        # Validate response length for Discord
-        response = self._validate_response_length(result.response)
+            if tokens_used == 0:
+                tokens_used = self._estimate_tokens(result.response)
+                logger.debug(f"Using estimated token count: {tokens_used}")
 
-        return response, tokens_used
+            # Validate response length (ensure it fits Discord constraints)
+            response_text = self._validate_response_length(result.response)
+
+            logger.info(f"MentionAgent generated response via ReAct: {len(response_text)} chars, {tokens_used} tokens")
+
+            # Agent has already sent the message via send_message tool
+            # Return success indicator, token count, and response text for logging
+            return True, tokens_used, response_text
+
+        except Exception as e:
+            logger.error(f"Error in MentionAgent.generate_response: {e}", exc_info=True)
+            return False, 0, None
 
 
 # Global mention agent instance
