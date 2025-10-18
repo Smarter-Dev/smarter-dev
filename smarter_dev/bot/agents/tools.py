@@ -1,126 +1,160 @@
 """Tools available to Discord bot agents via ReAct pattern.
 
-These tools enable agents to take actions and gather information to
-support their responses. Tools are defined as simple functions that
-can be called by ReAct agents.
+These tools enable agents to take Discord interaction actions within the
+context-bound channel and guild where they were mentioned. All tools are
+created as a factory to ensure they can only operate in their intended context.
 """
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Callable, List
 
 logger = logging.getLogger(__name__)
 
 
-async def get_user_bytes_balance(user_id: str) -> Dict[str, Any]:
-    """Get a user's bytes balance in the server.
+def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id: str) -> List[Callable]:
+    """Create context-bound Discord interaction tools for a mention agent.
 
-    Useful for answering questions about account balances or checking
-    if a user has enough bytes for an action.
-
-    Args:
-        user_id: Discord user ID as a string
-
-    Returns:
-        Dictionary with balance, streak_count, and optional error
-    """
-    try:
-        # TODO: Integrate with BytesService
-        logger.debug(f"[Tool] get_user_bytes_balance called for user {user_id}")
-        return {
-            "balance": 0,
-            "streak_count": 0,
-            "error": None
-        }
-    except Exception as e:
-        return {
-            "balance": 0,
-            "streak_count": 0,
-            "error": str(e)
-        }
-
-
-async def get_squad_info(squad_name: Optional[str] = None) -> Dict[str, Any]:
-    """Get information about squads in the server.
-
-    Useful for answering questions about squad membership, costs, or
-    helping users decide which squad to join.
+    All returned tools are bound to the specific channel and guild where the
+    mention occurred, ensuring they can only operate in that context.
 
     Args:
-        squad_name: Optional specific squad name to look up (None for all squads)
+        bot: Discord bot instance (lightbulb.BotApp)
+        channel_id: Channel where the mention occurred (string)
+        guild_id: Guild where the mention occurred (string)
+        trigger_message_id: ID of the message that triggered the mention
 
     Returns:
-        Dictionary with list of squads and optional error
+        List of callable async functions for the ReAct agent to use
     """
-    try:
-        logger.debug(f"[Tool] get_squad_info called for squad: {squad_name}")
-        return {
-            "squads": [],
-            "error": None
-        }
-    except Exception as e:
-        return {
-            "squads": [],
-            "error": str(e)
-        }
 
+    async def send_message(content: str) -> dict:
+        """Send a message to the channel where the bot was mentioned.
 
-async def get_challenge_status(limit: int = 10) -> Dict[str, Any]:
-    """Get current challenge/campaign status and leaderboard.
+        Args:
+            content: Message content to send
 
-    Useful for answering questions about active challenges, scoring,
-    or current leader information.
+        Returns:
+            dict with 'success' and 'result' or 'error' keys
+        """
+        try:
+            logger.debug(f"[Tool] send_message called in channel {channel_id}")
+            message = await bot.rest.create_message(int(channel_id), content)
+            return {
+                "success": True,
+                "result": f"Message sent successfully (ID: {message.id})"
+            }
+        except Exception as e:
+            logger.error(f"[Tool] send_message failed: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
-    Args:
-        limit: Number of top scores to retrieve (default: 10)
+    async def reply_to_message(message_id: str, content: str) -> dict:
+        """Reply to a specific message in the current channel.
 
-    Returns:
-        Dictionary with current challenge info and leaderboard
-    """
-    try:
-        logger.debug(f"[Tool] get_challenge_status called with limit: {limit}")
-        return {
-            "current_challenge": None,
-            "leaderboard": [],
-            "error": None
-        }
-    except Exception as e:
-        return {
-            "current_challenge": None,
-            "leaderboard": [],
-            "error": str(e)
-        }
+        Args:
+            message_id: ID of the message to reply to
+            content: Reply content
 
+        Returns:
+            dict with 'success' and 'result' or 'error' keys
+        """
+        try:
+            logger.debug(f"[Tool] reply_to_message called for message {message_id}")
+            message = await bot.rest.create_message(
+                int(channel_id),
+                content,
+                reply=int(message_id)
+            )
+            return {
+                "success": True,
+                "result": f"Reply sent successfully (ID: {message.id})"
+            }
+        except Exception as e:
+            logger.error(f"[Tool] reply_to_message failed: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
-async def get_bot_commands(category: Optional[str] = None) -> Dict[str, Any]:
-    """Get list of available bot commands and their descriptions.
+    async def add_reaction_to_message(message_id: str, emoji: str) -> dict:
+        """Add an emoji reaction to a message in the current channel.
 
-    Useful for answering "how do I use this bot" or "what can you do"
-    type questions.
+        Args:
+            message_id: ID of the message to react to
+            emoji: Emoji to add (Unicode emoji, e.g., "👍" or custom emoji ID)
 
-    Args:
-        category: Optional filter by category (bytes, squads, challenges, etc.)
+        Returns:
+            dict with 'success' and 'result' or 'error' keys
+        """
+        try:
+            logger.debug(f"[Tool] add_reaction_to_message called for message {message_id} with emoji {emoji}")
+            await bot.rest.add_reaction(
+                int(channel_id),
+                int(message_id),
+                emoji
+            )
+            return {
+                "success": True,
+                "result": f"Reaction added successfully"
+            }
+        except Exception as e:
+            logger.error(f"[Tool] add_reaction_to_message failed: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
 
-    Returns:
-        Dictionary with list of commands and optional error
-    """
-    try:
-        logger.debug(f"[Tool] get_bot_commands called for category: {category}")
-        return {
-            "commands": [],
-            "error": None
-        }
-    except Exception as e:
-        return {
-            "commands": [],
-            "error": str(e)
-        }
+    async def list_reaction_types() -> dict:
+        """List available emojis for the guild (both Unicode and custom emojis).
 
+        Returns:
+            dict with 'success' and 'emoji_list' or 'error' keys
+        """
+        try:
+            logger.debug(f"[Tool] list_reaction_types called for guild {guild_id}")
 
-# Tool registry for ReAct agent
-# These are placeholder implementations that can be expanded with real functionality later
-MENTION_AGENT_TOOLS = {
-    "get_user_bytes_balance": get_user_bytes_balance,
-    "get_squad_info": get_squad_info,
-    "get_challenge_status": get_challenge_status,
-    "get_bot_commands": get_bot_commands,
-}
+            # Fetch custom emojis from the guild
+            try:
+                guild_emojis = await bot.rest.fetch_guild_emojis(int(guild_id))
+                emoji_list = [
+                    {
+                        "name": emoji.name,
+                        "id": str(emoji.id),
+                        "mention": emoji.mention,
+                        "type": "custom"
+                    }
+                    for emoji in guild_emojis
+                ]
+            except Exception as e:
+                logger.warning(f"Could not fetch guild emojis: {e}")
+                emoji_list = []
+
+            # Add common Unicode emojis
+            common_unicode_emojis = ["👍", "❤️", "😀", "😂", "🎉", "🔥", "✨", "😍", "🙏"]
+            for emoji in common_unicode_emojis:
+                emoji_list.append({
+                    "name": emoji,
+                    "type": "unicode"
+                })
+
+            return {
+                "success": True,
+                "emoji_list": emoji_list,
+                "count": len(emoji_list)
+            }
+        except Exception as e:
+            logger.error(f"[Tool] list_reaction_types failed: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    # Return list of tools for ReAct agent
+    return [
+        send_message,
+        reply_to_message,
+        add_reaction_to_message,
+        list_reaction_types
+    ]
