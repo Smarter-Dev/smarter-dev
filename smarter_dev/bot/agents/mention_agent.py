@@ -202,7 +202,7 @@ class MentionAgent(BaseAgent):
             context = await context_builder.build_context(channel_id, trigger_message_id)
 
             # Create context-bound tools for this specific mention
-            tools = create_mention_tools(
+            tools, tool_tracker = create_mention_tools(
                 bot=bot,
                 channel_id=str(channel_id),
                 guild_id=str(guild_id) if guild_id else "",
@@ -225,6 +225,15 @@ class MentionAgent(BaseAgent):
                 me=context["me"],
                 messages_remaining=messages_remaining
             )
+
+            # Send tool usage summary if any tools were called
+            if tool_tracker.has_calls():
+                summary = tool_tracker.get_summary()
+                try:
+                    await bot.rest.create_message(int(channel_id), summary)
+                    logger.debug(f"Sent tool usage summary: {summary}")
+                except Exception as e:
+                    logger.error(f"Failed to send tool usage summary: {e}")
 
             logger.debug(f"ReAct agent result: {result}")
             logger.debug(f"ReAct response text: {result.response}")
