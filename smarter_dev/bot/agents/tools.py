@@ -8,11 +8,60 @@ created as a factory to ensure they can only operate in their intended context.
 import logging
 from typing import Callable, List, Optional, Dict, Any
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
+import asyncio
 
 from ddgs import DDGS
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Custom user agent for the bot
+BOT_USER_AGENT = "Smarter Dev Discord Bot - admin@smarter.dev"
+
+
+class URLRateLimiter:
+    """Rate limiter for URL requests, enforcing 5-second delays between requests to the same domain."""
+
+    MIN_DELAY_SECONDS = 5
+
+    def __init__(self):
+        """Initialize the rate limiter."""
+        # Track last request time per domain
+        # Format: {domain: datetime}
+        self.last_request_time: Dict[str, datetime] = {}
+        # Lock for thread-safe operations
+        self._lock = asyncio.Lock()
+
+    async def wait_if_needed(self, url: str) -> None:
+        """Wait if necessary to respect rate limiting for a domain.
+
+        Args:
+            url: The URL being requested
+        """
+        async with self._lock:
+            # Extract domain from URL
+            parsed = urlparse(url)
+            domain = parsed.netloc
+
+            # Check if we've made a request to this domain recently
+            if domain in self.last_request_time:
+                last_time = self.last_request_time[domain]
+                elapsed = (datetime.now() - last_time).total_seconds()
+
+                # Wait if not enough time has passed
+                if elapsed < self.MIN_DELAY_SECONDS:
+                    wait_time = self.MIN_DELAY_SECONDS - elapsed
+                    logger.debug(f"[Rate Limit] Waiting {wait_time:.1f}s before next request to {domain}")
+                    await asyncio.sleep(wait_time)
+
+            # Update last request time
+            self.last_request_time[domain] = datetime.now()
+            logger.debug(f"[Rate Limit] Request to {domain} allowed")
+
+
+# Global rate limiter instance
+url_rate_limiter = URLRateLimiter()
 
 
 class SearchCache:
@@ -502,7 +551,14 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             # Fetch the URL with httpx (follows redirects by default)
             try:
-                async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+                # Apply rate limiting
+                await url_rate_limiter.wait_if_needed(url)
+
+                async with httpx.AsyncClient(
+                    follow_redirects=True,
+                    timeout=10.0,
+                    headers={"User-Agent": BOT_USER_AGENT}
+                ) as client:
                     response = await client.get(url)
                     response.raise_for_status()
 
