@@ -7,85 +7,13 @@ created as a factory to ensure they can only operate in their intended context.
 
 import logging
 from typing import Callable, List
-from functools import wraps
-import inspect
 
 from ddgs import DDGS
 
 logger = logging.getLogger(__name__)
 
 
-class ToolTracker:
-    """Tracks tool calls made by the agent for reporting."""
-
-    def __init__(self):
-        """Initialize the tool tracker."""
-        self.calls: List[dict] = []
-
-    def track_call(self, tool_name: str, **kwargs) -> None:
-        """Track a tool call with its parameters.
-
-        Args:
-            tool_name: Name of the tool that was called
-            **kwargs: Parameters passed to the tool
-        """
-        # Format parameters for display
-        params = self._format_params(kwargs)
-        self.calls.append({
-            "name": tool_name,
-            "params": params,
-            "raw_params": kwargs
-        })
-        logger.debug(f"[Tool Tracker] Recorded: {tool_name}({params})")
-
-    def _format_params(self, params: dict) -> str:
-        """Format parameters for display.
-
-        Args:
-            params: Dictionary of parameters
-
-        Returns:
-            Formatted parameter string like "param1=value1, param2=value2"
-        """
-        if not params:
-            return ""
-
-        formatted = []
-        for key, value in params.items():
-            # Truncate long values for display
-            if isinstance(value, str) and len(value) > 50:
-                display_value = f'"{value[:47]}..."'
-            elif isinstance(value, str):
-                display_value = f'"{value}"'
-            else:
-                display_value = repr(value)
-            formatted.append(f"{key}={display_value}")
-        return ", ".join(formatted)
-
-    def get_summary(self) -> str:
-        """Get formatted summary of all tool calls.
-
-        Returns:
-            Formatted string with all tool calls, or empty string if no calls were made
-        """
-        if not self.calls:
-            return ""
-
-        lines = ["-# Tools Used:"]
-        for call in self.calls:
-            lines.append(f"-# `{call['name']}({call['params']})`")
-        return "\n".join(lines)
-
-    def has_calls(self) -> bool:
-        """Check if any tools were called.
-
-        Returns:
-            True if any tools were tracked, False otherwise
-        """
-        return len(self.calls) > 0
-
-
-def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id: str) -> tuple[List[Callable], ToolTracker]:
+def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id: str) -> List[Callable]:
     """Create context-bound Discord interaction tools for a mention agent.
 
     All returned tools are bound to the specific channel and guild where the
@@ -98,32 +26,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         trigger_message_id: ID of the message that triggered the mention
 
     Returns:
-        Tuple of (List of callable async functions, ToolTracker instance)
+        List of callable async functions for the ReAct agent to use
     """
-
-    # Create tracker for this agent execution
-    tracker = ToolTracker()
-
-    def _wrap_tool(tool_name: str, tool_func: Callable) -> Callable:
-        """Wrap a tool function to track its calls.
-
-        Args:
-            tool_name: Name of the tool for tracking
-            tool_func: The async tool function to wrap
-
-        Returns:
-            Wrapped async function that tracks calls
-        """
-        @wraps(tool_func)
-        async def wrapper(*args, **kwargs):
-            # Track the call with parameter names and values
-            sig = inspect.signature(tool_func)
-            bound_args = sig.bind(*args, **kwargs)
-            bound_args.apply_defaults()
-            tracker.track_call(tool_name, **bound_args.arguments)
-            # Call the original function
-            return await tool_func(*args, **kwargs)
-        return wrapper
 
     async def send_message(content: str) -> dict:
         """Send a message to the channel where the bot was mentioned.
@@ -400,15 +304,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 "error": str(e)
             }
 
-    # Wrap only search tools with tracking (not message/reaction tools)
-    tools = [
+    # Return list of tools for ReAct agent
+    return [
         send_message,
         reply_to_message,
         add_reaction_to_message,
         list_reaction_types,
-        _wrap_tool("search_web_instant_answer", search_web_instant_answer),
-        _wrap_tool("search_web", search_web)
+        search_web_instant_answer,
+        search_web
     ]
-
-    # Return wrapped tools and tracker
-    return tools, tracker
