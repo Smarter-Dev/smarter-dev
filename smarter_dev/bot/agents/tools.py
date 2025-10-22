@@ -302,7 +302,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             logger.debug(f"[Tool] search_web_instant_answer called with query: {query}")
 
             # Send usage message (always, even for cache hits)
-            usage_message = f"Using quick web search for '{query}'"
+            usage_message = f"-# Using quick web search for '{query}'"
             try:
                 await bot.rest.create_message(int(channel_id), usage_message)
             except Exception as e:
@@ -372,7 +372,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             logger.debug(f"[Tool] search_web called with query: {query}, max_results: {max_results}")
 
             # Send usage message (always, even for cache hits)
-            usage_message = f"Using web search for '{query}' with {max_results} result{'s' if max_results != 1 else ''}"
+            usage_message = f"-# Using web search for '{query}' with max {max_results} result{'s' if max_results != 1 else ''}"
             try:
                 await bot.rest.create_message(int(channel_id), usage_message)
             except Exception as e:
