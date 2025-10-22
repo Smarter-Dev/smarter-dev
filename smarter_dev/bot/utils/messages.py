@@ -425,45 +425,51 @@ class ConversationContextBuilder:
         
     async def _build_conversation_timeline(self, messages: List[hikari.Message], trigger_message_id: Optional[int], users_by_id: Dict[str, Dict]) -> str:
         """Build a human-readable conversation timeline.
-        
+
         Args:
             messages: List of Discord messages
             trigger_message_id: ID of message that triggered the agent
             users_by_id: Dict mapping user IDs to user info
-            
+
         Returns:
             String representing the conversation timeline
         """
         timeline_parts = []
         trigger_timestamp = None
-        
+
         # Find trigger message timestamp
         if trigger_message_id:
             trigger_msg = next((m for m in messages if m.id == trigger_message_id), None)
             if trigger_msg:
                 trigger_timestamp = trigger_msg.created_at
-        
+
         # Build timeline entries
         for message in messages:
             # Get user display name
             user_info = users_by_id.get(str(message.author.id), {})
             display_name = user_info.get("discord_name", f"User{message.author.id}")
-            
+
             # Check if user is bot
             is_bot = user_info.get("is_bot", False)
             if is_bot and "bot_name" in user_info:
                 display_name = user_info["bot_name"]
-            
+
             # Resolve mentions in content
             content = await resolve_mentions(message.content or "", self.bot, self.guild_id)
-            
+
+            # Skip messages that are just bot mentions with no other content
+            # Pattern matches messages containing only user mentions and whitespace
+            if re.match(r'^\s*(<@!?\d+>\s*)+$', content):
+                logger.debug(f"Skipping empty bot mention message from {display_name}")
+                continue
+
             # Add attachment info
             if message.attachments:
                 attachment_info = []
                 for attachment in message.attachments:
                     if hasattr(attachment, 'filename') and attachment.filename:
                         attachment_info.append(f"📎 {attachment.filename}")
-                        
+
                 if attachment_info:
                     content = f"{content} {' '.join(attachment_info)}".strip()
             
