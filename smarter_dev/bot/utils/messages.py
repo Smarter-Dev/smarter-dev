@@ -344,13 +344,31 @@ class ConversationContextBuilder:
         }
         
     async def _fetch_base_messages(self, channel_id: int, limit: int = 20) -> List[hikari.Message]:
-        """Fetch the initial set of messages from the channel."""
+        """Fetch the initial set of messages from the channel, skipping bot tool usage messages.
+
+        Ignores messages sent by the bot that start with '-#' (tool usage messages),
+        but still fetches enough messages to meet the limit by fetching more if needed.
+        """
         messages = []
-        
-        async for message in self.bot.rest.fetch_messages(channel_id).limit(limit):
+        bot_user_id = self.bot.get_me().id
+
+        # Fetch up to 3x the limit to account for filtered messages
+        max_fetch = limit * 3
+
+        async for message in self.bot.rest.fetch_messages(channel_id).limit(max_fetch):
             self._fetched_messages[message.id] = message
+
+            # Skip bot messages that start with '-#' (tool usage messages)
+            if message.author.id == bot_user_id and message.content and message.content.startswith("-#"):
+                logger.debug(f"Skipping bot tool usage message: {message.content[:50]}")
+                continue
+
             messages.append(message)
-            
+
+            # Stop once we have enough valid messages
+            if len(messages) >= limit:
+                break
+
         return list(reversed(messages))  # Return in chronological order
         
     async def _complete_reply_threads(self, messages: List[hikari.Message]) -> List[hikari.Message]:
