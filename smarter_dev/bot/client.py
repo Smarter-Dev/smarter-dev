@@ -148,6 +148,112 @@ def cleanup_old_cache_entries() -> None:
         logger.debug(f"Cleaned up {len(old_keys)} old cache entries")
 
 
+async def sync_squad_roles(
+    bot: lightbulb.BotApp,
+    event: hikari.GuildMessageCreateEvent
+) -> None:
+    """Sync Discord squad roles with database squad membership.
+
+    Ensures that the user's Discord roles match their squad membership in the database:
+    - If user has squad in DB but missing Discord role: Add the role
+    - If user has squad role in Discord but not in DB: Remove the role
+    - If roles don't match: Remove old role and add correct one
+
+    Args:
+        bot: Bot application instance
+        event: Message create event with guild, author, and member info
+    """
+    try:
+        guild_id = str(event.guild_id)
+        user_id = str(event.author.id)
+
+        # Get services
+        squads_service = getattr(bot, "d", {}).get("squads_service")
+        if not squads_service:
+            logger.debug("Squads service not available for role sync")
+            return
+
+        # Get guild and member
+        guild = event.get_guild()
+        if not guild:
+            logger.debug(f"Could not get guild {guild_id} for role sync")
+            return
+
+        member = guild.get_member(user_id)
+        if not member:
+            logger.debug(f"Could not get member {user_id} for role sync")
+            return
+
+        # Get user's current squad from database
+        try:
+            user_squad_response = await squads_service.get_user_squad(guild_id, user_id, use_cache=False)
+            user_squad = user_squad_response.squad if user_squad_response else None
+        except Exception as e:
+            logger.debug(f"Failed to get user squad for role sync: {e}")
+            return
+
+        # Get all squads for the guild to identify squad role IDs
+        try:
+            all_squads = await squads_service.list_squads(guild_id)
+        except Exception as e:
+            logger.debug(f"Failed to list squads for role sync: {e}")
+            return
+
+        squad_role_ids = {int(squad.role_id) for squad in all_squads}
+
+        # Find user's current squad roles in Discord
+        user_squad_roles = [role_id for role_id in member.role_ids if int(role_id) in squad_role_ids]
+
+        # Determine what actions to take
+        expected_role_id = int(user_squad.role_id) if user_squad else None
+        current_role_ids = set(user_squad_roles)
+
+        roles_to_remove = []
+        roles_to_add = []
+
+        if expected_role_id:
+            # User should have a squad role
+            if expected_role_id not in current_role_ids:
+                # Missing the correct role, add it
+                roles_to_add.append(expected_role_id)
+
+            # Remove any other squad roles they might have
+            for role_id in current_role_ids:
+                if role_id != expected_role_id:
+                    roles_to_remove.append(role_id)
+        else:
+            # User should not have any squad roles
+            if current_role_ids:
+                # Remove all squad roles (database is source of truth)
+                roles_to_remove = list(current_role_ids)
+
+        # Apply role changes
+        for role_id in roles_to_remove:
+            try:
+                role = guild.get_role(role_id)
+                if role:
+                    await member.remove_role(role)
+                    logger.debug(f"Removed squad role {role.name} from user {user_id}")
+            except Exception as e:
+                logger.warning(f"Failed to remove squad role {role_id} from user {user_id}: {e}")
+
+        for role_id in roles_to_add:
+            try:
+                role = guild.get_role(role_id)
+                if role:
+                    await member.add_role(role)
+                    squad_name = user_squad.name if user_squad else "Unknown"
+                    logger.info(f"Synced squad role {role.name} to user {user_id} in squad '{squad_name}'")
+            except Exception as e:
+                logger.warning(f"Failed to add squad role {role_id} to user {user_id}: {e}")
+
+        if not roles_to_remove and not roles_to_add:
+            logger.debug(f"Squad roles already in sync for user {user_id}")
+
+    except Exception as e:
+        logger.error(f"Unexpected error syncing squad roles for user {event.author.id}: {e}")
+
+
 # Fun and techy status messages that rotate every 5 minutes
 STATUS_MESSAGES = [
     "🚀 Compiling bytes...",
@@ -1042,6 +1148,9 @@ async def run_bot() -> None:
             else:
                 logger.debug(f"Daily reward not successful for {event.author}")
 
+            # Sync squad roles to ensure Discord roles match database state
+            await sync_squad_roles(bot, event)
+
         except Exception as e:
             # Handle expected scenarios gracefully
             error_str = str(e).lower()
@@ -1180,6 +1289,34 @@ async def run_bot() -> None:
             logger.info(f"Cleaned up member data for user {user_id} in guild {guild_id}")
         except Exception as e:
             logger.warning(f"Failed to cleanup member data for user {user_id} in guild {guild_id}: {e}")
+
+    @bot.listen()
+    async def on_member_join(event: hikari.MemberCreateEvent) -> None:
+        """Cleanup stale user data when they join a guild.
+
+        If the user previously left while the bot was offline, they may have stale
+        squad memberships or bytes balance in the database. Clean them up to ensure
+        a fresh start on next interaction.
+        """
+        try:
+            guild_id = str(getattr(event, "guild_id", ""))
+            user_id = str(getattr(event, "user_id", ""))
+        except Exception:
+            return
+
+        if not guild_id or not user_id:
+            return
+
+        api_client = getattr(bot, "d", {}).get("api_client")
+        if not api_client:
+            logger.warning("API client not available; cannot cleanup stale user data on join")
+            return
+
+        try:
+            await api_client.delete(f"/guilds/{guild_id}/members/{user_id}")
+            logger.info(f"Cleaned up stale data for user {user_id} joining guild {guild_id}")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup stale data for user {user_id} in guild {guild_id}: {e}")
 
     # Set up services before starting the bot
     logger.info("Setting up bot services...")
