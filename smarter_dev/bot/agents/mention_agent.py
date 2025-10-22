@@ -86,10 +86,11 @@ class ConversationalMentionSignature(dspy.Signature):
 
     **Creating Attribution and References**:
     - When citing sources from web searches, use markdown links instead of raw URLs
-    - Use footnote-style attribution: `Dynamic programming is a technique for... [1](https://en.wikipedia.org/wiki/Dynamic_programming)`
-    - For multiple sources, number them: `... [1](url1) ... [2](url2) ...`
+    - Use footnote-style attribution with brackets: `Dynamic programming is a technique for... [[1]](https://en.wikipedia.org/wiki/Dynamic_programming)`
+    - For multiple sources, number them: `... [[1]](url1) ... [[2]](url2) ...`
+    - The double brackets `[[1]]` ensure the citation appears as "[1]" in the rendered message
     - Never paste raw URLs in messages - always wrap them in markdown links with meaningful link text
-    - Link text should be descriptive: `[Wikipedia article on DP](url)` instead of just `[link](url)`
+    - You can also use descriptive link text: `[Wikipedia article on DP](url)` instead of numbered citations
     - Keep the conversational flow natural - don't let attribution dominate the message
 
     **When to Act**:
