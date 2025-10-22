@@ -421,6 +421,7 @@ def create_bot(settings: Settings | None = None) -> lightbulb.BotApp:
                 "hikari": {"level": "INFO"},
                 "hikari.ratelimits": {"level": "DEBUG"},
                 "lightbulb": {"level": "INFO"},
+                "smarter_dev": {"level": "DEBUG"},  # Enable DEBUG logging for the application
             },
         },
         banner=None,  # Disable banner for cleaner logs
