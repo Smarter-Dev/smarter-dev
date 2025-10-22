@@ -12,9 +12,12 @@ from urllib.parse import urlparse
 import asyncio
 import re
 import html
+import io
 
 from ddgs import DDGS
 import httpx
+from markdownify import markdownify as md
+import pdfplumber
 
 logger = logging.getLogger(__name__)
 
@@ -516,21 +519,29 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             }
 
     async def open_url(url: str) -> dict:
-        """Fetch and cache URL content.
+        """Fetch and cache URL content with support for HTML, PDF, and text formats.
 
-        Follows redirects and returns the page content/title.
-        Results are cached in memory for 24 hours.
+        Follows redirects and returns the page content/title. Converts HTML to Markdown
+        for readability, and extracts text from PDFs. Results are cached in memory for
+        24 hours.
+
+        Supported content types:
+        - text/plain: Plain text, returned as-is
+        - text/html: Converted to Markdown with preserved structure
+        - text/markdown: Markdown, returned as-is
+        - application/json: JSON, returned as-is
+        - application/pdf: Text extracted from all pages
 
         Args:
             url: The URL to open and fetch content from (e.g., "https://example.com")
 
         Returns:
-            dict with 'success' boolean, 'title' (page title), 'content' (page text),
-            and 'final_url' (after following redirects)
+            dict with 'success' boolean, 'title' (page/document title), 'content'
+            (text or Markdown), and 'final_url' (after following redirects)
 
         Example:
             open_url("https://en.wikipedia.org/wiki/Python_(programming_language)")
-            -> {"success": True, "title": "Python (programming language)", "content": "...", "final_url": "..."}
+            -> {"success": True, "title": "Python (programming language)", "content": "# Python\n...", "final_url": "..."}
         """
         try:
             logger.debug(f"[Tool] open_url called with url: {url}")
@@ -568,40 +579,52 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
                     # Check Content-Type header
                     content_type = response.headers.get("content-type", "").lower()
-                    allowed_types = ["text/plain", "text/html", "text/markdown", "application/json"]
+                    allowed_types = ["text/plain", "text/html", "text/markdown", "application/json", "application/pdf"]
 
                     # Check if content type is allowed
                     if not any(allowed in content_type for allowed in allowed_types):
-                        raise ValueError(f"Unsupported content type: {content_type}. Only text/plain, text/html, text/markdown, and application/json are accepted.")
+                        raise ValueError(f"Unsupported content type: {content_type}. Only text/plain, text/html, text/markdown, application/json, and application/pdf are accepted.")
 
                     # Get the final URL after redirects
                     final_url = str(response.url)
-                    content = response.text
-
-                    # Extract plain text based on content type
-                    if "html" in content_type:
-                        # Strip HTML tags for plain text extraction
-                        # Remove script and style tags first
-                        content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.IGNORECASE)
-                        content = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL | re.IGNORECASE)
-                        # Remove HTML tags
-                        content = re.sub(r'<[^>]+>', '', content)
-                        # Decode HTML entities
-                        content = html.unescape(content)
-                        # Clean up whitespace
-                        content = re.sub(r'\s+', ' ', content).strip()
-
-                    # Extract title from HTML if present
+                    content = ""
                     title = ""
+
+                    # Process content based on content type
                     if "html" in content_type:
-                        original_content = response.text
-                        if "<title>" in original_content.lower():
+                        # Convert HTML to Markdown
+                        html_content = response.text
+                        content = md(html_content, heading_style="ATX")
+
+                        # Extract title from HTML if present
+                        if "<title>" in html_content.lower():
                             try:
-                                start = original_content.lower().index("<title>") + 7
-                                end = original_content.lower().index("</title>", start)
-                                title = original_content[start:end].strip()
+                                start = html_content.lower().index("<title>") + 7
+                                end = html_content.lower().index("</title>", start)
+                                title = html_content[start:end].strip()
                             except Exception:
                                 title = "[Unable to extract title]"
+
+                    elif "pdf" in content_type:
+                        # Extract text from PDF
+                        try:
+                            pdf_bytes = response.content
+                            with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                                pdf_text = ""
+                                for page_num, page in enumerate(pdf.pages, 1):
+                                    page_text = page.extract_text()
+                                    if page_text:
+                                        pdf_text += f"--- Page {page_num} ---\n{page_text}\n\n"
+
+                                content = pdf_text.strip()
+                                title = f"PDF ({len(pdf.pages)} pages)"
+                        except Exception as e:
+                            logger.error(f"[Tool] Failed to extract PDF text: {e}")
+                            raise ValueError(f"Failed to extract text from PDF: {e}")
+
+                    else:
+                        # For plain text, markdown, and JSON, use as-is
+                        content = response.text
 
                     # Truncate content to keep manageable (first 2000 chars)
                     if len(content) > 2000:
