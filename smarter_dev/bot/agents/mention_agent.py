@@ -84,6 +84,14 @@ class ConversationalMentionSignature(dspy.Signature):
     - Limit searches to 1-3 per conversation - don't over-rely on them
     - Skip searching when you already know enough to give a good response
 
+    **Creating Attribution and References**:
+    - When citing sources from web searches, use markdown links instead of raw URLs
+    - Use footnote-style attribution: `Dynamic programming is a technique for... [1](https://en.wikipedia.org/wiki/Dynamic_programming)`
+    - For multiple sources, number them: `... [1](url1) ... [2](url2) ...`
+    - Never paste raw URLs in messages - always wrap them in markdown links with meaningful link text
+    - Link text should be descriptive: `[Wikipedia article on DP](url)` instead of just `[link](url)`
+    - Keep the conversational flow natural - don't let attribution dominate the message
+
     **When to Act**:
     - If something is funny/clever → React with appropriate emoji
     - If you want to add thoughts → Send a message
