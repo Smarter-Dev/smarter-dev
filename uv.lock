@@ -749,6 +749,21 @@ wheels = [
 ]
 
 [[package]]
+name = "ddgs"
+version = "9.6.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "httpx", extra = ["brotli", "http2", "socks"] },
+    { name = "lxml" },
+    { name = "primp" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8b/a3/f2ad1a105d0de9b77a78712cfca592c19a0ee8ca9a02970d8864a8d756d2/ddgs-9.6.1.tar.gz", hash = "sha256:15ec3aace0417c0ab3c0184059e1e03dbd6bda8d3be6108949c18ad7b4cd1e11", size = 35881 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ba/58/4b35f13d21a44681e71ee8b1bca5755db0f84017cb29593eb0375aaa01e0/ddgs-9.6.1-py3-none-any.whl", hash = "sha256:e7d7e0c4dbae3f287627b9f6e411278256d7859d017bbad45b8229c230bf5270", size = 41577 },
+]
+
+[[package]]
 name = "decorator"
 version = "5.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -836,20 +851,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/4a/3f/701097f90ead136ab4535eb63326f089513dfadbf450fd41cdfc0ded8536/dspy_ai-3.0.0.tar.gz", hash = "sha256:a456edb4dba83c39660be029e298fb0cd79d841af63612ec909411e556df4b30", size = 1111 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d7/f4/2d4c983ac63a13246e358daafa704a7c80d38cf6651cadd0f9f669e5b669/dspy_ai-3.0.0-py3-none-any.whl", hash = "sha256:dbd54b7aeed95eca63608aaaf7e475afced34dd1376c9c212bb1146d9394695a", size = 1094 },
-]
-
-[[package]]
-name = "duckduckgo-search"
-version = "8.1.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "click" },
-    { name = "lxml" },
-    { name = "primp" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/10/ef/07791a05751e6cc9de1dd49fb12730259ee109b18e6d097e25e6c32d5617/duckduckgo_search-8.1.1.tar.gz", hash = "sha256:9da91c9eb26a17e016ea1da26235d40404b46b0565ea86d75a9f78cc9441f935", size = 22868 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/db/72/c027b3b488b1010cf71670032fcf7e681d44b81829d484bb04e31a949a8d/duckduckgo_search-8.1.1-py3-none-any.whl", hash = "sha256:f48adbb06626ee05918f7e0cef3a45639e9939805c4fc179e68c48a12f1b5062", size = 18932 },
 ]
 
 [[package]]
@@ -1079,6 +1080,19 @@ wheels = [
 ]
 
 [[package]]
+name = "h2"
+version = "4.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "hpack" },
+    { name = "hyperframe" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1d/17/afa56379f94ad0fe8defd37d6eb3f89a25404ffc71d4d848893d270325fc/h2-4.3.0.tar.gz", hash = "sha256:6c59efe4323fa18b47a632221a1888bd7fde6249819beda254aeca909f221bf1", size = 2152026 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/69/b2/119f6e6dcbd96f9069ce9a2665e0146588dc9f88f29549711853645e736a/h2-4.3.0-py3-none-any.whl", hash = "sha256:c438f029a25f7945c69e0ccf0fb951dc3f73a5f6412981daee861431b70e2bdd", size = 61779 },
+]
+
+[[package]]
 name = "hf-xet"
 version = "1.1.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1125,6 +1139,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ff/8d/0f6e8bd5f155dd672d382f76e07b6ff71bebc50dada1677ff6c65bd39017/hikari_lightbulb-2.3.5.post1.tar.gz", hash = "sha256:89ece6d07a87853c015c8626783ebdb90f9a903c8c03024d71208021adbd9b27", size = 87469 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1f/ce/ee34a508ac6d6eefffe70bb477ce677f36873539bef288ada4976e5e790c/hikari_lightbulb-2.3.5.post1-py3-none-any.whl", hash = "sha256:9d4e6d180e5d38c97c0d89fba2bae5859b5c79d2a848d321fb8866e3b028816f", size = 118212 },
+]
+
+[[package]]
+name = "hpack"
+version = "4.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/48/71de9ed269fdae9c8057e5a4c0aa7402e8bb16f2c6e90b3aa53327b113f8/hpack-4.1.0.tar.gz", hash = "sha256:ec5eca154f7056aa06f196a557655c5b009b382873ac8d1e66e79e87535f1dca", size = 51276 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/07/c6/80c95b1b2b94682a72cbdbfb85b81ae2daffa4291fbfa1b1464502ede10d/hpack-4.1.0-py3-none-any.whl", hash = "sha256:157ac792668d995c657d93111f46b4535ed114f0c9c8d672271bbec7eae1b496", size = 34357 },
 ]
 
 [[package]]
@@ -1184,6 +1207,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl", hash = "sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad", size = 73517 },
 ]
 
+[package.optional-dependencies]
+brotli = [
+    { name = "brotli", marker = "platform_python_implementation == 'CPython'" },
+    { name = "brotlicffi", marker = "platform_python_implementation != 'CPython'" },
+]
+http2 = [
+    { name = "h2" },
+]
+socks = [
+    { name = "socksio" },
+]
+
 [[package]]
 name = "huggingface-hub"
 version = "0.34.3"
@@ -1201,6 +1236,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/91/b4/e6b465eca5386b52cf23cb6df8644ad318a6b0e12b4b96a7e0be09cbfbcc/huggingface_hub-0.34.3.tar.gz", hash = "sha256:d58130fd5aa7408480681475491c0abd7e835442082fbc3ef4d45b6c39f83853", size = 456800 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/59/a8/4677014e771ed1591a87b63a2392ce6923baf807193deef302dcfde17542/huggingface_hub-0.34.3-py3-none-any.whl", hash = "sha256:5444550099e2d86e68b2898b09e85878fbd788fc2957b506c6a79ce060e39492", size = 558847 },
+]
+
+[[package]]
+name = "hyperframe"
+version = "6.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/02/e7/94f8232d4a74cc99514c13a9f995811485a6903d48e5d952771ef6322e30/hyperframe-6.1.0.tar.gz", hash = "sha256:f630908a00854a7adeabd6382b43923a4c4cd4b821fcb527e6ab9e15382a3b08", size = 26566 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/48/30/47d0bf6072f7252e6521f3447ccfa40b421b6824517f82854703d0f5a98b/hyperframe-6.1.0-py3-none-any.whl", hash = "sha256:b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5", size = 13007 },
 ]
 
 [[package]]
@@ -2959,8 +3003,8 @@ dependencies = [
 [package.dev-dependencies]
 bot = [
     { name = "aiohttp" },
+    { name = "ddgs" },
     { name = "dspy" },
-    { name = "duckduckgo-search" },
     { name = "hikari", extra = ["speedups"] },
     { name = "hikari-lightbulb" },
     { name = "httpx" },
@@ -3042,8 +3086,8 @@ requires-dist = [
 [package.metadata.requires-dev]
 bot = [
     { name = "aiohttp", specifier = ">=3.8.0" },
+    { name = "ddgs", specifier = ">=3.8.0" },
     { name = "dspy", specifier = ">=2.6.27" },
-    { name = "duckduckgo-search", specifier = ">=7.2.0" },
     { name = "hikari", extras = ["speedups"], specifier = ">=2.0.0" },
     { name = "hikari-lightbulb", specifier = ">=2.0.0" },
     { name = "httpx", specifier = ">=0.24.0" },
@@ -3099,6 +3143,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a2/87/a6771e1546d97e7e041b6ae58d80074f81b7d5121207425c964ddf5cfdbd/sniffio-1.3.1.tar.gz", hash = "sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc", size = 20372 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e9/44/75a9c9421471a6c4805dbf2356f7c181a29c1879239abab1ea2cc8f38b40/sniffio-1.3.1-py3-none-any.whl", hash = "sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2", size = 10235 },
+]
+
+[[package]]
+name = "socksio"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f8/5c/48a7d9495be3d1c651198fd99dbb6ce190e2274d0f28b9051307bdec6b85/socksio-1.0.0.tar.gz", hash = "sha256:f88beb3da5b5c38b9890469de67d0cb0f9d494b78b106ca1845f96c10b91c4ac", size = 19055 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/c3/6eeb6034408dac0fa653d126c9204ade96b819c936e136c5e8a6897eee9c/socksio-1.0.0-py3-none-any.whl", hash = "sha256:95dc1f15f9b34e8d7b16f06d74b8ccf48f609af32ab33c608d08761c5dcbb1f3", size = 12763 },
 ]
 
 [[package]]

@@ -8,7 +8,7 @@ created as a factory to ensure they can only operate in their intended context.
 import logging
 from typing import Callable, List
 
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 
 logger = logging.getLogger(__name__)
 
