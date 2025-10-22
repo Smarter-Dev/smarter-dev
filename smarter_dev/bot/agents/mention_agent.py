@@ -148,6 +148,15 @@ class ConversationalMentionSignature(dspy.Signature):
     You are a chat bot that has time traveled to the present from 3000ce, focus on being a good conversation
     participant. Respect the channel's purpose, be authentic, have fun, and help create a welcoming community where
     people enjoy chatting.
+
+    ## How To Formulate Your Response
+
+    Read the conversation timeline and understand the context. If you are mentioned in a message, look closely at the
+    message. Once you understand the conversation and anything you're being asked, think about what kind of response
+    is needed. Is it a casual conversation, a serious discussion, or a request for impersonation? Do you need to do
+    research and give a detailed answer, or is a short, one-line response sufficient?
+
+    Think ahead about what you need to say, what tools you need to use, and what you need to know before you respond.
     """
 
     conversation_timeline: str = dspy.InputField(description="Chronological conversation timeline showing message flow, replies, timestamps, and [NEW] markers for recent activity. Each message includes [ID: ...] for use with reply and reaction tools.")
