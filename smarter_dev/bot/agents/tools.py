@@ -621,14 +621,36 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                         try:
                             pdf_bytes = response.content
                             with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-                                pdf_text = ""
-                                for page_num, page in enumerate(pdf.pages, 1):
-                                    page_text = page.extract_text()
-                                    if page_text:
-                                        pdf_text += f"--- Page {page_num} ---\n{page_text}\n\n"
+                                # Use list for efficient string building
+                                pdf_text_parts = []
+                                content_length = 0
+                                max_content_length = 2000  # Stop extracting after 2000 chars
 
-                                content = pdf_text.strip()
-                                title = f"PDF ({len(pdf.pages)} pages)"
+                                # Get total page count for title
+                                total_pages = len(pdf.pages)
+                                logger.debug(f"[Tool] PDF has {total_pages} pages, extracting text...")
+
+                                for page_num, page in enumerate(pdf.pages, 1):
+                                    # Stop if we have enough content
+                                    if content_length >= max_content_length:
+                                        logger.debug(f"[Tool] Reached content limit at page {page_num} of {total_pages}")
+                                        break
+
+                                    try:
+                                        page_text = page.extract_text()
+                                        if page_text:
+                                            page_header = f"--- Page {page_num} ---\n"
+                                            pdf_text_parts.append(page_header)
+                                            pdf_text_parts.append(page_text)
+                                            pdf_text_parts.append("\n\n")
+                                            content_length += len(page_header) + len(page_text) + 2
+                                    except Exception as page_error:
+                                        logger.warning(f"[Tool] Failed to extract text from page {page_num}: {page_error}")
+                                        continue
+
+                                content = "".join(pdf_text_parts).strip()
+                                title = f"PDF ({total_pages} pages)"
+                                logger.debug(f"[Tool] Extracted {len(content)} chars from PDF")
                         except Exception as e:
                             logger.error(f"[Tool] Failed to extract PDF text: {e}")
                             raise ValueError(f"Failed to extract text from PDF: {e}")
