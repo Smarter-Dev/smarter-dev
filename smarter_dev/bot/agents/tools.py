@@ -10,6 +10,7 @@ from typing import Callable, List, Optional, Dict, Any
 from datetime import datetime, timedelta
 
 from ddgs import DDGS
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,9 @@ class SearchCache:
         # Track recent queries per channel
         # Format: {channel_id: [query1, query2, ...]}
         self.channel_queries: Dict[str, List[str]] = {}
+        # URL cache (not tracked per channel)
+        # Format: {url: (content, timestamp)}
+        self.url_cache: Dict[str, tuple[str, datetime]] = {}
 
     def get(self, query: str, cache_type: str = "full") -> Optional[Any]:
         """Get a cached result if it exists and hasn't expired.
@@ -88,6 +92,36 @@ class SearchCache:
             List of recent search query strings, or empty list if none
         """
         return self.channel_queries.get(channel_id, [])
+
+    def get_url(self, url: str) -> Optional[str]:
+        """Get cached URL content if it exists and hasn't expired.
+
+        Args:
+            url: The URL to retrieve
+
+        Returns:
+            Cached content if found and valid, None otherwise
+        """
+        if url not in self.url_cache:
+            return None
+
+        content, timestamp = self.url_cache[url]
+        # Check if expired
+        if datetime.now() - timestamp > timedelta(hours=self.CACHE_TTL_HOURS):
+            del self.url_cache[url]
+            return None
+
+        return content
+
+    def set_url(self, url: str, content: str) -> None:
+        """Store URL content in cache.
+
+        Args:
+            url: The URL that was fetched
+            content: The content/response to cache
+        """
+        self.url_cache[url] = (content, datetime.now())
+        logger.debug(f"[Cache] Stored URL content for '{url}'")
 
 
 # Global search cache instance
@@ -428,6 +462,106 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 "error": str(e)
             }
 
+    async def open_url(url: str) -> dict:
+        """Fetch and cache URL content.
+
+        Follows redirects and returns the page content/title.
+        Results are cached in memory for 24 hours.
+
+        Args:
+            url: The URL to open and fetch content from (e.g., "https://example.com")
+
+        Returns:
+            dict with 'success' boolean, 'title' (page title), 'content' (page text),
+            and 'final_url' (after following redirects)
+
+        Example:
+            open_url("https://en.wikipedia.org/wiki/Python_(programming_language)")
+            -> {"success": True, "title": "Python (programming language)", "content": "...", "final_url": "..."}
+        """
+        try:
+            logger.debug(f"[Tool] open_url called with url: {url}")
+
+            # Send usage message
+            usage_message = f"-# Using url for '{url}'"
+            try:
+                await bot.rest.create_message(int(channel_id), usage_message)
+            except Exception as e:
+                logger.error(f"[Tool] Failed to send url usage message: {e}")
+
+            # Check cache first
+            cached_content = search_cache.get_url(url)
+            if cached_content is not None:
+                logger.debug(f"[Cache] URL hit for '{url}'")
+                # Return cached result
+                return {
+                    "success": True,
+                    "content": cached_content,
+                    "note": "Result from cache"
+                }
+
+            # Fetch the URL with httpx (follows redirects by default)
+            try:
+                async with httpx.AsyncClient(follow_redirects=True, timeout=10.0) as client:
+                    response = await client.get(url)
+                    response.raise_for_status()
+
+                    # Get the final URL after redirects
+                    final_url = str(response.url)
+
+                    # Extract title from HTML if possible
+                    content = response.text
+                    title = ""
+                    if "<title>" in content.lower():
+                        try:
+                            start = content.lower().index("<title>") + 7
+                            end = content.lower().index("</title>", start)
+                            title = content[start:end].strip()
+                        except Exception:
+                            title = "[Unable to extract title]"
+
+                    # Truncate content to keep manageable (first 2000 chars)
+                    if len(content) > 2000:
+                        content = content[:2000] + "..."
+
+                    result = {
+                        "success": True,
+                        "title": title or "[No title]",
+                        "content": content,
+                        "final_url": final_url
+                    }
+
+                    # Cache the result
+                    search_cache.set_url(url, content)
+
+                    return result
+
+            except httpx.TimeoutException:
+                logger.error(f"[Tool] Timeout fetching URL '{url}'")
+                return {
+                    "success": False,
+                    "error": "Request timeout - URL took too long to respond"
+                }
+            except httpx.HTTPStatusError as e:
+                logger.error(f"[Tool] HTTP error fetching URL '{url}': {e.response.status_code}")
+                return {
+                    "success": False,
+                    "error": f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
+                }
+            except Exception as e:
+                logger.error(f"[Tool] Failed to fetch URL '{url}': {e}")
+                return {
+                    "success": False,
+                    "error": str(e)
+                }
+
+        except Exception as e:
+            logger.error(f"[Tool] open_url failed: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
     # Get recent search queries for this channel
     channel_queries = search_cache.get_channel_queries(channel_id)
 
@@ -438,7 +572,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         add_reaction_to_message,
         list_reaction_types,
         search_web_instant_answer,
-        search_web
+        search_web,
+        open_url
     ]
 
     return tools, channel_queries
