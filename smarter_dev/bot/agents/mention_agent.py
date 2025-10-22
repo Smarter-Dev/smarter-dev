@@ -77,6 +77,13 @@ class ConversationalMentionSignature(dspy.Signature):
     - Use reactions to show immediate engagement, use messages for substance
     - Don't overthink it - if you want to react, do it; if you have something to say, say it
 
+    **Using Web Search Tools**:
+    - `search_web_instant_answer()` gets quick facts and direct answers (capitals, dates, definitions)
+    - `search_web()` performs comprehensive searches for broader topics or multiple sources
+    - Use these tools when you genuinely need current/grounded information to respond well
+    - Limit searches to 1-3 per conversation - don't over-rely on them
+    - Skip searching when you already know enough to give a good response
+
     **When to Act**:
     - If something is funny/clever → React with appropriate emoji
     - If you want to add thoughts → Send a message
@@ -139,7 +146,7 @@ class ConversationalMentionSignature(dspy.Signature):
     channel: dict = dspy.InputField(description="Channel info with name and description fields")
     me: dict = dspy.InputField(description="Bot info with bot_name and bot_id fields")
     messages_remaining: int = dspy.InputField(description="Number of messages user can send after this one (0 = this is their last message)")
-    response: str = dspy.OutputField(description="Your conversational response in casual Discord style. Default to SHORT one-liners - use send_message() multiple times if a thought needs more than one line. Always format code in backticks or code blocks - NEVER send raw code. Use add_reaction_to_message() for quick emotional responses instead of typing (lol, agree, etc). Use reply_to_message() when engaging with specific ideas. Only send longer messages for genuinely complex topics or when explicitly asked for depth.")
+    response: str = dspy.OutputField(description="Your conversational response in casual Discord style. Default to SHORT one-liners - use send_message() multiple times if a thought needs more than one line. Always format code in backticks or code blocks - NEVER send raw code. Use add_reaction_to_message() for quick emotional responses instead of typing (lol, agree, etc). Use reply_to_message() when engaging with specific ideas. Use search_web_instant_answer() or search_web() when you need current or grounded information to respond well. Only send longer messages for genuinely complex topics or when explicitly asked for depth.")
 
 
 class MentionAgent(BaseAgent):

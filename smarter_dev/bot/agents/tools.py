@@ -8,6 +8,8 @@ created as a factory to ensure they can only operate in their intended context.
 import logging
 from typing import Callable, List
 
+from duckduckgo_search import DDGS
+
 logger = logging.getLogger(__name__)
 
 
@@ -199,10 +201,111 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 "error": str(e)
             }
 
+    async def search_web_instant_answer(query: str) -> dict:
+        """Search for instant answers and quick facts using DuckDuckGo.
+
+        Returns quick facts and direct answers when available (e.g., definitions, capitals, dates).
+        If no instant answer is found, returns None - use search_web for comprehensive results.
+
+        Args:
+            query: The question or topic to search for (e.g., "What is photosynthesis?")
+
+        Returns:
+            dict with 'success' boolean, 'answer' (str or None), and optional 'source' field
+
+        Example:
+            search_web_instant_answer("What is the capital of France?")
+            -> {"success": True, "answer": "Paris", "source": "Wikipedia"}
+        """
+        try:
+            logger.debug(f"[Tool] search_web_instant_answer called with query: {query}")
+
+            # Search using DuckDuckGo instant answers
+            results = DDGS().answers(query)
+
+            if results and len(results) > 0:
+                # Return the first instant answer
+                answer_obj = results[0]
+                return {
+                    "success": True,
+                    "answer": answer_obj.get("text", answer_obj.get("answer")),
+                    "source": answer_obj.get("source", "DuckDuckGo")
+                }
+            else:
+                # No instant answer available
+                return {
+                    "success": True,
+                    "answer": None,
+                    "note": "No instant answer available - use search_web for comprehensive results"
+                }
+        except Exception as e:
+            logger.error(f"[Tool] search_web_instant_answer failed: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    async def search_web(query: str, max_results: int = 3) -> dict:
+        """Perform a comprehensive web search using DuckDuckGo.
+
+        Returns multiple search results with titles, URLs, and snippets.
+        Limited to 3 results by default to keep responses concise for Discord.
+
+        Args:
+            query: The search query (e.g., "Python async programming")
+            max_results: Maximum number of results to return (default 3, max 5 to stay concise)
+
+        Returns:
+            dict with 'success' boolean and 'results' list containing dicts with
+            'title', 'url', and 'snippet' fields
+
+        Example:
+            search_web("machine learning frameworks")
+            -> {"success": True, "results": [{"title": "...", "url": "...", "snippet": "..."}]}
+        """
+        try:
+            # Limit to max 5 results to keep responses Discord-friendly
+            max_results = min(max_results, 5)
+
+            logger.debug(f"[Tool] search_web called with query: {query}, max_results: {max_results}")
+
+            # Perform web search using DuckDuckGo
+            search_results = DDGS().text(query, max_results=max_results)
+
+            if search_results:
+                results = [
+                    {
+                        "title": result.get("title"),
+                        "url": result.get("href"),
+                        "snippet": result.get("body")
+                    }
+                    for result in search_results
+                ]
+                return {
+                    "success": True,
+                    "results": results,
+                    "count": len(results)
+                }
+            else:
+                return {
+                    "success": True,
+                    "results": [],
+                    "count": 0,
+                    "note": "No results found for this query"
+                }
+        except Exception as e:
+            logger.error(f"[Tool] search_web failed: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
     # Return list of tools for ReAct agent
     return [
         send_message,
         reply_to_message,
         add_reaction_to_message,
-        list_reaction_types
+        list_reaction_types,
+        search_web_instant_answer,
+        search_web
     ]
