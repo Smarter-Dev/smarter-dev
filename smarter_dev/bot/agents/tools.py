@@ -202,41 +202,42 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             }
 
     async def search_web_instant_answer(query: str) -> dict:
-        """Search for instant answers and quick facts using DuckDuckGo.
+        """Search for quick answers and facts using DuckDuckGo.
 
-        Returns quick facts and direct answers when available (e.g., definitions, capitals, dates).
-        If no instant answer is found, returns None - use search_web for comprehensive results.
+        Returns the top search result as a quick answer for direct/simple questions.
+        For more detailed information, use search_web instead.
 
         Args:
             query: The question or topic to search for (e.g., "What is photosynthesis?")
 
         Returns:
-            dict with 'success' boolean, 'answer' (str or None), and optional 'source' field
+            dict with 'success' boolean, 'answer' (title + snippet), and 'url' field
 
         Example:
             search_web_instant_answer("What is the capital of France?")
-            -> {"success": True, "answer": "Paris", "source": "Wikipedia"}
+            -> {"success": True, "answer": "Paris - ...", "url": "..."}
         """
         try:
             logger.debug(f"[Tool] search_web_instant_answer called with query: {query}")
 
-            # Search using DuckDuckGo instant answers
-            results = DDGS().answers(query)
+            # Get the first result from text search for a quick answer
+            search_results = list(DDGS().text(query, max_results=1))
 
-            if results and len(results) > 0:
-                # Return the first instant answer
-                answer_obj = results[0]
+            if search_results and len(search_results) > 0:
+                result = search_results[0]
+                # Combine title and snippet for a quick answer
+                answer = f"{result.get('title', 'No title')} - {result.get('body', '')[:200]}"
                 return {
                     "success": True,
-                    "answer": answer_obj.get("text", answer_obj.get("answer")),
-                    "source": answer_obj.get("source", "DuckDuckGo")
+                    "answer": answer,
+                    "url": result.get("href")
                 }
             else:
-                # No instant answer available
+                # No answer available
                 return {
                     "success": True,
                     "answer": None,
-                    "note": "No instant answer available - use search_web for comprehensive results"
+                    "note": "No results found - use search_web for comprehensive search"
                 }
         except Exception as e:
             logger.error(f"[Tool] search_web_instant_answer failed: {e}")
@@ -270,7 +271,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             logger.debug(f"[Tool] search_web called with query: {query}, max_results: {max_results}")
 
             # Perform web search using DuckDuckGo
-            search_results = DDGS().text(query, max_results=max_results)
+            search_results = list(DDGS().text(query, max_results=max_results))
+            logger.debug(f"[Tool] search_web got {len(search_results)} results for query: {query}")
 
             if search_results:
                 results = [
@@ -281,12 +283,14 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     }
                     for result in search_results
                 ]
+                logger.debug(f"[Tool] search_web returning {len(results)} formatted results")
                 return {
                     "success": True,
                     "results": results,
                     "count": len(results)
                 }
             else:
+                logger.warning(f"[Tool] search_web got no results for query: {query}")
                 return {
                     "success": True,
                     "results": [],
@@ -294,7 +298,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     "note": "No results found for this query"
                 }
         except Exception as e:
-            logger.error(f"[Tool] search_web failed: {e}")
+            logger.error(f"[Tool] search_web failed for query '{query}': {e}", exc_info=True)
             return {
                 "success": False,
                 "error": str(e)
