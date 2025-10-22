@@ -10,6 +10,8 @@ from typing import Callable, List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 import asyncio
+import re
+import html
 
 from ddgs import DDGS
 import httpx
@@ -385,7 +387,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             logger.debug(f"[Tool] search_web_instant_answer called with query: {query}")
 
             # Send usage message (always, even for cache hits)
-            usage_message = f"-# Using quick web search for '{query}'"
+            usage_message = f"-# Quick searching for '{query}'"
             try:
                 await bot.rest.create_message(int(channel_id), usage_message)
             except Exception as e:
@@ -455,7 +457,9 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             logger.debug(f"[Tool] search_web called with query: {query}, max_results: {max_results}")
 
             # Send usage message (always, even for cache hits)
-            usage_message = f"-# Using web search for '{query}' with max {max_results} result{'s' if max_results != 1 else ''}"
+            usage_message = (
+                f"-# Searching the web for '{query}' with max {max_results} result{'s' if max_results != 1 else ''}"
+            )
             try:
                 await bot.rest.create_message(int(channel_id), usage_message)
             except Exception as e:
@@ -532,7 +536,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             logger.debug(f"[Tool] open_url called with url: {url}")
 
             # Send usage message
-            usage_message = f"-# Using url for '{url}'"
+            usage_message = f"-# Opening '{url}'"
             try:
                 await bot.rest.create_message(int(channel_id), usage_message)
             except Exception as e:
@@ -562,19 +566,42 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     response = await client.get(url)
                     response.raise_for_status()
 
+                    # Check Content-Type header
+                    content_type = response.headers.get("content-type", "").lower()
+                    allowed_types = ["text/plain", "text/html", "text/markdown", "application/json"]
+
+                    # Check if content type is allowed
+                    if not any(allowed in content_type for allowed in allowed_types):
+                        raise ValueError(f"Unsupported content type: {content_type}. Only text/plain, text/html, text/markdown, and application/json are accepted.")
+
                     # Get the final URL after redirects
                     final_url = str(response.url)
-
-                    # Extract title from HTML if possible
                     content = response.text
+
+                    # Extract plain text based on content type
+                    if "html" in content_type:
+                        # Strip HTML tags for plain text extraction
+                        # Remove script and style tags first
+                        content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.IGNORECASE)
+                        content = re.sub(r'<style[^>]*>.*?</style>', '', content, flags=re.DOTALL | re.IGNORECASE)
+                        # Remove HTML tags
+                        content = re.sub(r'<[^>]+>', '', content)
+                        # Decode HTML entities
+                        content = html.unescape(content)
+                        # Clean up whitespace
+                        content = re.sub(r'\s+', ' ', content).strip()
+
+                    # Extract title from HTML if present
                     title = ""
-                    if "<title>" in content.lower():
-                        try:
-                            start = content.lower().index("<title>") + 7
-                            end = content.lower().index("</title>", start)
-                            title = content[start:end].strip()
-                        except Exception:
-                            title = "[Unable to extract title]"
+                    if "html" in content_type:
+                        original_content = response.text
+                        if "<title>" in original_content.lower():
+                            try:
+                                start = original_content.lower().index("<title>") + 7
+                                end = original_content.lower().index("</title>", start)
+                                title = original_content[start:end].strip()
+                            except Exception:
+                                title = "[Unable to extract title]"
 
                     # Truncate content to keep manageable (first 2000 chars)
                     if len(content) > 2000:
@@ -603,6 +630,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 return {
                     "success": False,
                     "error": f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
+                }
+            except ValueError as e:
+                logger.error(f"[Tool] Unsupported content type for URL '{url}': {e}")
+                return {
+                    "success": False,
+                    "error": str(e)
                 }
             except Exception as e:
                 logger.error(f"[Tool] Failed to fetch URL '{url}': {e}")
