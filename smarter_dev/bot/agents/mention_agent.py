@@ -154,6 +154,7 @@ class ConversationalMentionSignature(dspy.Signature):
     users: list[dict] = dspy.InputField(description="List of users with user_id, discord_name, nickname, server_nickname, role_names, is_bot fields")
     channel: dict = dspy.InputField(description="Channel info with name and description fields")
     me: dict = dspy.InputField(description="Bot info with bot_name and bot_id fields")
+    recent_search_queries: list[str] = dspy.InputField(description="List of recent search queries made in this channel (results may be cached)")
     messages_remaining: int = dspy.InputField(description="Number of messages user can send after this one (0 = this is their last message)")
     response: str = dspy.OutputField(description="Your conversational response in casual Discord style. Default to SHORT one-liners - use send_message() multiple times if a thought needs more than one line. Always format code in backticks or code blocks - NEVER send raw code. Use add_reaction_to_message() for quick emotional responses instead of typing (lol, agree, etc). Use reply_to_message() when engaging with specific ideas. Use search_web_instant_answer() or search_web() when you need current or grounded information to respond well. Only send longer messages for genuinely complex topics or when explicitly asked for depth.")
 
@@ -202,7 +203,7 @@ class MentionAgent(BaseAgent):
             context = await context_builder.build_context(channel_id, trigger_message_id)
 
             # Create context-bound tools for this specific mention
-            tools = create_mention_tools(
+            tools, channel_queries = create_mention_tools(
                 bot=bot,
                 channel_id=str(channel_id),
                 guild_id=str(guild_id) if guild_id else "",
@@ -223,6 +224,7 @@ class MentionAgent(BaseAgent):
                 users=context["users"],
                 channel=context["channel"],
                 me=context["me"],
+                recent_search_queries=channel_queries,
                 messages_remaining=messages_remaining
             )
 

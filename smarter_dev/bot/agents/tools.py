@@ -6,14 +6,95 @@ created as a factory to ensure they can only operate in their intended context.
 """
 
 import logging
-from typing import Callable, List
+from typing import Callable, List, Optional, Dict, Any
+from datetime import datetime, timedelta
 
 from ddgs import DDGS
 
 logger = logging.getLogger(__name__)
 
 
-def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id: str) -> List[Callable]:
+class SearchCache:
+    """Manages search result caching with 24-hour TTL and per-channel query tracking."""
+
+    # Cache TTL in hours
+    CACHE_TTL_HOURS = 24
+
+    def __init__(self):
+        """Initialize the search cache."""
+        # Separate caches for quick and full searches
+        # Format: {query: (results, timestamp)}
+        self.quick_search_cache: Dict[str, tuple[Any, datetime]] = {}
+        self.full_search_cache: Dict[str, tuple[Any, datetime]] = {}
+        # Track recent queries per channel
+        # Format: {channel_id: [query1, query2, ...]}
+        self.channel_queries: Dict[str, List[str]] = {}
+
+    def get(self, query: str, cache_type: str = "full") -> Optional[Any]:
+        """Get a cached result if it exists and hasn't expired.
+
+        Args:
+            query: The search query
+            cache_type: "quick" for instant answer cache, "full" for full search cache
+
+        Returns:
+            Cached results if found and valid, None otherwise
+        """
+        cache = self.quick_search_cache if cache_type == "quick" else self.full_search_cache
+
+        if query not in cache:
+            return None
+
+        results, timestamp = cache[query]
+        # Check if expired
+        if datetime.now() - timestamp > timedelta(hours=self.CACHE_TTL_HOURS):
+            del cache[query]
+            return None
+
+        return results
+
+    def set(self, query: str, results: Any, cache_type: str = "full") -> None:
+        """Store results in cache.
+
+        Args:
+            query: The search query
+            results: The search results to cache
+            cache_type: "quick" for instant answer cache, "full" for full search cache
+        """
+        cache = self.quick_search_cache if cache_type == "quick" else self.full_search_cache
+        cache[query] = (results, datetime.now())
+        logger.debug(f"[Cache] Stored {cache_type} search for '{query}'")
+
+    def add_channel_query(self, channel_id: str, query: str) -> None:
+        """Track that a query was searched in a channel.
+
+        Args:
+            channel_id: The Discord channel ID
+            query: The search query
+        """
+        if channel_id not in self.channel_queries:
+            self.channel_queries[channel_id] = []
+        # Add to front if not already there
+        if query not in self.channel_queries[channel_id]:
+            self.channel_queries[channel_id].insert(0, query)
+
+    def get_channel_queries(self, channel_id: str) -> List[str]:
+        """Get list of recent search queries in a channel.
+
+        Args:
+            channel_id: The Discord channel ID
+
+        Returns:
+            List of recent search query strings, or empty list if none
+        """
+        return self.channel_queries.get(channel_id, [])
+
+
+# Global search cache instance
+search_cache = SearchCache()
+
+
+def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id: str) -> tuple[List[Callable], List[str]]:
     """Create context-bound Discord interaction tools for a mention agent.
 
     All returned tools are bound to the specific channel and guild where the
@@ -26,7 +107,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         trigger_message_id: ID of the message that triggered the mention
 
     Returns:
-        List of callable async functions for the ReAct agent to use
+        Tuple of (List of callable async functions, List of recent search queries in this channel)
     """
 
     async def send_message(content: str) -> dict:
@@ -220,32 +301,45 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         try:
             logger.debug(f"[Tool] search_web_instant_answer called with query: {query}")
 
-            # Send usage message
+            # Send usage message (always, even for cache hits)
             usage_message = f"Using quick web search for '{query}'"
             try:
                 await bot.rest.create_message(int(channel_id), usage_message)
             except Exception as e:
                 logger.error(f"[Tool] Failed to send search usage message: {e}")
 
-            # Get the first result from text search for a quick answer
+            # Check cache first
+            cached_result = search_cache.get(query, cache_type="quick")
+            if cached_result is not None:
+                logger.debug(f"[Cache] Quick search hit for '{query}'")
+                return cached_result
+
+            # Not in cache, perform search
             search_results = list(DDGS().text(query, max_results=1))
 
             if search_results and len(search_results) > 0:
                 result = search_results[0]
                 # Combine title and snippet for a quick answer
                 answer = f"{result.get('title', 'No title')} - {result.get('body', '')[:200]}"
-                return {
+                response = {
                     "success": True,
                     "answer": answer,
                     "url": result.get("href")
                 }
             else:
                 # No answer available
-                return {
+                response = {
                     "success": True,
                     "answer": None,
                     "note": "No results found - use search_web for comprehensive search"
                 }
+
+            # Cache and track this query
+            search_cache.set(query, response, cache_type="quick")
+            search_cache.add_channel_query(channel_id, query)
+
+            return response
+
         except Exception as e:
             logger.error(f"[Tool] search_web_instant_answer failed: {e}")
             return {
@@ -277,14 +371,23 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             logger.debug(f"[Tool] search_web called with query: {query}, max_results: {max_results}")
 
-            # Send usage message
+            # Send usage message (always, even for cache hits)
             usage_message = f"Using web search for '{query}' with {max_results} result{'s' if max_results != 1 else ''}"
             try:
                 await bot.rest.create_message(int(channel_id), usage_message)
             except Exception as e:
                 logger.error(f"[Tool] Failed to send search usage message: {e}")
 
-            # Perform web search using DuckDuckGo
+            # Use composite key to cache by query + max_results
+            cache_key = f"{query}:{max_results}"
+
+            # Check cache first
+            cached_result = search_cache.get(cache_key, cache_type="full")
+            if cached_result is not None:
+                logger.debug(f"[Cache] Full search hit for '{cache_key}'")
+                return cached_result
+
+            # Not in cache, perform search
             search_results = list(DDGS().text(query, max_results=max_results))
             logger.debug(f"[Tool] search_web got {len(search_results)} results for query: {query}")
 
@@ -298,19 +401,26 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     for result in search_results
                 ]
                 logger.debug(f"[Tool] search_web returning {len(results)} formatted results")
-                return {
+                response = {
                     "success": True,
                     "results": results,
                     "count": len(results)
                 }
             else:
                 logger.warning(f"[Tool] search_web got no results for query: {query}")
-                return {
+                response = {
                     "success": True,
                     "results": [],
                     "count": 0,
                     "note": "No results found for this query"
                 }
+
+            # Cache and track this query
+            search_cache.set(cache_key, response, cache_type="full")
+            search_cache.add_channel_query(channel_id, query)
+
+            return response
+
         except Exception as e:
             logger.error(f"[Tool] search_web failed for query '{query}': {e}", exc_info=True)
             return {
@@ -318,8 +428,11 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 "error": str(e)
             }
 
-    # Return list of tools for ReAct agent
-    return [
+    # Get recent search queries for this channel
+    channel_queries = search_cache.get_channel_queries(channel_id)
+
+    # Return tools and channel queries
+    tools = [
         send_message,
         reply_to_message,
         add_reaction_to_message,
@@ -327,3 +440,5 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         search_web_instant_answer,
         search_web
     ]
+
+    return tools, channel_queries
