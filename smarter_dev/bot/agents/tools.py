@@ -579,6 +579,16 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
                     # Check Content-Type header
                     content_type = response.headers.get("content-type", "").lower()
+                    logger.debug(f"[Tool] Response content-type: '{content_type}'")
+
+                    # Get response text for checking
+                    response_text = response.text
+
+                    # If no content-type but content looks like HTML, treat as HTML
+                    if not content_type and response_text.strip().startswith("<"):
+                        logger.debug(f"[Tool] No content-type header but content looks like HTML, treating as HTML")
+                        content_type = "text/html"
+
                     allowed_types = ["text/plain", "text/html", "text/markdown", "application/json", "application/pdf"]
 
                     # Check if content type is allowed
@@ -592,6 +602,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
                     # Process content based on content type
                     if "html" in content_type:
+                        logger.debug(f"[Tool] Converting HTML to Markdown for {url}")
                         # Convert HTML to Markdown
                         html_content = response.text
                         content = md(html_content, heading_style="ATX")
