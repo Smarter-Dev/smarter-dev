@@ -464,6 +464,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             RepeatingMessageService,
         )
         from smarter_dev.bot.services.squads_service import SquadsService
+        from smarter_dev.bot.services.channel_state import initialize_channel_state_manager
 
         bytes_service = BytesService(api_client, cache_manager)
         squads_service = SquadsService(api_client, cache_manager)
@@ -471,6 +472,9 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         challenge_service = ChallengeService(api_client, cache_manager, bot)
         scheduled_message_service = ScheduledMessageService(api_client, cache_manager, bot)
         repeating_message_service = RepeatingMessageService(api_client, cache_manager, bot)
+
+        # Initialize conversation participation services (debounce-based, no polling needed)
+        channel_state_manager = initialize_channel_state_manager(watching_duration_minutes=10, check_interval_seconds=60)
 
         # Initialize services
         logger.info("Initializing bytes service...")
@@ -542,6 +546,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d["challenge_service"] = challenge_service
         bot.d["scheduled_message_service"] = scheduled_message_service
         bot.d["repeating_message_service"] = repeating_message_service
+        bot.d["channel_state_manager"] = channel_state_manager
 
         # Store services in d for plugin access (primary)
         bot.d["_services"] = {
@@ -550,7 +555,8 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             "forum_agent_service": forum_agent_service,
             "challenge_service": challenge_service,
             "scheduled_message_service": scheduled_message_service,
-            "repeating_message_service": repeating_message_service
+            "repeating_message_service": repeating_message_service,
+            "channel_state_manager": channel_state_manager
         }
 
         logger.info("✓ Bot services setup complete")
@@ -991,6 +997,7 @@ async def run_bot() -> None:
         # Start cache cleanup
         await start_cache_cleanup()
 
+        # Start conversation watcher for natural participation
         logger.info("Bot is now fully ready and will stay online")
 
     @bot.listen()
