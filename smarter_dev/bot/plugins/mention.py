@@ -15,7 +15,6 @@ from typing import List, Optional, TYPE_CHECKING
 
 from smarter_dev.bot.agents.mention_agent import mention_agent
 from smarter_dev.bot.agents.models import DiscordMessage
-from smarter_dev.bot.agents.relevance_checker import get_relevance_checker
 from smarter_dev.bot.services.rate_limiter import rate_limiter
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.channel_state import get_channel_state_manager
@@ -39,7 +38,7 @@ async def handle_delayed_response(
     """Handle a delayed response triggered by the debounce timer.
 
     This function is called when the debounce timer fires (15-second lull in conversation,
-    or 1-minute max timeout). It builds context, checks relevance, and triggers the agent.
+    or 1-minute max timeout). It triggers the agent to generate a response.
 
     Args:
         bot: Discord bot instance
@@ -55,20 +54,6 @@ async def handle_delayed_response(
             return
 
         try:
-            # Build conversation context
-            context_builder = ConversationContextBuilder(bot, guild_id)
-            context = await context_builder.build_context(channel_id, None)
-
-            # Check if conversation is relevant for bot response
-            relevance_checker = get_relevance_checker()
-            should_respond, reasoning = await relevance_checker.should_respond(context["conversation_timeline"])
-
-            if not should_respond:
-                logger.debug(f"Channel {channel_id}: Conversation not relevant for debounced response - {reasoning}")
-                return
-
-            logger.info(f"Channel {channel_id}: Debounced response - Conversation relevant - {reasoning}")
-
             # Show typing indicator while agent processes
             async with bot.rest.trigger_typing(channel_id):
                 success, tokens_used, response_text = await mention_agent.generate_response(
