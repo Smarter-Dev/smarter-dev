@@ -47,7 +47,9 @@ services:
       - smarter_dev
 
   bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
     container_name: smarter_dev_bot
     depends_on:
       postgres:
@@ -62,9 +64,6 @@ services:
       - ENVIRONMENT=development
       - LLM_MODEL=claude-haiku-4-5-20251001
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-    volumes:
-      - .:/app
-      - /app/.venv
     working_dir: /app
     command: uv run python -m smarter_dev.bot.client
     restart: unless-stopped
