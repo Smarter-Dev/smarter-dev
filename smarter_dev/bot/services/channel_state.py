@@ -1,8 +1,9 @@
-"""Channel state manager for tracking conversation participation windows.
+"""Channel state manager for agentic message monitoring.
 
-This service manages per-channel state to implement natural conversation participation:
-- Tracks whether the agent is currently running in a channel
-- Manages debounced response timers with rolling 15-second delays and 1-minute caps
+This service manages per-channel state for agent-driven conversation monitoring:
+- Tracks typing indicator state
+- Manages message queue for wait_for_messages tool
+- Tracks whether agent wants to continue monitoring
 - Prevents concurrent agent executions in the same channel
 """
 
@@ -10,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -19,52 +19,40 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ChannelState:
-    """Manages state for a single channel."""
+class ChannelMonitorState:
+    """Manages state for a single channel during agent monitoring."""
 
     def __init__(self):
         """Initialize channel state."""
-        self.is_running: bool = False  # Is agent currently processing
-        self.last_response_time: Optional[datetime] = None  # When bot last responded
-        self.watching_until: Optional[datetime] = None  # When watching period ends
-        self.last_checked_message_id: Optional[int] = None  # Last message ID seen by background task
-
-        # Debounce timer state for rolling delay logic
-        self.first_new_message_time: Optional[datetime] = None  # When first user message arrived
-        self.last_user_message_time: Optional[datetime] = None  # When most recent user message arrived
-        self.response_timer_task: Optional[asyncio.Task] = None  # Pending delayed response task
-        self.response_timer_callback: Optional[callable] = None  # Callback to trigger response
-
-        # Track if messages arrived while agent was running (need debounce after finish)
-        self.messages_arrived_during_run: bool = False  # Flag to restart debounce after agent finishes
+        self.agent_running: bool = False  # Is agent currently processing
+        self.typing_active: bool = False  # Is typing indicator currently shown
+        self.typing_task: Optional[asyncio.Task] = None  # Background typing indicator task
+        self.continue_monitoring: bool = False  # Does agent want to continue monitoring
+        self.last_message_id_seen: Optional[str] = None  # Checkpoint for fetch_new_messages
+        self.message_queue: asyncio.Queue = asyncio.Queue()  # Messages for wait_for_messages
+        self.queue_updated_event: asyncio.Event = asyncio.Event()  # Signals new messages
+        self.messages_processed: int = 0  # Total messages processed in this conversation session
 
 
 class ChannelStateManager:
-    """Manages per-channel state for natural conversation participation."""
+    """Manages per-channel state for agentic conversation monitoring."""
 
-    def __init__(self, watching_duration_minutes: int = 10, check_interval_seconds: int = 60):
-        """Initialize the channel state manager.
+    def __init__(self):
+        """Initialize the channel state manager."""
+        self.states: Dict[int, ChannelMonitorState] = {}
+        logger.info("ChannelStateManager initialized for agentic monitoring")
 
-        Args:
-            watching_duration_minutes: How long to watch a channel after bot responds (default 10)
-            check_interval_seconds: How often background task checks for new messages (default 60)
-        """
-        self.states: Dict[int, ChannelState] = {}
-        self.watching_duration = timedelta(minutes=watching_duration_minutes)
-        self.check_interval = timedelta(seconds=check_interval_seconds)
-        logger.info(f"ChannelStateManager initialized with {watching_duration_minutes}min watch windows, {check_interval_seconds}s check intervals")
-
-    def get_state(self, channel_id: int) -> ChannelState:
+    def get_state(self, channel_id: int) -> ChannelMonitorState:
         """Get or create state for a channel.
 
         Args:
             channel_id: Discord channel ID
 
         Returns:
-            ChannelState for the channel
+            ChannelMonitorState for the channel
         """
         if channel_id not in self.states:
-            self.states[channel_id] = ChannelState()
+            self.states[channel_id] = ChannelMonitorState()
         return self.states[channel_id]
 
     def start_agent(self, channel_id: int) -> bool:
@@ -77,67 +65,24 @@ class ChannelStateManager:
             True if successfully marked as running, False if already running
         """
         state = self.get_state(channel_id)
-        if state.is_running:
+        if state.agent_running:
             logger.debug(f"Channel {channel_id}: Agent already running, skipping")
             return False
 
-        state.is_running = True
+        state.agent_running = True
+        state.continue_monitoring = False  # Reset for new invocation
         logger.debug(f"Channel {channel_id}: Agent started")
         return True
 
     def finish_agent(self, channel_id: int) -> None:
-        """Mark agent as finished and start watching period.
+        """Mark agent as finished.
 
         Args:
             channel_id: Discord channel ID
         """
         state = self.get_state(channel_id)
-        state.is_running = False
-        state.last_response_time = datetime.now(timezone.utc)
-        state.watching_until = state.last_response_time + self.watching_duration
-        logger.debug(f"Channel {channel_id}: Agent finished, watching until {state.watching_until}")
-
-    def is_watching(self, channel_id: int) -> bool:
-        """Check if a channel is in the watching period.
-
-        Args:
-            channel_id: Discord channel ID
-
-        Returns:
-            True if channel is actively being watched
-        """
-        state = self.get_state(channel_id)
-        if state.watching_until is None:
-            return False
-
-        is_active = datetime.now(timezone.utc) < state.watching_until
-        if not is_active:
-            # Clean up expired state
-            state.watching_until = None
-            state.last_response_time = None
-            state.last_checked_message_id = None
-
-        return is_active
-
-    def should_check_channel(self, channel_id: int) -> bool:
-        """Determine if a channel should be checked by the background task.
-
-        Args:
-            channel_id: Discord channel ID
-
-        Returns:
-            True if channel is being watched and enough time has passed since last check
-        """
-        if not self.is_watching(channel_id):
-            return False
-
-        state = self.get_state(channel_id)
-        if state.last_checked_message_id is None:
-            # First check, should always check
-            return True
-
-        # Always check when watching (we check every minute whether there are new messages)
-        return True
+        state.agent_running = False
+        logger.debug(f"Channel {channel_id}: Agent finished")
 
     def is_agent_running(self, channel_id: int) -> bool:
         """Check if agent is currently running in a channel.
@@ -149,168 +94,225 @@ class ChannelStateManager:
             True if agent is actively processing
         """
         state = self.get_state(channel_id)
-        return state.is_running
+        return state.agent_running
 
-    def update_last_checked(self, channel_id: int, message_id: int) -> None:
-        """Update the last message ID seen by the background task.
+    def set_continue_monitoring(self, channel_id: int, continue_monitoring: bool) -> None:
+        """Set whether agent wants to continue monitoring.
 
         Args:
             channel_id: Discord channel ID
-            message_id: The last message ID that was checked
+            continue_monitoring: True if agent wants to continue
         """
         state = self.get_state(channel_id)
-        state.last_checked_message_id = message_id
-        logger.debug(f"Channel {channel_id}: Updated last checked message to {message_id}")
+        state.continue_monitoring = continue_monitoring
+        logger.debug(f"Channel {channel_id}: Continue monitoring set to {continue_monitoring}")
 
-    def get_last_checked_message_id(self, channel_id: int) -> Optional[int]:
-        """Get the last message ID that was checked by the background task.
+    def should_continue_monitoring(self, channel_id: int) -> bool:
+        """Check if agent wants to continue monitoring.
 
         Args:
             channel_id: Discord channel ID
 
         Returns:
-            The last message ID checked, or None if no messages have been checked
+            True if agent wants to continue monitoring
         """
         state = self.get_state(channel_id)
-        return state.last_checked_message_id
+        return state.continue_monitoring
 
-    def schedule_delayed_response(
+    def set_typing_active(self, channel_id: int, active: bool) -> None:
+        """Set typing indicator state.
+
+        Args:
+            channel_id: Discord channel ID
+            active: True if typing indicator should be active
+        """
+        state = self.get_state(channel_id)
+        state.typing_active = active
+        logger.debug(f"Channel {channel_id}: Typing indicator {'started' if active else 'stopped'}")
+
+    def is_typing_active(self, channel_id: int) -> bool:
+        """Check if typing indicator is currently active.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            True if typing indicator is active
+        """
+        state = self.get_state(channel_id)
+        return state.typing_active
+
+    async def start_typing_task(
         self,
         channel_id: int,
-        callback: callable,
-        initial_delay_seconds: int = 15,
-        max_delay_seconds: int = 60
+        bot_rest_callback
     ) -> None:
-        """Schedule or reschedule a delayed response with debouncing.
-
-        Implements rolling 15-second delay with 1-minute maximum cap.
-        Each new message resets the timer, but response is guaranteed after 1 minute.
+        """Start a background typing indicator task.
 
         Args:
             channel_id: Discord channel ID
-            callback: Async callable to execute when timer fires (should trigger agent)
-            initial_delay_seconds: Base delay between last message and response (default 15)
-            max_delay_seconds: Maximum time from first message to response (default 60)
+            bot_rest_callback: Async callback to call trigger_typing (bot.rest.trigger_typing)
         """
         state = self.get_state(channel_id)
-        now = datetime.now(timezone.utc)
 
-        # Cancel any existing timer
-        self.cancel_response_timer(channel_id)
+        # Cancel any existing typing task
+        if state.typing_task and not state.typing_task.done():
+            state.typing_task.cancel()
 
-        # If this is the first message in a batch, set the first_new_message_time
-        if state.first_new_message_time is None:
-            state.first_new_message_time = now
-            logger.debug(f"Channel {channel_id}: First new message detected, starting debounce timer")
+        # Create new typing task
+        async def typing_loop():
+            """Keep typing indicator active by retriggering every 9 seconds."""
+            try:
+                while state.typing_active:
+                    await bot_rest_callback(channel_id)
+                    await asyncio.sleep(9)  # Trigger before 10-second expiry
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Error in typing loop for channel {channel_id}: {e}")
 
-        # Update the last message time
-        state.last_user_message_time = now
+        state.typing_task = asyncio.create_task(typing_loop())
+        logger.debug(f"Channel {channel_id}: Started typing indicator task")
 
-        # Calculate how much time has passed since the first message
-        time_since_first = (now - state.first_new_message_time).total_seconds()
-        remaining_time_until_max = max_delay_seconds - time_since_first
-
-        # If we've already exceeded the max delay, respond immediately
-        if remaining_time_until_max <= 0:
-            delay = 0
-            logger.debug(f"Channel {channel_id}: Exceeded max delay, responding immediately")
-        else:
-            # Otherwise, use the minimum of:
-            # 1. The initial delay (15 seconds)
-            # 2. The remaining time until max delay is exceeded
-            delay = min(initial_delay_seconds, remaining_time_until_max)
-            logger.debug(f"Channel {channel_id}: Scheduled delayed response in {delay:.1f}s (time since first: {time_since_first:.1f}s)")
-
-        # Store callback for later use
-        state.response_timer_callback = callback
-
-        # Create and store the timer task
-        state.response_timer_task = asyncio.create_task(
-            self._execute_delayed_response(channel_id, delay)
-        )
-
-    async def _execute_delayed_response(self, channel_id: int, delay: float) -> None:
-        """Execute the delayed response after the timer fires.
-
-        Args:
-            channel_id: Discord channel ID
-            delay: How many seconds to wait before executing
-        """
-        try:
-            if delay > 0:
-                await asyncio.sleep(delay)
-
-            # Verify channel still exists and has a callback
-            state = self.get_state(channel_id)
-            if state.response_timer_callback and not state.is_running:
-                # Check if a new debounce will be scheduled before clearing state
-                messages_will_arrive = state.messages_arrived_during_run
-
-                # Call the callback to trigger the agent
-                await state.response_timer_callback()
-
-                # Only reset message tracking if no new debounce was scheduled
-                # (i.e., no messages arrived during the agent's execution)
-                state = self.get_state(channel_id)
-                if not messages_will_arrive or not state.response_timer_task:
-                    self.reset_message_tracking(channel_id)
-
-        except asyncio.CancelledError:
-            logger.debug(f"Channel {channel_id}: Delayed response timer cancelled")
-        except Exception as e:
-            logger.error(f"Channel {channel_id}: Error in delayed response execution: {e}", exc_info=True)
-
-    def cancel_response_timer(self, channel_id: int) -> None:
-        """Cancel any pending delayed response timer for a channel.
+    def stop_typing_task(self, channel_id: int) -> None:
+        """Stop the background typing indicator task.
 
         Args:
             channel_id: Discord channel ID
         """
         state = self.get_state(channel_id)
-        if state.response_timer_task:
-            if not state.response_timer_task.done():
-                state.response_timer_task.cancel()
-            state.response_timer_task = None
-            logger.debug(f"Channel {channel_id}: Cancelled pending delayed response")
 
-    def reset_message_tracking(self, channel_id: int) -> None:
-        """Reset message tracking timestamps when agent responds.
+        if state.typing_task and not state.typing_task.done():
+            state.typing_task.cancel()
+            logger.debug(f"Channel {channel_id}: Cancelled typing indicator task")
+
+        state.typing_task = None
+
+    def set_last_message_id(self, channel_id: int, message_id: str) -> None:
+        """Update the last message ID checkpoint.
+
+        Args:
+            channel_id: Discord channel ID
+            message_id: The message ID to use as checkpoint
+        """
+        state = self.get_state(channel_id)
+        state.last_message_id_seen = message_id
+        logger.debug(f"Channel {channel_id}: Updated last message checkpoint to {message_id}")
+
+    def get_last_message_id(self, channel_id: int) -> Optional[str]:
+        """Get the last message ID checkpoint.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            The last message ID seen, or None if not set
+        """
+        state = self.get_state(channel_id)
+        return state.last_message_id_seen
+
+    async def queue_message(self, channel_id: int, message: dict) -> None:
+        """Add a message to the channel's message queue.
+
+        Args:
+            channel_id: Discord channel ID
+            message: Message dict to queue
+        """
+        state = self.get_state(channel_id)
+        await state.message_queue.put(message)
+        state.queue_updated_event.set()
+        logger.debug(f"Channel {channel_id}: Queued message (queue size: {state.message_queue.qsize()})")
+
+    def get_message_queue(self, channel_id: int) -> asyncio.Queue:
+        """Get the message queue for a channel.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            The asyncio.Queue for the channel
+        """
+        state = self.get_state(channel_id)
+        return state.message_queue
+
+    def get_queue_event(self, channel_id: int) -> asyncio.Event:
+        """Get the queue updated event for a channel.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            The asyncio.Event signaling queue updates
+        """
+        state = self.get_state(channel_id)
+        return state.queue_updated_event
+
+    def clear_queue(self, channel_id: int) -> None:
+        """Clear all messages from the queue.
 
         Args:
             channel_id: Discord channel ID
         """
         state = self.get_state(channel_id)
-        state.first_new_message_time = None
-        state.last_user_message_time = None
-        state.response_timer_callback = None
-        state.messages_arrived_during_run = False
-        logger.debug(f"Channel {channel_id}: Reset message tracking")
+        while not state.message_queue.empty():
+            try:
+                state.message_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        state.queue_updated_event.clear()
+        logger.debug(f"Channel {channel_id}: Cleared message queue")
 
-    def mark_messages_arrived_during_run(self, channel_id: int) -> None:
-        """Mark that messages arrived while agent was running.
+    def increment_messages_processed(self, channel_id: int, count: int = 1) -> int:
+        """Increment the messages processed counter for a channel.
+
+        Args:
+            channel_id: Discord channel ID
+            count: Number to increment by (default 1)
+
+        Returns:
+            The new total message count
+        """
+        state = self.get_state(channel_id)
+        state.messages_processed += count
+        logger.debug(f"Channel {channel_id}: Messages processed incremented to {state.messages_processed}")
+        return state.messages_processed
+
+    def get_messages_processed(self, channel_id: int) -> int:
+        """Get the total messages processed for a channel.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            The total message count
+        """
+        state = self.get_state(channel_id)
+        return state.messages_processed
+
+    def reset_messages_processed(self, channel_id: int) -> None:
+        """Reset the messages processed counter for a channel.
 
         Args:
             channel_id: Discord channel ID
         """
         state = self.get_state(channel_id)
-        if state.is_running:
-            state.messages_arrived_during_run = True
-            logger.debug(f"Channel {channel_id}: Messages arrived during agent run")
+        state.messages_processed = 0
+        logger.debug(f"Channel {channel_id}: Messages processed reset to 0")
 
-    def cleanup_old_states(self) -> None:
-        """Clean up channel states that have expired watching periods."""
-        now = datetime.now(timezone.utc)
-        expired_channels = []
+    def cleanup_channel(self, channel_id: int) -> None:
+        """Clean up state for a channel.
 
-        for channel_id, state in self.states.items():
-            if state.watching_until is not None and now > state.watching_until:
-                # Cancel any pending timers before cleanup
-                self.cancel_response_timer(channel_id)
-                expired_channels.append(channel_id)
-
-        for channel_id in expired_channels:
+        Args:
+            channel_id: Discord channel ID
+        """
+        if channel_id in self.states:
+            state = self.states[channel_id]
+            self.clear_queue(channel_id)
+            if state.typing_active:
+                # Log that typing indicator should be stopped
+                logger.debug(f"Channel {channel_id}: Cleaned up state with active typing indicator")
             del self.states[channel_id]
-            logger.debug(f"Channel {channel_id}: Cleaned up expired state")
+            logger.debug(f"Channel {channel_id}: Cleaned up channel state")
 
 
 # Global instance
@@ -329,19 +331,12 @@ def get_channel_state_manager() -> ChannelStateManager:
     return _channel_state_manager
 
 
-def initialize_channel_state_manager(
-    watching_duration_minutes: int = 10,
-    check_interval_seconds: int = 60
-) -> ChannelStateManager:
-    """Initialize the global channel state manager with custom settings.
-
-    Args:
-        watching_duration_minutes: How long to watch a channel after bot responds
-        check_interval_seconds: How often background task checks for new messages
+def initialize_channel_state_manager() -> ChannelStateManager:
+    """Initialize the global channel state manager.
 
     Returns:
         The initialized ChannelStateManager instance
     """
     global _channel_state_manager
-    _channel_state_manager = ChannelStateManager(watching_duration_minutes, check_interval_seconds)
+    _channel_state_manager = ChannelStateManager()
     return _channel_state_manager

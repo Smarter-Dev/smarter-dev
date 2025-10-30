@@ -473,8 +473,8 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         scheduled_message_service = ScheduledMessageService(api_client, cache_manager, bot)
         repeating_message_service = RepeatingMessageService(api_client, cache_manager, bot)
 
-        # Initialize conversation participation services (debounce-based, no polling needed)
-        channel_state_manager = initialize_channel_state_manager(watching_duration_minutes=10, check_interval_seconds=60)
+        # Initialize conversation participation services
+        channel_state_manager = initialize_channel_state_manager()
 
         # Initialize services
         logger.info("Initializing bytes service...")
