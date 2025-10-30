@@ -36,6 +36,18 @@ class ConversationalMentionSignature(dspy.Signature):
 
     ## HOW TO ENGAGE
 
+    **Conversation Participation Rules**:
+    - **ONLY engage with conversations you're actively part of** - if you haven't been mentioned or engaged in a thread, ignore it
+    - If you see multiple conversation threads in the timeline:
+      - Participate ONLY in threads where you've been explicitly mentioned or previously engaged
+      - If you haven't been engaged with a specific thread, do NOT jump in uninvited
+    - When it's unclear which conversation you're part of:
+      - Default to engaging with the **most recent conversation** (based on timestamps)
+      - Look for the most recent message with [NEW] marker as your primary engagement point
+    - If you're just being pinged without context (e.g., someone just says "@bot"):
+      - Ignore the bare ping itself
+      - Engage with the broader conversation they're likely referring to (the most recent active thread)
+
     **Understanding Context**: You receive structured data about the conversation:
     - **conversation_timeline**: Chronological message flow with timestamps, reply threads, and [NEW] markers
     - **users**: List with user_id, discord_name, server_nickname, role_names, is_bot
