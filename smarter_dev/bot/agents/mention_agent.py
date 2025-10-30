@@ -149,6 +149,54 @@ class ConversationalMentionSignature(dspy.Signature):
     participant. Respect the channel's purpose, be authentic, have fun, and help create a welcoming community where
     people enjoy chatting.
 
+    ## CHANNEL MONITORING & FLOW CONTROL TOOLS
+
+    You have powerful tools to control your own participation loop and monitor conversations naturally:
+
+    **Typing Indicator Control**:
+    - `start_typing()`: Show "bot is typing" status while thinking or preparing a response
+    - `stop_typing()`: Stop the typing indicator explicitly (though send_message/reply_to_message auto-stop it)
+    - Typing indicators are already managed by send_message() and reply_to_message() automatically
+
+    **Message Monitoring**:
+    - `fetch_new_messages()`: Get messages sent since your last fetch (use to check what happened)
+    - `wait_for_messages()`: Block until new messages arrive OR 15 seconds pass since last message (natural debounce)
+      - Returns immediately if 10+ messages are queued
+      - Otherwise waits 15 seconds of message inactivity
+      - Perfect for monitoring ongoing conversations
+    - `wait_for_duration(seconds)`: Simple wait for specified time (1-300 seconds, useful for thinking delays)
+
+    **Monitoring Lifecycle**:
+    - RECOMMENDED: Keep calling `wait_for_messages()` to stay engaged - the system will auto-restart you with fresh context
+    - AVOID: `stop_monitoring()` should only be called if you're certain the conversation is truly over (rare!)
+    - By NOT calling stop_monitoring() and just waiting, you stay naturally present and responsive
+    - The system will handle timing out of the conversation automatically after max iterations
+
+    **Conversation Flow Pattern (Single Cycle Per Invocation)**:
+    Each time you're invoked, you go through ONE cycle and then return (letting the system restart you):
+    1. Analyze the context and conversation
+    2. Decide what you want to do (send message, react, reply, etc.)
+    3. Take your action(s) using the appropriate tools
+    4. Call `wait_for_messages()` ONCE to wait for the next message
+    5. Return - the system will auto-restart you with fresh context
+
+    The system automatically restarts you in a loop, so it FEELS infinite - you're constantly getting new context and responding. You never need to call wait_for_messages() multiple times or worry about running out of iterations because each invocation is fresh.
+
+    **Why This Works**:
+    - Each agent invocation gets: current context + new messages since last time
+    - You respond naturally to what's happened
+    - Call wait_for_messages() once to create a natural pause
+    - System restarts you when messages arrive (10+ messages immediately, or after 15s of silence)
+    - You get a fresh context and respond again
+    - This continues indefinitely - feels like an infinite conversation loop
+
+    **Example Flow**:
+    1. Invocation 1: See mention → send greeting → wait_for_messages() → return
+    2. System restarts with new context
+    3. Invocation 2: See follow-up message → send response → wait_for_messages() → return
+    4. System restarts again
+    5. Keep repeating forever - conversation feels infinite and natural
+
     ## How To Formulate Your Response
 
     Read the conversation timeline and understand the context. If you are mentioned in a message, look closely at the
@@ -165,6 +213,7 @@ class ConversationalMentionSignature(dspy.Signature):
     me: dict = dspy.InputField(description="Bot info with bot_name and bot_id fields")
     recent_search_queries: list[str] = dspy.InputField(description="List of recent search queries made in this channel (results may be cached)")
     messages_remaining: int = dspy.InputField(description="Number of messages user can send after this one (0 = this is their last message)")
+    is_continuation: bool = dspy.InputField(description="True if this is a continuation of a previous monitoring session (agent is being restarted after waiting), False if this is a fresh mention")
     response: str = dspy.OutputField(description="Your conversational response in casual Discord style. Default to SHORT one-liners - use send_message() multiple times if a thought needs more than one line. Always format code in backticks or code blocks - NEVER send raw code. Use add_reaction_to_message() for quick emotional responses instead of typing (lol, agree, etc). Use reply_to_message() when engaging with specific ideas. Use search_web_instant_answer() or search_web() when you need current or grounded information to respond well. Only send longer messages for genuinely complex topics or when explicitly asked for depth.")
 
 
@@ -183,7 +232,8 @@ class MentionAgent(BaseAgent):
         channel_id: int,
         guild_id: Optional[int] = None,
         trigger_message_id: Optional[int] = None,
-        messages_remaining: int = 10
+        messages_remaining: int = 10,
+        is_continuation: bool = False
     ) -> Tuple[bool, int, Optional[str]]:
         """Generate a conversational response using ReAct with context-bound tools.
 
@@ -197,6 +247,7 @@ class MentionAgent(BaseAgent):
             guild_id: Guild ID for user/role information
             trigger_message_id: Message ID that triggered this response
             messages_remaining: Number of messages user can send after this one
+            is_continuation: True if this is a continuation after waiting (agent being restarted)
 
         Returns:
             Tuple[bool, int, Optional[str]]: (success, token_usage, response_text)
@@ -220,10 +271,17 @@ class MentionAgent(BaseAgent):
             )
 
             # Create ReAct agent with context-bound tools
+            # Very high max_iters (effectively infinite) allows agent to:
+            # - Activate typing indicator and do complex tasks
+            # - Do research/analysis across multiple message exchanges
+            # - React to messages with multiple reactions/sends per message
+            # - Handle large message backlogs efficiently
+            # Agent naturally stops when wait_for_messages() hits 100 message threshold
+            # and sets continue_monitoring to False, or when max_iters is exhausted
             react_agent = dspy.ReAct(
                 self._agent_signature,
                 tools=tools,
-                max_iters=5
+                max_iters=1000
             )
 
             # Generate response using the ReAct agent (agent will call send_message tool)
@@ -234,7 +292,8 @@ class MentionAgent(BaseAgent):
                 channel=context["channel"],
                 me=context["me"],
                 recent_search_queries=channel_queries,
-                messages_remaining=messages_remaining
+                messages_remaining=messages_remaining,
+                is_continuation=is_continuation
             )
 
             logger.debug(f"ReAct agent result: {result}")
