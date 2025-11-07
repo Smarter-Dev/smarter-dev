@@ -305,40 +305,83 @@ class ConversationContextBuilder:
         self._fetched_messages: Dict[int, hikari.Message] = {}
         
     async def build_context(
-        self, 
-        channel_id: int, 
+        self,
+        channel_id: int,
         trigger_message_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """Build complete conversation context.
-        
+
         Args:
             channel_id: Channel to gather context from
             trigger_message_id: Message ID that triggered the agent (for marking new messages)
-            
+
         Returns:
             Dict with conversation_timeline, users, channel, and me fields
         """
         # Load guild roles if we have guild context
         if self.guild_id:
             self._guild_roles = await bot_cache.get_guild_roles(self.bot, self.guild_id)
-            
+
         # Fetch base messages and complete reply threads
         messages = await self._fetch_base_messages(channel_id, limit=20)
         messages = await self._complete_reply_threads(messages)
-        
+
         # Build user info first so we can enrich the timeline
         users = await self._build_user_list(messages)
         users_by_id = {user["user_id"]: user for user in users}
-        
+
         # Build conversation timeline with enriched user info
         conversation_timeline = await self._build_conversation_timeline(messages, trigger_message_id, users_by_id)
-        
+
         channel_info = await self._build_channel_info(channel_id)
         me_info = self._build_me_info()
-        
+
         return {
             "conversation_timeline": conversation_timeline,
-            "users": users, 
+            "users": users,
+            "channel": channel_info,
+            "me": me_info
+        }
+
+    async def build_truncated_context(
+        self,
+        channel_id: int,
+        trigger_message_id: Optional[int] = None,
+        limit: int = 5
+    ) -> Dict[str, Any]:
+        """Build truncated conversation context with limited message history.
+
+        This is useful for fast, cost-effective agents that don't need full context.
+
+        Args:
+            channel_id: Channel to gather context from
+            trigger_message_id: Message ID that triggered the agent (for marking new messages)
+            limit: Maximum number of messages to include (default 5)
+
+        Returns:
+            Dict with conversation_timeline, users, channel, and me fields
+        """
+        # Load guild roles if we have guild context
+        if self.guild_id:
+            self._guild_roles = await bot_cache.get_guild_roles(self.bot, self.guild_id)
+
+        # Fetch limited base messages and complete reply threads
+        messages = await self._fetch_base_messages(channel_id, limit=limit)
+        messages = await self._complete_reply_threads(messages)
+
+        # Build user info first so we can enrich the timeline
+        users = await self._build_user_list(messages)
+        users_by_id = {user["user_id"]: user for user in users}
+
+        # Build conversation timeline with enriched user info
+        conversation_timeline = await self._build_conversation_timeline(messages, trigger_message_id, users_by_id)
+
+        channel_info = await self._build_channel_info(channel_id)
+        me_info = self._build_me_info()
+
+        return {
+            "conversation_timeline": conversation_timeline,
+            "users": users,
             "channel": channel_info,
             "me": me_info
         }

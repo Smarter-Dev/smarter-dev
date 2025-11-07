@@ -98,6 +98,93 @@ class URLContentExtractionSignature(dspy.Signature):
     )
 
 
+class EngagementPlanningSignature(dspy.Signature):
+    """You are a strategic conversation planning agent for a Discord bot. You see the FULL conversation
+    history and your job is to generate a comprehensive plan for how to engage with the current conversation.
+
+    Your role is to:
+    1. **Understand the situation**: Summarize what's happening in the conversation, who's involved, and what they want
+    2. **Plan strategically**: Decide what tools to use and what actions to take to best engage with the conversation
+    3. **Be specific**: Provide step-by-step recommendations that an execution agent can follow precisely
+
+    The execution agent (Gemini) will follow your plan exactly, so be concrete about:
+    - Which specific tools to call (send_message, reply_to_message, search_web, open_url, add_reaction_to_message, generate_in_depth_response, etc.)
+    - What parameters to pass to each tool
+    - The order to execute actions in
+
+    Guidelines:
+    - If the conversation is simple (greetings, quick reactions), recommend simple actions (react + brief message)
+    - If research is needed, recommend search_web_instant_answer() or search_web() first
+    - For technical/detailed responses, recommend: `generate_in_depth_response(prompt_summary, prompt)` → `send_message(result['response'])`
+      - Use this for: technical explanations, code examples, detailed answers (anything longer than 2-3 lines)
+      - First parameter is a brief summary shown to users (e.g., "async/await in Python")
+      - Second parameter is the complete prompt with context, research results, and what's needed
+    - For quick casual responses, Gemini can write them directly
+    - If a URL needs analysis, recommend open_url(url, question) with a specific question
+    - If engaging with a specific message, recommend reply_to_message(message_id, content)
+    - Always consider the conversation context and channel purpose when planning
+
+    Keep your plan clear, actionable, and concise.
+    """
+
+    conversation_timeline: str = dspy.InputField(
+        description="Full conversation timeline (20 messages) showing chronological message flow with timestamps, reply threads, and [NEW] markers"
+    )
+    users: list = dspy.InputField(
+        description="List of users with user_id, discord_name, nickname, server_nickname, role_names, is_bot fields"
+    )
+    channel: dict = dspy.InputField(
+        description="Channel info with name and description fields"
+    )
+    me: dict = dspy.InputField(
+        description="Bot info with bot_name and bot_id fields"
+    )
+
+    summary: str = dspy.OutputField(
+        description="Brief 2-3 sentence summary of the conversation state: who's involved, what's happening, what they want"
+    )
+    recommended_actions: str = dspy.OutputField(
+        description="Step-by-step action plan with specific tools and parameters to use. Be concrete and precise. Example: '1. search_web(\"best used cars under $10k\") 2. send_message(\"Based on the search results...\")'"
+    )
+    reasoning: str = dspy.OutputField(
+        description="Brief explanation (2-3 sentences) of why these actions make sense for this conversation"
+    )
+
+
+class InDepthResponseSignature(dspy.Signature):
+    """You are a technical response generator for a Discord bot. Your job is to create detailed, substantive
+    responses for technical questions, coding problems, explanations, and any topic requiring depth.
+
+    Guidelines:
+    - Be thorough but concise - aim for 500-1500 characters (Discord-friendly length)
+    - Use proper code formatting with triple backticks and language tags
+    - Structure longer responses with clear sections or numbered points
+    - Be conversational but informative - you're a helpful community member, not a formal documentation
+    - Include examples when helpful for understanding
+    - Keep Discord markdown in mind: `inline code`, ```code blocks```, **bold**, *italic*
+    - For code: always specify language (```python, ```javascript, etc.)
+    - Break up long explanations into digestible chunks
+
+    Context you receive:
+    - The prompt contains all necessary context (question, relevant messages, search results, etc.)
+    - You don't need to ask for clarification - generate the best response you can with the given information
+    - If the prompt indicates a reply to a specific message, structure your response accordingly
+
+    Your response will be sent directly to Discord, so make it ready to send as-is.
+    """
+
+    prompt_summary: str = dspy.InputField(
+        description="Brief summary of what response is being generated (shown to users in status message)"
+    )
+    prompt: str = dspy.InputField(
+        description="Complete prompt with all context: the question, relevant conversation, any search results, and what response is needed"
+    )
+
+    response: str = dspy.OutputField(
+        description="In-depth, well-formatted response ready to send to Discord. 500-1500 characters, properly formatted with code blocks and markdown as needed."
+    )
+
+
 class SearchCache:
     """Manages search result caching with 24-hour TTL and per-channel query tracking."""
 
@@ -1157,6 +1244,148 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 "error": str(e)
             }
 
+    async def generate_engagement_plan() -> dict:
+        """Generate a strategic engagement plan using Claude Haiku 4.5.
+
+        This tool analyzes the FULL conversation context (20 messages) and generates
+        a comprehensive plan for how to engage. It's useful when:
+        - The situation is complex and needs strategic thinking
+        - You need to understand broader conversation context
+        - You're unsure what tools to use or how to respond
+        - The conversation requires multi-step engagement
+
+        The planning agent sees the full history and returns:
+        - A summary of what's happening in the conversation
+        - Recommended actions and tools to use (step by step)
+        - Reasoning for why these actions make sense
+
+        Once you receive a plan, execute the recommended steps precisely.
+
+        Returns:
+            dict with success, summary, recommended_actions, and reasoning fields
+
+        Example usage:
+            plan = generate_engagement_plan()
+            # Then follow the recommended_actions in the plan
+        """
+        try:
+            from smarter_dev.llm_config import get_llm_model
+            from smarter_dev.bot.utils.messages import ConversationContextBuilder
+
+            logger.info("[Tool] generate_engagement_plan called - building full context")
+
+            # Send status message to channel
+            try:
+                await bot.rest.create_message(int(channel_id), "> -# Planning my response")
+            except Exception as e:
+                logger.warning(f"[Tool] Failed to send planning status message: {e}")
+
+            # Build FULL context (20 messages) for strategic planning
+            context_builder = ConversationContextBuilder(
+                bot,
+                int(guild_id) if guild_id else None
+            )
+            full_context = await context_builder.build_context(
+                int(channel_id),
+                int(trigger_message_id) if trigger_message_id else None
+            )
+
+            # Get Claude Haiku 4.5 for strategic planning
+            claude_lm = get_llm_model("default")
+
+            # Use context manager for thread-safe LLM switching
+            with dspy.context(lm=claude_lm):
+                predictor = dspy.Predict(EngagementPlanningSignature)
+                result = predictor(
+                    conversation_timeline=full_context["conversation_timeline"],
+                    users=full_context["users"],
+                    channel=full_context["channel"],
+                    me=full_context["me"]
+                )
+
+            logger.info(f"[Tool] Planning agent generated plan: {result.summary[:100]}...")
+
+            return {
+                "success": True,
+                "summary": result.summary,
+                "recommended_actions": result.recommended_actions,
+                "reasoning": result.reasoning
+            }
+
+        except Exception as e:
+            logger.error(f"[Tool] generate_engagement_plan failed: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Failed to generate plan: {str(e)}"
+            }
+
+    async def generate_in_depth_response(prompt_summary: str, prompt: str) -> dict:
+        """Generate an in-depth, technical response using Claude Haiku 4.5.
+
+        Use this tool when you need to provide:
+        - Technical explanations or detailed answers
+        - Code examples or programming help
+        - Complex topic breakdowns
+        - Structured, multi-part responses
+        - Any response that needs more depth than a quick casual message
+
+        This tool uses Claude Haiku 4.5 to generate well-formatted, Discord-ready responses.
+        You (Gemini) should focus on routing, research, and quick casual messages.
+        Let Claude handle the substantive content generation.
+
+        Args:
+            prompt_summary: Brief description shown to users (e.g., "async/await in Python", "fixing AttributeError")
+            prompt: Complete prompt with all context:
+                - The user's question or request
+                - Relevant conversation context
+                - Any search results or information gathered
+                - What kind of response is needed (explanation, code example, comparison, etc.)
+
+        Returns:
+            dict with success and response fields (response is ready to send to Discord)
+
+        Example:
+            result = generate_in_depth_response(
+                prompt_summary="async/await in Python",
+                prompt="User asked: 'How do I use async/await in Python?'
+                       Explain async/await in Python with a simple example.
+                       Keep it under 1500 characters."
+            )
+            # Then use send_message(result['response'])
+        """
+        try:
+            from smarter_dev.llm_config import get_llm_model
+
+            logger.info(f"[Tool] generate_in_depth_response called: {prompt_summary}")
+
+            # Send status message to channel with the provided summary
+            try:
+                await bot.rest.create_message(int(channel_id), f"> -# Writing a response for \"{prompt_summary}\"")
+            except Exception as e:
+                logger.warning(f"[Tool] Failed to send in-depth response status message: {e}")
+
+            # Get Claude Haiku 4.5 for in-depth response generation
+            claude_lm = get_llm_model("default")
+
+            # Use context manager for thread-safe LLM switching
+            with dspy.context(lm=claude_lm):
+                predictor = dspy.Predict(InDepthResponseSignature)
+                result = predictor(prompt_summary=prompt_summary, prompt=prompt)
+
+            logger.info(f"[Tool] Generated in-depth response: {len(result.response)} chars")
+
+            return {
+                "success": True,
+                "response": result.response
+            }
+
+        except Exception as e:
+            logger.error(f"[Tool] generate_in_depth_response failed: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Failed to generate response: {str(e)}"
+            }
+
     # Get recent search queries for this channel
     channel_queries = search_cache.get_channel_queries(channel_id)
 
@@ -1169,6 +1398,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         search_web_instant_answer,
         search_web,
         open_url,
+        generate_engagement_plan,
+        generate_in_depth_response,
         start_typing,
         stop_typing,
         fetch_new_messages,
