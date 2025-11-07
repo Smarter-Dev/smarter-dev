@@ -16,6 +16,7 @@ import io
 import time
 import random
 
+import dspy
 from ddgs import DDGS
 import httpx
 from markdownify import markdownify as md
@@ -73,6 +74,30 @@ class URLRateLimiter:
 url_rate_limiter = URLRateLimiter()
 
 
+class URLContentExtractionSignature(dspy.Signature):
+    """You are an intelligent content extraction agent. Given web content (HTML converted to Markdown,
+    PDF text, or plain text) and a specific question, extract and return the relevant information
+    that answers the question.
+
+    Focus on:
+    - Directly answering the question asked
+    - Being concise but complete
+    - Including relevant context when needed
+    - Citing specific information from the content
+    - Admitting when the answer isn't in the content
+
+    Keep responses under 1500 characters to fit Discord message limits.
+    """
+    url: str = dspy.InputField(description="The source URL of the content")
+    content: str = dspy.InputField(description="The full content to analyze (Markdown, text, etc.)")
+    content_type: str = dspy.InputField(description="Type of content: html, pdf, text, json")
+    question: str = dspy.InputField(description="The specific question to answer about this content")
+
+    answer: str = dspy.OutputField(
+        description="Direct answer to the question based on the content, under 1500 characters"
+    )
+
+
 class SearchCache:
     """Manages search result caching with 24-hour TTL and per-channel query tracking."""
 
@@ -91,6 +116,9 @@ class SearchCache:
         # URL cache (not tracked per channel)
         # Format: {url: (content, timestamp)}
         self.url_cache: Dict[str, tuple[str, datetime]] = {}
+        # URL answer cache for question-specific responses
+        # Format: {url::question: (answer, timestamp)}
+        self.url_answer_cache: Dict[str, tuple[str, datetime]] = {}
 
     def get(self, query: str, cache_type: str = "full") -> Optional[Any]:
         """Get a cached result if it exists and hasn't expired.
@@ -180,6 +208,41 @@ class SearchCache:
         """
         self.url_cache[url] = (content, datetime.now())
         logger.debug(f"[Cache] Stored URL content for '{url}'")
+
+    def get_url_answer(self, url: str, question: str) -> Optional[str]:
+        """Get cached answer for a specific question about a URL.
+
+        Args:
+            url: The URL that was queried
+            question: The specific question asked about the URL
+
+        Returns:
+            Cached answer if found and valid, None otherwise
+        """
+        cache_key = f"{url}::{question}"
+
+        if cache_key not in self.url_answer_cache:
+            return None
+
+        answer, timestamp = self.url_answer_cache[cache_key]
+        # Check if expired
+        if datetime.now() - timestamp > timedelta(hours=self.CACHE_TTL_HOURS):
+            del self.url_answer_cache[cache_key]
+            return None
+
+        return answer
+
+    def set_url_answer(self, url: str, question: str, answer: str) -> None:
+        """Store answer for a specific question about a URL.
+
+        Args:
+            url: The URL that was queried
+            question: The specific question asked
+            answer: The extracted answer to cache
+        """
+        cache_key = f"{url}::{question}"
+        self.url_answer_cache[cache_key] = (answer, datetime.now())
+        logger.debug(f"[Cache] Stored URL answer for '{url}' with question")
 
 
 # Global search cache instance
@@ -550,187 +613,214 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 "error": str(e)
             }
 
-    async def open_url(url: str) -> dict:
-        """Fetch and cache URL content with support for HTML, PDF, and text formats.
-
-        Follows redirects and returns the page content/title. Converts HTML to Markdown
-        for readability, and extracts text from PDFs. Results are cached in memory for
-        24 hours.
+    async def open_url(url: str, question: str) -> dict:
+        """Fetch URL content and extract information answering a specific question.
 
         Supported content types:
-        - text/plain: Plain text, returned as-is
+        - text/plain: Plain text
         - text/html: Converted to Markdown with preserved structure
-        - text/markdown: Markdown, returned as-is
-        - application/json: JSON, returned as-is
+        - text/markdown: Markdown
+        - application/json: JSON
         - application/pdf: Text extracted from all pages
 
         Args:
             url: The URL to open and fetch content from (e.g., "https://example.com")
+            question: The specific question to answer about the content (e.g., "What is the release date?")
 
         Returns:
-            dict with 'success' boolean, 'title' (page/document title), 'content'
-            (text or Markdown), and 'final_url' (after following redirects)
+            dict with 'success' boolean, 'answer' (extracted response), and 'url'
 
         Example:
-            open_url("https://en.wikipedia.org/wiki/Python_(programming_language)")
-            -> {"success": True, "title": "Python (programming language)", "content": "# Python\n...", "final_url": "..."}
+            open_url("https://en.wikipedia.org/wiki/Python_(programming_language)", "When was Python first released?")
+            -> {"success": True, "answer": "Python was first released in 1991...", "url": "..."}
         """
         try:
-            logger.debug(f"[Tool] open_url called with url: {url}")
+            logger.debug(f"[Tool] open_url called with url: {url}, question: {question}")
 
             # Send usage message
-            usage_message = f"> -# Opening '{url}'"
+            usage_message = f"> -# Opening '{url}' to answer: {question}"
             try:
                 await bot.rest.create_message(int(channel_id), usage_message)
             except Exception as e:
                 logger.error(f"[Tool] Failed to send url usage message: {e}")
 
-            # Check cache first
-            cached_content = search_cache.get_url(url)
-            if cached_content is not None:
-                logger.debug(f"[Cache] URL hit for '{url}'")
-                # Return cached result
+            # Tier 2 Cache: Check if we already have an answer for this specific question
+            cached_answer = search_cache.get_url_answer(url, question)
+            if cached_answer is not None:
+                logger.debug(f"[Cache] Answer cache hit for '{url}' with question")
                 return {
                     "success": True,
-                    "content": cached_content,
-                    "note": "Result from cache"
+                    "answer": cached_answer,
+                    "url": url,
+                    "note": "Answer from cache"
                 }
 
-            # Fetch the URL with httpx (follows redirects by default)
-            try:
-                # Apply rate limiting
-                await url_rate_limiter.wait_if_needed(url)
+            # Tier 1 Cache: Check if we have the content cached
+            cached_content = search_cache.get_url(url)
+            content = None
+            content_type_str = ""
+            final_url = url
 
-                async with httpx.AsyncClient(
-                    follow_redirects=True,
-                    timeout=10.0,
-                    headers={"User-Agent": BOT_USER_AGENT}
-                ) as client:
-                    response = await client.get(url)
-                    response.raise_for_status()
+            if cached_content is not None:
+                logger.debug(f"[Cache] Content cache hit for '{url}'")
+                content = cached_content
+                # We'll need to determine content type for Gemini
+                # For cached content, we'll default to "html" (most common)
+                content_type_str = "html"
+            else:
+                # Content not cached - fetch it
+                # Fetch the URL with httpx (follows redirects by default)
+                try:
+                    # Apply rate limiting
+                    await url_rate_limiter.wait_if_needed(url)
 
-                    # Check Content-Type header
-                    content_type = response.headers.get("content-type", "").lower()
-                    logger.debug(f"[Tool] Response content-type: '{content_type}'")
+                    async with httpx.AsyncClient(
+                        follow_redirects=True,
+                        timeout=30.0,
+                        headers={"User-Agent": BOT_USER_AGENT}
+                    ) as client:
+                        response = await client.get(url)
+                        response.raise_for_status()
 
-                    # Get response text for checking
-                    response_text = response.text
+                        # Check Content-Type header
+                        content_type = response.headers.get("content-type", "").lower()
+                        logger.debug(f"[Tool] Response content-type: '{content_type}'")
 
-                    # If no content-type but content looks like HTML, treat as HTML
-                    if not content_type and response_text.strip().startswith("<"):
-                        logger.debug(f"[Tool] No content-type header but content looks like HTML, treating as HTML")
-                        content_type = "text/html"
+                        # Get response text for checking
+                        response_text = response.text
 
-                    allowed_types = ["text/plain", "text/html", "text/markdown", "application/json", "application/pdf"]
+                        # If no content-type but content looks like HTML, treat as HTML
+                        if not content_type and response_text.strip().startswith("<"):
+                            logger.debug(f"[Tool] No content-type header but content looks like HTML, treating as HTML")
+                            content_type = "text/html"
 
-                    # Check if content type is allowed
-                    if not any(allowed in content_type for allowed in allowed_types):
-                        raise ValueError(f"Unsupported content type: {content_type}. Only text/plain, text/html, text/markdown, application/json, and application/pdf are accepted.")
+                        allowed_types = ["text/plain", "text/html", "text/markdown", "application/json", "application/pdf"]
 
-                    # Get the final URL after redirects
-                    final_url = str(response.url)
-                    content = ""
-                    title = ""
+                        # Check if content type is allowed
+                        if not any(allowed in content_type for allowed in allowed_types):
+                            raise ValueError(f"Unsupported content type: {content_type}. Only text/plain, text/html, text/markdown, application/json, and application/pdf are accepted.")
 
-                    # Process content based on content type
-                    if "html" in content_type:
-                        logger.debug(f"[Tool] Converting HTML to Markdown for {url}")
-                        # Convert HTML to Markdown
-                        html_content = response.text
-                        content = md(html_content, heading_style="ATX")
+                        # Get the final URL after redirects
+                        final_url = str(response.url)
+                        content = ""
 
-                        # Extract title from HTML if present
-                        if "<title>" in html_content.lower():
+                        # Process content based on content type
+                        if "html" in content_type:
+                            logger.debug(f"[Tool] Converting HTML to Markdown for {url}")
+                            # Convert HTML to Markdown
+                            html_content = response.text
+                            content = md(html_content, heading_style="ATX")
+                            content_type_str = "html"
+
+                        elif "pdf" in content_type:
+                            # Extract text from PDF (full content, no truncation)
                             try:
-                                start = html_content.lower().index("<title>") + 7
-                                end = html_content.lower().index("</title>", start)
-                                title = html_content[start:end].strip()
-                            except Exception:
-                                title = "[Unable to extract title]"
+                                pdf_bytes = response.content
+                                with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                                    # Use list for efficient string building
+                                    pdf_text_parts = []
 
-                    elif "pdf" in content_type:
-                        # Extract text from PDF
-                        try:
-                            pdf_bytes = response.content
-                            with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-                                # Use list for efficient string building
-                                pdf_text_parts = []
-                                content_length = 0
-                                max_content_length = 2000  # Stop extracting after 2000 chars
+                                    # Get total page count
+                                    total_pages = len(pdf.pages)
+                                    logger.debug(f"[Tool] PDF has {total_pages} pages, extracting full text...")
 
-                                # Get total page count for title
-                                total_pages = len(pdf.pages)
-                                logger.debug(f"[Tool] PDF has {total_pages} pages, extracting text...")
+                                    for page_num, page in enumerate(pdf.pages, 1):
+                                        try:
+                                            page_text = page.extract_text()
+                                            if page_text:
+                                                page_header = f"--- Page {page_num} ---\n"
+                                                pdf_text_parts.append(page_header)
+                                                pdf_text_parts.append(page_text)
+                                                pdf_text_parts.append("\n\n")
+                                        except Exception as page_error:
+                                            logger.warning(f"[Tool] Failed to extract text from page {page_num}: {page_error}")
+                                            continue
 
-                                for page_num, page in enumerate(pdf.pages, 1):
-                                    # Stop if we have enough content
-                                    if content_length >= max_content_length:
-                                        logger.debug(f"[Tool] Reached content limit at page {page_num} of {total_pages}")
-                                        break
+                                    content = "".join(pdf_text_parts).strip()
+                                    logger.debug(f"[Tool] Extracted {len(content)} chars from PDF")
+                            except Exception as e:
+                                logger.error(f"[Tool] Failed to extract PDF text: {e}")
+                                raise ValueError(f"Failed to extract text from PDF: {e}")
+                            content_type_str = "pdf"
 
-                                    try:
-                                        page_text = page.extract_text()
-                                        if page_text:
-                                            page_header = f"--- Page {page_num} ---\n"
-                                            pdf_text_parts.append(page_header)
-                                            pdf_text_parts.append(page_text)
-                                            pdf_text_parts.append("\n\n")
-                                            content_length += len(page_header) + len(page_text) + 2
-                                    except Exception as page_error:
-                                        logger.warning(f"[Tool] Failed to extract text from page {page_num}: {page_error}")
-                                        continue
+                        elif "json" in content_type:
+                            # For JSON, use as-is
+                            content = response.text
+                            content_type_str = "json"
 
-                                content = "".join(pdf_text_parts).strip()
-                                title = f"PDF ({total_pages} pages)"
-                                logger.debug(f"[Tool] Extracted {len(content)} chars from PDF")
-                        except Exception as e:
-                            logger.error(f"[Tool] Failed to extract PDF text: {e}")
-                            raise ValueError(f"Failed to extract text from PDF: {e}")
+                        else:
+                            # For plain text, markdown, use as-is
+                            content = response.text
+                            content_type_str = "text"
 
-                    else:
-                        # For plain text, markdown, and JSON, use as-is
-                        content = response.text
+                        # Cache the content (Tier 1)
+                        search_cache.set_url(url, content)
+                        logger.debug(f"[Tool] Fetched and cached {len(content)} chars from {url}")
 
-                    # Truncate content to keep manageable (first 2000 chars)
-                    if len(content) > 2000:
-                        content = content[:2000] + "..."
-
-                    result = {
-                        "success": True,
-                        "title": title or "[No title]",
-                        "content": content,
-                        "final_url": final_url
+                except httpx.TimeoutException:
+                    logger.error(f"[Tool] Timeout fetching URL '{url}'")
+                    return {
+                        "success": False,
+                        "error": "Request timeout - URL took too long to respond (30 second limit)",
+                        "next_step": "Try searching for a different URL with similar information, or use search_web() to find alternative sources on this topic"
+                    }
+                except httpx.HTTPStatusError as e:
+                    logger.error(f"[Tool] HTTP error fetching URL '{url}': {e.response.status_code}")
+                    return {
+                        "success": False,
+                        "error": f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
+                    }
+                except ValueError as e:
+                    logger.error(f"[Tool] Unsupported content type for URL '{url}': {e}")
+                    return {
+                        "success": False,
+                        "error": str(e)
+                    }
+                except Exception as e:
+                    logger.error(f"[Tool] Failed to fetch URL '{url}': {e}")
+                    return {
+                        "success": False,
+                        "error": str(e)
                     }
 
-                    # Cache the result
-                    search_cache.set_url(url, content)
+            # At this point, we have the content (either from cache or freshly fetched)
+            # Now use Gemini to extract the answer to the question
+            if content is None or len(content) == 0:
+                return {
+                    "success": False,
+                    "error": "No content available to process"
+                }
 
-                    return result
+            logger.debug(f"[Tool] Using Gemini to extract answer from {len(content)} chars")
 
-            except httpx.TimeoutException:
-                logger.error(f"[Tool] Timeout fetching URL '{url}'")
-                return {
-                    "success": False,
-                    "error": "Request timeout - URL took too long to respond"
-                }
-            except httpx.HTTPStatusError as e:
-                logger.error(f"[Tool] HTTP error fetching URL '{url}': {e.response.status_code}")
-                return {
-                    "success": False,
-                    "error": f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
-                }
-            except ValueError as e:
-                logger.error(f"[Tool] Unsupported content type for URL '{url}': {e}")
-                return {
-                    "success": False,
-                    "error": str(e)
-                }
-            except Exception as e:
-                logger.error(f"[Tool] Failed to fetch URL '{url}': {e}")
-                return {
-                    "success": False,
-                    "error": str(e)
-                }
+            # Initialize Gemini 2.5 Flash Lite via the judge model
+            from smarter_dev.llm_config import get_llm_model
+            import dspy
+
+            gemini_lm = get_llm_model("judge")  # gemini-2.5-flash-lite
+
+            # Use context manager to temporarily use Gemini without affecting global LLM config
+            with dspy.context(lm=gemini_lm):
+                # Use DSPy to extract the answer
+                predictor = dspy.Predict(URLContentExtractionSignature)
+                result = predictor(
+                    url=final_url,
+                    content=content,
+                    content_type=content_type_str,
+                    question=question
+                )
+
+            answer = result.answer
+
+            # Cache the answer (Tier 2)
+            search_cache.set_url_answer(url, question, answer)
+            logger.debug(f"[Tool] Extracted and cached answer: {len(answer)} chars")
+
+            return {
+                "success": True,
+                "answer": answer,
+                "url": final_url
+            }
 
         except Exception as e:
             logger.error(f"[Tool] open_url failed: {e}", exc_info=True)
