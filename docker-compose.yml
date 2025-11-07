@@ -63,7 +63,9 @@ services:
       - BOT_API_KEY=sk-ubE6Hj4Bjb7LUJLPIg44dbFcshooY3RXHvtltZFNLzk
       - ENVIRONMENT=development
       - LLM_MODEL=claude-haiku-4-5-20251001
+      - LLM_JUDGE_MODEL=gemini/gemini-2.5-flash-lite
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     working_dir: /app
     command: uv run python -m smarter_dev.bot.client
     restart: unless-stopped
