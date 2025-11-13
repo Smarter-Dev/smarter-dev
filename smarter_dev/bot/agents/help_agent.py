@@ -15,8 +15,9 @@ from smarter_dev.llm_config import get_llm_model, get_model_info
 logger = logging.getLogger(__name__)
 
 # Configure LLM model from environment
-lm = get_llm_model("default")
-dspy.configure(lm=lm, track_usage=True)
+# NOTE: We don't call dspy.configure() globally to avoid conflicts with other agents
+# Instead, we use dspy.context() when creating the agent
+HELP_AGENT_LM = get_llm_model("default")
 
 # Log which model is being used
 model_info = get_model_info("default")
@@ -236,15 +237,16 @@ class HelpAgent(BaseAgent):
         context_builder = ConversationContextBuilder(bot, guild_id)
         context = await context_builder.build_context(channel_id, trigger_message_id)
 
-        # Generate response using the agent
-        result = self._agent(
-            conversation_timeline=context["conversation_timeline"],
-            users=context["users"],
-            channel=context["channel"],
-            me=context["me"],
-            user_question=user_question,
-            messages_remaining=messages_remaining
-        )
+        # Generate response using the agent with proper LM context
+        with dspy.context(lm=HELP_AGENT_LM, track_usage=True):
+            result = self._agent(
+                conversation_timeline=context["conversation_timeline"],
+                users=context["users"],
+                channel=context["channel"],
+                me=context["me"],
+                user_question=user_question,
+                messages_remaining=messages_remaining
+            )
 
         # Extract token usage
         tokens_used = self._extract_token_usage(result)
