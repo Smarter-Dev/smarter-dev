@@ -17,8 +17,9 @@ logger = logging.getLogger(__name__)
 
 # Configure LLM model from environment
 # Use "judge" to get gemini-2.5-flash-lite (configured via LLM_JUDGE_MODEL)
-lm = get_llm_model("judge")
-dspy.configure(lm=lm, track_usage=True)
+# NOTE: We don't call dspy.configure() globally to avoid conflicts with other agents
+# Instead, we use dspy.context() when creating the ReAct agent
+MENTION_AGENT_LM = get_llm_model("judge")
 
 # Log which model is being used
 model_info = get_model_info("judge")
@@ -431,23 +432,26 @@ class MentionAgent(BaseAgent):
             # - Handle large message backlogs efficiently
             # Agent naturally stops when wait_for_messages() hits 100 message threshold
             # and sets continue_monitoring to False, or when max_iters is exhausted
-            react_agent = dspy.ReAct(
-                self._agent_signature,
-                tools=tools,
-                max_iters=1000
-            )
 
-            # Generate response using the ReAct agent (agent will call send_message tool)
-            # Use acall() for async execution of tools
-            result = await react_agent.acall(
-                conversation_timeline=context["conversation_timeline"],
-                users=context["users"],
-                channel=context["channel"],
-                me=context["me"],
-                recent_search_queries=channel_queries,
-                messages_remaining=messages_remaining,
-                is_continuation=is_continuation
-            )
+            # Use context manager to ensure this agent uses Gemini, not Claude
+            with dspy.context(lm=MENTION_AGENT_LM, track_usage=True):
+                react_agent = dspy.ReAct(
+                    self._agent_signature,
+                    tools=tools,
+                    max_iters=1000
+                )
+
+                # Generate response using the ReAct agent (agent will call send_message tool)
+                # Use acall() for async execution of tools
+                result = await react_agent.acall(
+                    conversation_timeline=context["conversation_timeline"],
+                    users=context["users"],
+                    channel=context["channel"],
+                    me=context["me"],
+                    recent_search_queries=channel_queries,
+                    messages_remaining=messages_remaining,
+                    is_continuation=is_continuation
+                )
 
             logger.debug(f"ReAct agent result: {result}")
             logger.debug(f"ReAct response text: {result.response}")
