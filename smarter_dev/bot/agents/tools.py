@@ -580,6 +580,11 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         Returns the top search result as a quick answer for direct/simple questions.
         For more detailed information, use search_web instead.
 
+        Queries should be either a topic or a specific question. Queries should be clear and specific,
+        avoid vague or overly broad queries. The query should reflect the intent of the search, "DFS software
+        development" is better than "DFS" but "Meaning of DFS in software development?" is even better as it clearly
+        indicates the user is looking for a definition in terms of software development.
+
         Args:
             query: The question or topic to search for (e.g., "What is photosynthesis?")
 
@@ -644,6 +649,11 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
         Returns multiple search results with titles, URLs, and snippets.
         Limited to 3 results by default to keep responses concise for Discord.
+
+        Queries should be either a topic or a specific question. Queries should be clear and specific,
+        avoid vague or overly broad queries. The query should reflect the intent of the search, "DFS software
+        development" is better than "DFS" but "Meaning of DFS in software development?" is even better as it clearly
+        indicates the user is looking for a definition in terms of software development.
 
         Args:
             query: The search query (e.g., "Python async programming")
@@ -1240,7 +1250,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             }
 
     async def stop_monitoring() -> dict:
-        """Signal that the agent wants to stop monitoring the channel.
+        """Signal that the agent wants to stop monitoring the channel. This should be called when users request to stop.
 
         Use this when you're done participating in the conversation and don't want
         to be auto-restarted.
