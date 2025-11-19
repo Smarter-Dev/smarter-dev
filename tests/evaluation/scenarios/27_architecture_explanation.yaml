@@ -1,0 +1,27 @@
+id: "27_architecture_explanation"
+category: "tool_usage"
+description: "Architecture explanation requiring technical depth"
+
+channel_name: "architecture"
+channel_description: "System architecture discussions"
+
+conversation:
+  - timestamp: "09:45:00"
+    user: "Ben"
+    user_id: "292929292"
+    content: "@SmarterDev can you explain the difference between microservices and service-oriented architecture?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message", "search_web", "generate_in_depth_response", "send_message"]
+  expected_sequence: ["send_message", "search_web", "generate_in_depth_response", "send_message"]
+  expected_response_type: "architecture_technical"
+  description: "Should provide detailed technical architecture explanation"
+  key_points:
+    - "Acknowledges before research"
+    - "Searches for architectural patterns"
+    - "Uses generate_in_depth_response for detailed explanation"
+    - "Compares and contrasts approaches"

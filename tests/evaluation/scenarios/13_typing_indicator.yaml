@@ -1,0 +1,28 @@
+id: "13_typing_indicator"
+category: "tool_usage"
+description: "Long operation requiring typing indicator management"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "14:00:00"
+    user: "Mike"
+    user_id: "141414141"
+    content: "@SmarterDev can you analyze this 50-page research paper and summarize the key findings? https://arxiv.org/example-paper.pdf"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message", "start_typing", "open_url", "generate_in_depth_response", "stop_typing", "send_message"]
+  expected_sequence: ["send_message", "start_typing", "open_url", "generate_in_depth_response", "stop_typing", "send_message"]
+  expected_response_type: "long_operation_with_typing"
+  description: "Should use typing indicator for long operation"
+  key_points:
+    - "Acknowledges the request"
+    - "Activates typing indicator before long operation"
+    - "Fetches and analyzes PDF"
+    - "Stops typing before sending response"
+    - "Provides comprehensive summary"

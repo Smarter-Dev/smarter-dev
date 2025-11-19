@@ -1,0 +1,27 @@
+id: "20_minimal_context"
+category: "edge_cases"
+description: "Handling scenario with minimal/empty context"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "08:00:00"
+    user: "Uma"
+    user_id: "222222223"
+    content: "@SmarterDev"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["wait_for_messages"]
+  expected_sequence: ["wait_for_messages"]
+  expected_response_type: "wait_for_context"
+  description: "Should wait for more context when only mentioned without question"
+  key_points:
+    - "Recognizes incomplete message"
+    - "Uses wait_for_messages"
+    - "Waits for user to provide actual question"
+    - "Doesn't respond to empty mention"

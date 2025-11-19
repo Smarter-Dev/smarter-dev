@@ -3701,7 +3701,7 @@ async def audit_log_config(request: Request) -> Response:
         try:
             channels = await get_guild_channels(guild_id)
             # Filter to text channels only
-            text_channels = [ch for ch in channels if ch.get("type") in (0, 5)]  # TEXT and NEWS channels
+            text_channels = [ch for ch in channels if ch.type in (0, 5)]  # TEXT and NEWS channels
         except DiscordAPIError:
             text_channels = []
             logger.warning(f"Failed to fetch channels for guild {guild_id}, using empty list")

@@ -1,0 +1,39 @@
+id: "10_context_dependent"
+category: "conversation"
+description: "Question requiring understanding of previous message context"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "11:00:00"
+    user: "Ian"
+    user_id: "101010101"
+    content: "I'm trying to decide between React and Vue for my new project"
+  - timestamp: "11:00:15"
+    user: "Jane"
+    user_id: "111111112"
+    content: "What's the project?"
+  - timestamp: "11:00:30"
+    user: "Ian"
+    user_id: "101010101"
+    content: "A real-time dashboard for monitoring IoT devices"
+  - timestamp: "11:00:45"
+    user: "Ian"
+    user_id: "101010101"
+    content: "@SmarterDev which would you recommend?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message"]
+  expected_sequence: ["send_message"]
+  expected_response_type: "contextual_advice"
+  description: "Should reference previous context about real-time IoT dashboard"
+  key_points:
+    - "References the IoT dashboard context"
+    - "Provides framework recommendation based on use case"
+    - "Mentions real-time capabilities"
+    - "Shows contextual awareness in reasoning"

@@ -1,0 +1,27 @@
+id: "21_comparison_question"
+category: "tool_usage"
+description: "Comparison question requiring research and synthesis"
+
+channel_name: "tech-discussion"
+channel_description: "Technology discussions"
+
+conversation:
+  - timestamp: "10:00:00"
+    user: "Victor"
+    user_id: "232323232"
+    content: "@SmarterDev what are the main differences between PostgreSQL and MySQL in 2025?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message", "search_web", "send_message"]
+  expected_sequence: ["send_message", "search_web", "send_message"]
+  expected_response_type: "researched_comparison"
+  description: "Should research current differences and provide comprehensive comparison"
+  key_points:
+    - "Acknowledges before research"
+    - "Uses search_web for current information"
+    - "Writes comparison itself (not technical coding question)"
+    - "Structured, clear comparison"

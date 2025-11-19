@@ -1,0 +1,27 @@
+id: "28_news_question"
+category: "tool_usage"
+description: "Current news/events question requiring web search"
+
+channel_name: "tech-news"
+channel_description: "Technology news and updates"
+
+conversation:
+  - timestamp: "16:30:00"
+    user: "Carla"
+    user_id: "303030303"
+    content: "@SmarterDev what are the latest updates in AI this week?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message", "search_web", "send_message"]
+  expected_sequence: ["send_message", "search_web", "send_message"]
+  expected_response_type: "current_events"
+  description: "Should search for recent news and summarize casually"
+  key_points:
+    - "Acknowledges before searching"
+    - "Uses search_web for current information"
+    - "Writes casual summary (not generate_in_depth_response)"
+    - "Highlights interesting developments"

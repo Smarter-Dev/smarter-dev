@@ -48,12 +48,12 @@ def format_diff(old_text: str, new_text: str, max_length: int = 1024) -> str:
     old_lines = old_text.splitlines()
     new_lines = new_text.splitlines()
 
-    # Generate diff
+    # Generate diff with 2 lines of context
     diff = list(difflib.unified_diff(
         old_lines,
         new_lines,
         lineterm='',
-        n=0  # No context lines
+        n=2  # 2 context lines around changes
     ))
 
     # Skip the header lines (---, +++, @@)
@@ -63,6 +63,12 @@ def format_diff(old_text: str, new_text: str, max_length: int = 1024) -> str:
             diff_lines.append(f"+ {line[1:]}")
         elif line.startswith('-'):
             diff_lines.append(f"- {line[1:]}")
+        elif line.startswith('@@'):
+            # Skip hunk headers
+            continue
+        else:
+            # Context line (unchanged)
+            diff_lines.append(f"  {line[1:]}" if line.startswith(' ') else f"  {line}")
 
     # If no meaningful diff, show before/after
     if not diff_lines:
@@ -271,17 +277,26 @@ async def log_message_edit(
     if not await should_log_event(event.guild_id, "log_message_edit"):
         return
 
-    # Skip if no content change (e.g., embed update)
-    if event.old_message is None or event.old_message.content == event.message.content:
-        return
-
     # Get author info
     author = event.message.author
     if not author:
         return
 
-    # Create diff
-    diff = format_diff(event.old_message.content or "", event.message.content or "")
+    # Check if we have the old message (cached)
+    if event.old_message is not None:
+        # Skip if no content change (e.g., embed update)
+        if event.old_message.content == event.message.content:
+            return
+
+        # Create diff showing before/after
+        diff = format_diff(event.old_message.content or "", event.message.content or "")
+        changes_value = f"```diff\n{diff}\n```"
+    else:
+        # Message wasn't cached - show current content only
+        current_content = event.message.content or ""
+        if len(current_content) > 1000:
+            current_content = current_content[:997] + "..."
+        changes_value = f"**New Content:**\n{current_content}\n\n*Original content not available (message not cached)*"
 
     embed = hikari.Embed(
         title="Message Edited",
@@ -292,7 +307,7 @@ async def log_message_edit(
     embed.add_field(name="Author", value=f"{author.username} ({author.id})", inline=True)
     embed.add_field(name="Channel", value=f"<#{event.channel_id}>", inline=True)
     embed.add_field(name="Message ID", value=str(event.message.id), inline=True)
-    embed.add_field(name="Changes", value=f"```diff\n{diff}\n```", inline=False)
+    embed.add_field(name="Changes", value=changes_value, inline=False)
     embed.add_field(name="Jump to Message", value=f"[Click here](https://discord.com/channels/{event.guild_id}/{event.channel_id}/{event.message.id})", inline=False)
 
     if author.avatar_url:

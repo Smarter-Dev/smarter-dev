@@ -1,0 +1,27 @@
+id: "17_rate_limit_awareness"
+category: "edge_cases"
+description: "Repeated similar queries testing rate limit awareness"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "11:00:00"
+    user: "Rachel"
+    user_id: "191919191"
+    content: "@SmarterDev what's the weather in New York?"
+
+recent_search_queries: ["weather in New York", "New York weather", "weather NY"]
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message"]
+  expected_sequence: ["send_message"]
+  expected_response_type: "cached_or_skip"
+  description: "Should recognize recent similar queries and avoid redundant search"
+  key_points:
+    - "Checks recent_search_queries"
+    - "Recognizes duplicate query"
+    - "Responds based on cache or politely declines"
+    - "Doesn't waste resources on redundant search"

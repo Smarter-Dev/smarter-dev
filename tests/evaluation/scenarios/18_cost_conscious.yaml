@@ -1,0 +1,27 @@
+id: "18_cost_conscious"
+category: "edge_cases"
+description: "Simple question testing if agent avoids expensive tools unnecessarily"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "14:45:00"
+    user: "Sam"
+    user_id: "202020202"
+    content: "@SmarterDev is Python a good first language?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message"]
+  expected_sequence: ["send_message"]
+  expected_response_type: "direct_opinion"
+  description: "Should answer from knowledge without search or generation tools"
+  key_points:
+    - "Common question doesn't need research"
+    - "Responds directly without tools"
+    - "Shares informed opinion"
+    - "Cost-effective approach"

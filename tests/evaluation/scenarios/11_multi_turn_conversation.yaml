@@ -1,0 +1,36 @@
+id: "11_multi_turn_conversation"
+category: "conversation"
+description: "Multi-turn back-and-forth conversation maintaining context"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "16:00:00"
+    user: "Kate"
+    user_id: "121212121"
+    content: "@SmarterDev hey!"
+  - timestamp: "16:00:30"
+    user: "SmarterDev"
+    user_id: "987654321"
+    is_bot: true
+    content: "Hey Kate! What's up?"
+  - timestamp: "16:01:00"
+    user: "Kate"
+    user_id: "121212121"
+    content: "do you know any good resources for learning Rust?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: true
+
+expected_behavior:
+  expected_tools: ["send_message", "search_web", "send_message"]
+  expected_sequence: ["send_message", "search_web", "send_message"]
+  expected_response_type: "continuation_research"
+  description: "Should continue conversation naturally, research, and provide helpful resources"
+  key_points:
+    - "Recognizes continuation of previous conversation"
+    - "Acknowledges before searching"
+    - "Searches for Rust learning resources"
+    - "Provides specific recommendations casually"
