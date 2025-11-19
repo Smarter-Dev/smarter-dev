@@ -428,9 +428,21 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     "error": "Typing indicator not active. Call start_typing() first before sending messages."
                 }
 
+            # Check for duplicate message
+            if channel_state.is_duplicate_message(content):
+                logger.warning(f"[Tool] Duplicate message detected, rejecting send: {content[:50]}...")
+                return {
+                    "success": False,
+                    "error": "This message was already sent within the last minute. Please avoid sending duplicate messages."
+                }
+
             # Stop typing indicator before sending
             channel_state.typing_active = False
             message = await bot.rest.create_message(int(channel_id), content)
+
+            # Track the message to prevent duplicates
+            channel_state.add_recent_message(content)
+
             return {
                 "success": True,
                 "result": f"Message sent successfully (ID: {message.id}). Typing indicator stopped."
@@ -479,6 +491,14 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     "error": "Typing indicator not active. Call start_typing() first before sending replies."
                 }
 
+            # Check for duplicate message
+            if channel_state.is_duplicate_message(content):
+                logger.warning(f"[Tool] Duplicate reply detected, rejecting send: {content[:50]}...")
+                return {
+                    "success": False,
+                    "error": "This message was already sent within the last minute. Please avoid sending duplicate messages."
+                }
+
             # Stop typing indicator before sending
             channel_state.typing_active = False
             message = await bot.rest.create_message(
@@ -486,6 +506,10 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 content,
                 reply=int(message_id)
             )
+
+            # Track the message to prevent duplicates
+            channel_state.add_recent_message(content)
+
             return {
                 "success": True,
                 "result": f"Reply sent successfully (ID: {message.id}). Typing indicator stopped."
