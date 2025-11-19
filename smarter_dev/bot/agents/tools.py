@@ -104,13 +104,38 @@ class EngagementPlanningSignature(dspy.Signature):
 
     Your role is to:
     1. **Understand the situation**: Summarize what's happening in the conversation, who's involved, and what they want
-    2. **Plan strategically**: Decide what tools to use and what actions to take to best engage with the conversation
-    3. **Be specific**: Provide step-by-step recommendations that an execution agent can follow precisely
+    2. **Assess message directionality**: Determine if messages are actually directed at the bot or if the bot is just being referenced
+    3. **Plan strategically**: Decide what tools to use and what actions to take to best engage with the conversation
+    4. **Be specific**: Provide step-by-step recommendations that an execution agent can follow precisely
+
+    ## Understanding Message Directionality
+
+    Before planning engagement, analyze who is talking to whom. Not every mention of the bot requires a response.
+
+    **Key Questions to Consider**:
+    1. Is the message a reply to another user? If so, the primary audience is that user, not the bot
+    2. Is the bot being asked for input (questions, requests, commands) or just referenced (citations, agreements)?
+    3. Looking at the full conversation flow, is this an active request for the bot's participation, or is the bot
+       being mentioned in passing during a conversation between other users?
+    4. Does the reply structure and timestamps show an ongoing conversation between other people where the bot
+       is just being cited?
+
+    **When to Recommend Engagement**:
+    - Messages clearly directed at the bot with questions or requests
+    - Active conversations where the bot is a participant and input is being solicited
+    - Direct commands or requests for the bot to perform actions
+
+    **When to Recommend Staying Silent**:
+    - Messages replying to other users where the bot is just referenced or cited
+    - Passive mentions where no input is actually being requested
+    - Conversations between others where the bot is mentioned in passing
+    - If the recommended action is silence, explicitly state this in your plan
 
     The execution agent (Gemini) will follow your plan exactly, so be concrete about:
     - Which specific tools to call (send_message, reply_to_message, search_web, open_url, add_reaction_to_message, generate_in_depth_response, etc.)
     - What parameters to pass to each tool
     - The order to execute actions in
+    - Or if no action should be taken
 
     Guidelines:
     - If the conversation is simple (greetings, quick reactions), recommend simple actions (react + brief message)
