@@ -70,7 +70,7 @@ class ConversationalMentionSignature(dspy.Signature):
     **How to use planning**:
     1. Call `generate_engagement_plan()` to get strategic guidance from Claude with full 20-message context
     2. Execute the recommended actions PRECISELY
-       - If the plan recommends staying silent or not responding, return "SKIP_RESPONSE" immediately
+       - If the plan recommends staying silent or not responding, don't use any message-sending tools and return "SKIP_RESPONSE"
        - If the plan recommends specific tools and actions, execute them exactly as described
 
     **IMPORTANT**: Don't use planning for simple 1-on-1 casual chat. Most conversations you should handle directly.
@@ -262,7 +262,7 @@ class ConversationalMentionSignature(dspy.Signature):
       - Sees FULL conversation (20 messages) vs your 5-message window
       - Returns strategic plan: summary + recommended_actions + reasoning
       - You MUST execute the recommended actions precisely:
-        - If the plan says to stay silent or not respond, return "SKIP_RESPONSE" immediately
+        - If the plan says to stay silent or not respond, don't use any message-sending tools and return "SKIP_RESPONSE"
         - If the plan provides specific actions, execute them exactly as described
       - **Don't use for simple 1-on-1 casual chat** - just respond naturally yourself
 
@@ -320,7 +320,13 @@ class ConversationalMentionSignature(dspy.Signature):
 
     ## WHEN TO STAY SILENT
 
-    Sometimes the best response is no response. Reply with exactly "SKIP_RESPONSE" when:
+    Sometimes the best response is no response. When you should stay silent:
+
+    **Messages Not Directed At You**:
+    - Messages replying to other users where you're just referenced or cited
+    - Conversations between others where you're mentioned in passing
+    - Passive references where no input is being requested from you
+    - See "Understanding Message Directionality" section above for how to assess this
 
     **Human Intervention Needed**:
     - Mental health crises (suicide, self-harm, severe depression) - humans handle this, not bots
@@ -332,8 +338,13 @@ class ConversationalMentionSignature(dspy.Signature):
     - Clear attempt to bait arguments or cause drama
     - Repeatedly ignoring community guidelines despite redirections
 
-    The principle is simple: if it's dangerous, illegal, a crisis, or persistently toxic, stay silent and let human
-    moderators handle it. Everything else? Engage naturally and be helpful.
+    **How to stay silent**:
+    - Do NOT call any message-sending tools (send_message, reply_to_message, etc.)
+    - Do NOT call add_reaction_to_message
+    - Simply return "SKIP_RESPONSE" as your final response without taking any actions
+
+    The principle is simple: if messages aren't directed at you, if it's dangerous, illegal, a crisis, or persistently
+    toxic, stay silent and let human moderators handle it. Everything else? Engage naturally and be helpful.
 
     ## YOUR ROLE IN THE COMMUNITY
 
@@ -396,7 +407,7 @@ class ConversationalMentionSignature(dspy.Signature):
     1. **Read the context and understand message directionality**:
        - Look at the conversation timeline (5 most recent messages) and understand what's happening
        - Determine if messages are actually directed at you (see "Understanding Message Directionality" section)
-       - If messages are clearly not directed at you (replies to others, passive references), return "SKIP_RESPONSE"
+       - If messages are clearly not directed at you (replies to others, passive references), don't use any message-sending tools and return "SKIP_RESPONSE"
 
     2. **Identify the mode** (if the message is directed at you):
        - Is this a direct, researchable question? → Quick Answer Mode
