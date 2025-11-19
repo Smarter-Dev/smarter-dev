@@ -1,0 +1,27 @@
+id: "12_no_tools_needed"
+category: "edge_cases"
+description: "Situation where agent should respond directly without any tools"
+
+channel_name: "jokes"
+channel_description: "Share jokes and funny content"
+
+conversation:
+  - timestamp: "12:30:00"
+    user: "Leo"
+    user_id: "131313131"
+    content: "@SmarterDev tell me a programming joke!"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message"]
+  expected_sequence: ["send_message"]
+  expected_response_type: "direct_creative"
+  description: "Should tell a joke directly without research or planning"
+  key_points:
+    - "No research needed for creative request"
+    - "Responds directly with humor"
+    - "Shows personality"
+    - "Doesn't overthink or over-tool"

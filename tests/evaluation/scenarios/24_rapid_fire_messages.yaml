@@ -1,0 +1,39 @@
+id: "24_rapid_fire_messages"
+category: "conversation"
+description: "Rapid-fire messages requiring smart debouncing"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "13:00:00"
+    user: "Yara"
+    user_id: "262626262"
+    content: "@SmarterDev"
+  - timestamp: "13:00:02"
+    user: "Yara"
+    user_id: "262626262"
+    content: "wait"
+  - timestamp: "13:00:04"
+    user: "Yara"
+    user_id: "262626262"
+    content: "let me"
+  - timestamp: "13:00:06"
+    user: "Yara"
+    user_id: "262626262"
+    content: "type this out"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["wait_for_messages"]
+  expected_sequence: ["wait_for_messages"]
+  expected_response_type: "smart_debounce"
+  description: "Should wait intelligently for user to finish rapid messages"
+  key_points:
+    - "Recognizes rapid message pattern"
+    - "Uses wait_for_messages intelligently"
+    - "Doesn't interrupt user's typing"
+    - "Waits for complete thought"

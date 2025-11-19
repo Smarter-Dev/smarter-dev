@@ -1,0 +1,27 @@
+id: "09_opinion_question"
+category: "conversation"
+description: "Opinion question not requiring research - casual conversation"
+
+channel_name: "random"
+channel_description: "Random off-topic discussions"
+
+conversation:
+  - timestamp: "15:20:00"
+    user: "Helen"
+    user_id: "999999999"
+    content: "@SmarterDev what's your favorite programming language?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message"]
+  expected_sequence: ["send_message"]
+  expected_response_type: "casual_opinion"
+  description: "Should respond with personality without tools, sharing preferences"
+  key_points:
+    - "No research needed for opinion"
+    - "Shows personality and preferences"
+    - "Conversational and engaging"
+    - "Can mention technical reasons casually"

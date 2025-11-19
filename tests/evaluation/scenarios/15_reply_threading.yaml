@@ -1,0 +1,38 @@
+id: "15_reply_threading"
+category: "tool_usage"
+description: "Scenario requiring reply_to_message for thread context"
+
+channel_name: "support"
+channel_description: "Technical support channel"
+
+conversation:
+  - timestamp: "13:00:00"
+    user: "Oscar"
+    user_id: "161616161"
+    message_id: "msg_001"
+    content: "My app keeps crashing when I try to save data"
+  - timestamp: "13:05:00"
+    user: "Paula"
+    user_id: "171717171"
+    message_id: "msg_002"
+    content: "Anyone have ideas?"
+  - timestamp: "13:06:00"
+    user: "Oscar"
+    user_id: "161616161"
+    message_id: "msg_003"
+    content: "@SmarterDev can you help?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message", "search_web", "reply_to_message"]
+  expected_sequence: ["send_message", "search_web", "reply_to_message"]
+  expected_response_type: "threaded_reply"
+  description: "Should reply to original message to maintain thread context"
+  key_points:
+    - "Acknowledges the request"
+    - "Searches for crash debugging info"
+    - "Uses reply_to_message to reply to msg_001"
+    - "Maintains conversation threading"

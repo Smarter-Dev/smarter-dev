@@ -1,0 +1,35 @@
+id: "14_wait_for_messages"
+category: "tool_usage"
+description: "Scenario requiring wait_for_messages for debouncing"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "10:15:00"
+    user: "Nina"
+    user_id: "151515151"
+    content: "Hey @SmarterDev"
+  - timestamp: "10:15:01"
+    user: "Nina"
+    user_id: "151515151"
+    content: "I have"
+  - timestamp: "10:15:02"
+    user: "Nina"
+    user_id: "151515151"
+    content: "a question"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["wait_for_messages", "send_message"]
+  expected_sequence: ["wait_for_messages", "send_message"]
+  expected_response_type: "wait_then_respond"
+  description: "Should wait for user to finish typing multiple messages"
+  key_points:
+    - "Recognizes rapid message sequence"
+    - "Uses wait_for_messages to debounce"
+    - "Waits for user to complete thought"
+    - "Responds after getting full question"

@@ -1,0 +1,39 @@
+id: "07_multi_user_complex"
+category: "conversation"
+description: "Complex 3+ user conversation requiring strategic planning"
+
+channel_name: "architecture"
+channel_description: "System architecture discussions"
+
+conversation:
+  - timestamp: "10:30:00"
+    user: "Alice"
+    user_id: "111111111"
+    content: "I think we should migrate to microservices"
+  - timestamp: "10:30:15"
+    user: "Bob"
+    user_id: "333333333"
+    content: "But our team is small, monolith might be better"
+  - timestamp: "10:30:30"
+    user: "Charlie"
+    user_id: "444444444"
+    content: "What about starting with a modular monolith?"
+  - timestamp: "10:30:45"
+    user: "Dana"
+    user_id: "555555555"
+    content: "@SmarterDev thoughts?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["generate_engagement_plan", "send_message"]
+  expected_sequence: ["generate_engagement_plan", "send_message"]
+  expected_response_type: "strategic_engagement"
+  description: "Should use planning tool for complex multi-user technical discussion"
+  key_points:
+    - "Recognizes 3+ users with different viewpoints"
+    - "Uses generate_engagement_plan to see full context"
+    - "Provides balanced perspective considering all views"
+    - "Maintains neutral, helpful tone"

@@ -1,0 +1,28 @@
+id: "08_tool_chaining"
+category: "tool_usage"
+description: "Question requiring chained tool usage: search → URL → generate → send"
+
+channel_name: "python-help"
+channel_description: "Python programming help and discussion"
+
+conversation:
+  - timestamp: "13:45:00"
+    user: "George"
+    user_id: "888888888"
+    content: "@SmarterDev how do I implement authentication with FastAPI? Can you explain the best practices?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message", "search_web", "open_url", "generate_in_depth_response", "send_message"]
+  expected_sequence: ["send_message", "search_web", "open_url", "generate_in_depth_response", "send_message"]
+  expected_response_type: "technical_research_chain"
+  description: "Should chain: acknowledge → search → open docs → generate technical response"
+  key_points:
+    - "Acknowledges first"
+    - "Searches for FastAPI auth info"
+    - "Opens relevant documentation URL"
+    - "Uses generate_in_depth_response for technical explanation"
+    - "Provides comprehensive answer with code examples"

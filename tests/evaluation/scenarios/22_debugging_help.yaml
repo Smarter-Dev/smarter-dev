@@ -1,0 +1,31 @@
+id: "22_debugging_help"
+category: "tool_usage"
+description: "Debugging help requiring technical in-depth response"
+
+channel_name: "javascript-help"
+channel_description: "JavaScript help channel"
+
+conversation:
+  - timestamp: "15:30:00"
+    user: "Wendy"
+    user_id: "242424242"
+    content: "My React component keeps re-rendering infinitely"
+  - timestamp: "15:30:15"
+    user: "Wendy"
+    user_id: "242424242"
+    content: "@SmarterDev how do I debug this?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message", "search_web", "generate_in_depth_response", "send_message"]
+  expected_sequence: ["send_message", "search_web", "generate_in_depth_response", "send_message"]
+  expected_response_type: "debugging_technical"
+  description: "Should provide technical debugging steps using generate_in_depth_response"
+  key_points:
+    - "Acknowledges the issue"
+    - "Searches for React re-render causes"
+    - "Uses generate_in_depth_response for technical debugging"
+    - "Provides code examples and solutions"

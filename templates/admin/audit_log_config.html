@@ -1,0 +1,323 @@
+{% extends "admin/base_sidebar.html" %}
+
+{% block title %}Audit Log Configuration - {{ guild.name }}{% endblock %}
+
+{% block page_title %}Audit Log Configuration{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item active">Audit Logs</li>
+{% endblock %}
+
+
+{% block content %}
+<!-- Guild Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" class="guild-icon me-3">
+                    {% else %}
+                    <div class="guild-icon-placeholder me-3">{{ guild.name[0].upper() }}</div>
+                    {% endif %}
+                    <div>
+                        <h3 class="mb-1">{{ guild.name }}</h3>
+                        <div class="text-muted">Audit Log Configuration - Replace Dyno</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Success Message -->
+{% if request.query_params.get('success') == 'updated' %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    <div class="d-flex">
+        <div>
+            <svg class="icon alert-icon" width="24" height="24">
+                <use xlink:href="#tabler-check"></use>
+            </svg>
+        </div>
+        <div>
+            <h4 class="alert-title">Configuration updated!</h4>
+            <div class="text-muted">Audit log settings have been successfully updated.</div>
+        </div>
+    </div>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+
+<!-- Configuration Form -->
+<form method="post">
+    <div class="row">
+        <div class="col-lg-8">
+            <!-- Channel Selection -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Audit Log Channel</h3>
+                    <div class="card-subtitle">Select the channel where audit logs will be sent</div>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="audit_channel_id">Log Channel</label>
+                        <select class="form-select" id="audit_channel_id" name="audit_channel_id">
+                            <option value="">Disabled - No audit logs</option>
+                            {% for channel in channels %}
+                            <option value="{{ channel.id }}" {% if config.audit_channel_id == channel.id %}selected{% endif %}>
+                                # {{ channel.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-hint">
+                            Choose a text channel for audit logs. If no channel is selected, audit logging is disabled.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Member Events -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Member Events</h3>
+                    <div class="card-subtitle">Log member join/leave and ban events</div>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="log_member_join"
+                                       {% if config.log_member_join %}checked{% endif %}>
+                                <span class="form-check-label">Member Joins</span>
+                            </label>
+                            <div class="form-hint">Log when members join the server</div>
+                        </div>
+
+                        <div class="col-md-6 mb-3">
+                            <label class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="log_member_leave"
+                                       {% if config.log_member_leave %}checked{% endif %}>
+                                <span class="form-check-label">Member Leaves</span>
+                            </label>
+                            <div class="form-hint">Log when members leave the server</div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="log_member_ban"
+                                       {% if config.log_member_ban %}checked{% endif %}>
+                                <span class="form-check-label">Member Bans</span>
+                            </label>
+                            <div class="form-hint">Log when members are banned</div>
+                        </div>
+
+                        <div class="col-md-6 mb-3">
+                            <label class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="log_member_unban"
+                                       {% if config.log_member_unban %}checked{% endif %}>
+                                <span class="form-check-label">Member Unbans</span>
+                            </label>
+                            <div class="form-hint">Log when members are unbanned</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Message Events -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Message Events</h3>
+                    <div class="card-subtitle">Log message edits and deletions (shows diffs)</div>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="log_message_edit"
+                                       {% if config.log_message_edit %}checked{% endif %}>
+                                <span class="form-check-label">Message Edits</span>
+                            </label>
+                            <div class="form-hint">Log when messages are edited (with diff)</div>
+                        </div>
+
+                        <div class="col-md-6 mb-3">
+                            <label class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="log_message_delete"
+                                       {% if config.log_message_delete %}checked{% endif %}>
+                                <span class="form-check-label">Message Deletions</span>
+                            </label>
+                            <div class="form-hint">Log when messages are deleted</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- User Change Events -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">User Change Events</h3>
+                    <div class="card-subtitle">Log username, nickname, and role changes</div>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="log_username_change"
+                                       {% if config.log_username_change %}checked{% endif %}>
+                                <span class="form-check-label">Username Changes</span>
+                            </label>
+                            <div class="form-hint">Log username changes</div>
+                        </div>
+
+                        <div class="col-md-4 mb-3">
+                            <label class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="log_nickname_change"
+                                       {% if config.log_nickname_change %}checked{% endif %}>
+                                <span class="form-check-label">Nickname Changes</span>
+                            </label>
+                            <div class="form-hint">Log nickname changes</div>
+                        </div>
+
+                        <div class="col-md-4 mb-3">
+                            <label class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="log_role_change"
+                                       {% if config.log_role_change %}checked{% endif %}>
+                                <span class="form-check-label">Role Changes</span>
+                            </label>
+                            <div class="form-hint">Log role additions/removals</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Configuration Summary -->
+        <div class="col-lg-4">
+            <div class="card position-sticky top-0">
+                <div class="card-header">
+                    <h3 class="card-title">Configuration Summary</h3>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <strong>Audit Channel:</strong>
+                        {% if config.audit_channel_id %}
+                        <div class="text-success mt-1">
+                            <svg class="icon me-1" width="16" height="16">
+                                <use xlink:href="#tabler-check"></use>
+                            </svg>
+                            Configured
+                        </div>
+                        {% else %}
+                        <div class="text-warning mt-1">
+                            <svg class="icon me-1" width="16" height="16">
+                                <use xlink:href="#tabler-alert-triangle"></use>
+                            </svg>
+                            Not configured
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <hr>
+
+                    <div class="mb-2">
+                        <strong>Enabled Events:</strong>
+                    </div>
+                    <div class="list-group list-group-flush">
+                        {% if config.log_member_join %}
+                        <div class="list-group-item d-flex align-items-center py-2">
+                            <svg class="icon text-success me-2" width="16" height="16">
+                                <use xlink:href="#tabler-user-plus"></use>
+                            </svg>
+                            <span>Member Joins</span>
+                        </div>
+                        {% endif %}
+                        {% if config.log_member_leave %}
+                        <div class="list-group-item d-flex align-items-center py-2">
+                            <svg class="icon text-danger me-2" width="16" height="16">
+                                <use xlink:href="#tabler-user-minus"></use>
+                            </svg>
+                            <span>Member Leaves</span>
+                        </div>
+                        {% endif %}
+                        {% if config.log_member_ban %}
+                        <div class="list-group-item d-flex align-items-center py-2">
+                            <svg class="icon text-danger me-2" width="16" height="16">
+                                <use xlink:href="#tabler-ban"></use>
+                            </svg>
+                            <span>Member Bans</span>
+                        </div>
+                        {% endif %}
+                        {% if config.log_member_unban %}
+                        <div class="list-group-item d-flex align-items-center py-2">
+                            <svg class="icon text-success me-2" width="16" height="16">
+                                <use xlink:href="#tabler-ban"></use>
+                            </svg>
+                            <span>Member Unbans</span>
+                        </div>
+                        {% endif %}
+                        {% if config.log_message_edit %}
+                        <div class="list-group-item d-flex align-items-center py-2">
+                            <svg class="icon text-warning me-2" width="16" height="16">
+                                <use xlink:href="#tabler-edit"></use>
+                            </svg>
+                            <span>Message Edits</span>
+                        </div>
+                        {% endif %}
+                        {% if config.log_message_delete %}
+                        <div class="list-group-item d-flex align-items-center py-2">
+                            <svg class="icon text-orange me-2" width="16" height="16">
+                                <use xlink:href="#tabler-trash"></use>
+                            </svg>
+                            <span>Message Deletions</span>
+                        </div>
+                        {% endif %}
+                        {% if config.log_username_change %}
+                        <div class="list-group-item d-flex align-items-center py-2">
+                            <svg class="icon text-purple me-2" width="16" height="16">
+                                <use xlink:href="#tabler-user-edit"></use>
+                            </svg>
+                            <span>Username Changes</span>
+                        </div>
+                        {% endif %}
+                        {% if config.log_nickname_change %}
+                        <div class="list-group-item d-flex align-items-center py-2">
+                            <svg class="icon text-purple me-2" width="16" height="16">
+                                <use xlink:href="#tabler-user-edit"></use>
+                            </svg>
+                            <span>Nickname Changes</span>
+                        </div>
+                        {% endif %}
+                        {% if config.log_role_change %}
+                        <div class="list-group-item d-flex align-items-center py-2">
+                            <svg class="icon text-blue me-2" width="16" height="16">
+                                <use xlink:href="#tabler-shield"></use>
+                            </svg>
+                            <span>Role Changes</span>
+                        </div>
+                        {% endif %}
+
+                        {% if not (config.log_member_join or config.log_member_leave or config.log_member_ban or config.log_member_unban or config.log_message_edit or config.log_message_delete or config.log_username_change or config.log_nickname_change or config.log_role_change) %}
+                        <div class="list-group-item text-center text-muted py-3">
+                            No events enabled
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <svg class="icon me-2" width="24" height="24">
+                            <use xlink:href="#tabler-device-floppy"></use>
+                        </svg>
+                        Save Configuration
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+{% endblock %}

@@ -35,6 +35,7 @@ from smarter_dev.web.models import (
     ChallengeSubmission,
     ScheduledMessage,
     RepeatingMessage,
+    AuditLogConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -4642,3 +4643,187 @@ class GuildOperations:
             }
         except Exception as e:
             raise DatabaseOperationError(f"Failed to remove user data: {e}") from e
+
+
+class AuditLogConfigOperations:
+    """Database operations for audit log configuration management.
+
+    Handles CRUD operations for guild-specific audit logging settings.
+    Manages audit log channel configuration and event type toggles.
+    """
+
+    async def get_config(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> Optional[AuditLogConfig]:
+        """Get audit log configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+
+        Returns:
+            AuditLogConfig or None if not configured
+
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = select(AuditLogConfig).where(AuditLogConfig.guild_id == guild_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get audit log config: {e}") from e
+
+    async def get_or_create_config(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> AuditLogConfig:
+        """Get or create audit log configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+
+        Returns:
+            AuditLogConfig: Guild configuration (existing or newly created)
+
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            config = await self.get_config(session, guild_id)
+            if config is None:
+                config = AuditLogConfig(guild_id=guild_id)
+                session.add(config)
+                await session.flush()
+            return config
+        except DatabaseOperationError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get or create audit log config: {e}") from e
+
+    async def update_config(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        **updates
+    ) -> AuditLogConfig:
+        """Update audit log configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            **updates: Fields to update
+
+        Returns:
+            AuditLogConfig: Updated configuration
+
+        Raises:
+            DatabaseOperationError: If update fails
+        """
+        try:
+            config = await self.get_or_create_config(session, guild_id)
+
+            # Update fields
+            for key, value in updates.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+
+            config.updated_at = datetime.now(timezone.utc)
+            await session.flush()
+
+            return config
+        except DatabaseOperationError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to update audit log config: {e}") from e
+
+    async def set_audit_channel(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        channel_id: Optional[str]
+    ) -> AuditLogConfig:
+        """Set or clear the audit log channel for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            channel_id: Discord channel ID or None to clear
+
+        Returns:
+            AuditLogConfig: Updated configuration
+
+        Raises:
+            DatabaseOperationError: If update fails
+        """
+        return await self.update_config(
+            session,
+            guild_id,
+            audit_channel_id=channel_id
+        )
+
+    async def set_event_logging(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        event_type: str,
+        enabled: bool
+    ) -> AuditLogConfig:
+        """Enable or disable logging for a specific event type.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            event_type: Event type field name (e.g., 'log_member_join')
+            enabled: Whether to enable logging for this event
+
+        Returns:
+            AuditLogConfig: Updated configuration
+
+        Raises:
+            DatabaseOperationError: If update fails
+            ValueError: If event_type is invalid
+        """
+        valid_events = {
+            'log_member_join', 'log_member_leave', 'log_member_ban', 'log_member_unban',
+            'log_message_edit', 'log_message_delete', 'log_username_change',
+            'log_nickname_change', 'log_role_change'
+        }
+
+        if event_type not in valid_events:
+            raise ValueError(f"Invalid event type: {event_type}")
+
+        return await self.update_config(
+            session,
+            guild_id,
+            **{event_type: enabled}
+        )
+
+    async def delete_config(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> bool:
+        """Delete audit log configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+
+        Returns:
+            bool: True if deleted, False if not found
+
+        Raises:
+            DatabaseOperationError: If deletion fails
+        """
+        try:
+            result = await session.execute(
+                delete(AuditLogConfig).where(AuditLogConfig.guild_id == guild_id)
+            )
+            return result.rowcount > 0
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to delete audit log config: {e}") from e

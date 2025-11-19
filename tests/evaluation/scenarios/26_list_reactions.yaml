@@ -1,0 +1,27 @@
+id: "26_list_reactions"
+category: "tool_usage"
+description: "User asks about available reactions"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "14:20:00"
+    user: "Amy"
+    user_id: "282828282"
+    content: "@SmarterDev what emojis can you react with?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["list_reaction_types", "send_message"]
+  expected_sequence: ["list_reaction_types", "send_message"]
+  expected_response_type: "tool_info_response"
+  description: "Should use list_reaction_types to get available emojis"
+  key_points:
+    - "Uses list_reaction_types tool"
+    - "Provides friendly explanation"
+    - "Shows available emoji options"
+    - "Casual, helpful tone"

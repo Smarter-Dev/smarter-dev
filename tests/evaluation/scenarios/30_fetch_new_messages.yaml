@@ -1,0 +1,27 @@
+id: "30_fetch_new_messages"
+category: "conversation"
+description: "Continuation scenario requiring fetch_new_messages"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "14:00:00"
+    user: "Eve"
+    user_id: "666666666"
+    content: "@SmarterDev are you still here?"
+
+recent_search_queries: []
+messages_remaining: 40
+is_continuation: true
+
+expected_behavior:
+  expected_tools: ["send_message", "fetch_new_messages"]
+  expected_sequence: ["send_message", "fetch_new_messages"]
+  expected_response_type: "continuation_with_fetch"
+  description: "Should respond and check for new messages in continuation"
+  key_points:
+    - "Confirms presence in conversation"
+    - "Uses fetch_new_messages to stay updated"
+    - "Maintains conversational continuity"
+    - "Friendly and responsive"

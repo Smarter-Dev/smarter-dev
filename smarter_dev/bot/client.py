@@ -1277,7 +1277,15 @@ async def run_bot() -> None:
         """Cleanup user data when they leave a guild.
 
         Removes squad memberships and bytes balance for the user in the guild.
+        Also logs the event to the audit log if configured.
         """
+        # Log to audit channel
+        from smarter_dev.bot.audit_logger import log_member_leave
+        try:
+            await log_member_leave(bot, event)
+        except Exception as e:
+            logger.error(f"Failed to log member leave to audit log: {e}")
+
         try:
             guild_id = str(getattr(event, "guild_id", ""))
             user_id = str(getattr(event, "user_id", ""))
@@ -1305,7 +1313,15 @@ async def run_bot() -> None:
         If the user previously left while the bot was offline, they may have stale
         squad memberships or bytes balance in the database. Clean them up to ensure
         a fresh start on next interaction.
+        Also logs the event to the audit log if configured.
         """
+        # Log to audit channel
+        from smarter_dev.bot.audit_logger import log_member_join
+        try:
+            await log_member_join(bot, event)
+        except Exception as e:
+            logger.error(f"Failed to log member join to audit log: {e}")
+
         try:
             guild_id = str(getattr(event, "guild_id", ""))
             user_id = str(getattr(event, "user_id", ""))
@@ -1325,6 +1341,52 @@ async def run_bot() -> None:
             logger.info(f"Cleaned up stale data for user {user_id} joining guild {guild_id}")
         except Exception as e:
             logger.warning(f"Failed to cleanup stale data for user {user_id} in guild {guild_id}: {e}")
+
+    # Audit log event listeners
+    @bot.listen()
+    async def on_ban_create(event: hikari.BanCreateEvent) -> None:
+        """Log member ban events to audit log."""
+        from smarter_dev.bot.audit_logger import log_member_ban
+        try:
+            await log_member_ban(bot, event)
+        except Exception as e:
+            logger.error(f"Failed to log member ban to audit log: {e}")
+
+    @bot.listen()
+    async def on_ban_delete(event: hikari.BanDeleteEvent) -> None:
+        """Log member unban events to audit log."""
+        from smarter_dev.bot.audit_logger import log_member_unban
+        try:
+            await log_member_unban(bot, event)
+        except Exception as e:
+            logger.error(f"Failed to log member unban to audit log: {e}")
+
+    @bot.listen()
+    async def on_message_update(event: hikari.GuildMessageUpdateEvent) -> None:
+        """Log message edit events to audit log."""
+        from smarter_dev.bot.audit_logger import log_message_edit
+        try:
+            await log_message_edit(bot, event)
+        except Exception as e:
+            logger.error(f"Failed to log message edit to audit log: {e}")
+
+    @bot.listen()
+    async def on_message_delete(event: hikari.GuildMessageDeleteEvent) -> None:
+        """Log message delete events to audit log."""
+        from smarter_dev.bot.audit_logger import log_message_delete
+        try:
+            await log_message_delete(bot, event)
+        except Exception as e:
+            logger.error(f"Failed to log message delete to audit log: {e}")
+
+    @bot.listen()
+    async def on_member_update(event: hikari.MemberUpdateEvent) -> None:
+        """Log member update events (username, nickname, role changes) to audit log."""
+        from smarter_dev.bot.audit_logger import log_member_update
+        try:
+            await log_member_update(bot, event)
+        except Exception as e:
+            logger.error(f"Failed to log member update to audit log: {e}")
 
     # Set up services before starting the bot
     logger.info("Setting up bot services...")

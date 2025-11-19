@@ -1,0 +1,35 @@
+id: "25_mixed_casual_technical"
+category: "conversation"
+description: "Mixed casual and technical content requiring balance"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "12:00:00"
+    user: "Zane"
+    user_id: "272727272"
+    content: "Good afternoon everyone!"
+  - timestamp: "12:00:15"
+    user: "Alice"
+    user_id: "111111111"
+    content: "Hey! How's everyone's day?"
+  - timestamp: "12:00:30"
+    user: "Zane"
+    user_id: "272727272"
+    content: "@SmarterDev btw, how would you implement rate limiting in an API?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message", "search_web", "generate_in_depth_response", "send_message"]
+  expected_sequence: ["send_message", "search_web", "generate_in_depth_response", "send_message"]
+  expected_response_type: "balanced_casual_technical"
+  description: "Should handle social context but provide technical answer"
+  key_points:
+    - "Acknowledges casual conversation context"
+    - "Transitions naturally to technical question"
+    - "Uses generate_in_depth_response for implementation details"
+    - "Maintains friendly but informative tone"
