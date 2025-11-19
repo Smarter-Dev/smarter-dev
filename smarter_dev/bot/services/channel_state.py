@@ -10,7 +10,9 @@ This service manages per-channel state for agent-driven conversation monitoring:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import time
 from typing import Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -32,6 +34,54 @@ class ChannelMonitorState:
         self.message_queue: asyncio.Queue = asyncio.Queue()  # Messages for wait_for_messages
         self.queue_updated_event: asyncio.Event = asyncio.Event()  # Signals new messages
         self.messages_processed: int = 0  # Total messages processed in this conversation session
+        self.recent_messages: Dict[str, float] = {}  # Message content hash -> timestamp for deduplication
+
+    def _hash_message(self, content: str) -> str:
+        """Generate a hash for message content.
+
+        Args:
+            content: The message content to hash
+
+        Returns:
+            SHA256 hash of the content
+        """
+        return hashlib.sha256(content.encode('utf-8')).hexdigest()
+
+    def _cleanup_old_messages(self) -> None:
+        """Remove message hashes older than 60 seconds from the recent messages tracker."""
+        current_time = time.time()
+        expired_hashes = [
+            msg_hash for msg_hash, timestamp in self.recent_messages.items()
+            if current_time - timestamp > 60
+        ]
+        for msg_hash in expired_hashes:
+            del self.recent_messages[msg_hash]
+        if expired_hashes:
+            logger.debug(f"Cleaned up {len(expired_hashes)} expired message hashes")
+
+    def is_duplicate_message(self, content: str) -> bool:
+        """Check if a message was recently sent (within the last 60 seconds).
+
+        Args:
+            content: The message content to check
+
+        Returns:
+            True if this message was sent within the last 60 seconds
+        """
+        self._cleanup_old_messages()
+        msg_hash = self._hash_message(content)
+        return msg_hash in self.recent_messages
+
+    def add_recent_message(self, content: str) -> None:
+        """Add a message to the recent messages tracker.
+
+        Args:
+            content: The message content that was sent
+        """
+        self._cleanup_old_messages()
+        msg_hash = self._hash_message(content)
+        self.recent_messages[msg_hash] = time.time()
+        logger.debug(f"Tracked message hash {msg_hash[:8]}... (total tracked: {len(self.recent_messages)})")
 
 
 class ChannelStateManager:
