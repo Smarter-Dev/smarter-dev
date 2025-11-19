@@ -222,6 +222,10 @@
                 <path d="M22 2L2 22"></path>
                 <path d="M22 22L2 2"></path>
             </symbol>
+            <symbol id="tabler-shield-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3a12 12 0 0 0 8.5 3A12 12 0 0 1 12 21 12 12 0 0 1 3.5 6 12 12 0 0 0 12 3"></path>
+                <path d="m9 12 2 2 4-4"></path>
+            </symbol>
             <symbol id="tabler-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <polyline points="3,6 5,6 21,6"></polyline>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -395,7 +399,16 @@
                         </span>
                         <span class="nav-link-title">Squads</span>
                     </a>
-                    
+
+                    <a class="nav-link {% if 'audit-logs' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/audit-logs" aria-current="{% if 'audit-logs' in request.url.path %}page{% endif %}">
+                        <span class="nav-link-icon">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-shield-check"></use>
+                            </svg>
+                        </span>
+                        <span class="nav-link-title">Audit Logs</span>
+                    </a>
+
                     <a class="nav-link {% if 'squad-sale-events' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/squad-sale-events" aria-current="{% if 'squad-sale-events' in request.url.path %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
@@ -627,7 +640,16 @@
                     </span>
                     <span class="nav-link-title">Squads</span>
                 </a>
-                
+
+                <a class="nav-link {% if 'audit-logs' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/audit-logs">
+                    <span class="nav-link-icon">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-shield-check"></use>
+                        </svg>
+                    </span>
+                    <span class="nav-link-title">Audit Logs</span>
+                </a>
+
                 <a class="nav-link {% if 'squad-sale-events' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/squad-sale-events">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
