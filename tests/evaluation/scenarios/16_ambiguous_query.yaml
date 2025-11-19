@@ -1,0 +1,27 @@
+id: "16_ambiguous_query"
+category: "conversation"
+description: "Ambiguous question requiring clarification or interpretation"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "09:30:00"
+    user: "Quinn"
+    user_id: "181818181"
+    content: "@SmarterDev how do I make it faster?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message"]
+  expected_sequence: ["send_message"]
+  expected_response_type: "clarifying_question"
+  description: "Should ask for clarification about what needs to be faster"
+  key_points:
+    - "Recognizes ambiguous query"
+    - "Asks clarifying questions"
+    - "Friendly and helpful tone"
+    - "Offers multiple possibilities"

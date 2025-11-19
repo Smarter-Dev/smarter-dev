@@ -2448,3 +2448,140 @@ class RepeatingMessage(Base):
         """String representation of the repeating message."""
         status = "active" if self.is_active else "inactive"
         return f"<RepeatingMessage(guild_id='{self.guild_id}', channel_id='{self.channel_id}', status='{status}')>"
+
+
+class AuditLogConfig(Base):
+    """Audit log configuration per guild for Discord event logging.
+
+    Stores guild-specific settings for audit logging events like member join/leave,
+    bans, message edits/deletes, and user changes. Logs are sent as embeds to the
+    configured audit channel.
+    """
+
+    __tablename__ = "audit_log_configs"
+
+    # Primary key
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        primary_key=True,
+        doc="Discord guild (server) snowflake ID"
+    )
+
+    # Audit channel configuration
+    audit_channel_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        doc="Discord channel ID where audit logs are sent"
+    )
+
+    # Member event logging
+    log_member_join: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        doc="Log when members join the guild"
+    )
+    log_member_leave: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        doc="Log when members leave the guild"
+    )
+    log_member_ban: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        doc="Log when members are banned"
+    )
+    log_member_unban: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        doc="Log when members are unbanned"
+    )
+
+    # Message event logging
+    log_message_edit: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Log when messages are edited"
+    )
+    log_message_delete: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Log when messages are deleted"
+    )
+
+    # User change event logging
+    log_username_change: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Log when users change their username"
+    )
+    log_nickname_change: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Log when users change their nickname in the guild"
+    )
+    log_role_change: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Log when user roles are added or removed"
+    )
+
+    # Audit timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="Timestamp when the config was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="Timestamp when the config was last updated"
+    )
+
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_audit_log_configs_guild_id", "guild_id"),
+    )
+
+    def __init__(self, **kwargs):
+        """Initialize AuditLogConfig with default values."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        kwargs.setdefault('log_member_join', True)
+        kwargs.setdefault('log_member_leave', True)
+        kwargs.setdefault('log_member_ban', True)
+        kwargs.setdefault('log_member_unban', True)
+        kwargs.setdefault('log_message_edit', False)
+        kwargs.setdefault('log_message_delete', False)
+        kwargs.setdefault('log_username_change', False)
+        kwargs.setdefault('log_nickname_change', False)
+        kwargs.setdefault('log_role_change', False)
+        super().__init__(**kwargs)
+
+    @classmethod
+    def get_defaults(cls, guild_id: str) -> 'AuditLogConfig':
+        """Get default configuration for a guild.
+
+        Args:
+            guild_id: Discord guild ID
+
+        Returns:
+            AuditLogConfig instance with default values
+        """
+        return cls(guild_id=guild_id)
+
+    def __repr__(self) -> str:
+        """String representation of the audit log config."""
+        return f"<AuditLogConfig(guild_id='{self.guild_id}', channel='{self.audit_channel_id}')>"

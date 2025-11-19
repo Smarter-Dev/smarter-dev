@@ -1,0 +1,31 @@
+id: "06_reaction_only"
+category: "conversation"
+description: "Simple acknowledgment best handled with reaction emoji"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "14:15:30"
+    user: "Frank"
+    user_id: "777777777"
+    content: "Just deployed the new feature to production! 🚀"
+  - timestamp: "14:15:45"
+    user: "Frank"
+    user_id: "777777777"
+    content: "@SmarterDev"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["add_reaction_to_message"]
+  expected_sequence: ["add_reaction_to_message"]
+  expected_response_type: "reaction_only"
+  description: "Should use reaction emoji instead of sending a message"
+  key_points:
+    - "Recognizes this is celebratory/acknowledgment"
+    - "Uses add_reaction_to_message (👍, 🎉, etc.)"
+    - "Doesn't send unnecessary message"
+    - "Efficient and appropriate"

@@ -1,0 +1,27 @@
+id: "29_wait_duration"
+category: "tool_usage"
+description: "Scenario requiring simple wait with wait_for_duration"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "10:00:00"
+    user: "Dave"
+    user_id: "313131313"
+    content: "@SmarterDev give me a second, I'm about to share an error message"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["add_reaction_to_message", "wait_for_duration"]
+  expected_sequence: ["add_reaction_to_message", "wait_for_duration"]
+  expected_response_type: "polite_wait"
+  description: "Should acknowledge and wait using wait_for_duration"
+  key_points:
+    - "Acknowledges with reaction (👍)"
+    - "Uses wait_for_duration for simple wait"
+    - "Doesn't rush or interrupt"
+    - "Polite and patient"

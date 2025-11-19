@@ -1,0 +1,27 @@
+id: "19_stop_monitoring"
+category: "edge_cases"
+description: "Scenario where agent should stop monitoring conversation"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "16:00:00"
+    user: "Tina"
+    user_id: "212121212"
+    content: "@SmarterDev thanks for the help!"
+
+recent_search_queries: []
+messages_remaining: 1
+is_continuation: true
+
+expected_behavior:
+  expected_tools: ["add_reaction_to_message", "stop_monitoring"]
+  expected_sequence: ["add_reaction_to_message", "stop_monitoring"]
+  expected_response_type: "graceful_exit"
+  description: "Should acknowledge and stop monitoring when messages_remaining is low"
+  key_points:
+    - "Recognizes conversation is ending"
+    - "Adds friendly reaction"
+    - "Calls stop_monitoring to end session"
+    - "Graceful exit from conversation"

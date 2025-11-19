@@ -1,0 +1,31 @@
+id: "05_greeting_casual"
+category: "conversation"
+description: "Simple greeting requiring no tools"
+
+channel_name: "general"
+channel_description: "General discussion channel"
+
+conversation:
+  - timestamp: "09:00:15"
+    user: "Dana"
+    user_id: "555555555"
+    content: "Good morning everyone!"
+  - timestamp: "09:00:20"
+    user: "Eve"
+    user_id: "666666666"
+    content: "Morning! @SmarterDev how's it going?"
+
+recent_search_queries: []
+messages_remaining: 50
+is_continuation: false
+
+expected_behavior:
+  expected_tools: ["send_message"]
+  expected_sequence: ["send_message"]
+  expected_response_type: "casual_no_tools"
+  description: "Should respond casually without using any research or planning tools"
+  key_points:
+    - "No acknowledgment needed (not a research task)"
+    - "Responds directly with friendly greeting"
+    - "No tools except send_message"
+    - "Conversational and warm tone"
