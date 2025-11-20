@@ -1215,6 +1215,10 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             logger.debug(f"[Tool] wait_for_messages called in channel {channel_id}")
             channel_state = get_channel_state_manager().get_state(int(channel_id))
 
+            # Signal that agent wants to continue monitoring
+            # This allows the auto-restart loop to continue after this agent execution completes
+            channel_state.continue_monitoring = True
+
             # Check if we've processed 100+ messages - if so, end the conversation session
             messages_processed = channel_state.messages_processed
             if messages_processed >= 100:
@@ -1240,7 +1244,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 messages.append(msg)
             except asyncio.TimeoutError:
                 # 5 minutes passed with no messages - conversation ended
-                logger.debug(f"[Tool] Channel {channel_id}: 5-minute timeout with no messages")
+                logger.info(f"[Tool] Channel {channel_id}: 5-minute timeout with no messages, stopping monitoring")
+                channel_state.continue_monitoring = False
                 queue_event.clear()
                 return {
                     "success": True,
