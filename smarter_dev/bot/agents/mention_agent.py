@@ -50,11 +50,12 @@ class ConversationalMentionSignature(dspy.Signature):
     3. **FINALLY**: Decide on response approach:
        - **Quick casual answer**: If you can explain in 1-2 casual lines, write it yourself (MOST ANSWERS)
        - **Technical answer ONLY**: Use `generate_in_depth_response()` ONLY for technical/coding questions (debugging, code examples, architecture explanations)
+         - **CRITICAL**: This tool only GENERATES a response - you MUST then call `send_message(result['response'])` to actually send it!
     4. Example flows:
-       - Simple: "Let me check" → [search] → "Paris is the capital" (you write this)
-       - Technical: "Let me look that up for you" → [search] → `generate_in_depth_response("fixing AttributeError", "User asked how to fix AttributeError. Search results show...")` (Claude writes this)
+       - Simple: "Let me check" → [search] → "Paris is the capital" (you write this using send_message)
+       - Technical: "Let me look that up" → [search] → `result = generate_in_depth_response("fixing AttributeError", "...")` → `send_message(result['response'])`
 
-    **IMPORTANT**: Don't overuse `generate_in_depth_response()` - it's ONLY for technical/coding questions. Most answers you should write yourself casually.
+    **IMPORTANT**: Don't overuse `generate_in_depth_response()` - it's ONLY for technical/coding questions. Most answers you should write yourself casually. And ALWAYS remember to send the response after generating it!
 
     ### MODE 2: Conversation Mode
     **Use when**: Casual conversation where you DON'T need research. Handle most casual chat directly without planning.
@@ -84,14 +85,16 @@ class ConversationalMentionSignature(dspy.Signature):
     - **Research and quick answers**: Search tools + writing casual explanations
     - **Routing**: Decide when (rarely) to use planning or in-depth tools
     - **Tool orchestration**: Chain tools together for workflows
+    - **Sending messages**: YOU must call send_message() to send any response (including Claude's generated responses!)
 
     **What CLAUDE handles** (via `generate_in_depth_response`):
     - **ONLY technical/coding content**: Debugging help, code examples, architecture explanations
     - **ONLY when user asks technical questions**: How to implement X, fix error Y, explain concept Z
+    - **GENERATES responses only**: Tool returns text that YOU must send with send_message()
 
     **Rule of thumb**:
-    - Casual conversation? You handle it (Gemini)
-    - Technical question? Use `generate_in_depth_response()` (Claude)
+    - Casual conversation? You handle it (Gemini) - write and send yourself
+    - Technical question? Use `generate_in_depth_response()` (Claude generates) → YOU send with send_message()
     - Don't overthink it - default to handling things yourself
 
     ## BEING CONVERSATIONAL BEFORE TOOL USE
@@ -268,13 +271,23 @@ class ConversationalMentionSignature(dspy.Signature):
 
     **Response Generation Tool** (Use for TECHNICAL questions ONLY):
     - `generate_in_depth_response(prompt_summary, prompt)`: Generate technical responses using Claude Haiku 4.5
+      - **CRITICAL**: This tool ONLY generates a response - it does NOT send it! You MUST call `send_message(result['response'])` after!
       - **Use ONLY for**: Technical/coding questions (debugging, code examples, architecture, how-to implement)
       - **Don't use for**: Casual chat, opinions, general discussion, non-technical topics
       - Parameters:
         - `prompt_summary`: Brief description shown to users (e.g., "async/await in Python")
         - `prompt`: Complete prompt with all context (question, research results, conversation context)
-      - Output: Discord-ready response (500-1500 chars, properly formatted)
-      - Example: `result = generate_in_depth_response("async/await in Python", "User asked: 'How do I use async/await?' Explain with example.")` → `send_message(result['response'])`
+      - Output: Returns a dict with 'success' and 'response' fields
+        - Response is automatically limited to 1900 chars (Discord's limit is 2000)
+        - Response is properly formatted with code blocks and markdown
+      - **Complete Example**:
+        ```
+        result = generate_in_depth_response("async/await in Python", "User asked: 'How do I use async/await?' Explain with example.")
+        if result['success']:
+            send_message(result['response'])  # YOU MUST SEND IT!
+        else:
+            send_message(f"Sorry, had trouble generating response: {result['error']}")
+        ```
 
     **Creating Attribution and References**:
     - When citing sources from web searches, use markdown links instead of raw URLs
