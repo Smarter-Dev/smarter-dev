@@ -1776,25 +1776,27 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
     # Get recent search queries for this channel
     channel_queries = search_cache.get_channel_queries(channel_id)
 
-    # Wrap all tools with failure tracking
-    # This monitors tool failures globally and automatically disables tools that fail repeatedly
-    # Critical tools (marked with critical=True) are never auto-disabled to ensure bot can always communicate
-    wrapped_tools = [
-        with_failure_tracking("send_message", send_message, critical=True),  # Critical: core messaging
-        with_failure_tracking("reply_to_message", reply_to_message, critical=True),  # Critical: core messaging
-        with_failure_tracking("add_reaction_to_message", add_reaction_to_message, critical=True),  # Critical: core interaction
-        with_failure_tracking("list_reaction_types", list_reaction_types),  # Non-critical: can fail without breaking bot
-        with_failure_tracking("search_web_instant_answer", search_web_instant_answer),  # Non-critical: external service
-        with_failure_tracking("search_web", search_web),  # Non-critical: external service
-        with_failure_tracking("open_url", open_url),  # Non-critical: external service
-        with_failure_tracking("generate_engagement_plan", generate_engagement_plan),  # Non-critical: can work without planning
-        with_failure_tracking("generate_in_depth_response", generate_in_depth_response),  # Non-critical: agent can write responses itself
-        with_failure_tracking("start_typing", start_typing, critical=True),  # Critical: essential for UX
-        with_failure_tracking("stop_typing", stop_typing, critical=True),  # Critical: essential for UX
-        with_failure_tracking("fetch_new_messages", fetch_new_messages, critical=True),  # Critical: needed for conversation flow
-        with_failure_tracking("wait_for_duration", wait_for_duration, critical=True),  # Critical: timing control
-        with_failure_tracking("wait_for_messages", wait_for_messages, critical=True),  # Critical: conversation monitoring
-        with_failure_tracking("stop_monitoring", stop_monitoring, critical=True)  # Critical: conversation control
+    # TEMPORARILY DISABLED: Wrap all tools with failure tracking
+    # Testing if the wrapper is causing compatibility issues with DSPy ReAct
+    # TODO: Re-enable with proper signature preservation
+
+    # Original tools without wrapper (for testing)
+    tools = [
+        send_message,
+        reply_to_message,
+        add_reaction_to_message,
+        list_reaction_types,
+        search_web_instant_answer,
+        search_web,
+        open_url,
+        generate_engagement_plan,
+        generate_in_depth_response,
+        start_typing,
+        stop_typing,
+        fetch_new_messages,
+        wait_for_duration,
+        wait_for_messages,
+        stop_monitoring
     ]
 
-    return wrapped_tools, channel_queries
+    return tools, channel_queries
