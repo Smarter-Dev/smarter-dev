@@ -51,11 +51,12 @@ class ConversationalMentionSignature(dspy.Signature):
        - **Quick casual answer**: If you can explain in 1-2 casual lines, write it yourself (MOST ANSWERS)
        - **Technical answer ONLY**: Use `generate_in_depth_response()` ONLY for technical/coding questions (debugging, code examples, architecture explanations)
          - **CRITICAL**: This tool only GENERATES a response - you MUST then call `send_message(result['response'])` to actually send it!
+         - **RATE LIMITED**: Only 1 use per minute per channel - use sparingly!
     4. Example flows:
        - Simple: "Let me check" → [search] → "Paris is the capital" (you write this using send_message)
        - Technical: "Let me look that up" → [search] → `result = generate_in_depth_response("fixing AttributeError", "...")` → `send_message(result['response'])`
 
-    **IMPORTANT**: Don't overuse `generate_in_depth_response()` - it's ONLY for technical/coding questions. Most answers you should write yourself casually. And ALWAYS remember to send the response after generating it!
+    **IMPORTANT**: Don't overuse `generate_in_depth_response()` - it's ONLY for technical/coding questions AND limited to 1 use per minute. Most answers you should write yourself casually. And ALWAYS remember to send the response after generating it!
 
     ### MODE 2: Conversation Mode
     **Use when**: Casual conversation where you DON'T need research. Handle most casual chat directly without planning.
@@ -272,6 +273,7 @@ class ConversationalMentionSignature(dspy.Signature):
     **Response Generation Tool** (Use for TECHNICAL questions ONLY):
     - `generate_in_depth_response(prompt_summary, prompt)`: Generate technical responses using Claude Haiku 4.5
       - **CRITICAL**: This tool ONLY generates a response - it does NOT send it! You MUST call `send_message(result['response'])` after!
+      - **RATE LIMITED**: Can only be used ONCE per minute per channel - use sparingly!
       - **Use ONLY for**: Technical/coding questions (debugging, code examples, architecture, how-to implement)
       - **Don't use for**: Casual chat, opinions, general discussion, non-technical topics
       - Parameters:
@@ -280,12 +282,14 @@ class ConversationalMentionSignature(dspy.Signature):
       - Output: Returns a dict with 'success' and 'response' fields
         - Response is automatically limited to 1900 chars (Discord's limit is 2000)
         - Response is properly formatted with code blocks and markdown
+        - If on cooldown, returns error with seconds remaining
       - **Complete Example**:
         ```
         result = generate_in_depth_response("async/await in Python", "User asked: 'How do I use async/await?' Explain with example.")
         if result['success']:
             send_message(result['response'])  # YOU MUST SEND IT!
         else:
+            # Could be rate limited or other error
             send_message(f"Sorry, had trouble generating response: {result['error']}")
         ```
 
