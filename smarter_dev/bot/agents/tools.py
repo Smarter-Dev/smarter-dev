@@ -10,6 +10,7 @@ from typing import Callable, List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 import asyncio
+import functools
 import re
 import html
 import io
@@ -580,6 +581,7 @@ def with_failure_tracking(tool_name: str, tool_func: Callable, critical: bool = 
     Returns:
         Wrapped tool function that tracks failures
     """
+    @functools.wraps(tool_func)
     async def wrapped(*args, **kwargs):
         # Check if tool is disabled (skip check for critical tools)
         if not critical:
@@ -636,9 +638,6 @@ def with_failure_tracking(tool_name: str, tool_func: Callable, critical: bool = 
                 "error": f"Tool execution failed: {error_msg}"
             }
 
-    # Preserve function metadata
-    wrapped.__name__ = tool_func.__name__
-    wrapped.__doc__ = tool_func.__doc__
     return wrapped
 
 
