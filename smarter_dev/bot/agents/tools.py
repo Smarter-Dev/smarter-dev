@@ -569,51 +569,66 @@ class ToolFailureMonitor:
 tool_failure_monitor = ToolFailureMonitor()
 
 
-def with_failure_tracking(tool_name: str, tool_func: Callable) -> Callable:
+def with_failure_tracking(tool_name: str, tool_func: Callable, critical: bool = False) -> Callable:
     """Wrap a tool function with failure tracking and automatic disabling.
 
     Args:
         tool_name: Name of the tool (for tracking)
         tool_func: The async tool function to wrap
+        critical: If True, tool will never be auto-disabled (for essential communication tools)
 
     Returns:
         Wrapped tool function that tracks failures
     """
     async def wrapped(*args, **kwargs):
-        # Check if tool is disabled
-        is_disabled, reason = await tool_failure_monitor.is_tool_disabled(tool_name)
-        if is_disabled:
-            logger.warning(f"[ToolMonitor] Blocked execution of disabled tool: {tool_name}")
-            return {
-                "success": False,
-                "error": reason,
-                "tool_disabled": True
-            }
+        # Check if tool is disabled (skip check for critical tools)
+        if not critical:
+            is_disabled, reason = await tool_failure_monitor.is_tool_disabled(tool_name)
+            if is_disabled:
+                logger.warning(f"[ToolMonitor] Blocked execution of disabled tool: {tool_name}")
+                return {
+                    "success": False,
+                    "error": reason,
+                    "tool_disabled": True
+                }
 
         # Execute the tool
         try:
             result = await tool_func(*args, **kwargs)
 
-            # Check if result indicates success
-            # Most tools return dict with 'success' key
+            # Only track failures for non-critical tools
+            # Critical tools log failures but are never disabled
             if isinstance(result, dict):
                 if result.get("success", True):  # Default to True if no success key
-                    await tool_failure_monitor.record_success(tool_name)
+                    if not critical:
+                        await tool_failure_monitor.record_success(tool_name)
                 else:
-                    # Tool returned failure - record it
+                    # Tool returned failure
                     error_msg = result.get("error", "Unknown error")
-                    await tool_failure_monitor.record_failure(tool_name, error_msg)
+                    if critical:
+                        # Critical tool failed - log but don't track for disabling
+                        logger.warning(f"[ToolMonitor] Critical tool {tool_name} failed (not disabled): {error_msg[:100]}")
+                    else:
+                        # Non-critical tool failed - track it
+                        await tool_failure_monitor.record_failure(tool_name, error_msg)
             else:
                 # Non-dict result, assume success
-                await tool_failure_monitor.record_success(tool_name)
+                if not critical:
+                    await tool_failure_monitor.record_success(tool_name)
 
             return result
 
         except Exception as e:
-            # Exception during execution - record failure
+            # Exception during execution
             error_msg = str(e)
             logger.error(f"[ToolMonitor] Tool {tool_name} raised exception: {error_msg}")
-            await tool_failure_monitor.record_failure(tool_name, error_msg)
+
+            if critical:
+                # Critical tool exception - log but don't track for disabling
+                logger.error(f"[ToolMonitor] Critical tool {tool_name} raised exception (not disabled): {error_msg[:100]}")
+            else:
+                # Non-critical tool exception - track it
+                await tool_failure_monitor.record_failure(tool_name, error_msg)
 
             # Return error dict
             return {
@@ -1764,22 +1779,23 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
     # Wrap all tools with failure tracking
     # This monitors tool failures globally and automatically disables tools that fail repeatedly
+    # Critical tools (marked with critical=True) are never auto-disabled to ensure bot can always communicate
     wrapped_tools = [
-        with_failure_tracking("send_message", send_message),
-        with_failure_tracking("reply_to_message", reply_to_message),
-        with_failure_tracking("add_reaction_to_message", add_reaction_to_message),
-        with_failure_tracking("list_reaction_types", list_reaction_types),
-        with_failure_tracking("search_web_instant_answer", search_web_instant_answer),
-        with_failure_tracking("search_web", search_web),
-        with_failure_tracking("open_url", open_url),
-        with_failure_tracking("generate_engagement_plan", generate_engagement_plan),
-        with_failure_tracking("generate_in_depth_response", generate_in_depth_response),
-        with_failure_tracking("start_typing", start_typing),
-        with_failure_tracking("stop_typing", stop_typing),
-        with_failure_tracking("fetch_new_messages", fetch_new_messages),
-        with_failure_tracking("wait_for_duration", wait_for_duration),
-        with_failure_tracking("wait_for_messages", wait_for_messages),
-        with_failure_tracking("stop_monitoring", stop_monitoring)
+        with_failure_tracking("send_message", send_message, critical=True),  # Critical: core messaging
+        with_failure_tracking("reply_to_message", reply_to_message, critical=True),  # Critical: core messaging
+        with_failure_tracking("add_reaction_to_message", add_reaction_to_message, critical=True),  # Critical: core interaction
+        with_failure_tracking("list_reaction_types", list_reaction_types),  # Non-critical: can fail without breaking bot
+        with_failure_tracking("search_web_instant_answer", search_web_instant_answer),  # Non-critical: external service
+        with_failure_tracking("search_web", search_web),  # Non-critical: external service
+        with_failure_tracking("open_url", open_url),  # Non-critical: external service
+        with_failure_tracking("generate_engagement_plan", generate_engagement_plan),  # Non-critical: can work without planning
+        with_failure_tracking("generate_in_depth_response", generate_in_depth_response),  # Non-critical: agent can write responses itself
+        with_failure_tracking("start_typing", start_typing, critical=True),  # Critical: essential for UX
+        with_failure_tracking("stop_typing", stop_typing, critical=True),  # Critical: essential for UX
+        with_failure_tracking("fetch_new_messages", fetch_new_messages, critical=True),  # Critical: needed for conversation flow
+        with_failure_tracking("wait_for_duration", wait_for_duration, critical=True),  # Critical: timing control
+        with_failure_tracking("wait_for_messages", wait_for_messages, critical=True),  # Critical: conversation monitoring
+        with_failure_tracking("stop_monitoring", stop_monitoring, critical=True)  # Critical: conversation control
     ]
 
     return wrapped_tools, channel_queries
