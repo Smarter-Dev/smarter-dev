@@ -435,6 +435,198 @@ class InDepthResponseRateLimiter:
 in_depth_response_rate_limiter = InDepthResponseRateLimiter()
 
 
+class ToolFailureMonitor:
+    """Global tool failure monitor that disables tools after repeated failures.
+
+    If any tool fails twice within 5 minutes, it is disabled for 5 minutes.
+    This prevents cascading failures and wasted API calls when a tool is having issues.
+    """
+
+    FAILURE_WINDOW_SECONDS = 300  # 5 minutes - window to track failures
+    FAILURE_THRESHOLD = 2  # Number of failures to trigger disable
+    DISABLE_DURATION_SECONDS = 300  # 5 minutes - how long to disable the tool
+
+    def __init__(self):
+        """Initialize the tool failure monitor."""
+        # Track failures per tool: {tool_name: [timestamp1, timestamp2, ...]}
+        self.failures: Dict[str, List[datetime]] = {}
+        # Track when tools are disabled: {tool_name: disable_until_timestamp}
+        self.disabled_until: Dict[str, datetime] = {}
+        self._lock = asyncio.Lock()
+
+    async def is_tool_disabled(self, tool_name: str) -> Tuple[bool, Optional[str]]:
+        """Check if a tool is currently disabled.
+
+        Args:
+            tool_name: Name of the tool to check
+
+        Returns:
+            Tuple[bool, Optional[str]]: (is_disabled, reason)
+                - is_disabled: True if tool is disabled
+                - reason: Human-readable reason why tool is disabled (None if not disabled)
+        """
+        async with self._lock:
+            now = datetime.now()
+
+            # Check if tool is disabled
+            if tool_name in self.disabled_until:
+                disable_until = self.disabled_until[tool_name]
+
+                # Check if disable period has expired
+                if now >= disable_until:
+                    # Re-enable the tool
+                    del self.disabled_until[tool_name]
+                    if tool_name in self.failures:
+                        del self.failures[tool_name]
+                    logger.info(f"[ToolMonitor] Re-enabled tool: {tool_name}")
+                    return False, None
+                else:
+                    # Still disabled
+                    remaining = int((disable_until - now).total_seconds())
+                    reason = f"This tool is temporarily disabled due to recent failures. It will be available again in {remaining} seconds."
+                    logger.debug(f"[ToolMonitor] Tool {tool_name} still disabled: {remaining}s remaining")
+                    return True, reason
+
+            return False, None
+
+    async def record_failure(self, tool_name: str, error: str) -> None:
+        """Record a tool failure and potentially disable the tool.
+
+        Args:
+            tool_name: Name of the tool that failed
+            error: Error message from the failure
+        """
+        async with self._lock:
+            now = datetime.now()
+
+            # Initialize failure list if needed
+            if tool_name not in self.failures:
+                self.failures[tool_name] = []
+
+            # Add this failure
+            self.failures[tool_name].append(now)
+
+            # Remove failures outside the tracking window
+            cutoff_time = now - timedelta(seconds=self.FAILURE_WINDOW_SECONDS)
+            self.failures[tool_name] = [
+                ts for ts in self.failures[tool_name]
+                if ts > cutoff_time
+            ]
+
+            # Check if we've hit the failure threshold
+            if len(self.failures[tool_name]) >= self.FAILURE_THRESHOLD:
+                # Disable the tool
+                disable_until = now + timedelta(seconds=self.DISABLE_DURATION_SECONDS)
+                self.disabled_until[tool_name] = disable_until
+
+                logger.warning(
+                    f"[ToolMonitor] Disabling tool '{tool_name}' for {self.DISABLE_DURATION_SECONDS}s "
+                    f"after {len(self.failures[tool_name])} failures in {self.FAILURE_WINDOW_SECONDS}s. "
+                    f"Last error: {error[:100]}"
+                )
+
+    async def record_success(self, tool_name: str) -> None:
+        """Record a successful tool execution.
+
+        This clears any failure history for the tool.
+
+        Args:
+            tool_name: Name of the tool that succeeded
+        """
+        async with self._lock:
+            # Clear failure history on success
+            if tool_name in self.failures:
+                del self.failures[tool_name]
+                logger.debug(f"[ToolMonitor] Cleared failure history for {tool_name}")
+
+    def get_status(self) -> Dict[str, dict]:
+        """Get current status of all monitored tools.
+
+        Returns:
+            Dict mapping tool names to their status
+        """
+        status = {}
+        now = datetime.now()
+
+        for tool_name in set(list(self.failures.keys()) + list(self.disabled_until.keys())):
+            tool_status = {
+                "failures": len(self.failures.get(tool_name, [])),
+                "disabled": False,
+                "disabled_until": None
+            }
+
+            if tool_name in self.disabled_until:
+                if now < self.disabled_until[tool_name]:
+                    tool_status["disabled"] = True
+                    tool_status["disabled_until"] = self.disabled_until[tool_name].isoformat()
+
+            status[tool_name] = tool_status
+
+        return status
+
+
+# Global tool failure monitor
+tool_failure_monitor = ToolFailureMonitor()
+
+
+def with_failure_tracking(tool_name: str, tool_func: Callable) -> Callable:
+    """Wrap a tool function with failure tracking and automatic disabling.
+
+    Args:
+        tool_name: Name of the tool (for tracking)
+        tool_func: The async tool function to wrap
+
+    Returns:
+        Wrapped tool function that tracks failures
+    """
+    async def wrapped(*args, **kwargs):
+        # Check if tool is disabled
+        is_disabled, reason = await tool_failure_monitor.is_tool_disabled(tool_name)
+        if is_disabled:
+            logger.warning(f"[ToolMonitor] Blocked execution of disabled tool: {tool_name}")
+            return {
+                "success": False,
+                "error": reason,
+                "tool_disabled": True
+            }
+
+        # Execute the tool
+        try:
+            result = await tool_func(*args, **kwargs)
+
+            # Check if result indicates success
+            # Most tools return dict with 'success' key
+            if isinstance(result, dict):
+                if result.get("success", True):  # Default to True if no success key
+                    await tool_failure_monitor.record_success(tool_name)
+                else:
+                    # Tool returned failure - record it
+                    error_msg = result.get("error", "Unknown error")
+                    await tool_failure_monitor.record_failure(tool_name, error_msg)
+            else:
+                # Non-dict result, assume success
+                await tool_failure_monitor.record_success(tool_name)
+
+            return result
+
+        except Exception as e:
+            # Exception during execution - record failure
+            error_msg = str(e)
+            logger.error(f"[ToolMonitor] Tool {tool_name} raised exception: {error_msg}")
+            await tool_failure_monitor.record_failure(tool_name, error_msg)
+
+            # Return error dict
+            return {
+                "success": False,
+                "error": f"Tool execution failed: {error_msg}"
+            }
+
+    # Preserve function metadata
+    wrapped.__name__ = tool_func.__name__
+    wrapped.__doc__ = tool_func.__doc__
+    return wrapped
+
+
 def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id: str) -> tuple[List[Callable], List[str]]:
     """Create context-bound Discord interaction tools for a mention agent.
 
@@ -1570,23 +1762,24 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
     # Get recent search queries for this channel
     channel_queries = search_cache.get_channel_queries(channel_id)
 
-    # Return tools and channel queries
-    tools = [
-        send_message,
-        reply_to_message,
-        add_reaction_to_message,
-        list_reaction_types,
-        search_web_instant_answer,
-        search_web,
-        open_url,
-        generate_engagement_plan,
-        generate_in_depth_response,
-        start_typing,
-        stop_typing,
-        fetch_new_messages,
-        wait_for_duration,
-        wait_for_messages,
-        stop_monitoring
+    # Wrap all tools with failure tracking
+    # This monitors tool failures globally and automatically disables tools that fail repeatedly
+    wrapped_tools = [
+        with_failure_tracking("send_message", send_message),
+        with_failure_tracking("reply_to_message", reply_to_message),
+        with_failure_tracking("add_reaction_to_message", add_reaction_to_message),
+        with_failure_tracking("list_reaction_types", list_reaction_types),
+        with_failure_tracking("search_web_instant_answer", search_web_instant_answer),
+        with_failure_tracking("search_web", search_web),
+        with_failure_tracking("open_url", open_url),
+        with_failure_tracking("generate_engagement_plan", generate_engagement_plan),
+        with_failure_tracking("generate_in_depth_response", generate_in_depth_response),
+        with_failure_tracking("start_typing", start_typing),
+        with_failure_tracking("stop_typing", stop_typing),
+        with_failure_tracking("fetch_new_messages", fetch_new_messages),
+        with_failure_tracking("wait_for_duration", wait_for_duration),
+        with_failure_tracking("wait_for_messages", wait_for_messages),
+        with_failure_tracking("stop_monitoring", stop_monitoring)
     ]
 
-    return tools, channel_queries
+    return wrapped_tools, channel_queries
