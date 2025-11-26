@@ -388,6 +388,53 @@ class SearchCache:
 search_cache = SearchCache()
 
 
+class InDepthResponseRateLimiter:
+    """Rate limiter for generate_in_depth_response tool to prevent excessive usage."""
+
+    COOLDOWN_SECONDS = 60  # 1 minute cooldown between uses per channel
+
+    def __init__(self):
+        """Initialize the rate limiter."""
+        # Track last usage time per channel
+        # Format: {channel_id: datetime}
+        self.last_usage: Dict[str, datetime] = {}
+        self._lock = asyncio.Lock()
+
+    async def check_and_record(self, channel_id: str) -> Tuple[bool, Optional[float]]:
+        """Check if tool can be used and record usage.
+
+        Args:
+            channel_id: The Discord channel ID
+
+        Returns:
+            Tuple[bool, Optional[float]]: (can_use, seconds_remaining)
+                - can_use: True if tool can be used now, False if on cooldown
+                - seconds_remaining: Seconds until cooldown ends (None if can_use=True)
+        """
+        async with self._lock:
+            now = datetime.now()
+
+            # Check if channel has used this tool recently
+            if channel_id in self.last_usage:
+                last_time = self.last_usage[channel_id]
+                elapsed = (now - last_time).total_seconds()
+
+                # Still on cooldown
+                if elapsed < self.COOLDOWN_SECONDS:
+                    remaining = self.COOLDOWN_SECONDS - elapsed
+                    logger.debug(f"[RateLimit] generate_in_depth_response on cooldown for channel {channel_id}: {remaining:.1f}s remaining")
+                    return False, remaining
+
+            # Allow usage and record timestamp
+            self.last_usage[channel_id] = now
+            logger.debug(f"[RateLimit] generate_in_depth_response allowed for channel {channel_id}")
+            return True, None
+
+
+# Global rate limiter for in-depth responses
+in_depth_response_rate_limiter = InDepthResponseRateLimiter()
+
+
 def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id: str) -> tuple[List[Callable], List[str]]:
     """Create context-bound Discord interaction tools for a mention agent.
 
@@ -1418,6 +1465,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         - Returns a Discord-ready message that you MUST send using send_message()
         - Automatically enforces Discord's 2000 character limit (truncates to 1900 chars max)
         - Designed for technical/coding questions only
+        - **RATE LIMITED**: Can only be used once per minute per channel
 
         **WHEN TO USE**:
         - Technical explanations or detailed answers
@@ -1430,6 +1478,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         - Casual conversation or opinions (you handle these)
         - Simple questions you can answer in 1-2 lines
         - Non-technical topics
+        - When you've already used it in the last minute (will be rate limited)
 
         **IMPORTANT**: After calling this tool, you MUST call send_message(result['response'])
         to actually send the generated response to Discord!
@@ -1447,6 +1496,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             - success: True if generation succeeded, False otherwise
             - response: Discord-ready message (max 1900 chars, properly formatted)
             - error: Error message if success is False
+            - on_cooldown: True if rate limited (only present when success=False)
+            - cooldown_remaining: Seconds until cooldown ends (only present when on_cooldown=True)
 
         Example:
             result = generate_in_depth_response(
@@ -1464,6 +1515,17 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             from smarter_dev.llm_config import get_llm_model
 
             logger.info(f"[Tool] generate_in_depth_response called: {prompt_summary}")
+
+            # Check rate limit
+            can_use, remaining = await in_depth_response_rate_limiter.check_and_record(channel_id)
+            if not can_use:
+                logger.warning(f"[Tool] generate_in_depth_response rate limited in channel {channel_id}: {remaining:.0f}s remaining")
+                return {
+                    "success": False,
+                    "error": f"This tool can only be used once per minute. Please wait {int(remaining)} seconds before trying again.",
+                    "on_cooldown": True,
+                    "cooldown_remaining": int(remaining)
+                }
 
             # Send status message to channel with the provided summary
             try:
