@@ -6,7 +6,7 @@ created as a factory to ensure they can only operate in their intended context.
 """
 
 import logging
-from typing import Callable, List, Optional, Dict, Any
+from typing import Callable, List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 import asyncio
@@ -689,9 +689,11 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             # Check for duplicate message
             if channel_state.is_duplicate_message(content):
                 logger.warning(f"[Tool] Duplicate message detected, rejecting send: {content[:50]}...")
+                # Stop typing indicator
+                channel_state.typing_active = False
                 return {
                     "success": False,
-                    "error": "This message was already sent within the last minute. Please avoid sending duplicate messages."
+                    "error": "DUPLICATE_MESSAGE: This exact message was already sent. The message has been delivered - do not retry sending it. Instead, call wait_for_messages() to continue monitoring the conversation or stop_monitoring() if you're done engaging."
                 }
 
             # Stop typing indicator before sending

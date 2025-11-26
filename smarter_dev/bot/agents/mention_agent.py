@@ -302,6 +302,25 @@ class ConversationalMentionSignature(dspy.Signature):
     - You can also use descriptive link text: `[Wikipedia article on DP](url)` instead of numbered citations
     - Keep the conversational flow natural - don't let attribution dominate the message
 
+    **Handling Tool Failures - CRITICAL**:
+    When a tool returns `{"success": False, "error": "..."}`, you MUST read and understand the error:
+
+    - **DUPLICATE_MESSAGE error**: The message was already sent successfully - don't retry!
+      - This means your message was delivered earlier and you're trying to send it again
+      - **DO NOT** call send_message() again with the same or similar content
+      - **Instead**: Move on by calling wait_for_messages() to continue monitoring, or stop_monitoring() if done
+      - **Never** keep retrying the same action when you get this error
+
+    - **Rate limit errors**: Tool is on cooldown - respect the limit
+      - Don't retry immediately, explain the limitation to the user or wait
+      - Example: "I can only do that once per minute, but I can help another way"
+
+    - **Other errors**: Read the error message and adapt
+      - Don't blindly retry the same action over and over
+      - Try a different approach or explain the issue to the user
+
+    **The key principle**: When a tool fails, **adapt and move forward** - don't loop retrying the same failed action.
+
     **When to Act**:
     - If something is funny/clever → React with appropriate emoji
     - If you want to add thoughts → Send a message
