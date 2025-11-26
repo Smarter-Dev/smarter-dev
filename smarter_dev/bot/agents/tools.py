@@ -140,10 +140,13 @@ class EngagementPlanningSignature(dspy.Signature):
     Guidelines:
     - If the conversation is simple (greetings, quick reactions), recommend simple actions (react + brief message)
     - If research is needed, recommend search_web_instant_answer() or search_web() first
-    - For technical/detailed responses, recommend: `generate_in_depth_response(prompt_summary, prompt)` → `send_message(result['response'])`
+    - For technical/detailed responses, recommend TWO steps:
+      1. `result = generate_in_depth_response(prompt_summary, prompt)` - generates response
+      2. `send_message(result['response'])` - sends it to Discord
       - Use this for: technical explanations, code examples, detailed answers (anything longer than 2-3 lines)
       - First parameter is a brief summary shown to users (e.g., "async/await in Python")
       - Second parameter is the complete prompt with context, research results, and what's needed
+      - Response is automatically limited to 1900 chars (Discord's 2000 char limit)
     - For quick casual responses, Gemini can write them directly
     - If a URL needs analysis, recommend open_url(url, question) with a specific question
     - If engaging with a specific message, recommend reply_to_message(message_id, content)
@@ -203,12 +206,14 @@ class InDepthResponseSignature(dspy.Signature):
     - Explain WHY things work a certain way, not just HOW
     - If there are common gotchas or tips, mention them naturally
 
-    ## Length & Style
-    - Aim for 500-1500 characters - detailed but Discord-friendly
+    ## Length & Style - CRITICAL CONSTRAINT
+    - **ABSOLUTE MAXIMUM: 1900 characters** - Discord has a 2000 character limit, you MUST stay under 1900
+    - Aim for 500-1500 characters for ideal balance of depth and readability
     - Don't pad for length - say what needs saying, then stop
     - It's fine to be direct and concise when that's what's needed
     - Use Discord markdown naturally: **bold** for emphasis, *italic* for nuance
     - Keep it readable - don't cram too much into one block
+    - If you can't fit everything in 1900 chars, prioritize the most important points
 
     ## Context Handling
     - The prompt contains all context (question, conversation, search results)
@@ -217,7 +222,7 @@ class InDepthResponseSignature(dspy.Signature):
     - Reference relevant context from the conversation when it makes sense
 
     Remember: You're not generating a report, you're sharing knowledge in a conversation. Be helpful, be thorough,
-    but most importantly - be human.
+    but most importantly - be human. And ALWAYS stay under 1900 characters or your message will fail to send!
     """
 
     prompt_summary: str = dspy.InputField(
@@ -228,7 +233,7 @@ class InDepthResponseSignature(dspy.Signature):
     )
 
     response: str = dspy.OutputField(
-        description="In-depth, well-formatted response ready to send to Discord. 500-1500 characters, properly formatted with code blocks and markdown as needed."
+        description="In-depth, well-formatted response ready to send to Discord. MUST be under 1900 characters (Discord's limit is 2000). Aim for 500-1500 characters ideally, properly formatted with code blocks and markdown as needed."
     )
 
 
@@ -381,6 +386,260 @@ class SearchCache:
 
 # Global search cache instance
 search_cache = SearchCache()
+
+
+class InDepthResponseRateLimiter:
+    """Rate limiter for generate_in_depth_response tool to prevent excessive usage."""
+
+    COOLDOWN_SECONDS = 60  # 1 minute cooldown between uses per channel
+
+    def __init__(self):
+        """Initialize the rate limiter."""
+        # Track last usage time per channel
+        # Format: {channel_id: datetime}
+        self.last_usage: Dict[str, datetime] = {}
+        self._lock = asyncio.Lock()
+
+    async def check_and_record(self, channel_id: str) -> Tuple[bool, Optional[float]]:
+        """Check if tool can be used and record usage.
+
+        Args:
+            channel_id: The Discord channel ID
+
+        Returns:
+            Tuple[bool, Optional[float]]: (can_use, seconds_remaining)
+                - can_use: True if tool can be used now, False if on cooldown
+                - seconds_remaining: Seconds until cooldown ends (None if can_use=True)
+        """
+        async with self._lock:
+            now = datetime.now()
+
+            # Check if channel has used this tool recently
+            if channel_id in self.last_usage:
+                last_time = self.last_usage[channel_id]
+                elapsed = (now - last_time).total_seconds()
+
+                # Still on cooldown
+                if elapsed < self.COOLDOWN_SECONDS:
+                    remaining = self.COOLDOWN_SECONDS - elapsed
+                    logger.debug(f"[RateLimit] generate_in_depth_response on cooldown for channel {channel_id}: {remaining:.1f}s remaining")
+                    return False, remaining
+
+            # Allow usage and record timestamp
+            self.last_usage[channel_id] = now
+            logger.debug(f"[RateLimit] generate_in_depth_response allowed for channel {channel_id}")
+            return True, None
+
+
+# Global rate limiter for in-depth responses
+in_depth_response_rate_limiter = InDepthResponseRateLimiter()
+
+
+class ToolFailureMonitor:
+    """Global tool failure monitor that disables tools after repeated failures.
+
+    If any tool fails twice within 5 minutes, it is disabled for 5 minutes.
+    This prevents cascading failures and wasted API calls when a tool is having issues.
+    """
+
+    FAILURE_WINDOW_SECONDS = 300  # 5 minutes - window to track failures
+    FAILURE_THRESHOLD = 2  # Number of failures to trigger disable
+    DISABLE_DURATION_SECONDS = 300  # 5 minutes - how long to disable the tool
+
+    def __init__(self):
+        """Initialize the tool failure monitor."""
+        # Track failures per tool: {tool_name: [timestamp1, timestamp2, ...]}
+        self.failures: Dict[str, List[datetime]] = {}
+        # Track when tools are disabled: {tool_name: disable_until_timestamp}
+        self.disabled_until: Dict[str, datetime] = {}
+        self._lock = asyncio.Lock()
+
+    async def is_tool_disabled(self, tool_name: str) -> Tuple[bool, Optional[str]]:
+        """Check if a tool is currently disabled.
+
+        Args:
+            tool_name: Name of the tool to check
+
+        Returns:
+            Tuple[bool, Optional[str]]: (is_disabled, reason)
+                - is_disabled: True if tool is disabled
+                - reason: Human-readable reason why tool is disabled (None if not disabled)
+        """
+        async with self._lock:
+            now = datetime.now()
+
+            # Check if tool is disabled
+            if tool_name in self.disabled_until:
+                disable_until = self.disabled_until[tool_name]
+
+                # Check if disable period has expired
+                if now >= disable_until:
+                    # Re-enable the tool
+                    del self.disabled_until[tool_name]
+                    if tool_name in self.failures:
+                        del self.failures[tool_name]
+                    logger.info(f"[ToolMonitor] Re-enabled tool: {tool_name}")
+                    return False, None
+                else:
+                    # Still disabled
+                    remaining = int((disable_until - now).total_seconds())
+                    reason = f"This tool is temporarily disabled due to recent failures. It will be available again in {remaining} seconds."
+                    logger.debug(f"[ToolMonitor] Tool {tool_name} still disabled: {remaining}s remaining")
+                    return True, reason
+
+            return False, None
+
+    async def record_failure(self, tool_name: str, error: str) -> None:
+        """Record a tool failure and potentially disable the tool.
+
+        Args:
+            tool_name: Name of the tool that failed
+            error: Error message from the failure
+        """
+        async with self._lock:
+            now = datetime.now()
+
+            # Initialize failure list if needed
+            if tool_name not in self.failures:
+                self.failures[tool_name] = []
+
+            # Add this failure
+            self.failures[tool_name].append(now)
+
+            # Remove failures outside the tracking window
+            cutoff_time = now - timedelta(seconds=self.FAILURE_WINDOW_SECONDS)
+            self.failures[tool_name] = [
+                ts for ts in self.failures[tool_name]
+                if ts > cutoff_time
+            ]
+
+            # Check if we've hit the failure threshold
+            if len(self.failures[tool_name]) >= self.FAILURE_THRESHOLD:
+                # Disable the tool
+                disable_until = now + timedelta(seconds=self.DISABLE_DURATION_SECONDS)
+                self.disabled_until[tool_name] = disable_until
+
+                logger.warning(
+                    f"[ToolMonitor] Disabling tool '{tool_name}' for {self.DISABLE_DURATION_SECONDS}s "
+                    f"after {len(self.failures[tool_name])} failures in {self.FAILURE_WINDOW_SECONDS}s. "
+                    f"Last error: {error[:100]}"
+                )
+
+    async def record_success(self, tool_name: str) -> None:
+        """Record a successful tool execution.
+
+        This clears any failure history for the tool.
+
+        Args:
+            tool_name: Name of the tool that succeeded
+        """
+        async with self._lock:
+            # Clear failure history on success
+            if tool_name in self.failures:
+                del self.failures[tool_name]
+                logger.debug(f"[ToolMonitor] Cleared failure history for {tool_name}")
+
+    def get_status(self) -> Dict[str, dict]:
+        """Get current status of all monitored tools.
+
+        Returns:
+            Dict mapping tool names to their status
+        """
+        status = {}
+        now = datetime.now()
+
+        for tool_name in set(list(self.failures.keys()) + list(self.disabled_until.keys())):
+            tool_status = {
+                "failures": len(self.failures.get(tool_name, [])),
+                "disabled": False,
+                "disabled_until": None
+            }
+
+            if tool_name in self.disabled_until:
+                if now < self.disabled_until[tool_name]:
+                    tool_status["disabled"] = True
+                    tool_status["disabled_until"] = self.disabled_until[tool_name].isoformat()
+
+            status[tool_name] = tool_status
+
+        return status
+
+
+# Global tool failure monitor
+tool_failure_monitor = ToolFailureMonitor()
+
+
+def with_failure_tracking(tool_name: str, tool_func: Callable, critical: bool = False) -> Callable:
+    """Wrap a tool function with failure tracking and automatic disabling.
+
+    Args:
+        tool_name: Name of the tool (for tracking)
+        tool_func: The async tool function to wrap
+        critical: If True, tool will never be auto-disabled (for essential communication tools)
+
+    Returns:
+        Wrapped tool function that tracks failures
+    """
+    async def wrapped(*args, **kwargs):
+        # Check if tool is disabled (skip check for critical tools)
+        if not critical:
+            is_disabled, reason = await tool_failure_monitor.is_tool_disabled(tool_name)
+            if is_disabled:
+                logger.warning(f"[ToolMonitor] Blocked execution of disabled tool: {tool_name}")
+                return {
+                    "success": False,
+                    "error": reason,
+                    "tool_disabled": True
+                }
+
+        # Execute the tool
+        try:
+            result = await tool_func(*args, **kwargs)
+
+            # Only track failures for non-critical tools
+            # Critical tools log failures but are never disabled
+            if isinstance(result, dict):
+                if result.get("success", True):  # Default to True if no success key
+                    if not critical:
+                        await tool_failure_monitor.record_success(tool_name)
+                else:
+                    # Tool returned failure
+                    error_msg = result.get("error", "Unknown error")
+                    if critical:
+                        # Critical tool failed - log but don't track for disabling
+                        logger.warning(f"[ToolMonitor] Critical tool {tool_name} failed (not disabled): {error_msg[:100]}")
+                    else:
+                        # Non-critical tool failed - track it
+                        await tool_failure_monitor.record_failure(tool_name, error_msg)
+            else:
+                # Non-dict result, assume success
+                if not critical:
+                    await tool_failure_monitor.record_success(tool_name)
+
+            return result
+
+        except Exception as e:
+            # Exception during execution
+            error_msg = str(e)
+            logger.error(f"[ToolMonitor] Tool {tool_name} raised exception: {error_msg}")
+
+            if critical:
+                # Critical tool exception - log but don't track for disabling
+                logger.error(f"[ToolMonitor] Critical tool {tool_name} raised exception (not disabled): {error_msg[:100]}")
+            else:
+                # Non-critical tool exception - track it
+                await tool_failure_monitor.record_failure(tool_name, error_msg)
+
+            # Return error dict
+            return {
+                "success": False,
+                "error": f"Tool execution failed: {error_msg}"
+            }
+
+    # Preserve function metadata
+    wrapped.__name__ = tool_func.__name__
+    wrapped.__doc__ = tool_func.__doc__
+    return wrapped
 
 
 def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id: str) -> tuple[List[Callable], List[str]]:
@@ -1408,16 +1667,28 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
     async def generate_in_depth_response(prompt_summary: str, prompt: str) -> dict:
         """Generate an in-depth, technical response using Claude Haiku 4.5.
 
-        Use this tool when you need to provide:
+        **WHAT THIS TOOL DOES**:
+        - Generates detailed technical responses using Claude (not you, Gemini)
+        - Returns a Discord-ready message that you MUST send using send_message()
+        - Automatically enforces Discord's 2000 character limit (truncates to 1900 chars max)
+        - Designed for technical/coding questions only
+        - **RATE LIMITED**: Can only be used once per minute per channel
+
+        **WHEN TO USE**:
         - Technical explanations or detailed answers
         - Code examples or programming help
         - Complex topic breakdowns
         - Structured, multi-part responses
-        - Any response that needs more depth than a quick casual message
+        - Any technical question that needs more depth than a quick casual message
 
-        This tool uses Claude Haiku 4.5 to generate well-formatted, Discord-ready responses.
-        You (Gemini) should focus on routing, research, and quick casual messages.
-        Let Claude handle the substantive content generation.
+        **WHEN NOT TO USE**:
+        - Casual conversation or opinions (you handle these)
+        - Simple questions you can answer in 1-2 lines
+        - Non-technical topics
+        - When you've already used it in the last minute (will be rate limited)
+
+        **IMPORTANT**: After calling this tool, you MUST call send_message(result['response'])
+        to actually send the generated response to Discord!
 
         Args:
             prompt_summary: Brief description shown to users (e.g., "async/await in Python", "fixing AttributeError")
@@ -1428,7 +1699,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 - What kind of response is needed (explanation, code example, comparison, etc.)
 
         Returns:
-            dict with success and response fields (response is ready to send to Discord)
+            dict with success and response fields:
+            - success: True if generation succeeded, False otherwise
+            - response: Discord-ready message (max 1900 chars, properly formatted)
+            - error: Error message if success is False
+            - on_cooldown: True if rate limited (only present when success=False)
+            - cooldown_remaining: Seconds until cooldown ends (only present when on_cooldown=True)
 
         Example:
             result = generate_in_depth_response(
@@ -1437,12 +1713,26 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                        Explain async/await in Python with a simple example.
                        Keep it under 1500 characters."
             )
-            # Then use send_message(result['response'])
+            if result['success']:
+                send_message(result['response'])  # YOU MUST DO THIS!
+            else:
+                send_message(f"Sorry, I had trouble generating a response: {result['error']}")
         """
         try:
             from smarter_dev.llm_config import get_llm_model
 
             logger.info(f"[Tool] generate_in_depth_response called: {prompt_summary}")
+
+            # Check rate limit
+            can_use, remaining = await in_depth_response_rate_limiter.check_and_record(channel_id)
+            if not can_use:
+                logger.warning(f"[Tool] generate_in_depth_response rate limited in channel {channel_id}: {remaining:.0f}s remaining")
+                return {
+                    "success": False,
+                    "error": f"This tool can only be used once per minute. Please wait {int(remaining)} seconds before trying again.",
+                    "on_cooldown": True,
+                    "cooldown_remaining": int(remaining)
+                }
 
             # Send status message to channel with the provided summary
             try:
@@ -1458,11 +1748,23 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 predictor = dspy.Predict(InDepthResponseSignature)
                 result = predictor(prompt_summary=prompt_summary, prompt=prompt)
 
-            logger.info(f"[Tool] Generated in-depth response: {len(result.response)} chars")
+            response_text = result.response
+            original_length = len(response_text)
+
+            # Enforce Discord's 2000 character limit with safety buffer
+            MAX_LENGTH = 1900
+            if len(response_text) > MAX_LENGTH:
+                logger.warning(f"[Tool] Response too long ({original_length} chars), truncating to {MAX_LENGTH}")
+                # Truncate and add indication
+                response_text = response_text[:MAX_LENGTH-50] + "\n\n...(response truncated to fit Discord's limit)"
+
+            logger.info(f"[Tool] Generated in-depth response: {len(response_text)} chars (original: {original_length} chars)")
 
             return {
                 "success": True,
-                "response": result.response
+                "response": response_text,
+                "original_length": original_length,
+                "truncated": len(response_text) < original_length
             }
 
         except Exception as e:
@@ -1475,23 +1777,25 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
     # Get recent search queries for this channel
     channel_queries = search_cache.get_channel_queries(channel_id)
 
-    # Return tools and channel queries
-    tools = [
-        send_message,
-        reply_to_message,
-        add_reaction_to_message,
-        list_reaction_types,
-        search_web_instant_answer,
-        search_web,
-        open_url,
-        generate_engagement_plan,
-        generate_in_depth_response,
-        start_typing,
-        stop_typing,
-        fetch_new_messages,
-        wait_for_duration,
-        wait_for_messages,
-        stop_monitoring
+    # Wrap all tools with failure tracking
+    # This monitors tool failures globally and automatically disables tools that fail repeatedly
+    # Critical tools (marked with critical=True) are never auto-disabled to ensure bot can always communicate
+    wrapped_tools = [
+        with_failure_tracking("send_message", send_message, critical=True),  # Critical: core messaging
+        with_failure_tracking("reply_to_message", reply_to_message, critical=True),  # Critical: core messaging
+        with_failure_tracking("add_reaction_to_message", add_reaction_to_message, critical=True),  # Critical: core interaction
+        with_failure_tracking("list_reaction_types", list_reaction_types),  # Non-critical: can fail without breaking bot
+        with_failure_tracking("search_web_instant_answer", search_web_instant_answer),  # Non-critical: external service
+        with_failure_tracking("search_web", search_web),  # Non-critical: external service
+        with_failure_tracking("open_url", open_url),  # Non-critical: external service
+        with_failure_tracking("generate_engagement_plan", generate_engagement_plan),  # Non-critical: can work without planning
+        with_failure_tracking("generate_in_depth_response", generate_in_depth_response),  # Non-critical: agent can write responses itself
+        with_failure_tracking("start_typing", start_typing, critical=True),  # Critical: essential for UX
+        with_failure_tracking("stop_typing", stop_typing, critical=True),  # Critical: essential for UX
+        with_failure_tracking("fetch_new_messages", fetch_new_messages, critical=True),  # Critical: needed for conversation flow
+        with_failure_tracking("wait_for_duration", wait_for_duration, critical=True),  # Critical: timing control
+        with_failure_tracking("wait_for_messages", wait_for_messages, critical=True),  # Critical: conversation monitoring
+        with_failure_tracking("stop_monitoring", stop_monitoring, critical=True)  # Critical: conversation control
     ]
 
-    return tools, channel_queries
+    return wrapped_tools, channel_queries
