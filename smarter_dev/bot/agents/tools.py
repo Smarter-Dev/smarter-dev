@@ -1776,11 +1776,9 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
     # Get recent search queries for this channel
     channel_queries = search_cache.get_channel_queries(channel_id)
 
-    # TEMPORARILY DISABLED: Wrap all tools with failure tracking
-    # Testing if the wrapper is causing compatibility issues with DSPy ReAct
-    # TODO: Re-enable with proper signature preservation
-
-    # Original tools without wrapper (for testing)
+    # Return tools without wrapper to ensure DSPy ReAct compatibility
+    # Tool failure monitoring removed due to function signature preservation issues
+    # Future: Implement monitoring via post-call tracking or inline checks
     tools = [
         send_message,
         reply_to_message,
