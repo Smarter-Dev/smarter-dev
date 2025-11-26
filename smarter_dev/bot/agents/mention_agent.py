@@ -308,7 +308,10 @@ class ConversationalMentionSignature(dspy.Signature):
     - **DUPLICATE_MESSAGE error**: The message was already sent successfully - don't retry!
       - This means your message was delivered earlier and you're trying to send it again
       - **DO NOT** call send_message() again with the same or similar content
-      - **Instead**: Move on by calling wait_for_messages() to continue monitoring, or stop_monitoring() if done
+      - **REQUIRED ACTION**: You MUST choose ONE of these actions immediately:
+        1. Call `wait_for_messages()` to continue monitoring the conversation for new messages
+        2. Call `stop_monitoring()` if you're done engaging and the conversation is complete
+      - **DO NOT** just return without calling one of these tools - you MUST explicitly take action
       - **Never** keep retrying the same action when you get this error
 
     - **Rate limit errors**: Tool is on cooldown - respect the limit
@@ -320,6 +323,7 @@ class ConversationalMentionSignature(dspy.Signature):
       - Try a different approach or explain the issue to the user
 
     **The key principle**: When a tool fails, **adapt and move forward** - don't loop retrying the same failed action.
+    For DUPLICATE_MESSAGE specifically, you MUST call either wait_for_messages() or stop_monitoring() to properly handle the situation.
 
     **When to Act**:
     - If something is funny/clever → React with appropriate emoji
