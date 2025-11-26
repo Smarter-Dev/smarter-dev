@@ -6,7 +6,7 @@ created as a factory to ensure they can only operate in their intended context.
 """
 
 import logging
-from typing import Callable, List, Optional, Dict, Any
+from typing import Callable, List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
 from urllib.parse import urlparse
 import asyncio
@@ -689,9 +689,11 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             # Check for duplicate message
             if channel_state.is_duplicate_message(content):
                 logger.warning(f"[Tool] Duplicate message detected, rejecting send: {content[:50]}...")
+                # Stop typing indicator
+                channel_state.typing_active = False
                 return {
                     "success": False,
-                    "error": "This message was already sent within the last minute. Please avoid sending duplicate messages."
+                    "error": "DUPLICATE_MESSAGE: This exact message was already sent. The message has been delivered - do not retry sending it. Instead, call wait_for_messages() to continue monitoring the conversation or stop_monitoring() if you're done engaging."
                 }
 
             # Stop typing indicator before sending
@@ -902,6 +904,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             search_web_instant_answer("What is the capital of France?")
             -> {"success": True, "answer": "Paris - ...", "url": "..."}
         """
+        # Check if tool is disabled
+        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("search_web_instant_answer")
+        if is_disabled:
+            logger.warning(f"[Tool] search_web_instant_answer is disabled")
+            return {"success": False, "error": reason, "tool_disabled": True}
+
         try:
             logger.debug(f"[Tool] search_web_instant_answer called with query: {query}")
 
@@ -942,13 +950,18 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             search_cache.set(query, response, cache_type="quick")
             search_cache.add_channel_query(channel_id, query)
 
+            # Record success
+            await tool_failure_monitor.record_success("search_web_instant_answer")
             return response
 
         except Exception as e:
             logger.error(f"[Tool] search_web_instant_answer failed: {e}")
+            error_msg = str(e)
+            # Record failure
+            await tool_failure_monitor.record_failure("search_web_instant_answer", error_msg)
             return {
                 "success": False,
-                "error": str(e)
+                "error": error_msg
             }
 
     async def search_web(query: str, max_results: int = 3) -> dict:
@@ -974,6 +987,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             search_web("machine learning frameworks")
             -> {"success": True, "results": [{"title": "...", "url": "...", "snippet": "..."}]}
         """
+        # Check if tool is disabled
+        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("search_web")
+        if is_disabled:
+            logger.warning(f"[Tool] search_web is disabled")
+            return {"success": False, "error": reason, "tool_disabled": True}
+
         try:
             # Limit to max 5 results to keep responses Discord-friendly
             max_results = min(max_results, 5)
@@ -1030,13 +1049,18 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             search_cache.set(cache_key, response, cache_type="full")
             search_cache.add_channel_query(channel_id, query)
 
+            # Record success
+            await tool_failure_monitor.record_success("search_web")
             return response
 
         except Exception as e:
             logger.error(f"[Tool] search_web failed for query '{query}': {e}", exc_info=True)
+            error_msg = str(e)
+            # Record failure
+            await tool_failure_monitor.record_failure("search_web", error_msg)
             return {
                 "success": False,
-                "error": str(e)
+                "error": error_msg
             }
 
     async def open_url(url: str, question: str) -> dict:
@@ -1060,6 +1084,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             open_url("https://en.wikipedia.org/wiki/Python_(programming_language)", "When was Python first released?")
             -> {"success": True, "answer": "Python was first released in 1991...", "url": "..."}
         """
+        # Check if tool is disabled
+        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("open_url")
+        if is_disabled:
+            logger.warning(f"[Tool] open_url is disabled")
+            return {"success": False, "error": reason, "tool_disabled": True}
+
         try:
             logger.debug(f"[Tool] open_url called with url: {url}, question: {question}")
 
@@ -1242,6 +1272,9 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             search_cache.set_url_answer(url, question, answer)
             logger.debug(f"[Tool] Extracted and cached answer: {len(answer)} chars")
 
+            # Record success
+            await tool_failure_monitor.record_success("open_url")
+
             return {
                 "success": True,
                 "answer": answer,
@@ -1250,9 +1283,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
         except Exception as e:
             logger.error(f"[Tool] open_url failed: {e}", exc_info=True)
+            error_msg = str(e)
+            # Record failure
+            await tool_failure_monitor.record_failure("open_url", error_msg)
             return {
                 "success": False,
-                "error": str(e)
+                "error": error_msg
             }
 
     async def start_typing() -> dict:
@@ -1612,6 +1648,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             plan = generate_engagement_plan()
             # Then follow the recommended_actions in the plan
         """
+        # Check if tool is disabled
+        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("generate_engagement_plan")
+        if is_disabled:
+            logger.warning(f"[Tool] generate_engagement_plan is disabled")
+            return {"success": False, "error": reason, "tool_disabled": True}
+
         try:
             from smarter_dev.llm_config import get_llm_model
             from smarter_dev.bot.utils.messages import ConversationContextBuilder
@@ -1649,6 +1691,9 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             logger.info(f"[Tool] Planning agent generated plan: {result.summary[:100]}...")
 
+            # Record success
+            await tool_failure_monitor.record_success("generate_engagement_plan")
+
             return {
                 "success": True,
                 "summary": result.summary,
@@ -1658,9 +1703,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
         except Exception as e:
             logger.error(f"[Tool] generate_engagement_plan failed: {e}", exc_info=True)
+            error_msg = str(e)
+            # Record failure
+            await tool_failure_monitor.record_failure("generate_engagement_plan", error_msg)
             return {
                 "success": False,
-                "error": f"Failed to generate plan: {str(e)}"
+                "error": f"Failed to generate plan: {error_msg}"
             }
 
     async def generate_in_depth_response(prompt_summary: str, prompt: str) -> dict:
@@ -1717,6 +1765,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             else:
                 send_message(f"Sorry, I had trouble generating a response: {result['error']}")
         """
+        # Check if tool is disabled (before rate limit check to avoid consuming quota)
+        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("generate_in_depth_response")
+        if is_disabled:
+            logger.warning(f"[Tool] generate_in_depth_response is disabled")
+            return {"success": False, "error": reason, "tool_disabled": True}
+
         try:
             from smarter_dev.llm_config import get_llm_model
 
@@ -1759,6 +1813,9 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             logger.info(f"[Tool] Generated in-depth response: {len(response_text)} chars (original: {original_length} chars)")
 
+            # Record success
+            await tool_failure_monitor.record_success("generate_in_depth_response")
+
             return {
                 "success": True,
                 "response": response_text,
@@ -1768,33 +1825,36 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
         except Exception as e:
             logger.error(f"[Tool] generate_in_depth_response failed: {e}", exc_info=True)
+            error_msg = str(e)
+            # Record failure
+            await tool_failure_monitor.record_failure("generate_in_depth_response", error_msg)
             return {
                 "success": False,
-                "error": f"Failed to generate response: {str(e)}"
+                "error": f"Failed to generate response: {error_msg}"
             }
 
     # Get recent search queries for this channel
     channel_queries = search_cache.get_channel_queries(channel_id)
 
-    # Wrap all tools with failure tracking
-    # This monitors tool failures globally and automatically disables tools that fail repeatedly
-    # Critical tools (marked with critical=True) are never auto-disabled to ensure bot can always communicate
-    wrapped_tools = [
-        with_failure_tracking("send_message", send_message, critical=True),  # Critical: core messaging
-        with_failure_tracking("reply_to_message", reply_to_message, critical=True),  # Critical: core messaging
-        with_failure_tracking("add_reaction_to_message", add_reaction_to_message, critical=True),  # Critical: core interaction
-        with_failure_tracking("list_reaction_types", list_reaction_types),  # Non-critical: can fail without breaking bot
-        with_failure_tracking("search_web_instant_answer", search_web_instant_answer),  # Non-critical: external service
-        with_failure_tracking("search_web", search_web),  # Non-critical: external service
-        with_failure_tracking("open_url", open_url),  # Non-critical: external service
-        with_failure_tracking("generate_engagement_plan", generate_engagement_plan),  # Non-critical: can work without planning
-        with_failure_tracking("generate_in_depth_response", generate_in_depth_response),  # Non-critical: agent can write responses itself
-        with_failure_tracking("start_typing", start_typing, critical=True),  # Critical: essential for UX
-        with_failure_tracking("stop_typing", stop_typing, critical=True),  # Critical: essential for UX
-        with_failure_tracking("fetch_new_messages", fetch_new_messages, critical=True),  # Critical: needed for conversation flow
-        with_failure_tracking("wait_for_duration", wait_for_duration, critical=True),  # Critical: timing control
-        with_failure_tracking("wait_for_messages", wait_for_messages, critical=True),  # Critical: conversation monitoring
-        with_failure_tracking("stop_monitoring", stop_monitoring, critical=True)  # Critical: conversation control
+    # Return tools without wrapper to ensure DSPy ReAct compatibility
+    # Tool failure monitoring removed due to function signature preservation issues
+    # Future: Implement monitoring via post-call tracking or inline checks
+    tools = [
+        send_message,
+        reply_to_message,
+        add_reaction_to_message,
+        list_reaction_types,
+        search_web_instant_answer,
+        search_web,
+        open_url,
+        generate_engagement_plan,
+        generate_in_depth_response,
+        start_typing,
+        stop_typing,
+        fetch_new_messages,
+        wait_for_duration,
+        wait_for_messages,
+        stop_monitoring
     ]
 
-    return wrapped_tools, channel_queries
+    return tools, channel_queries
