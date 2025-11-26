@@ -902,6 +902,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             search_web_instant_answer("What is the capital of France?")
             -> {"success": True, "answer": "Paris - ...", "url": "..."}
         """
+        # Check if tool is disabled
+        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("search_web_instant_answer")
+        if is_disabled:
+            logger.warning(f"[Tool] search_web_instant_answer is disabled")
+            return {"success": False, "error": reason, "tool_disabled": True}
+
         try:
             logger.debug(f"[Tool] search_web_instant_answer called with query: {query}")
 
@@ -942,13 +948,18 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             search_cache.set(query, response, cache_type="quick")
             search_cache.add_channel_query(channel_id, query)
 
+            # Record success
+            await tool_failure_monitor.record_success("search_web_instant_answer")
             return response
 
         except Exception as e:
             logger.error(f"[Tool] search_web_instant_answer failed: {e}")
+            error_msg = str(e)
+            # Record failure
+            await tool_failure_monitor.record_failure("search_web_instant_answer", error_msg)
             return {
                 "success": False,
-                "error": str(e)
+                "error": error_msg
             }
 
     async def search_web(query: str, max_results: int = 3) -> dict:
@@ -974,6 +985,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             search_web("machine learning frameworks")
             -> {"success": True, "results": [{"title": "...", "url": "...", "snippet": "..."}]}
         """
+        # Check if tool is disabled
+        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("search_web")
+        if is_disabled:
+            logger.warning(f"[Tool] search_web is disabled")
+            return {"success": False, "error": reason, "tool_disabled": True}
+
         try:
             # Limit to max 5 results to keep responses Discord-friendly
             max_results = min(max_results, 5)
@@ -1030,13 +1047,18 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             search_cache.set(cache_key, response, cache_type="full")
             search_cache.add_channel_query(channel_id, query)
 
+            # Record success
+            await tool_failure_monitor.record_success("search_web")
             return response
 
         except Exception as e:
             logger.error(f"[Tool] search_web failed for query '{query}': {e}", exc_info=True)
+            error_msg = str(e)
+            # Record failure
+            await tool_failure_monitor.record_failure("search_web", error_msg)
             return {
                 "success": False,
-                "error": str(e)
+                "error": error_msg
             }
 
     async def open_url(url: str, question: str) -> dict:
@@ -1060,6 +1082,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             open_url("https://en.wikipedia.org/wiki/Python_(programming_language)", "When was Python first released?")
             -> {"success": True, "answer": "Python was first released in 1991...", "url": "..."}
         """
+        # Check if tool is disabled
+        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("open_url")
+        if is_disabled:
+            logger.warning(f"[Tool] open_url is disabled")
+            return {"success": False, "error": reason, "tool_disabled": True}
+
         try:
             logger.debug(f"[Tool] open_url called with url: {url}, question: {question}")
 
@@ -1242,6 +1270,9 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             search_cache.set_url_answer(url, question, answer)
             logger.debug(f"[Tool] Extracted and cached answer: {len(answer)} chars")
 
+            # Record success
+            await tool_failure_monitor.record_success("open_url")
+
             return {
                 "success": True,
                 "answer": answer,
@@ -1250,9 +1281,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
         except Exception as e:
             logger.error(f"[Tool] open_url failed: {e}", exc_info=True)
+            error_msg = str(e)
+            # Record failure
+            await tool_failure_monitor.record_failure("open_url", error_msg)
             return {
                 "success": False,
-                "error": str(e)
+                "error": error_msg
             }
 
     async def start_typing() -> dict:
@@ -1612,6 +1646,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             plan = generate_engagement_plan()
             # Then follow the recommended_actions in the plan
         """
+        # Check if tool is disabled
+        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("generate_engagement_plan")
+        if is_disabled:
+            logger.warning(f"[Tool] generate_engagement_plan is disabled")
+            return {"success": False, "error": reason, "tool_disabled": True}
+
         try:
             from smarter_dev.llm_config import get_llm_model
             from smarter_dev.bot.utils.messages import ConversationContextBuilder
@@ -1649,6 +1689,9 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             logger.info(f"[Tool] Planning agent generated plan: {result.summary[:100]}...")
 
+            # Record success
+            await tool_failure_monitor.record_success("generate_engagement_plan")
+
             return {
                 "success": True,
                 "summary": result.summary,
@@ -1658,9 +1701,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
         except Exception as e:
             logger.error(f"[Tool] generate_engagement_plan failed: {e}", exc_info=True)
+            error_msg = str(e)
+            # Record failure
+            await tool_failure_monitor.record_failure("generate_engagement_plan", error_msg)
             return {
                 "success": False,
-                "error": f"Failed to generate plan: {str(e)}"
+                "error": f"Failed to generate plan: {error_msg}"
             }
 
     async def generate_in_depth_response(prompt_summary: str, prompt: str) -> dict:
@@ -1717,6 +1763,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             else:
                 send_message(f"Sorry, I had trouble generating a response: {result['error']}")
         """
+        # Check if tool is disabled (before rate limit check to avoid consuming quota)
+        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("generate_in_depth_response")
+        if is_disabled:
+            logger.warning(f"[Tool] generate_in_depth_response is disabled")
+            return {"success": False, "error": reason, "tool_disabled": True}
+
         try:
             from smarter_dev.llm_config import get_llm_model
 
@@ -1759,6 +1811,9 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             logger.info(f"[Tool] Generated in-depth response: {len(response_text)} chars (original: {original_length} chars)")
 
+            # Record success
+            await tool_failure_monitor.record_success("generate_in_depth_response")
+
             return {
                 "success": True,
                 "response": response_text,
@@ -1768,9 +1823,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
         except Exception as e:
             logger.error(f"[Tool] generate_in_depth_response failed: {e}", exc_info=True)
+            error_msg = str(e)
+            # Record failure
+            await tool_failure_monitor.record_failure("generate_in_depth_response", error_msg)
             return {
                 "success": False,
-                "error": f"Failed to generate response: {str(e)}"
+                "error": f"Failed to generate response: {error_msg}"
             }
 
     # Get recent search queries for this channel
