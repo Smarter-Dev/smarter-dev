@@ -140,10 +140,13 @@ class EngagementPlanningSignature(dspy.Signature):
     Guidelines:
     - If the conversation is simple (greetings, quick reactions), recommend simple actions (react + brief message)
     - If research is needed, recommend search_web_instant_answer() or search_web() first
-    - For technical/detailed responses, recommend: `generate_in_depth_response(prompt_summary, prompt)` → `send_message(result['response'])`
+    - For technical/detailed responses, recommend TWO steps:
+      1. `result = generate_in_depth_response(prompt_summary, prompt)` - generates response
+      2. `send_message(result['response'])` - sends it to Discord
       - Use this for: technical explanations, code examples, detailed answers (anything longer than 2-3 lines)
       - First parameter is a brief summary shown to users (e.g., "async/await in Python")
       - Second parameter is the complete prompt with context, research results, and what's needed
+      - Response is automatically limited to 1900 chars (Discord's 2000 char limit)
     - For quick casual responses, Gemini can write them directly
     - If a URL needs analysis, recommend open_url(url, question) with a specific question
     - If engaging with a specific message, recommend reply_to_message(message_id, content)
@@ -203,12 +206,14 @@ class InDepthResponseSignature(dspy.Signature):
     - Explain WHY things work a certain way, not just HOW
     - If there are common gotchas or tips, mention them naturally
 
-    ## Length & Style
-    - Aim for 500-1500 characters - detailed but Discord-friendly
+    ## Length & Style - CRITICAL CONSTRAINT
+    - **ABSOLUTE MAXIMUM: 1900 characters** - Discord has a 2000 character limit, you MUST stay under 1900
+    - Aim for 500-1500 characters for ideal balance of depth and readability
     - Don't pad for length - say what needs saying, then stop
     - It's fine to be direct and concise when that's what's needed
     - Use Discord markdown naturally: **bold** for emphasis, *italic* for nuance
     - Keep it readable - don't cram too much into one block
+    - If you can't fit everything in 1900 chars, prioritize the most important points
 
     ## Context Handling
     - The prompt contains all context (question, conversation, search results)
@@ -217,7 +222,7 @@ class InDepthResponseSignature(dspy.Signature):
     - Reference relevant context from the conversation when it makes sense
 
     Remember: You're not generating a report, you're sharing knowledge in a conversation. Be helpful, be thorough,
-    but most importantly - be human.
+    but most importantly - be human. And ALWAYS stay under 1900 characters or your message will fail to send!
     """
 
     prompt_summary: str = dspy.InputField(
@@ -228,7 +233,7 @@ class InDepthResponseSignature(dspy.Signature):
     )
 
     response: str = dspy.OutputField(
-        description="In-depth, well-formatted response ready to send to Discord. 500-1500 characters, properly formatted with code blocks and markdown as needed."
+        description="In-depth, well-formatted response ready to send to Discord. MUST be under 1900 characters (Discord's limit is 2000). Aim for 500-1500 characters ideally, properly formatted with code blocks and markdown as needed."
     )
 
 
@@ -1408,16 +1413,26 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
     async def generate_in_depth_response(prompt_summary: str, prompt: str) -> dict:
         """Generate an in-depth, technical response using Claude Haiku 4.5.
 
-        Use this tool when you need to provide:
+        **WHAT THIS TOOL DOES**:
+        - Generates detailed technical responses using Claude (not you, Gemini)
+        - Returns a Discord-ready message that you MUST send using send_message()
+        - Automatically enforces Discord's 2000 character limit (truncates to 1900 chars max)
+        - Designed for technical/coding questions only
+
+        **WHEN TO USE**:
         - Technical explanations or detailed answers
         - Code examples or programming help
         - Complex topic breakdowns
         - Structured, multi-part responses
-        - Any response that needs more depth than a quick casual message
+        - Any technical question that needs more depth than a quick casual message
 
-        This tool uses Claude Haiku 4.5 to generate well-formatted, Discord-ready responses.
-        You (Gemini) should focus on routing, research, and quick casual messages.
-        Let Claude handle the substantive content generation.
+        **WHEN NOT TO USE**:
+        - Casual conversation or opinions (you handle these)
+        - Simple questions you can answer in 1-2 lines
+        - Non-technical topics
+
+        **IMPORTANT**: After calling this tool, you MUST call send_message(result['response'])
+        to actually send the generated response to Discord!
 
         Args:
             prompt_summary: Brief description shown to users (e.g., "async/await in Python", "fixing AttributeError")
@@ -1428,7 +1443,10 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 - What kind of response is needed (explanation, code example, comparison, etc.)
 
         Returns:
-            dict with success and response fields (response is ready to send to Discord)
+            dict with success and response fields:
+            - success: True if generation succeeded, False otherwise
+            - response: Discord-ready message (max 1900 chars, properly formatted)
+            - error: Error message if success is False
 
         Example:
             result = generate_in_depth_response(
@@ -1437,7 +1455,10 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                        Explain async/await in Python with a simple example.
                        Keep it under 1500 characters."
             )
-            # Then use send_message(result['response'])
+            if result['success']:
+                send_message(result['response'])  # YOU MUST DO THIS!
+            else:
+                send_message(f"Sorry, I had trouble generating a response: {result['error']}")
         """
         try:
             from smarter_dev.llm_config import get_llm_model
@@ -1458,11 +1479,23 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 predictor = dspy.Predict(InDepthResponseSignature)
                 result = predictor(prompt_summary=prompt_summary, prompt=prompt)
 
-            logger.info(f"[Tool] Generated in-depth response: {len(result.response)} chars")
+            response_text = result.response
+            original_length = len(response_text)
+
+            # Enforce Discord's 2000 character limit with safety buffer
+            MAX_LENGTH = 1900
+            if len(response_text) > MAX_LENGTH:
+                logger.warning(f"[Tool] Response too long ({original_length} chars), truncating to {MAX_LENGTH}")
+                # Truncate and add indication
+                response_text = response_text[:MAX_LENGTH-50] + "\n\n...(response truncated to fit Discord's limit)"
+
+            logger.info(f"[Tool] Generated in-depth response: {len(response_text)} chars (original: {original_length} chars)")
 
             return {
                 "success": True,
-                "response": result.response
+                "response": response_text,
+                "original_length": original_length,
+                "truncated": len(response_text) < original_length
             }
 
         except Exception as e:
