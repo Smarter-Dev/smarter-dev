@@ -259,7 +259,7 @@ async def _handle_direct_squad_join(
         username = None
         try:
             username = ctx.user.display_name or ctx.user.username
-        except:
+        except Exception:
             pass  # Fall back to None
 
         # Process squad join (exact same call as dropdown)
@@ -499,7 +499,7 @@ async def info_command(ctx: lightbulb.Context) -> None:
                         # Create enhanced member with Discord name
                         from dataclasses import replace
                         member = replace(member, username=discord_member.display_name)
-                except:
+                except Exception:
                     pass
             enhanced_members.append(member)
 
@@ -616,7 +616,7 @@ async def members_command(ctx: lightbulb.Context) -> None:
                         # Try to fetch user from Discord
                         user = await ctx.bot.rest.fetch_user(int(member.user_id))
                         enhanced_member = replace(member, username=user.username)
-                except:
+                except Exception:
                     pass
             enhanced_members.append(enhanced_member)
 

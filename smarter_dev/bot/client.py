@@ -1213,7 +1213,7 @@ async def run_bot() -> None:
                             embed=embed,
                             components=[]
                         )
-                    except:
+                    except Exception:
                         pass  # Interaction might already be responded to
             else:
                 logger.warning(f"No active view found for {custom_id} interaction from user {user_id}")
@@ -1226,7 +1226,7 @@ async def run_bot() -> None:
                         embed=embed,
                         components=[]
                     )
-                except:
+                except Exception:
                     pass  # Interaction might already be responded to
 
     @bot.listen()
@@ -1244,7 +1244,7 @@ async def run_bot() -> None:
             parent_channel = bot.cache.get_guild_channel(event.thread.parent_id)
             if not parent_channel or not is_forum_channel(parent_channel):
                 return
-        except:
+        except Exception:
             return
 
         # Create a mock event object for the handler
@@ -1269,7 +1269,7 @@ async def run_bot() -> None:
             parent_channel = bot.cache.get_guild_channel(event.thread.parent_id)
             if not parent_channel or not is_forum_channel(parent_channel):
                 return
-        except:
+        except Exception:
             return
 
         # This could be when the initial message is added to a forum thread

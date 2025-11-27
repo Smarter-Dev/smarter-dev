@@ -105,7 +105,7 @@ async def balance_command(ctx: lightbulb.Context) -> None:
             generator = get_generator()
             image_file = generator.create_error_embed("Failed to retrieve balance. Please try again later.")
             await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
-        except:
+        except Exception:
             pass  # Interaction was already responded to
         return
     except Exception as e:
@@ -115,7 +115,7 @@ async def balance_command(ctx: lightbulb.Context) -> None:
             generator = get_generator()
             image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
             await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
-        except:
+        except Exception:
             pass  # Interaction was already responded to
         return
 
@@ -198,14 +198,14 @@ async def send_command(ctx: lightbulb.Context) -> None:
         try:
             sender_member = ctx.get_guild().get_member(ctx.user.id)
             sender_display_name = sender_member.display_name if sender_member else ctx.user.username
-        except:
+        except Exception:
             sender_display_name = ctx.user.display_name or ctx.user.username
 
         # Get receiver's display name (nickname if set, otherwise username)
         try:
             receiver_member = ctx.get_guild().get_member(user.id)
             receiver_display_name = receiver_member.display_name if receiver_member else user.username
-        except:
+        except Exception:
             receiver_display_name = user.display_name or user.username
 
         description = f"{sender_display_name} sent {amount:,} bytes to {receiver_display_name}"
@@ -290,7 +290,7 @@ async def leaderboard_command(ctx: lightbulb.Context) -> None:
             try:
                 member = ctx.get_guild().get_member(int(entry.user_id))
                 user_display_names[entry.user_id] = member.display_name if member else f"User {entry.user_id[:8]}"
-            except:
+            except Exception:
                 user_display_names[entry.user_id] = f"User {entry.user_id[:8]}"
 
         # Use image embed for 10 or fewer users, Discord embed for more

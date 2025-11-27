@@ -316,7 +316,7 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
 
             # Add challenge breakdown sections
             if challenges_breakdown:
-                for i, challenge in enumerate(challenges_breakdown[:8]):  # Show up to 8 challenges
+                for _i, challenge in enumerate(challenges_breakdown[:8]):  # Show up to 8 challenges
                     challenge_title = challenge.get("challenge_title", "Unknown Challenge")
                     submissions = challenge.get("submissions", [])
 
@@ -608,7 +608,7 @@ async def event_command(ctx: lightbulb.Context) -> None:
             await ctx.edit_last_response(
                 "A fatal error occurred. Please try again later."
             )
-        except:
+        except Exception:
             pass
 
 

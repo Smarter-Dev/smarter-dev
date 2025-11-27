@@ -443,7 +443,7 @@ async def handle_leaderboard_share_interaction(event: hikari.InteractionCreateEv
             try:
                 member = event.interaction.get_guild().get_member(int(entry.user_id))
                 user_display_names[entry.user_id] = member.display_name if member else f"User {entry.user_id[:8]}"
-            except:
+            except Exception:
                 user_display_names[entry.user_id] = f"User {entry.user_id[:8]}"
 
         # Generate the leaderboard image

@@ -8,7 +8,6 @@ error handling, and caching strategies.
 from __future__ import annotations
 
 import logging
-from abc import ABC
 from datetime import UTC
 from typing import Any
 from typing import Protocol
@@ -230,7 +229,7 @@ class CacheManagerProtocol(Protocol):
         ...
 
 
-class BaseService(ABC):
+class BaseService:
     """Abstract base class for all bot services.
 
     This class provides common functionality for all services including:
