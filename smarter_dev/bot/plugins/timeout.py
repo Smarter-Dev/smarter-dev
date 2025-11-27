@@ -145,7 +145,7 @@ async def timeout_user(ctx: lightbulb.Context) -> None:
         # Generate AI-processed public message
         try:
             logger.info(f"Starting AI message processing for timeout of {target_user.username}")
-            from smarter_dev.bot.agent import ForumMonitorAgent
+            from smarter_dev.bot.agents.forum_agent import ForumMonitorAgent
             ai_agent = ForumMonitorAgent()
             
             # Create a signature for timeout message processing

@@ -1109,7 +1109,7 @@ async def run_bot() -> None:
                         # Get or create streak celebration agent
                         streak_agent = getattr(bot, "d", {}).get("streak_celebration_agent")
                         if not streak_agent:
-                            from smarter_dev.bot.agent import StreakCelebrationAgent
+                            from smarter_dev.bot.agents.streak_agent import StreakCelebrationAgent
                             streak_agent = StreakCelebrationAgent()
                             if not hasattr(bot, "d"):
                                 bot.d = {}
