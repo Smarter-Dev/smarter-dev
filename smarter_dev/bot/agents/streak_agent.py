@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
+
 import dspy
-from typing import Tuple
 
 from smarter_dev.bot.agents.base import BaseAgent
-from smarter_dev.llm_config import get_llm_model, get_model_info
+from smarter_dev.llm_config import get_llm_model
+from smarter_dev.llm_config import get_model_info
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class StreakCelebrationAgent(BaseAgent):
         streak_days: int,
         user_id: int,
         user_message: str
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Generate a celebratory message for streak bonuses.
 
         Args:

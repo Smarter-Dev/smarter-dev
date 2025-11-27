@@ -185,6 +185,8 @@ ignore_missing_imports = true
 [tool.ruff]
 target-version = "py311"
 line-length = 88
+
+[tool.ruff.lint]
 select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
@@ -201,10 +203,10 @@ ignore = [
     "B905",  # zip() without an explicit strict= parameter
 ]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B018", "B019"]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["smarter_dev"]
 force-single-line = true
 

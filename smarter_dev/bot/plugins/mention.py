@@ -7,19 +7,20 @@ loop using wait_for_messages, fetch_new_messages, and other flow control tools.
 
 from __future__ import annotations
 
-import hikari
-import lightbulb
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional, TYPE_CHECKING
+from datetime import UTC
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+import hikari
+import lightbulb
 
 from smarter_dev.bot.agents.mention_agent import mention_agent
 from smarter_dev.bot.agents.models import DiscordMessage
-from smarter_dev.bot.services.rate_limiter import rate_limiter
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.channel_state import get_channel_state_manager
-from smarter_dev.bot.utils.messages import ConversationContextBuilder
+from smarter_dev.bot.services.rate_limiter import rate_limiter
 from smarter_dev.shared.config import get_settings
 
 if TYPE_CHECKING:
@@ -39,9 +40,9 @@ async def store_conversation(
     interaction_type: str,
     user_question: str,
     bot_response: str,
-    context_messages: List[DiscordMessage] = None,
+    context_messages: list[DiscordMessage] = None,
     tokens_used: int = 0,
-    response_time_ms: Optional[int] = None
+    response_time_ms: int | None = None
 ) -> bool:
     """Store a mention conversation in the database for auditing and analytics.
 
@@ -178,7 +179,7 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
 
         try:
             # Track response time
-            start_time = datetime.now(timezone.utc)
+            start_time = datetime.now(UTC)
 
             # Reset message counter for this conversation session
             channel_state.reset_messages_processed(event.channel_id)
@@ -210,7 +211,7 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
                             f"Mention response sent: {len(response_text)} chars, {tokens_used} tokens"
                         )
                     else:
-                        logger.debug(f"Agent did not send a response")
+                        logger.debug("Agent did not send a response")
 
                 except Exception as e:
                     logger.error(f"Error in agent execution: {e}", exc_info=True)
@@ -228,12 +229,12 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
                 # Loop continues to restart agent
 
             # Calculate total response time
-            end_time = datetime.now(timezone.utc)
+            end_time = datetime.now(UTC)
             response_time_ms = int((end_time - start_time).total_seconds() * 1000)
 
             # Record token usage for rate limiting
             if total_tokens > 0:
-                rate_limiter.record_request(str(event.author.id), total_tokens, 'mention')
+                rate_limiter.record_request(str(event.author.id), total_tokens, "mention")
 
             # Store conversation in database if we have the required context
             if event.guild_id:

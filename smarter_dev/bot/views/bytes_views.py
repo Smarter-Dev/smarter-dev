@@ -6,16 +6,15 @@ including amount and reason input with validation.
 
 from __future__ import annotations
 
-import hikari
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
+import hikari
+
+from smarter_dev.bot.services.exceptions import InsufficientBalanceError
+from smarter_dev.bot.services.exceptions import ServiceError
+from smarter_dev.bot.services.exceptions import ValidationError
 from smarter_dev.bot.utils.image_embeds import get_generator
-from smarter_dev.bot.services.exceptions import (
-    InsufficientBalanceError,
-    ServiceError,
-    ValidationError
-)
 
 if TYPE_CHECKING:
     from smarter_dev.bot.services.bytes_service import BytesService
@@ -28,11 +27,11 @@ def create_send_bytes_modal(
     max_transfer: int
 ) -> hikari.api.InteractionModalBuilder:
     """Create a send bytes modal.
-    
+
     Args:
         recipient: User receiving the bytes
         max_transfer: Maximum transfer amount for this guild
-        
+
     Returns:
         The modal builder instance
     """
@@ -40,7 +39,7 @@ def create_send_bytes_modal(
         title=f"Send Bytes to {recipient.display_name or recipient.username}",
         custom_id=f"send_bytes_modal:{recipient.id}"
     )
-    
+
     # Add amount text input
     modal.add_component(
         hikari.impl.ModalActionRowBuilder().add_component(
@@ -55,7 +54,7 @@ def create_send_bytes_modal(
             )
         )
     )
-    
+
     # Add reason text input
     modal.add_component(
         hikari.impl.ModalActionRowBuilder().add_component(
@@ -74,7 +73,7 @@ def create_send_bytes_modal(
 
 class SendBytesModalHandler:
     """Handler for send bytes modal interactions."""
-    
+
     def __init__(
         self,
         recipient: hikari.User,
@@ -82,10 +81,10 @@ class SendBytesModalHandler:
         giver: hikari.User,
         max_transfer: int,
         bytes_service: BytesService,
-        target_message_id: Optional[int] = None
+        target_message_id: int | None = None
     ):
         """Initialize the modal handler.
-        
+
         Args:
             recipient: User receiving the bytes
             guild_id: Discord guild ID
@@ -100,10 +99,10 @@ class SendBytesModalHandler:
         self.max_transfer = max_transfer
         self.bytes_service = bytes_service
         self.target_message_id = target_message_id
-    
+
     async def handle_submit(self, interaction: hikari.ModalInteraction) -> None:
         """Handle modal submission and process the bytes transfer.
-        
+
         Args:
             interaction: The modal interaction
         """
@@ -111,15 +110,15 @@ class SendBytesModalHandler:
             # Get the input values
             amount_str = None
             reason = None
-            
+
             for component in interaction.components:
-                if hasattr(component, 'components'):
+                if hasattr(component, "components"):
                     for text_input in component.components:
                         if text_input.custom_id == "amount":
                             amount_str = text_input.value
                         elif text_input.custom_id == "reason":
                             reason = text_input.value if text_input.value else None
-            
+
             if not amount_str:
                 generator = get_generator()
                 image_file = generator.create_error_embed("Amount is required.")
@@ -129,7 +128,7 @@ class SendBytesModalHandler:
                     flags=hikari.MessageFlag.EPHEMERAL
                 )
                 return
-            
+
             # Validate amount
             try:
                 amount = int(amount_str)
@@ -142,7 +141,7 @@ class SendBytesModalHandler:
                     flags=hikari.MessageFlag.EPHEMERAL
                 )
                 return
-            
+
             # Validate amount range
             if amount < 1:
                 generator = get_generator()
@@ -153,7 +152,7 @@ class SendBytesModalHandler:
                     flags=hikari.MessageFlag.EPHEMERAL
                 )
                 return
-            
+
             if amount > self.max_transfer:
                 generator = get_generator()
                 image_file = generator.create_error_embed(
@@ -165,10 +164,10 @@ class SendBytesModalHandler:
                     flags=hikari.MessageFlag.EPHEMERAL
                 )
                 return
-            
+
             # Process the transfer
             logger.info(f"Processing bytes transfer: {self.giver} -> {self.recipient}, amount: {amount}")
-            
+
             result = await self.bytes_service.transfer_bytes(
                 guild_id=self.guild_id,
                 giver=self.giver,
@@ -176,17 +175,17 @@ class SendBytesModalHandler:
                 amount=amount,
                 reason=reason
             )
-            
+
             generator = get_generator()
-            
+
             if result.success:
                 # Create success embed with same format as slash command
                 description = f"{str(self.giver)} sent {amount:,} bytes to {str(self.recipient)}"
-                
+
                 # Add reason if provided
                 if reason:
                     description += f"\n\n{reason}"
-                
+
                 image_file = generator.create_success_embed("BYTES SENT", description)
                 logger.info(f"✅ Transfer successful: {amount} bytes from {self.giver} to {self.recipient}")
             else:
@@ -198,22 +197,22 @@ class SendBytesModalHandler:
                     # Use error embed for transfer limit and other errors
                     logger.info("Creating error image embed")
                     image_file = generator.create_error_embed(result.reason)
-            
+
             logger.info(f"Created image file: {type(image_file)}")
-            
+
             if result.success:
                 # Success messages should be public for everyone to see
                 if self.target_message_id:
                     # For context menu: Defer response then create reply message
                     await interaction.create_initial_response(hikari.ResponseType.DEFERRED_MESSAGE_CREATE)
-                    
+
                     # Create a reply message to the original message
                     await interaction.app.rest.create_message(
                         interaction.channel_id,
                         attachment=image_file,
                         reply=self.target_message_id
                     )
-                    
+
                     # Delete the deferred response since we created our own message
                     await interaction.delete_initial_response()
                 else:
@@ -229,7 +228,7 @@ class SendBytesModalHandler:
                     attachment=image_file,
                     flags=hikari.MessageFlag.EPHEMERAL
                 )
-            
+
         except InsufficientBalanceError as e:
             logger.info(f"Insufficient balance for transfer: {e}")
             generator = get_generator()

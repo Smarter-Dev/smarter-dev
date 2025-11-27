@@ -7,15 +7,16 @@ including viewing scoreboards and challenge statistics.
 from __future__ import annotations
 
 import logging
-import lightbulb
+from typing import TYPE_CHECKING
+
 import hikari
-from typing import TYPE_CHECKING, List, Dict, Any, Optional
+import lightbulb
 
 if TYPE_CHECKING:
     from smarter_dev.bot.services.api_client import APIClient
 
 from smarter_dev.bot.services.api_client import APIClient
-from smarter_dev.bot.services.exceptions import APIError, ServiceError
+from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.shared.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ async def scoreboard_command(ctx: lightbulb.Context) -> None:
     try:
         # Defer the response immediately to avoid timeout
         await ctx.respond(hikari.ResponseType.DEFERRED_MESSAGE_CREATE, flags=hikari.MessageFlag.EPHEMERAL)
-        
+
         # Get guild ID
         guild_id = str(ctx.guild_id) if ctx.guild_id else None
         if not guild_id:
@@ -61,18 +62,18 @@ async def scoreboard_command(ctx: lightbulb.Context) -> None:
             # Get current campaign and scoreboard data
             response = await api_client.get(f"/challenges/scoreboard?guild_id={guild_id}")
             data = response.json()
-            
+
             campaign = data.get("campaign")
             scoreboard = data.get("scoreboard", [])
             total_submissions = data.get("total_submissions", 0)
             total_challenges = data.get("total_challenges", 0)
-            
+
             if not campaign:
                 # Check if there's an upcoming campaign
                 upcoming_response = await api_client.get(f"/challenges/upcoming-campaign?guild_id={guild_id}")
                 upcoming_data = upcoming_response.json()
                 upcoming_campaign = upcoming_data.get("campaign")
-                
+
                 if upcoming_campaign:
                     # There's an upcoming campaign
                     start_date = upcoming_campaign.get("start_date", "Unknown")
@@ -85,12 +86,12 @@ async def scoreboard_command(ctx: lightbulb.Context) -> None:
                 else:
                     # No campaigns at all
                     embed = hikari.Embed(
-                        title="Challenge Scoreboard", 
+                        title="Challenge Scoreboard",
                         description="**No events scheduled**\n\nThere are currently no challenge campaigns scheduled for this server.\n\nContact an administrator to set up challenges!",
                         color=0x95a5a6
                     )
                     embed.set_footer(text="Check back later for upcoming challenges!")
-                
+
                 await ctx.edit_last_response(content=None, embed=embed)
                 return
 
@@ -119,31 +120,31 @@ async def scoreboard_command(ctx: lightbulb.Context) -> None:
             if scoreboard:
                 # Top 10 squads
                 top_squads = scoreboard[:10]
-                
+
                 scoreboard_text = ""
                 for i, squad in enumerate(top_squads, 1):
                     squad_name = squad.get("squad_name", "Unknown Squad")
                     total_points = squad.get("total_points", 0)
                     successful_submissions = squad.get("successful_submissions", 0)
-                    
+
                     # Add medal emojis for top 3
                     if i == 1:
                         medal = "🥇"
                     elif i == 2:
-                        medal = "🥈" 
+                        medal = "🥈"
                     elif i == 3:
                         medal = "🥉"
                     else:
                         medal = f"**{i}.**"
-                    
+
                     scoreboard_text += f"{medal} **{squad_name}** - {total_points} pts ({successful_submissions} solved)\n"
-                
+
                 embed.add_field(
                     name="Top Squads",
                     value=scoreboard_text or "No submissions yet",
                     inline=False
                 )
-                
+
                 # Show if there are more squads
                 if len(scoreboard) > 10:
                     embed.add_field(
@@ -171,16 +172,16 @@ async def scoreboard_command(ctx: lightbulb.Context) -> None:
                 emoji="📤",
                 label="Share"
             )
-            
+
             action_row = hikari.impl.MessageActionRowBuilder()
             action_row.add_component(share_button)
-            
+
             logger.info(f"Components being sent: {[action_row]}")
             await ctx.edit_last_response(content=None, embed=embed, components=[action_row])
 
         except APIError as api_error:
             logger.error(f"API error in scoreboard command: {api_error}")
-            
+
             error_message = str(api_error)
             if "404" in error_message:
                 await ctx.edit_last_response(
@@ -223,7 +224,7 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
     try:
         # Defer the response immediately to avoid timeout
         await ctx.respond(hikari.ResponseType.DEFERRED_MESSAGE_CREATE, flags=hikari.MessageFlag.EPHEMERAL)
-        
+
         # Get guild ID
         guild_id = str(ctx.guild_id) if ctx.guild_id else None
         if not guild_id:
@@ -241,14 +242,14 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
             # Get detailed scoreboard data
             response = await api_client.get(f"/challenges/detailed-scoreboard?guild_id={guild_id}")
             data = response.json()
-            
+
             campaign = data.get("campaign")
             detailed_data = data.get("detailed_scoreboard", {})
-            
+
             # Debug: Check the type and structure of detailed_data
             logger.info(f"detailed_data type: {type(detailed_data)}")
             logger.info(f"detailed_data content: {detailed_data}")
-            
+
             # Handle case where detailed_data might be a list instead of dict
             if isinstance(detailed_data, list):
                 # If it's a list, it might be empty or have a different structure
@@ -261,16 +262,16 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
                 # Fallback
                 challenges_breakdown = []
                 squad_totals = []
-                
+
             total_submissions = data.get("total_submissions", 0)
             total_challenges = data.get("total_challenges", 0)
-            
+
             if not campaign:
                 # Check if there's an upcoming campaign
                 upcoming_response = await api_client.get(f"/challenges/upcoming-campaign?guild_id={guild_id}")
                 upcoming_data = upcoming_response.json()
                 upcoming_campaign = upcoming_data.get("campaign")
-                
+
                 if upcoming_campaign:
                     # There's an upcoming campaign
                     start_date = upcoming_campaign.get("start_date", "Unknown")
@@ -283,12 +284,12 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
                 else:
                     # No campaigns at all
                     embed = hikari.Embed(
-                        title="📊 Detailed Challenge Breakdown", 
+                        title="📊 Detailed Challenge Breakdown",
                         description="**No events scheduled**\n\nThere are currently no challenge campaigns scheduled for this server.\n\nContact an administrator to set up challenges!",
                         color=0x95a5a6
                     )
                     embed.set_footer(text="Check back later for upcoming challenges!")
-                
+
                 await ctx.edit_last_response(content=None, embed=embed)
                 return
 
@@ -318,13 +319,13 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
                 for i, challenge in enumerate(challenges_breakdown[:8]):  # Show up to 8 challenges
                     challenge_title = challenge.get("challenge_title", "Unknown Challenge")
                     submissions = challenge.get("submissions", [])
-                    
+
                     # Build submissions text
                     submissions_text = ""
                     for j, submission in enumerate(submissions):  # Show all submissions
                         squad_name = submission.get("squad_name", "Unknown Squad")
                         points = submission.get("points_earned", 0)
-                        
+
                         # Add medal for top 3 submissions
                         if j == 0:
                             medal = "🥇"
@@ -334,18 +335,18 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
                             medal = "🥉"
                         else:
                             medal = "•"
-                        
+
                         submissions_text += f"{medal} {squad_name}: {points} pts\n"
-                    
+
                     if not submissions_text:
                         submissions_text = "No submissions yet"
-                    
+
                     embed.add_field(
                         name=f"{challenge_title}",
                         value=submissions_text,
                         inline=False
                     )
-                
+
                 # Add overall standings if we have squad totals
                 if squad_totals:
                     standings_text = ""
@@ -353,24 +354,24 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
                         squad_name = squad.get("squad_name", "Unknown Squad")
                         total_points = squad.get("total_points", 0)
                         challenges_completed = squad.get("challenges_completed", 0)
-                        
+
                         if i == 0:
                             medal = "🥇"
                         elif i == 1:
-                            medal = "🥈" 
+                            medal = "🥈"
                         elif i == 2:
                             medal = "🥉"
                         else:
                             medal = f"**{i+1}.**"
-                        
+
                         standings_text += f"{medal} {squad_name}: {total_points} pts ({challenges_completed} solved)\n"
-                    
+
                     embed.add_field(
                         name="Overall Standings",
                         value=standings_text or "No completed challenges",
                         inline=False
                     )
-                
+
                 # Show if there are more challenges
                 if len(challenges_breakdown) > 8:
                     embed.add_field(
@@ -398,16 +399,16 @@ async def breakdown_command(ctx: lightbulb.Context) -> None:
                 emoji="📤",
                 label="Share"
             )
-            
+
             action_row = hikari.impl.MessageActionRowBuilder()
             action_row.add_component(share_button)
-            
+
             logger.info(f"Breakdown components being sent: {[action_row]}")
             await ctx.edit_last_response(content=None, embed=embed, components=[action_row])
 
         except APIError as api_error:
             logger.error(f"API error in breakdown command: {api_error}")
-            
+
             error_message = str(api_error)
             if "404" in error_message:
                 await ctx.edit_last_response(
@@ -450,7 +451,7 @@ async def event_command(ctx: lightbulb.Context) -> None:
     try:
         # Defer the response immediately to avoid timeout
         await ctx.respond(hikari.ResponseType.DEFERRED_MESSAGE_CREATE, flags=hikari.MessageFlag.EPHEMERAL)
-        
+
         # Get guild ID
         guild_id = str(ctx.guild_id) if ctx.guild_id else None
         if not guild_id:
@@ -468,16 +469,16 @@ async def event_command(ctx: lightbulb.Context) -> None:
             # Get current campaign info
             response = await api_client.get(f"/challenges/scoreboard?guild_id={guild_id}")
             data = response.json()
-            
+
             campaign = data.get("campaign")
             total_challenges = data.get("total_challenges", 0)
-            
+
             if not campaign:
                 # Check if there's an upcoming campaign
                 upcoming_response = await api_client.get(f"/challenges/upcoming-campaign?guild_id={guild_id}")
                 upcoming_data = upcoming_response.json()
                 upcoming_campaign = upcoming_data.get("campaign")
-                
+
                 if upcoming_campaign:
                     # There's an upcoming campaign
                     start_date = upcoming_campaign.get("start_date", "Unknown")
@@ -511,7 +512,7 @@ async def event_command(ctx: lightbulb.Context) -> None:
                         color=0x95a5a6
                     )
                     embed.set_footer(text="Contact an administrator to set up challenges!")
-                
+
                 await ctx.edit_last_response(content=None, embed=embed)
                 return
 
@@ -539,7 +540,7 @@ async def event_command(ctx: lightbulb.Context) -> None:
                 value="Active" if campaign.get("is_active") else "Ended",
                 inline=True
             )
-            
+
             if campaign.get("start_date"):
                 embed.add_field(
                     name="Started",
@@ -584,7 +585,7 @@ async def event_command(ctx: lightbulb.Context) -> None:
 
         except APIError as api_error:
             logger.error(f"API error in event command: {api_error}")
-            
+
             error_message = str(api_error)
             if "not found" in error_message.lower():
                 await ctx.edit_last_response(

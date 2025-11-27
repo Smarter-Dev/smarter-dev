@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import logging
-import dspy
-from typing import Optional, Tuple
 
+import dspy
 import hikari
 
 from smarter_dev.bot.agents.base import BaseAgent
-from smarter_dev.bot.agents.models import DiscordMessage
 from smarter_dev.bot.agents.tools import create_mention_tools
-from smarter_dev.llm_config import get_llm_model, get_model_info
+from smarter_dev.llm_config import get_llm_model
+from smarter_dev.llm_config import get_model_info
 
 logger = logging.getLogger(__name__)
 
@@ -495,11 +494,11 @@ class MentionAgent(BaseAgent):
         self,
         bot: hikari.GatewayBot,
         channel_id: int,
-        guild_id: Optional[int] = None,
-        trigger_message_id: Optional[int] = None,
+        guild_id: int | None = None,
+        trigger_message_id: int | None = None,
         messages_remaining: int = 10,
         is_continuation: bool = False
-    ) -> Tuple[bool, int, Optional[str]]:
+    ) -> tuple[bool, int, str | None]:
         """Generate a conversational response using ReAct with context-bound tools.
 
         The agent will use the send_message tool to send its response directly to Discord.

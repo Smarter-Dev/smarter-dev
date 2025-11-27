@@ -1,8 +1,8 @@
 """Data models for Discord bot agents."""
 
 from datetime import datetime
+
 from pydantic import BaseModel
-from typing import Optional
 
 
 class DiscordMessage(BaseModel):

@@ -13,9 +13,9 @@ from datetime import datetime
 import hikari
 import lightbulb
 
+from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
-from smarter_dev.bot.services.api_client import APIClient
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ async def store_streak_celebration(
     response_time_ms: int | None = None
 ) -> bool:
     """Store a streak celebration interaction in the database for auditing and analytics.
-    
+
     Args:
         guild_id: Discord guild ID
         channel_id: Discord channel ID
@@ -47,14 +47,14 @@ async def store_streak_celebration(
         streak_multiplier: Streak bonus multiplier
         bytes_earned: Total bytes earned
         response_time_ms: Response generation time
-        
+
     Returns:
         bool: True if stored successfully, False otherwise
     """
     try:
         # Generate session ID
         session_id = str(uuid.uuid4())
-        
+
         # Prepare conversation data
         conversation_data = {
             "session_id": session_id,
@@ -79,7 +79,7 @@ async def store_streak_celebration(
                 "message_length": len(user_message)
             }
         }
-        
+
         # Store conversation via API
         settings = get_settings()
         async with APIClient(
@@ -94,7 +94,7 @@ async def store_streak_celebration(
             else:
                 logger.warning(f"❌ Failed to store streak celebration: HTTP {response.status_code}")
                 return False
-                
+
     except Exception as e:
         logger.error(f"❌ Error storing streak celebration: {e}")
         return False
@@ -286,7 +286,7 @@ STATUS_MESSAGES = [
 
 async def start_status_rotation(bot: lightbulb.BotApp) -> None:
     """Start the periodic status message rotation.
-    
+
     Args:
         bot: Bot application instance
     """
@@ -344,10 +344,10 @@ async def start_cache_cleanup() -> None:
 
 async def initialize_single_guild_configuration(guild_id: str) -> None:
     """Initialize bytes configuration for a single guild using the API.
-    
+
     The API automatically creates a default configuration if none exists
     when requesting the guild configuration.
-    
+
     Args:
         guild_id: Discord guild ID to initialize
     """
@@ -373,7 +373,7 @@ async def initialize_single_guild_configuration(guild_id: str) -> None:
 
 async def initialize_guild_configurations(bot: lightbulb.BotApp) -> None:
     """Initialize bytes configurations for all guilds the bot is in.
-    
+
     Args:
         bot: Bot application instance
     """
@@ -394,7 +394,7 @@ async def initialize_guild_configurations(bot: lightbulb.BotApp) -> None:
 
 def create_bot(settings: Settings | None = None) -> lightbulb.BotApp:
     """Create and configure the Discord bot with Lightbulb v2 syntax.
-    
+
     Returns:
         BotApp instance for v2 compatibility
     """
@@ -456,15 +456,17 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         # Create services
         from smarter_dev.bot.services.bytes_service import BytesService
         from smarter_dev.bot.services.challenge_service import ChallengeService
-        from smarter_dev.bot.services.forum_agent_service import ForumAgentService
-        from smarter_dev.bot.services.scheduled_message_service import (
-            ScheduledMessageService,
+        from smarter_dev.bot.services.channel_state import (
+            initialize_channel_state_manager,
         )
+        from smarter_dev.bot.services.forum_agent_service import ForumAgentService
         from smarter_dev.bot.services.repeating_message_service import (
             RepeatingMessageService,
         )
+        from smarter_dev.bot.services.scheduled_message_service import (
+            ScheduledMessageService,
+        )
         from smarter_dev.bot.services.squads_service import SquadsService
-        from smarter_dev.bot.services.channel_state import initialize_channel_state_manager
 
         bytes_service = BytesService(api_client, cache_manager)
         squads_service = SquadsService(api_client, cache_manager)
@@ -573,10 +575,10 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
 
 def is_forum_channel(channel) -> bool:
     """Check if a channel is a forum channel.
-    
+
     Args:
         channel: Discord channel object
-        
+
     Returns:
         True if channel is a forum channel
     """
@@ -585,11 +587,11 @@ def is_forum_channel(channel) -> bool:
 
 async def extract_forum_post_data(bot: lightbulb.BotApp, thread, initial_message=None) -> ForumPostData:
     """Extract forum post data from Discord thread and message objects.
-    
+
     Args:
         thread: Discord thread object
         initial_message: Initial message in the thread (forum post content)
-        
+
     Returns:
         ForumPostData object with extracted information
     """
@@ -643,12 +645,12 @@ async def extract_forum_post_data(bot: lightbulb.BotApp, thread, initial_message
 
 async def post_agent_responses(bot: lightbulb.BotApp, thread_id: int, responses: list[dict]) -> bool:
     """Post AI agent responses to a Discord thread.
-    
+
     Args:
         bot: Discord bot instance
         thread_id: Thread ID to post responses to
         responses: List of agent response dictionaries
-        
+
     Returns:
         bool: True if any response was posted, False otherwise
     """
@@ -680,13 +682,13 @@ async def post_agent_responses(bot: lightbulb.BotApp, thread_id: int, responses:
 
     except Exception as e:
         logger.error(f"Error posting agent responses to thread {thread_id}: {e}")
-    
+
     return response_posted
 
 
 async def post_user_notifications(bot: lightbulb.BotApp, thread_id: int, topic_user_map: dict, response_posted: bool) -> None:
     """Post user notification mentions to a Discord thread, organized by topic.
-    
+
     Args:
         bot: Discord bot instance
         thread_id: Thread ID to post notifications to
@@ -701,16 +703,16 @@ async def post_user_notifications(bot: lightbulb.BotApp, thread_id: int, topic_u
         # Example: -# JavaScript @user1 @user2\n-# Frontend @user3 @user4
         notification_lines = []
         all_user_ids = set()
-        
+
         for topic, user_mentions in topic_user_map.items():
             mentions_text = " ".join(sorted(user_mentions))  # Sort for consistency
             notification_lines.append(f"-# {topic} {mentions_text}")
-            
+
             # Collect all unique user IDs for the user_mentions parameter
             for mention in user_mentions:
-                user_id = int(mention.strip('<@>'))
+                user_id = int(mention.strip("<@>"))
                 all_user_ids.add(user_id)
-        
+
         notification_message = "\n".join(notification_lines)
 
         # Post the notification message with user mentions enabled
@@ -730,12 +732,12 @@ async def post_user_notifications(bot: lightbulb.BotApp, thread_id: int, topic_u
 
 async def resolve_forum_tag_names(bot: lightbulb.BotApp, channel_id: str, tag_ids: list) -> list:
     """Resolve forum tag IDs to tag names by fetching forum channel info.
-    
+
     Args:
         bot: Discord bot instance
         channel_id: Forum channel ID
         tag_ids: List of tag IDs to resolve
-        
+
     Returns:
         List of tag names
     """
@@ -776,7 +778,7 @@ async def resolve_forum_tag_names(bot: lightbulb.BotApp, channel_id: str, tag_id
 
 async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:
     """Handle forum thread creation events for AI agent processing.
-    
+
     Args:
         bot: Discord bot instance
         event: Thread creation event
@@ -852,7 +854,7 @@ async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:
 
 async def handle_forum_message_create(bot: lightbulb.BotApp, event) -> None:
     """Handle message creation in forum threads (follow-up messages).
-    
+
     Args:
         bot: Discord bot instance
         event: Message creation event
@@ -1105,11 +1107,13 @@ async def run_bot() -> None:
                     try:
                         # Record start time for response time tracking
                         start_time = datetime.now()
-                        
+
                         # Get or create streak celebration agent
                         streak_agent = getattr(bot, "d", {}).get("streak_celebration_agent")
                         if not streak_agent:
-                            from smarter_dev.bot.agents.streak_agent import StreakCelebrationAgent
+                            from smarter_dev.bot.agents.streak_agent import (
+                                StreakCelebrationAgent,
+                            )
                             streak_agent = StreakCelebrationAgent()
                             if not hasattr(bot, "d"):
                                 bot.d = {}
@@ -1392,7 +1396,7 @@ async def run_bot() -> None:
     logger.info("Setting up bot services...")
     await setup_bot_services(bot)
     logger.info("Bot services setup complete")
-    
+
     # Load plugins after services are ready
     logger.info("Loading bot plugins...")
     load_plugins(bot)

@@ -6,14 +6,18 @@ allowing users to send messages with role mentions through webhooks.
 
 from __future__ import annotations
 
-import hikari
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Optional, TYPE_CHECKING
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
+from typing import TYPE_CHECKING
 
-from smarter_dev.bot.utils.webhooks import get_or_create_webhook, send_webhook_message
-from smarter_dev.bot.utils.image_embeds import get_generator
+import hikari
+
 from smarter_dev.bot.services.exceptions import ServiceError
+from smarter_dev.bot.utils.image_embeds import get_generator
+from smarter_dev.bot.utils.webhooks import get_or_create_webhook
+from smarter_dev.bot.utils.webhooks import send_webhook_message
 
 if TYPE_CHECKING:
     from smarter_dev.bot.services.squads_service import SquadsService
@@ -21,13 +25,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Rate limiting: user_id -> last_beacon_time
-_beacon_cooldowns: Dict[int, datetime] = {}
+_beacon_cooldowns: dict[int, datetime] = {}
 BEACON_COOLDOWN_MINUTES = 720  # 12 hours
 
 
 def create_beacon_message_modal() -> hikari.api.InteractionModalBuilder:
     """Create a beacon message modal.
-    
+
     Returns:
         The modal builder instance
     """
@@ -35,7 +39,7 @@ def create_beacon_message_modal() -> hikari.api.InteractionModalBuilder:
         title="Squad Beacon Message",
         custom_id="beacon_message_modal"
     )
-    
+
     # Add message content text input
     modal.add_component(
         hikari.impl.ModalActionRowBuilder().add_component(
@@ -50,31 +54,31 @@ def create_beacon_message_modal() -> hikari.api.InteractionModalBuilder:
             )
         )
     )
-    
+
     return modal
 
 
-def is_user_on_cooldown(user_id: int) -> tuple[bool, Optional[int]]:
+def is_user_on_cooldown(user_id: int) -> tuple[bool, int | None]:
     """Check if user is on beacon cooldown.
-    
+
     Args:
         user_id: Discord user ID
-        
+
     Returns:
         Tuple of (is_on_cooldown, seconds_remaining)
     """
     if user_id not in _beacon_cooldowns:
         return False, None
-    
+
     last_beacon = _beacon_cooldowns[user_id]
     cooldown_end = last_beacon + timedelta(minutes=BEACON_COOLDOWN_MINUTES)
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(UTC)
+
     if now >= cooldown_end:
         # Cooldown expired, remove from cache
         del _beacon_cooldowns[user_id]
         return False, None
-    
+
     # Still on cooldown
     seconds_remaining = int((cooldown_end - now).total_seconds())
     return True, seconds_remaining
@@ -82,33 +86,33 @@ def is_user_on_cooldown(user_id: int) -> tuple[bool, Optional[int]]:
 
 def set_user_cooldown(user_id: int) -> None:
     """Set beacon cooldown for user."""
-    _beacon_cooldowns[user_id] = datetime.now(timezone.utc)
+    _beacon_cooldowns[user_id] = datetime.now(UTC)
 
 
 async def handle_beacon_modal_submit(
     event: hikari.InteractionCreateEvent,
-    squads_service: 'SquadsService'
+    squads_service: SquadsService
 ) -> None:
     """Handle beacon message modal submission.
-    
+
     Args:
         event: Modal submission interaction event
         squads_service: Squad service instance
     """
     if not isinstance(event.interaction, hikari.ModalInteraction):
         return
-    
+
     # We'll respond directly with the result instead of deferring
-    
+
     try:
         # Get the message content from the modal
         message_content = None
         for component in event.interaction.components:
             for action_row in component:
-                if hasattr(action_row, 'custom_id') and action_row.custom_id == "message_content":
+                if hasattr(action_row, "custom_id") and action_row.custom_id == "message_content":
                     message_content = action_row.value
                     break
-        
+
         if not message_content or not message_content.strip():
             generator = get_generator()
             image_file = generator.create_error_embed("Message content cannot be empty!")
@@ -121,7 +125,7 @@ async def handle_beacon_modal_submit(
             except (hikari.NotFoundError, hikari.BadRequestError):
                 logger.warning("Failed to respond to modal interaction - interaction expired")
             return
-        
+
         # Check rate limiting
         is_on_cooldown, seconds_remaining = is_user_on_cooldown(event.interaction.user.id)
         if is_on_cooldown:
@@ -136,7 +140,7 @@ async def handle_beacon_modal_submit(
             else:
                 minutes_remaining = max(1, seconds_remaining // 60)
                 time_str = f"{minutes_remaining} minute{'s' if minutes_remaining != 1 else ''}"
-            
+
             generator = get_generator()
             image_file = generator.create_error_embed(
                 f"Please wait {time_str} before sending another beacon message."
@@ -150,14 +154,14 @@ async def handle_beacon_modal_submit(
             except (hikari.NotFoundError, hikari.BadRequestError):
                 logger.warning("Failed to respond to modal interaction - interaction expired")
             return
-        
+
         # Get user's current squad
         try:
             user_squad_response = await squads_service.get_user_squad(
-                str(event.interaction.guild_id), 
+                str(event.interaction.guild_id),
                 str(event.interaction.user.id)
             )
-            
+
             if not user_squad_response.is_in_squad:
                 generator = get_generator()
                 image_file = generator.create_error_embed("You must be in a squad to send beacon messages!")
@@ -170,9 +174,9 @@ async def handle_beacon_modal_submit(
                 except (hikari.NotFoundError, hikari.BadRequestError):
                     logger.warning("Failed to respond to modal interaction - interaction expired")
                 return
-            
+
             squad = user_squad_response.squad
-            
+
         except ServiceError as e:
             logger.error(f"Error getting user squad for beacon: {e}")
             generator = get_generator()
@@ -186,25 +190,25 @@ async def handle_beacon_modal_submit(
             except (hikari.NotFoundError, hikari.BadRequestError):
                 logger.warning("Failed to respond to modal interaction - interaction expired")
             return
-        
+
         # Verify we're in the correct channel
         if not squad.announcement_channel or str(event.interaction.channel_id) != squad.announcement_channel:
             generator = get_generator()
-            
+
             # Try to get the channel name for a more helpful error message
             error_message = "Beacon messages can only be sent in your squad's announcement channel!"
             if squad.announcement_channel:
                 try:
                     channel = await event.interaction.app.rest.fetch_channel(int(squad.announcement_channel))
                     # Filter to ASCII characters only and clean up the name
-                    clean_name = ''.join(c for c in channel.name if ord(c) < 128)
+                    clean_name = "".join(c for c in channel.name if ord(c) < 128)
                     error_message = f"Beacon messages can only be sent in your squad's announcement channel: #{clean_name}"
                     logger.debug(f"Successfully fetched channel name: {clean_name}")
                 except Exception as e:
                     # If we can't fetch the channel, just show a generic message
                     logger.debug(f"Could not fetch channel name for {squad.announcement_channel}: {e}")
                     error_message = "Beacon messages can only be sent in your squad's announcement channel!"
-            
+
             image_file = generator.create_error_embed(error_message)
             try:
                 await event.interaction.create_initial_response(
@@ -215,13 +219,13 @@ async def handle_beacon_modal_submit(
             except (hikari.NotFoundError, hikari.BadRequestError):
                 logger.warning("Failed to respond to modal interaction - interaction expired")
             return
-        
+
         # Get or create webhook
         webhook = await get_or_create_webhook(
             event.interaction.app,
             event.interaction.channel_id
         )
-        
+
         if not webhook:
             generator = get_generator()
             image_file = generator.create_error_embed(
@@ -236,16 +240,16 @@ async def handle_beacon_modal_submit(
             except (hikari.NotFoundError, hikari.BadRequestError):
                 logger.warning("Failed to respond to modal interaction - interaction expired")
             return
-        
+
         # Prepare the message with role mention
         role_mention = f"<@&{squad.role_id}>" if squad.role_id else ""
         full_message = f"{message_content.strip()}\n\n{role_mention}" if role_mention else message_content.strip()
-        
+
         # Get user's display name and avatar
         user = event.interaction.user
         display_name = user.display_name or user.username
         avatar_url = str(user.avatar_url) if user.avatar_url else None
-        
+
         # Send the webhook message
         success = await send_webhook_message(
             event.interaction.app,
@@ -254,11 +258,11 @@ async def handle_beacon_modal_submit(
             display_name,
             avatar_url
         )
-        
+
         if success:
             # Set cooldown for user
             set_user_cooldown(event.interaction.user.id)
-            
+
             # Send success response
             generator = get_generator()
             image_file = generator.create_success_embed(
@@ -273,7 +277,7 @@ async def handle_beacon_modal_submit(
                 )
             except (hikari.NotFoundError, hikari.BadRequestError):
                 logger.warning("Failed to respond to modal interaction - interaction expired")
-            
+
             logger.info(f"User {user.username} sent beacon message in squad {squad.name}")
         else:
             generator = get_generator()
@@ -286,7 +290,7 @@ async def handle_beacon_modal_submit(
                 )
             except (hikari.NotFoundError, hikari.BadRequestError):
                 logger.warning("Failed to respond to modal interaction - interaction expired")
-    
+
     except Exception as e:
         logger.exception(f"Error handling beacon modal submission: {e}")
         generator = get_generator()

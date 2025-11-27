@@ -5,9 +5,10 @@ This module provides interactive UI components for balance display and sharing.
 
 from __future__ import annotations
 
-import hikari
 import logging
 from typing import TYPE_CHECKING
+
+import hikari
 
 if TYPE_CHECKING:
     pass
@@ -17,11 +18,11 @@ logger = logging.getLogger(__name__)
 
 class BalanceShareView:
     """View with share button for balance command."""
-    
-    def __init__(self, username: str, balance: int, streak_count: int, 
+
+    def __init__(self, username: str, balance: int, streak_count: int,
                  last_daily: str, total_received: int, total_sent: int):
         """Initialize the balance share view.
-        
+
         Args:
             username: Username for display
             balance: Current balance
@@ -37,7 +38,7 @@ class BalanceShareView:
         self.total_received = total_received
         self.total_sent = total_sent
         self._timeout = 300  # 5 minutes
-    
+
     def build_components(self) -> list[hikari.api.ComponentBuilder]:
         """Build the action row components."""
         share_button = hikari.impl.InteractiveButtonBuilder(
@@ -46,8 +47,8 @@ class BalanceShareView:
             emoji="📤",
             label="Share"
         )
-        
+
         action_row = hikari.impl.MessageActionRowBuilder()
         action_row.add_component(share_button)
         return [action_row]
-    
+

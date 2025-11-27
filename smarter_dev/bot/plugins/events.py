@@ -7,25 +7,22 @@ buttons, and other interactive elements used by the bot commands.
 from __future__ import annotations
 
 import asyncio
-import hikari
 import logging
-from typing import Dict, Any
+from typing import Any
 
-from smarter_dev.bot.views.squad_views import SquadSelectView
-from smarter_dev.bot.views.balance_views import BalanceShareView
-from smarter_dev.bot.views.leaderboard_views import LeaderboardShareView
-from smarter_dev.bot.views.history_views import HistoryShareView
+import hikari
+
 from smarter_dev.bot.views.beacon_views import handle_beacon_modal_submit
 
 logger = logging.getLogger(__name__)
 
 # Global storage for active views (in production, this could be Redis-backed)
-active_views: Dict[str, Any] = {}
+active_views: dict[str, Any] = {}
 
 
 def register_view(interaction_id: str, view: Any) -> None:
     """Register an active view for interaction handling.
-    
+
     Args:
         interaction_id: Unique identifier for the interaction
         view: The view instance to register
@@ -36,7 +33,7 @@ def register_view(interaction_id: str, view: Any) -> None:
 
 def unregister_view(interaction_id: str) -> None:
     """Unregister an active view.
-    
+
     Args:
         interaction_id: Unique identifier for the interaction
     """
@@ -47,16 +44,16 @@ def unregister_view(interaction_id: str) -> None:
 
 async def handle_modal_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle modal interactions for the bot.
-    
+
     Args:
         event: The interaction event from Discord
     """
     if not isinstance(event.interaction, hikari.ModalInteraction):
         return
-    
+
     custom_id = event.interaction.custom_id
     logger.debug(f"Handling modal interaction: {custom_id}")
-    
+
     try:
         # Handle bytes transfer modal
         if custom_id.startswith("send_bytes_modal:"):
@@ -67,10 +64,10 @@ async def handle_modal_interaction(event: hikari.InteractionCreateEvent) -> None
             await handle_beacon_message_modal(event)
         else:
             logger.warning(f"Unhandled modal interaction: {custom_id}")
-    
+
     except Exception as e:
         logger.exception(f"Error handling modal interaction {custom_id}: {e}")
-        
+
         # Try to respond with error message
         try:
             if not event.interaction.is_responded():
@@ -88,132 +85,132 @@ async def handle_modal_interaction(event: hikari.InteractionCreateEvent) -> None
 
 async def handle_send_bytes_modal(event: hikari.InteractionCreateEvent) -> None:
     """Handle send bytes modal submission.
-    
+
     Args:
         event: The modal interaction event
     """
     if not isinstance(event.interaction, hikari.ModalInteraction):
         return
-        
+
     # Parse custom_id to get recipient ID
     custom_id_parts = event.interaction.custom_id.split(":")
     if len(custom_id_parts) != 2:
         logger.error(f"Invalid send_bytes_modal custom_id format: {event.interaction.custom_id}")
         return
-    
+
     recipient_id = custom_id_parts[1]
     user_id = str(event.interaction.user.id)
-    
+
     # Find the handler
     handler_key = f"send_bytes_modal:{recipient_id}:{user_id}"
-    
+
     # Get bot instance from event
     bot = event.app
-    if not hasattr(bot, 'd') or 'modal_handlers' not in bot.d:
+    if not hasattr(bot, "d") or "modal_handlers" not in bot.d:
         logger.error("No modal handlers found in bot data")
         return
-    
-    handler = bot.d['modal_handlers'].get(handler_key)
+
+    handler = bot.d["modal_handlers"].get(handler_key)
     if not handler:
         logger.error(f"No handler found for key: {handler_key}")
         return
-    
+
     try:
         # Call the handler's submit method
         await handler.handle_submit(event.interaction)
-        
+
         # Clean up the handler after use
-        del bot.d['modal_handlers'][handler_key]
-        
+        del bot.d["modal_handlers"][handler_key]
+
     except Exception as e:
         logger.exception(f"Error in send bytes modal handler: {e}")
         # Clean up handler even on error
-        if handler_key in bot.d['modal_handlers']:
-            del bot.d['modal_handlers'][handler_key]
+        if handler_key in bot.d["modal_handlers"]:
+            del bot.d["modal_handlers"][handler_key]
         raise
 
 
 async def handle_solution_submission_modal(event: hikari.InteractionCreateEvent) -> None:
     """Handle solution submission modal submission.
-    
+
     Args:
         event: The modal interaction event
     """
     if not isinstance(event.interaction, hikari.ModalInteraction):
         return
-        
+
     # Parse custom_id to get challenge ID
     custom_id_parts = event.interaction.custom_id.split(":")
     if len(custom_id_parts) != 2:
         logger.error(f"Invalid submit_solution_modal custom_id format: {event.interaction.custom_id}")
         return
-    
+
     challenge_id = custom_id_parts[1]
     user_id = str(event.interaction.user.id)
-    
+
     # Find the handler
     handler_key = f"submit_solution_modal:{challenge_id}:{user_id}"
-    
+
     # Get bot instance from event
     bot = event.app
-    if not hasattr(bot, 'd') or 'modal_handlers' not in bot.d:
+    if not hasattr(bot, "d") or "modal_handlers" not in bot.d:
         logger.error("No modal handlers found in bot data")
         return
-    
-    handler = bot.d['modal_handlers'].get(handler_key)
+
+    handler = bot.d["modal_handlers"].get(handler_key)
     if not handler:
         logger.error(f"No handler found for key: {handler_key}")
         return
-    
+
     try:
         # Call the handler's submit method
         await handler.handle_submit(event.interaction)
-        
+
         # Clean up the handler after use
-        del bot.d['modal_handlers'][handler_key]
-        
+        del bot.d["modal_handlers"][handler_key]
+
     except Exception as e:
         logger.exception(f"Error in solution submission modal handler: {e}")
         # Clean up handler even on error
-        if handler_key in bot.d['modal_handlers']:
-            del bot.d['modal_handlers'][handler_key]
+        if handler_key in bot.d["modal_handlers"]:
+            del bot.d["modal_handlers"][handler_key]
         raise
 
 
 async def handle_beacon_message_modal(event: hikari.InteractionCreateEvent) -> None:
     """Handle beacon message modal submission.
-    
+
     Args:
         event: The modal interaction event
     """
     if not isinstance(event.interaction, hikari.ModalInteraction):
         return
-    
+
     # Get the squads service
-    squads_service = getattr(event.app.d, 'squads_service')
+    squads_service = event.app.d.squads_service
     if not squads_service:
-        squads_service = getattr(event.app.d, '_services', {}).get('squads_service')
-    
+        squads_service = getattr(event.app.d, "_services", {}).get("squads_service")
+
     if not squads_service:
         logger.error("No squads service found for beacon modal submission")
         return
-    
+
     # Handle the modal submission
     await handle_beacon_modal_submit(event, squads_service)
 
 
 async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle component interactions for the bot.
-    
+
     Args:
         event: The interaction event from Discord
     """
     if not isinstance(event.interaction, hikari.ComponentInteraction):
         return
-    
+
     custom_id = event.interaction.custom_id
     logger.debug(f"Handling component interaction: {custom_id}")
-    
+
     try:
         # Handle squad selection interactions
         if custom_id == "squad_select":
@@ -244,10 +241,10 @@ async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> 
             await handle_challenge_submit_solution_interaction(event)
         else:
             logger.warning(f"Unhandled component interaction: {custom_id}")
-    
+
     except Exception as e:
         logger.exception(f"Error handling component interaction {custom_id}: {e}")
-        
+
         # Try to respond with error message
         try:
             if not event.interaction.is_responded():
@@ -266,85 +263,84 @@ async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> 
 
 async def handle_squad_select_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle squad selection menu interactions.
-    
+
     Args:
         event: The interaction event
     """
     # In a production environment, you'd want to properly track views
     # For now, we'll handle this directly in the view
-    
+
     # Get user and guild IDs to find the appropriate view
     user_id = str(event.interaction.user.id)
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
-    
+
     if not guild_id:
         logger.error("Squad select interaction without guild context")
         return
-    
+
     # For this implementation, we'll handle the interaction within the view itself
     # In production, you might want to store active views in Redis or a database
     logger.info(f"Squad select interaction from user {user_id} in guild {guild_id}")
-    
+
     # The SquadSelectView should handle its own interactions
     # This is a placeholder for the production implementation
 
 
 async def handle_squad_confirm_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle squad confirmation button interactions.
-    
+
     Args:
         event: The interaction event
     """
     user_id = str(event.interaction.user.id)
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
-    
+
     if not guild_id:
         logger.error("Squad confirm interaction without guild context")
         return
-    
+
     logger.info(f"Squad confirm interaction from user {user_id} in guild {guild_id}")
-    
+
     # Handle confirmation logic here
     # This would typically involve updating the squad membership
 
 
 async def handle_balance_share_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle balance share button interactions.
-    
+
     Args:
         event: The interaction event
     """
     if not isinstance(event.interaction, hikari.ComponentInteraction):
         return
-        
+
     user_id = str(event.interaction.user.id)
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
-    
+
     if not guild_id:
         logger.error("Balance share interaction without guild context")
         return
-    
+
     logger.info(f"Balance share interaction from user {user_id} in guild {guild_id}")
-    
+
     try:
         # Get the user's current balance data to regenerate the image
-        from smarter_dev.bot.services.bytes_service import BytesService
         from smarter_dev.bot.utils.image_embeds import get_generator
-        
+
         # Get the bytes service from the bot
         service = None
-        
+
         # Try multiple ways to access the service
-        if hasattr(event.app, 'd') and hasattr(event.app.d, '_services'):
-            service = event.app.d._services.get('bytes_service')
-        elif hasattr(event.app, 'bytes_service'):
+        if hasattr(event.app, "d") and hasattr(event.app.d, "_services"):
+            service = event.app.d._services.get("bytes_service")
+        elif hasattr(event.app, "bytes_service"):
             service = event.app.bytes_service
-        elif hasattr(event.app, 'd') and isinstance(event.app.d, dict):
-            services = event.app.d.get('_services', {})
-            service = services.get('bytes_service')
-        
+        elif hasattr(event.app, "d") and isinstance(event.app.d, dict):
+            services = event.app.d.get("_services", {})
+            service = services.get("bytes_service")
+
         logger.debug(f"Service access result: {service is not None}")
-        
+
         if not service:
             await event.interaction.create_initial_response(
                 hikari.ResponseType.MESSAGE_CREATE,
@@ -352,18 +348,18 @@ async def handle_balance_share_interaction(event: hikari.InteractionCreateEvent)
                 flags=hikari.MessageFlag.EPHEMERAL
             )
             return
-        
+
         # Get current balance
         balance = await service.get_balance(guild_id, user_id)
-        
+
         # Format last daily as readable string
         last_daily_str = None
         if balance.last_daily:
-            last_daily_str = balance.last_daily.strftime('%B %d, %Y')
-        
+            last_daily_str = balance.last_daily.strftime("%B %d, %Y")
+
         # Get username for display
         username = event.interaction.user.display_name or event.interaction.user.username
-        
+
         # Generate the balance image
         generator = get_generator()
         image_file = generator.create_balance_embed(
@@ -374,17 +370,17 @@ async def handle_balance_share_interaction(event: hikari.InteractionCreateEvent)
             total_received=balance.total_received,
             total_sent=balance.total_sent
         )
-        
+
         # Send as public message
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
             attachment=image_file,
             flags=hikari.MessageFlag.NONE  # Public message
         )
-        
+
     except Exception as e:
         logger.exception(f"Error in balance share interaction: {e}")
-        
+
         # Send error response
         try:
             if not event.interaction.is_responded():
@@ -399,37 +395,37 @@ async def handle_balance_share_interaction(event: hikari.InteractionCreateEvent)
 
 async def handle_leaderboard_share_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle leaderboard share button interactions.
-    
+
     Args:
         event: The interaction event
     """
     if not isinstance(event.interaction, hikari.ComponentInteraction):
         return
-        
+
     user_id = str(event.interaction.user.id)
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
-    
+
     if not guild_id:
         logger.error("Leaderboard share interaction without guild context")
         return
-    
+
     logger.info(f"Leaderboard share interaction from user {user_id} in guild {guild_id}")
-    
+
     try:
         # Get the bytes service from the bot
         service = None
-        
+
         # Try multiple ways to access the service
-        if hasattr(event.app, 'd') and hasattr(event.app.d, '_services'):
-            service = event.app.d._services.get('bytes_service')
-        elif hasattr(event.app, 'bytes_service'):
+        if hasattr(event.app, "d") and hasattr(event.app.d, "_services"):
+            service = event.app.d._services.get("bytes_service")
+        elif hasattr(event.app, "bytes_service"):
             service = event.app.bytes_service
-        elif hasattr(event.app, 'd') and isinstance(event.app.d, dict):
-            services = event.app.d.get('_services', {})
-            service = services.get('bytes_service')
-        
+        elif hasattr(event.app, "d") and isinstance(event.app.d, dict):
+            services = event.app.d.get("_services", {})
+            service = services.get("bytes_service")
+
         logger.debug(f"Service access result: {service is not None}")
-        
+
         if not service:
             await event.interaction.create_initial_response(
                 hikari.ResponseType.MESSAGE_CREATE,
@@ -437,10 +433,10 @@ async def handle_leaderboard_share_interaction(event: hikari.InteractionCreateEv
                 flags=hikari.MessageFlag.EPHEMERAL
             )
             return
-        
+
         # Get leaderboard data (default to 10 entries like the command)
         entries = await service.get_leaderboard(guild_id, 10)
-        
+
         # Create user display names mapping
         user_display_names = {}
         for entry in entries:
@@ -449,26 +445,26 @@ async def handle_leaderboard_share_interaction(event: hikari.InteractionCreateEv
                 user_display_names[entry.user_id] = member.display_name if member else f"User {entry.user_id[:8]}"
             except:
                 user_display_names[entry.user_id] = f"User {entry.user_id[:8]}"
-        
+
         # Generate the leaderboard image
         from smarter_dev.bot.utils.image_embeds import get_generator
         generator = get_generator()
         image_file = generator.create_leaderboard_embed(
-            entries, 
-            event.interaction.get_guild().name, 
+            entries,
+            event.interaction.get_guild().name,
             user_display_names
         )
-        
+
         # Send as public message
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
             attachment=image_file,
             flags=hikari.MessageFlag.NONE  # Public message
         )
-        
+
     except Exception as e:
         logger.exception(f"Error in leaderboard share interaction: {e}")
-        
+
         # Send error response
         try:
             if not event.interaction.is_responded():
@@ -483,37 +479,37 @@ async def handle_leaderboard_share_interaction(event: hikari.InteractionCreateEv
 
 async def handle_history_share_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle history share button interactions.
-    
+
     Args:
         event: The interaction event
     """
     if not isinstance(event.interaction, hikari.ComponentInteraction):
         return
-        
+
     user_id = str(event.interaction.user.id)
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
-    
+
     if not guild_id:
         logger.error("History share interaction without guild context")
         return
-    
+
     logger.info(f"History share interaction from user {user_id} in guild {guild_id}")
-    
+
     try:
         # Get the bytes service from the bot
         service = None
-        
+
         # Try multiple ways to access the service
-        if hasattr(event.app, 'd') and hasattr(event.app.d, '_services'):
-            service = event.app.d._services.get('bytes_service')
-        elif hasattr(event.app, 'bytes_service'):
+        if hasattr(event.app, "d") and hasattr(event.app.d, "_services"):
+            service = event.app.d._services.get("bytes_service")
+        elif hasattr(event.app, "bytes_service"):
             service = event.app.bytes_service
-        elif hasattr(event.app, 'd') and isinstance(event.app.d, dict):
-            services = event.app.d.get('_services', {})
-            service = services.get('bytes_service')
-        
+        elif hasattr(event.app, "d") and isinstance(event.app.d, dict):
+            services = event.app.d.get("_services", {})
+            service = services.get("bytes_service")
+
         logger.debug(f"Service access result: {service is not None}")
-        
+
         if not service:
             await event.interaction.create_initial_response(
                 hikari.ResponseType.MESSAGE_CREATE,
@@ -521,29 +517,29 @@ async def handle_history_share_interaction(event: hikari.InteractionCreateEvent)
                 flags=hikari.MessageFlag.EPHEMERAL
             )
             return
-        
+
         # Get transaction history (default to 10 entries like the command)
         transactions = await service.get_transaction_history(
             guild_id,
             user_id=user_id,
             limit=10
         )
-        
+
         # Generate the history image
         from smarter_dev.bot.utils.image_embeds import get_generator
         generator = get_generator()
         image_file = generator.create_history_embed(transactions, user_id)
-        
+
         # Send as public message
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
             attachment=image_file,
             flags=hikari.MessageFlag.NONE  # Public message
         )
-        
+
     except Exception as e:
         logger.exception(f"Error in history share interaction: {e}")
-        
+
         # Send error response
         try:
             if not event.interaction.is_responded():
@@ -558,37 +554,37 @@ async def handle_history_share_interaction(event: hikari.InteractionCreateEvent)
 
 async def handle_squad_list_share_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle squad list share button interactions.
-    
+
     Args:
         event: The interaction event
     """
     if not isinstance(event.interaction, hikari.ComponentInteraction):
         return
-        
+
     user_id = str(event.interaction.user.id)
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
-    
+
     if not guild_id:
         logger.error("Squad list share interaction without guild context")
         return
-    
+
     logger.info(f"Squad list share interaction from user {user_id} in guild {guild_id}")
-    
+
     try:
         # Get the squads service from the bot
         service = None
-        
+
         # Try multiple ways to access the service
-        if hasattr(event.app, 'd') and hasattr(event.app.d, '_services'):
-            service = event.app.d._services.get('squads_service')
-        elif hasattr(event.app, 'squads_service'):
+        if hasattr(event.app, "d") and hasattr(event.app.d, "_services"):
+            service = event.app.d._services.get("squads_service")
+        elif hasattr(event.app, "squads_service"):
             service = event.app.squads_service
-        elif hasattr(event.app, 'd') and isinstance(event.app.d, dict):
-            services = event.app.d.get('_services', {})
-            service = services.get('squads_service')
-        
+        elif hasattr(event.app, "d") and isinstance(event.app.d, dict):
+            services = event.app.d.get("_services", {})
+            service = services.get("squads_service")
+
         logger.debug(f"Service access result: {service is not None}")
-        
+
         if not service:
             await event.interaction.create_initial_response(
                 hikari.ResponseType.MESSAGE_CREATE,
@@ -596,10 +592,10 @@ async def handle_squad_list_share_interaction(event: hikari.InteractionCreateEve
                 flags=hikari.MessageFlag.EPHEMERAL
             )
             return
-        
+
         # Get squads data
         squads = await service.list_squads(guild_id)
-        
+
         if not squads:
             await event.interaction.create_initial_response(
                 hikari.ResponseType.MESSAGE_CREATE,
@@ -607,45 +603,45 @@ async def handle_squad_list_share_interaction(event: hikari.InteractionCreateEve
                 flags=hikari.MessageFlag.EPHEMERAL
             )
             return
-        
+
         # Sort squads to put default squad at the bottom
-        squads.sort(key=lambda s: (getattr(s, 'is_default', False), s.name.lower()))
-        
+        squads.sort(key=lambda s: (getattr(s, "is_default", False), s.name.lower()))
+
         # Get user's current squad
         user_squad_response = await service.get_user_squad(guild_id, user_id)
         current_squad_id = user_squad_response.squad.id if user_squad_response.squad else None
-        
+
         # Check for active campaign
         has_active_campaign = await service._check_active_campaign(guild_id)
-        
+
         # Get guild roles for color information
         guild_roles = {}
         guild = event.interaction.get_guild()
         if guild:
             for role in guild.get_roles().values():
                 guild_roles[str(role.id)] = role.color
-        
+
         # Generate the squad list image
         from smarter_dev.bot.utils.image_embeds import get_generator
         generator = get_generator()
         image_file = generator.create_squad_list_embed(
-            squads, 
-            guild.name, 
+            squads,
+            guild.name,
             str(current_squad_id) if current_squad_id else None,
             guild_roles,
             has_active_campaign=has_active_campaign
         )
-        
+
         # Send as public message
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
             attachment=image_file,
             flags=hikari.MessageFlag.NONE  # Public message
         )
-        
+
     except Exception as e:
         logger.exception(f"Error in squad list share interaction: {e}")
-        
+
         # Send error response
         try:
             if not event.interaction.is_responded():
@@ -660,22 +656,22 @@ async def handle_squad_list_share_interaction(event: hikari.InteractionCreateEve
 
 async def handle_tldr_share_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle TLDR share button interactions.
-    
+
     Args:
         event: The interaction event
     """
     if not isinstance(event.interaction, hikari.ComponentInteraction):
         return
-        
+
     user_id = str(event.interaction.user.id)
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
-    
+
     if not guild_id:
         logger.error("TLDR share interaction without guild context")
         return
-    
+
     logger.info(f"TLDR share interaction from user {user_id} in guild {guild_id}")
-    
+
     try:
         # Parse the custom_id to get user_id and message_count
         # Format: share_tldr:user_id:message_count
@@ -688,10 +684,10 @@ async def handle_tldr_share_interaction(event: hikari.InteractionCreateEvent) ->
                 flags=hikari.MessageFlag.EPHEMERAL
             )
             return
-        
+
         original_user_id = custom_id_parts[1]
-        message_count = custom_id_parts[2]
-        
+        custom_id_parts[2]
+
         # Only allow the original requester to share their summary
         if user_id != original_user_id:
             await event.interaction.create_initial_response(
@@ -700,7 +696,7 @@ async def handle_tldr_share_interaction(event: hikari.InteractionCreateEvent) ->
                 flags=hikari.MessageFlag.EPHEMERAL
             )
             return
-        
+
         # Get the original message content from the interaction
         original_message = event.interaction.message
         if not original_message:
@@ -711,28 +707,28 @@ async def handle_tldr_share_interaction(event: hikari.InteractionCreateEvent) ->
                 flags=hikari.MessageFlag.EPHEMERAL
             )
             return
-        
+
         # Extract the summary content from the original message
         summary_content = original_message.content if original_message.content else "Summary content not available"
-        
+
         # Get user's display name for attribution
         username = event.interaction.user.display_name or event.interaction.user.username
-        
+
         # Create public message with attribution
         public_content = f"📝 **Channel Summary** (requested by {username})\n\n{summary_content}"
-        
+
         # Share as public message
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
             content=public_content,
             flags=hikari.MessageFlag.NONE  # Public message
         )
-        
+
         logger.info(f"TLDR summary shared publicly by {username} ({user_id})")
-        
+
     except Exception as e:
         logger.exception(f"Error in TLDR share interaction: {e}")
-        
+
         # Send error response
         try:
             if not event.interaction.is_responded():
@@ -747,22 +743,22 @@ async def handle_tldr_share_interaction(event: hikari.InteractionCreateEvent) ->
 
 async def handle_scoreboard_share_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle scoreboard share button interactions.
-    
+
     Args:
         event: The interaction event
     """
     if not isinstance(event.interaction, hikari.ComponentInteraction):
         return
-        
+
     user_id = str(event.interaction.user.id)
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
-    
+
     if not guild_id:
         logger.error("Scoreboard share interaction without guild context")
         return
-    
+
     logger.info(f"Scoreboard share interaction from user {user_id} in guild {guild_id}")
-    
+
     try:
         # Get the original embed from the interaction message
         original_message = event.interaction.message
@@ -774,17 +770,17 @@ async def handle_scoreboard_share_interaction(event: hikari.InteractionCreateEve
                 flags=hikari.MessageFlag.EPHEMERAL
             )
             return
-        
+
         # Get the original embed
         original_embed = original_message.embeds[0]
-        
+
         # Acknowledge the interaction first
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
             content="📤 Sharing scoreboard...",
             flags=hikari.MessageFlag.EPHEMERAL
         )
-        
+
         # Send the embed as a public message in the same channel
         channel = event.interaction.get_channel()
         if channel:
@@ -792,7 +788,7 @@ async def handle_scoreboard_share_interaction(event: hikari.InteractionCreateEve
             logger.info(f"Shared scoreboard in channel {channel.id}")
         else:
             logger.error("Could not get channel for scoreboard share")
-            
+
     except hikari.ForbiddenError as e:
         logger.error(f"Missing permissions to share scoreboard in channel: {e}")
         try:
@@ -813,22 +809,22 @@ async def handle_scoreboard_share_interaction(event: hikari.InteractionCreateEve
 
 async def handle_breakdown_share_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle breakdown share button interactions.
-    
+
     Args:
         event: The interaction event
     """
     if not isinstance(event.interaction, hikari.ComponentInteraction):
         return
-        
+
     user_id = str(event.interaction.user.id)
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
-    
+
     if not guild_id:
         logger.error("Breakdown share interaction without guild context")
         return
-    
+
     logger.info(f"Breakdown share interaction from user {user_id} in guild {guild_id}")
-    
+
     try:
         # Get the original embed from the interaction message
         original_message = event.interaction.message
@@ -840,17 +836,17 @@ async def handle_breakdown_share_interaction(event: hikari.InteractionCreateEven
                 flags=hikari.MessageFlag.EPHEMERAL
             )
             return
-        
+
         # Get the original embed
         original_embed = original_message.embeds[0]
-        
+
         # Acknowledge the interaction first
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
             content="📤 Sharing breakdown...",
             flags=hikari.MessageFlag.EPHEMERAL
         )
-        
+
         # Send the embed as a public message in the same channel
         channel = event.interaction.get_channel()
         if channel:
@@ -858,7 +854,7 @@ async def handle_breakdown_share_interaction(event: hikari.InteractionCreateEven
             logger.info(f"Shared breakdown in channel {channel.id}")
         else:
             logger.error("Could not get channel for breakdown share")
-            
+
     except hikari.ForbiddenError as e:
         logger.error(f"Missing permissions to share breakdown in channel: {e}")
         try:
@@ -879,26 +875,26 @@ async def handle_breakdown_share_interaction(event: hikari.InteractionCreateEven
 
 async def handle_challenge_get_input_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle 'Get Input' button interactions for challenges.
-    
+
     Shows confirmation prompt for first-time input generation with timer warning.
     If input already exists, provides it directly.
-    
+
     Args:
         event: The interaction event
     """
     if not isinstance(event.interaction, hikari.ComponentInteraction):
         return
-        
+
     user_id = str(event.interaction.user.id)
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
-    
+
     if not guild_id:
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
             content="❌ This command can only be used in a server."
         )
         return
-    
+
     # Parse challenge ID from custom_id
     custom_id_parts = event.interaction.custom_id.split(":")
     if len(custom_id_parts) != 2 or custom_id_parts[0] != "get_input":
@@ -908,22 +904,22 @@ async def handle_challenge_get_input_interaction(event: hikari.InteractionCreate
             content="❌ Invalid challenge request format."
         )
         return
-    
+
     challenge_id = custom_id_parts[1]
-    
+
     logger.info(f"Challenge get input interaction from user {user_id} in guild {guild_id} for challenge {challenge_id}")
-    
+
     try:
         # Get the API client from the bot
         api_client = None
-        
-        if hasattr(event.app, 'd') and hasattr(event.app.d, '_services'):
+
+        if hasattr(event.app, "d") and hasattr(event.app.d, "_services"):
             # Try to get any service that has an API client
-            for service_name, service in event.app.d._services.items():
-                if hasattr(service, '_api_client'):
+            for _service_name, service in event.app.d._services.items():
+                if hasattr(service, "_api_client"):
                     api_client = service._api_client
                     break
-        
+
         if not api_client:
             logger.error("No API client available")
             await event.interaction.create_initial_response(
@@ -931,27 +927,27 @@ async def handle_challenge_get_input_interaction(event: hikari.InteractionCreate
                 content="❌ Service not available. Please try again later."
             )
             return
-        
+
         # First, check if input already exists
         try:
             exists_response = await api_client.get(
-                f"/challenges/{challenge_id}/input-exists", 
+                f"/challenges/{challenge_id}/input-exists",
                 params={
                     "guild_id": guild_id,
                     "user_id": user_id
                 }
             )
-            
+
             exists_data = exists_response.json()
             input_already_exists = exists_data.get("exists", False)
-            
+
             if input_already_exists:
                 # Input already exists, get it directly without confirmation
                 await _provide_challenge_input_directly(event, api_client, challenge_id, guild_id, user_id)
             else:
                 # Input doesn't exist, show confirmation prompt
                 await _show_input_generation_confirmation(event, challenge_id)
-                
+
         except Exception as api_error:
             # Handle specific API errors
             error_message = str(api_error)
@@ -962,15 +958,15 @@ async def handle_challenge_get_input_interaction(event: hikari.InteractionCreate
             else:
                 logger.exception(f"API call failed while checking input existence: {api_error}")
                 content = "❌ Failed to check challenge input status. Please try again later."
-            
+
             await event.interaction.create_initial_response(
                 hikari.ResponseType.MESSAGE_CREATE,
                 content=content
             )
-        
+
     except Exception as e:
         logger.exception(f"Error in challenge get input interaction: {e}")
-        
+
         # Send error response
         try:
             if not event.interaction.is_responded():
@@ -984,7 +980,7 @@ async def handle_challenge_get_input_interaction(event: hikari.InteractionCreate
 
 async def _show_input_generation_confirmation(event: hikari.InteractionCreateEvent, challenge_id: str) -> None:
     """Show confirmation prompt for first-time input generation with timer warning.
-    
+
     Args:
         event: The interaction event
         challenge_id: The challenge ID
@@ -996,19 +992,19 @@ async def _show_input_generation_confirmation(event: hikari.InteractionCreateEve
         emoji="📥",
         label="Get Input"
     )
-    
+
     cancel_button = hikari.impl.InteractiveButtonBuilder(
         style=hikari.ButtonStyle.SECONDARY,
         custom_id=f"cancel_get_input:{challenge_id}",
         emoji="❌",
         label="Cancel"
     )
-    
+
     # Create action row and add buttons
     action_row = hikari.impl.MessageActionRowBuilder()
     action_row.add_component(get_input_button)
     action_row.add_component(cancel_button)
-    
+
     await event.interaction.create_initial_response(
         hikari.ResponseType.MESSAGE_CREATE,
         content="⚠️ **Challenge Input Generation**\n\n"
@@ -1018,7 +1014,7 @@ async def _show_input_generation_confirmation(event: hikari.InteractionCreateEve
         components=[action_row],
         flags=hikari.MessageFlag.EPHEMERAL
     )
-    
+
     # Schedule auto-deletion after 60 seconds
     async def delete_after_delay():
         try:
@@ -1028,7 +1024,7 @@ async def _show_input_generation_confirmation(event: hikari.InteractionCreateEve
         except Exception as e:
             # Message may already be deleted or interaction expired
             logger.debug(f"Could not auto-delete confirmation message: {e}")
-    
+
     # Start the deletion task in the background
     asyncio.create_task(delete_after_delay())
 
@@ -1037,11 +1033,11 @@ async def _provide_challenge_input_directly(
     event: hikari.InteractionCreateEvent,
     api_client,
     challenge_id: str,
-    guild_id: str, 
+    guild_id: str,
     user_id: str
 ) -> None:
     """Provide challenge input directly without confirmation (when it already exists).
-    
+
     Args:
         event: The interaction event
         api_client: The API client to use
@@ -1051,16 +1047,16 @@ async def _provide_challenge_input_directly(
     """
     try:
         response = await api_client.get(
-            f"/challenges/{challenge_id}/input", 
+            f"/challenges/{challenge_id}/input",
             params={
                 "guild_id": guild_id,
                 "user_id": user_id
             }
         )
-        
+
         if response.status_code != 200:
             logger.error(f"API call failed with status {response.status_code}: {response.text}")
-            
+
             # Handle specific error cases
             if response.status_code == 404:
                 if "not a member of any squad" in response.text:
@@ -1073,28 +1069,28 @@ async def _provide_challenge_input_directly(
                 content = "❌ Challenge has not been released yet. Please wait for the challenge to be announced."
             else:
                 content = "❌ Failed to get challenge input. Please try again later."
-            
+
             await event.interaction.create_initial_response(
                 hikari.ResponseType.MESSAGE_CREATE,
                 content=content
             )
             return
-        
+
         # Parse the API response
         response_data = response.json()
         input_data = response_data.get("input_data", "")
         challenge_info = response_data.get("challenge", {})
         challenge_title = challenge_info.get("title", "Challenge")
-        
+
         # Create a safe filename from the challenge title
         import re
-        safe_title = re.sub(r'[^a-zA-Z0-9_-]', '_', challenge_title.lower())
+        safe_title = re.sub(r"[^a-zA-Z0-9_-]", "_", challenge_title.lower())
         filename = f"{safe_title}.txt"
-        
+
         # Create a file with the input data
-        file_content = input_data.encode('utf-8')
+        file_content = input_data.encode("utf-8")
         file_attachment = hikari.Bytes(file_content, filename)
-        
+
         # Send response with file attachment (non-ephemeral so squad can see) with user mention
         user_mention = f"<@{user_id}>"
         await event.interaction.create_initial_response(
@@ -1102,9 +1098,9 @@ async def _provide_challenge_input_directly(
             content=f"{user_mention} requested the challenge input:\n\n📥 **{challenge_title}**",
             attachment=file_attachment
         )
-        
+
         logger.info(f"Successfully provided existing challenge input for user {user_id} in guild {guild_id} for challenge {challenge_id}")
-        
+
     except Exception as api_error:
         logger.exception(f"API call failed while providing challenge input: {api_error}")
         await event.interaction.create_initial_response(
@@ -1115,16 +1111,16 @@ async def _provide_challenge_input_directly(
 
 async def handle_challenge_confirm_get_input_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle 'Get Input' confirmation button interactions.
-    
+
     Args:
         event: The interaction event
     """
     if not isinstance(event.interaction, hikari.ComponentInteraction):
         return
-        
+
     user_id = str(event.interaction.user.id)
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
-    
+
     if not guild_id:
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_UPDATE,
@@ -1132,7 +1128,7 @@ async def handle_challenge_confirm_get_input_interaction(event: hikari.Interacti
             components=[]
         )
         return
-    
+
     # Parse challenge ID from custom_id
     custom_id_parts = event.interaction.custom_id.split(":")
     if len(custom_id_parts) != 2 or custom_id_parts[0] != "confirm_get_input":
@@ -1143,22 +1139,22 @@ async def handle_challenge_confirm_get_input_interaction(event: hikari.Interacti
             components=[]
         )
         return
-    
+
     challenge_id = custom_id_parts[1]
-    
+
     logger.info(f"Challenge confirm get input interaction from user {user_id} in guild {guild_id} for challenge {challenge_id}")
-    
+
     try:
         # Get the API client from the bot
         api_client = None
-        
-        if hasattr(event.app, 'd') and hasattr(event.app.d, '_services'):
+
+        if hasattr(event.app, "d") and hasattr(event.app.d, "_services"):
             # Try to get any service that has an API client
-            for service_name, service in event.app.d._services.items():
-                if hasattr(service, '_api_client'):
+            for _service_name, service in event.app.d._services.items():
+                if hasattr(service, "_api_client"):
                     api_client = service._api_client
                     break
-        
+
         if not api_client:
             logger.error("No API client available")
             await event.interaction.create_initial_response(
@@ -1167,14 +1163,14 @@ async def handle_challenge_confirm_get_input_interaction(event: hikari.Interacti
                 components=[]
             )
             return
-        
+
         # Use the existing function to provide challenge input
         # It will generate new input if needed and properly format the response
         await _provide_challenge_input_directly(event, api_client, challenge_id, guild_id, user_id)
-        
+
     except Exception as e:
         logger.exception(f"Error in challenge confirm get input interaction: {e}")
-        
+
         # Send error response
         try:
             if not event.interaction.is_responded():
@@ -1189,16 +1185,16 @@ async def handle_challenge_confirm_get_input_interaction(event: hikari.Interacti
 
 async def handle_challenge_cancel_get_input_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle 'Cancel' button interactions for input generation confirmation.
-    
+
     Args:
         event: The interaction event
     """
     if not isinstance(event.interaction, hikari.ComponentInteraction):
         return
-        
+
     user_id = str(event.interaction.user.id)
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
-    
+
     if not guild_id:
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_UPDATE,
@@ -1206,7 +1202,7 @@ async def handle_challenge_cancel_get_input_interaction(event: hikari.Interactio
             components=[]
         )
         return
-    
+
     # Parse challenge ID from custom_id
     custom_id_parts = event.interaction.custom_id.split(":")
     if len(custom_id_parts) != 2 or custom_id_parts[0] != "cancel_get_input":
@@ -1217,18 +1213,18 @@ async def handle_challenge_cancel_get_input_interaction(event: hikari.Interactio
             components=[]
         )
         return
-    
+
     challenge_id = custom_id_parts[1]
-    
+
     logger.info(f"Challenge cancel get input interaction from user {user_id} in guild {guild_id} for challenge {challenge_id}")
-    
+
     # Delete the confirmation message by updating it
     await event.interaction.create_initial_response(
         hikari.ResponseType.MESSAGE_UPDATE,
         content="❌ **Input Generation Cancelled**\n\nYour score timer has not started. You can request input later when you're ready.",
         components=[]
     )
-    
+
     # Delete the cancellation message after 5 seconds
     async def delete_after_delay():
         try:
@@ -1236,24 +1232,24 @@ async def handle_challenge_cancel_get_input_interaction(event: hikari.Interactio
             await event.interaction.delete_initial_response()
         except Exception:
             pass  # Message may already be deleted
-    
+
     asyncio.create_task(delete_after_delay())
 
 
 async def handle_challenge_submit_solution_interaction(event: hikari.InteractionCreateEvent) -> None:
     """Handle 'Submit Solution' button interactions for challenges.
-    
+
     Shows modal dialog for solution submission.
-    
+
     Args:
         event: The interaction event
     """
     if not isinstance(event.interaction, hikari.ComponentInteraction):
         return
-        
+
     user_id = str(event.interaction.user.id)
     guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
-    
+
     if not guild_id:
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
@@ -1261,7 +1257,7 @@ async def handle_challenge_submit_solution_interaction(event: hikari.Interaction
             flags=hikari.MessageFlag.EPHEMERAL
         )
         return
-    
+
     # Parse challenge ID from custom_id
     custom_id_parts = event.interaction.custom_id.split(":")
     if len(custom_id_parts) != 2 or custom_id_parts[0] != "submit_solution":
@@ -1272,22 +1268,22 @@ async def handle_challenge_submit_solution_interaction(event: hikari.Interaction
             flags=hikari.MessageFlag.EPHEMERAL
         )
         return
-    
+
     challenge_id = custom_id_parts[1]
-    
+
     logger.info(f"Challenge submit solution interaction from user {user_id} in guild {guild_id} for challenge {challenge_id}")
-    
+
     try:
         # Get the API client from the bot
         api_client = None
-        
-        if hasattr(event.app, 'd') and hasattr(event.app.d, '_services'):
+
+        if hasattr(event.app, "d") and hasattr(event.app.d, "_services"):
             # Try to get any service that has an API client
-            for service_name, service in event.app.d._services.items():
-                if hasattr(service, '_api_client'):
+            for _service_name, service in event.app.d._services.items():
+                if hasattr(service, "_api_client"):
                     api_client = service._api_client
                     break
-        
+
         if not api_client:
             logger.error("No API client available")
             await event.interaction.create_initial_response(
@@ -1296,7 +1292,7 @@ async def handle_challenge_submit_solution_interaction(event: hikari.Interaction
                 flags=hikari.MessageFlag.EPHEMERAL
             )
             return
-        
+
         # Get challenge information for the modal title
         challenge_title = "Challenge"
         try:
@@ -1307,12 +1303,15 @@ async def handle_challenge_submit_solution_interaction(event: hikari.Interaction
                 challenge_title = challenge_info.get("title", "Challenge")
         except Exception as e:
             logger.warning(f"Could not get challenge title: {e}")
-        
+
         # Create and show the submission modal
-        from smarter_dev.bot.views.challenge_views import create_solution_submission_modal, SolutionSubmissionModalHandler
-        
+        from smarter_dev.bot.views.challenge_views import SolutionSubmissionModalHandler
+        from smarter_dev.bot.views.challenge_views import (
+            create_solution_submission_modal,
+        )
+
         modal = create_solution_submission_modal(challenge_id, challenge_title)
-        
+
         # Create modal handler
         handler = SolutionSubmissionModalHandler(
             challenge_id=challenge_id,
@@ -1321,28 +1320,28 @@ async def handle_challenge_submit_solution_interaction(event: hikari.Interaction
             user=event.interaction.user,
             api_client=api_client
         )
-        
+
         # Store the handler in bot data for later use
-        if not hasattr(event.app, 'd'):
+        if not hasattr(event.app, "d"):
             event.app.d = {}
-        if 'modal_handlers' not in event.app.d:
-            event.app.d['modal_handlers'] = {}
-        
+        if "modal_handlers" not in event.app.d:
+            event.app.d["modal_handlers"] = {}
+
         handler_key = f"submit_solution_modal:{challenge_id}:{user_id}"
-        event.app.d['modal_handlers'][handler_key] = handler
-        
+        event.app.d["modal_handlers"][handler_key] = handler
+
         # Show the modal
         await event.interaction.create_modal_response(
             modal.title,
             modal.custom_id,
             components=modal.components
         )
-        
+
         logger.info(f"Solution submission modal shown for challenge {challenge_id} to user {user_id}")
-        
+
     except Exception as e:
         logger.exception(f"Error in challenge submit solution interaction: {e}")
-        
+
         # Send error response
         try:
             await event.interaction.create_initial_response(
@@ -1356,7 +1355,7 @@ async def handle_challenge_submit_solution_interaction(event: hikari.Interaction
 
 def setup_interaction_handlers(bot: hikari.GatewayBot) -> None:
     """Set up interaction event handlers for the bot.
-    
+
     Args:
         bot: The Discord bot instance
     """
@@ -1366,7 +1365,7 @@ def setup_interaction_handlers(bot: hikari.GatewayBot) -> None:
         # Handle both component and modal interactions
         await handle_component_interaction(event)
         await handle_modal_interaction(event)
-    
+
     logger.info("Interaction handlers set up")
 
 
