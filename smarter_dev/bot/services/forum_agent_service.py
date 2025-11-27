@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
-from smarter_dev.bot.agent import ForumMonitorAgent
+from smarter_dev.bot.agents.forum_agent import ForumMonitorAgent
 from smarter_dev.bot.services.base import BaseService
 from smarter_dev.bot.services.exceptions import APIError, ServiceError, ValidationError
 from smarter_dev.bot.services.models import ServiceHealth
@@ -457,7 +457,7 @@ class ForumAgentService(BaseService):
                         
                     elif operation_mode == 'tagging_only':
                         # Topic classification only
-                        from smarter_dev.bot.agent import ForumMonitorAgent
+                        from smarter_dev.bot.agents.forum_agent import ForumMonitorAgent
                         ai_agent = ForumMonitorAgent()
                         
                         matching_topics, tokens_used = await ai_agent.classify_topics_only(
@@ -476,7 +476,7 @@ class ForumAgentService(BaseService):
                         
                     else:  # combined mode
                         # Both response evaluation and topic classification
-                        from smarter_dev.bot.agent import ForumMonitorAgent
+                        from smarter_dev.bot.agents.forum_agent import ForumMonitorAgent
                         ai_agent = ForumMonitorAgent()
                         
                         decision, confidence, response_content, matching_topics, tokens_used = await ai_agent.evaluate_post_combined(

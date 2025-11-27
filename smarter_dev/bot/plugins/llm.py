@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, TYPE_CHECKING
 
-from smarter_dev.bot.agent import TLDRAgent, estimate_message_tokens
+from smarter_dev.bot.agents.tldr_agent import TLDRAgent, estimate_message_tokens
 from smarter_dev.bot.agents.models import DiscordMessage
 from smarter_dev.bot.services.rate_limiter import rate_limiter
 from smarter_dev.bot.utils.messages import gather_message_context
@@ -176,7 +176,7 @@ async def generate_tldr_summary(
         # Use fallback token estimate if no usage data available
         if tokens_used == 0:
             # Estimate based on message content and response length
-            from smarter_dev.bot.agent import estimate_message_tokens
+            from smarter_dev.bot.agents.tldr_agent import estimate_message_tokens
             estimated_input = estimate_message_tokens(messages)
             estimated_output = len(summary) // 4
             tokens_used = estimated_input + estimated_output
