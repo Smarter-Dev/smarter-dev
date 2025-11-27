@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import difflib
 import logging
-from datetime import datetime, timezone
-from typing import Optional, List, Tuple
+from datetime import UTC
+from datetime import datetime
 
 import hikari
 
@@ -52,23 +52,23 @@ def format_diff(old_text: str, new_text: str, max_length: int = 1024) -> str:
     diff = list(difflib.unified_diff(
         old_lines,
         new_lines,
-        lineterm='',
+        lineterm="",
         n=2  # 2 context lines around changes
     ))
 
     # Skip the header lines (---, +++, @@)
     diff_lines = []
     for line in diff[3:]:  # Skip first 3 header lines
-        if line.startswith('+'):
+        if line.startswith("+"):
             diff_lines.append(f"+ {line[1:]}")
-        elif line.startswith('-'):
+        elif line.startswith("-"):
             diff_lines.append(f"- {line[1:]}")
-        elif line.startswith('@@'):
+        elif line.startswith("@@"):
             # Skip hunk headers
             continue
         else:
             # Context line (unchanged)
-            diff_lines.append(f"  {line[1:]}" if line.startswith(' ') else f"  {line}")
+            diff_lines.append(f"  {line[1:]}" if line.startswith(" ") else f"  {line}")
 
     # If no meaningful diff, show before/after
     if not diff_lines:
@@ -169,7 +169,7 @@ async def log_member_join(
         title="Member Joined",
         description=f"{member.mention} {member.username}",
         color=COLORS["member_join"],
-        timestamp=datetime.now(timezone.utc)
+        timestamp=datetime.now(UTC)
     )
     embed.add_field(name="User ID", value=str(member.id), inline=True)
     embed.add_field(name="Account Created", value=f"<t:{int(member.created_at.timestamp())}:R>", inline=True)
@@ -198,7 +198,7 @@ async def log_member_leave(
         title="Member Left",
         description=f"{user.mention} {user.username}",
         color=COLORS["member_leave"],
-        timestamp=datetime.now(timezone.utc)
+        timestamp=datetime.now(UTC)
     )
     embed.add_field(name="User ID", value=str(user.id), inline=True)
 
@@ -226,7 +226,7 @@ async def log_member_ban(
         title="Member Banned",
         description=f"{user.mention} {user.username}",
         color=COLORS["member_ban"],
-        timestamp=datetime.now(timezone.utc)
+        timestamp=datetime.now(UTC)
     )
     embed.add_field(name="User ID", value=str(user.id), inline=True)
 
@@ -254,7 +254,7 @@ async def log_member_unban(
         title="Member Unbanned",
         description=f"{user.mention} {user.username}",
         color=COLORS["member_unban"],
-        timestamp=datetime.now(timezone.utc)
+        timestamp=datetime.now(UTC)
     )
     embed.add_field(name="User ID", value=str(user.id), inline=True)
 
@@ -302,7 +302,7 @@ async def log_message_edit(
         title="Message Edited",
         description=f"Message by {author.mention} edited in <#{event.channel_id}>",
         color=COLORS["message_edit"],
-        timestamp=datetime.now(timezone.utc)
+        timestamp=datetime.now(UTC)
     )
     embed.add_field(name="Author", value=f"{author.username} ({author.id})", inline=True)
     embed.add_field(name="Channel", value=f"<#{event.channel_id}>", inline=True)
@@ -336,7 +336,7 @@ async def log_message_delete(
         title="Message Deleted",
         description=f"Message deleted in <#{event.channel_id}>",
         color=COLORS["message_delete"],
-        timestamp=datetime.now(timezone.utc)
+        timestamp=datetime.now(UTC)
     )
 
     if old_message:
@@ -384,7 +384,7 @@ async def log_member_update(
                 title="Username Changed",
                 description=f"{member.mention} changed their username",
                 color=COLORS["username_change"],
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(UTC)
             )
             embed.add_field(name="Old Username", value=old_member.username, inline=True)
             embed.add_field(name="New Username", value=member.username, inline=True)
@@ -402,7 +402,7 @@ async def log_member_update(
                 title="Nickname Changed",
                 description=f"{member.mention} changed their nickname",
                 color=COLORS["nickname_change"],
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(UTC)
             )
             embed.add_field(name="Username", value=member.username, inline=True)
             embed.add_field(name="Old Nickname", value=old_member.nickname or "None", inline=True)
@@ -424,7 +424,7 @@ async def log_member_update(
                 title="Member Roles Changed",
                 description=f"{member.mention} {member.username}",
                 color=COLORS["role_change"],
-                timestamp=datetime.now(timezone.utc)
+                timestamp=datetime.now(UTC)
             )
             embed.add_field(name="User ID", value=str(member.id), inline=True)
 

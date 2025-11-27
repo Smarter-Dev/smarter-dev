@@ -5,23 +5,23 @@ context-bound channel and guild where they were mentioned. All tools are
 created as a factory to ensure they can only operate in their intended context.
 """
 
-import logging
-from typing import Callable, List, Optional, Dict, Any, Tuple
-from datetime import datetime, timedelta
-from urllib.parse import urlparse
 import asyncio
 import functools
-import re
-import html
 import io
-import time
+import logging
 import random
+import time
+from collections.abc import Callable
+from datetime import datetime
+from datetime import timedelta
+from typing import Any
+from urllib.parse import urlparse
 
 import dspy
-from ddgs import DDGS
 import httpx
-from markdownify import markdownify as md
 import pdfplumber
+from ddgs import DDGS
+from markdownify import markdownify as md
 
 from smarter_dev.bot.services.channel_state import get_channel_state_manager
 
@@ -40,7 +40,7 @@ class URLRateLimiter:
         """Initialize the rate limiter."""
         # Track last request time per domain
         # Format: {domain: datetime}
-        self.last_request_time: Dict[str, datetime] = {}
+        self.last_request_time: dict[str, datetime] = {}
         # Lock for thread-safe operations
         self._lock = asyncio.Lock()
 
@@ -248,19 +248,19 @@ class SearchCache:
         """Initialize the search cache."""
         # Separate caches for quick and full searches
         # Format: {query: (results, timestamp)}
-        self.quick_search_cache: Dict[str, tuple[Any, datetime]] = {}
-        self.full_search_cache: Dict[str, tuple[Any, datetime]] = {}
+        self.quick_search_cache: dict[str, tuple[Any, datetime]] = {}
+        self.full_search_cache: dict[str, tuple[Any, datetime]] = {}
         # Track recent queries per channel
         # Format: {channel_id: [query1, query2, ...]}
-        self.channel_queries: Dict[str, List[str]] = {}
+        self.channel_queries: dict[str, list[str]] = {}
         # URL cache (not tracked per channel)
         # Format: {url: (content, timestamp)}
-        self.url_cache: Dict[str, tuple[str, datetime]] = {}
+        self.url_cache: dict[str, tuple[str, datetime]] = {}
         # URL answer cache for question-specific responses
         # Format: {url::question: (answer, timestamp)}
-        self.url_answer_cache: Dict[str, tuple[str, datetime]] = {}
+        self.url_answer_cache: dict[str, tuple[str, datetime]] = {}
 
-    def get(self, query: str, cache_type: str = "full") -> Optional[Any]:
+    def get(self, query: str, cache_type: str = "full") -> Any | None:
         """Get a cached result if it exists and hasn't expired.
 
         Args:
@@ -308,7 +308,7 @@ class SearchCache:
         if query not in self.channel_queries[channel_id]:
             self.channel_queries[channel_id].insert(0, query)
 
-    def get_channel_queries(self, channel_id: str) -> List[str]:
+    def get_channel_queries(self, channel_id: str) -> list[str]:
         """Get list of recent search queries in a channel.
 
         Args:
@@ -319,7 +319,7 @@ class SearchCache:
         """
         return self.channel_queries.get(channel_id, [])
 
-    def get_url(self, url: str) -> Optional[str]:
+    def get_url(self, url: str) -> str | None:
         """Get cached URL content if it exists and hasn't expired.
 
         Args:
@@ -349,7 +349,7 @@ class SearchCache:
         self.url_cache[url] = (content, datetime.now())
         logger.debug(f"[Cache] Stored URL content for '{url}'")
 
-    def get_url_answer(self, url: str, question: str) -> Optional[str]:
+    def get_url_answer(self, url: str, question: str) -> str | None:
         """Get cached answer for a specific question about a URL.
 
         Args:
@@ -398,10 +398,10 @@ class InDepthResponseRateLimiter:
         """Initialize the rate limiter."""
         # Track last usage time per channel
         # Format: {channel_id: datetime}
-        self.last_usage: Dict[str, datetime] = {}
+        self.last_usage: dict[str, datetime] = {}
         self._lock = asyncio.Lock()
 
-    async def check_and_record(self, channel_id: str) -> Tuple[bool, Optional[float]]:
+    async def check_and_record(self, channel_id: str) -> tuple[bool, float | None]:
         """Check if tool can be used and record usage.
 
         Args:
@@ -450,12 +450,12 @@ class ToolFailureMonitor:
     def __init__(self):
         """Initialize the tool failure monitor."""
         # Track failures per tool: {tool_name: [timestamp1, timestamp2, ...]}
-        self.failures: Dict[str, List[datetime]] = {}
+        self.failures: dict[str, list[datetime]] = {}
         # Track when tools are disabled: {tool_name: disable_until_timestamp}
-        self.disabled_until: Dict[str, datetime] = {}
+        self.disabled_until: dict[str, datetime] = {}
         self._lock = asyncio.Lock()
 
-    async def is_tool_disabled(self, tool_name: str) -> Tuple[bool, Optional[str]]:
+    async def is_tool_disabled(self, tool_name: str) -> tuple[bool, str | None]:
         """Check if a tool is currently disabled.
 
         Args:
@@ -540,7 +540,7 @@ class ToolFailureMonitor:
                 del self.failures[tool_name]
                 logger.debug(f"[ToolMonitor] Cleared failure history for {tool_name}")
 
-    def get_status(self) -> Dict[str, dict]:
+    def get_status(self) -> dict[str, dict]:
         """Get current status of all monitored tools.
 
         Returns:
@@ -641,7 +641,7 @@ def with_failure_tracking(tool_name: str, tool_func: Callable, critical: bool = 
     return wrapped
 
 
-def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id: str) -> tuple[List[Callable], List[str]]:
+def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id: str) -> tuple[list[Callable], list[str]]:
     """Create context-bound Discord interaction tools for a mention agent.
 
     All returned tools are bound to the specific channel and guild where the
@@ -808,7 +808,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             # Clean up emoji format if it's in mention format <:name:id> or <emoji:id>
             emoji = emoji.strip()
-            if emoji.startswith('<') and emoji.endswith('>'):
+            if emoji.startswith("<") and emoji.endswith(">"):
                 # Strip angle brackets: <:emoji_name:123> -> :emoji_name:123
                 emoji = emoji[1:-1]
                 # If it still has a colon at start, keep as is (for custom emoji format)
@@ -822,7 +822,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             )
             return {
                 "success": True,
-                "result": f"Reaction added successfully"
+                "result": "Reaction added successfully"
             }
         except Exception as e:
             logger.error(f"[Tool] add_reaction_to_message failed: {e}")
@@ -907,7 +907,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         # Check if tool is disabled
         is_disabled, reason = await tool_failure_monitor.is_tool_disabled("search_web_instant_answer")
         if is_disabled:
-            logger.warning(f"[Tool] search_web_instant_answer is disabled")
+            logger.warning("[Tool] search_web_instant_answer is disabled")
             return {"success": False, "error": reason, "tool_disabled": True}
 
         try:
@@ -990,7 +990,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         # Check if tool is disabled
         is_disabled, reason = await tool_failure_monitor.is_tool_disabled("search_web")
         if is_disabled:
-            logger.warning(f"[Tool] search_web is disabled")
+            logger.warning("[Tool] search_web is disabled")
             return {"success": False, "error": reason, "tool_disabled": True}
 
         try:
@@ -1087,7 +1087,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         # Check if tool is disabled
         is_disabled, reason = await tool_failure_monitor.is_tool_disabled("open_url")
         if is_disabled:
-            logger.warning(f"[Tool] open_url is disabled")
+            logger.warning("[Tool] open_url is disabled")
             return {"success": False, "error": reason, "tool_disabled": True}
 
         try:
@@ -1147,7 +1147,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
                         # If no content-type but content looks like HTML, treat as HTML
                         if not content_type and response_text.strip().startswith("<"):
-                            logger.debug(f"[Tool] No content-type header but content looks like HTML, treating as HTML")
+                            logger.debug("[Tool] No content-type header but content looks like HTML, treating as HTML")
                             content_type = "text/html"
 
                         allowed_types = ["text/plain", "text/html", "text/markdown", "application/json", "application/pdf"]
@@ -1250,8 +1250,9 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             logger.debug(f"[Tool] Using Gemini to extract answer from {len(content)} chars")
 
             # Initialize Gemini 2.5 Flash Lite via the judge model
-            from smarter_dev.llm_config import get_llm_model
             import dspy
+
+            from smarter_dev.llm_config import get_llm_model
 
             gemini_lm = get_llm_model("judge")  # gemini-2.5-flash-lite
 
@@ -1462,7 +1463,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         """
         try:
             # Validate seconds
-            if not isinstance(seconds, (int, float)):
+            if not isinstance(seconds, int | float):
                 return {
                     "success": False,
                     "error": "seconds must be a number"
@@ -1536,7 +1537,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             try:
                 msg = await asyncio.wait_for(queue.get(), timeout=max_wait_seconds)
                 messages.append(msg)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # 5 minutes passed with no messages - conversation ended
                 logger.info(f"[Tool] Channel {channel_id}: 5-minute timeout with no messages, stopping monitoring")
                 channel_state.continue_monitoring = False
@@ -1576,7 +1577,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                             "reason": "queue_full",
                             "messages_processed": messages_processed
                         }
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # Debounce timeout - return messages
                     break
 
@@ -1651,12 +1652,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         # Check if tool is disabled
         is_disabled, reason = await tool_failure_monitor.is_tool_disabled("generate_engagement_plan")
         if is_disabled:
-            logger.warning(f"[Tool] generate_engagement_plan is disabled")
+            logger.warning("[Tool] generate_engagement_plan is disabled")
             return {"success": False, "error": reason, "tool_disabled": True}
 
         try:
-            from smarter_dev.llm_config import get_llm_model
             from smarter_dev.bot.utils.messages import ConversationContextBuilder
+            from smarter_dev.llm_config import get_llm_model
 
             logger.info("[Tool] generate_engagement_plan called - building full context")
 
@@ -1768,7 +1769,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         # Check if tool is disabled (before rate limit check to avoid consuming quota)
         is_disabled, reason = await tool_failure_monitor.is_tool_disabled("generate_in_depth_response")
         if is_disabled:
-            logger.warning(f"[Tool] generate_in_depth_response is disabled")
+            logger.warning("[Tool] generate_in_depth_response is disabled")
             return {"success": False, "error": reason, "tool_disabled": True}
 
         try:
@@ -1789,7 +1790,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             # Send status message to channel with the provided summary
             try:
-                await bot.rest.create_message(int(channel_id), f"> -# Writing a response for \"{prompt_summary}\"")
+                await bot.rest.create_message(int(channel_id), f'> -# Writing a response for "{prompt_summary}"')
             except Exception as e:
                 logger.warning(f"[Tool] Failed to send in-depth response status message: {e}")
 

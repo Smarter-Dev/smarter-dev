@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import html
 import logging
+
 import dspy
-from typing import Tuple
 
 from smarter_dev.bot.agents.base import BaseAgent
 from smarter_dev.bot.agents.models import DiscordMessage
-from smarter_dev.llm_config import get_llm_model, get_model_info
+from smarter_dev.llm_config import get_llm_model
+from smarter_dev.llm_config import get_model_info
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ class TLDRAgent(BaseAgent):
         self,
         messages: list[DiscordMessage],
         max_tokens: int = 15000
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Prepare messages for LLM context with progressive truncation.
 
         Args:
@@ -215,7 +216,7 @@ class TLDRAgent(BaseAgent):
         self,
         messages: list[DiscordMessage],
         max_context_tokens: int = 15000
-    ) -> Tuple[str, int, int]:
+    ) -> tuple[str, int, int]:
         """Generate a TLDR summary of Discord messages (synchronous version).
 
         Args:
@@ -261,7 +262,7 @@ class TLDRAgent(BaseAgent):
         self,
         messages: list[DiscordMessage],
         max_context_tokens: int = 15000
-    ) -> Tuple[str, int, int]:
+    ) -> tuple[str, int, int]:
         """Async version of generate_summary to avoid blocking the event loop.
 
         Args:

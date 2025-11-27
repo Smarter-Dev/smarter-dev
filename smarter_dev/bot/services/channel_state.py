@@ -13,10 +13,10 @@ import asyncio
 import hashlib
 import logging
 import time
-from typing import Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import hikari
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +28,13 @@ class ChannelMonitorState:
         """Initialize channel state."""
         self.agent_running: bool = False  # Is agent currently processing
         self.typing_active: bool = False  # Is typing indicator currently shown
-        self.typing_task: Optional[asyncio.Task] = None  # Background typing indicator task
+        self.typing_task: asyncio.Task | None = None  # Background typing indicator task
         self.continue_monitoring: bool = False  # Does agent want to continue monitoring
-        self.last_message_id_seen: Optional[str] = None  # Checkpoint for fetch_new_messages
+        self.last_message_id_seen: str | None = None  # Checkpoint for fetch_new_messages
         self.message_queue: asyncio.Queue = asyncio.Queue()  # Messages for wait_for_messages
         self.queue_updated_event: asyncio.Event = asyncio.Event()  # Signals new messages
         self.messages_processed: int = 0  # Total messages processed in this conversation session
-        self.recent_messages: Dict[str, float] = {}  # Message content hash -> timestamp for deduplication
+        self.recent_messages: dict[str, float] = {}  # Message content hash -> timestamp for deduplication
 
     def _hash_message(self, content: str) -> str:
         """Generate a hash for message content.
@@ -45,7 +45,7 @@ class ChannelMonitorState:
         Returns:
             SHA256 hash of the content
         """
-        return hashlib.sha256(content.encode('utf-8')).hexdigest()
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     def _cleanup_old_messages(self) -> None:
         """Remove message hashes older than 60 seconds from the recent messages tracker."""
@@ -89,7 +89,7 @@ class ChannelStateManager:
 
     def __init__(self):
         """Initialize the channel state manager."""
-        self.states: Dict[int, ChannelMonitorState] = {}
+        self.states: dict[int, ChannelMonitorState] = {}
         logger.info("ChannelStateManager initialized for agentic monitoring")
 
     def get_state(self, channel_id: int) -> ChannelMonitorState:
@@ -249,7 +249,7 @@ class ChannelStateManager:
         state.last_message_id_seen = message_id
         logger.debug(f"Channel {channel_id}: Updated last message checkpoint to {message_id}")
 
-    def get_last_message_id(self, channel_id: int) -> Optional[str]:
+    def get_last_message_id(self, channel_id: int) -> str | None:
         """Get the last message ID checkpoint.
 
         Args:
@@ -366,7 +366,7 @@ class ChannelStateManager:
 
 
 # Global instance
-_channel_state_manager: Optional[ChannelStateManager] = None
+_channel_state_manager: ChannelStateManager | None = None
 
 
 def get_channel_state_manager() -> ChannelStateManager:

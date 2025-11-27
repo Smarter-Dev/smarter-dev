@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import logging
-import dspy
-from typing import Optional, Tuple
 
+import dspy
 import hikari
 
 from smarter_dev.bot.agents.base import BaseAgent
-from smarter_dev.bot.agents.models import DiscordMessage
-from smarter_dev.llm_config import get_llm_model, get_model_info
+from smarter_dev.llm_config import get_llm_model
+from smarter_dev.llm_config import get_model_info
 
 logger = logging.getLogger(__name__)
 
@@ -214,10 +213,10 @@ class HelpAgent(BaseAgent):
         user_question: str,
         bot: hikari.GatewayBot,
         channel_id: int,
-        guild_id: Optional[int] = None,
-        trigger_message_id: Optional[int] = None,
+        guild_id: int | None = None,
+        trigger_message_id: int | None = None,
         messages_remaining: int = 10
-    ) -> Tuple[str, int]:
+    ) -> tuple[str, int]:
         """Generate a helpful response to a user's question.
 
         Args:

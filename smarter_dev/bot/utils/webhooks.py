@@ -6,28 +6,28 @@ particularly for sending messages with custom user identities.
 
 from __future__ import annotations
 
-import hikari
 import logging
-from typing import Optional, Dict
+
+import hikari
 
 logger = logging.getLogger(__name__)
 
 # Cache for channel webhooks to avoid recreating them
-_webhook_cache: Dict[int, hikari.IncomingWebhook] = {}
+_webhook_cache: dict[int, hikari.IncomingWebhook] = {}
 
 
 async def get_or_create_webhook(
     bot: hikari.GatewayBot,
     channel_id: int,
     webhook_name: str = "Squad Beacon System"
-) -> Optional[hikari.IncomingWebhook]:
+) -> hikari.IncomingWebhook | None:
     """Get or create a webhook for the specified channel.
-    
+
     Args:
         bot: Discord bot instance
         channel_id: Channel ID to get/create webhook for
         webhook_name: Name for the webhook
-        
+
     Returns:
         Webhook instance or None if creation failed
     """
@@ -35,25 +35,25 @@ async def get_or_create_webhook(
         # Check cache first
         if channel_id in _webhook_cache:
             return _webhook_cache[channel_id]
-        
+
         # Get existing webhooks in the channel
         try:
             webhooks = await bot.rest.fetch_channel_webhooks(channel_id)
-            
+
             # Look for existing webhook with our name
             for webhook in webhooks:
                 if webhook.name == webhook_name:
                     _webhook_cache[channel_id] = webhook
                     logger.debug(f"Found existing webhook {webhook.id} in channel {channel_id}")
                     return webhook
-                    
+
         except hikari.ForbiddenError:
             logger.error(f"No permission to fetch webhooks in channel {channel_id}")
             return None
         except hikari.NotFoundError:
             logger.warning(f"Channel {channel_id} not found")
             return None
-        
+
         # Create new webhook if none exists
         try:
             webhook = await bot.rest.create_webhook(
@@ -64,14 +64,14 @@ async def get_or_create_webhook(
             _webhook_cache[channel_id] = webhook
             logger.info(f"Created new webhook {webhook.id} in channel {channel_id}")
             return webhook
-            
+
         except hikari.ForbiddenError:
             logger.error(f"No permission to create webhook in channel {channel_id}")
             return None
         except Exception as e:
             logger.error(f"Failed to create webhook in channel {channel_id}: {e}")
             return None
-            
+
     except Exception as e:
         logger.error(f"Error getting/creating webhook for channel {channel_id}: {e}")
         return None
@@ -82,17 +82,17 @@ async def send_webhook_message(
     webhook: hikari.IncomingWebhook,
     content: str,
     username: str,
-    avatar_url: Optional[str] = None
+    avatar_url: str | None = None
 ) -> bool:
     """Send a message through a webhook with custom user identity.
-    
+
     Args:
         bot: Discord bot instance
         webhook: Webhook to send through
         content: Message content
         username: Display name for the message
         avatar_url: Avatar URL for the message
-        
+
     Returns:
         True if message was sent successfully, False otherwise
     """
@@ -107,7 +107,7 @@ async def send_webhook_message(
         )
         logger.debug(f"Successfully sent webhook message as {username}")
         return True
-        
+
     except hikari.BadRequestError as e:
         logger.error(f"Bad request sending webhook message: {e}")
         return False

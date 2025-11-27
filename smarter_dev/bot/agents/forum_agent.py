@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import html
 import logging
+
 import dspy
-from typing import Tuple, List, Optional
 
 from smarter_dev.bot.agents.base import BaseAgent
-from smarter_dev.llm_config import get_llm_model, get_model_info
+from smarter_dev.llm_config import get_llm_model
+from smarter_dev.llm_config import get_model_info
 
 logger = logging.getLogger(__name__)
 
@@ -177,8 +178,8 @@ class ForumMonitorAgent(BaseAgent):
         post_title: str,
         post_content: str,
         author_display_name: str,
-        post_tags: Optional[List[str]] = None,
-        attachment_names: Optional[List[str]] = None
+        post_tags: list[str] | None = None,
+        attachment_names: list[str] | None = None
     ) -> str:
         """Format post data into XML context for the AI."""
         post_tags = post_tags or []
@@ -209,9 +210,9 @@ class ForumMonitorAgent(BaseAgent):
         post_title: str,
         post_content: str,
         author_display_name: str,
-        post_tags: Optional[List[str]] = None,
-        attachment_names: Optional[List[str]] = None
-    ) -> Tuple[str, float, str, int]:
+        post_tags: list[str] | None = None,
+        attachment_names: list[str] | None = None
+    ) -> tuple[str, float, str, int]:
         """Evaluate a forum post and generate response if warranted.
 
         Args:
@@ -254,13 +255,13 @@ class ForumMonitorAgent(BaseAgent):
 
     async def classify_topics_only(
         self,
-        available_topics: List[str],
+        available_topics: list[str],
         post_title: str,
         post_content: str,
         author_display_name: str,
-        post_tags: Optional[List[str]] = None,
-        attachment_names: Optional[List[str]] = None
-    ) -> Tuple[List[str], int]:
+        post_tags: list[str] | None = None,
+        attachment_names: list[str] | None = None
+    ) -> tuple[list[str], int]:
         """Classify a forum post into notification topics only (no response generation).
 
         Args:
@@ -303,13 +304,13 @@ class ForumMonitorAgent(BaseAgent):
     async def evaluate_post_combined(
         self,
         system_prompt: str,
-        available_topics: List[str],
+        available_topics: list[str],
         post_title: str,
         post_content: str,
         author_display_name: str,
-        post_tags: Optional[List[str]] = None,
-        attachment_names: Optional[List[str]] = None
-    ) -> Tuple[str, float, str, List[str], int]:
+        post_tags: list[str] | None = None,
+        attachment_names: list[str] | None = None
+    ) -> tuple[str, float, str, list[str], int]:
         """Evaluate a forum post for both response generation AND topic classification.
 
         Args:
