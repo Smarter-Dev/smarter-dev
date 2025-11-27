@@ -621,7 +621,7 @@ class EmbedImageGenerator:
                     try:
                         created_dt = datetime.fromisoformat(transaction.created_at.replace("Z", "+00:00"))
                         date_str = created_dt.strftime("%m-%d")  # Use dash instead of slash
-                    except:
+                    except Exception:
                         date_str = "N/A"
                 else:
                     date_str = transaction.created_at.strftime("%m-%d")
@@ -869,7 +869,7 @@ class EmbedImageGenerator:
         squads: list,
         guild_name: str,
         current_squad_id: str = None,
-        guild_roles: Dict[str, int] | None = None,
+        guild_roles: dict[str, int] | None = None,
         has_active_campaign: bool = False
     ) -> hikari.files.Bytes:
         """Create a compact squad list embed image with table layout.

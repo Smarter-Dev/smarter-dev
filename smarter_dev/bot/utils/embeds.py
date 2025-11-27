@@ -325,7 +325,7 @@ def create_transaction_history_embed(transactions: list, user_id: str) -> hikari
             try:
                 created_dt = datetime.fromisoformat(tx.created_at.replace("Z", "+00:00"))
                 time_str = created_dt.strftime("%m/%d %H:%M")
-            except:
+            except Exception:
                 time_str = tx.created_at[:10]  # Fallback to date portion
         else:
             time_str = tx.created_at.strftime("%m/%d %H:%M")

@@ -337,7 +337,7 @@ class SquadSelectView:
                 # Try to get user from the interaction context
                 if hasattr(event.interaction, "user"):
                     username = event.interaction.user.display_name or event.interaction.user.username
-            except:
+            except Exception:
                 pass  # Fall back to None
 
             result = await self.squads_service.join_squad(

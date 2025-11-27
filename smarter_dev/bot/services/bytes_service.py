@@ -225,7 +225,7 @@ class BytesService(BaseService):
         except APIError as e:
             # Convert 404 APIError to ResourceNotFoundError
             if e.status_code == 404:
-                raise ResourceNotFoundError("user_balance", f"{guild_id}:{user_id}")
+                raise ResourceNotFoundError("user_balance", f"{guild_id}:{user_id}") from e
             # Re-raise other API errors
             raise
         except ResourceNotFoundError:
@@ -334,7 +334,7 @@ class BytesService(BaseService):
             if e.status_code == 409 or "already been claimed" in str(e).lower():
                 raise AlreadyClaimedError(
                     context={"guild_id": guild_id, "user_id": user_id}
-                )
+                ) from e
             # Re-raise other API errors
             raise
         except (AlreadyClaimedError, ValidationError):
@@ -607,7 +607,7 @@ class BytesService(BaseService):
                         required=amount,
                         available=giver_balance.balance,
                         operation="transfer"
-                    )
+                    ) from e
 
                 # Check for cooldown errors
                 if "cooldown active" in error_message.lower():

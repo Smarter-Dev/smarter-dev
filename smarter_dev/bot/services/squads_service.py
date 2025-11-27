@@ -239,7 +239,7 @@ class SquadsService(BaseService):
         except APIError as e:
             # Convert 404 APIError to ResourceNotFoundError
             if e.status_code == 404:
-                raise ResourceNotFoundError("squad", str(squad_id))
+                raise ResourceNotFoundError("squad", str(squad_id)) from e
             # Re-raise other API errors
             raise
         except (ValidationError, ResourceNotFoundError):
@@ -866,7 +866,7 @@ class SquadsService(BaseService):
         except APIError as e:
             # Convert 404 APIError to ResourceNotFoundError
             if e.status_code == 404:
-                raise ResourceNotFoundError("squad", str(squad_id))
+                raise ResourceNotFoundError("squad", str(squad_id)) from e
             # Re-raise other API errors
             raise
         except (ValidationError, ResourceNotFoundError):

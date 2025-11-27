@@ -152,7 +152,7 @@ class CacheManager(CacheManagerProtocol):
 
             except Exception as e:
                 self._logger.error(f"Failed to connect to Redis: {e}")
-                raise CacheError(f"Redis connection failed: {e}")
+                raise CacheError(f"Redis connection failed: {e}") from e
 
     def _build_key(self, key: str) -> str:
         """Build full cache key with prefix.
@@ -223,12 +223,12 @@ class CacheManager(CacheManagerProtocol):
         except (ConnectionError, TimeoutError) as e:
             self._errors_count += 1
             self._logger.error(f"Redis connection error during get({key}): {e}")
-            raise CacheError(f"Cache get operation failed: {e}")
+            raise CacheError(f"Cache get operation failed: {e}") from e
 
         except RedisError as e:
             self._errors_count += 1
             self._logger.error(f"Redis error during get({key}): {e}")
-            raise CacheError(f"Cache get operation failed: {e}")
+            raise CacheError(f"Cache get operation failed: {e}") from e
 
     async def set(
         self,
@@ -260,7 +260,7 @@ class CacheManager(CacheManagerProtocol):
                 serialized_value = self._serialize(value)
             except Exception as e:
                 self._logger.error(f"Failed to serialize value for key {key}: {e}")
-                raise CacheError(f"Serialization failed: {e}")
+                raise CacheError(f"Serialization failed: {e}") from e
 
             # Set value in Redis with TTL
             await self._redis.setex(full_key, expire_time, serialized_value)
@@ -282,12 +282,12 @@ class CacheManager(CacheManagerProtocol):
         except (ConnectionError, TimeoutError) as e:
             self._errors_count += 1
             self._logger.error(f"Redis connection error during set({key}): {e}")
-            raise CacheError(f"Cache set operation failed: {e}")
+            raise CacheError(f"Cache set operation failed: {e}") from e
 
         except RedisError as e:
             self._errors_count += 1
             self._logger.error(f"Redis error during set({key}): {e}")
-            raise CacheError(f"Cache set operation failed: {e}")
+            raise CacheError(f"Cache set operation failed: {e}") from e
 
     async def delete(self, key: str) -> None:
         """Delete value from cache.
@@ -325,12 +325,12 @@ class CacheManager(CacheManagerProtocol):
         except (ConnectionError, TimeoutError) as e:
             self._errors_count += 1
             self._logger.error(f"Redis connection error during delete({key}): {e}")
-            raise CacheError(f"Cache delete operation failed: {e}")
+            raise CacheError(f"Cache delete operation failed: {e}") from e
 
         except RedisError as e:
             self._errors_count += 1
             self._logger.error(f"Redis error during delete({key}): {e}")
-            raise CacheError(f"Cache delete operation failed: {e}")
+            raise CacheError(f"Cache delete operation failed: {e}") from e
 
     async def clear_pattern(self, pattern: str) -> int:
         """Clear all keys matching pattern.
@@ -385,12 +385,12 @@ class CacheManager(CacheManagerProtocol):
         except (ConnectionError, TimeoutError) as e:
             self._errors_count += 1
             self._logger.error(f"Redis connection error during clear_pattern({pattern}): {e}")
-            raise CacheError(f"Cache clear pattern operation failed: {e}")
+            raise CacheError(f"Cache clear pattern operation failed: {e}") from e
 
         except RedisError as e:
             self._errors_count += 1
             self._logger.error(f"Redis error during clear_pattern({pattern}): {e}")
-            raise CacheError(f"Cache clear pattern operation failed: {e}")
+            raise CacheError(f"Cache clear pattern operation failed: {e}") from e
 
     async def exists(self, key: str) -> bool:
         """Check if key exists in cache.
@@ -423,12 +423,12 @@ class CacheManager(CacheManagerProtocol):
         except (ConnectionError, TimeoutError) as e:
             self._errors_count += 1
             self._logger.error(f"Redis connection error during exists({key}): {e}")
-            raise CacheError(f"Cache exists operation failed: {e}")
+            raise CacheError(f"Cache exists operation failed: {e}") from e
 
         except RedisError as e:
             self._errors_count += 1
             self._logger.error(f"Redis error during exists({key}): {e}")
-            raise CacheError(f"Cache exists operation failed: {e}")
+            raise CacheError(f"Cache exists operation failed: {e}") from e
 
     async def get_ttl(self, key: str) -> int | None:
         """Get time-to-live for a key.
@@ -459,12 +459,12 @@ class CacheManager(CacheManagerProtocol):
         except (ConnectionError, TimeoutError) as e:
             self._errors_count += 1
             self._logger.error(f"Redis connection error during get_ttl({key}): {e}")
-            raise CacheError(f"Cache get_ttl operation failed: {e}")
+            raise CacheError(f"Cache get_ttl operation failed: {e}") from e
 
         except RedisError as e:
             self._errors_count += 1
             self._logger.error(f"Redis error during get_ttl({key}): {e}")
-            raise CacheError(f"Cache get_ttl operation failed: {e}")
+            raise CacheError(f"Cache get_ttl operation failed: {e}") from e
 
     async def health_check(self) -> ServiceHealth:
         """Check the health of the cache connection.

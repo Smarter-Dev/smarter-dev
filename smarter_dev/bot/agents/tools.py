@@ -1196,7 +1196,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                                     logger.debug(f"[Tool] Extracted {len(content)} chars from PDF")
                             except Exception as e:
                                 logger.error(f"[Tool] Failed to extract PDF text: {e}")
-                                raise ValueError(f"Failed to extract text from PDF: {e}")
+                                raise ValueError(f"Failed to extract text from PDF: {e}") from e
                             content_type_str = "pdf"
 
                         elif "json" in content_type:
