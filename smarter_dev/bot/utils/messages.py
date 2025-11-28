@@ -508,9 +508,14 @@ class ConversationContextBuilder:
 
         # Build timeline entries
         for message in messages:
-            # Get user display name
+            # Get user display name - prefer server nickname over discord username
             user_info = users_by_id.get(str(message.author.id), {})
-            display_name = user_info.get("discord_name", f"User{message.author.id}")
+            display_name = (
+                user_info.get("server_nickname") or
+                user_info.get("nickname") or
+                user_info.get("discord_name") or
+                f"User{message.author.id}"
+            )
 
             # Check if user is bot
             is_bot = user_info.get("is_bot", False)
@@ -566,7 +571,12 @@ class ConversationContextBuilder:
                 replied_msg = next((m for m in messages if m.id == message.referenced_message.id), None)
                 if replied_msg:
                     replied_user_info = users_by_id.get(str(replied_msg.author.id), {})
-                    replied_display_name = replied_user_info.get("discord_name", f"User{replied_msg.author.id}")
+                    replied_display_name = (
+                        replied_user_info.get("server_nickname") or
+                        replied_user_info.get("nickname") or
+                        replied_user_info.get("discord_name") or
+                        f"User{replied_msg.author.id}"
+                    )
                     if replied_user_info.get("is_bot", False) and "bot_name" in replied_user_info:
                         replied_display_name = replied_user_info["bot_name"]
 
@@ -615,7 +625,12 @@ class ConversationContextBuilder:
 
         for message in messages:
             user_info = users_by_id.get(str(message.author.id), {})
-            display_name = user_info.get("discord_name", f"User{message.author.id}")
+            display_name = (
+                user_info.get("server_nickname") or
+                user_info.get("nickname") or
+                user_info.get("discord_name") or
+                f"User{message.author.id}"
+            )
             participants.add(display_name)
 
             # Extract potential topics (simple keywords)

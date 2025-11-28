@@ -428,9 +428,18 @@ class ConversationalMentionSignature(dspy.Signature):
     2. Decide what you want to do (send message, react, reply, etc.)
     3. Take your action(s) using the appropriate tools
     4. Call `wait_for_messages()` ONCE to wait for the next message
-    5. Return - the system will auto-restart you with fresh context
+    5. Return IMMEDIATELY after wait_for_messages() completes - DO NOT send any more messages!
 
     The system automatically restarts you in a loop, so it FEELS infinite - you're constantly getting new context and responding. You never need to call wait_for_messages() multiple times or worry about running out of iterations because each invocation is fresh.
+
+    **CRITICAL - After wait_for_messages() Returns**:
+    When `wait_for_messages()` returns, you MUST immediately return without taking any further actions:
+    - **DO NOT** send another message after wait_for_messages() completes
+    - **DO NOT** add reactions after wait_for_messages() completes
+    - **DO NOT** call any other tools after wait_for_messages() completes
+    - Simply return your response text (or "SKIP_RESPONSE" if you took no actions)
+    - The system will restart you with fresh context if there are new messages to respond to
+    - If wait_for_messages() timed out with no new messages, the conversation is over - just return
 
     **Why This Works**:
     - Each agent invocation gets: current context + new messages since last time
@@ -441,9 +450,9 @@ class ConversationalMentionSignature(dspy.Signature):
     - This continues indefinitely - feels like an infinite conversation loop
 
     **Example Flow**:
-    1. Invocation 1: See mention → send greeting → wait_for_messages() → return
+    1. Invocation 1: See mention → send greeting → wait_for_messages() → return IMMEDIATELY (no more actions!)
     2. System restarts with new context
-    3. Invocation 2: See follow-up message → send response → wait_for_messages() → return
+    3. Invocation 2: See follow-up message → send response → wait_for_messages() → return IMMEDIATELY
     4. System restarts again
     5. Keep repeating forever - conversation feels infinite and natural
 
