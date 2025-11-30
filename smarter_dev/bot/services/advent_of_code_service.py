@@ -173,7 +173,12 @@ class AdventOfCodeService(BaseService):
         await asyncio.sleep(wait_seconds)
 
     async def _check_and_create_threads(self) -> None:
-        """Check if threads need to be created and create them."""
+        """Check if threads need to be created and create them.
+
+        This method checks ALL days from day 1 up to the current day,
+        creating any missing threads. This handles cases where the bot
+        was offline and missed creating threads on previous days.
+        """
         now_est = datetime.now(EST)
 
         # Only proceed if we're in December, days 1-25
@@ -181,14 +186,14 @@ class AdventOfCodeService(BaseService):
             logger.debug(f"Not December (month={now_est.month}), skipping AoC check")
             return
 
-        if now_est.day < AOC_START_DAY or now_est.day > AOC_END_DAY:
-            logger.debug(f"Outside AoC days 1-25 (day={now_est.day}), skipping")
+        if now_est.day < AOC_START_DAY:
+            logger.debug(f"Before December 1 (day={now_est.day}), skipping")
             return
 
-        current_day = now_est.day
+        current_day = min(now_est.day, AOC_END_DAY)  # Cap at day 25
         current_year = now_est.year
 
-        logger.info(f"Checking for AoC threads for {current_year} Day {current_day}")
+        logger.info(f"Checking for AoC threads for {current_year} (days 1-{current_day})")
 
         # Get all active configurations
         try:
@@ -203,20 +208,23 @@ class AdventOfCodeService(BaseService):
 
         logger.info(f"Found {len(active_configs)} active AoC configurations")
 
-        # Process each configuration
+        # Process each configuration for all days up to current
         for config in active_configs:
             try:
                 await self._process_config(config, current_year, current_day)
             except Exception as e:
                 logger.error(f"Failed to process AoC config for guild {config.get('guild_id')}: {e}")
 
-    async def _process_config(self, config: dict[str, Any], year: int, day: int) -> None:
-        """Process a single guild's AoC configuration.
+    async def _process_config(self, config: dict[str, Any], year: int, max_day: int) -> None:
+        """Process a single guild's AoC configuration for all days up to max_day.
+
+        This checks all days from 1 to max_day and creates any missing threads.
+        This handles catch-up when the bot was offline and missed creating threads.
 
         Args:
             config: Configuration dictionary
             year: Current AoC year
-            day: Current AoC day
+            max_day: Maximum day to check (1-25)
         """
         guild_id = config.get("guild_id")
         forum_channel_id = config.get("forum_channel_id")
@@ -231,19 +239,24 @@ class AdventOfCodeService(BaseService):
             logger.warning(f"No forum channel configured for guild {guild_id}")
             return
 
-        # Check if thread already exists for this day
-        try:
-            existing_thread = await self._get_posted_thread(guild_id, year, day)
-            if existing_thread:
-                logger.debug(f"Thread already exists for guild {guild_id}, year {year}, day {day}")
-                return
-        except Exception as e:
-            logger.error(f"Failed to check existing thread: {e}")
-            return
+        # Check all days from 1 to max_day for missing threads
+        for day in range(AOC_START_DAY, max_day + 1):
+            try:
+                existing_thread = await self._get_posted_thread(guild_id, year, day)
+                if existing_thread:
+                    logger.debug(f"Thread already exists for guild {guild_id}, year {year}, day {day}")
+                    continue
 
-        # Create the thread
-        logger.info(f"Creating AoC thread for guild {guild_id}, day {day}")
-        await self._create_aoc_thread(guild_id, forum_channel_id, year, day)
+                # Create the missing thread
+                logger.info(f"Creating AoC thread for guild {guild_id}, day {day} (catch-up)")
+                await self._create_aoc_thread(guild_id, forum_channel_id, year, day)
+
+                # Small delay between thread creations to avoid rate limiting
+                await asyncio.sleep(1)
+
+            except Exception as e:
+                logger.error(f"Failed to process day {day} for guild {guild_id}: {e}")
+                # Continue with next day even if one fails
 
     async def _create_aoc_thread(
         self,
