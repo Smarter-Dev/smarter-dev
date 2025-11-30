@@ -36,6 +36,8 @@ from smarter_dev.web.models import (
     ScheduledMessage,
     RepeatingMessage,
     AuditLogConfig,
+    AdventOfCodeConfig,
+    AdventOfCodeThread,
 )
 
 logger = logging.getLogger(__name__)
@@ -4827,3 +4829,255 @@ class AuditLogConfigOperations:
             return result.rowcount > 0
         except Exception as e:
             raise DatabaseOperationError(f"Failed to delete audit log config: {e}") from e
+
+
+class AdventOfCodeConfigOperations:
+    """Database operations for Advent of Code configuration management.
+
+    Handles CRUD operations for guild-specific Advent of Code settings,
+    including forum channel configuration and thread tracking.
+    """
+
+    async def get_config(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> Optional[AdventOfCodeConfig]:
+        """Get Advent of Code configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+
+        Returns:
+            AdventOfCodeConfig or None if not configured
+
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = select(AdventOfCodeConfig).where(AdventOfCodeConfig.guild_id == guild_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get AoC config: {e}") from e
+
+    async def get_or_create_config(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> AdventOfCodeConfig:
+        """Get or create Advent of Code configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+
+        Returns:
+            AdventOfCodeConfig: Guild configuration (existing or newly created)
+
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            config = await self.get_config(session, guild_id)
+            if config is None:
+                config = AdventOfCodeConfig(guild_id=guild_id)
+                session.add(config)
+                await session.flush()
+            return config
+        except DatabaseOperationError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get or create AoC config: {e}") from e
+
+    async def update_config(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        **updates
+    ) -> AdventOfCodeConfig:
+        """Update Advent of Code configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            **updates: Fields to update
+
+        Returns:
+            AdventOfCodeConfig: Updated configuration
+
+        Raises:
+            DatabaseOperationError: If update fails
+        """
+        try:
+            config = await self.get_or_create_config(session, guild_id)
+
+            # Update fields
+            for key, value in updates.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+
+            config.updated_at = datetime.now(timezone.utc)
+            await session.flush()
+
+            return config
+        except DatabaseOperationError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to update AoC config: {e}") from e
+
+    async def get_active_configs(
+        self,
+        session: AsyncSession
+    ) -> List[AdventOfCodeConfig]:
+        """Get all active Advent of Code configurations.
+
+        Args:
+            session: Database session
+
+        Returns:
+            List of active AdventOfCodeConfig objects
+
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = select(AdventOfCodeConfig).where(
+                AdventOfCodeConfig.is_active == True,
+                AdventOfCodeConfig.forum_channel_id.isnot(None)
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get active AoC configs: {e}") from e
+
+    async def get_posted_thread(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        year: int,
+        day: int
+    ) -> Optional[AdventOfCodeThread]:
+        """Check if a thread has already been posted for a specific day.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            year: Advent of Code year
+            day: Day of the challenge (1-25)
+
+        Returns:
+            AdventOfCodeThread if exists, None otherwise
+
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = select(AdventOfCodeThread).where(
+                AdventOfCodeThread.guild_id == guild_id,
+                AdventOfCodeThread.year == year,
+                AdventOfCodeThread.day == day
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to check posted thread: {e}") from e
+
+    async def record_posted_thread(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        year: int,
+        day: int,
+        thread_id: str,
+        thread_title: str
+    ) -> AdventOfCodeThread:
+        """Record that a thread has been created for a specific day.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            year: Advent of Code year
+            day: Day of the challenge (1-25)
+            thread_id: Discord thread/post snowflake ID
+            thread_title: Title of the created thread
+
+        Returns:
+            Created AdventOfCodeThread record
+
+        Raises:
+            DatabaseOperationError: If creation fails
+            ConflictError: If thread already recorded
+        """
+        try:
+            thread = AdventOfCodeThread(
+                guild_id=guild_id,
+                year=year,
+                day=day,
+                thread_id=thread_id,
+                thread_title=thread_title
+            )
+            session.add(thread)
+            await session.flush()
+            return thread
+        except IntegrityError as e:
+            raise ConflictError(f"Thread already recorded for guild {guild_id}, year {year}, day {day}") from e
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to record posted thread: {e}") from e
+
+    async def get_guild_threads(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        year: Optional[int] = None
+    ) -> List[AdventOfCodeThread]:
+        """Get all posted threads for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            year: Optional year filter
+
+        Returns:
+            List of AdventOfCodeThread records
+
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = select(AdventOfCodeThread).where(
+                AdventOfCodeThread.guild_id == guild_id
+            )
+            if year is not None:
+                stmt = stmt.where(AdventOfCodeThread.year == year)
+            stmt = stmt.order_by(AdventOfCodeThread.year.desc(), AdventOfCodeThread.day.desc())
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get guild threads: {e}") from e
+
+    async def delete_config(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> bool:
+        """Delete Advent of Code configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+
+        Returns:
+            bool: True if deleted, False if not found
+
+        Raises:
+            DatabaseOperationError: If deletion fails
+        """
+        try:
+            result = await session.execute(
+                delete(AdventOfCodeConfig).where(AdventOfCodeConfig.guild_id == guild_id)
+            )
+            return result.rowcount > 0
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to delete AoC config: {e}") from e

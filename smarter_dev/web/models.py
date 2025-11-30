@@ -2585,3 +2585,161 @@ class AuditLogConfig(Base):
     def __repr__(self) -> str:
         """String representation of the audit log config."""
         return f"<AuditLogConfig(guild_id='{self.guild_id}', channel='{self.audit_channel_id}')>"
+
+
+class AdventOfCodeConfig(Base):
+    """Advent of Code configuration per guild for daily challenge threads.
+
+    Stores guild-specific settings for automatic creation of daily Advent of Code
+    discussion threads in a designated forum channel. Threads are created at midnight
+    EST when each day's challenge is released.
+    """
+
+    __tablename__ = "advent_of_code_configs"
+
+    # Primary key
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        primary_key=True,
+        doc="Discord guild (server) snowflake ID"
+    )
+
+    # Forum channel configuration
+    forum_channel_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        doc="Discord forum channel ID where AoC threads are created"
+    )
+
+    # Feature toggle
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Whether automatic thread creation is enabled"
+    )
+
+    # Year configuration (to support multiple years)
+    year: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=2025,
+        doc="Advent of Code year to track"
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="When this config was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="When this config was last updated"
+    )
+
+    # Relationship to posted threads
+    posted_threads: Mapped[list["AdventOfCodeThread"]] = relationship(
+        "AdventOfCodeThread",
+        back_populates="config",
+        cascade="all, delete-orphan"
+    )
+
+    def __init__(self, **kwargs):
+        """Initialize AdventOfCodeConfig with default values."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        kwargs.setdefault('is_active', False)
+        kwargs.setdefault('year', 2025)
+        super().__init__(**kwargs)
+
+    def __repr__(self) -> str:
+        """String representation of the AoC config."""
+        return f"<AdventOfCodeConfig(guild_id='{self.guild_id}', channel='{self.forum_channel_id}', active={self.is_active})>"
+
+
+class AdventOfCodeThread(Base):
+    """Tracks Advent of Code threads that have been created.
+
+    Records which day's threads have been successfully posted to prevent
+    duplicate thread creation and provide audit history.
+    """
+
+    __tablename__ = "advent_of_code_threads"
+
+    # Primary key
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique identifier for the thread record"
+    )
+
+    # Foreign key to config
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("advent_of_code_configs.guild_id", ondelete="CASCADE"),
+        nullable=False,
+        doc="Discord guild (server) snowflake ID"
+    )
+
+    # Day tracking
+    year: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        doc="Advent of Code year"
+    )
+    day: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        doc="Day of the challenge (1-25)"
+    )
+
+    # Thread details
+    thread_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        doc="Discord thread/post snowflake ID"
+    )
+    thread_title: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        doc="Title of the created thread"
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="When the thread was created"
+    )
+
+    # Relationship back to config
+    config: Mapped["AdventOfCodeConfig"] = relationship(
+        "AdventOfCodeConfig",
+        back_populates="posted_threads"
+    )
+
+    # Constraints
+    __table_args__ = (
+        # Ensure unique thread per guild/year/day
+        UniqueConstraint("guild_id", "year", "day", name="uq_aoc_thread_guild_year_day"),
+        Index("ix_aoc_threads_guild_id", "guild_id"),
+        Index("ix_aoc_threads_year_day", "year", "day"),
+    )
+
+    def __init__(self, **kwargs):
+        """Initialize AdventOfCodeThread."""
+        kwargs.setdefault('id', uuid4())
+        kwargs.setdefault('created_at', datetime.now(timezone.utc))
+        super().__init__(**kwargs)
+
+    def __repr__(self) -> str:
+        """String representation of the AoC thread record."""
+        return f"<AdventOfCodeThread(guild='{self.guild_id}', year={self.year}, day={self.day})>"
