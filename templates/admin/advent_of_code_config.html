@@ -1,0 +1,257 @@
+{% extends "admin/base_sidebar.html" %}
+
+{% block title %}Advent of Code - {{ guild.name }}{% endblock %}
+
+{% block page_title %}Advent of Code{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item active">Advent of Code</li>
+{% endblock %}
+
+
+{% block content %}
+<!-- Guild Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" class="guild-icon me-3">
+                    {% else %}
+                    <div class="guild-icon-placeholder me-3">{{ guild.name[0].upper() }}</div>
+                    {% endif %}
+                    <div>
+                        <h3 class="mb-1">{{ guild.name }}</h3>
+                        <div class="text-muted">Advent of Code Daily Threads</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Success Message -->
+{% if request.query_params.get('success') == 'updated' %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    <div class="d-flex">
+        <div>
+            <svg class="icon alert-icon" width="24" height="24">
+                <use xlink:href="#tabler-check"></use>
+            </svg>
+        </div>
+        <div>
+            <h4 class="alert-title">Configuration updated!</h4>
+            <div class="text-muted">Advent of Code settings have been successfully updated.</div>
+        </div>
+    </div>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+
+<!-- Configuration Form -->
+<form method="post">
+    <div class="row">
+        <div class="col-lg-8">
+            <!-- Forum Channel Selection -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Forum Channel</h3>
+                    <div class="card-subtitle">Select the forum channel where daily AoC threads will be created</div>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="forum_channel_id">AoC Forum Channel</label>
+                        <select class="form-select" id="forum_channel_id" name="forum_channel_id">
+                            <option value="">Select a forum channel...</option>
+                            {% for channel in forum_channels %}
+                            <option value="{{ channel.id }}" {% if config.forum_channel_id == channel.id %}selected{% endif %}>
+                                # {{ channel.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-hint">
+                            Choose a forum channel where daily Advent of Code discussion threads will be automatically created.
+                            {% if not forum_channels %}
+                            <br><strong class="text-warning">No forum channels found!</strong> Create a forum channel in Discord first.
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Year Configuration -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Year Configuration</h3>
+                    <div class="card-subtitle">Set the Advent of Code year for thread creation</div>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="year">AoC Year</label>
+                        <select class="form-select" id="year" name="year">
+                            {% for y in range(current_year - 1, current_year + 2) %}
+                            <option value="{{ y }}" {% if config.year == y %}selected{% endif %}>
+                                {{ y }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-hint">
+                            The year for Advent of Code challenges. Threads will link to adventofcode.com for this year.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Feature Toggle -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Enable Daily Threads</h3>
+                    <div class="card-subtitle">Toggle automatic thread creation</div>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" name="is_active"
+                                   {% if config.is_active %}checked{% endif %}>
+                            <span class="form-check-label">Enable automatic thread creation</span>
+                        </label>
+                        <div class="form-hint">
+                            When enabled, a new discussion thread will be created at midnight EST each day during December 1-25.
+                            Threads are created ~2 seconds early to ensure they appear right when the challenge is released.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Posted Threads History -->
+            {% if threads %}
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Posted Threads</h3>
+                    <div class="card-subtitle">Threads that have been automatically created</div>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-vcenter card-table">
+                            <thead>
+                                <tr>
+                                    <th>Day</th>
+                                    <th>Title</th>
+                                    <th>Created</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for thread in threads %}
+                                <tr>
+                                    <td>
+                                        <span class="badge bg-blue">Day {{ thread.day }}</span>
+                                        <small class="text-muted">({{ thread.year }})</small>
+                                    </td>
+                                    <td>{{ thread.thread_title }}</td>
+                                    <td>
+                                        <span class="text-muted">{{ thread.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Configuration Summary -->
+        <div class="col-lg-4">
+            <div class="card position-sticky top-0">
+                <div class="card-header">
+                    <h3 class="card-title">Configuration Summary</h3>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <strong>Status:</strong>
+                        {% if config.is_active and config.forum_channel_id %}
+                        <div class="text-success mt-1">
+                            <svg class="icon me-1" width="16" height="16">
+                                <use xlink:href="#tabler-check"></use>
+                            </svg>
+                            Active
+                        </div>
+                        {% elif config.forum_channel_id and not config.is_active %}
+                        <div class="text-warning mt-1">
+                            <svg class="icon me-1" width="16" height="16">
+                                <use xlink:href="#tabler-player-pause"></use>
+                            </svg>
+                            Paused
+                        </div>
+                        {% else %}
+                        <div class="text-muted mt-1">
+                            <svg class="icon me-1" width="16" height="16">
+                                <use xlink:href="#tabler-alert-triangle"></use>
+                            </svg>
+                            Not configured
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <hr>
+
+                    <div class="mb-3">
+                        <strong>Forum Channel:</strong>
+                        {% if config.forum_channel_id %}
+                        <div class="text-muted mt-1">
+                            {% for channel in forum_channels %}
+                            {% if channel.id == config.forum_channel_id %}
+                            # {{ channel.name }}
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-muted mt-1">Not selected</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3">
+                        <strong>Year:</strong>
+                        <div class="text-muted mt-1">{{ config.year }}</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <strong>Threads Posted:</strong>
+                        <div class="text-muted mt-1">{{ threads|length }} thread(s)</div>
+                    </div>
+
+                    <hr>
+
+                    <div class="alert alert-info mb-0">
+                        <div class="d-flex">
+                            <div>
+                                <svg class="icon alert-icon" width="24" height="24">
+                                    <use xlink:href="#tabler-info-circle"></use>
+                                </svg>
+                            </div>
+                            <div>
+                                <div class="small">
+                                    Threads are created at <strong>midnight EST</strong> each day from December 1-25,
+                                    right when new Advent of Code challenges are released.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <svg class="icon me-2" width="24" height="24">
+                            <use xlink:href="#tabler-device-floppy"></use>
+                        </svg>
+                        Save Configuration
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+{% endblock %}
