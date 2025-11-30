@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import hikari
 
+from smarter_dev.bot.agents.aoc_thread_agent import aoc_thread_agent
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
 from smarter_dev.bot.services.cache_manager import CacheManager
@@ -23,7 +24,7 @@ from smarter_dev.bot.services.models import ServiceHealth
 
 logger = logging.getLogger(__name__)
 
-# Eastern Standard Time timezone
+# Eastern Time timezone (handles both EST and EDT automatically)
 EST = ZoneInfo("America/New_York")
 
 # Advent of Code runs December 1-25
@@ -276,14 +277,32 @@ class AdventOfCodeService(BaseService):
         thread_title = f"Day {day} - Advent of Code"
         aoc_url = f"https://adventofcode.com/{year}/day/{day}"
 
-        # Create the thread content
-        thread_content = (
-            f"**Advent of Code {year} - Day {day}**\n\n"
-            f"Today's challenge is live!\n\n"
-            f"{aoc_url}\n\n"
-            f"Share your solutions, discuss approaches, and help each other out. "
-            f"Please use spoiler tags (`||spoiler||`) when discussing solutions!"
-        )
+        # Generate LLM intro message
+        try:
+            llm_message, tokens_used = await aoc_thread_agent.generate_thread_message(day, year)
+            logger.info(f"Generated AoC thread message for day {day} ({tokens_used} tokens)")
+        except Exception as e:
+            logger.error(f"Failed to generate LLM message for day {day}: {e}")
+            llm_message = ""
+
+        # Build thread content with LLM message
+        if day == 25:
+            # Special Christmas Day format
+            thread_content = (
+                f"# Advent of Code {year} - Day 25\n\n"
+                f"{llm_message}\n\n"
+                f"**The final challenge awaits:** {aoc_url}\n\n"
+                f"Share your solutions, discuss approaches, and celebrate together! "
+                f"Please use spoiler tags (`||spoiler||`) when discussing solutions."
+            )
+        else:
+            thread_content = (
+                f"**Advent of Code {year} - Day {day}**\n\n"
+                f"{llm_message}\n\n"
+                f"**Today's challenge:** {aoc_url}\n\n"
+                f"Share your solutions, discuss approaches, and help each other out. "
+                f"Please use spoiler tags (`||spoiler||`) when discussing solutions!"
+            )
 
         try:
             channel_id_int = int(forum_channel_id)
