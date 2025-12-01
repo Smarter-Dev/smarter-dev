@@ -8,8 +8,10 @@ Each agent specializes in a specific type of interaction:
 - TLDRAgent: Message summarization agent
 - ForumMonitorAgent: Forum post evaluation and response agent
 - StreakCelebrationAgent: Daily streak celebration message generator
+- AoCThreadAgent: Advent of Code thread intro message generator
 """
 
+from smarter_dev.bot.agents.aoc_thread_agent import AoCThreadAgent
 from smarter_dev.bot.agents.forum_agent import ForumMonitorAgent
 from smarter_dev.bot.agents.help_agent import HelpAgent
 from smarter_dev.bot.agents.mention_agent import MentionAgent
@@ -24,6 +26,7 @@ __all__ = [
     "TLDRAgent",
     "ForumMonitorAgent",
     "StreakCelebrationAgent",
+    "AoCThreadAgent",
     "DiscordMessage",
     "estimate_message_tokens",
 ]

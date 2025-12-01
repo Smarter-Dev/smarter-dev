@@ -30,9 +30,11 @@ from smarter_dev.web.models import (
     Challenge,
     ScheduledMessage,
     RepeatingMessage,
-    AuditLogConfig
+    AuditLogConfig,
+    AdventOfCodeConfig,
+    AdventOfCodeThread
 )
-from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, SquadSaleEventOperations, APIKeyOperations, ForumAgentOperations, CampaignOperations, ScheduledMessageOperations, RepeatingMessageOperations, AuditLogConfigOperations, ConflictError
+from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, SquadSaleEventOperations, APIKeyOperations, ForumAgentOperations, CampaignOperations, ScheduledMessageOperations, RepeatingMessageOperations, AuditLogConfigOperations, AdventOfCodeConfigOperations, ConflictError
 from smarter_dev.web.security import generate_secure_api_key
 from smarter_dev.web.admin.auth import admin_required
 from smarter_dev.web.admin.discord import (
@@ -3783,6 +3785,104 @@ async def audit_log_config(request: Request) -> Response:
         context = {
             "request": request,
             "error": "Failed to load audit log configuration",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def advent_of_code_config(request: Request) -> Response:
+    """Advent of Code configuration for a guild."""
+    guild_id = request.path_params["guild_id"]
+
+    try:
+        # Verify guild exists and get info
+        guild = await get_guild_info(guild_id)
+
+        # Get all channels for the guild
+        try:
+            channels = await get_guild_channels(guild_id)
+            # Filter to forum channels only (type 15)
+            forum_channels = [ch for ch in channels if ch.type == 15]
+        except DiscordAPIError:
+            forum_channels = []
+            logger.warning(f"Failed to fetch channels for guild {guild_id}, using empty list")
+
+        async with get_db_session_context() as session:
+            aoc_ops = AdventOfCodeConfigOperations()
+
+            if request.method == "GET":
+                # Get current configuration
+                config = await aoc_ops.get_or_create_config(session, guild_id)
+
+                # Get posted threads for this guild
+                threads = await aoc_ops.get_guild_threads(session, guild_id)
+
+                # Get all guilds for the dropdown
+                try:
+                    all_guilds = await get_bot_guilds()
+                except Exception as e:
+                    logger.warning(f"Failed to get all guilds for dropdown: {e}")
+                    all_guilds = [guild]
+
+                return templates.TemplateResponse(
+                    request,
+                    "admin/advent_of_code_config.html",
+                    {
+                        "guild": guild,
+                        "guilds": all_guilds,
+                        "config": config,
+                        "forum_channels": forum_channels,
+                        "threads": threads,
+                    }
+                )
+
+            # POST - Update configuration
+            form = await request.form()
+
+            try:
+                # Parse form data
+                forum_channel_id = form.get("forum_channel_id") or None
+                is_active = form.get("is_active") == "on"
+
+                updates = {
+                    "forum_channel_id": forum_channel_id,
+                    "is_active": is_active,
+                }
+
+                # Update configuration
+                config = await aoc_ops.update_config(session, guild_id, **updates)
+                await session.commit()
+
+                logger.info(f"Updated Advent of Code configuration for guild {guild_id}")
+
+                # Redirect back to config page with success message
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/advent-of-code?success=updated",
+                    status_code=302
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to update AoC config: {e}")
+                await session.rollback()
+                context = {
+                    "request": request,
+                    "error": f"Failed to update configuration: {str(e)}",
+                    "title": "Error"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": f"Guild {guild_id} not found or bot is not a member",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error loading AoC config for guild {guild_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to load Advent of Code configuration",
             "title": "Error"
         }
         return templates.TemplateResponse("admin/error.html", context, status_code=500)

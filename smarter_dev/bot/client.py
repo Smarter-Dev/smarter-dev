@@ -467,6 +467,9 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             ScheduledMessageService,
         )
         from smarter_dev.bot.services.squads_service import SquadsService
+        from smarter_dev.bot.services.advent_of_code_service import (
+            AdventOfCodeService,
+        )
 
         bytes_service = BytesService(api_client, cache_manager)
         squads_service = SquadsService(api_client, cache_manager)
@@ -474,6 +477,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         challenge_service = ChallengeService(api_client, cache_manager, bot)
         scheduled_message_service = ScheduledMessageService(api_client, cache_manager, bot)
         repeating_message_service = RepeatingMessageService(api_client, cache_manager, bot)
+        advent_of_code_service = AdventOfCodeService(api_client, cache_manager, bot)
 
         # Initialize conversation participation services
         channel_state_manager = initialize_channel_state_manager()
@@ -503,6 +507,10 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         await repeating_message_service.initialize()
         logger.info("✓ Repeating message service initialized")
 
+        logger.info("Initializing advent of code service...")
+        await advent_of_code_service.initialize()
+        logger.info("✓ Advent of Code service initialized")
+
         # Verify service health
         logger.info("Verifying service health...")
         try:
@@ -512,6 +520,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             challenge_health = await challenge_service.health_check()
             scheduled_message_health = await scheduled_message_service.health_check()
             repeating_message_health = await repeating_message_service.health_check()
+            advent_of_code_health = await advent_of_code_service.health_check()
 
             logger.info(f"Bytes service health: {'healthy' if bytes_health.is_healthy else 'unhealthy'}")
             logger.info(f"Squads service health: {'healthy' if squads_health.is_healthy else 'unhealthy'}")
@@ -519,6 +528,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             logger.info(f"Challenge service health: {'healthy' if challenge_health.is_healthy else 'unhealthy'}")
             logger.info(f"Scheduled message service health: {'healthy' if scheduled_message_health.is_healthy else 'unhealthy'}")
             logger.info(f"Repeating message service health: {'healthy' if repeating_message_health.is_healthy else 'unhealthy'}")
+            logger.info(f"Advent of Code service health: {'healthy' if advent_of_code_health.is_healthy else 'unhealthy'}")
 
             if not bytes_health.is_healthy:
                 logger.warning(f"Bytes service not healthy: {bytes_health.details}")
@@ -532,6 +542,8 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
                 logger.warning(f"Scheduled message service not healthy: {scheduled_message_health.details}")
             if not repeating_message_health.is_healthy:
                 logger.warning(f"Repeating message service not healthy: {repeating_message_health.details}")
+            if not advent_of_code_health.is_healthy:
+                logger.warning(f"Advent of Code service not healthy: {advent_of_code_health.details}")
 
         except Exception as e:
             logger.error(f"Failed to check service health: {e}")
@@ -548,6 +560,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d["challenge_service"] = challenge_service
         bot.d["scheduled_message_service"] = scheduled_message_service
         bot.d["repeating_message_service"] = repeating_message_service
+        bot.d["advent_of_code_service"] = advent_of_code_service
         bot.d["channel_state_manager"] = channel_state_manager
 
         # Store services in d for plugin access (primary)
@@ -558,6 +571,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             "challenge_service": challenge_service,
             "scheduled_message_service": scheduled_message_service,
             "repeating_message_service": repeating_message_service,
+            "advent_of_code_service": advent_of_code_service,
             "channel_state_manager": channel_state_manager
         }
 
@@ -879,6 +893,9 @@ async def cleanup_bot_services(bot: lightbulb.BotApp) -> None:
 
         if hasattr(bot, "d") and "repeating_message_service" in bot.d:
             await bot.d["repeating_message_service"].cleanup()
+
+        if hasattr(bot, "d") and "advent_of_code_service" in bot.d:
+            await bot.d["advent_of_code_service"].cleanup()
 
         # Clean up cache manager (if used)
         if hasattr(bot, "d") and "cache_manager" in bot.d and bot.d["cache_manager"]:
