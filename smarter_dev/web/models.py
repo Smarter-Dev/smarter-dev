@@ -842,11 +842,11 @@ class HelpConversation(Base):
     )
     
     # Database constraints and indexes
+    # Note: expires_at and is_sensitive already have column-level index=True
     __table_args__ = (
         Index("ix_help_conversations_guild_started", "guild_id", "started_at"),
         Index("ix_help_conversations_user_started", "user_id", "started_at"),
         Index("ix_help_conversations_session_started", "session_id", "started_at"),
-        Index("ix_help_conversations_expires_at", "expires_at"),
         Index("ix_help_conversations_tokens_started", "tokens_used", "started_at"),
     )
     
@@ -2619,14 +2619,6 @@ class AdventOfCodeConfig(Base):
         doc="Whether automatic thread creation is enabled"
     )
 
-    # Year configuration (to support multiple years)
-    year: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=2025,
-        doc="Advent of Code year to track"
-    )
-
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -2655,7 +2647,6 @@ class AdventOfCodeConfig(Base):
         kwargs.setdefault('created_at', now)
         kwargs.setdefault('updated_at', now)
         kwargs.setdefault('is_active', False)
-        kwargs.setdefault('year', 2025)
         super().__init__(**kwargs)
 
     def __repr__(self) -> str:

@@ -40,6 +40,7 @@ def upgrade() -> None:
         sa.Column('thread_id', sa.String(), nullable=False),
         sa.Column('thread_title', sa.String(), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
         sa.ForeignKeyConstraint(['guild_id'], ['advent_of_code_configs.guild_id'], name=op.f('fk_advent_of_code_threads_guild_id_advent_of_code_configs'), ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id', name=op.f('pk_advent_of_code_threads')),
         sa.UniqueConstraint('guild_id', 'year', 'day', name='uq_aoc_thread_guild_year_day')

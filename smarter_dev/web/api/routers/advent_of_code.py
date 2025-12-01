@@ -46,7 +46,6 @@ class ConfigResponse(BaseModel):
     guild_id: str
     forum_channel_id: str | None
     is_active: bool
-    year: int
 
 
 @router.get("/active-configs")
@@ -72,7 +71,6 @@ async def get_active_configs(
                 "guild_id": config.guild_id,
                 "forum_channel_id": config.forum_channel_id,
                 "is_active": config.is_active,
-                "year": config.year
             }
             config_list.append(config_data)
 
@@ -116,7 +114,6 @@ async def get_guild_config(
             guild_id=config.guild_id,
             forum_channel_id=config.forum_channel_id,
             is_active=config.is_active,
-            year=config.year
         )
 
     except DatabaseOperationError as e:

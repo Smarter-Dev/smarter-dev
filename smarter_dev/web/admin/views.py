@@ -3824,10 +3824,6 @@ async def advent_of_code_config(request: Request) -> Response:
                     logger.warning(f"Failed to get all guilds for dropdown: {e}")
                     all_guilds = [guild]
 
-                # Get current year for default
-                from datetime import datetime
-                current_year = datetime.now().year
-
                 return templates.TemplateResponse(
                     request,
                     "admin/advent_of_code_config.html",
@@ -3837,7 +3833,6 @@ async def advent_of_code_config(request: Request) -> Response:
                         "config": config,
                         "forum_channels": forum_channels,
                         "threads": threads,
-                        "current_year": current_year
                     }
                 )
 
@@ -3848,12 +3843,10 @@ async def advent_of_code_config(request: Request) -> Response:
                 # Parse form data
                 forum_channel_id = form.get("forum_channel_id") or None
                 is_active = form.get("is_active") == "on"
-                year = int(form.get("year", datetime.now().year))
 
                 updates = {
                     "forum_channel_id": forum_channel_id,
                     "is_active": is_active,
-                    "year": year
                 }
 
                 # Update configuration
