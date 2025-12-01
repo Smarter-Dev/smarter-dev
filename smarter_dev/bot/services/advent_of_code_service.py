@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 # Eastern Time timezone (handles both EST and EDT automatically)
 EST = ZoneInfo("America/New_York")
 
-# Advent of Code runs December 1-25
+# Advent of Code 2024 runs December 1-12 (reduced from traditional 25 days)
 AOC_START_DAY = 1
-AOC_END_DAY = 25
+AOC_END_DAY = 12
 AOC_MONTH = 12
 
 # Post threads 2 seconds early to ensure they appear right at midnight
@@ -182,17 +182,23 @@ class AdventOfCodeService(BaseService):
         """
         now_est = datetime.now(EST)
 
+        # Add EARLY_POST_SECONDS to determine the "effective" day.
+        # This allows threads to be created a few seconds before midnight
+        # so they appear right when the new day starts.
+        # At 23:59:58, effective_time would be 00:00:00 of the next day.
+        effective_time = now_est + timedelta(seconds=EARLY_POST_SECONDS)
+
         # Only proceed if we're in December, days 1-25
-        if now_est.month != AOC_MONTH:
-            logger.debug(f"Not December (month={now_est.month}), skipping AoC check")
+        if effective_time.month != AOC_MONTH:
+            logger.debug(f"Not December (month={effective_time.month}), skipping AoC check")
             return
 
-        if now_est.day < AOC_START_DAY:
-            logger.debug(f"Before December 1 (day={now_est.day}), skipping")
+        if effective_time.day < AOC_START_DAY:
+            logger.debug(f"Before December 1 (day={effective_time.day}), skipping")
             return
 
-        current_day = min(now_est.day, AOC_END_DAY)  # Cap at day 25
-        current_year = now_est.year
+        current_day = min(effective_time.day, AOC_END_DAY)  # Cap at day 25
+        current_year = effective_time.year
 
         logger.info(f"Checking for AoC threads for {current_year} (days 1-{current_day})")
 
@@ -229,12 +235,6 @@ class AdventOfCodeService(BaseService):
         """
         guild_id = config.get("guild_id")
         forum_channel_id = config.get("forum_channel_id")
-        config_year = config.get("year", year)
-
-        # Only process if the config year matches current year
-        if config_year != year:
-            logger.debug(f"Config year {config_year} doesn't match current year {year} for guild {guild_id}")
-            return
 
         if not forum_channel_id:
             logger.warning(f"No forum channel configured for guild {guild_id}")
@@ -278,29 +278,32 @@ class AdventOfCodeService(BaseService):
         aoc_url = f"https://adventofcode.com/{year}/day/{day}"
 
         # Generate LLM intro message
+        llm_section = ""
         try:
             llm_message, tokens_used = await aoc_thread_agent.generate_thread_message(day, year)
-            logger.info(f"Generated AoC thread message for day {day} ({tokens_used} tokens)")
+            if llm_message:
+                llm_section = f"{llm_message}\n\n"
+                logger.info(f"Generated AoC thread message for day {day} ({tokens_used} tokens)")
         except Exception as e:
             logger.error(f"Failed to generate LLM message for day {day}: {e}")
-            llm_message = ""
 
-        # Build thread content with LLM message
-        if day == 25:
-            # Special Christmas Day format
+        # Build thread content with LLM message (llm_section is either "message\n\n" or "")
+        if day == AOC_END_DAY:
+            # Final day celebration format
             thread_content = (
-                f"# Advent of Code {year} - Day 25\n\n"
-                f"{llm_message}\n\n"
+                f"# Advent of Code {year} - Day {day} (Final Day!)\n\n"
+                f"{llm_section}"
                 f"**The final challenge awaits:** {aoc_url}\n\n"
                 f"Share your solutions, discuss approaches, and celebrate together! "
+                f"Merry Christmas and Happy New Year to all! "
                 f"Please use spoiler tags (`||spoiler||`) when discussing solutions."
             )
         else:
             thread_content = (
                 f"**Advent of Code {year} - Day {day}**\n\n"
-                f"{llm_message}\n\n"
+                f"{llm_section}"
                 f"**Today's challenge:** {aoc_url}\n\n"
-                f"Share your solutions, discuss approaches, and help each other out. "
+                f"Share your solutions, discuss approaches, and help each other out! "
                 f"Please use spoiler tags (`||spoiler||`) when discussing solutions!"
             )
 

@@ -82,29 +82,6 @@
                 </div>
             </div>
 
-            <!-- Year Configuration -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h3 class="card-title">Year Configuration</h3>
-                    <div class="card-subtitle">Set the Advent of Code year for thread creation</div>
-                </div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label" for="year">AoC Year</label>
-                        <select class="form-select" id="year" name="year">
-                            {% for y in range(current_year - 1, current_year + 2) %}
-                            <option value="{{ y }}" {% if config.year == y %}selected{% endif %}>
-                                {{ y }}
-                            </option>
-                            {% endfor %}
-                        </select>
-                        <div class="form-hint">
-                            The year for Advent of Code challenges. Threads will link to adventofcode.com for this year.
-                        </div>
-                    </div>
-                </div>
-            </div>
-
             <!-- Feature Toggle -->
             <div class="card mb-4">
                 <div class="card-header">
@@ -212,11 +189,6 @@
                         {% else %}
                         <div class="text-muted mt-1">Not selected</div>
                         {% endif %}
-                    </div>
-
-                    <div class="mb-3">
-                        <strong>Year:</strong>
-                        <div class="text-muted mt-1">{{ config.year }}</div>
                     </div>
 
                     <div class="mb-3">
