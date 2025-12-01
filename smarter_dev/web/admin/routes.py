@@ -48,7 +48,8 @@ from smarter_dev.web.admin.views import (
     repeating_message_edit,
     repeating_message_delete,
     repeating_message_toggle,
-    audit_log_config
+    audit_log_config,
+    advent_of_code_config
 )
 
 
@@ -121,4 +122,7 @@ admin_routes = [
     Route("/guilds/{guild_id}/repeating-messages/{message_id}/edit", admin_required(repeating_message_edit), methods=["GET", "POST"], name="admin_repeating_message_edit"),
     Route("/guilds/{guild_id}/repeating-messages/{message_id}/delete", admin_required(repeating_message_delete), methods=["POST"], name="admin_repeating_message_delete"),
     Route("/guilds/{guild_id}/repeating-messages/{message_id}/toggle", admin_required(repeating_message_toggle), methods=["POST"], name="admin_repeating_message_toggle"),
+
+    # Advent of Code configuration
+    Route("/guilds/{guild_id}/advent-of-code", admin_required(advent_of_code_config), methods=["GET", "POST"], name="admin_advent_of_code"),
 ]
