@@ -311,9 +311,10 @@ class AdventOfCodeService(BaseService):
             channel_id_int = int(forum_channel_id)
 
             # Create a forum post (thread) in the forum channel
+            # Note: channel and name are positional-only arguments in hikari
             thread = await self._bot.rest.create_forum_post(
-                channel=channel_id_int,
-                name=thread_title,
+                channel_id_int,
+                thread_title,
                 content=thread_content,
             )
 
