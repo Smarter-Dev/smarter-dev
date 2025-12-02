@@ -85,6 +85,19 @@ class ConversationalMentionSignature(dspy.Signature):
     - You MUST immediately call `wait_for_messages()` or `stop_monitoring()`
     - Do not just return - take one of these actions
 
+    DUPLICATE_SEARCH error:
+    - You already searched for this exact query - the results are in your trajectory above
+    - DO NOT retry the same search - look at the observation from your earlier search
+    - Either respond based on those results, or try a DIFFERENT search query
+
+    DUPLICATE_URL error:
+    - You already opened this URL with this question - the answer is in your trajectory above
+    - DO NOT retry the same open_url call - use the answer you already have
+
+    DUPLICATE_PLAN error:
+    - You already generated an engagement plan - it's in your trajectory above
+    - DO NOT generate another plan - follow the recommended_actions from the existing plan
+
     Rate limit errors:
     - Respect the limit, don't retry immediately
     - Explain or try a different approach
