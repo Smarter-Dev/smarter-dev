@@ -656,6 +656,10 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
     Returns:
         Tuple of (List of callable async functions, List of recent search queries in this channel)
     """
+    # Per-invocation search tracking to prevent the same agent instance from
+    # searching the same query multiple times in a loop. This is reset when
+    # the agent is restarted with fresh context.
+    invocation_searches: dict[str, float] = {}
 
     async def send_message(content: str) -> dict:
         """Send a message to the channel where the bot was mentioned.
@@ -913,18 +917,37 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         try:
             logger.debug(f"[Tool] search_web_instant_answer called with query: {query}")
 
-            # Send usage message (always, even for cache hits)
+            # Normalize query for comparison
+            normalized_query = query.lower().strip()
+
+            # Check for duplicate search within this agent invocation (prevents looping)
+            current_time = time.time()
+            if normalized_query in invocation_searches:
+                last_search_time = invocation_searches[normalized_query]
+                # Block if searched within the last 10 seconds (same invocation looping)
+                if current_time - last_search_time < 10:
+                    logger.warning(f"[Tool] Duplicate search detected in same invocation, rejecting: {query[:50]}...")
+                    return {
+                        "success": False,
+                        "error": "DUPLICATE_SEARCH: You already searched for this query. The results were returned in a previous tool call above. Use that information to respond, or try a DIFFERENT search query if you need additional information.",
+                        "duplicate": True
+                    }
+
+            # Track the search for this invocation (before cache check to prevent spam)
+            invocation_searches[normalized_query] = current_time
+
+            # Check cache first - if we have cached results, return them without sending a Discord message
+            cached_result = search_cache.get(query, cache_type="quick")
+            if cached_result is not None:
+                logger.debug(f"[Cache] Quick search hit for '{query}'")
+                return cached_result
+
+            # Only send usage message when actually performing a new search
             usage_message = f'> -# Looking up details about "{query}"'
             try:
                 await bot.rest.create_message(int(channel_id), usage_message)
             except Exception as e:
                 logger.error(f"[Tool] Failed to send search usage message: {e}")
-
-            # Check cache first
-            cached_result = search_cache.get(query, cache_type="quick")
-            if cached_result is not None:
-                logger.debug(f"[Cache] Quick search hit for '{query}'")
-                return cached_result
 
             # Not in cache, perform search
             search_results = list(DDGS().text(query, max_results=1))
@@ -999,7 +1022,35 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             logger.debug(f"[Tool] search_web called with query: {query}, max_results: {max_results}")
 
-            # Send usage message (always, even for cache hits)
+            # Normalize query for comparison
+            normalized_query = query.lower().strip()
+
+            # Check for duplicate search within this agent invocation (prevents looping)
+            current_time = time.time()
+            if normalized_query in invocation_searches:
+                last_search_time = invocation_searches[normalized_query]
+                # Block if searched within the last 10 seconds (same invocation looping)
+                if current_time - last_search_time < 10:
+                    logger.warning(f"[Tool] Duplicate search detected in same invocation, rejecting: {query[:50]}...")
+                    return {
+                        "success": False,
+                        "error": "DUPLICATE_SEARCH: You already searched for this query. The results were returned in a previous tool call above. Use that information to respond, or try a DIFFERENT search query if you need additional information.",
+                        "duplicate": True
+                    }
+
+            # Track the search for this invocation
+            invocation_searches[normalized_query] = current_time
+
+            # Use composite key to cache by query + max_results
+            cache_key = f"{query}:{max_results}"
+
+            # Check cache first - if we have cached results, return them without sending a Discord message
+            cached_result = search_cache.get(cache_key, cache_type="full")
+            if cached_result is not None:
+                logger.debug(f"[Cache] Full search hit for '{cache_key}'")
+                return cached_result
+
+            # Only send usage message when actually performing a new search
             usage_message = (
                 f'> -# Searching for "{query}" ({max_results} result{"s" if max_results != 1 else ""} max)'
             )
@@ -1007,15 +1058,6 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 await bot.rest.create_message(int(channel_id), usage_message)
             except Exception as e:
                 logger.error(f"[Tool] Failed to send search usage message: {e}")
-
-            # Use composite key to cache by query + max_results
-            cache_key = f"{query}:{max_results}"
-
-            # Check cache first
-            cached_result = search_cache.get(cache_key, cache_type="full")
-            if cached_result is not None:
-                logger.debug(f"[Cache] Full search hit for '{cache_key}'")
-                return cached_result
 
             # Not in cache, perform search
             search_results = list(DDGS().text(query, max_results=max_results))
@@ -1093,12 +1135,23 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         try:
             logger.debug(f"[Tool] open_url called with url: {url}, question: {question}")
 
-            # Send usage message
-            usage_message = f"> -# Opening '{url}' to answer: {question}"
-            try:
-                await bot.rest.create_message(int(channel_id), usage_message)
-            except Exception as e:
-                logger.error(f"[Tool] Failed to send url usage message: {e}")
+            # Create a normalized key for URL+question deduplication
+            normalized_url_key = f"url:{url.lower().strip()}:{question.lower().strip()}"
+
+            # Check for duplicate open_url call within this agent invocation
+            current_time = time.time()
+            if normalized_url_key in invocation_searches:
+                last_call_time = invocation_searches[normalized_url_key]
+                if current_time - last_call_time < 10:
+                    logger.warning(f"[Tool] Duplicate open_url detected in same invocation: {url[:50]}...")
+                    return {
+                        "success": False,
+                        "error": "DUPLICATE_URL: You already opened this URL with this question. The answer was returned in a previous tool call above. Use that information to respond.",
+                        "duplicate": True
+                    }
+
+            # Track the URL+question for this invocation
+            invocation_searches[normalized_url_key] = current_time
 
             # Tier 2 Cache: Check if we already have an answer for this specific question
             cached_answer = search_cache.get_url_answer(url, question)
@@ -1110,6 +1163,13 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     "url": url,
                     "note": "Answer from cache"
                 }
+
+            # Only send usage message when actually performing a new fetch
+            usage_message = f"> -# Opening '{url}' to answer: {question}"
+            try:
+                await bot.rest.create_message(int(channel_id), usage_message)
+            except Exception as e:
+                logger.error(f"[Tool] Failed to send url usage message: {e}")
 
             # Tier 1 Cache: Check if we have the content cached
             cached_content = search_cache.get_url(url)
@@ -1660,6 +1720,22 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             from smarter_dev.llm_config import get_llm_model
 
             logger.info("[Tool] generate_engagement_plan called - building full context")
+
+            # Check for duplicate planning call within this agent invocation
+            plan_key = "generate_engagement_plan"
+            current_time = time.time()
+            if plan_key in invocation_searches:
+                last_call_time = invocation_searches[plan_key]
+                if current_time - last_call_time < 10:
+                    logger.warning("[Tool] Duplicate generate_engagement_plan detected in same invocation")
+                    return {
+                        "success": False,
+                        "error": "DUPLICATE_PLAN: You already generated an engagement plan. The plan was returned in a previous tool call above. Follow those recommended_actions instead of generating another plan.",
+                        "duplicate": True
+                    }
+
+            # Track the planning call for this invocation
+            invocation_searches[plan_key] = current_time
 
             # Send status message to channel
             try:
