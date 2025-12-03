@@ -1194,6 +1194,28 @@ async def run_bot() -> None:
                 logger.error(f"Unexpected error in daily reward for {event.author}: {e}", exc_info=True)
 
     @bot.listen()
+    async def on_attachment_filter(event: hikari.GuildMessageCreateEvent) -> None:
+        """Check messages for blocked attachment types."""
+        # Skip bot messages
+        if event.is_bot:
+            return
+
+        # Skip if no guild
+        if not event.guild_id:
+            return
+
+        # Skip if no attachments
+        if not event.message.attachments:
+            return
+
+        # Check attachment filter
+        from smarter_dev.bot.attachment_filter import check_attachment_filter
+        try:
+            await check_attachment_filter(bot, event)
+        except Exception as e:
+            logger.error(f"Failed to check attachment filter: {e}")
+
+    @bot.listen()
     async def on_interaction_create(event: hikari.InteractionCreateEvent) -> None:
         """Handle component interactions for views."""
         if not isinstance(event.interaction, hikari.ComponentInteraction):

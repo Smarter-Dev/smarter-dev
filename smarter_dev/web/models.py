@@ -2734,3 +2734,118 @@ class AdventOfCodeThread(Base):
     def __repr__(self) -> str:
         """String representation of the AoC thread record."""
         return f"<AdventOfCodeThread(guild='{self.guild_id}', year={self.year}, day={self.day})>"
+
+
+class AttachmentFilterConfig(Base):
+    """Attachment filter configuration per guild for file type filtering.
+
+    Stores guild-specific settings for filtering message attachments based on
+    file extensions. Can delete messages or send warnings based on configuration.
+    Users with manage_messages permission are exempt from deletion (warning only).
+    """
+
+    __tablename__ = "attachment_filter_configs"
+
+    # Primary key
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        primary_key=True,
+        doc="Discord guild (server) snowflake ID"
+    )
+
+    # Feature toggle
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Whether attachment filtering is enabled"
+    )
+
+    # Blocked file extensions (stored as JSON array)
+    blocked_extensions: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        doc="List of blocked file extensions (e.g., ['.exe', '.bat', '.scr'])"
+    )
+
+    # Action to take: 'delete' or 'warn'
+    action: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="warn",
+        doc="Action to take on blocked attachments: 'delete' or 'warn'"
+    )
+
+    # Custom warning message
+    warning_message: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+        doc="Custom warning message to send (supports {user}, {extension}, {filename} placeholders)"
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="When this config was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="When this config was last updated"
+    )
+
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_attachment_filter_configs_guild_id", "guild_id"),
+    )
+
+    def __init__(self, **kwargs):
+        """Initialize AttachmentFilterConfig with default values."""
+        now = datetime.now(timezone.utc)
+        kwargs.setdefault('created_at', now)
+        kwargs.setdefault('updated_at', now)
+        kwargs.setdefault('is_active', False)
+        kwargs.setdefault('blocked_extensions', [])
+        kwargs.setdefault('action', 'warn')
+        super().__init__(**kwargs)
+
+    @classmethod
+    def get_defaults(cls, guild_id: str) -> 'AttachmentFilterConfig':
+        """Get default configuration for a guild.
+
+        Args:
+            guild_id: Discord guild ID
+
+        Returns:
+            AttachmentFilterConfig instance with default values
+        """
+        return cls(guild_id=guild_id)
+
+    def get_warning_message(self, user_mention: str, extension: str, filename: str) -> str:
+        """Get the formatted warning message.
+
+        Args:
+            user_mention: The user mention string (e.g., <@123456>)
+            extension: The blocked file extension
+            filename: The blocked filename
+
+        Returns:
+            Formatted warning message
+        """
+        if self.warning_message:
+            return self.warning_message.format(
+                user=user_mention,
+                extension=extension,
+                filename=filename
+            )
+        return f"{user_mention}, your message was flagged because it contained a blocked file type ({extension}). Please review the server's file sharing policies."
+
+    def __repr__(self) -> str:
+        """String representation of the attachment filter config."""
+        return f"<AttachmentFilterConfig(guild_id='{self.guild_id}', active={self.is_active}, action='{self.action}')>"

@@ -49,7 +49,8 @@ from smarter_dev.web.admin.views import (
     repeating_message_delete,
     repeating_message_toggle,
     audit_log_config,
-    advent_of_code_config
+    advent_of_code_config,
+    attachment_filter_config
 )
 
 
@@ -69,7 +70,8 @@ admin_routes = [
     Route("/guilds/{guild_id}/bytes", admin_required(bytes_config), methods=["GET", "POST"], name="admin_bytes_config"),
     Route("/guilds/{guild_id}/squads", admin_required(squads_config), methods=["GET", "POST"], name="admin_squads_config"),
     Route("/guilds/{guild_id}/audit-logs", admin_required(audit_log_config), methods=["GET", "POST"], name="admin_audit_logs"),
-    
+    Route("/guilds/{guild_id}/attachment-filter", admin_required(attachment_filter_config), methods=["GET", "POST"], name="admin_attachment_filter"),
+
     # Squad sale events management
     Route("/guilds/{guild_id}/squad-sale-events", admin_required(squad_sale_events_list), methods=["GET", "POST"], name="admin_squad_sale_events"),
     Route("/guilds/{guild_id}/squad-sale-events/{event_id}/edit", admin_required(squad_sale_event_edit), methods=["POST"], name="admin_squad_sale_event_edit"),
