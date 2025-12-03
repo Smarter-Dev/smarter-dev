@@ -32,9 +32,10 @@ from smarter_dev.web.models import (
     RepeatingMessage,
     AuditLogConfig,
     AdventOfCodeConfig,
-    AdventOfCodeThread
+    AdventOfCodeThread,
+    AttachmentFilterConfig
 )
-from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, SquadSaleEventOperations, APIKeyOperations, ForumAgentOperations, CampaignOperations, ScheduledMessageOperations, RepeatingMessageOperations, AuditLogConfigOperations, AdventOfCodeConfigOperations, ConflictError
+from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, SquadSaleEventOperations, APIKeyOperations, ForumAgentOperations, CampaignOperations, ScheduledMessageOperations, RepeatingMessageOperations, AuditLogConfigOperations, AdventOfCodeConfigOperations, AttachmentFilterConfigOperations, ConflictError
 from smarter_dev.web.security import generate_secure_api_key
 from smarter_dev.web.admin.auth import admin_required
 from smarter_dev.web.admin.discord import (
@@ -3883,6 +3884,106 @@ async def advent_of_code_config(request: Request) -> Response:
         context = {
             "request": request,
             "error": "Failed to load Advent of Code configuration",
+            "title": "Error"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def attachment_filter_config(request: Request) -> Response:
+    """Attachment filter configuration for a guild."""
+    guild_id = request.path_params["guild_id"]
+
+    try:
+        # Verify guild exists and get info
+        guild = await get_guild_info(guild_id)
+
+        async with get_db_session_context() as session:
+            filter_ops = AttachmentFilterConfigOperations()
+
+            if request.method == "GET":
+                # Get current configuration
+                config = await filter_ops.get_or_create_config(session, guild_id)
+
+                # Get all guilds for the dropdown
+                try:
+                    all_guilds = await get_bot_guilds()
+                except Exception as e:
+                    logger.warning(f"Failed to get all guilds for dropdown: {e}")
+                    all_guilds = [guild]
+
+                return templates.TemplateResponse(
+                    request,
+                    "admin/attachment_filter_config.html",
+                    {
+                        "guild": guild,
+                        "guilds": all_guilds,
+                        "config": config,
+                    }
+                )
+
+            # POST - Update configuration
+            form = await request.form()
+
+            try:
+                # Parse form data
+                is_active = form.get("is_active") == "on"
+                action = form.get("action", "warn")
+                warning_message = form.get("warning_message", "").strip() or None
+
+                # Parse blocked extensions from textarea (one per line or comma-separated)
+                extensions_raw = form.get("blocked_extensions", "")
+                blocked_extensions = []
+                for line in extensions_raw.replace(",", "\n").split("\n"):
+                    ext = line.strip().lower()
+                    if ext:
+                        # Ensure extension starts with a dot
+                        if not ext.startswith("."):
+                            ext = "." + ext
+                        blocked_extensions.append(ext)
+                # Remove duplicates while preserving order
+                blocked_extensions = list(dict.fromkeys(blocked_extensions))
+
+                updates = {
+                    "is_active": is_active,
+                    "action": action,
+                    "warning_message": warning_message,
+                    "blocked_extensions": blocked_extensions,
+                }
+
+                # Update configuration
+                config = await filter_ops.update_config(session, guild_id, **updates)
+                await session.commit()
+
+                logger.info(f"Updated attachment filter configuration for guild {guild_id}")
+
+                # Redirect back to config page with success message
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/attachment-filter?success=updated",
+                    status_code=302
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to update attachment filter config: {e}")
+                await session.rollback()
+                context = {
+                    "request": request,
+                    "error": f"Failed to update configuration: {str(e)}",
+                    "title": "Error"
+                }
+                return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+    except GuildNotFoundError:
+        context = {
+            "request": request,
+            "error": f"Guild {guild_id} not found or bot is not a member",
+            "title": "Guild Not Found"
+        }
+        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+    except Exception as e:
+        logger.error(f"Error loading attachment filter config for guild {guild_id}: {e}")
+        context = {
+            "request": request,
+            "error": "Failed to load attachment filter configuration",
             "title": "Error"
         }
         return templates.TemplateResponse("admin/error.html", context, status_code=500)

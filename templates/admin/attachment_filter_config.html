@@ -1,0 +1,270 @@
+{% extends "admin/base_sidebar.html" %}
+
+{% block title %}Attachment Filter - {{ guild.name }}{% endblock %}
+
+{% block page_title %}Attachment Filter{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item active">Attachment Filter</li>
+{% endblock %}
+
+
+{% block content %}
+<!-- Guild Header -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" class="guild-icon me-3">
+                    {% else %}
+                    <div class="guild-icon-placeholder me-3">{{ guild.name[0].upper() }}</div>
+                    {% endif %}
+                    <div>
+                        <h3 class="mb-1">{{ guild.name }}</h3>
+                        <div class="text-muted">Attachment Filter - Block unwanted file types</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Success Message -->
+{% if request.query_params.get('success') == 'updated' %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    <div class="d-flex">
+        <div>
+            <svg class="icon alert-icon" width="24" height="24">
+                <use xlink:href="#tabler-check"></use>
+            </svg>
+        </div>
+        <div>
+            <h4 class="alert-title">Configuration updated!</h4>
+            <div class="text-muted">Attachment filter settings have been successfully updated.</div>
+        </div>
+    </div>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+
+<!-- Configuration Form -->
+<form method="post">
+    <div class="row">
+        <div class="col-lg-8">
+            <!-- Enable/Disable -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Filter Status</h3>
+                    <div class="card-subtitle">Enable or disable the attachment filter</div>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" name="is_active"
+                                   {% if config.is_active %}checked{% endif %}>
+                            <span class="form-check-label">Enable Attachment Filter</span>
+                        </label>
+                        <div class="form-hint">
+                            When enabled, the bot will check all message attachments against the blocked extensions list.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Blocked Extensions -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Blocked File Extensions</h3>
+                    <div class="card-subtitle">Enter file extensions to block (one per line or comma-separated)</div>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="blocked_extensions">Extensions</label>
+                        <textarea class="form-control" id="blocked_extensions" name="blocked_extensions"
+                                  rows="8" placeholder=".exe&#10;.bat&#10;.scr&#10;.cmd&#10;.msi">{{ config.blocked_extensions | join('\n') if config.blocked_extensions else '' }}</textarea>
+                        <div class="form-hint">
+                            Enter file extensions with or without the leading dot. Examples: <code>.exe</code>, <code>bat</code>, <code>.scr</code>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info">
+                        <div class="d-flex">
+                            <div>
+                                <svg class="icon alert-icon" width="24" height="24">
+                                    <use xlink:href="#tabler-info-circle"></use>
+                                </svg>
+                            </div>
+                            <div>
+                                <h4 class="alert-title">Common dangerous extensions</h4>
+                                <div class="text-muted">
+                                    <code>.exe</code> <code>.bat</code> <code>.cmd</code> <code>.scr</code> <code>.msi</code>
+                                    <code>.vbs</code> <code>.js</code> <code>.jar</code> <code>.ps1</code> <code>.dll</code>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Configuration -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Action on Match</h3>
+                    <div class="card-subtitle">What to do when a blocked file type is detected</div>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <div class="form-selectgroup form-selectgroup-boxes d-flex flex-column">
+                            <label class="form-selectgroup-item flex-fill">
+                                <input type="radio" name="action" value="warn" class="form-selectgroup-input"
+                                       {% if config.action == 'warn' or not config.action %}checked{% endif %}>
+                                <div class="form-selectgroup-label d-flex align-items-center p-3">
+                                    <div class="me-3">
+                                        <span class="form-selectgroup-check"></span>
+                                    </div>
+                                    <div>
+                                        <strong>Warn Only</strong>
+                                        <div class="text-muted">Send a warning message but don't delete the attachment</div>
+                                    </div>
+                                </div>
+                            </label>
+                            <label class="form-selectgroup-item flex-fill">
+                                <input type="radio" name="action" value="delete" class="form-selectgroup-input"
+                                       {% if config.action == 'delete' %}checked{% endif %}>
+                                <div class="form-selectgroup-label d-flex align-items-center p-3">
+                                    <div class="me-3">
+                                        <span class="form-selectgroup-check"></span>
+                                    </div>
+                                    <div>
+                                        <strong>Delete Message</strong>
+                                        <div class="text-muted">Delete the message containing the blocked attachment and send a warning</div>
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-warning">
+                        <div class="d-flex">
+                            <div>
+                                <svg class="icon alert-icon" width="24" height="24">
+                                    <use xlink:href="#tabler-alert-triangle"></use>
+                                </svg>
+                            </div>
+                            <div>
+                                <strong>Note:</strong> Users with the "Manage Messages" permission are exempt from message deletion. They will only receive a warning instead.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Custom Warning Message -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3 class="card-title">Warning Message</h3>
+                    <div class="card-subtitle">Customize the message sent when a blocked file is detected</div>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="warning_message">Custom Message (optional)</label>
+                        <textarea class="form-control" id="warning_message" name="warning_message"
+                                  rows="3" placeholder="Leave empty for default message">{{ config.warning_message or '' }}</textarea>
+                        <div class="form-hint">
+                            Available placeholders: <code>{user}</code> (mentions the user), <code>{extension}</code> (the blocked extension), <code>{filename}</code> (the filename)
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <strong>Default message:</strong>
+                        <div class="text-muted mt-1">
+                            <em>@user, your message was flagged because it contained a blocked file type (.exe). Please review the server's file sharing policies.</em>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <strong>Example custom message:</strong>
+                        <div class="text-muted mt-1">
+                            <code>{user} - The file "{filename}" with extension {extension} is not allowed on this server. Please contact a moderator if you need to share this file type.</code>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Configuration Summary -->
+        <div class="col-lg-4">
+            <div class="card position-sticky top-0">
+                <div class="card-header">
+                    <h3 class="card-title">Configuration Summary</h3>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <strong>Status:</strong>
+                        {% if config.is_active %}
+                        <div class="text-success mt-1">
+                            <svg class="icon me-1" width="16" height="16">
+                                <use xlink:href="#tabler-check"></use>
+                            </svg>
+                            Active
+                        </div>
+                        {% else %}
+                        <div class="text-muted mt-1">
+                            <svg class="icon me-1" width="16" height="16">
+                                <use xlink:href="#tabler-x"></use>
+                            </svg>
+                            Disabled
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3">
+                        <strong>Action:</strong>
+                        <div class="mt-1">
+                            {% if config.action == 'delete' %}
+                            <span class="badge bg-danger">Delete + Warn</span>
+                            {% else %}
+                            <span class="badge bg-warning">Warn Only</span>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <div class="mb-2">
+                        <strong>Blocked Extensions:</strong>
+                    </div>
+                    <div class="list-group list-group-flush">
+                        {% if config.blocked_extensions %}
+                            {% for ext in config.blocked_extensions %}
+                            <div class="list-group-item d-flex align-items-center py-2">
+                                <svg class="icon text-danger me-2" width="16" height="16">
+                                    <use xlink:href="#tabler-x-circle"></use>
+                                </svg>
+                                <code>{{ ext }}</code>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                        <div class="list-group-item text-center text-muted py-3">
+                            No extensions blocked
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <button type="submit" class="btn btn-primary w-100">
+                        <svg class="icon me-2" width="24" height="24">
+                            <use xlink:href="#tabler-device-floppy"></use>
+                        </svg>
+                        Save Configuration
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</form>
+{% endblock %}
