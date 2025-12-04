@@ -16,11 +16,11 @@ AOC_FINAL_DAY = 12
 
 logger = logging.getLogger(__name__)
 
-# Configure LLM model from environment
-AOC_AGENT_LM = get_llm_model("default")
+# Configure LLM model from environment - use fast model for quick responses
+AOC_AGENT_LM = get_llm_model("fast")
 
 # Log which model is being used
-model_info = get_model_info("default")
+model_info = get_model_info("fast")
 logger.info(f"AoCThreadAgent using LLM model: {model_info['model_name']} (provider: {model_info['provider']})")
 
 

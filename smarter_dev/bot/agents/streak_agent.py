@@ -12,11 +12,11 @@ from smarter_dev.llm_config import get_model_info
 
 logger = logging.getLogger(__name__)
 
-# Configure LLM model from environment
-STREAK_AGENT_LM = get_llm_model("default")
+# Configure LLM model from environment - use fast model for quick responses
+STREAK_AGENT_LM = get_llm_model("fast")
 
 # Log which model is being used
-model_info = get_model_info("default")
+model_info = get_model_info("fast")
 logger.info(f"StreakCelebrationAgent using LLM model: {model_info['model_name']} (provider: {model_info['provider']})")
 
 

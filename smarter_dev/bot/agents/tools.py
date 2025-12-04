@@ -1753,8 +1753,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 int(trigger_message_id) if trigger_message_id else None
             )
 
-            # Get Claude Haiku 4.5 for strategic planning
-            claude_lm = get_llm_model("default")
+            # Get fast model for strategic planning
+            claude_lm = get_llm_model("fast")
 
             # Use context manager for thread-safe LLM switching
             with dspy.context(lm=claude_lm):
@@ -1870,8 +1870,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             except Exception as e:
                 logger.warning(f"[Tool] Failed to send in-depth response status message: {e}")
 
-            # Get Claude Haiku 4.5 for in-depth response generation
-            claude_lm = get_llm_model("default")
+            # Get fast model for in-depth response generation
+            claude_lm = get_llm_model("fast")
 
             # Use context manager for thread-safe LLM switching
             with dspy.context(lm=claude_lm):
