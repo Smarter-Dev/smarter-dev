@@ -1,4 +1,10 @@
-"""Attachment filter module for filtering messages with non-allowed file types."""
+"""Attachment filter module for filtering messages based on file type tiers.
+
+Three-tier filtering approach:
+1. Ignored extensions - Completely allowed, no action
+2. Warn extensions - Send warning but don't delete
+3. All others (blocked) - Delete + warn (or just warn if user has manage_messages)
+"""
 
 from __future__ import annotations
 
@@ -21,17 +27,19 @@ async def check_attachment_filter(
     bot: BotApp,
     event: hikari.GuildMessageCreateEvent
 ) -> bool:
-    """Check if a message contains non-allowed attachments and take appropriate action.
+    """Check message attachments against the three-tier filter and take appropriate action.
 
-    Only attachments with extensions in the allowed_extensions list are permitted.
-    All other file types will trigger a warning or deletion.
+    Tiers:
+    1. Ignored extensions - No action taken
+    2. Warn extensions - Send warning, don't delete
+    3. Blocked (all others) - Delete + warn (or just warn if user has manage_messages)
 
     Args:
         bot: The bot instance
         event: The message create event
 
     Returns:
-        bool: True if the message was handled (deleted or warned), False otherwise
+        bool: True if any action was taken (warned or deleted), False otherwise
     """
     # Skip if no attachments
     if not event.message.attachments:
@@ -52,29 +60,35 @@ async def check_attachment_filter(
             if config is None or not config.is_active:
                 return False
 
-            # Skip if no allowed extensions configured (would block everything)
-            if not config.allowed_extensions:
-                return False
+            # Categorize attachments
+            warn_attachments = []
+            blocked_attachments = []
 
-            # Check each attachment - find any that are NOT in the allowed list
-            disallowed_attachments = []
             for attachment in event.message.attachments:
                 filename = attachment.filename.lower()
                 extension = os.path.splitext(filename)[1].lower()
 
-                # If extension is NOT in the allowed list, it's disallowed
-                if extension not in config.allowed_extensions:
-                    disallowed_attachments.append({
+                # Check if ignored (completely allowed)
+                if extension in (config.ignored_extensions or []):
+                    continue
+
+                # Check if in warn list
+                if extension in (config.warn_extensions or []):
+                    warn_attachments.append({
+                        "filename": attachment.filename,
+                        "extension": extension if extension else "(no extension)"
+                    })
+                else:
+                    # Everything else is blocked
+                    blocked_attachments.append({
                         "filename": attachment.filename,
                         "extension": extension if extension else "(no extension)"
                     })
 
-            # All attachments are allowed
-            if not disallowed_attachments:
+            # No action needed if all attachments are ignored
+            if not warn_attachments and not blocked_attachments:
                 return False
 
-            # Get the first disallowed attachment for the warning message
-            disallowed = disallowed_attachments[0]
             user_mention = f"<@{event.author.id}>"
 
             # Check if user has manage_messages permission (exempt from deletion)
@@ -98,14 +112,24 @@ async def check_attachment_filter(
             except Exception as e:
                 logger.error(f"Error checking user permissions: {e}")
 
-            # Determine action
-            should_delete = config.action == "delete" and not user_has_manage_messages
+            # Determine action based on worst tier found
+            # Blocked takes precedence over warn
+            should_delete = bool(blocked_attachments) and not user_has_manage_messages
+
+            # Get the attachment to report (prioritize blocked over warned)
+            if blocked_attachments:
+                reported = blocked_attachments[0]
+                is_blocked = not user_has_manage_messages  # True if actually deleted
+            else:
+                reported = warn_attachments[0]
+                is_blocked = False  # Warn-only extensions are never deleted
 
             # Get warning message
             warning_message = config.get_warning_message(
                 user_mention=user_mention,
-                extension=disallowed["extension"],
-                filename=disallowed["filename"]
+                extension=reported["extension"],
+                filename=reported["filename"],
+                is_blocked=is_blocked
             )
 
             # Take action
@@ -115,7 +139,7 @@ async def check_attachment_filter(
                     await event.message.delete()
                     logger.info(
                         f"Deleted message from {event.author} in guild {guild_id_str} "
-                        f"due to non-allowed attachment: {disallowed['filename']}"
+                        f"due to blocked attachment: {reported['filename']}"
                     )
 
                 # Send warning message
@@ -125,10 +149,15 @@ async def check_attachment_filter(
                     user_mentions=[event.author.id]
                 )
 
-                action_taken = "deleted and warned" if should_delete else "warned"
+                if should_delete:
+                    action_taken = "deleted and warned"
+                else:
+                    action_taken = "warned"
+
+                tier = "blocked" if blocked_attachments else "warn-list"
                 logger.info(
                     f"Attachment filter: {action_taken} user {event.author} "
-                    f"for non-allowed file type {disallowed['extension']} in guild {guild_id_str}"
+                    f"for {tier} file type {reported['extension']} in guild {guild_id_str}"
                 )
 
                 return True

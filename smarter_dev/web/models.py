@@ -2740,8 +2740,11 @@ class AttachmentFilterConfig(Base):
     """Attachment filter configuration per guild for file type filtering.
 
     Stores guild-specific settings for filtering message attachments based on
-    file extensions. Only files with allowed extensions can be posted; all others
-    are blocked. Can delete messages or send warnings based on configuration.
+    file extensions using a three-tier approach:
+    - Ignored extensions: Completely allowed, no action taken
+    - Warn extensions: Send a warning but don't delete
+    - All others (blocked): Delete message and send warning
+
     Users with manage_messages permission are exempt from deletion (warning only).
     """
 
@@ -2762,20 +2765,20 @@ class AttachmentFilterConfig(Base):
         doc="Whether attachment filtering is enabled"
     )
 
-    # Allowed file extensions (stored as JSON array) - all others are blocked
-    allowed_extensions: Mapped[list] = mapped_column(
+    # Ignored file extensions - completely allowed, no action
+    ignored_extensions: Mapped[list] = mapped_column(
         JSON,
         nullable=False,
         default=list,
-        doc="List of allowed file extensions (e.g., ['.png', '.jpg', '.pdf']). All others are blocked."
+        doc="List of ignored file extensions (e.g., ['.png', '.jpg']). No action taken."
     )
 
-    # Action to take: 'delete' or 'warn'
-    action: Mapped[str] = mapped_column(
-        String(20),
+    # Warn file extensions - send warning but don't delete
+    warn_extensions: Mapped[list] = mapped_column(
+        JSON,
         nullable=False,
-        default="delete",
-        doc="Action to take on non-allowed attachments: 'delete' or 'warn'"
+        default=list,
+        doc="List of file extensions that trigger a warning only (e.g., ['.zip', '.rar'])."
     )
 
     # Custom warning message
@@ -2783,7 +2786,7 @@ class AttachmentFilterConfig(Base):
         Text,
         nullable=True,
         default=None,
-        doc="Custom warning message to send (supports {user}, {extension}, {filename} placeholders)"
+        doc="Custom warning message to send (supports {user}, {extension}, {filename}, {action} placeholders)"
     )
 
     # Timestamps
@@ -2812,8 +2815,8 @@ class AttachmentFilterConfig(Base):
         kwargs.setdefault('created_at', now)
         kwargs.setdefault('updated_at', now)
         kwargs.setdefault('is_active', False)
-        kwargs.setdefault('allowed_extensions', [])
-        kwargs.setdefault('action', 'delete')
+        kwargs.setdefault('ignored_extensions', [])
+        kwargs.setdefault('warn_extensions', [])
         super().__init__(**kwargs)
 
     @classmethod
@@ -2828,25 +2831,31 @@ class AttachmentFilterConfig(Base):
         """
         return cls(guild_id=guild_id)
 
-    def get_warning_message(self, user_mention: str, extension: str, filename: str) -> str:
+    def get_warning_message(self, user_mention: str, extension: str, filename: str, is_blocked: bool = True) -> str:
         """Get the formatted warning message.
 
         Args:
             user_mention: The user mention string (e.g., <@123456>)
-            extension: The disallowed file extension
-            filename: The disallowed filename
+            extension: The file extension
+            filename: The filename
+            is_blocked: True if the file was deleted (blocked), False if just warned
 
         Returns:
             Formatted warning message
         """
+        action = "removed" if is_blocked else "flagged"
         if self.warning_message:
             return self.warning_message.format(
                 user=user_mention,
                 extension=extension,
-                filename=filename
+                filename=filename,
+                action=action
             )
-        return f"{user_mention}, your message was removed because the file type ({extension}) is not allowed. Please use an approved file format."
+        if is_blocked:
+            return f"{user_mention}, your message was removed because the file type ({extension}) is not allowed. Please use an approved file format."
+        else:
+            return f"{user_mention}, your attachment ({extension}) requires caution. Please ensure you trust the source of this file."
 
     def __repr__(self) -> str:
         """String representation of the attachment filter config."""
-        return f"<AttachmentFilterConfig(guild_id='{self.guild_id}', active={self.is_active}, action='{self.action}')>"
+        return f"<AttachmentFilterConfig(guild_id='{self.guild_id}', active={self.is_active})>"
