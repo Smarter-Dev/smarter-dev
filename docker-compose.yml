@@ -33,8 +33,10 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/smarter_dev
       - ENVIRONMENT=development
-      - LLM_MODEL=claude-haiku-4-5-20251001
+      - LLM_FAST_MODEL=gemini/gemini-2.5-flash-lite
+      - LLM_MEDIUM_MODEL=claude-haiku-4-5-20251001
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     ports:
       - "8000:8000"
     volumes:
@@ -62,7 +64,8 @@ services:
       - API_SECRET_KEY=sk-ubE6Hj4Bjb7LUJLPIg44dbFcshooY3RXHvtltZFNLzk
       - BOT_API_KEY=sk-ubE6Hj4Bjb7LUJLPIg44dbFcshooY3RXHvtltZFNLzk
       - ENVIRONMENT=development
-      - LLM_MODEL=claude-haiku-4-5-20251001
+      - LLM_FAST_MODEL=gemini/gemini-2.5-flash-lite
+      - LLM_MEDIUM_MODEL=claude-haiku-4-5-20251001
       - LLM_JUDGE_MODEL=gemini/gemini-2.5-flash-lite
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}

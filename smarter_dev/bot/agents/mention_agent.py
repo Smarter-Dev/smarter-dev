@@ -14,8 +14,7 @@ from smarter_dev.llm_config import get_model_info
 
 logger = logging.getLogger(__name__)
 
-# Configure LLM model from environment
-# Use "judge" to get gemini-2.5-flash-lite (configured via LLM_JUDGE_MODEL)
+# Configure LLM model from environment - use judge model for mention handling
 # NOTE: We don't call dspy.configure() globally to avoid conflicts with other agents
 # Instead, we use dspy.context() when creating the ReAct agent
 MENTION_AGENT_LM = get_llm_model("judge")

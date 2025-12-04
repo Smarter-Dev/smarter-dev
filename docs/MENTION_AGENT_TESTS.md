@@ -44,18 +44,19 @@ uv run python test_mention_agent.py --with-llm
 **Model Selection:**
 The project supports switching LLM models system-wide using environment variables:
 
-- `LLM_MODEL`: Main bot model (default: `gemini/gemini-2.0-flash-lite`)
+- `LLM_FAST_MODEL`: Fast model for quick operations (default: `gemini/gemini-2.5-flash-lite`)
+- `LLM_MEDIUM_MODEL`: Medium intelligence model for complex reasoning (default: `claude-haiku-4-5-20251001`)
 - `LLM_JUDGE_MODEL`: Judge evaluation model (default: `gemini/gemini-2.5-flash-lite`)
 
   ```bash
-  # Use GPT-5 Nano for both bot and judge
-  LLM_MODEL=gpt-5-nano-2025-08-07 LLM_JUDGE_MODEL=gpt-5-nano-2025-08-07 uv run python test_mention_agent.py --llm-only
-  
-  # Use GPT-5 Nano for main bot, Gemini for judge
-  LLM_MODEL=gpt-5-nano-2025-08-07 uv run python -m smarter_dev.bot.client
-  
+  # Use GPT-5 Nano for all models
+  LLM_FAST_MODEL=gpt-5-nano-2025-08-07 LLM_MEDIUM_MODEL=gpt-5-nano-2025-08-07 LLM_JUDGE_MODEL=gpt-5-nano-2025-08-07 uv run python test_mention_agent.py --llm-only
+
+  # Use GPT-5 Nano for fast model, keep defaults for medium and judge
+  LLM_FAST_MODEL=gpt-5-nano-2025-08-07 uv run python -m smarter_dev.bot.client
+
   # Use different Gemini models
-  LLM_MODEL=gemini/gemini-2.5-flash LLM_JUDGE_MODEL=gemini/gemini-2.5-flash uv run python test_mention_agent.py --llm-only
+  LLM_FAST_MODEL=gemini/gemini-2.5-flash LLM_JUDGE_MODEL=gemini/gemini-2.5-flash uv run python test_mention_agent.py --llm-only
   ```
 
 **Comprehensive scenarios evaluated:**
