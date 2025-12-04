@@ -178,45 +178,44 @@
                 </div>
             </div>
 
-            <!-- Custom Warning Message -->
+            <!-- Custom Messages -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h3 class="card-title">Warning Message</h3>
-                    <div class="card-subtitle">Customize the message sent for warned and blocked files</div>
+                    <h3 class="card-title">Custom Messages</h3>
+                    <div class="card-subtitle">Customize the messages sent for each action type</div>
                 </div>
                 <div class="card-body">
-                    <div class="mb-3">
-                        <label class="form-label" for="warning_message">Custom Message (optional)</label>
-                        <textarea class="form-control" id="warning_message" name="warning_message"
-                                  rows="3" placeholder="Leave empty for default messages">{{ config.warning_message or '' }}</textarea>
+                    <!-- Warn Message -->
+                    <div class="mb-4">
+                        <label class="form-label" for="warn_message">
+                            <span class="badge bg-warning me-2">Warn</span>
+                            Warn Message (optional)
+                        </label>
+                        <textarea class="form-control" id="warn_message" name="warn_message"
+                                  rows="2" placeholder="Leave empty for default message">{{ config.warn_message or '' }}</textarea>
                         <div class="form-hint">
-                            Available placeholders: <code>{user}</code> (mentions user), <code>{extension}</code> (file extension), <code>{filename}</code> (filename), <code>{action}</code> ("removed" or "flagged")
+                            Sent for files in the warn list. Placeholders: <code>{user}</code>, <code>{extension}</code>, <code>{filename}</code>
+                        </div>
+                        <div class="text-muted mt-2 small">
+                            <strong>Default:</strong> <em>@user, your attachment (.zip) requires caution. Please ensure you trust the source of this file.</em>
                         </div>
                     </div>
 
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <strong>Default blocked message:</strong>
-                                <div class="text-muted mt-1 small">
-                                    <em>@user, your message was removed because the file type (.exe) is not allowed. Please use an approved file format.</em>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="mb-3">
-                                <strong>Default warn message:</strong>
-                                <div class="text-muted mt-1 small">
-                                    <em>@user, your attachment (.zip) requires caution. Please ensure you trust the source of this file.</em>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <hr>
 
+                    <!-- Delete Message -->
                     <div class="mb-0">
-                        <strong>Example custom message:</strong>
-                        <div class="text-muted mt-1">
-                            <code>{user} - The file "{filename}" ({extension}) was {action}. Contact a moderator if you need to share this file type.</code>
+                        <label class="form-label" for="delete_message">
+                            <span class="badge bg-danger me-2">Delete</span>
+                            Delete Message (optional)
+                        </label>
+                        <textarea class="form-control" id="delete_message" name="delete_message"
+                                  rows="2" placeholder="Leave empty for default message">{{ config.delete_message or '' }}</textarea>
+                        <div class="form-hint">
+                            Sent for blocked files (deleted or warned if user has Manage Messages). Placeholders: <code>{user}</code>, <code>{extension}</code>, <code>{filename}</code>
+                        </div>
+                        <div class="text-muted mt-2 small">
+                            <strong>Default:</strong> <em>@user, your message was removed because the file type (.exe) is not allowed. Please use an approved file format.</em>
                         </div>
                     </div>
                 </div>

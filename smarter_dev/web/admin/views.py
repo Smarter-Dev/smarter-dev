@@ -3927,7 +3927,8 @@ async def attachment_filter_config(request: Request) -> Response:
             try:
                 # Parse form data
                 is_active = form.get("is_active") == "on"
-                warning_message = form.get("warning_message", "").strip() or None
+                warn_message = form.get("warn_message", "").strip() or None
+                delete_message = form.get("delete_message", "").strip() or None
 
                 def parse_extensions(field_name: str) -> list:
                     """Parse extensions from textarea (one per line or comma-separated)."""
@@ -3948,7 +3949,8 @@ async def attachment_filter_config(request: Request) -> Response:
 
                 updates = {
                     "is_active": is_active,
-                    "warning_message": warning_message,
+                    "warn_message": warn_message,
+                    "delete_message": delete_message,
                     "ignored_extensions": ignored_extensions,
                     "warn_extensions": warn_extensions,
                 }

@@ -124,8 +124,8 @@ async def check_attachment_filter(
                 reported = warn_attachments[0]
                 is_blocked = False  # Warn-only extensions are never deleted
 
-            # Get warning message
-            warning_message = config.get_warning_message(
+            # Get appropriate message
+            message = config.get_message(
                 user_mention=user_mention,
                 extension=reported["extension"],
                 filename=reported["filename"],
@@ -142,10 +142,10 @@ async def check_attachment_filter(
                         f"due to blocked attachment: {reported['filename']}"
                     )
 
-                # Send warning message
+                # Send message
                 await bot.rest.create_message(
                     channel=event.channel_id,
-                    content=warning_message,
+                    content=message,
                     user_mentions=[event.author.id]
                 )
 
