@@ -1,4 +1,4 @@
-"""Attachment filter module for filtering messages with blocked file types."""
+"""Attachment filter module for filtering messages with non-allowed file types."""
 
 from __future__ import annotations
 
@@ -21,7 +21,10 @@ async def check_attachment_filter(
     bot: BotApp,
     event: hikari.GuildMessageCreateEvent
 ) -> bool:
-    """Check if a message contains blocked attachments and take appropriate action.
+    """Check if a message contains non-allowed attachments and take appropriate action.
+
+    Only attachments with extensions in the allowed_extensions list are permitted.
+    All other file types will trigger a warning or deletion.
 
     Args:
         bot: The bot instance
@@ -49,28 +52,29 @@ async def check_attachment_filter(
             if config is None or not config.is_active:
                 return False
 
-            # Skip if no blocked extensions configured
-            if not config.blocked_extensions:
+            # Skip if no allowed extensions configured (would block everything)
+            if not config.allowed_extensions:
                 return False
 
-            # Check each attachment
-            blocked_attachments = []
+            # Check each attachment - find any that are NOT in the allowed list
+            disallowed_attachments = []
             for attachment in event.message.attachments:
                 filename = attachment.filename.lower()
                 extension = os.path.splitext(filename)[1].lower()
 
-                if extension in config.blocked_extensions:
-                    blocked_attachments.append({
+                # If extension is NOT in the allowed list, it's disallowed
+                if extension not in config.allowed_extensions:
+                    disallowed_attachments.append({
                         "filename": attachment.filename,
-                        "extension": extension
+                        "extension": extension if extension else "(no extension)"
                     })
 
-            # No blocked attachments found
-            if not blocked_attachments:
+            # All attachments are allowed
+            if not disallowed_attachments:
                 return False
 
-            # Get the first blocked attachment for the warning message
-            blocked = blocked_attachments[0]
+            # Get the first disallowed attachment for the warning message
+            disallowed = disallowed_attachments[0]
             user_mention = f"<@{event.author.id}>"
 
             # Check if user has manage_messages permission (exempt from deletion)
@@ -100,8 +104,8 @@ async def check_attachment_filter(
             # Get warning message
             warning_message = config.get_warning_message(
                 user_mention=user_mention,
-                extension=blocked["extension"],
-                filename=blocked["filename"]
+                extension=disallowed["extension"],
+                filename=disallowed["filename"]
             )
 
             # Take action
@@ -111,7 +115,7 @@ async def check_attachment_filter(
                     await event.message.delete()
                     logger.info(
                         f"Deleted message from {event.author} in guild {guild_id_str} "
-                        f"due to blocked attachment: {blocked['filename']}"
+                        f"due to non-allowed attachment: {disallowed['filename']}"
                     )
 
                 # Send warning message
@@ -124,7 +128,7 @@ async def check_attachment_filter(
                 action_taken = "deleted and warned" if should_delete else "warned"
                 logger.info(
                     f"Attachment filter: {action_taken} user {event.author} "
-                    f"for blocked file type {blocked['extension']} in guild {guild_id_str}"
+                    f"for non-allowed file type {disallowed['extension']} in guild {guild_id_str}"
                 )
 
                 return True

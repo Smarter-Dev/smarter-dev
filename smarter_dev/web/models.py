@@ -2740,7 +2740,8 @@ class AttachmentFilterConfig(Base):
     """Attachment filter configuration per guild for file type filtering.
 
     Stores guild-specific settings for filtering message attachments based on
-    file extensions. Can delete messages or send warnings based on configuration.
+    file extensions. Only files with allowed extensions can be posted; all others
+    are blocked. Can delete messages or send warnings based on configuration.
     Users with manage_messages permission are exempt from deletion (warning only).
     """
 
@@ -2761,20 +2762,20 @@ class AttachmentFilterConfig(Base):
         doc="Whether attachment filtering is enabled"
     )
 
-    # Blocked file extensions (stored as JSON array)
-    blocked_extensions: Mapped[list] = mapped_column(
+    # Allowed file extensions (stored as JSON array) - all others are blocked
+    allowed_extensions: Mapped[list] = mapped_column(
         JSON,
         nullable=False,
         default=list,
-        doc="List of blocked file extensions (e.g., ['.exe', '.bat', '.scr'])"
+        doc="List of allowed file extensions (e.g., ['.png', '.jpg', '.pdf']). All others are blocked."
     )
 
     # Action to take: 'delete' or 'warn'
     action: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
-        default="warn",
-        doc="Action to take on blocked attachments: 'delete' or 'warn'"
+        default="delete",
+        doc="Action to take on non-allowed attachments: 'delete' or 'warn'"
     )
 
     # Custom warning message
@@ -2811,8 +2812,8 @@ class AttachmentFilterConfig(Base):
         kwargs.setdefault('created_at', now)
         kwargs.setdefault('updated_at', now)
         kwargs.setdefault('is_active', False)
-        kwargs.setdefault('blocked_extensions', [])
-        kwargs.setdefault('action', 'warn')
+        kwargs.setdefault('allowed_extensions', [])
+        kwargs.setdefault('action', 'delete')
         super().__init__(**kwargs)
 
     @classmethod
@@ -2832,8 +2833,8 @@ class AttachmentFilterConfig(Base):
 
         Args:
             user_mention: The user mention string (e.g., <@123456>)
-            extension: The blocked file extension
-            filename: The blocked filename
+            extension: The disallowed file extension
+            filename: The disallowed filename
 
         Returns:
             Formatted warning message
@@ -2844,7 +2845,7 @@ class AttachmentFilterConfig(Base):
                 extension=extension,
                 filename=filename
             )
-        return f"{user_mention}, your message was flagged because it contained a blocked file type ({extension}). Please review the server's file sharing policies."
+        return f"{user_mention}, your message was removed because the file type ({extension}) is not allowed. Please use an approved file format."
 
     def __repr__(self) -> str:
         """String representation of the attachment filter config."""
