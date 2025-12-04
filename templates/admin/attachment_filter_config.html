@@ -25,7 +25,7 @@
                     {% endif %}
                     <div>
                         <h3 class="mb-1">{{ guild.name }}</h3>
-                        <div class="text-muted">Attachment Filter - Allow only approved file types</div>
+                        <div class="text-muted">Attachment Filter - Control file types with ignore/warn/block tiers</div>
                     </div>
                 </div>
             </div>
@@ -51,6 +51,30 @@
 </div>
 {% endif %}
 
+<!-- How It Works -->
+<div class="alert alert-info mb-4">
+    <div class="d-flex">
+        <div>
+            <svg class="icon alert-icon" width="24" height="24">
+                <use xlink:href="#tabler-info-circle"></use>
+            </svg>
+        </div>
+        <div>
+            <h4 class="alert-title">How the three-tier filter works</h4>
+            <div class="text-muted">
+                <ol class="mb-0 ps-3">
+                    <li><strong>Ignored extensions</strong> - Completely allowed, no action taken</li>
+                    <li><strong>Warn extensions</strong> - A warning is sent, but the message is not deleted</li>
+                    <li><strong>All other extensions</strong> - Message is deleted and a warning is sent</li>
+                </ol>
+                <div class="mt-2">
+                    <em>Note: Users with "Manage Messages" permission are exempt from deletion - they only receive warnings.</em>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Configuration Form -->
 <form method="post">
     <div class="row">
@@ -69,29 +93,71 @@
                             <span class="form-check-label">Enable Attachment Filter</span>
                         </label>
                         <div class="form-hint">
-                            When enabled, the bot will only allow attachments with approved file extensions. All other file types will be blocked.
+                            When enabled, the bot will check all message attachments against the configured tiers.
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Allowed Extensions -->
+            <!-- Ignored Extensions -->
             <div class="card mb-4">
-                <div class="card-header">
-                    <h3 class="card-title">Allowed File Extensions</h3>
-                    <div class="card-subtitle">Enter file extensions to allow (one per line or comma-separated). All others will be blocked.</div>
+                <div class="card-header bg-success-lt">
+                    <h3 class="card-title">
+                        <svg class="icon me-2" width="24" height="24">
+                            <use xlink:href="#tabler-check"></use>
+                        </svg>
+                        Ignored Extensions (Allowed)
+                    </h3>
+                    <div class="card-subtitle">These file types are completely allowed - no action taken</div>
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
-                        <label class="form-label" for="allowed_extensions">Extensions</label>
-                        <textarea class="form-control" id="allowed_extensions" name="allowed_extensions"
-                                  rows="8" placeholder=".png&#10;.jpg&#10;.jpeg&#10;.gif&#10;.webp&#10;.pdf&#10;.txt&#10;.mp4&#10;.mp3">{{ config.allowed_extensions | join('\n') if config.allowed_extensions else '' }}</textarea>
+                        <label class="form-label" for="ignored_extensions">Extensions (one per line or comma-separated)</label>
+                        <textarea class="form-control" id="ignored_extensions" name="ignored_extensions"
+                                  rows="6" placeholder=".png&#10;.jpg&#10;.jpeg&#10;.gif&#10;.webp&#10;.pdf&#10;.txt">{{ config.ignored_extensions | join('\n') if config.ignored_extensions else '' }}</textarea>
                         <div class="form-hint">
-                            Enter file extensions with or without the leading dot. Examples: <code>.png</code>, <code>jpg</code>, <code>.pdf</code>
+                            Common safe extensions: <code>.png</code> <code>.jpg</code> <code>.jpeg</code> <code>.gif</code> <code>.webp</code> <code>.pdf</code> <code>.txt</code> <code>.mp4</code> <code>.mp3</code>
                         </div>
                     </div>
+                </div>
+            </div>
 
-                    <div class="alert alert-info">
+            <!-- Warn Extensions -->
+            <div class="card mb-4">
+                <div class="card-header bg-warning-lt">
+                    <h3 class="card-title">
+                        <svg class="icon me-2" width="24" height="24">
+                            <use xlink:href="#tabler-alert-triangle"></use>
+                        </svg>
+                        Warn Extensions (Caution)
+                    </h3>
+                    <div class="card-subtitle">These file types trigger a warning but are not deleted</div>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="warn_extensions">Extensions (one per line or comma-separated)</label>
+                        <textarea class="form-control" id="warn_extensions" name="warn_extensions"
+                                  rows="6" placeholder=".zip&#10;.rar&#10;.7z&#10;.doc&#10;.docx&#10;.xls&#10;.xlsx">{{ config.warn_extensions | join('\n') if config.warn_extensions else '' }}</textarea>
+                        <div class="form-hint">
+                            Use for potentially risky but sometimes needed files: <code>.zip</code> <code>.rar</code> <code>.7z</code> <code>.doc</code> <code>.docx</code> <code>.xls</code> <code>.xlsx</code>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Blocked Info -->
+            <div class="card mb-4">
+                <div class="card-header bg-danger-lt">
+                    <h3 class="card-title">
+                        <svg class="icon me-2" width="24" height="24">
+                            <use xlink:href="#tabler-x"></use>
+                        </svg>
+                        Blocked Extensions (Everything Else)
+                    </h3>
+                    <div class="card-subtitle">All extensions not listed above will be blocked</div>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-secondary mb-0">
                         <div class="d-flex">
                             <div>
                                 <svg class="icon alert-icon" width="24" height="24">
@@ -99,66 +165,13 @@
                                 </svg>
                             </div>
                             <div>
-                                <h4 class="alert-title">Common safe extensions</h4>
-                                <div class="text-muted">
-                                    <strong>Images:</strong> <code>.png</code> <code>.jpg</code> <code>.jpeg</code> <code>.gif</code> <code>.webp</code> <code>.svg</code><br>
-                                    <strong>Documents:</strong> <code>.pdf</code> <code>.txt</code> <code>.doc</code> <code>.docx</code> <code>.xls</code> <code>.xlsx</code><br>
-                                    <strong>Media:</strong> <code>.mp4</code> <code>.mp3</code> <code>.wav</code> <code>.mov</code> <code>.webm</code><br>
-                                    <strong>Archives:</strong> <code>.zip</code> <code>.rar</code> <code>.7z</code>
+                                Any file extension not in the Ignored or Warn lists will be <strong>deleted</strong> and a warning sent.
+                                <br><br>
+                                Examples of commonly blocked dangerous extensions:
+                                <div class="mt-2">
+                                    <code>.exe</code> <code>.bat</code> <code>.cmd</code> <code>.scr</code> <code>.msi</code>
+                                    <code>.vbs</code> <code>.js</code> <code>.jar</code> <code>.ps1</code> <code>.dll</code>
                                 </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Action Configuration -->
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h3 class="card-title">Action on Non-Allowed Files</h3>
-                    <div class="card-subtitle">What to do when a disallowed file type is detected</div>
-                </div>
-                <div class="card-body">
-                    <div class="mb-3">
-                        <div class="form-selectgroup form-selectgroup-boxes d-flex flex-column">
-                            <label class="form-selectgroup-item flex-fill">
-                                <input type="radio" name="action" value="delete" class="form-selectgroup-input"
-                                       {% if config.action == 'delete' or not config.action %}checked{% endif %}>
-                                <div class="form-selectgroup-label d-flex align-items-center p-3">
-                                    <div class="me-3">
-                                        <span class="form-selectgroup-check"></span>
-                                    </div>
-                                    <div>
-                                        <strong>Delete Message</strong>
-                                        <div class="text-muted">Delete the message containing the disallowed attachment and send a warning</div>
-                                    </div>
-                                </div>
-                            </label>
-                            <label class="form-selectgroup-item flex-fill">
-                                <input type="radio" name="action" value="warn" class="form-selectgroup-input"
-                                       {% if config.action == 'warn' %}checked{% endif %}>
-                                <div class="form-selectgroup-label d-flex align-items-center p-3">
-                                    <div class="me-3">
-                                        <span class="form-selectgroup-check"></span>
-                                    </div>
-                                    <div>
-                                        <strong>Warn Only</strong>
-                                        <div class="text-muted">Send a warning message but don't delete the attachment</div>
-                                    </div>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="alert alert-warning">
-                        <div class="d-flex">
-                            <div>
-                                <svg class="icon alert-icon" width="24" height="24">
-                                    <use xlink:href="#tabler-alert-triangle"></use>
-                                </svg>
-                            </div>
-                            <div>
-                                <strong>Note:</strong> Users with the "Manage Messages" permission are exempt from message deletion. They will only receive a warning instead.
                             </div>
                         </div>
                     </div>
@@ -169,29 +182,41 @@
             <div class="card mb-4">
                 <div class="card-header">
                     <h3 class="card-title">Warning Message</h3>
-                    <div class="card-subtitle">Customize the message sent when a disallowed file is detected</div>
+                    <div class="card-subtitle">Customize the message sent for warned and blocked files</div>
                 </div>
                 <div class="card-body">
                     <div class="mb-3">
                         <label class="form-label" for="warning_message">Custom Message (optional)</label>
                         <textarea class="form-control" id="warning_message" name="warning_message"
-                                  rows="3" placeholder="Leave empty for default message">{{ config.warning_message or '' }}</textarea>
+                                  rows="3" placeholder="Leave empty for default messages">{{ config.warning_message or '' }}</textarea>
                         <div class="form-hint">
-                            Available placeholders: <code>{user}</code> (mentions the user), <code>{extension}</code> (the file extension), <code>{filename}</code> (the filename)
+                            Available placeholders: <code>{user}</code> (mentions user), <code>{extension}</code> (file extension), <code>{filename}</code> (filename), <code>{action}</code> ("removed" or "flagged")
                         </div>
                     </div>
 
-                    <div class="mb-3">
-                        <strong>Default message:</strong>
-                        <div class="text-muted mt-1">
-                            <em>@user, your message was removed because the file type (.exe) is not allowed. Please use an approved file format.</em>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <strong>Default blocked message:</strong>
+                                <div class="text-muted mt-1 small">
+                                    <em>@user, your message was removed because the file type (.exe) is not allowed. Please use an approved file format.</em>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <strong>Default warn message:</strong>
+                                <div class="text-muted mt-1 small">
+                                    <em>@user, your attachment (.zip) requires caution. Please ensure you trust the source of this file.</em>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="mb-3">
+                    <div class="mb-0">
                         <strong>Example custom message:</strong>
                         <div class="text-muted mt-1">
-                            <code>{user} - The file "{filename}" ({extension}) is not an approved file type. Allowed formats: images, PDFs, and text files.</code>
+                            <code>{user} - The file "{filename}" ({extension}) was {action}. Contact a moderator if you need to share this file type.</code>
                         </div>
                     </div>
                 </div>
@@ -224,37 +249,63 @@
                         {% endif %}
                     </div>
 
+                    <hr>
+
+                    <!-- Ignored Extensions -->
                     <div class="mb-3">
-                        <strong>Action:</strong>
+                        <strong class="text-success">
+                            <svg class="icon me-1" width="16" height="16">
+                                <use xlink:href="#tabler-check"></use>
+                            </svg>
+                            Ignored ({{ config.ignored_extensions | length if config.ignored_extensions else 0 }}):
+                        </strong>
                         <div class="mt-1">
-                            {% if config.action == 'delete' %}
-                            <span class="badge bg-danger">Delete + Warn</span>
+                            {% if config.ignored_extensions %}
+                                {% for ext in config.ignored_extensions[:10] %}
+                                <span class="badge bg-success me-1 mb-1">{{ ext }}</span>
+                                {% endfor %}
+                                {% if config.ignored_extensions | length > 10 %}
+                                <span class="text-muted small">+{{ config.ignored_extensions | length - 10 }} more</span>
+                                {% endif %}
                             {% else %}
-                            <span class="badge bg-warning">Warn Only</span>
+                            <span class="text-muted small">None configured</span>
                             {% endif %}
                         </div>
                     </div>
 
-                    <hr>
-
-                    <div class="mb-2">
-                        <strong>Allowed Extensions:</strong>
-                    </div>
-                    <div class="list-group list-group-flush">
-                        {% if config.allowed_extensions %}
-                            {% for ext in config.allowed_extensions %}
-                            <div class="list-group-item d-flex align-items-center py-2">
-                                <svg class="icon text-success me-2" width="16" height="16">
-                                    <use xlink:href="#tabler-check-circle"></use>
-                                </svg>
-                                <code>{{ ext }}</code>
-                            </div>
-                            {% endfor %}
-                        {% else %}
-                        <div class="list-group-item text-center text-muted py-3">
-                            No extensions configured (all blocked when active)
+                    <!-- Warn Extensions -->
+                    <div class="mb-3">
+                        <strong class="text-warning">
+                            <svg class="icon me-1" width="16" height="16">
+                                <use xlink:href="#tabler-alert-triangle"></use>
+                            </svg>
+                            Warn ({{ config.warn_extensions | length if config.warn_extensions else 0 }}):
+                        </strong>
+                        <div class="mt-1">
+                            {% if config.warn_extensions %}
+                                {% for ext in config.warn_extensions[:10] %}
+                                <span class="badge bg-warning me-1 mb-1">{{ ext }}</span>
+                                {% endfor %}
+                                {% if config.warn_extensions | length > 10 %}
+                                <span class="text-muted small">+{{ config.warn_extensions | length - 10 }} more</span>
+                                {% endif %}
+                            {% else %}
+                            <span class="text-muted small">None configured</span>
+                            {% endif %}
                         </div>
-                        {% endif %}
+                    </div>
+
+                    <!-- Blocked -->
+                    <div class="mb-3">
+                        <strong class="text-danger">
+                            <svg class="icon me-1" width="16" height="16">
+                                <use xlink:href="#tabler-x"></use>
+                            </svg>
+                            Blocked:
+                        </strong>
+                        <div class="mt-1 text-muted small">
+                            All other extensions
+                        </div>
                     </div>
                 </div>
                 <div class="card-footer">

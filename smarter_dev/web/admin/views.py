@@ -3927,27 +3927,30 @@ async def attachment_filter_config(request: Request) -> Response:
             try:
                 # Parse form data
                 is_active = form.get("is_active") == "on"
-                action = form.get("action", "delete")
                 warning_message = form.get("warning_message", "").strip() or None
 
-                # Parse allowed extensions from textarea (one per line or comma-separated)
-                extensions_raw = form.get("allowed_extensions", "")
-                allowed_extensions = []
-                for line in extensions_raw.replace(",", "\n").split("\n"):
-                    ext = line.strip().lower()
-                    if ext:
-                        # Ensure extension starts with a dot
-                        if not ext.startswith("."):
-                            ext = "." + ext
-                        allowed_extensions.append(ext)
-                # Remove duplicates while preserving order
-                allowed_extensions = list(dict.fromkeys(allowed_extensions))
+                def parse_extensions(field_name: str) -> list:
+                    """Parse extensions from textarea (one per line or comma-separated)."""
+                    extensions_raw = form.get(field_name, "")
+                    extensions = []
+                    for line in extensions_raw.replace(",", "\n").split("\n"):
+                        ext = line.strip().lower()
+                        if ext:
+                            # Ensure extension starts with a dot
+                            if not ext.startswith("."):
+                                ext = "." + ext
+                            extensions.append(ext)
+                    # Remove duplicates while preserving order
+                    return list(dict.fromkeys(extensions))
+
+                ignored_extensions = parse_extensions("ignored_extensions")
+                warn_extensions = parse_extensions("warn_extensions")
 
                 updates = {
                     "is_active": is_active,
-                    "action": action,
                     "warning_message": warning_message,
-                    "allowed_extensions": allowed_extensions,
+                    "ignored_extensions": ignored_extensions,
+                    "warn_extensions": warn_extensions,
                 }
 
                 # Update configuration
