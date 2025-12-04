@@ -24,7 +24,8 @@ def upgrade() -> None:
     sa.Column('is_active', sa.Boolean(), nullable=False, server_default='false'),
     sa.Column('ignored_extensions', JSON(), nullable=False, server_default='[]'),
     sa.Column('warn_extensions', JSON(), nullable=False, server_default='[]'),
-    sa.Column('warning_message', sa.Text(), nullable=True),
+    sa.Column('warn_message', sa.Text(), nullable=True),
+    sa.Column('delete_message', sa.Text(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.PrimaryKeyConstraint('guild_id', name=op.f('pk_attachment_filter_configs'))

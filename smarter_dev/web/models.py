@@ -2781,12 +2781,20 @@ class AttachmentFilterConfig(Base):
         doc="List of file extensions that trigger a warning only (e.g., ['.zip', '.rar'])."
     )
 
-    # Custom warning message
-    warning_message: Mapped[Optional[str]] = mapped_column(
+    # Custom message for warn-list files
+    warn_message: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
         default=None,
-        doc="Custom warning message to send (supports {user}, {extension}, {filename}, {action} placeholders)"
+        doc="Custom message for warn-list files (supports {user}, {extension}, {filename} placeholders)"
+    )
+
+    # Custom message for blocked/deleted files
+    delete_message: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        default=None,
+        doc="Custom message for blocked files (supports {user}, {extension}, {filename} placeholders)"
     )
 
     # Timestamps
@@ -2831,8 +2839,8 @@ class AttachmentFilterConfig(Base):
         """
         return cls(guild_id=guild_id)
 
-    def get_warning_message(self, user_mention: str, extension: str, filename: str, is_blocked: bool = True) -> str:
-        """Get the formatted warning message.
+    def get_message(self, user_mention: str, extension: str, filename: str, is_blocked: bool = True) -> str:
+        """Get the formatted message for warn or delete actions.
 
         Args:
             user_mention: The user mention string (e.g., <@123456>)
@@ -2841,19 +2849,23 @@ class AttachmentFilterConfig(Base):
             is_blocked: True if the file was deleted (blocked), False if just warned
 
         Returns:
-            Formatted warning message
+            Formatted message
         """
-        action = "removed" if is_blocked else "flagged"
-        if self.warning_message:
-            return self.warning_message.format(
-                user=user_mention,
-                extension=extension,
-                filename=filename,
-                action=action
-            )
         if is_blocked:
+            if self.delete_message:
+                return self.delete_message.format(
+                    user=user_mention,
+                    extension=extension,
+                    filename=filename
+                )
             return f"{user_mention}, your message was removed because the file type ({extension}) is not allowed. Please use an approved file format."
         else:
+            if self.warn_message:
+                return self.warn_message.format(
+                    user=user_mention,
+                    extension=extension,
+                    filename=filename
+                )
             return f"{user_mention}, your attachment ({extension}) requires caution. Please ensure you trust the source of this file."
 
     def __repr__(self) -> str:
