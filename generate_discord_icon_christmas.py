@@ -136,7 +136,7 @@ class DiscordIconGenerator:
         if streak_path.exists():
             self.streak_image = Image.open(streak_path).convert("RGBA")
             # Rotate the streak by -15 degrees (DO NOT RESIZE)
-            self.rotated_streak = self.streak_image.rotate(GRID_ANGLE, expand=True)
+            self.rotated_streak = self.streak_image.rotate(GRID_ANGLE, expand=True, resample=Image.Resampling.BILINEAR)
 
             # Get actual dimensions after rotation
             self.streak_width = self.rotated_streak.width
