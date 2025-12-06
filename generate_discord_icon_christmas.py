@@ -40,7 +40,7 @@ MAX_STREAKS = 4
 
 # Asset paths
 BRAIN_PATH = Path("resources/smarter-dev-brain-no-glow.png")
-GRID_PATH = Path("resources/bg-grid.png")
+STREAK_PATH = Path("resources/streak.png")
 OUTPUT_PATH = Path("discord_server_icon.gif")
 
 class StreakAnimation:
@@ -132,9 +132,8 @@ class DiscordIconGenerator:
             self.brain_image = self.create_brain_placeholder()
 
         # Load streak image
-        streak_path = Path("resources/streak.png")
-        if streak_path.exists():
-            self.streak_image = Image.open(streak_path).convert("RGBA")
+        if STREAK_PATH.exists():
+            self.streak_image = Image.open(STREAK_PATH).convert("RGBA")
             self.streak_image = self.streak_image.resize((self.streak_image.width*4, self.streak_image.height*4), resample=Image.Resampling.NEAREST)
             # Rotate the streak by -15 degrees (DO NOT RESIZE)
             self.rotated_streak = self.streak_image.rotate(GRID_ANGLE, expand=True)
@@ -236,7 +235,9 @@ class DiscordIconGenerator:
             path_spacing * 4 + path_spacing // 2,       # Path 5: x = 230
         ]
 
-        # Shuffle streak colors
+        # Shuffle streak colors and make sure there's always enough
+        global STREAK_COLORS
+        STREAK_COLORS = STREAK_COLORS * (len(path_positions)//len(STREAK_COLORS))  # pyright: ignore[reportConstantRedefinition]
         random.shuffle(STREAK_COLORS)
 
         # Create streaks with spacing that ensures continuous coverage
