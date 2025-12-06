@@ -23,7 +23,14 @@ NUM_STREAKS = 5  # Fixed number of streaks
 # Colors (RGB)
 VERY_DARK_BLUE = (2, 0, 15)  # #02000F background
 WHITE = (255, 255, 255)
-STREAK_COLOR = (0, 225, 255)  # Cyan like the brand
+STREAK_COLORS = [
+    (255,0,0),
+    (255,120,120),
+    (255,255,255),
+    (116,214,128),
+    (55,139,41)
+]
+BRAIN_COLOR = (255, 215, 0)
 
 # Grid configuration
 GRID_SPACING = 32  # Scaled down from 120px for 256px canvas
@@ -106,7 +113,7 @@ class DiscordIconGenerator:
 
             _,_,_,a = brain.split()
             # Create new RGB image filled with the desired color
-            new_rgb = Image.new("RGB", brain.size, (255, 215, 0))
+            new_rgb = Image.new("RGB", brain.size, BRAIN_COLOR)
             # Combine with original alpha
             brain = Image.merge("RGBA", (*new_rgb.split(), a))
 
@@ -227,14 +234,8 @@ class DiscordIconGenerator:
             path_spacing * 4 + path_spacing // 2,       # Path 5: x = 230
         ]
 
-        colors = [
-            (255,0,0),
-            (255,120,120),
-            (255,255,255),
-            (116,214,128),
-            (55,139,41)
-        ]
-        random.shuffle(colors)
+        # Shuffle streak colors
+        random.shuffle(STREAK_COLORS)
 
         # Create streaks with spacing that ensures continuous coverage
         # Use offsets that guarantee overlap while maintaining irregularity
@@ -247,7 +248,7 @@ class DiscordIconGenerator:
             path_start_x = path_positions[i]
             path_start_y = -buffer  # Start above frame
 
-            streak = StreakAnimation(path_start_x, path_start_y, path_length, start_offsets[i], colors[i])
+            streak = StreakAnimation(path_start_x, path_start_y, path_length, start_offsets[i], random.choice(STREAK_COLORS))
             self.streaks.append(streak)
 
         # Add second streaks to three random paths, offset by half the path duration
@@ -260,7 +261,7 @@ class DiscordIconGenerator:
 
             # Second streak offset by half the path length from the first streak
             second_streak_offset = (start_offsets[path_idx] + half_path_offset) % path_length
-            streak = StreakAnimation(path_start_x, path_start_y, path_length, second_streak_offset, colors[path_idx])
+            streak = StreakAnimation(path_start_x, path_start_y, path_length, second_streak_offset, STREAK_COLORS[path_idx])
             self.streaks.append(streak)
 
         # Calculate total frames for perfect loop
