@@ -50,3 +50,6 @@ debug_*.py
 discord_server_icon.gif
 verify_setup.py
 .env.test
+
+# vscode config
+.vscode
