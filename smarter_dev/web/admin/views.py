@@ -26,6 +26,9 @@ from smarter_dev.web.models import (
     BlogPost,
     ForumAgent,
     ForumAgentResponse,
+    Quest,
+    DailyQuest,
+    QuestProgress,
     Campaign,
     Challenge,
     ScheduledMessage,
@@ -2198,7 +2201,6 @@ async def campaigns_list(request: Request) -> Response:
         }
         return templates.TemplateResponse("admin/error.html", context, status_code=500)
 
-
 async def campaign_create(request: Request) -> Response:
     """Create a new campaign."""
     guild_id = request.path_params["guild_id"]
@@ -2548,6 +2550,43 @@ async def campaign_delete(request: Request) -> Response:
         return RedirectResponse(
             url=f"/admin/guilds/{guild_id}/campaigns?error=delete_failed",
             status_code=302
+        )
+
+
+async def quests_list(request: Request) -> Response:
+    guild_id = request.path_params["guild_id"]
+
+    try:
+        guild = await get_guild_info(guild_id)
+
+        async with get_db_session_context() as session:
+            result = await session.execute(
+                select(Quest)
+                .where(Quest.guild_id == guild_id)
+                .order_by(Quest.created_at.desc())
+            )
+            quests = result.scalars().all()
+
+        return templates.TemplateResponse(
+            request,
+            "admin/quests_list.html",
+            {
+                "guild": guild,
+                "quests": quests,
+                "title": f"Quests – {guild.name}",
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error loading quests for guild {guild_id}: {e}")
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Failed to load quests",
+                "error_code": 500,
+            },
+            status_code=500,
         )
 
 

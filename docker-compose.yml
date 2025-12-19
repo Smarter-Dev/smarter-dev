@@ -31,12 +31,12 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      - DISCORD_APPLICATION_ID=1415431358527967472
-      - DISCORD_APPLICATION_SECRET=5j7MNuoQrGfEEC8Hxtb70frxINN0psNg
-      - DISCORD_REDIRECT_URI=http://localhost:8000/admin/auth/discord/callback
+      - DISCORD_APPLICATION_ID=${DISCORD_APPLICATION_ID}
+      - DISCORD_APPLICATION_SECRET=${DISCORD_APPLICATION_SECRET}
+      - DISCORD_REDIRECT_URI=${DISCORD_REDIRECT_URI}
       - DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/smarter_dev
       - ENVIRONMENT=development
-      - API_SECRET_KEY=sk-3IoainVB1hbU0yQbYhHgt0u1MZpf7eyo59abep5p40w
+      - API_SECRET_KEY=${API_SECRET_KEY}
       - LLM_FAST_MODEL=gemini/gemini-2.5-flash-lite
       - LLM_MEDIUM_MODEL=claude-haiku-4-5-20251001
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -65,8 +65,8 @@ services:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - DISCORD_APPLICATION_ID=${DISCORD_APPLICATION_ID}
       - API_BASE_URL=http://web:8000/api
-      - API_SECRET_KEY=sk-3IoainVB1hbU0yQbYhHgt0u1MZpf7eyo59abep5p40w
-      - BOT_API_KEY=sk-3IoainVB1hbU0yQbYhHgt0u1MZpf7eyo59abep5p40w
+      - API_SECRET_KEY=${API_SECRET_KEY}
+      - BOT_API_KEY=${API_SECRET_KEY}
       - ENVIRONMENT=development
       - LLM_FAST_MODEL=gemini/gemini-2.5-flash-lite
       - LLM_MEDIUM_MODEL=claude-haiku-4-5-20251001
