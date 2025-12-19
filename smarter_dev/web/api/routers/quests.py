@@ -1,8 +1,4 @@
-"""Challenge API router for Discord bot integration.
-
-Provides endpoints for challenge announcement management and release scheduling.
-Used by the Discord bot to check for pending announcements and mark challenges as announced.
-"""
+"""Quests API router for Discord bot integration."""
 
 from __future__ import annotations
 
