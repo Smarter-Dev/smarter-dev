@@ -1466,12 +1466,6 @@ class ForumUserSubscription(Base):
         return f"<ForumUserSubscription(username='{self.username}', guild_id='{self.guild_id}', topics={len(self.subscribed_topics)})>"
 
 class Quest(Base):
-    """Reusable quest definition.
-
-    A quest defines *what* the user must do.
-    DailyQuest (or similar) defines *when* it is active.
-    """
-
     __tablename__ = "quests"
 
     # Identity
@@ -1552,7 +1546,8 @@ class Quest(Base):
 class DailyQuest(Base):
     """Quest instance active for a specific date in a guild.
 
-    e.g. '2025-12-10: Do X, Y, Z in this guild'.
+    Example:
+    2025-12-10 → Quest X is active for this guild until end of day (UTC).
     """
 
     __tablename__ = "daily_quests"
@@ -1584,15 +1579,16 @@ class DailyQuest(Base):
         Date,
         nullable=False,
         index=True,
-        doc="Date this quest is active for (guild-local or UTC decision)",
+        doc="Date this quest is active for (UTC-based)",
     )
+
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        doc="Exact timestamp when this daily quest stops being valid",
+        doc="UTC timestamp when this daily quest stops being valid",
     )
 
-    # Optional: whether you manually disabled this instance
+    # Soft-disable flag
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -1601,13 +1597,23 @@ class DailyQuest(Base):
         doc="Whether this daily quest instance is active",
     )
 
-    quest: Mapped["Quest"] = relationship("Quest", lazy="joined")
+    quest: Mapped["Quest"] = relationship(
+        "Quest",
+        lazy="joined",
+    )
 
     __table_args__ = (
         UniqueConstraint(
-            "guild_id", "quest_id", "active_date", name="uq_daily_quests_per_day"
+            "guild_id",
+            "quest_id",
+            "active_date",
+            name="uq_daily_quests_per_day",
         ),
-        Index("ix_daily_quests_guild_date", "guild_id", "active_date"),
+        Index(
+            "ix_daily_quests_guild_date",
+            "guild_id",
+            "active_date",
+        ),
     )
 
     @property

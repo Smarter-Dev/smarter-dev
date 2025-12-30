@@ -3,8 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 import logging
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from smarter_dev.bot.services.api_client import APIClient
+from smarter_dev.bot.services.api_client import APIClient
 import hikari
 import lightbulb
 import logging
@@ -69,12 +68,6 @@ async def event_command(ctx: lightbulb.Context) -> None:
                 f"*{quest['hint']}*"
             ),
             color=0x27AE60,
-        )
-
-        embed.add_field(
-            name="Points",
-            value=str(quest.get("points_value", "?")),
-            inline=True,
         )
 
         embed.add_field(

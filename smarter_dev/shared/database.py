@@ -113,11 +113,11 @@ def create_engine(settings: Settings) -> AsyncEngine:
     
     # Convert PostgreSQL URL to asyncpg-compatible format
     cleaned_url, pg_connect_args = convert_postgres_url_for_asyncpg(database_url)
-    
-    # Engine configuration
+
+    # Engine Configuration
     engine_kwargs = {
-        "echo": settings.debug and settings.log_level == "DEBUG",
-        "echo_pool": settings.debug and settings.log_level == "DEBUG",
+        "echo": True,
+        "echo_pool": True,
         "future": True,
     }
     

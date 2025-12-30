@@ -2623,22 +2623,37 @@ class QuestOperations:
                 f"Failed to get quest: {e}"
             ) from e
 
+
     async def get_daily_quest(
         self,
         active_date: date,
-        guild_id: Optional[str] = None,
+        guild_id: str,
     ) -> Optional[DailyQuest]:
         try:
-            query = select(DailyQuest).where(
-                DailyQuest.active_date == active_date
+            now = datetime.now(timezone.utc)
+            logger.info("Now is=%s", now)
+    
+            query = (
+                select(DailyQuest)
+                .join(DailyQuest.quest)
+                .where(
+                    DailyQuest.active_date == active_date,
+                    DailyQuest.guild_id == guild_id,
+                    DailyQuest.is_active.is_(True),
+                    DailyQuest.expires_at > now,
+                )
             )
 
-            if guild_id is not None:
-                query = query.where(DailyQuest.guild_id == guild_id)
-
+            logger.info(
+                "DailyQuest query inputs | guild_id=%s active_date=%s now=%s",
+                guild_id,
+                active_date,
+                now,
+            )
+    
             result = await self.session.execute(query)
             return result.scalar_one_or_none()
-
+    
         except Exception as e:
             raise DatabaseOperationError(
                 f"Failed to get daily quest: {e}"
