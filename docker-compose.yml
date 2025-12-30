@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   postgres:
@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: smarter_dev_password
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "5432:5432"
+      - "5438:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -31,8 +31,12 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      - DISCORD_APPLICATION_ID=${DISCORD_APPLICATION_ID}
+      - DISCORD_APPLICATION_SECRET=${DISCORD_APPLICATION_SECRET}
+      - DISCORD_REDIRECT_URI=${DISCORD_REDIRECT_URI}
       - DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/smarter_dev
       - ENVIRONMENT=development
+      - API_SECRET_KEY=${API_SECRET_KEY}
       - LLM_FAST_MODEL=gemini/gemini-2.5-flash-lite
       - LLM_MEDIUM_MODEL=claude-haiku-4-5-20251001
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -61,8 +65,8 @@ services:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - DISCORD_APPLICATION_ID=${DISCORD_APPLICATION_ID}
       - API_BASE_URL=http://web:8000/api
-      - API_SECRET_KEY=sk-ubE6Hj4Bjb7LUJLPIg44dbFcshooY3RXHvtltZFNLzk
-      - BOT_API_KEY=sk-ubE6Hj4Bjb7LUJLPIg44dbFcshooY3RXHvtltZFNLzk
+      - API_SECRET_KEY=${API_SECRET_KEY}
+      - BOT_API_KEY=${API_SECRET_KEY}
       - ENVIRONMENT=development
       - LLM_FAST_MODEL=gemini/gemini-2.5-flash-lite
       - LLM_MEDIUM_MODEL=claude-haiku-4-5-20251001
