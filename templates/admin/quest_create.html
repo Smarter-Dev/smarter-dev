@@ -1,0 +1,78 @@
+{% extends "admin/base_sidebar.html" %} {% block title %}Create Quest{% endblock
+%} {% block page_title %}Create Quest{% endblock %} {% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item">
+  <a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a>
+</li>
+<li class="breadcrumb-item">
+  <a href="/admin/guilds/{{ guild.id }}/quests">Quests</a>
+</li>
+<li class="breadcrumb-item active">Create</li>
+{% endblock %} {% block content %}
+<div class="row">
+  <div class="col-md-8">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">
+          <svg class="icon me-2" width="24" height="24">
+            <use xlink:href="#tabler-plus"></use>
+          </svg>
+          Create New Quest
+        </h3>
+      </div>
+      <div class="card-body">
+        {% if errors %}
+        <div class="alert alert-danger">
+          <ul class="mb-0">
+            {% for error in errors %}
+            <li>{{ error }}</li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+
+        <form method="post">
+          <div class="mb-3">
+            <label class="form-label required">Quest Title</label>
+            <input
+              type="text"
+              class="form-control"
+              name="title"
+              value="{{ form_data.title if form_data else '' }}"
+              required
+            />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label required">Prompt</label>
+            <textarea class="form-control" name="prompt" rows="6" required>
+{{ form_data.prompt if form_data else '' }}</textarea
+            >
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label">Quest Type</label>
+            <select class="form-select" name="quest_type">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="one_off">One-off</option>
+            </select>
+          </div>
+
+          <div class="form-footer">
+            <button type="submit" class="btn btn-primary">
+              <svg class="icon me-2" width="24" height="24">
+                <use xlink:href="#tabler-check"></use>
+              </svg>
+              Create Quest
+            </button>
+            <a href="/admin/guilds/{{ guild.id }}/quests" class="btn btn-link"
+              >Cancel</a
+            >
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

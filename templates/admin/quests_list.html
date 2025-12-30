@@ -1,0 +1,136 @@
+{% extends "admin/base_sidebar.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block page_title %}Quests{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item">
+  <a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a>
+</li>
+<li class="breadcrumb-item active">Quests</li>
+{% endblock %}
+
+{% block page_actions %}
+<div class="col-auto ms-auto d-print-none">
+  <a href="/admin/guilds/{{ guild.id }}/quests/create" class="btn btn-primary">
+    <svg class="icon me-2" width="24" height="24">
+      <use xlink:href="#tabler-plus"></use>
+    </svg>
+    Create Quest
+  </a>
+</div>
+{% endblock %}
+
+{% block content %}
+{% if quests %}
+<div class="card">
+  <div class="card-header">
+    <h3 class="card-title">
+      <svg class="icon me-2" width="24" height="24">
+        <use xlink:href="#tabler-medal"></use>
+      </svg>
+      Quests
+    </h3>
+    <div class="card-actions">
+      <span class="text-muted">{{ quests|length }} total</span>
+    </div>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-vcenter card-table">
+      <thead>
+        <tr>
+          <th>Title</th>
+          <th>Type</th>
+          <th>Day</th>
+          <th class="w-1"></th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {% for item in quests %}
+          {% set quest = item.quest %}
+          {% set dq = item.daily_quest %}
+          <tr>
+            <td>
+              <div class="d-flex align-items-center gap-2">
+  {% if dq %}
+<span
+  class="rounded-circle"
+  style="
+    width: 8px;
+    height: 8px;
+    display: inline-block;
+    background-color:
+      {% if dq %}
+        {{ '#2fb344' if dq.is_active else '#adb5bd' }}
+      {% else %}
+        #ced4da
+      {% endif %}
+  "
+></span>
+  {% endif %}
+
+  <strong>{{ quest.title }}</strong>
+</div>
+              <div class="text-muted small">
+                {{ quest.prompt[:80] }}{% if quest.prompt|length > 80 %}…{% endif %}
+              </div>
+            </td>
+
+            <td>
+              <span class="badge bg-blue">{{ quest.quest_type }}</span>
+            </td>
+
+            <td>
+              {% if dq %}
+                <div class="text-muted">
+                  {{ dq.active_date.strftime("%Y-%m-%d") }}
+                </div>
+              {% else %}
+                <span class="text-muted fst-italic">Unscheduled</span>
+              {% endif %}
+            </td>
+
+            <td>
+              <div class="btn-group">
+                <a
+                  href="/admin/guilds/{{ guild.id }}/quests/{{ quest.id }}/edit{% if dq %}?date={{ dq.active_date.isoformat() }}{% endif %}"
+                  class="btn btn-sm btn-outline-secondary"
+                >
+                  <svg class="icon" width="16" height="16">
+                    <use xlink:href="#tabler-edit"></use>
+                  </svg>
+                </a>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% else %}
+<div class="card">
+  <div class="card-body text-center py-5">
+    <svg class="icon mb-3" width="48" height="48">
+      <use xlink:href="#tabler-medal"></use>
+    </svg>
+    <h3>No quests yet</h3>
+    <p class="text-muted">Create your first quest to get started.</p>
+    <a
+      href="/admin/guilds/{{ guild.id }}/quests/create"
+      class="btn btn-primary"
+    >
+      <svg class="icon me-2" width="24" height="24">
+        <use xlink:href="#tabler-plus"></use>
+      </svg>
+      Create Quest
+    </a>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

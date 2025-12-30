@@ -1465,6 +1465,200 @@ class ForumUserSubscription(Base):
         """String representation of the user subscription."""
         return f"<ForumUserSubscription(username='{self.username}', guild_id='{self.guild_id}', topics={len(self.subscribed_topics)})>"
 
+class Quest(Base):
+    __tablename__ = "quests"
+
+    # Identity
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique quest identifier",
+    )
+
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord guild (server) snowflake ID this quest belongs to",
+    )
+
+    # Human-facing content
+    title: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        doc="Quest title",
+    )
+
+    prompt: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Quest instructions / prompt shown to users",
+    )
+
+    quest_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="daily",
+        doc="Quest type (daily, weekly, one_off, etc.)",
+    )
+
+    # Execution / validation scripts
+    python_script: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Reference Python solution or logic",
+    )
+
+    input_generator_script: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Script to generate quest input (optional)",
+    )
+
+    solution_validator_script: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Script to validate user submissions",
+    )
+
+    # Audit
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        Index("ix_quests_guild_id", "guild_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Quest(title='{self.title}', guild_id='{self.guild_id}', type='{self.quest_type}')>"
+
+class DailyQuest(Base):
+    """Quest instance active for a specific date in a guild.
+
+    Example:
+    2025-12-10 → Quest X is active for this guild until end of day (UTC).
+    """
+
+    __tablename__ = "daily_quests"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique daily quest instance identifier",
+    )
+
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord guild (server) snowflake ID",
+    )
+
+    quest_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("quests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        doc="Quest template this instance is based on",
+    )
+
+    # Rotation info
+    active_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+        index=True,
+        doc="Date this quest is active for (UTC-based)",
+    )
+
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        doc="UTC timestamp when this daily quest stops being valid",
+    )
+
+    # Soft-disable flag
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        doc="Whether this daily quest instance is active",
+    )
+
+    quest: Mapped["Quest"] = relationship(
+        "Quest",
+        lazy="joined",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "guild_id",
+            "quest_id",
+            "active_date",
+            name="uq_daily_quests_per_day",
+        ),
+        Index(
+            "ix_daily_quests_guild_date",
+            "guild_id",
+            "active_date",
+        ),
+    )
+
+    @property
+    def is_expired(self) -> bool:
+        return datetime.now(timezone.utc) >= self.expires_at
+
+class QuestProgress(Base):
+    """Per-user completion tracking for a daily quest instance."""
+
+    __tablename__ = "quest_progress"
+
+    daily_quest_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("daily_quests.id", ondelete="CASCADE"),
+        primary_key=True,
+        doc="Daily quest instance this progress relates to",
+    )
+    user_id: Mapped[str] = mapped_column(
+        String,
+        primary_key=True,
+        doc="Discord user snowflake ID",
+    )
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Guild (server) where this progress applies",
+    )
+
+    completions: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        doc="How many times the user has completed this daily quest today",
+    )
+    last_completed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="When the user last completed this quest",
+    )
+
+    __table_args__ = (
+        Index("ix_quest_progress_guild_user", "guild_id", "user_id"),
+    )
 
 class Campaign(Base):
     """Campaign definition for challenge competitions.
@@ -2734,6 +2928,7 @@ class AdventOfCodeThread(Base):
     def __repr__(self) -> str:
         """String representation of the AoC thread record."""
         return f"<AdventOfCodeThread(guild='{self.guild_id}', year={self.year}, day={self.day})>"
+
 
 
 class AttachmentFilterConfig(Base):

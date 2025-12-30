@@ -31,7 +31,7 @@ async def store_streak_celebration(
     streak_days: int,
     streak_multiplier: int,
     bytes_earned: int,
-    response_time_ms: int | None = None
+    response_time_ms: int | None = None,
 ) -> bool:
     """Store a streak celebration interaction in the database for auditing and analytics.
 
@@ -76,8 +76,8 @@ async def store_streak_celebration(
                 "streak_days": streak_days,
                 "streak_multiplier": streak_multiplier,
                 "bytes_earned": bytes_earned,
-                "message_length": len(user_message)
-            }
+                "message_length": len(user_message),
+            },
         }
 
         # Store conversation via API
@@ -85,14 +85,20 @@ async def store_streak_celebration(
         async with APIClient(
             base_url=settings.api_base_url,
             api_key=settings.bot_api_key,
-            default_timeout=10.0
+            default_timeout=10.0,
         ) as client:
-            response = await client.post("/admin/conversations", json_data=conversation_data)
+            response = await client.post(
+                "/admin/conversations", json_data=conversation_data
+            )
             if response.status_code in (200, 201):
-                logger.debug(f"✅ Stored streak celebration for user {user_id} (session: {session_id})")
+                logger.debug(
+                    f"✅ Stored streak celebration for user {user_id} (session: {session_id})"
+                )
                 return True
             else:
-                logger.warning(f"❌ Failed to store streak celebration: HTTP {response.status_code}")
+                logger.warning(
+                    f"❌ Failed to store streak celebration: HTTP {response.status_code}"
+                )
                 return False
 
     except Exception as e:
@@ -108,6 +114,7 @@ daily_claim_cache: dict[str, str] = {}
 @dataclass
 class ForumPostData:
     """Data structure for forum post information."""
+
     title: str
     content: str
     author_display_name: str
@@ -149,8 +156,7 @@ def cleanup_old_cache_entries() -> None:
 
 
 async def sync_squad_roles(
-    bot: lightbulb.BotApp,
-    event: hikari.GuildMessageCreateEvent
+    bot: lightbulb.BotApp, event: hikari.GuildMessageCreateEvent
 ) -> None:
     """Sync Discord squad roles with database squad membership.
 
@@ -186,7 +192,9 @@ async def sync_squad_roles(
 
         # Get user's current squad from database
         try:
-            user_squad_response = await squads_service.get_user_squad(guild_id, user_id, use_cache=False)
+            user_squad_response = await squads_service.get_user_squad(
+                guild_id, user_id, use_cache=False
+            )
             user_squad = user_squad_response.squad if user_squad_response else None
         except Exception as e:
             logger.debug(f"Failed to get user squad for role sync: {e}")
@@ -202,7 +210,9 @@ async def sync_squad_roles(
         squad_role_ids = {int(squad.role_id) for squad in all_squads}
 
         # Find user's current squad roles in Discord
-        user_squad_roles = [role_id for role_id in member.role_ids if int(role_id) in squad_role_ids]
+        user_squad_roles = [
+            role_id for role_id in member.role_ids if int(role_id) in squad_role_ids
+        ]
 
         # Determine what actions to take
         expected_role_id = int(user_squad.role_id) if user_squad else None
@@ -235,7 +245,9 @@ async def sync_squad_roles(
                     await member.remove_role(role)
                     logger.debug(f"Removed squad role {role.name} from user {user_id}")
             except Exception as e:
-                logger.warning(f"Failed to remove squad role {role_id} from user {user_id}: {e}")
+                logger.warning(
+                    f"Failed to remove squad role {role_id} from user {user_id}: {e}"
+                )
 
         for role_id in roles_to_add:
             try:
@@ -243,15 +255,21 @@ async def sync_squad_roles(
                 if role:
                     await member.add_role(role)
                     squad_name = user_squad.name if user_squad else "Unknown"
-                    logger.info(f"Synced squad role {role.name} to user {user_id} in squad '{squad_name}'")
+                    logger.info(
+                        f"Synced squad role {role.name} to user {user_id} in squad '{squad_name}'"
+                    )
             except Exception as e:
-                logger.warning(f"Failed to add squad role {role_id} to user {user_id}: {e}")
+                logger.warning(
+                    f"Failed to add squad role {role_id} to user {user_id}: {e}"
+                )
 
         if not roles_to_remove and not roles_to_add:
             logger.debug(f"Squad roles already in sync for user {user_id}")
 
     except Exception as e:
-        logger.error(f"Unexpected error syncing squad roles for user {event.author.id}: {e}")
+        logger.error(
+            f"Unexpected error syncing squad roles for user {event.author.id}: {e}"
+        )
 
 
 # Fun and techy status messages that rotate every 5 minutes
@@ -290,6 +308,7 @@ async def start_status_rotation(bot: lightbulb.BotApp) -> None:
     Args:
         bot: Bot application instance
     """
+
     async def rotate_status():
         """Rotate the bot's status message every 5 minutes."""
         while True:
@@ -300,8 +319,7 @@ async def start_status_rotation(bot: lightbulb.BotApp) -> None:
                 # Update bot's activity
                 await bot.update_presence(
                     activity=hikari.Activity(
-                        name=status_message,
-                        type=hikari.ActivityType.CUSTOM
+                        name=status_message, type=hikari.ActivityType.CUSTOM
                     )
                 )
 
@@ -322,6 +340,7 @@ async def start_status_rotation(bot: lightbulb.BotApp) -> None:
 
 async def start_cache_cleanup() -> None:
     """Start the periodic cache cleanup for daily claim tracking."""
+
     async def cleanup_cache():
         """Clean up old cache entries every hour."""
         while True:
@@ -359,8 +378,7 @@ async def initialize_single_guild_configuration(guild_id: str) -> None:
 
         # Create API client
         api_client = APIClient(
-            base_url=settings.api_base_url,
-            api_key=settings.bot_api_key
+            base_url=settings.api_base_url, api_key=settings.bot_api_key
         )
 
         # Get guild configuration - this automatically creates one with defaults if it doesn't exist
@@ -421,7 +439,9 @@ def create_bot(settings: Settings | None = None) -> lightbulb.BotApp:
                 "hikari": {"level": "INFO"},
                 "hikari.ratelimits": {"level": "DEBUG"},
                 "lightbulb": {"level": "INFO"},
-                "smarter_dev": {"level": "DEBUG"},  # Enable DEBUG logging for the application
+                "smarter_dev": {
+                    "level": "DEBUG"
+                },  # Enable DEBUG logging for the application
             },
         },
         banner=None,  # Disable banner for cleaner logs
@@ -440,14 +460,17 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
 
         # Create API client
         from smarter_dev.bot.services.api_client import APIClient
+
         api_base_url = settings.api_base_url
         api_key = settings.bot_api_key
         logger.info(f"Connecting to API at: {api_base_url}")
-        logger.info(f"Using API key: {api_key[:12]}...{api_key[-10:] if len(api_key) > 20 else api_key}")
+        logger.info(
+            f"Using API key: {api_key[:12]}...{api_key[-10:] if len(api_key) > 20 else api_key}"
+        )
         api_client = APIClient(
             base_url=api_base_url,  # Web API base URL from settings
             api_key=api_key,  # Use secure API key for auth
-            default_timeout=30.0
+            default_timeout=30.0,
         )
 
         # Bot doesn't use caching - pass None for cache manager
@@ -475,8 +498,12 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         squads_service = SquadsService(api_client, cache_manager)
         forum_agent_service = ForumAgentService(api_client, cache_manager)
         challenge_service = ChallengeService(api_client, cache_manager, bot)
-        scheduled_message_service = ScheduledMessageService(api_client, cache_manager, bot)
-        repeating_message_service = RepeatingMessageService(api_client, cache_manager, bot)
+        scheduled_message_service = ScheduledMessageService(
+            api_client, cache_manager, bot
+        )
+        repeating_message_service = RepeatingMessageService(
+            api_client, cache_manager, bot
+        )
         advent_of_code_service = AdventOfCodeService(api_client, cache_manager, bot)
 
         # Initialize conversation participation services
@@ -522,28 +549,52 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             repeating_message_health = await repeating_message_service.health_check()
             advent_of_code_health = await advent_of_code_service.health_check()
 
-            logger.info(f"Bytes service health: {'healthy' if bytes_health.is_healthy else 'unhealthy'}")
-            logger.info(f"Squads service health: {'healthy' if squads_health.is_healthy else 'unhealthy'}")
-            logger.info(f"Forum agent service health: {'healthy' if forum_agent_health.is_healthy else 'unhealthy'}")
-            logger.info(f"Challenge service health: {'healthy' if challenge_health.is_healthy else 'unhealthy'}")
-            logger.info(f"Scheduled message service health: {'healthy' if scheduled_message_health.is_healthy else 'unhealthy'}")
-            logger.info(f"Repeating message service health: {'healthy' if repeating_message_health.is_healthy else 'unhealthy'}")
-            logger.info(f"Advent of Code service health: {'healthy' if advent_of_code_health.is_healthy else 'unhealthy'}")
+            logger.info(
+                f"Bytes service health: {'healthy' if bytes_health.is_healthy else 'unhealthy'}"
+            )
+            logger.info(
+                f"Squads service health: {'healthy' if squads_health.is_healthy else 'unhealthy'}"
+            )
+            logger.info(
+                f"Forum agent service health: {'healthy' if forum_agent_health.is_healthy else 'unhealthy'}"
+            )
+            logger.info(
+                f"Challenge service health: {'healthy' if challenge_health.is_healthy else 'unhealthy'}"
+            )
+            logger.info(
+                f"Scheduled message service health: {'healthy' if scheduled_message_health.is_healthy else 'unhealthy'}"
+            )
+            logger.info(
+                f"Repeating message service health: {'healthy' if repeating_message_health.is_healthy else 'unhealthy'}"
+            )
+            logger.info(
+                f"Advent of Code service health: {'healthy' if advent_of_code_health.is_healthy else 'unhealthy'}"
+            )
 
             if not bytes_health.is_healthy:
                 logger.warning(f"Bytes service not healthy: {bytes_health.details}")
             if not squads_health.is_healthy:
                 logger.warning(f"Squads service not healthy: {squads_health.details}")
             if not forum_agent_health.is_healthy:
-                logger.warning(f"Forum agent service not healthy: {forum_agent_health.details}")
+                logger.warning(
+                    f"Forum agent service not healthy: {forum_agent_health.details}"
+                )
             if not challenge_health.is_healthy:
-                logger.warning(f"Challenge service not healthy: {challenge_health.details}")
+                logger.warning(
+                    f"Challenge service not healthy: {challenge_health.details}"
+                )
             if not scheduled_message_health.is_healthy:
-                logger.warning(f"Scheduled message service not healthy: {scheduled_message_health.details}")
+                logger.warning(
+                    f"Scheduled message service not healthy: {scheduled_message_health.details}"
+                )
             if not repeating_message_health.is_healthy:
-                logger.warning(f"Repeating message service not healthy: {repeating_message_health.details}")
+                logger.warning(
+                    f"Repeating message service not healthy: {repeating_message_health.details}"
+                )
             if not advent_of_code_health.is_healthy:
-                logger.warning(f"Advent of Code service not healthy: {advent_of_code_health.details}")
+                logger.warning(
+                    f"Advent of Code service not healthy: {advent_of_code_health.details}"
+                )
 
         except Exception as e:
             logger.error(f"Failed to check service health: {e}")
@@ -572,7 +623,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             "scheduled_message_service": scheduled_message_service,
             "repeating_message_service": repeating_message_service,
             "advent_of_code_service": advent_of_code_service,
-            "channel_state_manager": channel_state_manager
+            "channel_state_manager": channel_state_manager,
         }
 
         logger.info("✓ Bot services setup complete")
@@ -599,7 +650,9 @@ def is_forum_channel(channel) -> bool:
     return hasattr(channel, "type") and channel.type == hikari.ChannelType.GUILD_FORUM
 
 
-async def extract_forum_post_data(bot: lightbulb.BotApp, thread, initial_message=None) -> ForumPostData:
+async def extract_forum_post_data(
+    bot: lightbulb.BotApp, thread, initial_message=None
+) -> ForumPostData:
     """Extract forum post data from Discord thread and message objects.
 
     Args:
@@ -618,28 +671,41 @@ async def extract_forum_post_data(bot: lightbulb.BotApp, thread, initial_message
     if initial_message:
         content = getattr(initial_message, "content", "")
         author = getattr(initial_message, "author", None)
-        author_name = getattr(author, "display_name", getattr(author, "username", "Unknown")) if author else "Unknown"
+        author_name = (
+            getattr(author, "display_name", getattr(author, "username", "Unknown"))
+            if author
+            else "Unknown"
+        )
 
         # Extract attachments
         attachments = []
         if hasattr(initial_message, "attachments"):
-            attachments = [getattr(att, "filename", "unknown") for att in initial_message.attachments]
+            attachments = [
+                getattr(att, "filename", "unknown")
+                for att in initial_message.attachments
+            ]
 
         # Debug extracted data
-        logger.debug(f"FORUM EXTRACT DEBUG: Content: '{content[:100]}...' ({len(content)} chars)")
+        logger.debug(
+            f"FORUM EXTRACT DEBUG: Content: '{content[:100]}...' ({len(content)} chars)"
+        )
         logger.debug(f"FORUM EXTRACT DEBUG: Author: '{author_name}'")
         logger.debug(f"FORUM EXTRACT DEBUG: Attachments: {len(attachments)}")
     else:
         content = ""
         author_name = "Unknown"
         attachments = []
-        logger.warning("FORUM EXTRACT DEBUG: No initial message provided - content and author will be empty/unknown")
+        logger.warning(
+            "FORUM EXTRACT DEBUG: No initial message provided - content and author will be empty/unknown"
+        )
 
     # Extract tags if available
     tags = []
     if hasattr(thread, "applied_tag_ids") and thread.applied_tag_ids:
         tag_ids = getattr(thread, "applied_tag_ids", [])
-        logger.warning(f"FORUM TAG DEBUG - Found {len(tag_ids)} applied tag IDs: {tag_ids}")
+        logger.warning(
+            f"FORUM TAG DEBUG - Found {len(tag_ids)} applied tag IDs: {tag_ids}"
+        )
         # Resolve tag IDs to tag names
         tags = await resolve_forum_tag_names(bot, channel_id, tag_ids)
     else:
@@ -653,11 +719,13 @@ async def extract_forum_post_data(bot: lightbulb.BotApp, thread, initial_message
         attachments=attachments,
         channel_id=channel_id,
         thread_id=thread_id,
-        guild_id=""  # Will be set by caller
+        guild_id="",  # Will be set by caller
     )
 
 
-async def post_agent_responses(bot: lightbulb.BotApp, thread_id: int, responses: list[dict]) -> bool:
+async def post_agent_responses(
+    bot: lightbulb.BotApp, thread_id: int, responses: list[dict]
+) -> bool:
     """Post AI agent responses to a Discord thread.
 
     Args:
@@ -686,10 +754,7 @@ async def post_agent_responses(bot: lightbulb.BotApp, thread_id: int, responses:
             formatted_response = response_content
 
             # Post the response to the thread
-            await bot.rest.create_message(
-                thread_id,
-                content=formatted_response
-            )
+            await bot.rest.create_message(thread_id, content=formatted_response)
 
             logger.info(f"Posted response to thread {thread_id}")
             response_posted = True
@@ -700,7 +765,9 @@ async def post_agent_responses(bot: lightbulb.BotApp, thread_id: int, responses:
     return response_posted
 
 
-async def post_user_notifications(bot: lightbulb.BotApp, thread_id: int, topic_user_map: dict, response_posted: bool) -> None:
+async def post_user_notifications(
+    bot: lightbulb.BotApp, thread_id: int, topic_user_map: dict, response_posted: bool
+) -> None:
     """Post user notification mentions to a Discord thread, organized by topic.
 
     Args:
@@ -731,20 +798,22 @@ async def post_user_notifications(bot: lightbulb.BotApp, thread_id: int, topic_u
 
         # Post the notification message with user mentions enabled
         await bot.rest.create_message(
-            thread_id,
-            content=notification_message,
-            user_mentions=list(all_user_ids)
+            thread_id, content=notification_message, user_mentions=list(all_user_ids)
         )
 
         total_users = len(all_user_ids)
         total_topics = len(topic_user_map)
-        logger.info(f"Posted user notifications to thread {thread_id}: {total_users} users notified across {total_topics} topics")
+        logger.info(
+            f"Posted user notifications to thread {thread_id}: {total_users} users notified across {total_topics} topics"
+        )
 
     except Exception as e:
         logger.error(f"Error posting user notifications to thread {thread_id}: {e}")
 
 
-async def resolve_forum_tag_names(bot: lightbulb.BotApp, channel_id: str, tag_ids: list) -> list:
+async def resolve_forum_tag_names(
+    bot: lightbulb.BotApp, channel_id: str, tag_ids: list
+) -> list:
     """Resolve forum tag IDs to tag names by fetching forum channel info.
 
     Args:
@@ -763,7 +832,9 @@ async def resolve_forum_tag_names(bot: lightbulb.BotApp, channel_id: str, tag_id
         forum_channel = await bot.rest.fetch_channel(channel_id)
 
         if not hasattr(forum_channel, "available_tags"):
-            logger.warning(f"Forum channel {channel_id} has no available_tags attribute")
+            logger.warning(
+                f"Forum channel {channel_id} has no available_tags attribute"
+            )
             return [str(tag_id) for tag_id in tag_ids]  # Fall back to IDs
 
         # Create mapping of tag ID to tag name
@@ -779,10 +850,14 @@ async def resolve_forum_tag_names(bot: lightbulb.BotApp, channel_id: str, tag_id
             if tag_id_str in tag_map:
                 tag_names.append(tag_map[tag_id_str])
             else:
-                logger.warning(f"Tag ID {tag_id} not found in forum channel available tags")
+                logger.warning(
+                    f"Tag ID {tag_id} not found in forum channel available tags"
+                )
                 tag_names.append(f"Unknown-{tag_id}")
 
-        logger.warning(f"FORUM TAG DEBUG - Resolved {len(tag_ids)} tag IDs to names: {tag_names}")
+        logger.warning(
+            f"FORUM TAG DEBUG - Resolved {len(tag_ids)} tag IDs to names: {tag_names}"
+        )
         return tag_names
 
     except Exception as e:
@@ -797,7 +872,9 @@ async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:
         bot: Discord bot instance
         event: Thread creation event
     """
-    logger.info(f"DEBUG: handle_forum_thread_create called for thread {event.thread.id}")
+    logger.info(
+        f"DEBUG: handle_forum_thread_create called for thread {event.thread.id}"
+    )
 
     # Check if this is a forum thread
     if not getattr(event, "is_forum_thread", True):
@@ -811,7 +888,9 @@ async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:
     # Get forum agent service
     forum_agent_service = getattr(bot, "d", {}).get("forum_agent_service")
     if not forum_agent_service:
-        forum_agent_service = getattr(bot, "d", {}).get("_services", {}).get("forum_agent_service")
+        forum_agent_service = (
+            getattr(bot, "d", {}).get("_services", {}).get("forum_agent_service")
+        )
 
     if not forum_agent_service:
         logger.debug("No forum agent service available for thread creation")
@@ -824,23 +903,39 @@ async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:
             # Get the first message in the thread (the forum post)
             # Messages are returned in reverse chronological order (newest first)
             messages = await bot.rest.fetch_messages(event.thread.id)
-            logger.debug(f"FORUM DEBUG: Fetched {len(messages) if messages else 0} messages for thread {event.thread.id}")
+            logger.debug(
+                f"FORUM DEBUG: Fetched {len(messages) if messages else 0} messages for thread {event.thread.id}"
+            )
 
             if messages:
                 # Get the last message (oldest, which should be the initial forum post)
                 initial_message = messages[-1]
-                logger.debug(f"FORUM DEBUG: Initial message found - Author: {getattr(initial_message.author, 'display_name', 'Unknown')}, Content length: {len(getattr(initial_message, 'content', ''))}")
+                logger.debug(
+                    f"FORUM DEBUG: Initial message found - Author: {getattr(initial_message.author, 'display_name', 'Unknown')}, Content length: {len(getattr(initial_message, 'content', ''))}"
+                )
             else:
-                logger.warning(f"FORUM DEBUG: No messages found in thread {event.thread.id}")
+                logger.warning(
+                    f"FORUM DEBUG: No messages found in thread {event.thread.id}"
+                )
         except Exception as e:
-            logger.error(f"Could not fetch initial message for thread {event.thread.id}: {e}")
+            logger.error(
+                f"Could not fetch initial message for thread {event.thread.id}: {e}"
+            )
 
         # Log thread details for debugging
-        logger.warning(f"FORUM TAG DEBUG - Thread details: id={event.thread.id}, name={event.thread.name}")
-        logger.warning(f"FORUM TAG DEBUG - Thread attributes: {[attr for attr in dir(event.thread) if not attr.startswith('_')]}")
-        logger.warning(f"FORUM TAG DEBUG - Applied tags attribute exists: {hasattr(event.thread, 'applied_tags')}")
+        logger.warning(
+            f"FORUM TAG DEBUG - Thread details: id={event.thread.id}, name={event.thread.name}"
+        )
+        logger.warning(
+            f"FORUM TAG DEBUG - Thread attributes: {[attr for attr in dir(event.thread) if not attr.startswith('_')]}"
+        )
+        logger.warning(
+            f"FORUM TAG DEBUG - Applied tags attribute exists: {hasattr(event.thread, 'applied_tags')}"
+        )
         if hasattr(event.thread, "applied_tags"):
-            logger.warning(f"FORUM TAG DEBUG - Applied tags raw: {event.thread.applied_tags}")
+            logger.warning(
+                f"FORUM TAG DEBUG - Applied tags raw: {event.thread.applied_tags}"
+            )
         else:
             logger.warning("FORUM TAG DEBUG - No applied_tags attribute found")
 
@@ -849,18 +944,24 @@ async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:
         post_data.guild_id = str(event.guild_id)
 
         # Process the post through all applicable agents with user tagging support
-        responses, topic_user_map = await forum_agent_service.process_forum_post_with_tagging(
-            str(event.guild_id), post_data
+        responses, topic_user_map = (
+            await forum_agent_service.process_forum_post_with_tagging(
+                str(event.guild_id), post_data
+            )
         )
 
         # Post responses that should be posted
         response_posted = False
         if responses:
-            response_posted = await post_agent_responses(bot, event.thread.id, responses)
+            response_posted = await post_agent_responses(
+                bot, event.thread.id, responses
+            )
 
         # Send user notifications if there are any
         if topic_user_map:
-            await post_user_notifications(bot, event.thread.id, topic_user_map, response_posted)
+            await post_user_notifications(
+                bot, event.thread.id, topic_user_map, response_posted
+            )
 
     except Exception as e:
         logger.error(f"Error handling forum thread creation: {e}")
@@ -916,13 +1017,21 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
     try:
         # Check if services are available before loading plugins
         if hasattr(bot, "d") and "_services" in bot.d:
-            logger.info(f"Services available for plugins: {list(bot.d['_services'].keys())}")
+            logger.info(
+                f"Services available for plugins: {list(bot.d['_services'].keys())}"
+            )
         else:
-            logger.warning("No services found in bot.d - plugins may not work correctly")
+            logger.warning(
+                "No services found in bot.d - plugins may not work correctly"
+            )
 
         # Load bytes commands plugin
         logger.info("Loading bytes plugin...")
         bot.load_extensions("smarter_dev.bot.plugins.bytes")
+        logger.info("✓ Loaded bytes plugin")
+
+        logger.info("Loading quests plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.quests")
         logger.info("✓ Loaded bytes plugin")
 
         # Load squads commands plugin
@@ -969,6 +1078,7 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
     except Exception as e:
         logger.error(f"Failed to load plugins: {e}")
         import traceback
+
         logger.error(f"Plugin loading traceback: {traceback.format_exc()}")
         # Don't raise to prevent bot from crashing - just log the error
         logger.warning("Bot will run without plugins")
@@ -992,6 +1102,7 @@ async def run_bot() -> None:
 
     # Create bot
     bot = create_bot(settings)
+
     # Set up event handlers
     @bot.listen()
     async def on_starting(event: hikari.StartingEvent) -> None:
@@ -1059,7 +1170,9 @@ async def run_bot() -> None:
         # Get services
         bytes_service = getattr(bot, "d", {}).get("bytes_service")
         if not bytes_service:
-            bytes_service = getattr(bot, "d", {}).get("_services", {}).get("bytes_service")
+            bytes_service = (
+                getattr(bot, "d", {}).get("_services", {}).get("bytes_service")
+            )
 
         if not bytes_service:
             logger.warning("No bytes service available for daily message reward")
@@ -1071,17 +1184,21 @@ async def run_bot() -> None:
 
         if has_claimed_today(guild_id_str, user_id_str):
             # User already claimed today, skip API call
-            logger.debug(f"User {event.author} already claimed daily reward today (cached)")
+            logger.debug(
+                f"User {event.author} already claimed daily reward today (cached)"
+            )
             return
 
         try:
             # Try to claim daily reward (this will only succeed on first message of the day)
-            logger.debug(f"Attempting daily reward for {event.author} (ID: {event.author.id}) in guild {event.guild_id}")
+            logger.debug(
+                f"Attempting daily reward for {event.author} (ID: {event.author.id}) in guild {event.guild_id}"
+            )
 
             result = await bytes_service.claim_daily(
                 guild_id_str,
                 user_id_str,
-                event.author.display_name or event.author.username
+                event.author.display_name or event.author.username,
             )
 
             if result.success:
@@ -1104,18 +1221,30 @@ async def run_bot() -> None:
                             if member and role:
                                 # Add the squad role to the user
                                 await member.add_role(role)
-                                logger.info(f"✅ Auto-assigned user {event.author} to squad '{squad_name}' with role {role.name}")
+                                logger.info(
+                                    f"✅ Auto-assigned user {event.author} to squad '{squad_name}' with role {role.name}"
+                                )
                             else:
-                                logger.warning(f"Could not assign squad role: member={member is not None}, role={role is not None}")
+                                logger.warning(
+                                    f"Could not assign squad role: member={member is not None}, role={role is not None}"
+                                )
                         else:
-                            logger.warning("Could not get guild for squad role assignment")
+                            logger.warning(
+                                "Could not get guild for squad role assignment"
+                            )
                     except Exception as e:
-                        logger.error(f"Failed to assign squad role during daily claim: {e}")
+                        logger.error(
+                            f"Failed to assign squad role during daily claim: {e}"
+                        )
 
                 # Add reaction to the message that earned bytes
                 try:
-                    await event.message.add_reaction("daily_bytes_received:1403748840477163642")
-                    logger.info(f"✅ Added reaction and awarded daily bytes reward ({result.earned}) to {event.author}")
+                    await event.message.add_reaction(
+                        "daily_bytes_received:1403748840477163642"
+                    )
+                    logger.info(
+                        f"✅ Added reaction and awarded daily bytes reward ({result.earned}) to {event.author}"
+                    )
                 except Exception as e:
                     logger.error(f"Failed to add reaction to daily reward message: {e}")
 
@@ -1126,36 +1255,45 @@ async def run_bot() -> None:
                         start_time = datetime.now()
 
                         # Get or create streak celebration agent
-                        streak_agent = getattr(bot, "d", {}).get("streak_celebration_agent")
+                        streak_agent = getattr(bot, "d", {}).get(
+                            "streak_celebration_agent"
+                        )
                         if not streak_agent:
                             from smarter_dev.bot.agents.streak_agent import (
                                 StreakCelebrationAgent,
                             )
+
                             streak_agent = StreakCelebrationAgent()
                             if not hasattr(bot, "d"):
                                 bot.d = {}
                             bot.d["streak_celebration_agent"] = streak_agent
 
                         # Generate celebration message
-                        celebration_message, tokens_used = await streak_agent.generate_celebration_message(
-                            bytes_earned=result.earned or 0,
-                            streak_multiplier=result.streak_bonus or 1,
-                            streak_days=result.streak or 0,
-                            user_id=event.author.id,
-                            user_message=event.message.content or ""
+                        celebration_message, tokens_used = (
+                            await streak_agent.generate_celebration_message(
+                                bytes_earned=result.earned or 0,
+                                streak_multiplier=result.streak_bonus or 1,
+                                streak_days=result.streak or 0,
+                                user_id=event.author.id,
+                                user_message=event.message.content or "",
+                            )
                         )
 
                         # Calculate response time
-                        response_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+                        response_time_ms = int(
+                            (datetime.now() - start_time).total_seconds() * 1000
+                        )
 
                         # Send the celebration message with the @ mention built in
                         if celebration_message:
                             await bot.rest.create_message(
                                 channel=event.channel_id,
                                 content=celebration_message,
-                                user_mentions=[event.author.id]
+                                user_mentions=[event.author.id],
                             )
-                            logger.info(f"✅ Posted streak celebration message for {event.author} (streak: {result.streak}, multiplier: {result.streak_bonus}x)")
+                            logger.info(
+                                f"✅ Posted streak celebration message for {event.author} (streak: {result.streak}, multiplier: {result.streak_bonus}x)"
+                            )
 
                             # Store the streak celebration interaction for analytics
                             await store_streak_celebration(
@@ -1169,11 +1307,13 @@ async def run_bot() -> None:
                                 streak_days=result.streak or 0,
                                 streak_multiplier=result.streak_bonus or 1,
                                 bytes_earned=result.earned or 0,
-                                response_time_ms=response_time_ms
+                                response_time_ms=response_time_ms,
                             )
 
                     except Exception as e:
-                        logger.error(f"Failed to generate or post streak celebration message: {e}")
+                        logger.error(
+                            f"Failed to generate or post streak celebration message: {e}"
+                        )
             else:
                 logger.debug(f"Daily reward not successful for {event.author}")
 
@@ -1183,15 +1323,22 @@ async def run_bot() -> None:
         except Exception as e:
             # Handle expected scenarios gracefully
             error_str = str(e).lower()
-            if ("already been claimed" in error_str or
-                "already claimed" in error_str or
-                "409" in error_str or
-                "conflict" in error_str):
+            if (
+                "already been claimed" in error_str
+                or "already claimed" in error_str
+                or "409" in error_str
+                or "conflict" in error_str
+            ):
                 # Mark as claimed in cache to prevent future API calls today
                 mark_claimed_today(guild_id_str, user_id_str)
-                logger.debug(f"Daily reward already claimed today for {event.author} (from API): {e}")
+                logger.debug(
+                    f"Daily reward already claimed today for {event.author} (from API): {e}"
+                )
             else:
-                logger.error(f"Unexpected error in daily reward for {event.author}: {e}", exc_info=True)
+                logger.error(
+                    f"Unexpected error in daily reward for {event.author}: {e}",
+                    exc_info=True,
+                )
 
     @bot.listen()
     async def on_attachment_filter(event: hikari.GuildMessageCreateEvent) -> None:
@@ -1210,6 +1357,7 @@ async def run_bot() -> None:
 
         # Check attachment filter
         from smarter_dev.bot.attachment_filter import check_attachment_filter
+
         try:
             await check_attachment_filter(bot, event)
         except Exception as e:
@@ -1246,24 +1394,30 @@ async def run_bot() -> None:
                     # Send error response if the view couldn't handle it
                     try:
                         from smarter_dev.bot.utils.embeds import create_error_embed
-                        embed = create_error_embed("An error occurred while processing your selection.")
+
+                        embed = create_error_embed(
+                            "An error occurred while processing your selection."
+                        )
                         await event.interaction.create_initial_response(
                             hikari.ResponseType.MESSAGE_UPDATE,
                             embed=embed,
-                            components=[]
+                            components=[],
                         )
                     except Exception:
                         pass  # Interaction might already be responded to
             else:
-                logger.warning(f"No active view found for {custom_id} interaction from user {user_id}")
+                logger.warning(
+                    f"No active view found for {custom_id} interaction from user {user_id}"
+                )
                 # Send timeout message
                 try:
                     from smarter_dev.bot.utils.embeds import create_error_embed
-                    embed = create_error_embed("This interaction has expired. Please try the command again.")
+
+                    embed = create_error_embed(
+                        "This interaction has expired. Please try the command again."
+                    )
                     await event.interaction.create_initial_response(
-                        hikari.ResponseType.MESSAGE_UPDATE,
-                        embed=embed,
-                        components=[]
+                        hikari.ResponseType.MESSAGE_UPDATE, embed=embed, components=[]
                     )
                 except Exception:
                     pass  # Interaction might already be responded to
@@ -1271,7 +1425,9 @@ async def run_bot() -> None:
     @bot.listen()
     async def on_guild_thread_create(event: hikari.GuildThreadCreateEvent) -> None:
         """Handle forum thread creation for AI agent processing."""
-        logger.info(f"FORUM DEBUG: Thread creation detected: {event.thread.id} in channel {event.thread.parent_id}, type: {event.thread.type}")
+        logger.info(
+            f"FORUM DEBUG: Thread creation detected: {event.thread.id} in channel {event.thread.parent_id}, type: {event.thread.type}"
+        )
 
         # Only process forum threads
         if not event.thread.type == hikari.ChannelType.GUILD_PUBLIC_THREAD:
@@ -1324,6 +1480,7 @@ async def run_bot() -> None:
         """
         # Log to audit channel
         from smarter_dev.bot.audit_logger import log_member_leave
+
         try:
             await log_member_leave(bot, event)
         except Exception as e:
@@ -1340,14 +1497,20 @@ async def run_bot() -> None:
 
         api_client = getattr(bot, "d", {}).get("api_client")
         if not api_client:
-            logger.warning("API client not available; cannot cleanup user data on leave")
+            logger.warning(
+                "API client not available; cannot cleanup user data on leave"
+            )
             return
 
         try:
             await api_client.delete(f"/guilds/{guild_id}/members/{user_id}")
-            logger.info(f"Cleaned up member data for user {user_id} in guild {guild_id}")
+            logger.info(
+                f"Cleaned up member data for user {user_id} in guild {guild_id}"
+            )
         except Exception as e:
-            logger.warning(f"Failed to cleanup member data for user {user_id} in guild {guild_id}: {e}")
+            logger.warning(
+                f"Failed to cleanup member data for user {user_id} in guild {guild_id}: {e}"
+            )
 
     @bot.listen()
     async def on_member_join(event: hikari.MemberCreateEvent) -> None:
@@ -1360,6 +1523,7 @@ async def run_bot() -> None:
         """
         # Log to audit channel
         from smarter_dev.bot.audit_logger import log_member_join
+
         try:
             await log_member_join(bot, event)
         except Exception as e:
@@ -1376,20 +1540,27 @@ async def run_bot() -> None:
 
         api_client = getattr(bot, "d", {}).get("api_client")
         if not api_client:
-            logger.warning("API client not available; cannot cleanup stale user data on join")
+            logger.warning(
+                "API client not available; cannot cleanup stale user data on join"
+            )
             return
 
         try:
             await api_client.delete(f"/guilds/{guild_id}/members/{user_id}")
-            logger.info(f"Cleaned up stale data for user {user_id} joining guild {guild_id}")
+            logger.info(
+                f"Cleaned up stale data for user {user_id} joining guild {guild_id}"
+            )
         except Exception as e:
-            logger.warning(f"Failed to cleanup stale data for user {user_id} in guild {guild_id}: {e}")
+            logger.warning(
+                f"Failed to cleanup stale data for user {user_id} in guild {guild_id}: {e}"
+            )
 
     # Audit log event listeners
     @bot.listen()
     async def on_ban_create(event: hikari.BanCreateEvent) -> None:
         """Log member ban events to audit log."""
         from smarter_dev.bot.audit_logger import log_member_ban
+
         try:
             await log_member_ban(bot, event)
         except Exception as e:
@@ -1399,6 +1570,7 @@ async def run_bot() -> None:
     async def on_ban_delete(event: hikari.BanDeleteEvent) -> None:
         """Log member unban events to audit log."""
         from smarter_dev.bot.audit_logger import log_member_unban
+
         try:
             await log_member_unban(bot, event)
         except Exception as e:
@@ -1408,6 +1580,7 @@ async def run_bot() -> None:
     async def on_message_update(event: hikari.GuildMessageUpdateEvent) -> None:
         """Log message edit events to audit log."""
         from smarter_dev.bot.audit_logger import log_message_edit
+
         try:
             await log_message_edit(bot, event)
         except Exception as e:
@@ -1417,6 +1590,7 @@ async def run_bot() -> None:
     async def on_message_delete(event: hikari.GuildMessageDeleteEvent) -> None:
         """Log message delete events to audit log."""
         from smarter_dev.bot.audit_logger import log_message_delete
+
         try:
             await log_message_delete(bot, event)
         except Exception as e:
@@ -1426,6 +1600,7 @@ async def run_bot() -> None:
     async def on_member_update(event: hikari.MemberUpdateEvent) -> None:
         """Log member update events (username, nickname, role changes) to audit log."""
         from smarter_dev.bot.audit_logger import log_member_update
+
         try:
             await log_member_update(bot, event)
         except Exception as e:
@@ -1466,4 +1641,5 @@ async def run_bot() -> None:
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(run_bot())
