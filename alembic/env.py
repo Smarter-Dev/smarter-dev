@@ -15,8 +15,9 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 # Import your models here for autogenerate support
 from smarter_dev.shared.database import Base
 from smarter_dev.shared.config import get_settings
+
 # Import all models so they're registered with Base.metadata
-from smarter_dev.web.models import BytesBalance, BytesTransaction, BytesConfig, Squad, SquadMembership
+from smarter_dev.web import models
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -82,14 +83,14 @@ def do_run_migrations(connection: Connection) -> None:
 async def run_async_migrations() -> None:
     """Run migrations in async mode."""
     configuration = config.get_section(config.config_ini_section, {})
-    
+
     # Override with the current database URL and fix SSL parameters for asyncpg
     db_url = settings.effective_database_url
     # Convert sslmode=require to ssl=require for asyncpg compatibility
     if "sslmode=require" in db_url:
         db_url = db_url.replace("sslmode=require", "ssl=require")
     configuration["sqlalchemy.url"] = db_url
-    
+
     connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",

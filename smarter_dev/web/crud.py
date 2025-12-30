@@ -29,6 +29,9 @@ from smarter_dev.web.models import (
     ForumAgentResponse,
     ForumNotificationTopic,
     ForumUserSubscription,
+    Quest,
+    QuestProgress,
+    DailyQuest,
     Campaign,
     Challenge,
     ChallengeInput,
@@ -2593,6 +2596,108 @@ class ForumAgentOperations:
             logger.error(f"Error syncing notification topics for agent {agent.id}: {e}")
             raise DatabaseOperationError(f"Failed to sync notification topics: {e}") from e
 
+
+
+class QuestOperations:
+    """Database operations for quest management system."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_quest_by_id(
+        self,
+        quest_id: UUID,
+        guild_id: Optional[str] = None,
+    ) -> Optional[Quest]:
+        try:
+            query = select(Quest).where(Quest.id == quest_id)
+
+            if guild_id is not None:
+                query = query.where(Quest.guild_id == guild_id)
+
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get quest: {e}"
+            ) from e
+
+
+    async def get_daily_quest(
+        self,
+        active_date: date,
+        guild_id: str,
+    ) -> Optional[DailyQuest]:
+        try:
+            now = datetime.now(timezone.utc)
+            logger.info("Now is=%s", now)
+    
+            query = (
+                select(DailyQuest)
+                .join(DailyQuest.quest)
+                .where(
+                    DailyQuest.active_date == active_date,
+                    DailyQuest.guild_id == guild_id,
+                    DailyQuest.is_active.is_(True),
+                    DailyQuest.expires_at > now,
+                )
+            )
+
+            logger.info(
+                "DailyQuest query inputs | guild_id=%s active_date=%s now=%s",
+                guild_id,
+                active_date,
+                now,
+            )
+    
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+    
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get daily quest: {e}"
+            ) from e
+
+    async def create_quest(
+        self,
+        *,
+        guild_id: str,
+        title: str,
+        prompt: str,
+        quest_type: str = "daily",
+        python_script: Optional[str] = None,
+        input_generator_script: Optional[str] = None,
+        solution_validator_script: Optional[str] = None,
+    ) -> Quest:
+        try:
+            quest = Quest(
+                guild_id=guild_id,
+                title=title,
+                prompt=prompt,
+                quest_type=quest_type,
+                python_script=python_script,
+                input_generator_script=input_generator_script,
+                solution_validator_script=solution_validator_script,
+            )
+
+            self.session.add(quest)
+            await self.session.commit()
+            await self.session.refresh(quest)
+
+            return quest
+
+        except IntegrityError as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(
+                f"Quest integrity error: {e}"
+            ) from e
+
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(
+                f"Failed to create quest: {e}"
+            ) from e
 
 class CampaignOperations:
     """Database operations for campaign management system.
