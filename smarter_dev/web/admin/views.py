@@ -2717,6 +2717,35 @@ async def quest_schedule(request: Request) -> Response:
         status_code=302,
     )
 
+async def quest_delete(request: Request) -> Response:
+    guild_id = request.path_params["guild_id"]
+    quest_id = request.path_params["quest_id"]
+
+    try:
+        async with get_db_session_context() as session:
+            quest = await session.get(Quest, quest_id)
+
+            if not quest or quest.guild_id != guild_id:
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/quests?error=not_found",
+                    status_code=302,
+                )
+
+            await session.delete(quest)
+            await session.commit()
+
+        return RedirectResponse(
+            url=f"/admin/guilds/{guild_id}/quests?deleted=1",
+            status_code=302,
+        )
+
+    except Exception as e:
+        logger.error(f"Error deleting quest {quest_id} in guild {guild_id}: {e}")
+        return RedirectResponse(
+            url=f"/admin/guilds/{guild_id}/quests?error=delete_failed",
+            status_code=302,
+        )
+
 async def quest_create(request: Request) -> Response:
     guild_id = request.path_params["guild_id"]
     guild = await get_guild_info(guild_id)
