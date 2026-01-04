@@ -1,5 +1,9 @@
-{% extends "admin/base_sidebar.html" %} {% block title %}Create Quest{% endblock
-%} {% block page_title %}Create Quest{% endblock %} {% block breadcrumb_items %}
+{% extends "admin/base_sidebar.html" %}
+
+{% block title %}Create Quest{% endblock %}
+{% block page_title %}Create Quest{% endblock %}
+
+{% block breadcrumb_items %}
 <li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
 <li class="breadcrumb-item">
   <a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a>
@@ -8,7 +12,9 @@
   <a href="/admin/guilds/{{ guild.id }}/quests">Quests</a>
 </li>
 <li class="breadcrumb-item active">Create</li>
-{% endblock %} {% block content %}
+{% endblock %}
+
+{% block content %}
 <div class="row">
   <div class="col-md-8">
     <div class="card">
@@ -20,6 +26,7 @@
           Create New Quest
         </h3>
       </div>
+
       <div class="card-body">
         {% if errors %}
         <div class="alert alert-danger">
@@ -31,7 +38,10 @@
         </div>
         {% endif %}
 
-        <form method="post">
+        <!-- IMPORTANT: multipart -->
+        <form method="post" enctype="multipart/form-data">
+
+          <!-- Title -->
           <div class="mb-3">
             <label class="form-label required">Quest Title</label>
             <input
@@ -43,13 +53,18 @@
             />
           </div>
 
+          <!-- Prompt -->
           <div class="mb-3">
             <label class="form-label required">Prompt</label>
-            <textarea class="form-control" name="prompt" rows="6" required>
-{{ form_data.prompt if form_data else '' }}</textarea
-            >
+            <textarea
+              class="form-control"
+              name="prompt"
+              rows="6"
+              required
+            >{{ form_data.prompt if form_data else '' }}</textarea>
           </div>
 
+          <!-- Quest Type -->
           <div class="mb-4">
             <label class="form-label">Quest Type</label>
             <select class="form-select" name="quest_type">
@@ -59,6 +74,49 @@
             </select>
           </div>
 
+          <!-- Input Generator Script -->
+          <div class="mb-4">
+            <label class="form-label">Input Generator Script</label>
+            <input
+              type="file"
+              class="form-control"
+              name="input_generator_script"
+              accept=".py"
+            />
+            <div class="form-hint">
+              Python script that generates quest input and expected result.
+            </div>
+          </div>
+
+          <!-- Solution Validator Script -->
+          <div class="mb-4">
+            <label class="form-label">Solution Validator Script</label>
+            <input
+              type="file"
+              class="form-control"
+              name="solution_validator_script"
+              accept=".py"
+            />
+            <div class="form-hint">
+              Optional custom validation logic for submissions.
+            </div>
+          </div>
+
+          <!-- Reference Script -->
+          <div class="mb-4">
+            <label class="form-label">Reference Python Script</label>
+            <input
+              type="file"
+              class="form-control"
+              name="python_script"
+              accept=".py"
+            />
+            <div class="form-hint">
+              Optional reference implementation (admin only).
+            </div>
+          </div>
+
+          <!-- Actions -->
           <div class="form-footer">
             <button type="submit" class="btn btn-primary">
               <svg class="icon me-2" width="24" height="24">
@@ -66,10 +124,11 @@
               </svg>
               Create Quest
             </button>
-            <a href="/admin/guilds/{{ guild.id }}/quests" class="btn btn-link"
-              >Cancel</a
-            >
+            <a href="/admin/guilds/{{ guild.id }}/quests" class="btn btn-link">
+              Cancel
+            </a>
           </div>
+
         </form>
       </div>
     </div>

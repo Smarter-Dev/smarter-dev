@@ -2717,6 +2717,35 @@ async def quest_schedule(request: Request) -> Response:
         status_code=302,
     )
 
+async def quest_delete(request: Request) -> Response:
+    guild_id = request.path_params["guild_id"]
+    quest_id = request.path_params["quest_id"]
+
+    try:
+        async with get_db_session_context() as session:
+            quest = await session.get(Quest, quest_id)
+
+            if not quest or quest.guild_id != guild_id:
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/quests?error=not_found",
+                    status_code=302,
+                )
+
+            await session.delete(quest)
+            await session.commit()
+
+        return RedirectResponse(
+            url=f"/admin/guilds/{guild_id}/quests?deleted=1",
+            status_code=302,
+        )
+
+    except Exception as e:
+        logger.error(f"Error deleting quest {quest_id} in guild {guild_id}: {e}")
+        return RedirectResponse(
+            url=f"/admin/guilds/{guild_id}/quests?error=delete_failed",
+            status_code=302,
+        )
+
 async def quest_create(request: Request) -> Response:
     guild_id = request.path_params["guild_id"]
     guild = await get_guild_info(guild_id)
@@ -2730,21 +2759,34 @@ async def quest_create(request: Request) -> Response:
                 "title": "Create Quest",
             },
         )
+
     form = await request.form()
     errors = []
-    
+
+    # --- Basic fields ---
     raw_title = form.get("title")
     raw_prompt = form.get("prompt")
     raw_type = form.get("quest_type")
+
     title = raw_title.strip() if isinstance(raw_title, str) else ""
     prompt = raw_prompt.strip() if isinstance(raw_prompt, str) else ""
     quest_type = raw_type if isinstance(raw_type, str) else "daily"
-    
+
     if not title:
         errors.append("Quest title is required")
     if not prompt:
         errors.append("Quest prompt is required")
-    
+
+    # --- Input generator script (THE FIX) ---
+    input_generator_script = None
+    file = form.get("input_generator_script")
+
+    if file and hasattr(file, "file") and file.filename:
+        try:
+            input_generator_script = (await file.read()).decode("utf-8")
+        except Exception as e:
+            errors.append(f"Failed to read input generator script: {e}")
+
     if errors:
         return templates.TemplateResponse(
             "admin/quest_create.html",
@@ -2764,10 +2806,11 @@ async def quest_create(request: Request) -> Response:
             title=title,
             prompt=prompt,
             quest_type=quest_type,
+            input_generator_script=input_generator_script,  # ← THIS WAS MISSING
         )
         session.add(quest)
         await session.commit()
-    
+
     return RedirectResponse(
         f"/admin/guilds/{guild_id}/quests?created=1",
         status_code=302,

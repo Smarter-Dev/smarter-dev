@@ -19,6 +19,7 @@ from smarter_dev.web.admin.views import (
     quest_edit,
     quest_schedule,
     quests_list,
+    quest_delete,
     squads_config,
     api_keys_list,
     api_keys_create,
@@ -237,6 +238,12 @@ admin_routes = [
         name="admin_quest_create",
     ),
     Route(
+        "/guilds/{guild_id}/quests/{quest_id}/delete",
+        admin_required(quest_delete),
+        methods=["POST"],
+        name="admin_quest_delete"
+    ),
+    Route(
         "/guilds/{guild_id}/quests/{quest_id}/edit",
         admin_required(quest_edit),
         methods=["GET", "POST"],
@@ -272,6 +279,7 @@ admin_routes = [
         methods=["POST"],
         name="admin_campaign_delete",
     ),
+
     Route(
         "/guilds/{guild_id}/campaigns/{campaign_id}/challenges",
         admin_required(campaign_challenges),
