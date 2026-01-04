@@ -96,14 +96,34 @@
 
             <td>
               <div class="btn-group">
+                <!-- Edit -->
                 <a
                   href="/admin/guilds/{{ guild.id }}/quests/{{ quest.id }}/edit{% if dq %}?date={{ dq.active_date.isoformat() }}{% endif %}"
                   class="btn btn-sm btn-outline-secondary"
+                  title="Edit Quest"
                 >
                   <svg class="icon" width="16" height="16">
                     <use xlink:href="#tabler-edit"></use>
                   </svg>
                 </a>
+
+                <!-- Delete -->
+                <form
+                  method="post"
+                  action="/admin/guilds/{{ guild.id }}/quests/{{ quest.id }}/delete"
+                  onsubmit="return confirm('Are you sure you want to delete this quest?')"
+                  class="d-inline"
+                >
+                  <button
+                    type="submit"
+                    class="btn btn-sm btn-outline-danger"
+                    title="Delete Quest"
+                  >
+                    <svg class="icon" width="16" height="16">
+                      <use xlink:href="#tabler-trash"></use>
+                    </svg>
+                  </button>
+                </form>
               </div>
             </td>
           </tr>
