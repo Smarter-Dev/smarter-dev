@@ -1,5 +1,4 @@
 from __future__ import annotations
-from fastapi import APIRouter, Depends, HTTPException, status, Query
 import logging
 from typing import TYPE_CHECKING
 
@@ -8,8 +7,6 @@ import hikari
 import lightbulb
 import logging
 from smarter_dev.shared.config import Settings, get_settings
-
-router = APIRouter(prefix="/quests", tags=["quests"])
 
 plugin = lightbulb.Plugin("quests")
 
@@ -45,6 +42,9 @@ def initialize_client(settings: Settings, default_timeout=30):
 @lightbulb.command("current", "View current quest information")
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def event_command(ctx: lightbulb.Context) -> None:
+
+    logger.info("Quests/current hit")
+
     try:
         await defer_ephemeral(ctx)
 
@@ -55,10 +55,20 @@ async def event_command(ctx: lightbulb.Context) -> None:
 
         api_client = initialize_client(settings)
 
+        logger.info("Attempting to hit quests/daily/current")
+
         response = await api_client.get(f"/quests/daily/current?guild_id={guild_id}")
+
+        logger.info("Received response from quests/daily/current:")
 
         data = response.json()
         quest = data["quest"]
+
+        if data["quest"] is None:
+            await ctx.edit_last_response("🗓️ No daily quest yet.\nCheck back later!")
+            return
+
+        logger.info("Embedding quests")
 
         embed = hikari.Embed(
             title="🗓️ Daily Quest",
