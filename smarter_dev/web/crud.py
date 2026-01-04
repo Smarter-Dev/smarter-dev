@@ -31,6 +31,8 @@ from smarter_dev.web.models import (
     ForumUserSubscription,
     Quest,
     QuestProgress,
+    QuestSubmission,
+    QuestInput,
     DailyQuest,
     Campaign,
     Challenge,
@@ -2605,9 +2607,9 @@ class QuestOperations:
         self.session = session
 
     async def get_quest_by_id(
-        self,
-        quest_id: UUID,
-        guild_id: Optional[str] = None,
+            self,
+            quest_id: UUID,
+            guild_id: Optional[str] = None,
     ) -> Optional[Quest]:
         try:
             query = select(Quest).where(Quest.id == quest_id)
@@ -2623,16 +2625,31 @@ class QuestOperations:
                 f"Failed to get quest: {e}"
             ) from e
 
+    async def get_daily_quest_by_id(self, daily_quest_id: UUID, guild_id: UUID) -> Optional[DailyQuest]:
+        try:
+            query = select(DailyQuest).where(DailyQuest.id == daily_quest_id)
+
+            if guild_id is not None:
+                query = query.where(Quest.guild_id == guild_id)
+
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get daily quest: {e}"
+            ) from e
+
 
     async def get_daily_quest(
-        self,
-        active_date: date,
-        guild_id: str,
+            self,
+            active_date: date,
+            guild_id: str,
     ) -> Optional[DailyQuest]:
         try:
             now = datetime.now(timezone.utc)
             logger.info("Now is=%s", now)
-    
+
             query = (
                 select(DailyQuest)
                 .join(DailyQuest.quest)
@@ -2650,25 +2667,25 @@ class QuestOperations:
                 active_date,
                 now,
             )
-    
+
             result = await self.session.execute(query)
             return result.scalar_one_or_none()
-    
+
         except Exception as e:
             raise DatabaseOperationError(
                 f"Failed to get daily quest: {e}"
             ) from e
 
     async def create_quest(
-        self,
-        *,
-        guild_id: str,
-        title: str,
-        prompt: str,
-        quest_type: str = "daily",
-        python_script: Optional[str] = None,
-        input_generator_script: Optional[str] = None,
-        solution_validator_script: Optional[str] = None,
+            self,
+            *,
+            guild_id: str,
+            title: str,
+            prompt: str,
+            quest_type: str = "daily",
+            python_script: Optional[str] = None,
+            input_generator_script: Optional[str] = None,
+            solution_validator_script: Optional[str] = None,
     ) -> Quest:
         try:
             quest = Quest(
@@ -2698,6 +2715,260 @@ class QuestOperations:
             raise DatabaseOperationError(
                 f"Failed to create quest: {e}"
             ) from e
+
+
+class QuestInputOperations:
+    """Database operations for daily quest input generation.
+    Exactly one input is generated per DailyQuest and shared by all users.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_or_create_input(
+        self,
+        daily_quest_id: UUID,
+        script: Optional[str] = None,
+    ) -> tuple[str, str]:
+        """
+        Get existing input for a daily quest or generate it once.
+
+        Returns:
+            (input_data, result_data)
+        """
+        try:
+            # 1. Check if input already exists
+            existing = await self.get_input(daily_quest_id)
+            if existing:
+                return existing.input_data, existing.result_data
+
+            # 2. Generate input if missing
+            if not script:
+                raise DatabaseOperationError(
+                    "No input_generator_script provided for quest"
+                )
+
+            input_data, result_data = await self._execute_script(script)
+
+            quest_input = QuestInput(
+                daily_quest_id=daily_quest_id,
+                input_data=input_data,
+                result_data=result_data,
+            )
+
+            self.session.add(quest_input)
+            await self.session.commit()
+
+            return input_data, result_data
+
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(
+                f"Failed to get or create quest input: {e}"
+            ) from e
+
+    async def get_input(
+        self,
+        daily_quest_id: UUID,
+    ) -> Optional[QuestInput]:
+        """Fetch existing input without generating it."""
+        try:
+            result = await self.session.execute(
+                select(QuestInput).where(
+                    QuestInput.daily_quest_id == daily_quest_id
+                )
+            )
+            return result.scalar_one_or_none()
+
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get quest input: {e}"
+            ) from e
+
+    async def _execute_script(self, script: str) -> tuple[str, str]:
+        import json
+        import io
+        from contextlib import redirect_stdout
+
+        try:
+            buf = io.StringIO()
+            exec_globals = {"__builtins__": __builtins__}
+
+            with redirect_stdout(buf):
+                exec(script, exec_globals)
+
+            raw = buf.getvalue().strip()
+
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise ScriptExecutionError(
+                    f"Script output is not valid JSON: {e}"
+                )
+
+            if not isinstance(payload, dict):
+                raise ScriptExecutionError("Script output must be a JSON object")
+
+            if "input" not in payload or "result" not in payload:
+                raise ScriptExecutionError(
+                    "Script output must contain 'input' and 'result'"
+                )
+
+            return str(payload["input"]), str(payload["result"])
+
+        except ScriptExecutionError:
+            raise
+        except Exception as e:
+            raise ScriptExecutionError(
+                f"Script execution failed: {e}"
+            ) from e
+
+
+class QuestSubmissionOperations:
+    """Competitive submission handling for daily quests."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def submit_solution(
+        self,
+        daily_quest_id: UUID,
+        guild_id: str,
+        squad_id: UUID,
+        user_id: str,
+        username: str,
+        submitted_solution: str,
+    ) -> tuple[bool, bool, Optional[int]]:
+        """
+        Returns:
+            (is_correct, is_first_success, points_earned)
+        """
+        try:
+            # 1. Fetch expected result
+            input_ops = QuestInputOperations(self.session)
+            quest_input = await input_ops.get_input(daily_quest_id)
+
+            if not quest_input:
+                raise ValueError("Quest input not generated")
+
+            expected = quest_input.result_data.strip()
+            submitted = submitted_solution.strip()
+            is_correct = expected == submitted
+
+            is_first_success = False
+            points_earned = None
+
+            if is_correct:
+                existing = await self._get_first_success_for_squad(
+                    daily_quest_id,
+                    squad_id,
+                )
+
+                is_first_success = existing is None
+
+                # Only add points on first submission
+                if is_first_success:
+                    points_earned = self._calculate_points()
+
+            submission = QuestSubmission(
+                daily_quest_id=daily_quest_id,
+                guild_id=guild_id,
+                squad_id=squad_id,
+                user_id=user_id,
+                username=username,
+                submitted_solution=submitted_solution,
+                is_correct=is_correct,
+                is_first_success=is_first_success,
+                points_earned=points_earned,
+            )
+
+            self.session.add(submission)
+            await self.session.commit()
+
+            return is_correct, is_first_success, points_earned
+
+        except Exception as e:
+            await self.session.rollback()
+            if isinstance(e, ValueError):
+                raise
+            raise DatabaseOperationError(
+                f"Failed to submit quest solution: {e}"
+            ) from e
+
+    async def _get_first_success_for_squad(
+        self,
+        daily_quest_id: UUID,
+        squad_id: UUID,
+    ) -> Optional[QuestSubmission]:
+        result = await self.session.execute(
+            select(QuestSubmission).where(
+                QuestSubmission.daily_quest_id == daily_quest_id,
+                QuestSubmission.squad_id == squad_id,
+                QuestSubmission.is_first_success.is_(True),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_daily_quest_scoreboard(
+            self,
+            daily_quest_id: UUID,
+    ) -> list[dict]:
+        """
+        Get squad rankings for a single daily quest.
+
+        Returns:
+            [
+              {
+                "squad_id": ...,
+                "squad_name": ...,
+                "points": ...,
+                "winner_user_id": ...,
+                "winner_username": ...
+              },
+              ...
+            ]
+        """
+        try:
+            query = (
+                select(
+                    Squad.id.label("squad_id"),
+                    Squad.name.label("squad_name"),
+                    QuestSubmission.points_earned.label("points"),
+                    QuestSubmission.user_id.label("winner_user_id"),
+                    QuestSubmission.username.label("winner_username"),
+                )
+                .select_from(QuestSubmission)
+                .join(Squad, QuestSubmission.squad_id == Squad.id)
+                .where(
+                    QuestSubmission.daily_quest_id == daily_quest_id,
+                    QuestSubmission.is_first_success.is_(True),
+                )
+                .order_by(desc(QuestSubmission.points_earned))
+            )
+
+            result = await self.session.execute(query)
+            rows = result.fetchall()
+
+            return [
+                {
+                    "squad_id": row.squad_id,
+                    "squad_name": row.squad_name,
+                    "points": row.points or 0,
+                    "winner_user_id": row.winner_user_id,
+                    "winner_username": row.winner_username,
+                }
+                for row in rows
+            ]
+
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get daily quest scoreboard: {e}"
+            ) from e
+
+    def _calculate_points(self) -> int:
+        """Simple, deterministic quest scoring."""
+        return 100
+
 
 class CampaignOperations:
     """Database operations for campaign management system.

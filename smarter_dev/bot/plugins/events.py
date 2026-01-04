@@ -1352,6 +1352,120 @@ async def handle_challenge_submit_solution_interaction(event: hikari.Interaction
         except Exception as e2:
             logger.error(f"Failed to send challenge submit solution error response: {e2}")
 
+async def _provide_daily_quest_input_directly(
+    event: hikari.InteractionCreateEvent,
+    api_client,
+    daily_quest_id: str,
+    guild_id: str,
+    user_id: str,
+) -> None:
+    """Provide daily quest input directly.
+
+    Args:
+        event: The interaction event
+        api_client: The API client to use
+        daily_quest_id: The daily quest ID
+        guild_id: The guild ID
+        user_id: The user ID
+    """
+    try:
+        response = await api_client.get(
+            f"/quests/{daily_quest_id}/input",
+            params={
+                "guild_id": guild_id,
+                "user_id": user_id,
+            },
+        )
+
+        if response.status_code != 200:
+            if response.status_code == 404:
+                if "member of any squad" in response.text:
+                    content = "❌ You must be a member of a squad to get quest input."
+                else:
+                    content = "❌ Daily quest not found or not active."
+            elif response.status_code == 403:
+                content = "❌ This daily quest is not active."
+            else:
+                content = "❌ Failed to get daily quest input."
+
+            await event.interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_CREATE,
+                content=content,
+            )
+            return
+
+        data = response.json()
+        input_data = data.get("input_data", "")
+        quest_info = data.get("quest", {})
+        quest_title = quest_info.get("title", "Daily Quest")
+
+        # safe filename
+        import re
+        safe_title = re.sub(r"[^a-zA-Z0-9_-]", "_", quest_title.lower())
+        filename = f"{safe_title}.txt"
+
+        file_attachment = hikari.Bytes(
+            input_data.encode("utf-8"),
+            filename,
+        )
+
+        await event.interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_CREATE,
+            content=f"<@{user_id}> requested the daily quest input:\n\n📥 **{quest_title}**",
+            attachment=file_attachment,
+        )
+
+    except Exception as e:
+        logger.exception(f"Failed to provide daily quest input: {e}")
+        await event.interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_CREATE,
+            content="❌ Failed to get daily quest input. Please try again later.",
+        )
+
+async def handle_daily_quest_get_input_interaction(
+    event: hikari.InteractionCreateEvent,
+) -> None:
+    if not isinstance(event.interaction, hikari.ComponentInteraction):
+        return
+
+    user_id = str(event.interaction.user.id)
+    guild_id = str(event.interaction.guild_id) if event.interaction.guild_id else None
+
+    if not guild_id:
+        await event.interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_UPDATE,
+            content="❌ This command can only be used in a server.",
+            components=[],
+        )
+        return
+
+    custom_id_parts = event.interaction.custom_id.split(":")
+    if len(custom_id_parts) != 2 or custom_id_parts[0] != "get_daily_quest_input":
+        return
+
+    daily_quest_id = custom_id_parts[1]
+
+    api_client = None
+    for service in getattr(event.app.d, "_services", {}).values():
+        if hasattr(service, "_api_client"):
+            api_client = service._api_client
+            break
+
+    if not api_client:
+        await event.interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_UPDATE,
+            content="❌ Service unavailable.",
+            components=[],
+        )
+        return
+
+    await _provide_daily_quest_input_directly(
+        event,
+        api_client,
+        daily_quest_id,
+        guild_id,
+        user_id,
+    )
 
 def setup_interaction_handlers(bot: hikari.GatewayBot) -> None:
     """Set up interaction event handlers for the bot.

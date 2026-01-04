@@ -1543,6 +1543,35 @@ class Quest(Base):
     def __repr__(self) -> str:
         return f"<Quest(title='{self.title}', guild_id='{self.guild_id}', type='{self.quest_type}')>"
 
+class QuestInput(Base):
+    __tablename__ = "quest_inputs"
+
+    daily_quest_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("daily_quests.id", ondelete="CASCADE"),
+        primary_key=True,
+        doc="Daily quest instance this input belongs to",
+    )
+
+    input_data: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Generated quest input",
+    )
+
+    result_data: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Expected result for validation",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
 class DailyQuest(Base):
     """Quest instance active for a specific date in a guild.
 
@@ -1619,6 +1648,80 @@ class DailyQuest(Base):
     @property
     def is_expired(self) -> bool:
         return datetime.now(timezone.utc) >= self.expires_at
+
+class QuestSubmission(Base):
+    __tablename__ = "quest_submissions"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+
+    daily_quest_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("daily_quests.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        index=True,
+        nullable=False,
+    )
+
+    squad_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        index=True,
+        nullable=False,
+    )
+
+    user_id: Mapped[str] = mapped_column(
+        String,
+        index=True,
+        nullable=False,
+    )
+
+    username: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    submitted_solution: Mapped[str] = mapped_column(Text, nullable=False)
+
+    is_correct: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+
+    is_first_success: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+    )
+
+    points_earned: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_quest_submissions_daily_squad_first",
+            "daily_quest_id",
+            "squad_id",
+            "is_first_success",
+        ),
+    )
+
 
 class QuestProgress(Base):
     """Per-user completion tracking for a daily quest instance."""
