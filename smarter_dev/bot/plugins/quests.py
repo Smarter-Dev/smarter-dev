@@ -37,6 +37,73 @@ def initialize_client(settings: Settings, default_timeout=30):
         default_timeout=default_timeout,
     )
 
+@quests_group.child
+@lightbulb.command("scoreboard", "View the daily quest scoreboard")
+@lightbulb.implements(lightbulb.SlashSubCommand)
+async def scoreboard_command(ctx: lightbulb.Context) -> None:
+    try:
+        await defer_ephemeral(ctx)
+
+        guild_id = ctx.guild_id
+        if guild_id is None:
+            await ctx.edit_last_response("This command can only be used in a server.")
+            return
+
+        api_client = initialize_client(settings)
+
+        response = await api_client.get(
+            f"/quests/scoreboard?guild_id={guild_id}"
+        )
+        data = response.json()
+
+        quest = data.get("quest")
+        scoreboard = data.get("scoreboard", [])
+
+        if not quest:
+            await ctx.edit_last_response("🗓️ No active daily quest.")
+            return
+
+        embed = hikari.Embed(
+            title="🏆 Daily Quest Scoreboard",
+            description=f"**{quest['title']}**",
+            color=0xF1C40F,
+        )
+
+        if scoreboard:
+            lines = []
+            for i, row in enumerate(scoreboard, start=1):
+                medal = (
+                    "🥇" if i == 1 else
+                    "🥈" if i == 2 else
+                    "🥉" if i == 3 else f"**{i}.**"
+                )
+
+                lines.append(
+                    f"{medal} **{row['squad_name']}** — {row['points']} pts\n"
+                    f"↳ solved by `{row['winner_username']}`"
+                )
+
+            embed.add_field(
+                name="Standings",
+                value="\n".join(lines),
+                inline=False,
+            )
+        else:
+            embed.add_field(
+                name="Standings",
+                value="No squad has solved the quest yet.",
+                inline=False,
+            )
+
+        embed.set_footer(text="First correct submission per squad earns points")
+
+        await ctx.edit_last_response(embed=embed)
+
+    except Exception as e:
+        logger.exception("Error in /quests scoreboard")
+        await ctx.edit_last_response(
+            "Failed to load daily quest scoreboard."
+        )
 
 @quests_group.child
 @lightbulb.command("current", "View current quest information")
@@ -95,6 +162,7 @@ async def event_command(ctx: lightbulb.Context) -> None:
         await ctx.edit_last_response(
             "Failed to load current quest. Please try again later."
         )
+
 
 
 def load(bot: lightbulb.BotApp) -> None:

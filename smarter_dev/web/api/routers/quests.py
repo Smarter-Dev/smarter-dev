@@ -223,6 +223,48 @@ async def get_daily_quest_input(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
         )
+
+@router.get("/scoreboard")
+async def get_daily_quest_scoreboard(
+    guild_id: str = Query(..., description="Discord guild ID"),
+    session: AsyncSession = Depends(get_db_session),
+    api_key=Depends(verify_api_key),
+) -> Dict[str, Any]:
+    date_provider = get_date_provider()
+    today = date_provider.today()
+
+    try:
+        quest_ops = QuestOperations(session)
+        daily = await quest_ops.get_daily_quest(
+            active_date=today,
+            guild_id=guild_id,
+        )
+
+        if not daily:
+            return {
+                "quest": None,
+                "scoreboard": [],
+            }
+
+        submission_ops = QuestSubmissionOperations(session)
+        scoreboard = await submission_ops.get_daily_quest_scoreboard(daily.id)
+
+        return {
+            "quest": {
+                "id": str(daily.id),
+                "title": daily.quest.title,
+                "active_date": daily.active_date.isoformat(),
+                "expires_at": daily.expires_at.isoformat(),
+            },
+            "scoreboard": scoreboard,
+        }
+
+    except DatabaseOperationError as e:
+        logger.error(f"Database error getting daily quest scoreboard: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve daily quest scoreboard",
+        )
 @router.get("/detailed-scoreboard")
 async def get_detailed_scoreboard(
         guild_id: str = Query(..., description="Discord guild ID"),
