@@ -2759,21 +2759,34 @@ async def quest_create(request: Request) -> Response:
                 "title": "Create Quest",
             },
         )
+
     form = await request.form()
     errors = []
-    
+
+    # --- Basic fields ---
     raw_title = form.get("title")
     raw_prompt = form.get("prompt")
     raw_type = form.get("quest_type")
+
     title = raw_title.strip() if isinstance(raw_title, str) else ""
     prompt = raw_prompt.strip() if isinstance(raw_prompt, str) else ""
     quest_type = raw_type if isinstance(raw_type, str) else "daily"
-    
+
     if not title:
         errors.append("Quest title is required")
     if not prompt:
         errors.append("Quest prompt is required")
-    
+
+    # --- Input generator script (THE FIX) ---
+    input_generator_script = None
+    file = form.get("input_generator_script")
+
+    if file and hasattr(file, "file") and file.filename:
+        try:
+            input_generator_script = (await file.read()).decode("utf-8")
+        except Exception as e:
+            errors.append(f"Failed to read input generator script: {e}")
+
     if errors:
         return templates.TemplateResponse(
             "admin/quest_create.html",
@@ -2793,10 +2806,11 @@ async def quest_create(request: Request) -> Response:
             title=title,
             prompt=prompt,
             quest_type=quest_type,
+            input_generator_script=input_generator_script,  # ← THIS WAS MISSING
         )
         session.add(quest)
         await session.commit()
-    
+
     return RedirectResponse(
         f"/admin/guilds/{guild_id}/quests?created=1",
         status_code=302,

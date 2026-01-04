@@ -1603,6 +1603,21 @@ class DailyQuest(Base):
         doc="Quest template this instance is based on",
     )
 
+    is_announced: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        doc="Whether this daily quest has been announced"
+    )
+
+    announced_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc="When the daily quest was announced"
+    )
+
     # Rotation info
     active_date: Mapped[date] = mapped_column(
         Date,

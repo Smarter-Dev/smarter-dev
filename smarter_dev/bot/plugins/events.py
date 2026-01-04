@@ -58,7 +58,7 @@ async def handle_modal_interaction(event: hikari.InteractionCreateEvent) -> None
         # Handle bytes transfer modal
         if custom_id.startswith("send_bytes_modal:"):
             await handle_send_bytes_modal(event)
-        elif custom_id.startswith("submit_solution_modal:"):
+        elif custom_id.startswith(("submit_solution_modal:", "submit_daily_quest_modal:")):
             await handle_solution_submission_modal(event)
         elif custom_id == "beacon_message_modal":
             await handle_beacon_message_modal(event)
@@ -149,7 +149,8 @@ async def handle_solution_submission_modal(event: hikari.InteractionCreateEvent)
     user_id = str(event.interaction.user.id)
 
     # Find the handler
-    handler_key = f"submit_solution_modal:{challenge_id}:{user_id}"
+    prefix = event.interaction.custom_id.split(":")[0]
+    handler_key = f"{prefix}:{challenge_id}:{user_id}"
 
     # Get bot instance from event
     bot = event.app
@@ -233,12 +234,16 @@ async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> 
             await handle_breakdown_share_interaction(event)
         elif custom_id.startswith("get_input:"):
             await handle_challenge_get_input_interaction(event)
+        elif custom_id.startswith("get_daily_quest_input:"):
+            await handle_daily_quest_get_input_interaction(event)
         elif custom_id.startswith("confirm_get_input:"):
             await handle_challenge_confirm_get_input_interaction(event)
         elif custom_id.startswith("cancel_get_input:"):
             await handle_challenge_cancel_get_input_interaction(event)
         elif custom_id.startswith("submit_solution:"):
             await handle_challenge_submit_solution_interaction(event)
+        elif custom_id.startswith("submit_daily_quest:"):
+            await handle_daily_quest_submit_interaction(event)
         else:
             logger.warning(f"Unhandled component interaction: {custom_id}")
 
@@ -1351,6 +1356,61 @@ async def handle_challenge_submit_solution_interaction(event: hikari.Interaction
             )
         except Exception as e2:
             logger.error(f"Failed to send challenge submit solution error response: {e2}")
+
+async def handle_daily_quest_submit_interaction(
+    event: hikari.InteractionCreateEvent
+) -> None:
+    if not isinstance(event.interaction, hikari.ComponentInteraction):
+        return
+
+    user_id = str(event.interaction.user.id)
+    guild_id = str(event.interaction.guild_id)
+    daily_quest_id = event.interaction.custom_id.split(":")[1]
+
+    api_client = None
+    for service in getattr(event.app.d, "_services", {}).values():
+        if hasattr(service, "_api_client"):
+            api_client = service._api_client
+            break
+
+    if not api_client:
+        await event.interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_CREATE,
+            content="❌ Service unavailable.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
+        return
+
+    from smarter_dev.bot.views.challenge_views import (
+        create_solution_submission_modal,
+        SolutionSubmissionModalHandler,
+    )
+
+    modal = create_solution_submission_modal(
+        daily_quest_id,
+        "Daily Quest",
+        modal_prefix="submit_daily_quest_modal",
+    )
+
+    handler = SolutionSubmissionModalHandler(
+        challenge_id=daily_quest_id,
+        challenge_title="Daily Quest",
+        guild_id=guild_id,
+        user=event.interaction.user,
+        api_client=api_client,
+        endpoint=f"/quests/{daily_quest_id}/submit",
+    )
+
+    event.app.d.setdefault("modal_handlers", {})
+    event.app.d["modal_handlers"][
+        f"submit_daily_quest_modal:{daily_quest_id}:{user_id}"
+    ] = handler
+
+    await event.interaction.create_modal_response(
+        modal.title,
+        modal.custom_id,
+        components=modal.components,
+    )
 
 async def _provide_daily_quest_input_directly(
     event: hikari.InteractionCreateEvent,

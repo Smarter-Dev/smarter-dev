@@ -16,7 +16,7 @@ from smarter_dev.shared.database import get_db_session
 from smarter_dev.web.api.dependencies import verify_api_key
 from smarter_dev.web.crud import (
     QuestOperations,
-    DatabaseOperationError, SquadOperations, QuestInputOperations, ScriptExecutionError,
+    DatabaseOperationError, SquadOperations, QuestInputOperations, ScriptExecutionError, QuestSubmissionOperations,
 )
 from smarter_dev.web.models import Campaign, DailyQuest, Quest
 
@@ -68,6 +68,52 @@ async def get_current_daily_quest(
             detail="Failed to retrieve daily quest",
         ) from e
 
+class DailyQuestSubmitBody(BaseModel):
+    guild_id: str
+    user_id: str
+    submitted_solution: str
+
+
+@router.post("/{daily_quest_id}/submit")
+async def submit_daily_quest(
+    daily_quest_id: UUID,
+    body: DailyQuestSubmitBody,
+    session: AsyncSession = Depends(get_db_session),
+    api_key=Depends(verify_api_key),
+) -> dict[str, Any]:
+    guild_id = body.guild_id
+
+    user_id = body.user_id
+    submitted_solution = body.submitted_solution
+
+    squad_ops = SquadOperations()
+    user_squad = await squad_ops.get_user_squad(session, guild_id, user_id)
+    if not user_squad:
+        raise HTTPException(404, "User is not a member of any squad")
+
+    quest_ops = QuestOperations(session)
+    daily_quest = await quest_ops.get_daily_quest_by_id(daily_quest_id, guild_id)
+    if not daily_quest:
+        raise HTTPException(404, "Daily quest not found")
+    if not daily_quest.is_active:
+        raise HTTPException(403, "Daily quest is not active")
+
+    submission_ops = QuestSubmissionOperations(session)
+    is_correct, is_first_success, points = await submission_ops.submit_solution(
+        daily_quest_id=daily_quest_id,
+        guild_id=guild_id,
+        squad_id=user_squad.id,
+        user_id=user_id,
+        username=user_id,  # replace later if you want
+        submitted_solution=submitted_solution,
+    )
+
+    return {
+        "is_correct": is_correct,
+        "is_first_success": is_first_success,
+        "points_earned": points,
+    }
+
 @router.get("/{daily_quest_id}/input")
 async def get_daily_quest_input(
     daily_quest_id: UUID,
@@ -118,27 +164,24 @@ async def get_daily_quest_input(
 
         quest = daily_quest.quest
 
-        # Check if the quest has an input generator script
-        if not quest.input_generator_script:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="This quest does not have input generation configured yet. Please contact an administrator.",
-            )
-
         # Get or generate shared input for the daily quest
         input_ops = QuestInputOperations(session)
 
-        try:
-            input_data, _ = await input_ops.get_or_create_input(
-                daily_quest_id=daily_quest.id,
-                script=quest.input_generator_script,
-            )
-        except ScriptExecutionError as e:
-            logger.error(f"Script execution error for daily quest {daily_quest_id}: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to generate quest input due to script execution error",
-            )
+        # If no generator script, return empty/static input instead of error
+        if not quest.input_generator_script:
+            input_data = "No input required for this quest."
+            result_data = ""
+        else:
+            try:
+                input_data, result_data = await input_ops.get_or_create_input(
+                    daily_quest_id=daily_quest.id,
+                    script=quest.input_generator_script,
+                )
+            except ScriptExecutionError as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to generate quest input",
+                )
 
         logger.info(
             f"Provided daily quest input for user {user_id} (quest={daily_quest_id})"
@@ -180,17 +223,11 @@ async def get_daily_quest_input(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
         )
-
-
-
-
-
-
 @router.get("/detailed-scoreboard")
 async def get_detailed_scoreboard(
         guild_id: str = Query(..., description="Discord guild ID"),
         session: AsyncSession = Depends(get_db_session),
-        api_key=Depends(get_db_session)
+        api_key=Depends(verify_api_key)
 ) -> Dict[str, Any]:
     try:
         quest_ops : QuestOperations = QuestOperations(session)
@@ -217,3 +254,75 @@ async def get_detailed_scoreboard(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
         )
+
+@router.get("/upcoming-announcements")
+async def get_upcoming_quest_announcements(
+    seconds: int = Query(default=45),
+    session: AsyncSession = Depends(get_db_session),
+    api_key=Depends(verify_api_key),
+) -> Dict[str, list[dict[str, Any]]]:
+    try:
+        quest_ops = QuestOperations(session)
+
+        now = datetime.now(timezone.utc)
+        window_end = now + timedelta(seconds=seconds)
+
+        quests = await quest_ops.get_upcoming_daily_quests(
+            window_end=window_end
+        )
+
+        quest_list = []
+        for dq in quests:
+            quest_list.append({
+                "id": str(dq.id),                 # daily_quest_id
+                "quest_id": str(dq.quest.id),
+                "title": dq.quest.title,
+                "description": dq.quest.prompt,
+                "guild_id": dq.guild_id,
+                "release_time": dq.active_date.isoformat(),
+            })
+
+        return {"quests": quest_list}
+
+    except DatabaseOperationError as e:
+        logger.error(f"Failed to get upcoming quest announcements: {e}")
+        raise HTTPException(500, "Failed to retrieve upcoming quests")
+
+@router.post("/{daily_quest_id}/mark-announced")
+async def mark_daily_quest_announced(
+    daily_quest_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    api_key=Depends(verify_api_key),
+) -> Dict[str, bool]:
+    try:
+        quest_ops = QuestOperations(session)
+        success = await quest_ops.mark_daily_quest_announced(daily_quest_id)
+
+        if not success:
+            raise HTTPException(404, "Daily quest not found")
+
+        return {"success": True}
+
+    except DatabaseOperationError as e:
+        logger.error(f"Failed to mark quest announced: {e}")
+        raise HTTPException(500, "Failed to mark quest announced")
+
+@router.post("/{daily_quest_id}/mark-active")
+async def mark_daily_quest_active(
+    daily_quest_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    api_key=Depends(verify_api_key),
+) -> Dict[str, bool]:
+    try:
+        quest_ops = QuestOperations(session)
+        success = await quest_ops.mark_daily_quest_active(daily_quest_id)
+
+        if not success:
+            raise HTTPException(404, "Daily quest not found")
+
+        return {"success": True}
+
+    except DatabaseOperationError as e:
+        logger.error(f"Failed to activate daily quest: {e}")
+        raise HTTPException(500, "Failed to activate daily quest")
+

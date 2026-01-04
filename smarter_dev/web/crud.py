@@ -2625,12 +2625,12 @@ class QuestOperations:
                 f"Failed to get quest: {e}"
             ) from e
 
-    async def get_daily_quest_by_id(self, daily_quest_id: UUID, guild_id: UUID) -> Optional[DailyQuest]:
+    async def get_daily_quest_by_id(self, daily_quest_id: UUID, guild_id: str) -> Optional[DailyQuest]:
         try:
             query = select(DailyQuest).where(DailyQuest.id == daily_quest_id)
 
             if guild_id is not None:
-                query = query.where(Quest.guild_id == guild_id)
+                query = query.where(DailyQuest.guild_id == guild_id)
 
             result = await self.session.execute(query)
             return result.scalar_one_or_none()
@@ -2640,6 +2640,95 @@ class QuestOperations:
                 f"Failed to get daily quest: {e}"
             ) from e
 
+    async def get_upcoming_daily_quests(
+            self,
+            window_end: datetime,
+    ) -> list[DailyQuest]:
+        """
+        Daily quests that will become active soon and are not announced yet.
+        """
+        try:
+            now = datetime.now(timezone.utc)
+
+            query = (
+                select(DailyQuest)
+                .join(DailyQuest.quest)
+                .where(
+                    DailyQuest.is_announced.is_(False),
+                    DailyQuest.active_date >= now.date(),
+                    DailyQuest.active_date <= window_end.date(),
+                )
+            )
+
+            result = await self.session.execute(query)
+            return list(result.scalars().all())
+
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get upcoming daily quests: {e}"
+            ) from e
+
+    async def get_pending_daily_quests(self) -> list[DailyQuest]:
+        """
+        Daily quests that should already be announced but aren't.
+        """
+        try:
+            today = datetime.now(timezone.utc).date()
+
+            query = (
+                select(DailyQuest)
+                .where(
+                    DailyQuest.is_announced.is_(False),
+                    DailyQuest.active_date <= today,
+                )
+            )
+
+            result = await self.session.execute(query)
+            return list(result.scalars().all())
+
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get pending daily quests: {e}"
+            ) from e
+
+    async def mark_daily_quest_announced(self, daily_quest_id: UUID) -> bool:
+        try:
+            now = datetime.now(timezone.utc)
+
+            result = await self.session.execute(
+                update(DailyQuest)
+                .where(DailyQuest.id == daily_quest_id)
+                .values(
+                    is_announced=True,
+                    announced_at=now,
+                )
+            )
+
+            await self.session.commit()
+            return result.rowcount > 0
+
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(
+                f"Failed to mark daily quest announced: {e}"
+            ) from e
+
+    async def mark_daily_quest_active(self, daily_quest_id: UUID) -> bool:
+        try:
+            result = await self.session.execute(
+                update(DailyQuest)
+                .where(DailyQuest.id == daily_quest_id)
+                .values(is_active=True)
+            )
+
+            await self.session.commit()
+            return result.rowcount > 0
+
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(
+                f"Failed to activate daily quest: {e}"
+            ) from e
 
     async def get_daily_quest(
             self,
