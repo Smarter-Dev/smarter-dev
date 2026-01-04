@@ -26,16 +26,31 @@ from smarter_dev.shared.database import init_database, close_database
 from smarter_dev.web.api.routers.auth import router as auth_router
 from smarter_dev.web.api.routers.bytes import router as bytes_router
 from smarter_dev.web.api.routers.squads import router as squads_router
-from smarter_dev.web.api.routers.squad_sale_events import router as squad_sale_events_router
+from smarter_dev.web.api.routers.squad_sale_events import (
+    router as squad_sale_events_router,
+)
 from smarter_dev.web.api.routers.admin import router as admin_router
-from smarter_dev.web.api.routers.forum_agents_simple import router as forum_agents_router
-from smarter_dev.web.api.routers.forum_notifications import router as forum_notifications_router
+from smarter_dev.web.api.routers.forum_agents_simple import (
+    router as forum_agents_router,
+)
+from smarter_dev.web.api.routers.quests import router as quests_router
+from smarter_dev.web.api.routers.forum_notifications import (
+    router as forum_notifications_router,
+)
 from smarter_dev.web.api.routers.challenges import router as challenges_router
-from smarter_dev.web.api.routers.scheduled_messages import router as scheduled_messages_router
-from smarter_dev.web.api.routers.repeating_messages import router as repeating_messages_router
+from smarter_dev.web.api.routers.scheduled_messages import (
+    router as scheduled_messages_router,
+)
+from smarter_dev.web.api.routers.repeating_messages import (
+    router as repeating_messages_router,
+)
 from smarter_dev.web.api.routers.members import router as members_router
 from smarter_dev.web.api.routers.advent_of_code import router as advent_of_code_router
-from smarter_dev.web.api.schemas import ErrorResponse, ValidationErrorResponse, ErrorDetail
+from smarter_dev.web.api.schemas import (
+    ErrorResponse,
+    ValidationErrorResponse,
+    ErrorDetail,
+)
 from smarter_dev.web.crud import DatabaseOperationError, NotFoundError, ConflictError
 from smarter_dev.web.security_headers import SecurityHeadersMiddleware
 from smarter_dev.web.http_methods_middleware import HTTPMethodsMiddleware
@@ -46,28 +61,28 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage FastAPI application lifespan.
-    
+
     This function handles initialization and cleanup of database connections
     and other resources during application startup and shutdown.
-    
+
     Args:
         app: FastAPI application instance
-        
+
     Yields:
         None: Control to the application
     """
     # Startup
     settings = get_settings()
-    
+
     try:
         # Initialize database connection
         await init_database()
-        
+
         # Store settings in app state for access in dependencies
         app.state.settings = settings
-        
+
         yield
-        
+
     finally:
         # Cleanup
         await close_database()
@@ -105,8 +120,9 @@ api = FastAPI(
     lifespan=lifespan,
     docs_url=docs_url,
     redoc_url=redoc_url,
-    openapi_url=openapi_url
+    openapi_url=openapi_url,
 )
+
 
 # Request ID and debug middleware
 @api.middleware("http")
@@ -114,7 +130,7 @@ async def add_request_id_middleware(request: Request, call_next):
     """Add request ID to request state for tracking."""
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
     request.state.request_id = request_id
-    
+
     # Debug logging for squad join requests
     if "squad" in str(request.url) and request.method == "POST":
         body = b""
@@ -126,15 +142,23 @@ async def add_request_id_middleware(request: Request, call_next):
                 body = await request.body()
             except:
                 pass
-        
-        logger.error(f"DEBUG MIDDLEWARE: POST {request.url}, method={request.method}, body={body[:500]}, headers={dict(request.headers)}")
-    
+
+        logger.error(
+            f"DEBUG MIDDLEWARE: POST {request.url}, method={request.method}, body={body[:500]}, headers={dict(request.headers)}"
+        )
+
     response = await call_next(request)
-    
+
     # Debug logging for failed squad join responses
-    if "squad" in str(request.url) and request.method == "POST" and response.status_code >= 400:
-        logger.error(f"DEBUG MIDDLEWARE RESPONSE: status={response.status_code}, response_headers={dict(response.headers)}")
-    
+    if (
+        "squad" in str(request.url)
+        and request.method == "POST"
+        and response.status_code >= 400
+    ):
+        logger.error(
+            f"DEBUG MIDDLEWARE RESPONSE: status={response.status_code}, response_headers={dict(response.headers)}"
+        )
+
     response.headers["x-request-id"] = request_id
     return response
 
@@ -162,176 +186,168 @@ async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
     """Handle Pydantic validation errors.
-    
+
     Args:
         request: FastAPI request object
         exc: Validation exception
-        
+
     Returns:
         JSONResponse: Formatted validation error response
     """
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-    
+
     # Convert Pydantic errors to our format
     errors = []
     for error in exc.errors():
         field_path = " -> ".join(str(loc) for loc in error["loc"])
-        errors.append(ErrorDetail(
-            code=error["type"],
-            message=error["msg"],
-            field=field_path
-        ))
-    
+        errors.append(
+            ErrorDetail(code=error["type"], message=error["msg"], field=field_path)
+        )
+
     logger.warning(
         "Validation error",
         extra={
             "request_id": request_id,
             "url": str(request.url),
             "method": request.method,
-            "errors": [error.model_dump() for error in errors]
-        }
+            "errors": [error.model_dump() for error in errors],
+        },
     )
-    
+
     response = ValidationErrorResponse(
         detail="Request validation failed",
         errors=errors,
         timestamp=datetime.now(timezone.utc),
-        request_id=request_id
+        request_id=request_id,
     )
-    
-    return JSONResponse(
-        status_code=422,
-        content=response.model_dump()
-    )
+
+    return JSONResponse(status_code=422, content=response.model_dump())
 
 
 @api.exception_handler(NotFoundError)
-async def not_found_exception_handler(request: Request, exc: NotFoundError) -> JSONResponse:
+async def not_found_exception_handler(
+    request: Request, exc: NotFoundError
+) -> JSONResponse:
     """Handle NotFoundError exceptions.
-    
+
     Args:
         request: FastAPI request object
         exc: NotFoundError exception
-        
+
     Returns:
         JSONResponse: 404 error response
     """
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-    
+
     logger.info(
         "Resource not found",
         extra={
             "request_id": request_id,
             "url": str(request.url),
             "method": request.method,
-            "error": str(exc)
-        }
+            "error": str(exc),
+        },
     )
-    
+
     response = ErrorResponse(
         detail=str(exc),
         type="not_found_error",
         timestamp=datetime.now(timezone.utc),
-        request_id=request_id
+        request_id=request_id,
     )
-    
-    return JSONResponse(
-        status_code=404,
-        content=response.model_dump()
-    )
+
+    return JSONResponse(status_code=404, content=response.model_dump())
 
 
 @api.exception_handler(ConflictError)
-async def conflict_exception_handler(request: Request, exc: ConflictError) -> JSONResponse:
+async def conflict_exception_handler(
+    request: Request, exc: ConflictError
+) -> JSONResponse:
     """Handle ConflictError exceptions.
-    
+
     Args:
         request: FastAPI request object
         exc: ConflictError exception
-        
+
     Returns:
         JSONResponse: 409 error response
     """
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-    
+
     logger.warning(
         "Conflict error",
         extra={
             "request_id": request_id,
             "url": str(request.url),
             "method": request.method,
-            "error": str(exc)
-        }
+            "error": str(exc),
+        },
     )
-    
+
     response = ErrorResponse(
         detail=str(exc),
         type="conflict_error",
         timestamp=datetime.now(timezone.utc),
-        request_id=request_id
+        request_id=request_id,
     )
-    
-    return JSONResponse(
-        status_code=409,
-        content=response.model_dump()
-    )
+
+    return JSONResponse(status_code=409, content=response.model_dump())
 
 
 @api.exception_handler(DatabaseOperationError)
-async def database_exception_handler(request: Request, exc: DatabaseOperationError) -> JSONResponse:
+async def database_exception_handler(
+    request: Request, exc: DatabaseOperationError
+) -> JSONResponse:
     """Handle DatabaseOperationError exceptions.
-    
+
     Args:
         request: FastAPI request object
         exc: DatabaseOperationError exception
-        
+
     Returns:
         JSONResponse: 500 error response
     """
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-    
+
     logger.error(
         f"Database operation error: {exc}",
         extra={
             "request_id": request_id,
             "url": str(request.url),
             "method": request.method,
-            "error": str(exc)
-        }
+            "error": str(exc),
+        },
     )
-    
+
     # Don't expose internal database errors in production
     if settings.verbose_errors_enabled and settings.is_development:
         detail = f"Database error: {str(exc)}"
     else:
         detail = "Internal server error"
-    
+
     response = ErrorResponse(
         detail=detail,
         type="database_error",
         timestamp=datetime.now(timezone.utc),
-        request_id=request_id
+        request_id=request_id,
     )
-    
-    return JSONResponse(
-        status_code=500,
-        content=response.model_dump()
-    )
+
+    return JSONResponse(status_code=500, content=response.model_dump())
 
 
 @api.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """Handle unexpected exceptions globally.
-    
+
     Args:
         request: FastAPI request object
         exc: Exception that was raised
-        
+
     Returns:
         JSONResponse: Error response
     """
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-    
+
     # Log the full exception with traceback
     logger.exception(
         "Unhandled exception",
@@ -339,100 +355,65 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
             "request_id": request_id,
             "url": str(request.url),
             "method": request.method,
-            "exception_type": type(exc).__name__
-        }
+            "exception_type": type(exc).__name__,
+        },
     )
-    
+
     # Don't expose internal error details in production
     if settings.verbose_errors_enabled and settings.is_development:
         detail = f"Internal server error: {str(exc)}"
     else:
         detail = "Internal server error"
-    
+
     response = ErrorResponse(
         detail=detail,
         type="internal_error",
         timestamp=datetime.now(timezone.utc),
-        request_id=request_id
+        request_id=request_id,
     )
-    
-    return JSONResponse(
-        status_code=500,
-        content=response.model_dump()
-    )
+
+    return JSONResponse(status_code=500, content=response.model_dump())
 
 
 # Include routers
+api.include_router(auth_router, prefix="/auth", tags=["Authentication"])
+
 api.include_router(
-    auth_router,
-    prefix="/auth",
-    tags=["Authentication"]
+    bytes_router, prefix="/guilds/{guild_id}/bytes", tags=["Bytes Economy"]
 )
 
 api.include_router(
-    bytes_router,
-    prefix="/guilds/{guild_id}/bytes",
-    tags=["Bytes Economy"]
+    squads_router, prefix="/guilds/{guild_id}/squads", tags=["Squad Management"]
 )
 
 api.include_router(
-    squads_router,
-    prefix="/guilds/{guild_id}/squads",
-    tags=["Squad Management"]
+    squad_sale_events_router, prefix="/guilds/{guild_id}", tags=["Squad Sale Events"]
 )
 
-api.include_router(
-    squad_sale_events_router,
-    prefix="/guilds/{guild_id}",
-    tags=["Squad Sale Events"]
-)
+api.include_router(admin_router, tags=["Admin Management"])
 
-api.include_router(
-    admin_router,
-    tags=["Admin Management"]
-)
+api.include_router(forum_agents_router, tags=["Forum Agents"])
 
-api.include_router(
-    forum_agents_router,
-    tags=["Forum Agents"]
-)
+api.include_router(forum_notifications_router, tags=["Forum Notifications"])
 
-api.include_router(
-    forum_notifications_router,
-    tags=["Forum Notifications"]
-)
+api.include_router(challenges_router, tags=["Challenge Management"])
 
-api.include_router(
-    challenges_router,
-    tags=["Challenge Management"]
-)
+api.include_router(quests_router, tags=["Quests Management"])
 
-api.include_router(
-    scheduled_messages_router,
-    tags=["Scheduled Message Management"]
-)
+api.include_router(scheduled_messages_router, tags=["Scheduled Message Management"])
 
-api.include_router(
-    repeating_messages_router,
-    tags=["Repeating Message Management"]
-)
+api.include_router(repeating_messages_router, tags=["Repeating Message Management"])
 
-api.include_router(
-    members_router,
-    tags=["Members"]
-)
+api.include_router(members_router, tags=["Members"])
 
-api.include_router(
-    advent_of_code_router,
-    tags=["Advent of Code"]
-)
+api.include_router(advent_of_code_router, tags=["Advent of Code"])
 
 
 # Health check endpoint
 @api.get("/health", tags=["Health"])
 async def health_check() -> dict[str, str]:
     """Health check endpoint for monitoring.
-    
+
     Returns:
         dict: Health status
     """
@@ -442,11 +423,11 @@ async def health_check() -> dict[str, str]:
 # Custom documentation endpoints with authentication
 if settings.api_docs_enabled and settings.api_docs_require_auth:
     from smarter_dev.web.api.dependencies import verify_api_key
-    
+
     @api.get("/docs", include_in_schema=False)
-    async def get_swagger_ui(api_key = Depends(verify_api_key)) -> HTMLResponse:
+    async def get_swagger_ui(api_key=Depends(verify_api_key)) -> HTMLResponse:
         """Authenticated Swagger UI documentation.
-        
+
         Requires valid API key authentication to access.
         """
         return get_swagger_ui_html(
@@ -455,22 +436,22 @@ if settings.api_docs_enabled and settings.api_docs_require_auth:
             swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
             swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
         )
-    
+
     @api.get("/redoc", include_in_schema=False)
-    async def get_redoc(api_key = Depends(verify_api_key)) -> HTMLResponse:
+    async def get_redoc(api_key=Depends(verify_api_key)) -> HTMLResponse:
         """Authenticated ReDoc documentation.
-        
+
         Requires valid API key authentication to access.
         """
         return get_redoc_html(
             openapi_url="/api/openapi.json",
             title=f"{api.title} - ReDoc",
         )
-    
+
     @api.get("/openapi.json", include_in_schema=False)
-    async def get_openapi_schema(api_key = Depends(verify_api_key)) -> dict:
+    async def get_openapi_schema(api_key=Depends(verify_api_key)) -> dict:
         """Authenticated OpenAPI schema.
-        
+
         Requires valid API key authentication to access.
         """
         return get_openapi(
