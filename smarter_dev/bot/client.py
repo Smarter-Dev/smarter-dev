@@ -482,6 +482,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         from smarter_dev.bot.services.channel_state import (
             initialize_channel_state_manager,
         )
+        from smarter_dev.bot.services.quests_service import QuestService
         from smarter_dev.bot.services.forum_agent_service import ForumAgentService
         from smarter_dev.bot.services.repeating_message_service import (
             RepeatingMessageService,
@@ -496,6 +497,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
 
         bytes_service = BytesService(api_client, cache_manager)
         squads_service = SquadsService(api_client, cache_manager)
+        quests_service = QuestService(api_client, cache_manager, bot)
         forum_agent_service = ForumAgentService(api_client, cache_manager)
         challenge_service = ChallengeService(api_client, cache_manager, bot)
         scheduled_message_service = ScheduledMessageService(
@@ -526,6 +528,10 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         await challenge_service.initialize()
         logger.info("✓ Challenge service initialized")
 
+        logger.info("Initializing quests service...")
+        await quests_service.initialize()
+        logger.info("✓ Quests service initialized")
+
         logger.info("Initializing scheduled message service...")
         await scheduled_message_service.initialize()
         logger.info("✓ Scheduled message service initialized")
@@ -545,6 +551,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             squads_health = await squads_service.health_check()
             forum_agent_health = await forum_agent_service.health_check()
             challenge_health = await challenge_service.health_check()
+            quests_health = await quests_service.health_check()
             scheduled_message_health = await scheduled_message_service.health_check()
             repeating_message_health = await repeating_message_service.health_check()
             advent_of_code_health = await advent_of_code_service.health_check()
@@ -560,6 +567,9 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             )
             logger.info(
                 f"Challenge service health: {'healthy' if challenge_health.is_healthy else 'unhealthy'}"
+            )
+            logger.info(
+                f"Quests service health: {'healthy' if quests_health.is_healthy else 'unhealthy'}"
             )
             logger.info(
                 f"Scheduled message service health: {'healthy' if scheduled_message_health.is_healthy else 'unhealthy'}"
@@ -583,6 +593,12 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
                 logger.warning(
                     f"Challenge service not healthy: {challenge_health.details}"
                 )
+
+            if not quests_health.is_healthy:
+                logger.warning(
+                    f"Quests service not healthy: {challenge_health.details}"
+                )
+
             if not scheduled_message_health.is_healthy:
                 logger.warning(
                     f"Scheduled message service not healthy: {scheduled_message_health.details}"
@@ -609,6 +625,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d["squads_service"] = squads_service
         bot.d["forum_agent_service"] = forum_agent_service
         bot.d["challenge_service"] = challenge_service
+        bot.d["quests_service"] = quests_service
         bot.d["scheduled_message_service"] = scheduled_message_service
         bot.d["repeating_message_service"] = repeating_message_service
         bot.d["advent_of_code_service"] = advent_of_code_service
@@ -620,6 +637,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             "squads_service": squads_service,
             "forum_agent_service": forum_agent_service,
             "challenge_service": challenge_service,
+            "quests_service": quests_service,
             "scheduled_message_service": scheduled_message_service,
             "repeating_message_service": repeating_message_service,
             "advent_of_code_service": advent_of_code_service,
