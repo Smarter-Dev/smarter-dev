@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Dict, Any, List
 from uuid import UUID
 
@@ -2595,6 +2596,7 @@ async def quests_list(request: Request) -> Response:
             "quests": quests_with_dates,
             "total_count": len(quests_with_dates),
             "title": f"Quests – {guild.name}",
+            "today": date.today()
         },
     )
 
@@ -2691,6 +2693,42 @@ async def quest_schedule(request: Request) -> Response:
     )
 
     async with get_db_session_context() as session:
+        # Get THIS quest’s existing daily quest (if any)
+        current_daily = await session.execute(
+            select(DailyQuest)
+            .where(
+                DailyQuest.guild_id == guild_id,
+                DailyQuest.quest_id == quest_id,
+            )
+            .limit(1)
+        )
+        current_daily = current_daily.scalar_one_or_none()
+
+        # Check for conflict with OTHER quests
+        conflict = await session.execute(
+            select(DailyQuest)
+            .where(
+                DailyQuest.guild_id == guild_id,
+                DailyQuest.active_date == active_date,
+                DailyQuest.quest_id != quest_id,
+            )
+            .limit(1)
+        )
+        conflict = conflict.scalar_one_or_none()
+
+        if conflict:
+            return templates.TemplateResponse(
+                "admin/quest_edit.html",
+                {
+                    "request": request,
+                    "guild": await get_guild_info(guild_id),
+                    "quest": await session.get(Quest, quest_id),
+                    "daily_quest": current_daily,  # ← important
+                    "date_error": "Another daily quest is already scheduled for this date.",
+                },
+                status_code=400,
+            )
+
         stmt = (
             pg_insert(DailyQuest)
             .values(
