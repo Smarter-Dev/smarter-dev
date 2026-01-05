@@ -2959,6 +2959,21 @@ class QuestSubmissionOperations:
                 if is_first_success:
                     points_earned = self._calculate_points()
 
+                squad_ops = SquadOperations()
+                members = await squad_ops.get_squad_members(self.session, squad_id)
+
+                bytes_ops = BytesOperations()
+
+                for member in members:
+                    await bytes_ops.create_system_reward(
+                        self.session,
+                        guild_id=guild_id,
+                        user_id=member.user_id,
+                        username=member.user_id,  # or cached username if you have it
+                        amount=points_earned,
+                        reason=f"Daily quest reward (first correct solution)",
+                    )
+
             submission = QuestSubmission(
                 daily_quest_id=daily_quest_id,
                 guild_id=guild_id,
@@ -3056,7 +3071,7 @@ class QuestSubmissionOperations:
 
     def _calculate_points(self) -> int:
         """Simple, deterministic quest scoring."""
-        return 100
+        return 20
 
 
 class CampaignOperations:
