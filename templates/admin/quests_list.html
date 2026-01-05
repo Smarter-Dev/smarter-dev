@@ -56,7 +56,7 @@
           <tr>
             <td>
               <div class="d-flex align-items-center gap-2">
-  {% if dq %}
+{% if dq %}
 <span
   class="rounded-circle"
   style="
@@ -64,14 +64,14 @@
     height: 8px;
     display: inline-block;
     background-color:
-      {% if dq %}
-        {{ '#2fb344' if dq.is_active else '#adb5bd' }}
+      {% if dq.is_active and dq.active_date == today %}
+        #2fb344
       {% else %}
-        #ced4da
+        #adb5bd
       {% endif %}
   "
 ></span>
-  {% endif %}
+{% endif %}
 
   <strong>{{ quest.title }}</strong>
 </div>
