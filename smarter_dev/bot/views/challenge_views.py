@@ -115,20 +115,39 @@ class SolutionSubmissionModalHandler:
 
             user_mention = f"<@{self.user.id}>"
 
-            if is_correct:
-                msg = (
-                    f"{user_mention}\n"
-                    f"✅ **Correct Solution!**\n\n"
-                    f"🏆 First success: **{is_first}**\n"
-                    f"🎯 Points earned: **{points}**"
-                )
-                flags = hikari.MessageFlag.NONE
+            is_daily_quest = self.endpoint.startswith("/quests/")
+
+            # Default: private feedback
+            flags = hikari.MessageFlag.EPHEMERAL
+
+            if not is_correct:
+                msg = "❌ **Incorrect Solution**\n\nTry again."
+
             else:
-                msg = (
-                    f"❌ **Incorrect Solution**\n\n"
-                    f"Try again."
-                )
-                flags = hikari.MessageFlag.EPHEMERAL
+                # ---- DAILY QUESTS ----
+                if is_daily_quest:
+                    flags = hikari.MessageFlag.NONE  # public
+
+                    if is_first:
+                        msg = (
+                            f"{user_mention} has submitted the **first correct solution** "
+                            f"to the **Daily Quest** and earned their squad **{points} points!** 🏆"
+                        )
+                    else:
+                        msg = (
+                            f"{user_mention} has submitted a **correct solution** "
+                            f"to the **Daily Quest** ✅"
+                        )
+
+                # ---- CHALLENGES (unchanged behaviour) ----
+                else:
+                    msg = (
+                        f"{user_mention}\n"
+                        f"✅ **Correct Solution!**\n\n"
+                        f"🏆 First success: **{is_first}**\n"
+                        f"🎯 Points earned: **{points}**"
+                    )
+                    flags = hikari.MessageFlag.NONE
 
             try:
                 await interaction.create_initial_response(

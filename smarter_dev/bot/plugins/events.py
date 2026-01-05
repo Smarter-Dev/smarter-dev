@@ -1471,8 +1471,9 @@ async def _provide_daily_quest_input_directly(
 
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
-            content=f"<@{user_id}> requested the daily quest input:\n\n📥 **{quest_title}**",
+            content=f"📥 **Daily Quest Input — {quest_title}**",
             attachment=file_attachment,
+            flags=hikari.MessageFlag.EPHEMERAL,
         )
 
     except Exception as e:
