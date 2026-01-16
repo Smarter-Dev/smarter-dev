@@ -1483,13 +1483,15 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     return {
                         "success": True,
                         "messages": formatted_messages,
-                        "count": len(formatted_messages)
+                        "count": len(formatted_messages),
+                        "instructions": "Evaluate these new messages in the context of previously seen messages, but only respond to the new messages shown above."
                     }
                 else:
                     return {
                         "success": True,
                         "messages": [],
-                        "count": 0
+                        "count": 0,
+                        "instructions": "No new messages. Do not send any messages, replies, or reactions. The only acceptable actions are to stop monitoring or wait for new messages."
                     }
 
             except Exception as e:
@@ -1584,7 +1586,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     "new_messages": [],
                     "count": 0,
                     "reason": "message_limit_reached",
-                    "messages_processed": messages_processed
+                    "messages_processed": messages_processed,
+                    "instructions": "Message limit reached. Do not send any messages, replies, or reactions. You should stop monitoring now."
                 }
 
             queue = channel_state.message_queue
@@ -1607,7 +1610,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     "new_messages": [],
                     "count": 0,
                     "reason": "timeout",
-                    "messages_processed": messages_processed
+                    "messages_processed": messages_processed,
+                    "instructions": "Timeout reached with no new messages. Do not send any messages, replies, or reactions. The only acceptable actions are to stop monitoring or wait for new messages."
                 }
 
             # Phase 2: We got at least one message! Switch to debounce mode
@@ -1635,7 +1639,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                             "new_messages": messages,
                             "count": len(messages),
                             "reason": "queue_full",
-                            "messages_processed": messages_processed
+                            "messages_processed": messages_processed,
+                            "instructions": "Evaluate these new messages in the context of previously seen messages, but only respond to the new messages shown above."
                         }
                 except TimeoutError:
                     # Debounce timeout - return messages
@@ -1649,7 +1654,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 "new_messages": messages,
                 "count": len(messages),
                 "reason": "debounce_elapsed",
-                "messages_processed": messages_processed
+                "messages_processed": messages_processed,
+                "instructions": "Evaluate these new messages in the context of previously seen messages, but only respond to the new messages shown above."
             }
         except Exception as e:
             logger.error(f"[Tool] wait_for_messages failed: {e}")
