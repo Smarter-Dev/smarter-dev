@@ -349,7 +349,8 @@ class ConversationContextBuilder:
         self,
         channel_id: int,
         trigger_message_id: int | None = None,
-        limit: int = 5
+        limit: int = 5,
+        since_message_id: int | None = None
     ) -> dict[str, Any]:
         """Build truncated conversation context with limited message history.
 
@@ -359,17 +360,24 @@ class ConversationContextBuilder:
             channel_id: Channel to gather context from
             trigger_message_id: Message ID that triggered the agent (for marking new messages)
             limit: Maximum number of messages to include (default 5)
+            since_message_id: If provided, fetch messages after this ID (for restart catch-up)
 
         Returns:
-            Dict with conversation_timeline, users, channel, and me fields
+            Dict with conversation_timeline, users, channel, me, and last_message_id fields
         """
         # Load guild roles if we have guild context
         if self.guild_id:
             self._guild_roles = await bot_cache.get_guild_roles(self.bot, self.guild_id)
 
-        # Fetch limited base messages and complete reply threads
-        messages = await self._fetch_base_messages(channel_id, limit=limit)
+        # Fetch messages - either since a specific ID (restart) or most recent (normal)
+        if since_message_id:
+            messages = await self._fetch_messages_since(channel_id, since_message_id, limit=limit)
+        else:
+            messages = await self._fetch_base_messages(channel_id, limit=limit)
         messages = await self._complete_reply_threads(messages)
+
+        # Track the last message ID for restart continuity
+        last_message_id = str(messages[-1].id) if messages else None
 
         # Build user info first so we can enrich the timeline
         users = await self._build_user_list(messages)
@@ -385,7 +393,8 @@ class ConversationContextBuilder:
             "conversation_timeline": conversation_timeline,
             "users": users,
             "channel": channel_info,
-            "me": me_info
+            "me": me_info,
+            "last_message_id": last_message_id
         }
 
     async def _fetch_base_messages(self, channel_id: int, limit: int = 20) -> list[hikari.Message]:
@@ -415,6 +424,41 @@ class ConversationContextBuilder:
                 break
 
         return list(reversed(messages))  # Return in chronological order
+
+    async def _fetch_messages_since(
+        self,
+        channel_id: int,
+        since_message_id: int,
+        limit: int = 50
+    ) -> list[hikari.Message]:
+        """Fetch messages sent after a specific message ID.
+
+        Used for restart catch-up to ensure continuity.
+
+        Args:
+            channel_id: Channel to fetch from
+            since_message_id: Fetch messages after this ID
+            limit: Maximum number of messages to fetch
+
+        Returns:
+            List of messages in chronological order
+        """
+        messages = []
+        bot_user_id = self.bot.get_me().id
+
+        # Fetch messages after the given ID
+        async for message in self.bot.rest.fetch_messages(channel_id, after=since_message_id).limit(limit):
+            self._fetched_messages[message.id] = message
+
+            # Skip bot messages that start with '-#' (tool usage messages)
+            if message.author.id == bot_user_id and message.content and message.content.startswith("-#"):
+                logger.debug(f"Skipping bot tool usage message: {message.content[:50]}")
+                continue
+
+            messages.append(message)
+
+        # Messages from 'after' query are in reverse chronological order, so reverse them
+        return list(reversed(messages))
 
     async def _complete_reply_threads(self, messages: list[hikari.Message]) -> list[hikari.Message]:
         """Recursively fetch any replied-to messages not in the current list."""
