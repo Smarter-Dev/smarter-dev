@@ -1576,18 +1576,18 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             # This allows the auto-restart loop to continue after this agent execution completes
             channel_state.continue_monitoring = True
 
-            # Check if we've processed 100+ messages - if so, end the conversation session
+            # Check if we've processed 100+ messages - if so, restart with fresh context
             messages_processed = channel_state.messages_processed
             if messages_processed >= 100:
-                logger.info(f"[Tool] Channel {channel_id}: Reached 100+ messages ({messages_processed}), ending conversation session")
-                channel_state.continue_monitoring = False
+                logger.info(f"[Tool] Channel {channel_id}: Reached 100+ messages ({messages_processed}), restarting with fresh context")
+                # Keep continue_monitoring = True to allow auto-restart with fresh context
                 return {
                     "success": True,
                     "new_messages": [],
                     "count": 0,
                     "reason": "message_limit_reached",
                     "messages_processed": messages_processed,
-                    "instructions": "Message limit reached. Do not send any messages, replies, or reactions. You should stop monitoring now."
+                    "instructions": "Message limit reached. You will be restarted with fresh context to reduce memory usage. Continue watching for new messages."
                 }
 
             queue = channel_state.message_queue
