@@ -191,6 +191,7 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
             is_continuation = False
             total_tokens = 0
             previous_summary = ""
+            since_message_id = None  # For restart catch-up
 
             while True:
                 try:
@@ -203,7 +204,8 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
                         trigger_message_id=event.message.id,
                         messages_remaining=10,
                         is_continuation=is_continuation,
-                        previous_summary=previous_summary
+                        previous_summary=previous_summary,
+                        since_message_id=since_message_id
                     )
 
                     total_tokens += tokens_used
@@ -235,6 +237,11 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
                     logger.debug(f"Channel {event.channel_id}: Passing conversation summary to restarted agent ({len(previous_summary)} chars)")
                     # Clear the summary after retrieving it (one-time use)
                     channel_state.set_conversation_summary(event.channel_id, None)
+
+                # Get the last message ID the agent saw for catch-up on restart
+                since_message_id = channel_state.get_last_context_message_id(event.channel_id)
+                if since_message_id:
+                    logger.debug(f"Channel {event.channel_id}: Will fetch messages since {since_message_id} for restart catch-up")
 
                 # Reset message counter for fresh context in restarted agent
                 channel_state.reset_messages_processed(event.channel_id)

@@ -9,6 +9,7 @@ import hikari
 
 from smarter_dev.bot.agents.base import BaseAgent
 from smarter_dev.bot.agents.tools import create_mention_tools
+from smarter_dev.bot.services.channel_state import get_channel_state_manager
 from smarter_dev.llm_config import get_llm_model
 from smarter_dev.llm_config import get_model_info
 
@@ -164,7 +165,8 @@ class MentionAgent(BaseAgent):
         trigger_message_id: int | None = None,
         messages_remaining: int = 10,
         is_continuation: bool = False,
-        previous_summary: str = ""
+        previous_summary: str = "",
+        since_message_id: str | None = None
     ) -> tuple[bool, int, str | None]:
         """Generate a conversational response using ReAct with context-bound tools.
 
@@ -180,6 +182,7 @@ class MentionAgent(BaseAgent):
             messages_remaining: Number of messages user can send after this one
             is_continuation: True if this is a continuation after waiting (agent being restarted)
             previous_summary: Summary of conversation from before restart (for context continuity)
+            since_message_id: If provided, fetch messages after this ID (for restart catch-up)
 
         Returns:
             Tuple[bool, int, Optional[str]]: (success, token_usage, response_text)
@@ -192,8 +195,19 @@ class MentionAgent(BaseAgent):
         try:
             # Build truncated context (5 messages) for fast, cost-effective agent
             # Agent can call generate_engagement_plan() to get full context (20 messages) if needed
+            # If since_message_id is provided (restart), fetch messages since that ID for continuity
             context_builder = ConversationContextBuilder(bot, guild_id)
-            context = await context_builder.build_truncated_context(channel_id, trigger_message_id, limit=5)
+            context = await context_builder.build_truncated_context(
+                channel_id,
+                trigger_message_id,
+                limit=5 if not since_message_id else 50,  # Fetch more messages on restart for catch-up
+                since_message_id=int(since_message_id) if since_message_id else None
+            )
+
+            # Store the last message ID for restart continuity
+            if context.get("last_message_id"):
+                channel_state_mgr = get_channel_state_manager()
+                channel_state_mgr.set_last_context_message_id(channel_id, context["last_message_id"])
 
             # Create context-bound tools for this specific mention
             tools, channel_queries = create_mention_tools(
