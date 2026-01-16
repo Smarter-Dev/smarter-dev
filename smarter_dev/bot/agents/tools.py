@@ -1587,7 +1587,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     "count": 0,
                     "reason": "message_limit_reached",
                     "messages_processed": messages_processed,
-                    "instructions": "Message limit reached. You will be restarted with fresh context to reduce memory usage. Continue watching for new messages."
+                    "instructions": "Message limit reached. You will be restarted with fresh context to reduce memory usage. Before your execution ends, call set_conversation_summary() with a brief summary of the conversation so far (key topics, ongoing discussions, tone) so the restarted agent has context. Then let your execution end naturally - do not call stop_monitoring()."
                 }
 
             queue = channel_state.message_queue
@@ -1686,6 +1686,43 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             }
         except Exception as e:
             logger.error(f"[Tool] stop_monitoring failed: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    async def set_conversation_summary(summary: str) -> dict:
+        """Store a summary of the conversation for context continuity when the agent is restarted.
+
+        Call this when you receive a message_limit_reached response from wait_for_messages().
+        The summary will be passed to the restarted agent so it has context about
+        what has happened in the conversation without needing the full message history.
+
+        The summary should include:
+        - Key topics discussed
+        - Important decisions or conclusions reached
+        - Any ongoing tasks or questions that need follow-up
+        - The general tone/mood of the conversation
+
+        Args:
+            summary: A concise summary of the conversation so far (max 1000 chars recommended)
+
+        Returns:
+            dict with 'success' boolean
+
+        Example:
+            set_conversation_summary("Discussed Python async patterns. User asked about error handling in coroutines. Mood is curious and engaged.")
+        """
+        try:
+            logger.debug(f"[Tool] set_conversation_summary called in channel {channel_id}")
+            channel_state_mgr = get_channel_state_manager()
+            channel_state_mgr.set_conversation_summary(int(channel_id), summary)
+            return {
+                "success": True,
+                "result": "Summary stored. It will be passed to the restarted agent."
+            }
+        except Exception as e:
+            logger.error(f"[Tool] set_conversation_summary failed: {e}")
             return {
                 "success": False,
                 "error": str(e)
@@ -1937,7 +1974,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         fetch_new_messages,
         wait_for_duration,
         wait_for_messages,
-        stop_monitoring
+        stop_monitoring,
+        set_conversation_summary
     ]
 
     return tools, channel_queries

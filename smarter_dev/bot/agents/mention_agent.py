@@ -143,6 +143,7 @@ class ConversationalMentionSignature(dspy.Signature):
     recent_search_queries: list[str] = dspy.InputField(description="List of recent search queries made in this channel (results may be cached)")
     messages_remaining: int = dspy.InputField(description="Number of messages user can send after this one (0 = this is their last message)")
     is_continuation: bool = dspy.InputField(description="True if this is a continuation of a previous monitoring session (agent is being restarted after waiting), False if this is a fresh mention")
+    previous_summary: str = dspy.InputField(description="Summary of conversation context from before the restart. Empty string if this is a fresh conversation or no summary was provided. Use this to understand what has been discussed without needing full message history.")
     response: str = dspy.OutputField(description="Your conversational response in casual Discord style. Default to SHORT one-liners - use send_message() multiple times if a thought needs more than one line. Always format code in backticks or code blocks - NEVER send raw code. Use add_reaction_to_message() for quick emotional responses instead of typing (lol, agree, etc). Use reply_to_message() when engaging with specific ideas. Use search_web_instant_answer() or search_web() when you need current or grounded information to respond well. Only send longer messages for genuinely complex topics or when explicitly asked for depth.")
 
 
@@ -162,7 +163,8 @@ class MentionAgent(BaseAgent):
         guild_id: int | None = None,
         trigger_message_id: int | None = None,
         messages_remaining: int = 10,
-        is_continuation: bool = False
+        is_continuation: bool = False,
+        previous_summary: str = ""
     ) -> tuple[bool, int, str | None]:
         """Generate a conversational response using ReAct with context-bound tools.
 
@@ -177,6 +179,7 @@ class MentionAgent(BaseAgent):
             trigger_message_id: Message ID that triggered this response
             messages_remaining: Number of messages user can send after this one
             is_continuation: True if this is a continuation after waiting (agent being restarted)
+            previous_summary: Summary of conversation from before restart (for context continuity)
 
         Returns:
             Tuple[bool, int, Optional[str]]: (success, token_usage, response_text)
@@ -226,7 +229,8 @@ class MentionAgent(BaseAgent):
                     me=context["me"],
                     recent_search_queries=channel_queries,
                     messages_remaining=messages_remaining,
-                    is_continuation=is_continuation
+                    is_continuation=is_continuation,
+                    previous_summary=previous_summary
                 )
 
             logger.debug(f"ReAct agent result: {result}")

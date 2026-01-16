@@ -35,6 +35,7 @@ class ChannelMonitorState:
         self.queue_updated_event: asyncio.Event = asyncio.Event()  # Signals new messages
         self.messages_processed: int = 0  # Total messages processed in this conversation session
         self.recent_messages: dict[str, float] = {}  # Message content hash -> timestamp for deduplication
+        self.conversation_summary: str | None = None  # Summary for context continuity across restarts
 
     def _hash_message(self, content: str) -> str:
         """Generate a hash for message content.
@@ -348,6 +349,32 @@ class ChannelStateManager:
         state = self.get_state(channel_id)
         state.messages_processed = 0
         logger.debug(f"Channel {channel_id}: Messages processed reset to 0")
+
+    def set_conversation_summary(self, channel_id: int, summary: str | None) -> None:
+        """Set the conversation summary for context continuity across restarts.
+
+        Args:
+            channel_id: Discord channel ID
+            summary: Summary text, or None to clear
+        """
+        state = self.get_state(channel_id)
+        state.conversation_summary = summary
+        if summary:
+            logger.debug(f"Channel {channel_id}: Conversation summary set ({len(summary)} chars)")
+        else:
+            logger.debug(f"Channel {channel_id}: Conversation summary cleared")
+
+    def get_conversation_summary(self, channel_id: int) -> str | None:
+        """Get the conversation summary for a channel.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            The conversation summary, or None if not set
+        """
+        state = self.get_state(channel_id)
+        return state.conversation_summary
 
     def cleanup_channel(self, channel_id: int) -> None:
         """Clean up state for a channel.
