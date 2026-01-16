@@ -35,6 +35,8 @@ class ChannelMonitorState:
         self.queue_updated_event: asyncio.Event = asyncio.Event()  # Signals new messages
         self.messages_processed: int = 0  # Total messages processed in this conversation session
         self.recent_messages: dict[str, float] = {}  # Message content hash -> timestamp for deduplication
+        self.conversation_summary: str | None = None  # Summary for context continuity across restarts
+        self.last_context_message_id: str | None = None  # Last message ID included in agent's context (for restart catch-up)
 
     def _hash_message(self, content: str) -> str:
         """Generate a hash for message content.
@@ -348,6 +350,60 @@ class ChannelStateManager:
         state = self.get_state(channel_id)
         state.messages_processed = 0
         logger.debug(f"Channel {channel_id}: Messages processed reset to 0")
+
+    def set_conversation_summary(self, channel_id: int, summary: str | None) -> None:
+        """Set the conversation summary for context continuity across restarts.
+
+        Args:
+            channel_id: Discord channel ID
+            summary: Summary text, or None to clear
+        """
+        state = self.get_state(channel_id)
+        state.conversation_summary = summary
+        if summary:
+            logger.debug(f"Channel {channel_id}: Conversation summary set ({len(summary)} chars)")
+        else:
+            logger.debug(f"Channel {channel_id}: Conversation summary cleared")
+
+    def get_conversation_summary(self, channel_id: int) -> str | None:
+        """Get the conversation summary for a channel.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            The conversation summary, or None if not set
+        """
+        state = self.get_state(channel_id)
+        return state.conversation_summary
+
+    def set_last_context_message_id(self, channel_id: int, message_id: str | None) -> None:
+        """Set the last message ID that was included in the agent's context.
+
+        Used to fetch catch-up messages when agent is restarted.
+
+        Args:
+            channel_id: Discord channel ID
+            message_id: The message ID, or None to clear
+        """
+        state = self.get_state(channel_id)
+        state.last_context_message_id = message_id
+        if message_id:
+            logger.debug(f"Channel {channel_id}: Last context message ID set to {message_id}")
+        else:
+            logger.debug(f"Channel {channel_id}: Last context message ID cleared")
+
+    def get_last_context_message_id(self, channel_id: int) -> str | None:
+        """Get the last message ID that was included in the agent's context.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            The message ID, or None if not set
+        """
+        state = self.get_state(channel_id)
+        return state.last_context_message_id
 
     def cleanup_channel(self, channel_id: int) -> None:
         """Clean up state for a channel.
