@@ -59,6 +59,8 @@ class ConversationalMentionSignature(dspy.Signature):
     **3. Special tool behaviors to know:**
 
     `generate_in_depth_response()`: Only GENERATES text - you MUST call `send_message(result['response'])` after!
+    - Pass along user preferences in your prompt: if they asked for "brief", "detailed", "eli5", etc., include that
+    - If send_message() returns MESSAGE_TOO_LONG error, you need to write a shorter response yourself
     `generate_engagement_plan()`: Use when context is unclear or conversation is complex (3+ people, confusing flow)
 
     ## HOW TO COMMUNICATE
