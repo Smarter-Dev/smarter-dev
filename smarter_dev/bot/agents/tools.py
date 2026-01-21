@@ -207,14 +207,12 @@ class InDepthResponseSignature(dspy.Signature):
     - Explain WHY things work a certain way, not just HOW
     - If there are common gotchas or tips, mention them naturally
 
-    ## Length & Style - CRITICAL CONSTRAINT
-    - **ABSOLUTE MAXIMUM: 1900 characters** - Discord has a 2000 character limit, you MUST stay under 1900
-    - Aim for 500-1500 characters for ideal balance of depth and readability
+    ## Length & Style
+    - Aim for a good balance of depth and readability - thorough but not overwhelming
     - Don't pad for length - say what needs saying, then stop
     - It's fine to be direct and concise when that's what's needed
     - Use Discord markdown naturally: **bold** for emphasis, *italic* for nuance
-    - Keep it readable - don't cram too much into one block
-    - If you can't fit everything in 1900 chars, prioritize the most important points
+    - Keep it readable - don't cram too much into one response
 
     ## Context Handling
     - The prompt contains all context (question, conversation, search results)
@@ -223,7 +221,7 @@ class InDepthResponseSignature(dspy.Signature):
     - Reference relevant context from the conversation when it makes sense
 
     Remember: You're not generating a report, you're sharing knowledge in a conversation. Be helpful, be thorough,
-    but most importantly - be human. And ALWAYS stay under 1900 characters or your message will fail to send!
+    but most importantly - be human.
     """
 
     prompt_summary: str = dspy.InputField(
@@ -234,7 +232,7 @@ class InDepthResponseSignature(dspy.Signature):
     )
 
     response: str = dspy.OutputField(
-        description="In-depth, well-formatted response ready to send to Discord. MUST be under 1900 characters (Discord's limit is 2000). Aim for 500-1500 characters ideally, properly formatted with code blocks and markdown as needed."
+        description="In-depth, well-formatted response ready to send to Discord, properly formatted with code blocks and markdown as needed."
     )
 
 
@@ -683,6 +681,14 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             logger.debug(f"[Tool] send_message called in channel {channel_id}")
             channel_state = get_channel_state_manager().get_state(int(channel_id))
 
+            # Check message length - Discord has a 2000 character limit
+            if len(content) > 2000:
+                logger.warning(f"[Tool] Message too long ({len(content)} chars), rejecting send")
+                return {
+                    "success": False,
+                    "error": f"MESSAGE_TOO_LONG: Your message is {len(content)} characters but Discord's limit is 2000. Please shorten your response by {len(content) - 2000} characters and try again. Focus on the most important points and remove less critical details."
+                }
+
             # Check that typing indicator was started
             if not channel_state.typing_active:
                 return {
@@ -747,6 +753,14 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             logger.debug(f"[Tool] reply_to_message called for message {message_id}")
             channel_state = get_channel_state_manager().get_state(int(channel_id))
+
+            # Check message length - Discord has a 2000 character limit
+            if len(content) > 2000:
+                logger.warning(f"[Tool] Reply too long ({len(content)} chars), rejecting send")
+                return {
+                    "success": False,
+                    "error": f"MESSAGE_TOO_LONG: Your reply is {len(content)} characters but Discord's limit is 2000. Please shorten your response by {len(content) - 2000} characters and try again. Focus on the most important points and remove less critical details."
+                }
 
             # Check that typing indicator was started
             if not channel_state.typing_active:
@@ -1837,7 +1851,6 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         **WHAT THIS TOOL DOES**:
         - Generates detailed technical responses using Claude (not you, Gemini)
         - Returns a Discord-ready message that you MUST send using send_message()
-        - Automatically enforces Discord's 2000 character limit (truncates to 1900 chars max)
         - Designed for technical/coding questions only
         - **RATE LIMITED**: Can only be used once per minute per channel
 
@@ -1864,11 +1877,13 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 - Relevant conversation context
                 - Any search results or information gathered
                 - What kind of response is needed (explanation, code example, comparison, etc.)
+                - Any user preferences for length/detail (e.g., "brief", "detailed", "eli5")
 
         Returns:
             dict with success and response fields:
             - success: True if generation succeeded, False otherwise
-            - response: Discord-ready message (max 1900 chars, properly formatted)
+            - response: Generated response (properly formatted)
+            - length: Character count of the response
             - error: Error message if success is False
             - on_cooldown: True if rate limited (only present when success=False)
             - cooldown_remaining: Seconds until cooldown ends (only present when on_cooldown=True)
@@ -1877,8 +1892,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             result = generate_in_depth_response(
                 prompt_summary="async/await in Python",
                 prompt="User asked: 'How do I use async/await in Python?'
-                       Explain async/await in Python with a simple example.
-                       Keep it under 1500 characters."
+                       Explain async/await in Python with a simple example."
             )
             if result['success']:
                 send_message(result['response'])  # YOU MUST DO THIS!
@@ -1922,16 +1936,9 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 result = predictor(prompt_summary=prompt_summary, prompt=prompt)
 
             response_text = result.response
-            original_length = len(response_text)
+            response_length = len(response_text)
 
-            # Enforce Discord's 2000 character limit with safety buffer
-            MAX_LENGTH = 1900
-            if len(response_text) > MAX_LENGTH:
-                logger.warning(f"[Tool] Response too long ({original_length} chars), truncating to {MAX_LENGTH}")
-                # Truncate and add indication
-                response_text = response_text[:MAX_LENGTH-50] + "\n\n...(response truncated to fit Discord's limit)"
-
-            logger.info(f"[Tool] Generated in-depth response: {len(response_text)} chars (original: {original_length} chars)")
+            logger.info(f"[Tool] Generated in-depth response: {response_length} chars")
 
             # Record success
             await tool_failure_monitor.record_success("generate_in_depth_response")
@@ -1939,8 +1946,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             return {
                 "success": True,
                 "response": response_text,
-                "original_length": original_length,
-                "truncated": len(response_text) < original_length
+                "length": response_length
             }
 
         except Exception as e:
