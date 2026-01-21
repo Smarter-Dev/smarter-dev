@@ -1959,6 +1959,58 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 "error": f"Failed to generate response: {error_msg}"
             }
 
+    async def report_behavior(classification: str) -> dict:
+        """Report problematic user behavior and get instructions for how to proceed.
+
+        Use this tool when users exhibit behavior that should be noted and handled
+        appropriately, such as:
+        - Rage bait: Users trying to provoke angry responses
+        - Paradox tests: Users asking unsolvable logic puzzles to "break" the bot
+        - Trolling: Users intentionally disrupting conversation
+        - Spam: Users sending repetitive or meaningless messages
+        - Harassment: Users being rude or hostile
+
+        This tool sends a visible status message noting the behavior and provides
+        guidance on how to proceed with the conversation.
+
+        Args:
+            classification: Brief description of the behavior type (e.g., "rage bait",
+                           "paradox test", "trolling", "spam")
+
+        Returns:
+            dict with 'success' boolean and instructions for proceeding
+
+        Example:
+            report_behavior("paradox test")
+            report_behavior("rage bait")
+        """
+        try:
+            logger.debug(f"[Tool] report_behavior called in channel {channel_id}: {classification}")
+
+            # Send thought message to channel
+            thought_message = f"> -# Ignoring {classification}"
+            try:
+                await bot.rest.create_message(int(channel_id), thought_message)
+            except Exception as e:
+                logger.warning(f"[Tool] Failed to send behavior report message: {e}")
+
+            return {
+                "success": True,
+                "result": (
+                    f"Behavior '{classification}' has been noted. Instructions: "
+                    "If there are other users in the conversation engaging appropriately, "
+                    "you may continue participating with them while ignoring the problematic behavior. "
+                    "If the problematic user is the only participant, end the conversation by calling "
+                    "stop_monitoring() - do not engage further with the behavior."
+                )
+            }
+        except Exception as e:
+            logger.error(f"[Tool] report_behavior failed: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
     # Get recent search queries for this channel
     channel_queries = search_cache.get_channel_queries(channel_id)
 
@@ -1981,7 +2033,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         wait_for_duration,
         wait_for_messages,
         stop_monitoring,
-        set_conversation_summary
+        set_conversation_summary,
+        report_behavior
     ]
 
     return tools, channel_queries
