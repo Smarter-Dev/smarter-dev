@@ -16,12 +16,12 @@ messages_remaining: 50
 is_continuation: false
 
 expected_behavior:
-  expected_tools: ["send_message", "search_web_instant_answer"]
-  expected_sequence: ["send_message", "search_web_instant_answer", "send_message"]
+  expected_tools: ["send_message", "lookup_fact"]
+  expected_sequence: ["send_message", "lookup_fact", "send_message"]
   expected_response_type: "quick_casual_answer"
-  description: "Should acknowledge, search for answer, then respond casually with 'Paris'"
+  description: "Should acknowledge, look up fact, then respond casually with 'Paris'"
   key_points:
-    - "Sends acknowledgment before searching"
-    - "Uses search_web_instant_answer for quick fact"
+    - "Sends acknowledgment before looking up"
+    - "Uses lookup_fact for general fact (capital city)"
     - "Writes casual answer itself (not generate_in_depth_response)"
     - "Answer is concise and friendly"
