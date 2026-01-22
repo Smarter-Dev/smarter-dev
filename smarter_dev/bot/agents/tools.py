@@ -1007,7 +1007,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 "error": error_msg
             }
 
-    async def search_web(query: str, max_results: int = 3) -> dict:
+    async def search_web(query: str, max_results: int = 10) -> dict:
         """Search the web for specific, current, or niche information that requires research.
 
         USE THIS FOR: Topics that need multiple sources, current information, or aren't common knowledge:
@@ -1019,12 +1019,15 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         DO NOT USE THIS FOR: Simple facts like capitals, populations, release dates, or definitions.
         Use lookup_fact() instead for those - it's faster and more direct.
 
-        Returns multiple search results with titles, URLs, and snippets.
-        Limited to 3 results by default to keep responses concise for Discord.
+        CHOOSING max_results:
+        - Use fewer results (3-5) for: simple questions with likely consensus answers, quick lookups
+        - Use default (10) for: comparisons, "best of" lists, research requiring multiple perspectives
+        - Use more results (15-20) for: comprehensive research, controversial topics needing many viewpoints,
+          or when initial searches didn't find what you needed
 
         Args:
             query: The search query - be specific about what you're looking for
-            max_results: Maximum number of results to return (default 3, max 5 to stay concise)
+            max_results: Number of results to return (default 10, max 20)
 
         Returns:
             dict with 'success' boolean and 'results' list containing dicts with
@@ -1041,8 +1044,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             return {"success": False, "error": reason, "tool_disabled": True}
 
         try:
-            # Limit to max 5 results to keep responses Discord-friendly
-            max_results = min(max_results, 5)
+            # Limit to max 20 results
+            max_results = min(max_results, 20)
 
             logger.debug(f"[Tool] search_web called with query: {query}, max_results: {max_results}")
 
