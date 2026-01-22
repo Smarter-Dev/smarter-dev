@@ -133,14 +133,15 @@ class EngagementPlanningSignature(dspy.Signature):
     - If the recommended action is silence, explicitly state this in your plan
 
     The execution agent (Gemini) will follow your plan exactly, so be concrete about:
-    - Which specific tools to call (send_message, reply_to_message, search_web, open_url, add_reaction_to_message, generate_in_depth_response, etc.)
+    - Which specific tools to call (send_message, reply_to_message, lookup_fact, search_web, open_url, add_reaction_to_message, generate_in_depth_response, etc.)
     - What parameters to pass to each tool
     - The order to execute actions in
     - Or if no action should be taken
 
     Guidelines:
     - If the conversation is simple (greetings, quick reactions), recommend simple actions (react + brief message)
-    - If research is needed, recommend search_web_instant_answer() or search_web() first
+    - If a general fact is needed (capitals, dates, definitions), recommend lookup_fact() first
+    - If specific/current information or multiple sources are needed, recommend search_web() first
     - For technical/detailed responses, recommend TWO steps:
       1. `result = generate_in_depth_response(prompt_summary, prompt)` - generates response
       2. `send_message(result['response'])` - sends it to Discord
@@ -901,35 +902,40 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 "error": str(e)
             }
 
-    async def search_web_instant_answer(query: str) -> dict:
-        """Search for quick answers and facts using DuckDuckGo.
+    async def lookup_fact(query: str) -> dict:
+        """Look up a general, widely-known fact (capitals, populations, dates, definitions, etc.).
 
-        Returns the top search result as a quick answer for direct/simple questions.
-        For more detailed information, use search_web instead.
+        USE THIS FOR: Facts that would appear in an encyclopedia or general reference - things most
+        educated people would know or could easily verify. Examples:
+        - "What is the capital of France?" → Paris
+        - "When was Python released?" → 1991
+        - "What is photosynthesis?" → definition
+        - "Population of Tokyo" → ~14 million
 
-        Queries should be either a topic or a specific question. Queries should be clear and specific,
-        avoid vague or overly broad queries. The query should reflect the intent of the search, "DFS software
-        development" is better than "DFS" but "Meaning of DFS in software development?" is even better as it clearly
-        indicates the user is looking for a definition in terms of software development.
+        DO NOT USE THIS FOR: Current events, recent news, specific product recommendations, niche
+        topics, comparisons, or anything that requires multiple sources. Use search_web() instead.
+
+        Returns only the top result as a quick answer - if you need multiple perspectives or
+        comprehensive research, use search_web() instead.
 
         Args:
-            query: The question or topic to search for (e.g., "What is photosynthesis?")
+            query: A factual question or topic (e.g., "What is the capital of France?")
 
         Returns:
             dict with 'success' boolean, 'answer' (title + snippet), and 'url' field
 
         Example:
-            search_web_instant_answer("What is the capital of France?")
+            lookup_fact("What is the capital of France?")
             -> {"success": True, "answer": "Paris - ...", "url": "..."}
         """
         # Check if tool is disabled
-        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("search_web_instant_answer")
+        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("lookup_fact")
         if is_disabled:
-            logger.warning("[Tool] search_web_instant_answer is disabled")
+            logger.warning("[Tool] lookup_fact is disabled")
             return {"success": False, "error": reason, "tool_disabled": True}
 
         try:
-            logger.debug(f"[Tool] search_web_instant_answer called with query: {query}")
+            logger.debug(f"[Tool] lookup_fact called with query: {query}")
 
             # Normalize query for comparison
             normalized_query = query.lower().strip()
@@ -988,32 +994,36 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             search_cache.add_channel_query(channel_id, query)
 
             # Record success
-            await tool_failure_monitor.record_success("search_web_instant_answer")
+            await tool_failure_monitor.record_success("lookup_fact")
             return response
 
         except Exception as e:
-            logger.error(f"[Tool] search_web_instant_answer failed: {e}")
+            logger.error(f"[Tool] lookup_fact failed: {e}")
             error_msg = str(e)
             # Record failure
-            await tool_failure_monitor.record_failure("search_web_instant_answer", error_msg)
+            await tool_failure_monitor.record_failure("lookup_fact", error_msg)
             return {
                 "success": False,
                 "error": error_msg
             }
 
     async def search_web(query: str, max_results: int = 3) -> dict:
-        """Perform a comprehensive web search using DuckDuckGo.
+        """Search the web for specific, current, or niche information that requires research.
+
+        USE THIS FOR: Topics that need multiple sources, current information, or aren't common knowledge:
+        - "Best Python web frameworks 2024" → needs current comparison
+        - "How to fix CORS errors in React" → specific technical issue
+        - "Reviews of the new MacBook Pro" → current product info
+        - "What happened at the tech conference yesterday" → recent news
+
+        DO NOT USE THIS FOR: Simple facts like capitals, populations, release dates, or definitions.
+        Use lookup_fact() instead for those - it's faster and more direct.
 
         Returns multiple search results with titles, URLs, and snippets.
         Limited to 3 results by default to keep responses concise for Discord.
 
-        Queries should be either a topic or a specific question. Queries should be clear and specific,
-        avoid vague or overly broad queries. The query should reflect the intent of the search, "DFS software
-        development" is better than "DFS" but "Meaning of DFS in software development?" is even better as it clearly
-        indicates the user is looking for a definition in terms of software development.
-
         Args:
-            query: The search query (e.g., "Python async programming")
+            query: The search query - be specific about what you're looking for
             max_results: Maximum number of results to return (default 3, max 5 to stay concise)
 
         Returns:
@@ -1021,7 +1031,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             'title', 'url', and 'snippet' fields
 
         Example:
-            search_web("machine learning frameworks")
+            search_web("best machine learning frameworks 2024 comparison")
             -> {"success": True, "results": [{"title": "...", "url": "...", "snippet": "..."}]}
         """
         # Check if tool is disabled
@@ -2022,7 +2032,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         reply_to_message,
         add_reaction_to_message,
         list_reaction_types,
-        search_web_instant_answer,
+        lookup_fact,
         search_web,
         open_url,
         generate_engagement_plan,
