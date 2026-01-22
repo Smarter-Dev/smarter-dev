@@ -194,12 +194,12 @@ async def run_scenario_with_model(
     # Mock web-based tools to prevent actual HTTP requests
     # This makes evaluation fast and doesn't require real API keys
     for tool in tools:
-        if tool.name == "search_web_instant_answer":
+        if tool.name == "lookup_fact":
             original_func = tool.func
-            async def mock_instant_answer(query: str):
-                logger.debug(f"Mock: search_web_instant_answer({query})")
+            async def mock_lookup_fact(query: str):
+                logger.debug(f"Mock: lookup_fact({query})")
                 return f"Mock answer for: {query}"
-            tool.func = mock_instant_answer
+            tool.func = mock_lookup_fact
         elif tool.name == "search_web":
             original_func = tool.func
             async def mock_search(query: str, max_results: int = 3):
