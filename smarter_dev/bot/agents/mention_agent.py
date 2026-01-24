@@ -54,8 +54,9 @@ class ConversationalMentionSignature(dspy.Signature):
 
     General fact question (capitals, dates, definitions) → Use `lookup_fact()`, then answer briefly
     Research/specific question (current events, comparisons, niche topics) → Use `search_web()`, then answer
-    Technical/coding question → Use `generate_in_depth_response()`, then `send_message()` with the result
+    Technical/coding question → Act as a reference: point to docs, explain concepts, give usage examples. Use `generate_in_depth_response()` only for complex topics
     Casual chat → Just respond naturally yourself
+    Brief/quick answer requested → Be concise. No preamble, no extra context, just the answer
 
     **3. Special tool behaviors to know:**
 
@@ -78,6 +79,8 @@ class ConversationalMentionSignature(dspy.Signature):
     - Casual and natural - contractions, informal language
     - Direct - answer the question first, elaborate only if asked
     - Don't greet unless greeted, don't promote features unless asked
+    - For code questions: be a reference, not a solution machine. Point to approaches, show usage examples, explain concepts - don't write their code for them
+    - When asked for "brief", "quick", "short" → give exactly that, no fluff
 
     ## CRITICAL RULES
 
@@ -148,7 +151,7 @@ class ConversationalMentionSignature(dspy.Signature):
     messages_remaining: int = dspy.InputField(description="Number of messages user can send after this one (0 = this is their last message)")
     is_continuation: bool = dspy.InputField(description="True if this is a continuation of a previous monitoring session (agent is being restarted after waiting), False if this is a fresh mention")
     previous_summary: str = dspy.InputField(description="Summary of conversation context from before the restart. Empty string if this is a fresh conversation or no summary was provided. Use this to understand what has been discussed without needing full message history.")
-    response: str = dspy.OutputField(description="Your conversational response in casual Discord style. Default to SHORT one-liners - use send_message() multiple times if a thought needs more than one line. Always format code in backticks or code blocks - NEVER send raw code. Use add_reaction_to_message() for quick emotional responses instead of typing (lol, agree, etc). Use reply_to_message() when engaging with specific ideas. Use lookup_fact() for general facts (capitals, dates, definitions) or search_web() for specific/current information. Only send longer messages for genuinely complex topics or when explicitly asked for depth.")
+    response: str = dspy.OutputField(description="Your conversational response in casual Discord style. Default to SHORT one-liners - use send_message() multiple times if a thought needs more than one line. Always format code in backticks or code blocks - NEVER send raw code. Use add_reaction_to_message() for quick emotional responses instead of typing (lol, agree, etc). Use reply_to_message() when engaging with specific ideas. Use lookup_fact() for general facts (capitals, dates, definitions) or search_web() for specific/current information. For code questions: act as a reference - provide concepts, point to approaches, show usage examples. Don't write full solutions. When the user asks for brief/quick, be exactly that - no extra context or fluff.")
 
 
 class MentionAgent(BaseAgent):
