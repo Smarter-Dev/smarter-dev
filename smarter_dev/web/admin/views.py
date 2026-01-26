@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Dict, Any, List
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from starlette.requests import Request
 from starlette.responses import Response, RedirectResponse
 from starlette.templating import Jinja2Templates
 from sqlalchemy import select, func, distinct
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
 from smarter_dev.shared.database import get_db_session_context
@@ -26,6 +28,9 @@ from smarter_dev.web.models import (
     BlogPost,
     ForumAgent,
     ForumAgentResponse,
+    Quest,
+    DailyQuest,
+    QuestProgress,
     Campaign,
     Challenge,
     ScheduledMessage,
@@ -2198,7 +2203,6 @@ async def campaigns_list(request: Request) -> Response:
         }
         return templates.TemplateResponse("admin/error.html", context, status_code=500)
 
-
 async def campaign_create(request: Request) -> Response:
     """Create a new campaign."""
     guild_id = request.path_params["guild_id"]
@@ -2550,6 +2554,305 @@ async def campaign_delete(request: Request) -> Response:
             status_code=302
         )
 
+
+from sqlalchemy import select, outerjoin
+from sqlalchemy.orm import contains_eager
+
+async def quests_list(request: Request) -> Response:
+    guild_id = request.path_params["guild_id"]
+    guild = await get_guild_info(guild_id)
+
+    async with get_db_session_context() as session:
+        stmt = (
+            select(Quest, DailyQuest)
+            .outerjoin(
+                DailyQuest,
+                (DailyQuest.quest_id == Quest.id)
+                & (DailyQuest.guild_id == guild_id)
+            )
+            .where(Quest.guild_id == guild_id)
+            .order_by(
+                DailyQuest.active_date.desc().nullslast(),
+                Quest.created_at.desc(),
+            )
+        )
+
+        rows = (await session.execute(stmt)).all()
+
+    # rows = [(Quest, DailyQuest | None), ...]
+    quests_with_dates = [
+        {
+            "quest": quest,
+            "daily_quest": daily_quest,
+        }
+        for quest, daily_quest in rows
+    ]
+
+    return templates.TemplateResponse(
+        "admin/quests_list.html",
+        {
+            "request": request,
+            "guild": guild,
+            "quests": quests_with_dates,
+            "total_count": len(quests_with_dates),
+            "title": f"Quests – {guild.name}",
+            "today": date.today()
+        },
+    )
+
+async def quest_edit(request: Request) -> Response:
+    guild_id = request.path_params["guild_id"]
+    quest_id = request.path_params["quest_id"]
+    guild = await get_guild_info(guild_id)
+
+    async with get_db_session_context() as session:
+        quest = await session.get(Quest, quest_id)
+
+        if not quest or quest.guild_id != guild_id:
+            return templates.TemplateResponse(
+                "admin/error.html",
+                {"request": request, "error": "Quest not found"},
+                status_code=404,
+            )
+
+        # Fetch existing daily quest (if any)
+        result = await session.execute(
+            select(DailyQuest)
+            .where(
+                DailyQuest.guild_id == guild_id,
+                DailyQuest.quest_id == quest.id,
+            )
+            .order_by(DailyQuest.active_date.desc())
+            .limit(1)
+        )
+        daily_quest = result.scalar_one_or_none()
+
+        if request.method == "GET":
+            return templates.TemplateResponse(
+                "admin/quest_edit.html",
+                {
+                    "request": request,
+                    "guild": guild,
+                    "quest": quest,
+                    "daily_quest": daily_quest,
+                    "title": f"Edit Quest – {quest.title}",
+                },
+            )
+
+        # POST
+        form = await request.form()
+
+        # --- Quest fields ---
+        title = form.get("title")
+        prompt = form.get("prompt")
+
+        if isinstance(title, str):
+            quest.title = title.strip()
+
+        if isinstance(prompt, str):
+            quest.prompt = prompt.strip()
+
+        quest.quest_type = str(form.get("quest_type", quest.quest_type))
+
+        # --- Daily quest toggle ---
+        if daily_quest:
+            daily_quest.is_active = form.get("is_active") == "1"
+
+        await session.commit()
+
+    return RedirectResponse(
+        f"/admin/guilds/{guild_id}/quests?updated=1",
+        status_code=302,
+    )
+
+async def quest_schedule(request: Request) -> Response:
+    guild_id = request.path_params["guild_id"]
+    quest_id = UUID(request.path_params["quest_id"])
+
+    form = await request.form()
+    raw_date = form.get("active_date")
+
+    if not isinstance(raw_date, str) or not raw_date:
+        return templates.TemplateResponse(
+            "admin/error.html",
+            {
+                "request": request,
+                "error": "Active date is required",
+                "title": "Invalid date",
+            },
+            status_code=400,
+        )
+
+    from datetime import date, datetime, timezone
+
+    active_date = date.fromisoformat(raw_date)
+    expires_at = datetime.combine(
+        active_date,
+        datetime.max.time(),
+        tzinfo=timezone.utc,
+    )
+
+    async with get_db_session_context() as session:
+        # Get THIS quest’s existing daily quest (if any)
+        current_daily = await session.execute(
+            select(DailyQuest)
+            .where(
+                DailyQuest.guild_id == guild_id,
+                DailyQuest.quest_id == quest_id,
+            )
+            .limit(1)
+        )
+        current_daily = current_daily.scalar_one_or_none()
+
+        # Check for conflict with OTHER quests
+        conflict = await session.execute(
+            select(DailyQuest)
+            .where(
+                DailyQuest.guild_id == guild_id,
+                DailyQuest.active_date == active_date,
+                DailyQuest.quest_id != quest_id,
+            )
+            .limit(1)
+        )
+        conflict = conflict.scalar_one_or_none()
+
+        if conflict:
+            return templates.TemplateResponse(
+                "admin/quest_edit.html",
+                {
+                    "request": request,
+                    "guild": await get_guild_info(guild_id),
+                    "quest": await session.get(Quest, quest_id),
+                    "daily_quest": current_daily,  # ← important
+                    "date_error": "Another daily quest is already scheduled for this date.",
+                },
+                status_code=400,
+            )
+
+        stmt = (
+            pg_insert(DailyQuest)
+            .values(
+                guild_id=guild_id,
+                quest_id=quest_id,
+                active_date=active_date,
+                expires_at=expires_at,
+                is_active=True,
+            )
+            .on_conflict_do_update(
+                index_elements=["guild_id", "quest_id", "active_date"],
+                set_={
+                    "expires_at": expires_at,
+                    "is_active": True,
+                },
+            )
+        )
+
+        await session.execute(stmt)
+        await session.commit()
+
+    return RedirectResponse(
+        f"/admin/guilds/{guild_id}/quests?scheduled=1",
+        status_code=302,
+    )
+
+async def quest_delete(request: Request) -> Response:
+    guild_id = request.path_params["guild_id"]
+    quest_id = request.path_params["quest_id"]
+
+    try:
+        async with get_db_session_context() as session:
+            quest = await session.get(Quest, quest_id)
+
+            if not quest or quest.guild_id != guild_id:
+                return RedirectResponse(
+                    url=f"/admin/guilds/{guild_id}/quests?error=not_found",
+                    status_code=302,
+                )
+
+            await session.delete(quest)
+            await session.commit()
+
+        return RedirectResponse(
+            url=f"/admin/guilds/{guild_id}/quests?deleted=1",
+            status_code=302,
+        )
+
+    except Exception as e:
+        logger.error(f"Error deleting quest {quest_id} in guild {guild_id}: {e}")
+        return RedirectResponse(
+            url=f"/admin/guilds/{guild_id}/quests?error=delete_failed",
+            status_code=302,
+        )
+
+async def quest_create(request: Request) -> Response:
+    guild_id = request.path_params["guild_id"]
+    guild = await get_guild_info(guild_id)
+
+    if request.method == "GET":
+        return templates.TemplateResponse(
+            "admin/quest_create.html",
+            {
+                "request": request,
+                "guild": guild,
+                "title": "Create Quest",
+            },
+        )
+
+    form = await request.form()
+    errors = []
+
+    # --- Basic fields ---
+    raw_title = form.get("title")
+    raw_prompt = form.get("prompt")
+    raw_type = form.get("quest_type")
+
+    title = raw_title.strip() if isinstance(raw_title, str) else ""
+    prompt = raw_prompt.strip() if isinstance(raw_prompt, str) else ""
+    quest_type = raw_type if isinstance(raw_type, str) else "daily"
+
+    if not title:
+        errors.append("Quest title is required")
+    if not prompt:
+        errors.append("Quest prompt is required")
+
+    # --- Input generator script (THE FIX) ---
+    input_generator_script = None
+    file = form.get("input_generator_script")
+
+    if file and hasattr(file, "file") and file.filename:
+        try:
+            input_generator_script = (await file.read()).decode("utf-8")
+        except Exception as e:
+            errors.append(f"Failed to read input generator script: {e}")
+
+    if errors:
+        return templates.TemplateResponse(
+            "admin/quest_create.html",
+            {
+                "request": request,
+                "guild": guild,
+                "errors": errors,
+                "form_data": form,
+                "title": "Create Quest",
+            },
+            status_code=400,
+        )
+
+    async with get_db_session_context() as session:
+        quest = Quest(
+            guild_id=guild_id,
+            title=title,
+            prompt=prompt,
+            quest_type=quest_type,
+            input_generator_script=input_generator_script,  # ← THIS WAS MISSING
+        )
+        session.add(quest)
+        await session.commit()
+
+    return RedirectResponse(
+        f"/admin/guilds/{guild_id}/quests?created=1",
+        status_code=302,
+    )
 
 async def campaign_challenges(request: Request) -> Response:
     """Manage challenges within a campaign."""

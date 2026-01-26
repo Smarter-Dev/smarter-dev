@@ -1,0 +1,141 @@
+{% extends "admin/base_sidebar.html" %}
+
+{% block title %}Edit Quest{% endblock %}
+{% block page_title %}Edit Quest{% endblock %}
+
+{% block breadcrumb_items %}
+<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item">
+  <a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a>
+</li>
+<li class="breadcrumb-item">
+  <a href="/admin/guilds/{{ guild.id }}/quests">Quests</a>
+</li>
+<li class="breadcrumb-item active">{{ quest.title }}</li>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+  <div class="col-md-8">
+
+    <!-- Edit Quest -->
+    <div class="card mb-3">
+      <div class="card-header">
+        <h3 class="card-title">
+          Edit Quest
+        </h3>
+      </div>
+
+      <div class="card-body">
+        <form method="post">
+          <div class="mb-3">
+            <label class="form-label required">Title</label>
+            <input
+              type="text"
+              class="form-control"
+              name="title"
+              value="{{ quest.title }}"
+              required
+            />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label required">Prompt</label>
+            <textarea
+              class="form-control"
+              name="prompt"
+              rows="6"
+              required
+            >{{ quest.prompt }}</textarea>
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label">Quest Type</label>
+            <select class="form-select" name="quest_type">
+              <option value="daily" {{ "selected" if quest.quest_type == "daily" else "" }}>
+                Daily
+              </option>
+              <option value="weekly" {{ "selected" if quest.quest_type == "weekly" else "" }}>
+                Weekly
+              </option>
+              <option value="one_off" {{ "selected" if quest.quest_type == "one_off" else "" }}>
+                One-off
+              </option>
+            </select>
+          </div>
+
+                                {% if daily_quest %}
+  <div class="mb-3">
+    <label class="form-check form-switch">
+      <input
+        class="form-check-input"
+        type="checkbox"
+        name="is_active"
+        value="1"
+        {{ "checked" if daily_quest.is_active else "" }}
+      />
+      <span class="form-check-label">
+        Quest is active
+      </span>
+    </label>
+    <div class="form-hint">
+      Disable to temporarily deactivate this daily quest without deleting it
+    </div>
+  </div>
+{% endif %}
+
+          <div class="form-footer">
+            <button type="submit" class="btn btn-primary">
+              Save Changes
+            </button>
+            <a href="/admin/guilds/{{ guild.id }}/quests" class="btn btn-link">
+              Cancel
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Schedule Quest -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">
+          Assign Date
+        </h3>
+      </div>
+
+      <div class="card-body">
+        <form
+          method="post"
+          action="/admin/guilds/{{ guild.id }}/quests/{{ quest.id }}/schedule"
+        >
+          <div class="mb-3">
+            <label class="form-label required">Active Date</label>
+            <input
+              type="date"
+              class="form-control"
+              name="active_date"
+              {% if daily_quest %}
+                value="{{ daily_quest.active_date.isoformat() }}"
+              {% endif %}
+              required
+            />
+            <div class="form-hint">
+              Quest will be active for this calendar date
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-outline-primary">
+            {% if daily_quest %}
+              Update Date
+            {% else %}
+              Assign Quest
+            {% endif %}
+          </button>
+        </form>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

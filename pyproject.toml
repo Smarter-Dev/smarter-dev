@@ -43,6 +43,7 @@ dependencies = [
     "httpx>=0.28.1",
     "redis>=6.2.0",
     "dspy-ai>=3.0.0",
+    "hikari>=2.1.1",
 ]
 
 [dependency-groups]
@@ -81,6 +82,9 @@ dev = [
     "isort>=5.12.0",
     "pre-commit>=3.0.0",
     "aiosqlite>=0.21.0",
+    "pdfplumber>=0.11.7",
+    "psutil>=7.0.0",
+    "ddgs>=9.6.1",
 ]
 
 # Testing dependencies
