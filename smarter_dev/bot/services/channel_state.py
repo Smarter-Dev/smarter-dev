@@ -37,6 +37,7 @@ class ChannelMonitorState:
         self.recent_messages: dict[str, float] = {}  # Message content hash -> timestamp for deduplication
         self.conversation_summary: str | None = None  # Summary for context continuity across restarts
         self.last_context_message_id: str | None = None  # Last message ID included in agent's context (for restart catch-up)
+        self.limit_reached_this_session: bool = False  # Prevents infinite loop when message limit is reached
 
     def _hash_message(self, content: str) -> str:
         """Generate a hash for message content.

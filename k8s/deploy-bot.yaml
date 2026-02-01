@@ -77,23 +77,28 @@ spec:
                     limits:
                         cpu: 500m
                         memory: 512Mi
+                ports:
+                  - containerPort: 8080
+                    name: health
+                startupProbe:
+                    httpGet:
+                        path: /health
+                        port: 8080
+                    failureThreshold: 30
+                    periodSeconds: 10
                 livenessProbe:
-                    exec:
-                        command:
-                          - pgrep
-                          - -f
-                          - "smarter_dev.bot.client"
-                    initialDelaySeconds: 30
+                    httpGet:
+                        path: /health
+                        port: 8080
+                    initialDelaySeconds: 10
                     periodSeconds: 30
                     timeoutSeconds: 5
                     failureThreshold: 3
                 readinessProbe:
-                    exec:
-                        command:
-                          - pgrep
-                          - -f
-                          - "smarter_dev.bot.client"
-                    initialDelaySeconds: 10
+                    httpGet:
+                        path: /health
+                        port: 8080
+                    initialDelaySeconds: 5
                     periodSeconds: 10
                     timeoutSeconds: 3
                     failureThreshold: 2

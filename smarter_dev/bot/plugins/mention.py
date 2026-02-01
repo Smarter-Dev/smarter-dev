@@ -245,6 +245,7 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
 
                 # Reset message counter for fresh context in restarted agent
                 channel_state.reset_messages_processed(event.channel_id)
+                channel_state.get_state(event.channel_id).limit_reached_this_session = False
                 # Loop continues to restart agent
 
             # Calculate total response time
