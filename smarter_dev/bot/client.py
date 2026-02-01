@@ -12,12 +12,40 @@ from datetime import datetime
 
 import hikari
 import lightbulb
+from aiohttp import web
 
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+async def start_health_server(bot: lightbulb.BotApp, port: int = 8080) -> web.AppRunner:
+    """Start a lightweight HTTP server for health checks.
+
+    Args:
+        bot: The bot instance to check health of
+        port: Port to listen on (default 8080)
+
+    Returns:
+        The AppRunner instance for cleanup
+    """
+    async def health_handler(request: web.Request) -> web.Response:
+        is_alive = bot.is_alive if hasattr(bot, 'is_alive') else False
+        if is_alive:
+            return web.json_response({"status": "healthy", "discord": "connected"})
+        else:
+            return web.json_response({"status": "unhealthy", "discord": "disconnected"}, status=503)
+
+    app = web.Application()
+    app.router.add_get("/health", health_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    logger.info(f"Health server started on port {port}")
+    return runner
 
 
 async def store_streak_celebration(
@@ -1634,9 +1662,13 @@ async def run_bot() -> None:
     load_plugins(bot)
 
     # Run bot and keep alive
+    health_runner = None
     try:
         # Start the bot and wait for it to be ready
         await bot.start()
+
+        # Start health check server for Kubernetes probes
+        health_runner = await start_health_server(bot)
 
         # Keep the bot running until interrupted
         logger.info("Bot is now running. Press Ctrl+C to stop.")
@@ -1654,6 +1686,8 @@ async def run_bot() -> None:
         raise
     finally:
         logger.info("Shutting down bot...")
+        if health_runner:
+            await health_runner.cleanup()
         await bot.close()
 
 
