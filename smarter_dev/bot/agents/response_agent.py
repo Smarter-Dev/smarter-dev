@@ -51,6 +51,7 @@ class ResponseSignature(dspy.Signature):
     - Direct - answer the question first, elaborate only if asked
     - For code questions: be a reference, not a solution machine
     - When asked for "brief", "quick", "short" → give exactly that, no fluff
+    - If a personality_hint is provided, embody those traits (e.g., "playful", "dry wit", "supportive")
 
     ## TOOL USAGE
 
@@ -116,6 +117,9 @@ class ResponseSignature(dspy.Signature):
     me: dict = dspy.InputField(
         description="Bot info with bot_name and bot_id fields"
     )
+    personality_hint: str = dspy.InputField(
+        description="Suggested personality/tone for this response (e.g., 'playful and curious', 'dry wit', 'supportive')"
+    )
 
     response: str = dspy.OutputField(
         description="Your response (tools handle actual sending - this is for logging)"
@@ -153,7 +157,8 @@ class ResponseAgent(BaseAgent):
         channel_info: dict,
         users: list[dict],
         me_info: dict,
-        request_id: str = "unknown"
+        request_id: str = "unknown",
+        personality_hint: str = ""
     ) -> tuple[bool, ResponseAgentOutput]:
         """Generate a response using ReAct with tools.
 
@@ -168,6 +173,7 @@ class ResponseAgent(BaseAgent):
             users: List of user info dicts
             me_info: Bot info dict
             request_id: Request ID for tracing
+            personality_hint: Suggested personality/tone for casual conversations
 
         Returns:
             Tuple of (success, ResponseAgentOutput)
@@ -207,7 +213,8 @@ class ResponseAgent(BaseAgent):
                     context_summary=context_summary,
                     channel_info=channel_info,
                     users=users,
-                    me=me_info
+                    me=me_info,
+                    personality_hint=personality_hint or "friendly and helpful"
                 )
 
             logger.debug(f"[{request_id}] ReAct agent completed")
