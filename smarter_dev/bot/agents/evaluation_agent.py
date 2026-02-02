@@ -28,39 +28,41 @@ logger.info(
 
 
 class EvaluationSignature(dspy.Signature):
-    """Evaluate whether new messages are related follow-ups to a watched conversation topic.
+    """Evaluate whether new messages continue a conversation the bot is watching.
 
-    The bot just answered a question and is watching for natural follow-up questions.
-    Your job is to determine if new messages are a continuation of that conversation.
+    The bot just responded and is watching for the user to continue the conversation.
+    Your job is to determine if new messages are a continuation - this includes BOTH
+    questions AND statements/replies.
 
     ## should_respond=True when:
-    - Message is a follow-up question about what the bot just explained
-    - Message asks for clarification, examples, or more detail on the topic
-    - Message explores a closely related aspect of the same subject area
-    - User wants to go deeper into something the bot mentioned
+    - User replies to what the bot said (even just a statement or reaction)
+    - User answers a question the bot asked them
+    - User shares their thoughts on the topic being discussed
+    - User asks a follow-up question
+    - User wants to continue chatting about the same topic
     - Message naturally continues the conversation thread
 
-    Example: If bot explained "protocols vs inheritance", then "what about composition?"
-    or "can you give an example?" or "how does this work in Python?" ARE relevant follow-ups.
+    Example: If bot asked "What do YOU think ice cream tastes like?", then:
+    - "I think it tastes sweet and creamy" → RESPOND (answering the bot's question)
+    - "vanilla is my favorite" → RESPOND (continuing the topic)
+    - "lol good question" → RESPOND (engaging with the conversation)
 
     ## should_respond=False when:
-    - Message is about a COMPLETELY DIFFERENT subject (not just a different aspect)
-    - Message is casual chat, greetings, or off-topic banter
-    - Bot is @mentioned for a clearly NEW unrelated question
+    - Message is about a COMPLETELY DIFFERENT subject
+    - Message is clearly directed at someone else
+    - Bot is @mentioned for a NEW unrelated question
     - Message is from a different conversation thread entirely
 
-    Example: If bot explained "protocols vs inheritance", then "can someone get me a soda?"
-    or "what's the weather?" or "hey @bot explain quantum physics" are NOT relevant.
+    Example: "can someone get me a soda?" or "hey @bot explain quantum physics" are NOT relevant.
 
     ## Key Principle
 
-    Think: "Is this person continuing the conversation about what the bot just discussed?"
-    A related follow-up question counts as continuing the conversation, even if it's not
-    the exact same sub-topic.
+    If the user is engaging with the conversation in ANY way (question, answer, statement,
+    reaction), respond. Only ignore messages that are clearly unrelated or directed elsewhere.
 
     ## Output
 
-    - should_respond: True for natural follow-ups within the conversation topic
+    - should_respond: True if user is continuing the conversation
     - relevant_message_ids: Comma-separated IDs (empty if should_respond=False)
     - reasoning: Brief explanation
     """
