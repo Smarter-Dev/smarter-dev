@@ -252,11 +252,9 @@ class WatchLoop:
                 limit=10
             )
 
-            # Filter to relevant messages
-            relevant_messages = self._filter_relevant_messages(
-                context["conversation_timeline"],
-                relevant_ids + [watcher.context.original_trigger_message_id]
-            )
+            # For watcher responses, use the FULL recent conversation timeline
+            # Don't filter aggressively - the bot needs to see what was actually said
+            relevant_messages = context["conversation_timeline"]
             logger.debug(f"[{request_id}] Context built, invoking response agent...")
 
             # Invoke response agent
@@ -266,8 +264,8 @@ class WatchLoop:
                 channel_id=self.channel_id,
                 guild_id=self.guild_id,
                 relevant_messages=relevant_messages,
-                intent=f"Follow-up on: {watcher.context.watching_for}",
-                context_summary=watcher.context.relevant_messages_summary,
+                intent=f"Continue conversation - user said something new",
+                context_summary=f"Watching for: {watcher.context.watching_for}",
                 channel_info=context["channel"],
                 users=context["users"],
                 me_info=context["me"],
