@@ -2057,3 +2057,51 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
     ]
 
     return tools, channel_queries
+
+
+def create_response_tools(bot, channel_id: str, guild_id: str) -> tuple[list[Callable], list[str]]:
+    """Create context-bound Discord interaction tools for a response agent.
+
+    This returns a subset of tools suitable for the response agent in the
+    multi-agent pipeline. Flow control tools (wait_for_messages, stop_monitoring,
+    fetch_new_messages, set_conversation_summary) are excluded because flow
+    control is now managed via structured output fields.
+
+    Args:
+        bot: Discord bot instance (lightbulb.BotApp)
+        channel_id: Channel where the mention occurred (string)
+        guild_id: Guild where the mention occurred (string)
+
+    Returns:
+        Tuple of (List of callable async functions, List of recent search queries in this channel)
+    """
+    # Get the full tool set from create_mention_tools
+    # We pass an empty trigger_message_id since it's not needed for response tools
+    all_tools, channel_queries = create_mention_tools(
+        bot=bot,
+        channel_id=channel_id,
+        guild_id=guild_id,
+        trigger_message_id=""
+    )
+
+    # Tools to exclude (flow control tools)
+    excluded_tool_names = {
+        "wait_for_messages",
+        "wait_for_duration",
+        "stop_monitoring",
+        "fetch_new_messages",
+        "set_conversation_summary"
+    }
+
+    # Filter out excluded tools
+    response_tools = [
+        tool for tool in all_tools
+        if tool.__name__ not in excluded_tool_names
+    ]
+
+    logger.debug(
+        f"Created response tools for channel {channel_id}: "
+        f"{len(response_tools)} tools (excluded {len(excluded_tool_names)} flow control tools)"
+    )
+
+    return response_tools, channel_queries
