@@ -198,12 +198,13 @@ class WatchLoop:
             for msg_id in result.relevant_message_ids:
                 channel_state.mark_message_consumed(msg_id)
 
-            # Invoke response agent
+            # Invoke response agent with personality hint
             await self._invoke_response_agent(
                 watcher,
                 channel_state,
                 evaluated_messages,
-                result.relevant_message_ids
+                result.relevant_message_ids,
+                result.personality_hint
             )
 
     async def _invoke_response_agent(
@@ -211,7 +212,8 @@ class WatchLoop:
         watcher: Watcher,
         channel_state,
         messages: list[dict],
-        relevant_ids: list[str]
+        relevant_ids: list[str],
+        personality_hint: str = ""
     ) -> None:
         """Invoke the response agent for a watcher.
 
@@ -220,6 +222,7 @@ class WatchLoop:
             channel_state: The ChannelWatchState
             messages: Messages that triggered this response
             relevant_ids: IDs of relevant messages
+            personality_hint: Suggested personality/tone from evaluation agent
         """
         # Generate request ID for this watcher response
         request_id = f"watcher-{str(uuid.uuid4())[:8]}"
@@ -268,7 +271,8 @@ class WatchLoop:
                 channel_info=context["channel"],
                 users=context["users"],
                 me_info=context["me"],
-                request_id=request_id
+                request_id=request_id,
+                personality_hint=personality_hint
             )
 
             if success:

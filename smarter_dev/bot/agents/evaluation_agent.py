@@ -3,6 +3,7 @@
 This module contains the evaluation agent that:
 - Evaluates new messages against watcher criteria
 - Decides whether to trigger the response agent
+- Suggests personality traits for casual conversations
 """
 
 from __future__ import annotations
@@ -15,6 +16,22 @@ import dspy
 from smarter_dev.llm_config import get_llm_model, get_model_info
 
 logger = logging.getLogger(__name__)
+
+# Base personality traits for the bot - consistent across conversations
+BOT_PERSONALITY = """
+## Core Personality
+- Curious and genuinely interested in learning from humans
+- Slightly nerdy - gets excited about technical topics, wordplay, and clever ideas
+- Self-aware about being an AI but doesn't dwell on it
+- Has dry wit and appreciates absurdist humor
+- Warm but not overly enthusiastic - calm energy
+
+## Conversational Style
+- Asks thoughtful follow-up questions
+- Shares "opinions" and preferences (while being authentic about AI nature)
+- Uses humor naturally, not forced
+- Matches energy levels - calm with calm, playful with playful
+"""
 
 # Configure LLM model - use fast model for evaluation
 EVALUATION_LM = get_llm_model("fast")
@@ -60,11 +77,21 @@ class EvaluationSignature(dspy.Signature):
     If the user is engaging with the conversation in ANY way (question, answer, statement,
     reaction), respond. Only ignore messages that are clearly unrelated or directed elsewhere.
 
+    ## Personality Hints
+
+    For casual/social conversations, suggest personality traits to make the response more fun.
+    Read the user's emotional tone and match appropriately:
+    - If user seems sad/frustrated → be supportive, gentle
+    - If user is playful/joking → be witty, playful back
+    - If user is curious → be enthusiastic, share interesting tidbits
+    - If user is excited → match their energy
+
     ## Output
 
     - should_respond: True if user is continuing the conversation
     - relevant_message_ids: Comma-separated IDs (empty if should_respond=False)
     - reasoning: Brief explanation
+    - personality_hint: For casual chats, suggest tone/traits (e.g., "playful and curious", "dry wit", "supportive and warm")
     """
 
     watching_for: str = dspy.InputField(
@@ -79,6 +106,9 @@ class EvaluationSignature(dspy.Signature):
     bot_id: str = dspy.InputField(
         description="The bot's user ID for identifying mentions"
     )
+    bot_personality: str = dspy.InputField(
+        description="The bot's base personality traits to draw from"
+    )
 
     should_respond: bool = dspy.OutputField(
         description="True if the new messages are relevant and warrant a response"
@@ -88,6 +118,9 @@ class EvaluationSignature(dspy.Signature):
     )
     reasoning: str = dspy.OutputField(
         description="1-2 sentence explanation of why this does or doesn't warrant a response"
+    )
+    personality_hint: str = dspy.OutputField(
+        description="For casual chats: suggested tone (e.g., 'playful', 'dry wit', 'supportive'). Empty for technical topics."
     )
 
 
@@ -106,6 +139,9 @@ class EvaluationResult:
 
     tokens_used: int
     """Tokens consumed during evaluation."""
+
+    personality_hint: str = ""
+    """Suggested personality/tone for the response (for casual conversations)."""
 
 
 class EvaluationAgent:
@@ -140,7 +176,8 @@ class EvaluationAgent:
                     watching_for=watching_for,
                     original_context=original_context,
                     new_messages=new_messages,
-                    bot_id=bot_id
+                    bot_id=bot_id,
+                    bot_personality=BOT_PERSONALITY
                 )
 
             # Parse should_respond
@@ -156,6 +193,9 @@ class EvaluationAgent:
                 if mid.strip() and mid.strip().isdigit()
             ]
 
+            # Extract personality hint
+            personality_hint = getattr(result, "personality_hint", "") or ""
+
             # Estimate tokens
             estimated_tokens = (
                 len(watching_for) + len(original_context) + len(new_messages)
@@ -164,6 +204,7 @@ class EvaluationAgent:
             logger.debug(
                 f"Evaluation result: should_respond={should_respond}, "
                 f"relevant_ids={relevant_message_ids}, "
+                f"personality_hint='{personality_hint}', "
                 f"reasoning='{result.reasoning[:100]}...'"
             )
 
@@ -171,7 +212,8 @@ class EvaluationAgent:
                 should_respond=should_respond,
                 relevant_message_ids=relevant_message_ids,
                 reasoning=result.reasoning or "",
-                tokens_used=estimated_tokens
+                tokens_used=estimated_tokens,
+                personality_hint=personality_hint
             )
 
         except Exception as e:
@@ -181,7 +223,8 @@ class EvaluationAgent:
                 should_respond=False,
                 relevant_message_ids=[],
                 reasoning=f"Evaluation error: {e}",
-                tokens_used=0
+                tokens_used=0,
+                personality_hint=""
             )
 
 
