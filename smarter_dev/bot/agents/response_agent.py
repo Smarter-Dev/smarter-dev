@@ -70,26 +70,30 @@ class ResponseSignature(dspy.Signature):
     After responding, you MUST decide whether to continue watching for follow-up messages.
     This is done via structured output fields, NOT via tools.
 
-    **DEFAULT: continue_watching=true** - Always expect follow-up questions, especially for
-    substantive or technical topics. Users often have clarifying questions after an answer.
+    **DEFAULT: continue_watching=true** - Almost always watch for follow-ups! Users often
+    want to continue the conversation, whether it's technical or casual.
+
+    **For casual/social interactions:** Be friendly and conversational! If someone asks about
+    your favorite color, hobbies, or just wants to chat - engage warmly and watch briefly
+    (30-45s) in case they want to continue. You're a community member, not just a Q&A bot.
 
     **continue_watching=false ONLY when:**
     - Conversation is hostile or aggressive
-    - Topic is drifting off-topic or becoming irrelevant
     - Topic is sensitive (personal, confidential, inappropriate)
     - User explicitly said goodbye, thanks, or requested you stop
-    - Trivial interaction (greeting, simple emoji reaction)
+    - Pure reaction with no conversation (just an emoji, "lol", "ok")
 
     **watching_for:** Describe what follow-up you're expecting (e.g., "follow-up questions
-    about Arduino wiring", "clarification on the code example", "questions about next steps")
+    about Arduino wiring", "continued chat about favorites", "clarification on the code example")
 
     **wait_duration:** How long to wait for follow-up (30-300 seconds)
+    - Brief (30-45s): Casual chat, simple social interactions
     - Short (60s): Simple topics, quick Q&A
     - Medium (120s): Technical explanations, tutorials
     - Long (180-300s): Complex discussions, debugging sessions, user testing something
 
     **update_frequency:** How often to check for relevant messages
-    - "10s": Fast-paced active discussion
+    - "10s": Fast-paced active discussion, casual back-and-forth
     - "1m": Normal conversation (default)
     - "5m": User needs time to think, test code, or try something
     """
