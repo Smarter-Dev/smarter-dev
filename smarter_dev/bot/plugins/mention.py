@@ -25,6 +25,7 @@ from smarter_dev.bot.agents.classification_agent import get_classification_agent
 from smarter_dev.bot.agents.response_agent import get_response_agent
 from smarter_dev.bot.agents.watcher import WatcherContext
 from smarter_dev.bot.services.api_client import APIClient
+from smarter_dev.bot.services.channel_state import get_channel_state_manager
 from smarter_dev.bot.services.rate_limiter import rate_limiter
 from smarter_dev.bot.services.watch_loop import get_or_create_watch_loop
 from smarter_dev.bot.services.watch_manager import get_watch_manager
@@ -239,6 +240,15 @@ async def handle_mention(event: hikari.MessageCreateEvent) -> None:
             request_id=request_id
         )
 
+        # Cleanup: Ensure typing indicator is stopped after response agent completes
+        # This prevents stuck typing indicators if the agent didn't properly clean up
+        channel_state_mgr = get_channel_state_manager()
+        channel_state = channel_state_mgr.get_state(event.channel_id)
+        if channel_state.typing_active:
+            logger.warning(f"[{request_id}] Typing indicator still active after response agent - cleaning up")
+            channel_state.typing_active = False
+            channel_state_mgr.stop_typing_task(event.channel_id)
+
         total_tokens += output.tokens_used
         logger.info(
             f"[{request_id}] Response agent result: success={success}, "
@@ -307,6 +317,16 @@ async def handle_mention(event: hikari.MessageCreateEvent) -> None:
 
     except Exception as e:
         logger.error(f"[{request_id}] Error in mention handler: {e}", exc_info=True)
+        # Cleanup: Ensure typing indicator is stopped on error
+        try:
+            channel_state_mgr = get_channel_state_manager()
+            channel_state = channel_state_mgr.get_state(event.channel_id)
+            if channel_state.typing_active:
+                logger.warning(f"[{request_id}] Cleaning up typing indicator after error")
+                channel_state.typing_active = False
+                channel_state_mgr.stop_typing_task(event.channel_id)
+        except Exception:
+            pass  # Don't mask the original error
 
 
 async def trigger_watcher_immediately(
