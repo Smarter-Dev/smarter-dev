@@ -24,9 +24,13 @@ NUM_STREAKS = 5  # Fixed number of streaks
 VERY_DARK_BLUE = (2, 0, 15)  # #02000F background
 WHITE = (255, 255, 255)
 STREAK_COLORS = [
-    (0, 255, 255)
+    (255,0,0),
+    (255,120,120),
+    (255,255,255),
+    (116,214,128),
+    (55,139,41)
 ]
-BRAIN_COLOR = (255, 255, 255)
+BRAIN_COLOR = (255, 215, 0)
 
 # Grid configuration
 GRID_SPACING = 32  # Scaled down from 120px for 256px canvas
