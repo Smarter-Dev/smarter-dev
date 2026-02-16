@@ -1293,18 +1293,11 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             except Exception as e:
                 logger.error(f"[Tool] Failed to send url usage message: {e}")
 
-            # Tier 1 Cache: Check if we have the content cached
-            cached_content = search_cache.get_url(url)
             content = None
             content_type_str = ""
             final_url = url
 
-            if cached_content is not None:
-                logger.debug(f"[Cache] Content cache hit for '{url}'")
-                content = cached_content
-                # For cached content, we'll default to "html" (most common)
-                content_type_str = "html"
-            elif is_youtube_url(url):
+            if is_youtube_url(url):
                 # Try YouTube transcript extraction first
                 transcript = fetch_youtube_transcript(url)
                 if transcript:
@@ -1322,6 +1315,14 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     content = f"{header}\n\n--- Transcript ---\n{transcript}" if header else transcript
                     content_type_str = "transcript"
                     search_cache.set_url(url, content)
+
+            # Tier 1 Cache: Check if we have the content cached (skip for YouTube, handled above)
+            if content is None:
+                cached_content = search_cache.get_url(url)
+                if cached_content is not None:
+                    logger.debug(f"[Cache] Content cache hit for '{url}'")
+                    content = cached_content
+                    content_type_str = "html"
 
             if content is None:
                 # Content not cached - fetch it
