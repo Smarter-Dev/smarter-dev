@@ -49,12 +49,17 @@ def sanitize_html(html: str) -> str:
     for tag in soup.find_all(_STRIP_TAGS):
         tag.decompose()
 
-    # Remove elements with non-content class/id
+    # Remove elements with non-content class/id (collect first to avoid mutation during iteration)
+    to_remove = []
     for el in soup.find_all(True):
+        if el.attrs is None:
+            continue
         classes = " ".join(el.get("class", []))
         el_id = el.get("id", "")
         if _NON_CONTENT_PATTERNS.search(classes) or _NON_CONTENT_PATTERNS.search(el_id):
-            el.decompose()
+            to_remove.append(el)
+    for el in to_remove:
+        el.decompose()
 
     return str(soup)
 
