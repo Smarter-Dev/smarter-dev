@@ -93,6 +93,31 @@ def _extract_video_id(url: str) -> str | None:
     return None
 
 
+async def fetch_youtube_metadata(url: str) -> dict[str, str]:
+    """Fetch YouTube video metadata via oEmbed API. Returns dict with title, author, description."""
+    metadata: dict[str, str] = {}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # oEmbed for title and author
+            oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+            resp = await client.get(oembed_url)
+            if resp.status_code == 200:
+                data = resp.json()
+                metadata["title"] = data.get("title", "")
+                metadata["author"] = data.get("author_name", "")
+
+            # Fetch page for description from meta tags
+            page_resp = await client.get(url, follow_redirects=True, headers={"User-Agent": BOT_USER_AGENT})
+            if page_resp.status_code == 200:
+                soup = BeautifulSoup(page_resp.text, "html.parser")
+                desc_tag = soup.find("meta", attrs={"name": "description"})
+                if desc_tag:
+                    metadata["description"] = desc_tag.get("content", "")
+    except Exception as e:
+        logger.debug(f"[Tool] Could not fetch YouTube metadata: {e}")
+    return metadata
+
+
 def fetch_youtube_transcript(url: str) -> str | None:
     """Fetch transcript text for a YouTube video. Returns None if unavailable."""
     video_id = _extract_video_id(url)
@@ -1284,7 +1309,17 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 transcript = fetch_youtube_transcript(url)
                 if transcript:
                     logger.debug(f"[Tool] Got YouTube transcript for {url}")
-                    content = transcript
+                    # Fetch metadata (title, author, description)
+                    metadata = await fetch_youtube_metadata(url)
+                    header_parts = []
+                    if metadata.get("title"):
+                        header_parts.append(f"Title: {metadata['title']}")
+                    if metadata.get("author"):
+                        header_parts.append(f"Channel: {metadata['author']}")
+                    if metadata.get("description"):
+                        header_parts.append(f"Description: {metadata['description']}")
+                    header = "\n".join(header_parts)
+                    content = f"{header}\n\n--- Transcript ---\n{transcript}" if header else transcript
                     content_type_str = "transcript"
                     search_cache.set_url(url, content)
 
