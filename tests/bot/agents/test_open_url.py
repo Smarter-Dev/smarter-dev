@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from smarter_dev.bot.agents.tools import fetch_youtube_metadata
 from smarter_dev.bot.agents.tools import fetch_youtube_transcript
 from smarter_dev.bot.agents.tools import is_youtube_url
 from smarter_dev.bot.agents.tools import sanitize_html
@@ -122,3 +123,65 @@ class TestFetchYoutubeTranscript:
         result = fetch_youtube_transcript("https://youtu.be/xyz789")
         assert result == "Short url"
         mock_api.fetch.assert_called_once_with("xyz789")
+
+
+class TestFetchYoutubeMetadata:
+    @pytest.mark.asyncio
+    async def test_returns_metadata(self):
+        import asyncio
+
+        mock_oembed_resp = MagicMock()
+        mock_oembed_resp.status_code = 200
+        mock_oembed_resp.json.return_value = {"title": "Test Video", "author_name": "Test Channel"}
+
+        mock_page_resp = MagicMock()
+        mock_page_resp.status_code = 200
+        mock_page_resp.text = '<html><head><meta name="description" content="A test description"></head></html>'
+
+        async def mock_get(url, **kwargs):
+            if "oembed" in url:
+                return mock_oembed_resp
+            return mock_page_resp
+
+        mock_client = MagicMock()
+        mock_client.get = mock_get
+
+        async def aenter(_):
+            return mock_client
+
+        async def aexit(_, *args):
+            pass
+
+        with patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_client_cls:
+            ctx = MagicMock()
+            ctx.__aenter__ = aenter
+            ctx.__aexit__ = aexit
+            mock_client_cls.return_value = ctx
+
+            metadata = await fetch_youtube_metadata("https://www.youtube.com/watch?v=abc")
+            assert metadata["title"] == "Test Video"
+            assert metadata["author"] == "Test Channel"
+            assert metadata["description"] == "A test description"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_on_failure(self):
+        async def mock_get(url, **kwargs):
+            raise Exception("Network error")
+
+        mock_client = MagicMock()
+        mock_client.get = mock_get
+
+        async def aenter(_):
+            return mock_client
+
+        async def aexit(_, *args):
+            pass
+
+        with patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_client_cls:
+            ctx = MagicMock()
+            ctx.__aenter__ = aenter
+            ctx.__aexit__ = aexit
+            mock_client_cls.return_value = ctx
+
+            metadata = await fetch_youtube_metadata("https://www.youtube.com/watch?v=abc")
+            assert metadata == {}
