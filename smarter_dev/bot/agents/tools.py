@@ -17,11 +17,15 @@ from datetime import timedelta
 from typing import Any
 from urllib.parse import urlparse
 
+import re
+
 import dspy
 import httpx
 import pdfplumber
+from bs4 import BeautifulSoup
 from ddgs import DDGS
 from markdownify import markdownify as md
+from youtube_transcript_api import YouTubeTranscriptApi
 
 from smarter_dev.bot.services.channel_state import get_channel_state_manager
 
@@ -29,6 +33,74 @@ logger = logging.getLogger(__name__)
 
 # Custom user agent for the bot
 BOT_USER_AGENT = "Smarter Dev Discord Bot - admin@smarter.dev"
+
+# Tags to remove during HTML sanitization
+_STRIP_TAGS = {"script", "style", "head", "nav", "footer", "iframe", "noscript", "svg", "img", "link", "meta"}
+
+# Patterns for non-content class/id attributes
+_NON_CONTENT_PATTERNS = re.compile(r"sidebar|cookie|banner|ad-|ads-|advert|popup|modal|newsletter|social-share", re.IGNORECASE)
+
+
+def sanitize_html(html: str) -> str:
+    """Strip non-content elements from HTML before markdown conversion."""
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Remove unwanted tags entirely
+    for tag in soup.find_all(_STRIP_TAGS):
+        tag.decompose()
+
+    # Remove elements with non-content class/id
+    for el in soup.find_all(True):
+        classes = " ".join(el.get("class", []))
+        el_id = el.get("id", "")
+        if _NON_CONTENT_PATTERNS.search(classes) or _NON_CONTENT_PATTERNS.search(el_id):
+            el.decompose()
+
+    return str(soup)
+
+
+def is_youtube_url(url: str) -> bool:
+    """Check if a URL is a YouTube video URL."""
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    return hostname in ("www.youtube.com", "youtube.com", "youtu.be", "m.youtube.com")
+
+
+def _extract_video_id(url: str) -> str | None:
+    """Extract YouTube video ID from various URL formats."""
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+
+    if hostname == "youtu.be":
+        return parsed.path.lstrip("/").split("/")[0] or None
+
+    if hostname in ("www.youtube.com", "youtube.com", "m.youtube.com"):
+        from urllib.parse import parse_qs
+        if parsed.path == "/watch":
+            params = parse_qs(parsed.query)
+            ids = params.get("v")
+            return ids[0] if ids else None
+        # /embed/ID or /v/ID or /shorts/ID
+        parts = parsed.path.strip("/").split("/")
+        if len(parts) >= 2 and parts[0] in ("embed", "v", "shorts"):
+            return parts[1]
+
+    return None
+
+
+def fetch_youtube_transcript(url: str) -> str | None:
+    """Fetch transcript text for a YouTube video. Returns None if unavailable."""
+    video_id = _extract_video_id(url)
+    if not video_id:
+        return None
+    try:
+        api = YouTubeTranscriptApi()
+        transcript = api.fetch(video_id)
+        lines = [snippet.text for snippet in transcript.snippets]
+        return "\n".join(lines)
+    except Exception:
+        logger.debug(f"[Tool] Could not fetch YouTube transcript for {video_id}")
+        return None
 
 
 class URLRateLimiter:
@@ -1200,10 +1272,18 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             if cached_content is not None:
                 logger.debug(f"[Cache] Content cache hit for '{url}'")
                 content = cached_content
-                # We'll need to determine content type for Gemini
                 # For cached content, we'll default to "html" (most common)
                 content_type_str = "html"
-            else:
+            elif is_youtube_url(url):
+                # Try YouTube transcript extraction first
+                transcript = fetch_youtube_transcript(url)
+                if transcript:
+                    logger.debug(f"[Tool] Got YouTube transcript for {url}")
+                    content = transcript
+                    content_type_str = "transcript"
+                    search_cache.set_url(url, content)
+
+            if content is None:
                 # Content not cached - fetch it
                 # Fetch the URL with httpx (follows redirects by default)
                 try:
@@ -1243,8 +1323,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                         # Process content based on content type
                         if "html" in content_type:
                             logger.debug(f"[Tool] Converting HTML to Markdown for {url}")
-                            # Convert HTML to Markdown
                             html_content = response.text
+                            html_content = sanitize_html(html_content)
                             content = md(html_content, heading_style="ATX")
                             content_type_str = "html"
 

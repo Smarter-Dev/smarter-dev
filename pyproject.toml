@@ -44,6 +44,7 @@ dependencies = [
     "redis>=6.2.0",
     "dspy-ai>=3.0.0",
     "hikari>=2.1.1",
+    "google-genai>=1.62.0",
 ]
 
 [dependency-groups]
@@ -57,6 +58,8 @@ bot = [
     "ddgs>=3.8.0",
     "markdownify>=0.11.6", # Convert HTML to Markdown
     "pdfplumber>=0.11.0", # Extract text from PDFs
+    "beautifulsoup4>=4.12.0", # HTML sanitization
+    "youtube-transcript-api>=1.0.0", # YouTube transcript extraction
 ]
 
 # Web API dependencies
