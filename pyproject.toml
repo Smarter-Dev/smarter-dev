@@ -59,7 +59,6 @@ bot = [
     "markdownify>=0.11.6", # Convert HTML to Markdown
     "pdfplumber>=0.11.0", # Extract text from PDFs
     "beautifulsoup4>=4.12.0", # HTML sanitization
-    "youtube-transcript-api>=1.0.0", # YouTube transcript extraction
 ]
 
 # Web API dependencies

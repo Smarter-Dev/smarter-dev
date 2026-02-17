@@ -25,8 +25,6 @@ import pdfplumber
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 from markdownify import markdownify as md
-from youtube_transcript_api import YouTubeTranscriptApi
-
 from smarter_dev.bot.services.channel_state import get_channel_state_manager
 
 logger = logging.getLogger(__name__)
@@ -71,28 +69,6 @@ def is_youtube_url(url: str) -> bool:
     return hostname in ("www.youtube.com", "youtube.com", "youtu.be", "m.youtube.com")
 
 
-def _extract_video_id(url: str) -> str | None:
-    """Extract YouTube video ID from various URL formats."""
-    parsed = urlparse(url)
-    hostname = parsed.hostname or ""
-
-    if hostname == "youtu.be":
-        return parsed.path.lstrip("/").split("/")[0] or None
-
-    if hostname in ("www.youtube.com", "youtube.com", "m.youtube.com"):
-        from urllib.parse import parse_qs
-        if parsed.path == "/watch":
-            params = parse_qs(parsed.query)
-            ids = params.get("v")
-            return ids[0] if ids else None
-        # /embed/ID or /v/ID or /shorts/ID
-        parts = parsed.path.strip("/").split("/")
-        if len(parts) >= 2 and parts[0] in ("embed", "v", "shorts"):
-            return parts[1]
-
-    return None
-
-
 async def fetch_youtube_metadata(url: str) -> dict[str, str]:
     """Fetch YouTube video metadata via oEmbed API. Returns dict with title, author, description."""
     metadata: dict[str, str] = {}
@@ -116,21 +92,6 @@ async def fetch_youtube_metadata(url: str) -> dict[str, str]:
     except Exception as e:
         logger.debug(f"[Tool] Could not fetch YouTube metadata: {e}")
     return metadata
-
-
-def fetch_youtube_transcript(url: str) -> str | None:
-    """Fetch transcript text for a YouTube video. Returns None if unavailable."""
-    video_id = _extract_video_id(url)
-    if not video_id:
-        return None
-    try:
-        api = YouTubeTranscriptApi()
-        transcript = api.fetch(video_id)
-        lines = [snippet.text for snippet in transcript.snippets]
-        return "\n".join(lines)
-    except Exception:
-        logger.debug(f"[Tool] Could not fetch YouTube transcript for {video_id}")
-        return None
 
 
 class URLRateLimiter:
@@ -1298,23 +1259,21 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             final_url = url
 
             if is_youtube_url(url):
-                # Try YouTube transcript extraction first
-                transcript = fetch_youtube_transcript(url)
-                if transcript:
-                    logger.debug(f"[Tool] Got YouTube transcript for {url}")
-                    # Fetch metadata (title, author, description)
-                    metadata = await fetch_youtube_metadata(url)
-                    header_parts = []
+                # Fetch YouTube metadata via oEmbed (works from cloud IPs)
+                metadata = await fetch_youtube_metadata(url)
+                if metadata:
+                    logger.debug(f"[Tool] Got YouTube metadata for {url}")
+                    parts = []
                     if metadata.get("title"):
-                        header_parts.append(f"Title: {metadata['title']}")
+                        parts.append(f"Title: {metadata['title']}")
                     if metadata.get("author"):
-                        header_parts.append(f"Channel: {metadata['author']}")
+                        parts.append(f"Channel: {metadata['author']}")
                     if metadata.get("description"):
-                        header_parts.append(f"Description: {metadata['description']}")
-                    header = "\n".join(header_parts)
-                    content = f"{header}\n\n--- Transcript ---\n{transcript}" if header else transcript
-                    content_type_str = "transcript"
-                    search_cache.set_url(url, content)
+                        parts.append(f"Description: {metadata['description']}")
+                    if parts:
+                        content = "\n".join(parts)
+                        content_type_str = "youtube_metadata"
+                        search_cache.set_url(url, content)
 
             # Tier 1 Cache: Check if we have the content cached (skip for YouTube, handled above)
             if content is None:

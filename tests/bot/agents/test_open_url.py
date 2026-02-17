@@ -1,27 +1,13 @@
-"""Tests for open_url HTML sanitization and YouTube transcript support."""
+"""Tests for open_url HTML sanitization and YouTube metadata support."""
 
-from dataclasses import dataclass
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
 
 from smarter_dev.bot.agents.tools import fetch_youtube_metadata
-from smarter_dev.bot.agents.tools import fetch_youtube_transcript
 from smarter_dev.bot.agents.tools import is_youtube_url
 from smarter_dev.bot.agents.tools import sanitize_html
-
-
-@dataclass
-class FakeSnippet:
-    text: str
-    start: float = 0.0
-    duration: float = 1.0
-
-
-class FakeTranscript:
-    def __init__(self, snippets):
-        self.snippets = snippets
 
 
 class TestSanitizeHtml:
@@ -90,46 +76,9 @@ class TestIsYoutubeUrl:
         assert is_youtube_url(url) is False
 
 
-class TestFetchYoutubeTranscript:
-    @patch("smarter_dev.bot.agents.tools.YouTubeTranscriptApi")
-    def test_returns_transcript(self, mock_cls):
-        mock_api = MagicMock()
-        mock_cls.return_value = mock_api
-        mock_api.fetch.return_value = FakeTranscript([
-            FakeSnippet("Hello world"),
-            FakeSnippet("Second line"),
-        ])
-        result = fetch_youtube_transcript("https://www.youtube.com/watch?v=abc123")
-        assert result == "Hello world\nSecond line"
-        mock_api.fetch.assert_called_once_with("abc123")
-
-    @patch("smarter_dev.bot.agents.tools.YouTubeTranscriptApi")
-    def test_returns_none_on_failure(self, mock_cls):
-        mock_api = MagicMock()
-        mock_cls.return_value = mock_api
-        mock_api.fetch.side_effect = Exception("No transcript")
-        result = fetch_youtube_transcript("https://www.youtube.com/watch?v=abc123")
-        assert result is None
-
-    def test_returns_none_for_invalid_url(self):
-        result = fetch_youtube_transcript("https://www.google.com")
-        assert result is None
-
-    @patch("smarter_dev.bot.agents.tools.YouTubeTranscriptApi")
-    def test_youtu_be_format(self, mock_cls):
-        mock_api = MagicMock()
-        mock_cls.return_value = mock_api
-        mock_api.fetch.return_value = FakeTranscript([FakeSnippet("Short url")])
-        result = fetch_youtube_transcript("https://youtu.be/xyz789")
-        assert result == "Short url"
-        mock_api.fetch.assert_called_once_with("xyz789")
-
-
 class TestFetchYoutubeMetadata:
     @pytest.mark.asyncio
     async def test_returns_metadata(self):
-        import asyncio
-
         mock_oembed_resp = MagicMock()
         mock_oembed_resp.status_code = 200
         mock_oembed_resp.json.return_value = {"title": "Test Video", "author_name": "Test Channel"}
