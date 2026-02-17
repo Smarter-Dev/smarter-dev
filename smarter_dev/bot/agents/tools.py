@@ -1436,11 +1436,17 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             # Record success
             await tool_failure_monitor.record_success("open_url")
 
-            return {
+            result_dict = {
                 "success": True,
                 "answer": answer,
-                "url": final_url
+                "url": final_url,
             }
+            if is_youtube_url(url):
+                result_dict["limitations"] = (
+                    "Only video metadata (title, channel, description) is available. "
+                    "Video transcripts cannot be accessed due to YouTube restrictions."
+                )
+            return result_dict
 
         except Exception as e:
             logger.error(f"[Tool] open_url failed: {e}", exc_info=True)
