@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block page_type %}sudo{% endblock %}
+{% block page_title %}sudo — Unlock more from Smarter Dev{% endblock %}
+
+{% block page_css %}
+    <link rel="stylesheet" href="/static/theme/css/pages/sudo.css">
+{% endblock %}
+
+{% block content %}
+<section class="sudo-hero">
+    <div class="container">
+        <div class="term reveal">
+            <div class="term-bar"><div class="p">smarter-dev</div></div>
+            <div class="term-body">
+                <div class="line"><span class="kw">$</span> <span class="fn">sudo</span> smarter-dev --unlock</div>
+                <div class="line"><span class="cm">[auth]</span> authenticating developer credentials...</div>
+                <div class="line"><span class="st">[ok]</span> access elevated</div>
+                <div class="line"><span class="st">[ok]</span> <span class="fn">sudo mode activated</span></div>
+            </div>
+        </div>
+        <div class="reveal">
+            <div class="sudo-tagline">One subscription. Root access to everything.</div>
+            <p class="sudo-sub">sudo is the Smarter Dev premium membership. One subscription, root access to everything premium across the ecosystem.</p>
+        </div>
+    </div>
+</section>
+
+<section>
+    <div class="container">
+        <div class="reveal">
+            <div class="code-label">// sudo.unlock()</div>
+            <div class="sec-h">What sudo unlocks.</div>
+            <div class="sec-p">Everything you get with one membership.</div>
+        </div>
+        <div class="pillars">
+            <div class="pillar reveal">
+                <div class="idx">01</div>
+                <h3>Community Perks</h3>
+                <p>Exclusive Discord channels, the sudo role, early access to new features, and priority access to AI-powered community features.</p>
+            </div>
+            <div class="pillar reveal">
+                <div class="idx">02</div>
+                <h3>First Access</h3>
+                <p>As Smarter Dev ships new tools, courses, and challenges, sudo members are always first in line.</p>
+            </div>
+            <div class="pillar coming reveal">
+                <div class="idx">03</div>
+                <h3>Interactive Challenges</h3>
+                <p>Multi-stage, AI-powered scenarios that test adversarial thinking, security awareness, and real-world problem solving. Narrative-driven experiences where you probe systems, analyze logs, and think like an attacker.</p>
+            </div>
+            <div class="pillar coming reveal">
+                <div class="idx">04</div>
+                <h3>Hands-on Courses</h3>
+                <p>Structured learning paths where you work with real AI-powered tools — coding agents, feedback systems, interactive environments. Built around the skills that define the AI era: specification, code comprehension, security thinking, tool use.</p>
+            </div>
+            <div class="pillar coming reveal">
+                <div class="idx">05</div>
+                <h3>Exclusive Tools</h3>
+                <p>Real dev tools built for the community and sudo members. Utilities that cost real money to operate — sudo membership is what makes them sustainable to offer.</p>
+            </div>
+            <div class="pillar coming reveal">
+                <div class="idx">06</div>
+                <h3>Curated Learning Path</h3>
+                <p>Free content, challenges, and courses sequenced into a coherent progression. Sudo members get the map and the tracking, not just the individual pieces.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section>
+    <div class="container">
+        <div class="reveal" style="text-align:center">
+            <div class="code-label">// sudo.philosophy()</div>
+            <div class="sec-h">One membership. Root access.</div>
+            <p class="sudo-sub" style="max-width:560px;margin:0 auto">You already have access to the community. sudo elevates your permissions. One membership, everything unlocks — no subscription sprawl, no per-feature nickel-and-diming. Just root access to the full Smarter Dev experience.</p>
+        </div>
+    </div>
+</section>
+
+<section class="cta">
+    <div class="container">
+        <div class="reveal">
+            <div class="cta-h">sudo is coming.</div>
+            <div class="cta-h2">Get notified when it launches.</div>
+            <div class="sudo-signup" style="margin:0 auto">
+                <form class="sudo-signup-form" id="sudo-signup-form">
+                    <input type="hidden" name="campaign_slug" value="sudo-launch">
+                    <input type="email" name="email" placeholder="dev@example.com" required>
+                    <button type="submit">Notify me</button>
+                </form>
+                <div class="sudo-signup-msg" id="sudo-signup-msg"></div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block page_scripts %}
+<script>
+(function() {
+    var form = document.getElementById('sudo-signup-form');
+    var msg = document.getElementById('sudo-signup-msg');
+    if (!form) return;
+
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        var email = form.querySelector('input[name="email"]').value;
+        var slug = form.querySelector('input[name="campaign_slug"]').value;
+        var btn = form.querySelector('button');
+
+        btn.disabled = true;
+        btn.textContent = '...';
+        msg.textContent = '';
+        msg.className = 'sudo-signup-msg';
+
+        fetch('/api/campaign-signups', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({campaign_slug: slug, email: email})
+        })
+        .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+        .then(function(res) {
+            if (res.ok) {
+                msg.textContent = 'You\'re on the list. We\'ll let you know.';
+                msg.className = 'sudo-signup-msg ok';
+                form.querySelector('input[name="email"]').value = '';
+            } else {
+                msg.textContent = res.data.detail || 'Something went wrong.';
+                msg.className = 'sudo-signup-msg err';
+            }
+        })
+        .catch(function() {
+            msg.textContent = 'Network error. Try again.';
+            msg.className = 'sudo-signup-msg err';
+        })
+        .finally(function() {
+            btn.disabled = false;
+            btn.textContent = 'Notify me';
+        });
+    });
+})();
+</script>
+{% endblock %}

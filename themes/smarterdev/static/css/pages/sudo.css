@@ -1,0 +1,200 @@
+/* ══════════════════════════════════════════════════════
+   Sudo Page — .sudo-hero, .sudo-reasons, .sudo-signup, .sudo-strip
+   ══════════════════════════════════════════════════════ */
+
+/* ── Sudo Hero ── */
+.sudo-hero {
+  text-align: center;
+  padding-top: 8rem;
+}
+.sudo-hero .term {
+  max-width: 600px;
+  margin: 0 auto 2.5rem;
+  text-align: left;
+}
+.sudo-hero .term-body .line {
+  opacity: 0;
+  animation: termLine .4s ease forwards;
+}
+.sudo-hero .term-body .line:nth-child(2) { animation-delay: .6s }
+.sudo-hero .term-body .line:nth-child(3) { animation-delay: 1.2s }
+.sudo-hero .term-body .line:nth-child(4) { animation-delay: 1.8s }
+
+@keyframes termLine {
+  from { opacity: 0; transform: translateY(4px) }
+  to   { opacity: 1; transform: none }
+}
+
+.sudo-hero .sudo-tagline {
+  font-family: var(--heading);
+  font-size: clamp(1rem, 2vw, 1.3rem);
+  color: var(--white);
+  margin-bottom: .5rem;
+  letter-spacing: .03em;
+}
+.sudo-hero .sudo-sub {
+  font-size: .9rem;
+  color: var(--mid);
+  max-width: 480px;
+  margin: 0 auto;
+  line-height: 1.75;
+}
+
+/* ── Sudo Reasons ── */
+.sudo-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sudo-reason {
+  display: flex;
+  align-items: flex-start;
+  gap: 1.25rem;
+  padding: 1.75rem 2rem;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  transition: all .3s;
+}
+.sudo-reason:hover {
+  border-color: rgba(0,212,255,.15);
+  box-shadow: inset 0 0 15px rgba(0,212,255,.03);
+}
+.sudo-reason .reason-icon {
+  font-size: 1.4rem;
+  flex-shrink: 0;
+  line-height: 1;
+  margin-top: 2px;
+}
+.sudo-reason h4 {
+  font-family: var(--heading);
+  font-size: .8rem;
+  color: var(--white);
+  margin-bottom: .35rem;
+  letter-spacing: .03em;
+}
+.sudo-reason p {
+  font-size: .82rem;
+  color: var(--mid);
+  line-height: 1.75;
+}
+
+/* ── Sudo Signup ── */
+.sudo-signup {
+  max-width: 500px;
+}
+.sudo-signup-form {
+  display: flex;
+  gap: 0;
+}
+.sudo-signup-form input[type="email"] {
+  flex: 1;
+  padding: 13px 18px;
+  font-family: var(--mono);
+  font-size: .8rem;
+  background: var(--surface);
+  color: var(--white);
+  border: 1px solid rgba(0,212,255,.15);
+  border-right: none;
+  outline: none;
+  caret-color: var(--cyan);
+  transition: border-color .2s;
+}
+.sudo-signup-form input[type="email"]::placeholder {
+  color: var(--gray);
+}
+.sudo-signup-form input[type="email"]:focus {
+  border-color: var(--cyan);
+}
+.sudo-signup-form button {
+  padding: 13px 24px;
+  font-family: var(--heading);
+  font-size: .65rem;
+  letter-spacing: .06em;
+  background: transparent;
+  color: var(--cyan);
+  border: 1px solid var(--cyan);
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(0,212,255,.15), inset 0 0 15px rgba(0,212,255,.05);
+  transition: all .3s;
+  white-space: nowrap;
+}
+.sudo-signup-form button:hover {
+  background: var(--cyan);
+  color: var(--bg);
+  box-shadow: 0 0 30px rgba(0,212,255,.3);
+}
+.sudo-signup-msg {
+  font-family: var(--heading);
+  font-size: .6rem;
+  letter-spacing: .06em;
+  margin-top: .75rem;
+  min-height: 1.2em;
+}
+.sudo-signup-msg.ok { color: var(--green) }
+.sudo-signup-msg.err { color: var(--rose) }
+
+/* ── Sudo Strip (homepage teaser) ── */
+.sudo-strip {
+  position: relative;
+  z-index: 1;
+  padding: clamp(30px, 4vw, 50px) clamp(2rem, 6vw, 8rem);
+}
+.sudo-strip-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 1.25rem 2rem;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.1);
+  border-left: 2px solid var(--cyan);
+  transition: all .3s;
+}
+.sudo-strip-inner:hover {
+  border-color: rgba(0,212,255,.2);
+  border-left-color: var(--cyan);
+  box-shadow: 0 0 20px rgba(0,212,255,.04);
+}
+.sudo-strip-cmd {
+  font-family: var(--mono);
+  font-size: .82rem;
+  color: var(--light);
+}
+.sudo-strip-cmd .kw { color: var(--amber) }
+.sudo-strip-cmd .fn { color: var(--cyan) }
+.sudo-strip-link {
+  font-family: var(--heading);
+  font-size: .65rem;
+  letter-spacing: .06em;
+  color: var(--cyan);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color .2s;
+}
+.sudo-strip-link:hover {
+  color: var(--white);
+}
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .sudo-signup-form {
+    flex-direction: column;
+  }
+  .sudo-signup-form input[type="email"] {
+    border-right: 1px solid rgba(0,212,255,.15);
+    border-bottom: none;
+  }
+  .sudo-signup-form input[type="email"]:focus {
+    border-color: var(--cyan);
+  }
+  .sudo-strip-inner {
+    flex-direction: column;
+    text-align: center;
+    gap: .75rem;
+  }
+  .sudo-reason {
+    padding: 1.25rem 1.5rem;
+  }
+}
