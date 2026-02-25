@@ -1,0 +1,140 @@
+/* ══════════════════════════════════════════════════════
+   Nav — Navbar, TOC sidebar, quick links, breadcrumb
+   ══════════════════════════════════════════════════════ */
+
+/* ── Site Navbar ── */
+.site-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 24px;
+  background: rgba(2,4,8,.92);
+  backdrop-filter: blur(24px);
+  border-bottom: 1px solid rgba(0,212,255,.06);
+}
+
+.nav-logo {
+  font-family: var(--display);
+  font-size: 1.3rem;
+  color: var(--white);
+  letter-spacing: .12em;
+  text-decoration: none;
+  flex-shrink: 0;
+  white-space: nowrap;
+  line-height: 1;
+}
+.nav-logo .dev {
+  font-family: var(--heading);
+  color: var(--cyan);
+  font-size: .8em;
+  letter-spacing: .06em;
+  vertical-align: 0.14em;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nav-links a {
+  color: var(--gray);
+  text-decoration: none;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  transition: all .2s;
+  white-space: nowrap;
+  font-family: var(--heading);
+  font-size: .62rem;
+  letter-spacing: .05em;
+}
+.nav-links a:hover { color: var(--cyan); border-color: rgba(0,212,255,.25) }
+.nav-links a.active { color: var(--cyan); border-color: var(--cyan); background: rgba(0,212,255,.06) }
+
+/* ── Dashboard Topbar ── */
+.dash-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 0 28px;
+  border-bottom: 1px solid rgba(0,212,255,.06);
+  margin-bottom: 28px;
+}
+.dash-logo {
+  font-family: var(--display);
+  font-size: 1.3rem;
+  color: var(--white);
+  letter-spacing: .12em;
+  text-decoration: none;
+}
+.dash-logo .dev { font-family: var(--heading); color: var(--cyan); font-size: .8em; letter-spacing: .06em; vertical-align: 0.14em }
+.dash-user { display: flex; align-items: center; gap: 14px }
+.dash-bell { position: relative; cursor: pointer; color: var(--mid); transition: color .2s }
+.dash-bell:hover { color: var(--cyan) }
+.dash-bell svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+.dash-bell-badge { position: absolute; top: -4px; right: -5px; width: 16px; height: 16px; background: var(--rose); color: #fff; font-size: .55rem; font-weight: 700; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 2px solid var(--bg) }
+.dash-avatar { width: 34px; height: 34px; background: rgba(0,212,255,.12); border: 1.5px solid rgba(0,212,255,.25); display: flex; align-items: center; justify-content: center; font-family: var(--heading); font-size: .65rem; color: var(--cyan); letter-spacing: .04em }
+.dash-greeting { font-family: var(--heading); font-size: .72rem; color: var(--white); letter-spacing: .04em }
+.dash-greeting span { color: var(--cyan) }
+
+/* ── Quick Links ── */
+.quick-links { display: grid; grid-template-columns: 1fr 1fr; gap: 1px }
+.quick-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(0,212,255,.02);
+  border: 1px solid rgba(0,212,255,.04);
+  font-family: var(--heading);
+  font-size: .62rem;
+  color: var(--mid);
+  letter-spacing: .05em;
+  text-decoration: none;
+  transition: all .2s;
+}
+.quick-link:hover { color: var(--cyan); border-color: rgba(0,212,255,.2); background: rgba(0,212,255,.04) }
+.quick-link svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0 }
+
+/* ── TOC Sidebar ── */
+.toc-sidebar { position: sticky; top: 60px; align-self: start; max-height: calc(100vh - 80px); overflow-y: auto }
+.toc-list { list-style: none }
+.toc-item {
+  display: block;
+  padding: 8px 14px;
+  font-family: var(--heading);
+  font-size: .56rem;
+  color: var(--gray);
+  letter-spacing: .05em;
+  text-decoration: none;
+  border-left: 2px solid rgba(0,212,255,.06);
+  transition: all .2s;
+  cursor: pointer;
+}
+.toc-item:hover { color: var(--light); border-left-color: rgba(0,212,255,.25) }
+.toc-item.active { color: var(--cyan); border-left-color: var(--cyan); background: rgba(0,212,255,.03) }
+
+/* ── Breadcrumb ── */
+.breadcrumb {
+  font-family: var(--heading);
+  font-size: .6rem;
+  color: var(--gray);
+  letter-spacing: .06em;
+  margin-bottom: 1.25rem;
+}
+.breadcrumb a { color: var(--cyan); text-decoration: none; transition: color .2s }
+.breadcrumb a:hover { color: var(--white) }
+.breadcrumb .sep { margin: 0 .5rem; opacity: .5 }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .quick-links { grid-template-columns: 1fr }
+  .toc-sidebar { display: none }
+}
+@media (max-width: 520px) {
+  .dash-topbar { flex-direction: column; gap: 14px; text-align: center }
+}

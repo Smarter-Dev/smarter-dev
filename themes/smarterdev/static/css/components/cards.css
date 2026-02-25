@@ -1,0 +1,186 @@
+/* ══════════════════════════════════════════════════════
+   Cards — .dash-card, .stat-card, .pillar, .related-card, .repo-card, etc.
+   ══════════════════════════════════════════════════════ */
+
+/* ── Pillars ── */
+.pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px }
+.pillar {
+  padding: 2.25rem 2rem;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  border-top: 2px solid rgba(0,212,255,.08);
+  transition: all .3s;
+  position: relative;
+}
+.pillar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity .3s;
+  box-shadow: inset 0 0 20px rgba(0,212,255,.05);
+}
+.pillar:hover { border-color: rgba(0,212,255,.2); border-top-color: var(--cyan) }
+.pillar:hover::after { opacity: 1 }
+.pillar .idx { font-family: var(--heading); font-size: .55rem; color: var(--cyan); margin-bottom: 1rem; letter-spacing: .15em }
+.pillar h3 { font-family: var(--heading); font-size: .85rem; color: var(--white); margin-bottom: .5rem; letter-spacing: .03em }
+.pillar p { font-size: .82rem; color: var(--mid); line-height: 1.75 }
+.pillar.coming { overflow: hidden }
+.pillar.coming::before {
+  content: 'COMING';
+  position: absolute;
+  top: 12px;
+  left: -26px;
+  width: 90px;
+  text-align: center;
+  font-family: var(--heading);
+  font-size: .4rem;
+  letter-spacing: .1em;
+  color: var(--bg);
+  background: var(--cyan);
+  padding: 2px 0;
+  transform: rotate(-45deg);
+  z-index: 1;
+  box-shadow: 0 0 10px rgba(0,212,255,.3);
+}
+
+/* ── Dashboard Card ── */
+.dash-card {
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  margin-bottom: 24px;
+  transition: all .3s;
+  position: relative;
+}
+.dash-card:hover { border-color: rgba(0,212,255,.12) }
+.dash-card-header { padding: 16px 20px 0 }
+.dash-card-body { padding: 16px 20px 20px }
+
+/* ── Stat Card ── */
+.stat-card {
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  padding: 22px 20px;
+  transition: all .3s;
+  position: relative;
+}
+.stat-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity .3s;
+  box-shadow: inset 0 0 20px rgba(0,212,255,.05);
+}
+.stat-card:hover::after { opacity: 1 }
+.stat-card:hover { border-color: rgba(0,212,255,.2) }
+.stat-card .stat-value {
+  font-family: var(--display);
+  font-size: clamp(1.4rem, 2.5vw, 1.9rem);
+  color: var(--white);
+  line-height: 1;
+  margin-bottom: 4px;
+  text-shadow: 0 0 15px rgba(0,212,255,.1);
+}
+.stat-card .stat-value .unit {
+  font-family: var(--heading);
+  color: var(--cyan);
+  font-size: .5em;
+  margin-left: 3px;
+}
+.stat-card .stat-label {
+  font-family: var(--heading);
+  font-size: .58rem;
+  color: var(--gray);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+/* ── Related Card ── */
+.related-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px }
+.related-card {
+  padding: 1.75rem;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  border-top: 2px solid rgba(0,212,255,.06);
+  transition: all .3s;
+  cursor: pointer;
+  text-decoration: none;
+  display: block;
+}
+.related-card:hover {
+  border-top-color: var(--cyan);
+  border-color: rgba(0,212,255,.18);
+  box-shadow: inset 0 0 15px rgba(0,212,255,.03);
+}
+.related-card .r-tag { font-family: var(--heading); font-size: .5rem; color: var(--cyan); letter-spacing: .1em; margin-bottom: .75rem; opacity: .7 }
+.related-card .r-title { font-family: var(--heading); font-size: .78rem; color: var(--white); letter-spacing: .02em; line-height: 1.5; margin-bottom: .75rem }
+.related-card .r-meta { font-size: .7rem; color: var(--gray); letter-spacing: .02em }
+.related-card .r-desc { font-size: .7rem; color: var(--gray); line-height: 1.6 }
+
+/* ── Repo Card ── */
+.repo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-bottom: 24px }
+.repo-card {
+  padding: 1.25rem 1.5rem;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  transition: all .3s;
+  cursor: pointer;
+}
+.repo-card:hover { border-color: rgba(0,212,255,.18); box-shadow: inset 0 0 15px rgba(0,212,255,.03) }
+.repo-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: .5rem }
+.repo-name { font-family: var(--heading); font-size: .7rem; color: var(--white); letter-spacing: .03em; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.repo-status { font-family: var(--heading); font-size: .45rem; letter-spacing: .08em; padding: 2px 8px; border: 1px solid; flex-shrink: 0 }
+.repo-status.passing { color: var(--green); border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.06) }
+.repo-status.failing { color: var(--rose); border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.06) }
+.repo-status.running { color: var(--amber); border-color: rgba(234,179,8,.35); background: rgba(234,179,8,.06) }
+.repo-detail { font-size: .7rem; color: var(--mid); line-height: 1.5; margin-bottom: .5rem }
+.repo-detail code { font-family: var(--mono); font-size: .66rem; color: var(--cyan); background: rgba(0,212,255,.04); padding: 0 4px }
+.repo-detail .branch { color: var(--amber) }
+.repo-detail .duration { color: var(--gray); margin-left: 4px }
+.repo-bar-row { display: flex; align-items: center; gap: 8px }
+.repo-bar-label { font-family: var(--heading); font-size: .45rem; color: var(--gray); letter-spacing: .06em; white-space: nowrap }
+.repo-bar { flex: 1; height: 3px; background: rgba(0,212,255,.06); display: flex }
+.repo-bar .bar-pass { height: 100%; background: var(--green); opacity: .7 }
+.repo-bar .bar-fail { height: 100%; background: var(--rose); opacity: .7 }
+.repo-bar-pct { font-family: var(--heading); font-size: .48rem; color: var(--green); letter-spacing: .04em; min-width: 26px; text-align: right }
+
+/* ── Metric Card ── */
+.metric-card {
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  padding: 18px 16px;
+  transition: all .3s;
+  position: relative;
+  text-align: center;
+}
+.metric-card::after { content: ''; position: absolute; inset: 0; opacity: 0; transition: opacity .3s; box-shadow: inset 0 0 20px rgba(0,212,255,.05) }
+.metric-card:hover::after { opacity: 1 }
+.metric-card:hover { border-color: rgba(0,212,255,.2) }
+.metric-card .m-value { font-family: var(--display); font-size: clamp(1.2rem, 2vw, 1.6rem); color: var(--white); line-height: 1; margin-bottom: 3px; text-shadow: 0 0 15px rgba(0,212,255,.1) }
+.metric-card .m-value .unit { font-family: var(--heading); color: var(--cyan); font-size: .5em; margin-left: 2px }
+.metric-card .m-value.green { color: var(--green); text-shadow: 0 0 15px rgba(34,197,94,.15) }
+.metric-card .m-value.amber { color: var(--amber); text-shadow: 0 0 15px rgba(234,179,8,.15) }
+.metric-card .m-value.rose { color: var(--rose); text-shadow: 0 0 15px rgba(239,68,68,.15) }
+.metric-card .m-label { font-family: var(--heading); font-size: .5rem; color: var(--gray); letter-spacing: .08em; text-transform: uppercase }
+
+/* ── Source Card ── */
+.source-card {
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  transition: all .3s;
+  cursor: pointer;
+}
+.source-card:hover { border-color: rgba(0,212,255,.18) }
+.source-card .source-title { font-size: .82rem; color: var(--white); font-weight: 500; margin-bottom: .4rem; line-height: 1.4 }
+.source-card .source-url { font-size: .68rem; color: var(--cyan); margin-bottom: .6rem; opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.source-card .relevance-bar { height: 3px; background: rgba(0,212,255,.08); margin-top: .5rem }
+.source-card .relevance-fill { height: 100%; background: var(--cyan); box-shadow: 0 0 6px rgba(0,212,255,.25) }
+.source-card .relevance-label { display: flex; justify-content: space-between; margin-top: .3rem }
+.source-card .relevance-label span { font-family: var(--heading); font-size: .48rem; color: var(--gray); letter-spacing: .06em }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .pillars, .related-grid, .repo-grid { grid-template-columns: 1fr }
+}
