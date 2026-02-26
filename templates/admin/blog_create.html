@@ -3,8 +3,8 @@
 {% block title %}Create Blog Post - Smarter Dev Admin{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item"><a href="/admin">Dashboard</a></li>
-<li class="breadcrumb-item"><a href="/admin/blogs">Blog Posts</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin">Dashboard</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/blogs">Blog Posts</a></li>
 <li class="breadcrumb-item active" aria-current="page">Create</li>
 {% endblock %}
 
@@ -22,11 +22,11 @@
             {{ success }}
             {% if blog_post %}
             <div class="mt-2">
-                <a href="/admin/blogs/{{ blog_post.id }}/edit" class="btn btn-sm btn-outline-success">Edit post</a>
+                <a href="/bot-admin/blogs/{{ blog_post.id }}/edit" class="btn btn-sm btn-outline-success">Edit post</a>
                 {% if blog_post.is_published %}
                 <a href="/blog/{{ blog_post.slug }}" class="btn btn-sm btn-outline-secondary" target="_blank">View post</a>
                 {% endif %}
-                <a href="/admin/blogs" class="btn btn-sm btn-outline-primary">Back to list</a>
+                <a href="/bot-admin/blogs" class="btn btn-sm btn-outline-primary">Back to list</a>
             </div>
             {% endif %}
         </div>
@@ -107,7 +107,7 @@
                             
                             <div class="form-footer">
                                 <button type="submit" class="btn btn-primary">Create blog post</button>
-                                <a href="/admin/blogs" class="btn btn-link">Cancel</a>
+                                <a href="/bot-admin/blogs" class="btn btn-link">Cancel</a>
                             </div>
                         </form>
                     </div>

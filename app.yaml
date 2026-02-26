@@ -1,0 +1,19 @@
+site_name: Smarter Dev
+theme: smarterdev
+
+controllers:
+  - smarter_dev.web.controllers:PagesController
+
+# Partials system (SPA navigation)
+partials:
+  enabled: true
+
+# Page types — auto-generates admin CRUD, public listing, and detail routes
+page_types:
+  - name: post
+    plural: posts
+    icon: pen-tool
+
+# Legacy site — existing Starlette app serves from subdomain
+legacy:
+  subdomain: legacy.smarter.dev

@@ -5,29 +5,29 @@
 {% block page_title %}Scheduled Messages{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/campaigns">Campaigns</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges">{{ campaign.title }}</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}/campaigns">Campaigns</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges">{{ campaign.title }}</a></li>
 <li class="breadcrumb-item active">Scheduled Messages</li>
 {% endblock %}
 
 {% block page_actions %}
 <div class="col-auto ms-auto d-print-none">
     <div class="btn-list">
-        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" class="btn btn-outline-primary">
+        <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" class="btn btn-outline-primary">
             <svg class="icon me-2" width="24" height="24">
                 <use xlink:href="#tabler-list"></use>
             </svg>
             Challenges
         </a>
-        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/edit" class="btn btn-outline-primary">
+        <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/edit" class="btn btn-outline-primary">
             <svg class="icon me-2" width="24" height="24">
                 <use xlink:href="#tabler-settings"></use>
             </svg>
             Campaign Settings
         </a>
-        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/create" class="btn btn-primary">
+        <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/create" class="btn btn-primary">
             <svg class="icon me-2" width="24" height="24">
                 <use xlink:href="#tabler-plus"></use>
             </svg>
@@ -190,7 +190,7 @@
                     </td>
                     <td>
                         <div class="btn-list flex-nowrap">
-                            <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/{{ message.id }}/edit" 
+                            <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/{{ message.id }}/edit" 
                                class="btn btn-sm btn-outline-primary">
                                 <svg class="icon" width="16" height="16">
                                     <use xlink:href="#tabler-edit"></use>
@@ -206,7 +206,7 @@
                                 </button>
                                 <div class="dropdown-menu">
                                     <form method="post" 
-                                          action="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/{{ message.id }}/delete"
+                                          action="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/{{ message.id }}/delete"
                                           onsubmit="return confirm('Are you sure you want to delete this scheduled message?');">
                                         <button type="submit" class="dropdown-item text-danger">
                                             <svg class="icon dropdown-item-icon" width="16" height="16">
@@ -237,7 +237,7 @@
                 Get started by creating your first scheduled message for this campaign.
             </p>
             <div class="empty-action">
-                <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/create" 
+                <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/create" 
                    class="btn btn-primary">
                     <svg class="icon me-2" width="24" height="24">
                         <use xlink:href="#tabler-plus"></use>

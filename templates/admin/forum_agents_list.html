@@ -5,15 +5,15 @@
 {% block page_title %}Forum Agents{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
 <li class="breadcrumb-item active">Forum Agents</li>
 {% endblock %}
 
 {% block page_actions %}
 <div class="col-auto ms-auto d-print-none">
     <div class="btn-list">
-        <a href="/admin/guilds/{{ guild.id }}/forum-agents/create" class="btn btn-primary">
+        <a href="/bot-admin/guilds/{{ guild.id }}/forum-agents/create" class="btn btn-primary">
             <svg class="icon me-2" width="24" height="24">
                 <use xlink:href="#tabler-plus"></use>
             </svg>
@@ -107,20 +107,20 @@
                                                 </svg>
                                             </a>
                                             <div class="dropdown-menu">
-                                                <a href="/admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/edit" class="dropdown-item">
+                                                <a href="/bot-admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/edit" class="dropdown-item">
                                                     <svg class="icon me-2" width="16" height="16">
                                                         <use xlink:href="#tabler-edit"></use>
                                                     </svg>
                                                     Edit
                                                 </a>
-                                                <a href="/admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/analytics" class="dropdown-item">
+                                                <a href="/bot-admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/analytics" class="dropdown-item">
                                                     <svg class="icon me-2" width="16" height="16">
                                                         <use xlink:href="#tabler-chart-bar"></use>
                                                     </svg>
                                                     Analytics
                                                 </a>
                                                 <div class="dropdown-divider"></div>
-                                                <form method="POST" action="/admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/toggle" style="display: inline;">
+                                                <form method="POST" action="/bot-admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/toggle" style="display: inline;">
                                                     <button type="submit" class="dropdown-item">
                                                         {% if agent.is_active %}
                                                         <svg class="icon me-2" width="16" height="16">
@@ -136,7 +136,7 @@
                                                     </button>
                                                 </form>
                                                 <div class="dropdown-divider"></div>
-                                                <form method="POST" action="/admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/delete" 
+                                                <form method="POST" action="/bot-admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/delete" 
                                                       onsubmit="return confirm('Are you sure you want to delete this agent? This cannot be undone.')" 
                                                       style="display: inline;">
                                                     <button type="submit" class="dropdown-item text-danger">
@@ -180,13 +180,13 @@
                             </div>
                             <div class="card-footer">
                                 <div class="d-flex justify-content-between">
-                                    <a href="/admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/edit" class="btn btn-sm btn-outline-primary">
+                                    <a href="/bot-admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/edit" class="btn btn-sm btn-outline-primary">
                                         <svg class="icon me-1" width="16" height="16">
                                             <use xlink:href="#tabler-edit"></use>
                                         </svg>
                                         Edit
                                     </a>
-                                    <a href="/admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/analytics" class="btn btn-sm btn-outline-info">
+                                    <a href="/bot-admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/analytics" class="btn btn-sm btn-outline-info">
                                         <svg class="icon me-1" width="16" height="16">
                                             <use xlink:href="#tabler-chart-bar"></use>
                                         </svg>
@@ -205,7 +205,7 @@
                     </svg>
                     <h3>No Forum Agents Created</h3>
                     <p class="mb-4">Create your first AI-powered forum agent to automatically monitor and respond to forum posts.</p>
-                    <a href="/admin/guilds/{{ guild.id }}/forum-agents/create" class="btn btn-primary">
+                    <a href="/bot-admin/guilds/{{ guild.id }}/forum-agents/create" class="btn btn-primary">
                         <svg class="icon me-2" width="16" height="16">
                             <use xlink:href="#tabler-plus"></use>
                         </svg>

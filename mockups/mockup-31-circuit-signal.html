@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — Circuit Signal</title>
+<link href="https://fonts.googleapis.com/css2?family=Bungee+Hairline&family=Bruno+Ace+SC&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#020408;--surface:#080c14;--surface2:#0c1018;--cyan:#00d4ff;--teal:#00b8d4;--green:#22c55e;--amber:#eab308;--rose:#ef4444;--gray:#2a3a4e;--mid:#4a6078;--light:#8098b0;--white:#d4e0ec;--display:'Bungee Hairline',sans-serif;--heading:'Bruno Ace SC',sans-serif;--body:'Inter',Arial,sans-serif}
+html{scroll-behavior:smooth}body{font-family:var(--body);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.7}
+#bg{position:fixed;inset:0;z-index:0}
+.mockup-nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;background:rgba(2,4,8,.92);backdrop-filter:blur(24px);border-bottom:1px solid rgba(0,212,255,.06);font-family:var(--heading);font-size:.62rem;letter-spacing:.05em}
+.mockup-nav a{color:var(--gray);text-decoration:none;padding:5px 12px;border:1px solid transparent;transition:all .2s;white-space:nowrap}.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.25)}.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.06)}
+.reveal{opacity:0;transform:translateY(16px);transition:all .55s cubic-bezier(.25,.46,.45,.94)}.reveal.visible{opacity:1;transform:none}
+.code-label{font-family:var(--heading);font-size:.65rem;color:var(--cyan);margin-bottom:1rem;opacity:.75;letter-spacing:.08em}
+.sec-h{font-family:var(--heading);font-size:clamp(1.4rem,2.8vw,2rem);color:var(--white);line-height:1.2;margin-bottom:.5rem;letter-spacing:.02em}
+.sec-p{font-size:.9rem;color:var(--mid);max-width:480px;margin-bottom:2.5rem;line-height:1.75}
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;z-index:1;padding:7rem 2rem 4rem;text-align:center}
+.hero-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 18px;border-radius:100px;font-family:var(--heading);font-size:.6rem;background:rgba(0,212,255,.04);border:1px solid rgba(0,212,255,.12);color:var(--cyan);margin-bottom:2.5rem;letter-spacing:.08em}
+.hero-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.hero-logo{font-family:var(--display);font-size:clamp(3.2rem,8vw,6.5rem);color:var(--white);line-height:1;margin-bottom:.5rem;letter-spacing:.15em;text-shadow:0 0 40px rgba(0,212,255,.15)}
+.hero-logo .dev{font-family:var(--heading);color:var(--cyan);letter-spacing:.06em;font-size:.8em;text-shadow:0 0 30px rgba(0,212,255,.3)}
+.hero-sub{font-family:var(--heading);font-size:clamp(.75rem,1.3vw,.9rem);color:var(--mid);margin-bottom:1.5rem;letter-spacing:.06em}
+.hero-p{font-size:1rem;color:var(--mid);max-width:480px;margin:0 auto 2.5rem;line-height:1.8}.hero-p strong{color:var(--white);font-weight:600}
+.hero-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.btn-glow{padding:13px 34px;font-family:var(--heading);font-size:.7rem;letter-spacing:.06em;background:transparent;color:var(--cyan);border:1.5px solid var(--cyan);border-radius:0;cursor:pointer;box-shadow:0 0 15px rgba(0,212,255,.15),inset 0 0 15px rgba(0,212,255,.05);transition:all .3s;text-decoration:none}.btn-glow:hover{background:var(--cyan);color:var(--bg);box-shadow:0 0 30px rgba(0,212,255,.3)}
+.btn-ghost{padding:13px 34px;font-family:var(--heading);font-size:.7rem;letter-spacing:.06em;background:transparent;color:var(--mid);border:1px solid rgba(255,255,255,.08);border-radius:0;cursor:pointer;transition:all .25s;text-decoration:none}.btn-ghost:hover{border-color:rgba(0,212,255,.2);color:var(--light)}
+.hero-proof{display:flex;gap:2.5rem;margin-top:4rem;flex-wrap:wrap;justify-content:center}
+.hp .n{font-family:var(--heading);font-size:.9rem;color:var(--white);letter-spacing:.04em;text-shadow:0 0 10px rgba(0,212,255,.1)}.hp .l{font-size:.72rem;color:var(--gray);margin-top:2px}
+section{position:relative;z-index:1;padding:clamp(50px,7vw,90px) clamp(2rem,6vw,8rem)}.container{max-width:1080px;margin:0 auto}
+.pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:1px}
+.pillar{padding:2.25rem 2rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);border-top:2px solid rgba(0,212,255,.08);transition:all .3s;position:relative}
+.pillar::after{content:'';position:absolute;inset:0;opacity:0;transition:opacity .3s;box-shadow:inset 0 0 20px rgba(0,212,255,.05)}.pillar:hover{border-color:rgba(0,212,255,.2);border-top-color:var(--cyan)}.pillar:hover::after{opacity:1}
+.pillar .idx{font-family:var(--heading);font-size:.55rem;color:var(--cyan);margin-bottom:1rem;letter-spacing:.15em}
+.pillar h3{font-family:var(--heading);font-size:.85rem;color:var(--white);margin-bottom:.5rem;letter-spacing:.03em}.pillar p{font-size:.82rem;color:var(--mid);line-height:1.75}
+.term{max-width:760px;margin:0 auto;background:var(--surface);overflow:hidden;border:1px solid rgba(0,212,255,.1);box-shadow:0 0 30px rgba(0,212,255,.03)}
+.term-bar{display:flex;align-items:center;gap:7px;padding:11px 16px;background:rgba(0,0,0,.3);border-bottom:1px solid rgba(0,212,255,.06)}
+.td{width:9px;height:9px;border-radius:50%;border:1.5px solid;background:transparent}.td.r{border-color:var(--rose)}.td.y{border-color:var(--amber)}.td.g{border-color:var(--green)}
+.term-bar .p{margin-left:auto;font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.05em}
+.term-body{padding:1.5rem 1.75rem;font-family:'Courier New',monospace;font-size:.78rem;line-height:2.2}
+.cm{color:#1e2e3e}.kw{color:var(--amber)}.fn{color:var(--cyan)}.st{color:var(--green)}
+.term-info{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(0,212,255,.06)}
+.ti{padding:1rem;text-align:center;border-right:1px solid rgba(0,212,255,.04)}.ti:last-child{border-right:none}
+.ti strong{display:block;font-family:var(--heading);font-size:.8rem;color:var(--cyan);margin-bottom:1px;letter-spacing:.03em;text-shadow:0 0 8px rgba(0,212,255,.2)}.ti span{font-size:.6rem;color:var(--gray);letter-spacing:.08em;text-transform:uppercase}
+.bytes-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;max-width:600px}
+.bg-item{display:flex;align-items:center;gap:14px;padding:1.15rem 1.5rem;background:var(--surface);border:1px solid rgba(0,212,255,.04);transition:all .2s}.bg-item:hover{border-color:rgba(0,212,255,.15);box-shadow:inset 0 0 12px rgba(0,212,255,.03)}
+.bg-item .pts{font-family:var(--heading);font-size:.82rem;color:var(--cyan);min-width:44px;letter-spacing:.03em;text-shadow:0 0 6px rgba(0,212,255,.2)}
+.bg-item .nm{font-size:.85rem;font-weight:600;color:var(--white)}.bg-item .ds{font-size:.7rem;color:var(--gray);margin-top:1px}
+.stats{display:flex;justify-content:space-between;flex-wrap:wrap;gap:2rem;padding:3rem 0;border-top:1px solid rgba(0,212,255,.06);border-bottom:1px solid rgba(0,212,255,.06)}
+.stat{text-align:center;flex:1;min-width:100px}.stat .num{font-family:var(--display);font-size:clamp(2rem,4vw,3rem);color:var(--white);line-height:1;text-shadow:0 0 20px rgba(0,212,255,.1)}.stat .num .u{font-family:var(--heading);color:var(--cyan);font-size:.45em}.stat .lbl{font-size:.72rem;color:var(--gray);margin-top:.15rem}
+.quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:2rem}
+.q{padding:2rem;background:var(--surface);border:1px solid rgba(0,212,255,.04);border-left:2px solid transparent;transition:all .3s}.q:hover{border-left-color:var(--cyan);box-shadow:inset 0 0 15px rgba(0,212,255,.02)}
+.q blockquote{font-size:.85rem;color:var(--light);line-height:1.8;margin-bottom:1.25rem}.q .who{font-size:.7rem}.q .nm{color:var(--white);font-weight:600}.q .rl{color:var(--gray)}
+.cta{text-align:center;padding:clamp(70px,10vw,130px) 2rem;position:relative;z-index:1}
+.cta-h{font-family:var(--display);font-size:clamp(1.8rem,4.5vw,3.5rem);color:var(--white);line-height:1.1;margin-bottom:.25rem;letter-spacing:.08em;text-shadow:0 0 30px rgba(0,212,255,.1)}
+.cta-h2{font-family:var(--heading);font-size:clamp(1.2rem,2.5vw,1.8rem);color:var(--cyan);margin-bottom:2rem;letter-spacing:.04em;text-shadow:0 0 20px rgba(0,212,255,.15)}
+.foot{text-align:center;padding:1.5rem;font-family:var(--heading);font-size:.55rem;color:var(--gray);border-top:1px solid rgba(0,212,255,.04);position:relative;z-index:1;letter-spacing:.06em}
+@media(max-width:900px){.pillars,.quotes{grid-template-columns:1fr}.bytes-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.stats{flex-direction:column;align-items:center}}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<nav class="mockup-nav">
+  <a href="mockup-27-circuit-pulse.html">27 Pulse</a>
+  <a href="mockup-28-circuit-maze.html">28 Maze</a>
+  <a href="mockup-29-circuit-snake.html">29 Snake</a>
+  <a href="mockup-30-circuit-flood.html">30 Flood</a>
+  <a href="mockup-31-circuit-signal.html" class="active">31 Signal</a>
+</nav>
+
+<section class="hero">
+  <div class="hero-chip reveal"><span class="dot"></span> 15,000+ developers and growing</div>
+  <div class="hero-logo reveal">SMARTER <span class="dev">Dev</span></div>
+  <div class="hero-sub reveal">AI writes code. We build developers.</div>
+  <p class="hero-p reveal">A community focused on what actually matters — <strong>critical thinking</strong>, <strong>architecture</strong>, and <strong>adversarial reasoning</strong>. No gatekeeping. No fluff. Just developers getting better, together.</p>
+  <div class="hero-btns reveal"><a href="#" class="btn-glow">Join on Discord</a><a href="#how" class="btn-ghost">How it works</a></div>
+  <div class="hero-proof reveal"><div class="hp"><div class="n">15K+</div><div class="l">Developers</div></div><div class="hp"><div class="n">730</div><div class="l">Challenges</div></div><div class="hp"><div class="n">98%</div><div class="l">"Worth it"</div></div></div>
+</section>
+
+<section id="how"><div class="container"><div class="reveal"><div class="code-label">// skills.sharpen()</div><div class="sec-h">Three pillars of developer growth.</div><div class="sec-p">AI handles syntax. We handle the thinking that makes syntax matter.</div></div>
+<div class="pillars"><div class="pillar reveal"><div class="idx">DISCIPLINE 01</div><h3>Critical Thinking</h3><p>Evaluate trade-offs. Spot invisible assumptions. Ask the questions that redirect entire projects. The skill that compounds forever.</p></div><div class="pillar reveal"><div class="idx">DISCIPLINE 02</div><h3>Architecture</h3><p>Design systems that survive production. Boundaries, contracts, failure modes — the thinking AI can't do for you.</p></div><div class="pillar reveal"><div class="idx">DISCIPLINE 03</div><h3>Adversarial Reasoning</h3><p>Think like an attacker. Find the edge case before production does. Build paranoid systems that hold up when reality pushes back.</p></div></div></div></section>
+
+<section><div class="container"><div class="reveal"><div class="code-label">// runhacks.execute()</div><div class="sec-h">Daily challenges. Real growth.</div><div class="sec-p">Real scenarios that train how you think, not just what you type.</div></div>
+<div class="term reveal"><div class="term-bar"><div class="td r"></div><div class="td y"></div><div class="td g"></div><div class="p">challenge_731.sh</div></div><div class="term-body"><div><span class="cm"># Distributed cache: 2% stale reads</span></div><div><span class="cm"># Replication healthy. TTLs correct.</span></div><div><span class="cm"># Difficulty: Hard | Reward: 150 Bytes</span></div><div>&nbsp;</div><div><span class="kw">function</span> <span class="fn">diagnose</span>() {</div><div>&nbsp;&nbsp;<span class="cm"># What architectural assumption is wrong?</span></div><div>&nbsp;&nbsp;<span class="kw">echo</span> <span class="st">"Think architecture, not code."</span></div><div>}</div></div><div class="term-info"><div class="ti"><strong>Daily</strong><span>Frequency</span></div><div class="ti"><strong>3 Tiers</strong><span>Difficulty</span></div><div class="ti"><strong>Peer</strong><span>Review</span></div></div></div></div></section>
+
+<section><div class="container"><div class="reveal"><div class="code-label">// bytes.earn()</div><div class="sec-h">Earn Bytes. Track your growth.</div><div class="sec-p">A reward system that values consistency, contribution, and quality over clout.</div></div>
+<div class="bytes-grid reveal"><div class="bg-item"><div class="pts">+5</div><div><div class="nm">Daily Check-in</div><div class="ds">Consistency compounds</div></div></div><div class="bg-item"><div class="pts">+50</div><div><div class="nm">Solve a RunHack</div><div class="ds">Ship a real solution</div></div></div><div class="bg-item"><div class="pts">+25</div><div><div class="nm">Peer Review</div><div class="ds">Give actionable feedback</div></div></div><div class="bg-item"><div class="pts">+100</div><div><div class="nm">Top Solution</div><div class="ds">Community-voted best</div></div></div></div></div></section>
+
+<section><div class="container"><div class="stats reveal"><div class="stat"><div class="num">15<span class="u">K+</span></div><div class="lbl">Developers</div></div><div class="stat"><div class="num">730</div><div class="lbl">Challenges</div></div><div class="stat"><div class="num">42<span class="u">K</span></div><div class="lbl">Solutions</div></div><div class="stat"><div class="num">98<span class="u">%</span></div><div class="lbl">"Worth it"</div></div></div></div></section>
+
+<section><div class="container"><div class="reveal"><div class="code-label">// community.listen()</div><div class="sec-h">What developers say.</div></div>
+<div class="quotes"><div class="q reveal"><blockquote>"I stopped vibe-coding with AI and started understanding the systems I was building. Smarter Dev changed how I approach everything."</blockquote><div class="who"><span class="nm">Maya Rodriguez</span> &mdash; <span class="rl">Senior Engineer @ Vercel</span></div></div><div class="q reveal"><blockquote>"RunHacks is addictive in the best way. 200+ challenges in and every single one made me think differently about code."</blockquote><div class="who"><span class="nm">James Kim</span> &mdash; <span class="rl">Full-Stack Developer</span></div></div><div class="q reveal"><blockquote>"No ego. No gatekeeping. Just devs helping devs get better. This is what communities should look like."</blockquote><div class="who"><span class="nm">Sarah Petrov</span> &mdash; <span class="rl">Tech Lead @ Stripe</span></div></div></div></div></section>
+
+<section class="cta"><div class="reveal"><div class="cta-h">Stop writing code.</div><div class="cta-h2">Start thinking.</div><a href="#" class="btn-glow" style="padding:14px 36px">Join on Discord &rarr;</a></div></section>
+<div class="foot">&copy; 2026 SMARTER DEV</div>
+
+<script>
+// Circuit Signal — Pre-built circuit board topology with signals routing between components (chips/nodes)
+const c=document.getElementById('bg'),ctx=c.getContext('2d');
+let W,H,cols,rows;
+const CELL=10,GAP=1,STEP=CELL+GAP;
+let traceGrid,chips,wires;
+
+function resize(){
+  W=c.width=innerWidth;H=c.height=innerHeight;
+  cols=Math.ceil(W/STEP)+2;rows=Math.ceil(H/STEP)+2;
+  traceGrid=new Uint8Array(cols*rows);
+  buildCircuit();
+  signals=[];
+  for(let i=0;i<10;i++)signals.push(new Signal());
+}
+
+function buildCircuit(){
+  chips=[];wires=[];
+  traceGrid.fill(0);
+  // Place random "chip" rectangles
+  const chipCount=6+Math.floor(Math.random()*6);
+  for(let i=0;i<chipCount;i++){
+    const w=3+Math.floor(Math.random()*4);
+    const h=2+Math.floor(Math.random()*3);
+    const x=2+Math.floor(Math.random()*(cols-w-4));
+    const y=2+Math.floor(Math.random()*(rows-h-4));
+    chips.push({x,y,w,h});
+    // Fill chip cells
+    for(let cy=y;cy<y+h;cy++)for(let cx=x;cx<x+w;cx++){
+      if(cx<cols&&cy<rows)traceGrid[cy*cols+cx]=2; // 2=chip
+    }
+  }
+  // Connect chips with L-shaped wires
+  for(let i=0;i<chips.length;i++){
+    const a=chips[i];
+    // Connect to 1-2 other chips
+    const targets=Math.random()<.5?2:1;
+    for(let t=0;t<targets;t++){
+      const j=(i+1+Math.floor(Math.random()*(chips.length-1)))%chips.length;
+      const b=chips[j];
+      const ax=a.x+Math.floor(a.w/2),ay=a.y+Math.floor(a.h/2);
+      const bx=b.x+Math.floor(b.w/2),by=b.y+Math.floor(b.h/2);
+      const wire=[];
+      // Horizontal then vertical (L-route)
+      const midX=Math.random()<.5?ax:bx;
+      let cx=ax,cy=ay;
+      while(cx!==midX){cx+=cx<midX?1:-1;if(cx>=0&&cx<cols&&cy>=0&&cy<rows){traceGrid[cy*cols+cx]=1;wire.push({x:cx,y:cy})}}
+      while(cy!==by){cy+=cy<by?1:-1;if(cx>=0&&cx<cols&&cy>=0&&cy<rows){traceGrid[cy*cols+cx]=1;wire.push({x:cx,y:cy})}}
+      while(cx!==bx){cx+=cx<bx?1:-1;if(cx>=0&&cx<cols&&cy>=0&&cy<rows){traceGrid[cy*cols+cx]=1;wire.push({x:cx,y:cy})}}
+      if(wire.length)wires.push(wire);
+    }
+  }
+}
+
+class Signal{
+  constructor(){this.reset()}
+  reset(){
+    if(!wires.length){this.alive=false;return}
+    this.wire=wires[Math.floor(Math.random()*wires.length)];
+    this.pos=Math.random()<.5?0:this.wire.length-1;
+    this.dir=this.pos===0?1:-1;
+    this.trail=[];
+    this.maxTrail=8+Math.floor(Math.random()*12);
+    this.alive=true;
+    this.brightness=.3+Math.random()*.3;
+    this.speed=1;
+  }
+  update(){
+    if(!this.wire){this.alive=false;return}
+    const cell=this.wire[this.pos];
+    if(cell)this.trail.push({x:cell.x,y:cell.y});
+    if(this.trail.length>this.maxTrail)this.trail.shift();
+    this.pos+=this.dir;
+    if(this.pos<0||this.pos>=this.wire.length){
+      // Reached end — find connected wire or die
+      if(Math.random()<.3&&wires.length>1){
+        // Jump to another wire
+        this.wire=wires[Math.floor(Math.random()*wires.length)];
+        this.pos=Math.random()<.5?0:this.wire.length-1;
+        this.dir=this.pos===0?1:-1;
+      }else{
+        this.alive=false;
+      }
+    }
+  }
+}
+
+let signals=[];
+
+function draw(){
+  ctx.fillStyle='#020408';ctx.fillRect(0,0,W,H);
+  // Grid
+  ctx.strokeStyle='rgba(0,212,255,0.012)';ctx.lineWidth=.5;
+  for(let x=0;x<=cols;x++){ctx.beginPath();ctx.moveTo(x*STEP-.5,0);ctx.lineTo(x*STEP-.5,H);ctx.stroke()}
+  for(let y=0;y<=rows;y++){ctx.beginPath();ctx.moveTo(0,y*STEP-.5);ctx.lineTo(W,y*STEP-.5);ctx.stroke()}
+
+  // Traces and chips
+  for(let y=0;y<rows;y++){
+    for(let x=0;x<cols;x++){
+      const v=traceGrid[y*cols+x];
+      if(v===1){
+        ctx.fillStyle='rgba(0,212,255,0.035)';
+        ctx.fillRect(x*STEP,y*STEP,CELL,CELL);
+      }else if(v===2){
+        ctx.fillStyle='rgba(0,212,255,0.06)';
+        ctx.fillRect(x*STEP,y*STEP,CELL,CELL);
+      }
+    }
+  }
+
+  // Chip outlines
+  for(const ch of chips){
+    ctx.strokeStyle='rgba(0,212,255,0.08)';ctx.lineWidth=.5;
+    ctx.strokeRect(ch.x*STEP-1,ch.y*STEP-1,ch.w*STEP+1,ch.h*STEP+1);
+    // Pin marks on edges
+    ctx.fillStyle='rgba(0,212,255,0.1)';
+    for(let px=ch.x;px<ch.x+ch.w;px++){
+      ctx.fillRect(px*STEP+3,ch.y*STEP-2,CELL-6,1);
+      ctx.fillRect(px*STEP+3,(ch.y+ch.h)*STEP,CELL-6,1);
+    }
+  }
+
+  // Signals
+  for(const s of signals){
+    for(let i=0;i<s.trail.length;i++){
+      const t=i/s.trail.length;
+      const a=s.brightness*t;
+      const pt=s.trail[i];
+      ctx.fillStyle=`rgba(0,212,255,${a})`;
+      ctx.fillRect(pt.x*STEP,pt.y*STEP,CELL,CELL);
+    }
+    if(s.trail.length){
+      const head=s.trail[s.trail.length-1];
+      const px=head.x*STEP+CELL/2,py=head.y*STEP+CELL/2;
+      const g=ctx.createRadialGradient(px,py,0,px,py,CELL*2);
+      g.addColorStop(0,`rgba(0,212,255,${s.brightness*.35})`);
+      g.addColorStop(1,'rgba(0,212,255,0)');
+      ctx.fillStyle=g;ctx.fillRect(px-CELL*2,py-CELL*2,CELL*4,CELL*4);
+    }
+  }
+}
+
+let tick=0;
+function animate(){
+  tick++;
+  if(tick%2===0){
+    for(let i=signals.length-1;i>=0;i--){
+      signals[i].update();
+      if(!signals[i].alive)signals[i]=new Signal();
+    }
+  }
+  draw();requestAnimationFrame(animate);
+}
+resize();window.addEventListener('resize',resize);
+for(let i=0;i<10;i++)signals.push(new Signal());
+animate();
+
+const obs=new IntersectionObserver(e=>{e.forEach(x=>{if(x.isIntersecting){x.target.classList.add('visible');obs.unobserve(x.target)}})},{threshold:.1});
+document.querySelectorAll('.reveal').forEach(el=>obs.observe(el));
+</script>
+</body>
+</html>

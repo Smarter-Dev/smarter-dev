@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Bungee+Hairline&family=Bruno+Ace+SC&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#020408;--surface:#080c14;--cyan:#00d4ff;--green:#22c55e;--amber:#eab308;--rose:#ef4444;--gray:#2a3a4e;--mid:#4a6078;--light:#8098b0;--white:#d4e0ec;--display:'Bungee Hairline',sans-serif;--heading:'Bruno Ace SC',sans-serif;--body:'Inter',Arial,sans-serif}
+html{scroll-behavior:smooth}body{font-family:var(--body);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.7}
+#bg{position:fixed;inset:0;z-index:0}
+.mockup-nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;background:rgba(2,4,8,.92);backdrop-filter:blur(24px);border-bottom:1px solid rgba(0,212,255,.06);font-family:var(--heading);font-size:.62rem;letter-spacing:.05em}
+.mockup-nav a{color:var(--gray);text-decoration:none;padding:5px 12px;border:1px solid transparent;transition:all .2s;white-space:nowrap}.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.25)}.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.06)}
+.reveal{opacity:0;transform:translateY(16px);transition:all .55s cubic-bezier(.25,.46,.45,.94)}.reveal.visible{opacity:1;transform:none}
+.code-label{font-family:var(--heading);font-size:.65rem;color:var(--cyan);margin-bottom:1rem;opacity:.75;letter-spacing:.08em}
+
+/* ── Dashboard-specific styles ── */
+
+.dash-wrap{position:relative;z-index:1;max-width:1120px;margin:0 auto;padding:70px 24px 40px}
+
+/* Top bar */
+.dash-topbar{display:flex;align-items:center;justify-content:space-between;padding:18px 0 28px;border-bottom:1px solid rgba(0,212,255,.06);margin-bottom:28px}
+.dash-logo{font-family:var(--display);font-size:1.3rem;color:var(--white);letter-spacing:.12em;text-decoration:none}
+.dash-logo .dev{font-family:var(--heading);color:var(--cyan);font-size:.8em;letter-spacing:.06em}
+.dash-user{display:flex;align-items:center;gap:14px}
+.dash-bell{position:relative;cursor:pointer;color:var(--mid);transition:color .2s}
+.dash-bell:hover{color:var(--cyan)}
+.dash-bell svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.dash-bell-badge{position:absolute;top:-4px;right:-5px;width:16px;height:16px;background:var(--rose);color:#fff;font-size:.55rem;font-weight:700;display:flex;align-items:center;justify-content:center;border-radius:50%;border:2px solid var(--bg)}
+.dash-avatar{width:34px;height:34px;background:rgba(0,212,255,.12);border:1.5px solid rgba(0,212,255,.25);display:flex;align-items:center;justify-content:center;font-family:var(--heading);font-size:.65rem;color:var(--cyan);letter-spacing:.04em}
+.dash-greeting{font-family:var(--heading);font-size:.72rem;color:var(--white);letter-spacing:.04em}
+.dash-greeting span{color:var(--cyan)}
+
+/* Stats row */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-bottom:28px}
+.stat-card{background:var(--surface);border:1px solid rgba(0,212,255,.06);padding:22px 20px;transition:all .3s;position:relative}
+.stat-card::after{content:'';position:absolute;inset:0;opacity:0;transition:opacity .3s;box-shadow:inset 0 0 20px rgba(0,212,255,.05)}.stat-card:hover::after{opacity:1}.stat-card:hover{border-color:rgba(0,212,255,.2)}
+.stat-card .stat-value{font-family:var(--display);font-size:clamp(1.4rem,2.5vw,1.9rem);color:var(--white);line-height:1;margin-bottom:4px;text-shadow:0 0 15px rgba(0,212,255,.1)}
+.stat-card .stat-value .unit{font-family:var(--heading);color:var(--cyan);font-size:.5em;margin-left:3px}
+.stat-card .stat-label{font-family:var(--heading);font-size:.58rem;color:var(--gray);letter-spacing:.08em;text-transform:uppercase}
+
+/* Two-column layout */
+.dash-columns{display:grid;grid-template-columns:1.5fr 1fr;gap:24px}
+
+/* Card base */
+.dash-card{background:var(--surface);border:1px solid rgba(0,212,255,.06);margin-bottom:24px;transition:all .3s;position:relative}
+.dash-card:hover{border-color:rgba(0,212,255,.12)}
+.dash-card-header{padding:16px 20px 0}
+.dash-card-body{padding:16px 20px 20px}
+
+/* Terminal challenge card */
+.challenge-term{background:var(--surface);border:1px solid rgba(0,212,255,.1);box-shadow:0 0 30px rgba(0,212,255,.03);margin-bottom:24px}
+.term-bar{display:flex;align-items:center;gap:7px;padding:11px 16px;background:rgba(0,0,0,.3);border-bottom:1px solid rgba(0,212,255,.06)}
+.term-bar .p{margin-left:auto;font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.05em}
+.challenge-body{padding:20px 22px}
+.challenge-meta{display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+.difficulty-badge{display:inline-block;padding:3px 12px;font-family:var(--heading);font-size:.55rem;letter-spacing:.08em;border:1px solid}
+.difficulty-badge.hard{color:var(--rose);border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.06)}
+.difficulty-badge.medium{color:var(--amber);border-color:rgba(234,179,8,.35);background:rgba(234,179,8,.06)}
+.difficulty-badge.easy{color:var(--green);border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.06)}
+.challenge-reward{font-family:var(--heading);font-size:.6rem;color:var(--cyan);letter-spacing:.06em;text-shadow:0 0 8px rgba(0,212,255,.2)}
+.challenge-timer{font-family:'Courier New',monospace;font-size:.7rem;color:var(--mid);margin-left:auto}
+.challenge-title{font-family:var(--heading);font-size:.82rem;color:var(--white);margin-bottom:8px;letter-spacing:.03em}
+.challenge-desc{font-family:'Courier New',monospace;font-size:.78rem;color:var(--mid);line-height:2;margin-bottom:18px}
+.cm{color:#1e2e3e}.kw{color:var(--amber)}.fn{color:var(--cyan)}.st{color:var(--green)}
+.btn-start{display:inline-block;padding:11px 30px;font-family:var(--heading);font-size:.65rem;letter-spacing:.06em;background:transparent;color:var(--cyan);border:1.5px solid var(--cyan);cursor:pointer;box-shadow:0 0 15px rgba(0,212,255,.15),inset 0 0 15px rgba(0,212,255,.05);transition:all .3s;text-decoration:none}.btn-start:hover{background:var(--cyan);color:var(--bg);box-shadow:0 0 30px rgba(0,212,255,.3)}
+
+/* Activity feed */
+.activity-list{list-style:none}
+.activity-item{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid rgba(0,212,255,.04)}.activity-item:last-child{border-bottom:none}
+.activity-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:rgba(0,212,255,.04);border:1px solid rgba(0,212,255,.08);margin-top:2px}
+.activity-icon svg{width:14px;height:14px;fill:none;stroke:var(--cyan);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.activity-icon.badge-icon svg{stroke:var(--amber)}
+.activity-icon.review-icon svg{stroke:var(--green)}
+.activity-icon.streak-icon svg{stroke:var(--rose)}
+.activity-text{font-size:.82rem;color:var(--light);line-height:1.5}
+.activity-text strong{color:var(--white);font-weight:600}
+.activity-text .bytes-earned{color:var(--cyan);font-family:var(--heading);font-size:.72rem}
+.activity-time{margin-left:auto;font-size:.68rem;color:var(--gray);white-space:nowrap;flex-shrink:0;margin-top:3px}
+
+/* Leaderboard */
+.lb-list{list-style:none}
+.lb-item{display:flex;align-items:center;gap:14px;padding:11px 16px;border-bottom:1px solid rgba(0,212,255,.04);transition:background .2s}.lb-item:last-child{border-bottom:none}
+.lb-item:hover{background:rgba(0,212,255,.02)}
+.lb-item.lb-current{border-left:2px solid var(--cyan);background:rgba(0,212,255,.03)}
+.lb-rank{font-family:var(--heading);font-size:.7rem;color:var(--gray);min-width:22px;text-align:center;letter-spacing:.04em}
+.lb-item.lb-current .lb-rank{color:var(--cyan)}
+.lb-avatar{width:26px;height:26px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.12);display:flex;align-items:center;justify-content:center;font-family:var(--heading);font-size:.5rem;color:var(--mid);flex-shrink:0}
+.lb-item.lb-current .lb-avatar{border-color:rgba(0,212,255,.3);color:var(--cyan)}
+.lb-name{font-size:.8rem;color:var(--white);font-weight:500;flex:1}
+.lb-item.lb-current .lb-name{color:var(--cyan)}
+.lb-bytes{font-family:var(--heading);font-size:.68rem;color:var(--mid);letter-spacing:.04em}
+.lb-item.lb-current .lb-bytes{color:var(--cyan);text-shadow:0 0 6px rgba(0,212,255,.2)}
+
+/* Bytes breakdown */
+.bytes-bar-list{list-style:none}
+.bytes-bar-item{margin-bottom:14px}.bytes-bar-item:last-child{margin-bottom:0}
+.bytes-bar-label{display:flex;justify-content:space-between;margin-bottom:5px}
+.bytes-bar-label span:first-child{font-size:.78rem;color:var(--light)}
+.bytes-bar-label span:last-child{font-family:var(--heading);font-size:.65rem;color:var(--cyan);letter-spacing:.04em}
+.bytes-bar-track{height:4px;background:rgba(0,212,255,.06);position:relative}
+.bytes-bar-fill{height:100%;background:var(--cyan);box-shadow:0 0 8px rgba(0,212,255,.25);transition:width .6s cubic-bezier(.25,.46,.45,.94)}
+
+/* Quick links */
+.quick-links{display:grid;grid-template-columns:1fr 1fr;gap:1px}
+.quick-link{display:flex;align-items:center;gap:10px;padding:12px 16px;background:rgba(0,212,255,.02);border:1px solid rgba(0,212,255,.04);font-family:var(--heading);font-size:.62rem;color:var(--mid);letter-spacing:.05em;text-decoration:none;transition:all .2s}
+.quick-link:hover{color:var(--cyan);border-color:rgba(0,212,255,.2);background:rgba(0,212,255,.04)}
+.quick-link svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+
+/* Footer */
+.dash-foot{text-align:center;padding:24px;font-family:var(--heading);font-size:.55rem;color:var(--gray);border-top:1px solid rgba(0,212,255,.04);position:relative;z-index:1;letter-spacing:.06em;margin-top:12px}
+
+/* Responsive */
+@media(max-width:900px){
+  .stats-row{grid-template-columns:repeat(2,1fr)}
+  .dash-columns{grid-template-columns:1fr}
+  .quick-links{grid-template-columns:1fr}
+}
+@media(max-width:520px){
+  .stats-row{grid-template-columns:1fr}
+  .dash-topbar{flex-direction:column;gap:14px;text-align:center}
+  .challenge-meta{justify-content:center}
+  .challenge-timer{margin-left:0}
+}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<nav class="mockup-nav">
+  <a href="mockup-42-warp-hex.html">42 Hex Warp</a>
+  <a href="mockup-43-dashboard.html" class="active">43 Dashboard</a>
+  <a href="mockup-44-blog.html">44 Blog</a>
+  <a href="mockup-45-questionnaire.html">45 Questionnaire</a>
+  <a href="mockup-46-research-prompt.html">46 Research</a>
+  <a href="mockup-47-research-output.html">47 Output</a>
+  <a href="mockup-48-github-actions.html">48 GitHub</a>
+</nav>
+
+<div class="dash-wrap">
+
+  <!-- Top bar -->
+  <div class="dash-topbar reveal">
+    <a href="#" class="dash-logo">SMARTER <span class="dev">Dev</span></a>
+    <div class="dash-user">
+      <div class="dash-bell">
+        <svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span class="dash-bell-badge">3</span>
+      </div>
+      <span class="dash-greeting">Welcome back, <span>Maya</span></span>
+      <div class="dash-avatar">MR</div>
+    </div>
+  </div>
+
+  <!-- Stats row -->
+  <div class="stats-row">
+    <div class="stat-card reveal">
+      <div class="stat-value">2,450<span class="unit">B</span></div>
+      <div class="stat-label">Total Bytes Earned</div>
+    </div>
+    <div class="stat-card reveal">
+      <div class="stat-value">47<span class="unit">d</span></div>
+      <div class="stat-label">Day Streak</div>
+    </div>
+    <div class="stat-card reveal">
+      <div class="stat-value">#23</div>
+      <div class="stat-label">Leaderboard Rank</div>
+    </div>
+    <div class="stat-card reveal">
+      <div class="stat-value">156</div>
+      <div class="stat-label">Challenges Completed</div>
+    </div>
+  </div>
+
+  <!-- Two-column layout -->
+  <div class="dash-columns">
+
+    <!-- Left column -->
+    <div class="dash-left">
+
+      <!-- Today's Challenge -->
+      <div class="challenge-term reveal">
+        <div class="term-bar">
+          <div class="p">runhack_731.sh</div>
+        </div>
+        <div class="challenge-body">
+          <div class="dash-card-header" style="padding:0 0 4px">
+            <div class="code-label">// today.challenge()</div>
+          </div>
+          <div class="challenge-meta">
+            <span class="difficulty-badge hard">HARD</span>
+            <span class="challenge-reward">+150 Bytes</span>
+            <span class="challenge-timer">&#9201; 23:41:08 remaining</span>
+          </div>
+          <div class="challenge-title">Distributed Cache: Ghost Reads</div>
+          <div class="challenge-desc">
+            <div><span class="cm"># 2% of cache reads returning stale data</span></div>
+            <div><span class="cm"># Replication is healthy. TTLs are correct.</span></div>
+            <div><span class="cm"># All nodes report consistent state.</span></div>
+            <div>&nbsp;</div>
+            <div><span class="kw">function</span> <span class="fn">diagnose</span>() {</div>
+            <div>&nbsp;&nbsp;<span class="cm"># What architectural assumption is wrong?</span></div>
+            <div>&nbsp;&nbsp;<span class="kw">echo</span> <span class="st">"Think architecture, not code."</span></div>
+            <div>}</div>
+          </div>
+          <a href="#" class="btn-start">Start Challenge &rarr;</a>
+        </div>
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="dash-card reveal">
+        <div class="dash-card-header">
+          <div class="code-label">// activity.recent()</div>
+        </div>
+        <div class="dash-card-body">
+          <ul class="activity-list">
+            <li class="activity-item">
+              <div class="activity-icon">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div class="activity-text">Completed <strong>RunHack #728</strong> <span class="bytes-earned">(+50 Bytes)</span></div>
+              <div class="activity-time">2h ago</div>
+            </li>
+            <li class="activity-item">
+              <div class="activity-icon review-icon">
+                <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </div>
+              <div class="activity-text">Received peer review from <strong>James K.</strong></div>
+              <div class="activity-time">5h ago</div>
+            </li>
+            <li class="activity-item">
+              <div class="activity-icon badge-icon">
+                <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+              </div>
+              <div class="activity-text">Earned <strong>'Week Warrior'</strong> badge</div>
+              <div class="activity-time">1d ago</div>
+            </li>
+            <li class="activity-item">
+              <div class="activity-icon">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <div class="activity-text">Completed <strong>RunHack #726</strong> <span class="bytes-earned">(+100 Bytes)</span> &mdash; Top Solution</div>
+              <div class="activity-time">1d ago</div>
+            </li>
+            <li class="activity-item">
+              <div class="activity-icon review-icon">
+                <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              </div>
+              <div class="activity-text">Submitted review for <strong>Sarah P.</strong> <span class="bytes-earned">(+25 Bytes)</span></div>
+              <div class="activity-time">2d ago</div>
+            </li>
+            <li class="activity-item">
+              <div class="activity-icon streak-icon">
+                <svg viewBox="0 0 24 24"><path d="M13 2L3 14h9l-1 10 10-12h-9l1-10z"/></svg>
+              </div>
+              <div class="activity-text">Hit <strong>45-day streak</strong> milestone <span class="bytes-earned">(+200 Bytes)</span></div>
+              <div class="activity-time">3d ago</div>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right column -->
+    <div class="dash-right">
+
+      <!-- Leaderboard -->
+      <div class="dash-card reveal">
+        <div class="dash-card-header">
+          <div class="code-label">// leaderboard.top(5)</div>
+        </div>
+        <div class="dash-card-body" style="padding:0 0 8px">
+          <ul class="lb-list">
+            <li class="lb-item">
+              <span class="lb-rank">1</span>
+              <div class="lb-avatar">AK</div>
+              <span class="lb-name">Alex Kowalski</span>
+              <span class="lb-bytes">8,720 B</span>
+            </li>
+            <li class="lb-item">
+              <span class="lb-rank">2</span>
+              <div class="lb-avatar">SP</div>
+              <span class="lb-name">Sarah Petrov</span>
+              <span class="lb-bytes">7,340 B</span>
+            </li>
+            <li class="lb-item">
+              <span class="lb-rank">3</span>
+              <div class="lb-avatar">JK</div>
+              <span class="lb-name">James Kim</span>
+              <span class="lb-bytes">6,980 B</span>
+            </li>
+            <li class="lb-item">
+              <span class="lb-rank">4</span>
+              <div class="lb-avatar">RL</div>
+              <span class="lb-name">Rachel Liu</span>
+              <span class="lb-bytes">5,210 B</span>
+            </li>
+            <li class="lb-item">
+              <span class="lb-rank">5</span>
+              <div class="lb-avatar">DM</div>
+              <span class="lb-name">Diego Martinez</span>
+              <span class="lb-bytes">4,890 B</span>
+            </li>
+            <li class="lb-item" style="border-top:1px solid rgba(0,212,255,.08);margin-top:4px;padding-top:14px">
+              <span class="lb-rank" style="color:var(--mid)">...</span>
+              <span class="lb-rank" style="min-width:auto"></span>
+            </li>
+            <li class="lb-item lb-current">
+              <span class="lb-rank">23</span>
+              <div class="lb-avatar">MR</div>
+              <span class="lb-name">Maya Rodriguez</span>
+              <span class="lb-bytes">2,450 B</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Bytes Breakdown -->
+      <div class="dash-card reveal">
+        <div class="dash-card-header">
+          <div class="code-label">// bytes.breakdown()</div>
+        </div>
+        <div class="dash-card-body">
+          <ul class="bytes-bar-list">
+            <li class="bytes-bar-item">
+              <div class="bytes-bar-label">
+                <span>Challenges</span>
+                <span>1,420 B</span>
+              </div>
+              <div class="bytes-bar-track"><div class="bytes-bar-fill" style="width:58%"></div></div>
+            </li>
+            <li class="bytes-bar-item">
+              <div class="bytes-bar-label">
+                <span>Peer Reviews</span>
+                <span>575 B</span>
+              </div>
+              <div class="bytes-bar-track"><div class="bytes-bar-fill" style="width:23%"></div></div>
+            </li>
+            <li class="bytes-bar-item">
+              <div class="bytes-bar-label">
+                <span>Streak Bonuses</span>
+                <span>310 B</span>
+              </div>
+              <div class="bytes-bar-track"><div class="bytes-bar-fill" style="width:13%"></div></div>
+            </li>
+            <li class="bytes-bar-item">
+              <div class="bytes-bar-label">
+                <span>Daily Check-ins</span>
+                <span>95 B</span>
+              </div>
+              <div class="bytes-bar-track"><div class="bytes-bar-fill" style="width:4%"></div></div>
+            </li>
+            <li class="bytes-bar-item">
+              <div class="bytes-bar-label">
+                <span>Top Solutions</span>
+                <span>50 B</span>
+              </div>
+              <div class="bytes-bar-track"><div class="bytes-bar-fill" style="width:2%"></div></div>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Quick Links -->
+      <div class="dash-card reveal">
+        <div class="dash-card-header">
+          <div class="code-label">// nav.shortcuts()</div>
+        </div>
+        <div class="dash-card-body" style="padding:12px">
+          <div class="quick-links">
+            <a href="#" class="quick-link">
+              <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/><path d="M3 9h6"/></svg>
+              Browse Challenges
+            </a>
+            <a href="#" class="quick-link">
+              <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              My Reviews
+            </a>
+            <a href="#" class="quick-link">
+              <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              Community Feed
+            </a>
+            <a href="#" class="quick-link">
+              <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              Settings
+            </a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+</div>
+
+<div class="dash-foot">&copy; 2026 SMARTER DEV</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('bg');
+  const ctx = canvas.getContext('2d');
+
+  const HEX_SIZE = 18;
+  const H_SPACING = HEX_SIZE * Math.sqrt(3);
+  const V_SPACING = HEX_SIZE * 1.5;
+  const DOT_RADIUS = 2;
+  const INFLUENCE_RADIUS = 200;
+  const MAX_DISPLACEMENT = 20;
+  const LERP_SPEED = 0.08;
+  const AMBIENT_AMPLITUDE = 1;
+  const AMBIENT_SPEED = 0.0008;
+  const CLICK_DURATION = 500;
+  const HEX_LINE_REST = 0.025;
+  const HEX_LINE_ACTIVE = 0.08;
+  const PATH_COUNT = 60;
+  const PATH_SPEED = 1.2;
+  const TURN_CHANCE = 0.2;
+  const SEGMENT_FADE = 0.001;
+  const SEGMENT_PEAK_ALPHA = 0.12;
+
+  let dots = [];
+  let cols = 0;
+  let rows = 0;
+  let mouseX = -9999;
+  let mouseY = -9999;
+  let mouseActive = false;
+  let clickTime = 0;
+  let clickActive = false;
+  let animId = null;
+  let time = 0;
+  let traces = [];
+
+  const hexVerts = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.PI / 180 * (60 * i - 30);
+    hexVerts.push({ x: HEX_SIZE * Math.cos(angle), y: HEX_SIZE * Math.sin(angle) });
+  }
+
+  function createDots() {
+    const w = canvas.width;
+    const h = canvas.height;
+    cols = Math.ceil(w / H_SPACING) + 3;
+    rows = Math.ceil(h / V_SPACING) + 3;
+    dots = [];
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const isOdd = row % 2 === 1;
+        dots.push({
+          baseX: col * H_SPACING + (isOdd ? H_SPACING * 0.5 : 0) - H_SPACING,
+          baseY: row * V_SPACING - V_SPACING,
+          offsetX: 0, offsetY: 0,
+          targetOffsetX: 0, targetOffsetY: 0,
+          col: col, row: row,
+          phaseX: Math.random() * Math.PI * 2,
+          phaseY: Math.random() * Math.PI * 2
+        });
+      }
+    }
+    initTraces();
+  }
+
+  function getDot(row, col) {
+    if (row < 0 || row >= rows || col < 0 || col >= cols) return null;
+    return dots[row * cols + col];
+  }
+
+  function downNeighbors(row, col) {
+    const isOdd = row % 2 === 1;
+    if (isOdd) return [{ row: row + 1, col: col }, { row: row + 1, col: col + 1 }];
+    return [{ row: row + 1, col: col - 1 }, { row: row + 1, col: col }];
+  }
+
+  function buildRoute(startCol) {
+    const route = [];
+    let col = startCol;
+    for (let row = 0; row < rows; row++) {
+      route.push({ row: row, col: col });
+      if (Math.random() < TURN_CHANCE && row < rows - 1) {
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        const newCol = col + dir;
+        if (newCol >= 0 && newCol < cols) { route.push({ row: row, col: newCol }); col = newCol; }
+      }
+      if (row < rows - 1) {
+        const dns = downNeighbors(row, col);
+        const pick = dns[Math.random() < 0.5 ? 0 : 1];
+        if (pick.col >= 0 && pick.col < cols) col = pick.col;
+        else col = dns[0].col >= 0 && dns[0].col < cols ? dns[0].col : dns[1].col;
+      }
+    }
+    return route;
+  }
+
+  let recentSpawnCols = [];
+  function pickSpawnCol() {
+    const MIN_DIST = 8;
+    for (let a = 0; a < 200; a++) {
+      const col = Math.floor(Math.random() * cols);
+      let bad = false;
+      for (const p of recentSpawnCols) { if (Math.abs(col - p) < MIN_DIST) { bad = true; break; } }
+      if (!bad) { recentSpawnCols.push(col); if (recentSpawnCols.length > 3) recentSpawnCols.shift(); return col; }
+    }
+    const col = Math.floor(Math.random() * cols);
+    recentSpawnCols.push(col); if (recentSpawnCols.length > 3) recentSpawnCols.shift();
+    return col;
+  }
+
+  function spawnTrace() {
+    const col = pickSpawnCol();
+    return { route: buildRoute(col), step: 0, progress: 0, speed: PATH_SPEED * (0.5 + Math.random() * 0.8), segments: [] };
+  }
+
+  function initTraces() {
+    recentSpawnCols = []; traces = [];
+    for (let i = 0; i < PATH_COUNT; i++) { const t = spawnTrace(); t.step = Math.floor(Math.random() * t.route.length * 0.8); traces.push(t); }
+  }
+
+  function updateTraces() {
+    for (let i = 0; i < traces.length; i++) {
+      const t = traces[i];
+      if (t.step < t.route.length - 1) {
+        const from = t.route[t.step], to = t.route[t.step + 1];
+        const d1 = getDot(from.row, from.col), d2 = getDot(to.row, to.col);
+        let stepDist = H_SPACING;
+        if (d1 && d2) { const dx = d2.baseX - d1.baseX, dy = d2.baseY - d1.baseY; stepDist = Math.sqrt(dx*dx+dy*dy) || H_SPACING; }
+        t.progress += t.speed / stepDist;
+        if (t.progress >= 1) { t.segments.push({ fromRow: from.row, fromCol: from.col, toRow: to.row, toCol: to.col, alpha: SEGMENT_PEAK_ALPHA }); t.progress -= 1; t.step++; }
+      } else { traces[i] = spawnTrace(); }
+      for (let j = t.segments.length - 1; j >= 0; j--) { t.segments[j].alpha -= SEGMENT_FADE; if (t.segments[j].alpha <= 0) t.segments.splice(j, 1); }
+    }
+  }
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr; canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + 'px'; canvas.style.height = window.innerHeight + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); createDots();
+  }
+
+  function onMouseMove(e) { mouseX = e.clientX; mouseY = e.clientY; mouseActive = true; }
+  function onMouseLeave() { mouseActive = false; mouseX = -9999; mouseY = -9999; }
+  function onClick() { clickTime = performance.now(); clickActive = true; }
+
+  function update(now) {
+    time = now;
+    let clickFactor = 0;
+    if (clickActive) { const el = now - clickTime; if (el < CLICK_DURATION) { clickFactor = 1 - el/CLICK_DURATION; clickFactor *= clickFactor; } else clickActive = false; }
+    const irSq = INFLUENCE_RADIUS * INFLUENCE_RADIUS;
+    for (let i = 0; i < dots.length; i++) {
+      const dot = dots[i];
+      const ax = Math.sin(now * AMBIENT_SPEED + dot.phaseX) * AMBIENT_AMPLITUDE;
+      const ay = Math.cos(now * AMBIENT_SPEED * 0.7 + dot.phaseY) * AMBIENT_AMPLITUDE;
+      let dx2 = 0, dy2 = 0;
+      if (mouseActive) { const ddx = dot.baseX - mouseX, ddy = dot.baseY - mouseY, dSq = ddx*ddx+ddy*ddy;
+        if (dSq < irSq && dSq > 0.01) { const d = Math.sqrt(dSq), p = 1-d/INFLUENCE_RADIUS, s = p*p*MAX_DISPLACEMENT, b = 1-2*clickFactor; dx2 = ddx/d*s*b; dy2 = ddy/d*s*b; } }
+      dot.targetOffsetX = dx2 + ax; dot.targetOffsetY = dy2 + ay;
+      dot.offsetX += (dot.targetOffsetX - dot.offsetX) * LERP_SPEED;
+      dot.offsetY += (dot.targetOffsetY - dot.offsetY) * LERP_SPEED;
+    }
+    updateTraces();
+  }
+
+  function drawHex(cx, cy, alpha) {
+    ctx.beginPath(); ctx.moveTo(cx + hexVerts[0].x, cy + hexVerts[0].y);
+    for (let i = 1; i < 6; i++) ctx.lineTo(cx + hexVerts[i].x, cy + hexVerts[i].y);
+    ctx.closePath(); ctx.strokeStyle = 'rgba(0,212,255,' + alpha.toFixed(4) + ')'; ctx.lineWidth = 0.5; ctx.stroke();
+  }
+
+  function draw() {
+    const w = window.innerWidth, h = window.innerHeight;
+    ctx.clearRect(0, 0, w, h);
+    for (let i = 0; i < dots.length; i++) {
+      const dot = dots[i], x = dot.baseX + dot.offsetX, y = dot.baseY + dot.offsetY;
+      const disp = Math.sqrt(dot.offsetX*dot.offsetX + dot.offsetY*dot.offsetY);
+      const ed = Math.max(0, disp - AMBIENT_AMPLITUDE), dn = Math.min(ed / MAX_DISPLACEMENT, 1);
+      drawHex(x, y, HEX_LINE_REST + (HEX_LINE_ACTIVE - HEX_LINE_REST) * dn);
+      ctx.beginPath(); ctx.arc(x, y, DOT_RADIUS, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(0,212,255,' + (0.06 + 0.24*dn).toFixed(3) + ')'; ctx.fill();
+    }
+    for (const t of traces) {
+      for (const seg of t.segments) {
+        const d1 = getDot(seg.fromRow, seg.fromCol), d2 = getDot(seg.toRow, seg.toCol);
+        if (!d1||!d2) continue;
+        ctx.beginPath(); ctx.moveTo(d1.baseX+d1.offsetX, d1.baseY+d1.offsetY);
+        ctx.lineTo(d2.baseX+d2.offsetX, d2.baseY+d2.offsetY);
+        ctx.strokeStyle = 'rgba(0,212,255,' + seg.alpha.toFixed(4) + ')'; ctx.lineWidth = 2.5; ctx.stroke();
+      }
+      if (t.step < t.route.length - 1) {
+        const from = t.route[t.step], to = t.route[t.step+1];
+        const d1 = getDot(from.row, from.col), d2 = getDot(to.row, to.col);
+        if (d1&&d2) { const x1=d1.baseX+d1.offsetX,y1=d1.baseY+d1.offsetY,x2=d2.baseX+d2.offsetX,y2=d2.baseY+d2.offsetY;
+          ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x1+(x2-x1)*t.progress, y1+(y2-y1)*t.progress);
+          ctx.strokeStyle='rgba(0,212,255,'+SEGMENT_PEAK_ALPHA+')'; ctx.lineWidth=2.5; ctx.stroke(); }
+      }
+    }
+  }
+
+  function loop(now) { update(now); draw(); animId = requestAnimationFrame(loop); }
+  resize();
+  window.addEventListener('resize', resize);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseleave', onMouseLeave);
+  window.addEventListener('click', onClick);
+  animId = requestAnimationFrame(loop);
+
+  const obs = new IntersectionObserver(e => { e.forEach(x => { if (x.isIntersecting) { x.target.classList.add('visible'); obs.unobserve(x.target); } }); }, { threshold: .1 });
+  document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+})();
+</script>
+</body>
+</html>

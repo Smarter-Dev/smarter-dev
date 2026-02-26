@@ -860,7 +860,7 @@ async def api_keys_delete(request: Request) -> Response:
         
         # Redirect back to API keys list
         from starlette.responses import RedirectResponse
-        return RedirectResponse(url="/admin/api-keys", status_code=303)
+        return RedirectResponse(url="/bot-admin/api-keys", status_code=303)
     
     except ValueError:
         return templates.TemplateResponse(
@@ -1711,7 +1711,7 @@ async def forum_agent_create(request: Request) -> Response:
                     
                     # Redirect to agents list
                     return RedirectResponse(
-                        url=f"/admin/guilds/{guild_id}/forum-agents",
+                        url=f"/bot-admin/guilds/{guild_id}/forum-agents",
                         status_code=303
                     )
                     
@@ -1867,7 +1867,7 @@ async def forum_agent_edit(request: Request) -> Response:
                     
                     # Redirect to agents list
                     return RedirectResponse(
-                        url=f"/admin/guilds/{guild_id}/forum-agents",
+                        url=f"/bot-admin/guilds/{guild_id}/forum-agents",
                         status_code=303
                     )
                     
@@ -1921,7 +1921,7 @@ async def forum_agent_delete(request: Request) -> Response:
         
         # Redirect to agents list
         return RedirectResponse(
-            url=f"/admin/guilds/{guild_id}/forum-agents",
+            url=f"/bot-admin/guilds/{guild_id}/forum-agents",
             status_code=303
         )
         
@@ -1956,7 +1956,7 @@ async def forum_agent_toggle(request: Request) -> Response:
         
         # Redirect to agents list
         return RedirectResponse(
-            url=f"/admin/guilds/{guild_id}/forum-agents",
+            url=f"/bot-admin/guilds/{guild_id}/forum-agents",
             status_code=303
         )
         
@@ -2133,7 +2133,7 @@ async def forum_agents_bulk(request: Request) -> Response:
         
         # Redirect to agents list with success message
         return RedirectResponse(
-            url=f"/admin/guilds/{guild_id}/forum-agents",
+            url=f"/bot-admin/guilds/{guild_id}/forum-agents",
             status_code=303
         )
         
@@ -2333,7 +2333,7 @@ async def campaign_create(request: Request) -> Response:
                     
                     # Redirect to campaigns list with success message
                     return RedirectResponse(
-                        url=f"/admin/guilds/{guild_id}/campaigns?created=1",
+                        url=f"/bot-admin/guilds/{guild_id}/campaigns?created=1",
                         status_code=302
                     )
                     
@@ -2483,7 +2483,7 @@ async def campaign_edit(request: Request) -> Response:
                     
                     if updated_campaign:
                         return RedirectResponse(
-                            url=f"/admin/guilds/{guild_id}/campaigns?updated=1",
+                            url=f"/bot-admin/guilds/{guild_id}/campaigns?updated=1",
                             status_code=302
                         )
                     else:
@@ -2538,19 +2538,19 @@ async def campaign_delete(request: Request) -> Response:
             
             if success:
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/campaigns?deleted=1",
+                    url=f"/bot-admin/guilds/{guild_id}/campaigns?deleted=1",
                     status_code=302
                 )
             else:
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/campaigns?error=not_found",
+                    url=f"/bot-admin/guilds/{guild_id}/campaigns?error=not_found",
                     status_code=302
                 )
     
     except Exception as e:
         logger.error(f"Error deleting campaign {campaign_id} in guild {guild_id}: {e}")
         return RedirectResponse(
-            url=f"/admin/guilds/{guild_id}/campaigns?error=delete_failed",
+            url=f"/bot-admin/guilds/{guild_id}/campaigns?error=delete_failed",
             status_code=302
         )
 
@@ -2661,7 +2661,7 @@ async def quest_edit(request: Request) -> Response:
         await session.commit()
 
     return RedirectResponse(
-        f"/admin/guilds/{guild_id}/quests?updated=1",
+        f"/bot-admin/guilds/{guild_id}/quests?updated=1",
         status_code=302,
     )
 
@@ -2751,7 +2751,7 @@ async def quest_schedule(request: Request) -> Response:
         await session.commit()
 
     return RedirectResponse(
-        f"/admin/guilds/{guild_id}/quests?scheduled=1",
+        f"/bot-admin/guilds/{guild_id}/quests?scheduled=1",
         status_code=302,
     )
 
@@ -2765,7 +2765,7 @@ async def quest_delete(request: Request) -> Response:
 
             if not quest or quest.guild_id != guild_id:
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/quests?error=not_found",
+                    url=f"/bot-admin/guilds/{guild_id}/quests?error=not_found",
                     status_code=302,
                 )
 
@@ -2773,14 +2773,14 @@ async def quest_delete(request: Request) -> Response:
             await session.commit()
 
         return RedirectResponse(
-            url=f"/admin/guilds/{guild_id}/quests?deleted=1",
+            url=f"/bot-admin/guilds/{guild_id}/quests?deleted=1",
             status_code=302,
         )
 
     except Exception as e:
         logger.error(f"Error deleting quest {quest_id} in guild {guild_id}: {e}")
         return RedirectResponse(
-            url=f"/admin/guilds/{guild_id}/quests?error=delete_failed",
+            url=f"/bot-admin/guilds/{guild_id}/quests?error=delete_failed",
             status_code=302,
         )
 
@@ -2850,7 +2850,7 @@ async def quest_create(request: Request) -> Response:
         await session.commit()
 
     return RedirectResponse(
-        f"/admin/guilds/{guild_id}/quests?created=1",
+        f"/bot-admin/guilds/{guild_id}/quests?created=1",
         status_code=302,
     )
 
@@ -2989,7 +2989,7 @@ async def challenge_create(request: Request) -> Response:
                 
                 # Redirect to campaign challenges page
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/campaigns/{campaign_id}/challenges?created=1",
+                    url=f"/bot-admin/guilds/{guild_id}/campaigns/{campaign_id}/challenges?created=1",
                     status_code=302
                 )
         
@@ -3158,7 +3158,7 @@ async def scheduled_message_create(request: Request) -> Response:
                 
                 # Redirect to scheduled messages list
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages?created=1",
+                    url=f"/bot-admin/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages?created=1",
                     status_code=302
                 )
         
@@ -3284,7 +3284,7 @@ async def scheduled_message_edit(request: Request) -> Response:
                 
                 # Redirect to scheduled messages list
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages?updated=1",
+                    url=f"/bot-admin/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages?updated=1",
                     status_code=302
                 )
         
@@ -3326,7 +3326,7 @@ async def scheduled_message_delete(request: Request) -> Response:
             
             # Redirect to scheduled messages list
             return RedirectResponse(
-                url=f"/admin/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages?deleted=1",
+                url=f"/bot-admin/guilds/{guild_id}/campaigns/{campaign_id}/scheduled-messages?deleted=1",
                 status_code=302
             )
         
@@ -3403,7 +3403,7 @@ async def squad_sale_events_list(request: Request) -> Response:
                 
                 # Redirect to avoid duplicate submission
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/squad-sale-events?success=created",
+                    url=f"/bot-admin/guilds/{guild_id}/squad-sale-events?success=created",
                     status_code=302
                 )
                 
@@ -3484,7 +3484,7 @@ async def squad_sale_event_edit(request: Request) -> Response:
                 
                 # Redirect to sale events list
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/squad-sale-events?success=updated",
+                    url=f"/bot-admin/guilds/{guild_id}/squad-sale-events?success=updated",
                     status_code=302
                 )
                 
@@ -3559,7 +3559,7 @@ async def squad_sale_event_delete(request: Request) -> Response:
             
             # Redirect to sale events list
             return RedirectResponse(
-                url=f"/admin/guilds/{guild_id}/squad-sale-events?success=deleted",
+                url=f"/bot-admin/guilds/{guild_id}/squad-sale-events?success=deleted",
                 status_code=302
             )
             
@@ -3653,7 +3653,7 @@ async def repeating_messages_list(request: Request) -> Response:
                     
                     # Redirect with success message
                     return RedirectResponse(
-                        url=f"/admin/guilds/{guild_id}/repeating-messages?success=created",
+                        url=f"/bot-admin/guilds/{guild_id}/repeating-messages?success=created",
                         status_code=302
                     )
                     
@@ -3755,7 +3755,7 @@ async def repeating_message_create(request: Request) -> Response:
                     )
                 
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/repeating-messages?success=created",
+                    url=f"/bot-admin/guilds/{guild_id}/repeating-messages?success=created",
                     status_code=302
                 )
                 
@@ -3867,7 +3867,7 @@ async def repeating_message_edit(request: Request) -> Response:
                     await message_ops.update_repeating_message(message_id, **updates)
                     
                     return RedirectResponse(
-                        url=f"/admin/guilds/{guild_id}/repeating-messages?success=updated",
+                        url=f"/bot-admin/guilds/{guild_id}/repeating-messages?success=updated",
                         status_code=302
                     )
                     
@@ -3927,7 +3927,7 @@ async def repeating_message_delete(request: Request) -> Response:
             if success:
                 logger.info(f"Deleted repeating message {message_id} in guild {guild_id}")
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/repeating-messages?success=deleted",
+                    url=f"/bot-admin/guilds/{guild_id}/repeating-messages?success=deleted",
                     status_code=302
                 )
             else:
@@ -3974,7 +3974,7 @@ async def repeating_message_toggle(request: Request) -> Response:
                 action = "enabled" if new_status else "disabled"
                 logger.info(f"{action.capitalize()} repeating message {message_id} in guild {guild_id}")
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/repeating-messages?success={action}",
+                    url=f"/bot-admin/guilds/{guild_id}/repeating-messages?success={action}",
                     status_code=302
                 )
             else:
@@ -4063,7 +4063,7 @@ async def audit_log_config(request: Request) -> Response:
 
                 # Redirect back to config page with success message
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/audit-logs?success=updated",
+                    url=f"/bot-admin/guilds/{guild_id}/audit-logs?success=updated",
                     status_code=302
                 )
 
@@ -4161,7 +4161,7 @@ async def advent_of_code_config(request: Request) -> Response:
 
                 # Redirect back to config page with success message
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/advent-of-code?success=updated",
+                    url=f"/bot-admin/guilds/{guild_id}/advent-of-code?success=updated",
                     status_code=302
                 )
 
@@ -4266,7 +4266,7 @@ async def attachment_filter_config(request: Request) -> Response:
 
                 # Redirect back to config page with success message
                 return RedirectResponse(
-                    url=f"/admin/guilds/{guild_id}/attachment-filter?success=updated",
+                    url=f"/bot-admin/guilds/{guild_id}/attachment-filter?success=updated",
                     status_code=302
                 )
 

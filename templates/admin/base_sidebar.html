@@ -287,7 +287,7 @@
         <!-- Primary Sidebar -->
         <nav class="sidebar sidebar-primary" id="primary-sidebar" role="navigation" aria-label="Main navigation">
             <div class="sidebar-header">
-                <a href="/admin" class="sidebar-brand">
+                <a href="/bot-admin" class="sidebar-brand">
                     <img src="/static/favicon.png" width="32" height="32" alt="Smarter Dev" class="sidebar-brand-image">
                     <span class="sidebar-brand-text">Smarter Dev</span>
                 </a>
@@ -300,7 +300,7 @@
             
             <div class="sidebar-content">
                 <nav class="nav nav-pills nav-sidebar">
-                    <a class="nav-link {% if request.url.path == '/admin' or request.url.path == '/admin/' %}active{% endif %}" href="/admin" aria-current="{% if request.url.path == '/admin' or request.url.path == '/admin/' %}page{% endif %}">
+                    <a class="nav-link {% if request.url.path == '/bot-admin' or request.url.path == '/bot-admin/' %}active{% endif %}" href="/bot-admin" aria-current="{% if request.url.path == '/bot-admin' or request.url.path == '/bot-admin/' %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-dashboard"></use>
@@ -309,7 +309,7 @@
                         <span class="nav-link-title">Dashboard</span>
                     </a>
                     
-                    <a class="nav-link {% if '/guilds' in request.url.path %}active{% endif %}" href="/admin/guilds" aria-current="{% if '/guilds' in request.url.path %}page{% endif %}">
+                    <a class="nav-link {% if '/guilds' in request.url.path %}active{% endif %}" href="/bot-admin/guilds" aria-current="{% if '/guilds' in request.url.path %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-building-community"></use>
@@ -318,7 +318,7 @@
                         <span class="nav-link-title">Guilds</span>
                     </a>
                     
-                    <a class="nav-link {% if '/conversations' in request.url.path %}active{% endif %}" href="/admin/conversations" aria-current="{% if '/conversations' in request.url.path %}page{% endif %}">
+                    <a class="nav-link {% if '/conversations' in request.url.path %}active{% endif %}" href="/bot-admin/conversations" aria-current="{% if '/conversations' in request.url.path %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-messages"></use>
@@ -327,7 +327,7 @@
                         <span class="nav-link-title">Conversations</span>
                     </a>
                     
-                    <a class="nav-link {% if '/api-keys' in request.url.path %}active{% endif %}" href="/admin/api-keys" aria-current="{% if '/api-keys' in request.url.path %}page{% endif %}">
+                    <a class="nav-link {% if '/api-keys' in request.url.path %}active{% endif %}" href="/bot-admin/api-keys" aria-current="{% if '/api-keys' in request.url.path %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-key"></use>
@@ -336,7 +336,7 @@
                         <span class="nav-link-title">API Keys</span>
                     </a>
                     
-                    <a class="nav-link {% if '/blogs' in request.url.path %}active{% endif %}" href="/admin/blogs" aria-current="{% if '/blogs' in request.url.path %}page{% endif %}">
+                    <a class="nav-link {% if '/blogs' in request.url.path %}active{% endif %}" href="/bot-admin/blogs" aria-current="{% if '/blogs' in request.url.path %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-article"></use>
@@ -359,7 +359,7 @@
                         </div>
                     </a>
                     <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
-                        <form action="/admin/logout" method="post" class="dropdown-item-text">
+                        <form action="/bot-admin/logout" method="post" class="dropdown-item-text">
                             <button type="submit" class="btn btn-link p-0 text-decoration-none">
                                 <svg class="icon me-2" width="24" height="24">
                                     <use xlink:href="#tabler-logout"></use>
@@ -394,7 +394,7 @@
             
             <div class="sidebar-content">
                 <nav class="nav nav-pills nav-sidebar">
-                    <a class="nav-link {% if request.url.path.endswith('/bytes') %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/bytes" aria-current="{% if request.url.path.endswith('/bytes') %}page{% endif %}">
+                    <a class="nav-link {% if request.url.path.endswith('/bytes') %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/bytes" aria-current="{% if request.url.path.endswith('/bytes') %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-coin"></use>
@@ -403,7 +403,7 @@
                         <span class="nav-link-title">Bytes</span>
                     </a>
                     
-                    <a class="nav-link {% if request.url.path.endswith('/squads') %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/squads" aria-current="{% if request.url.path.endswith('/squads') %}page{% endif %}">
+                    <a class="nav-link {% if request.url.path.endswith('/squads') %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/squads" aria-current="{% if request.url.path.endswith('/squads') %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-users"></use>
@@ -412,7 +412,7 @@
                         <span class="nav-link-title">Squads</span>
                     </a>
 
-                    <a class="nav-link {% if 'audit-logs' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/audit-logs" aria-current="{% if 'audit-logs' in request.url.path %}page{% endif %}">
+                    <a class="nav-link {% if 'audit-logs' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/audit-logs" aria-current="{% if 'audit-logs' in request.url.path %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-shield-check"></use>
@@ -421,7 +421,7 @@
                         <span class="nav-link-title">Audit Logs</span>
                     </a>
 
-                    <a class="nav-link {% if 'attachment-filter' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/attachment-filter" aria-current="{% if 'attachment-filter' in request.url.path %}page{% endif %}">
+                    <a class="nav-link {% if 'attachment-filter' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/attachment-filter" aria-current="{% if 'attachment-filter' in request.url.path %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-shield-x"></use>
@@ -430,7 +430,7 @@
                         <span class="nav-link-title">Attachment Filter</span>
                     </a>
 
-                    <a class="nav-link {% if 'squad-sale-events' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/squad-sale-events" aria-current="{% if 'squad-sale-events' in request.url.path %}page{% endif %}">
+                    <a class="nav-link {% if 'squad-sale-events' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/squad-sale-events" aria-current="{% if 'squad-sale-events' in request.url.path %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-calendar"></use>
@@ -439,7 +439,7 @@
                         <span class="nav-link-title">Events</span>
                     </a>
                     
-                    <a class="nav-link {% if 'forum-agents' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/forum-agents" aria-current="{% if 'forum-agents' in request.url.path %}page{% endif %}">
+                    <a class="nav-link {% if 'forum-agents' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/forum-agents" aria-current="{% if 'forum-agents' in request.url.path %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-robot"></use>
@@ -448,7 +448,7 @@
                         <span class="nav-link-title">Forum Agents</span>
                     </a>
                     
-                    <a class="nav-link {% if 'campaigns' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/campaigns" aria-current="{% if 'campaigns' in request.url.path %}page{% endif %}">
+                    <a class="nav-link {% if 'campaigns' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/campaigns" aria-current="{% if 'campaigns' in request.url.path %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-trophy"></use>
@@ -458,7 +458,7 @@
                     </a>
 
                     <a class="nav-link {% if '/quests' in request.url.path %}active{% endif %}"
-                       href="/admin/guilds/{{ guild.id }}/quests"
+                       href="/bot-admin/guilds/{{ guild.id }}/quests"
                        aria-current="{% if '/quests' in request.url.path %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
@@ -468,7 +468,7 @@
                         <span class="nav-link-title">Quests</span>
                     </a>
                     
-                    <a class="nav-link {% if 'repeating-messages' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/repeating-messages" aria-current="{% if 'repeating-messages' in request.url.path %}page{% endif %}">
+                    <a class="nav-link {% if 'repeating-messages' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/repeating-messages" aria-current="{% if 'repeating-messages' in request.url.path %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-clock-repeat"></use>
@@ -477,7 +477,7 @@
                         <span class="nav-link-title">Repeating Messages</span>
                     </a>
 
-                    <a class="nav-link {% if 'advent-of-code' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/advent-of-code" aria-current="{% if 'advent-of-code' in request.url.path %}page{% endif %}">
+                    <a class="nav-link {% if 'advent-of-code' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/advent-of-code" aria-current="{% if 'advent-of-code' in request.url.path %}page{% endif %}">
                         <span class="nav-link-icon">
                             <svg class="icon" width="24" height="24">
                                 <use xlink:href="#tabler-calendar"></use>
@@ -510,7 +510,7 @@
                             <div class="page-pretitle">
                                 <nav aria-label="breadcrumb">
                                     <ol class="breadcrumb">
-                                        <li class="breadcrumb-item"><a href="/admin">Admin</a></li>
+                                        <li class="breadcrumb-item"><a href="/bot-admin">Admin</a></li>
                                         {% block breadcrumb_items %}{% endblock %}
                                     </ol>
                                 </nav>
@@ -598,7 +598,7 @@
             <!-- Stacked Navigation for Mobile -->
             <nav class="nav nav-pills flex-column">
                 <!-- Main Navigation -->
-                <a class="nav-link {% if request.url.path == '/admin' or request.url.path == '/admin/' %}active{% endif %}" href="/admin">
+                <a class="nav-link {% if request.url.path == '/bot-admin' or request.url.path == '/bot-admin/' %}active{% endif %}" href="/bot-admin">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-dashboard"></use>
@@ -607,7 +607,7 @@
                     <span class="nav-link-title">Dashboard</span>
                 </a>
                 
-                <a class="nav-link {% if '/guilds' in request.url.path %}active{% endif %}" href="/admin/guilds">
+                <a class="nav-link {% if '/guilds' in request.url.path %}active{% endif %}" href="/bot-admin/guilds">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-building-community"></use>
@@ -616,7 +616,7 @@
                     <span class="nav-link-title">Guilds</span>
                 </a>
                 
-                <a class="nav-link {% if '/conversations' in request.url.path %}active{% endif %}" href="/admin/conversations">
+                <a class="nav-link {% if '/conversations' in request.url.path %}active{% endif %}" href="/bot-admin/conversations">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-messages"></use>
@@ -625,7 +625,7 @@
                     <span class="nav-link-title">Conversations</span>
                 </a>
                 
-                <a class="nav-link {% if '/api-keys' in request.url.path %}active{% endif %}" href="/admin/api-keys">
+                <a class="nav-link {% if '/api-keys' in request.url.path %}active{% endif %}" href="/bot-admin/api-keys">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-key"></use>
@@ -634,7 +634,7 @@
                     <span class="nav-link-title">API Keys</span>
                 </a>
                 
-                <a class="nav-link {% if '/blogs' in request.url.path %}active{% endif %}" href="/admin/blogs">
+                <a class="nav-link {% if '/blogs' in request.url.path %}active{% endif %}" href="/bot-admin/blogs">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-article"></use>
@@ -664,7 +664,7 @@
                 </div>
                 
                 <!-- Guild Navigation -->
-                <a class="nav-link {% if request.url.path.endswith('/bytes') %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/bytes">
+                <a class="nav-link {% if request.url.path.endswith('/bytes') %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/bytes">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-coin"></use>
@@ -673,7 +673,7 @@
                     <span class="nav-link-title">Bytes</span>
                 </a>
                 
-                <a class="nav-link {% if request.url.path.endswith('/squads') %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/squads">
+                <a class="nav-link {% if request.url.path.endswith('/squads') %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/squads">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-users"></use>
@@ -682,7 +682,7 @@
                     <span class="nav-link-title">Squads</span>
                 </a>
 
-                <a class="nav-link {% if 'audit-logs' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/audit-logs">
+                <a class="nav-link {% if 'audit-logs' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/audit-logs">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-shield-check"></use>
@@ -691,7 +691,7 @@
                     <span class="nav-link-title">Audit Logs</span>
                 </a>
 
-                <a class="nav-link {% if 'attachment-filter' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/attachment-filter">
+                <a class="nav-link {% if 'attachment-filter' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/attachment-filter">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-shield-x"></use>
@@ -700,7 +700,7 @@
                     <span class="nav-link-title">Attachment Filter</span>
                 </a>
 
-                <a class="nav-link {% if 'squad-sale-events' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/squad-sale-events">
+                <a class="nav-link {% if 'squad-sale-events' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/squad-sale-events">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-calendar"></use>
@@ -709,7 +709,7 @@
                     <span class="nav-link-title">Events</span>
                 </a>
                 
-                <a class="nav-link {% if 'forum-agents' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/forum-agents">
+                <a class="nav-link {% if 'forum-agents' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/forum-agents">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-robot"></use>
@@ -718,7 +718,7 @@
                     <span class="nav-link-title">Forum Agents</span>
                 </a>
                 
-                <a class="nav-link {% if 'campaigns' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/campaigns">
+                <a class="nav-link {% if 'campaigns' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/campaigns">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-trophy"></use>
@@ -727,7 +727,7 @@
                     <span class="nav-link-title">Campaigns</span>
                 </a>
 
-                <a class="nav-link {% if 'repeating-messages' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/repeating-messages">
+                <a class="nav-link {% if 'repeating-messages' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/repeating-messages">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-clock-repeat"></use>
@@ -736,7 +736,7 @@
                     <span class="nav-link-title">Repeating Messages</span>
                 </a>
 
-                <a class="nav-link {% if 'advent-of-code' in request.url.path %}active{% endif %}" href="/admin/guilds/{{ guild.id }}/advent-of-code">
+                <a class="nav-link {% if 'advent-of-code' in request.url.path %}active{% endif %}" href="/bot-admin/guilds/{{ guild.id }}/advent-of-code">
                     <span class="nav-link-icon">
                         <svg class="icon" width="24" height="24">
                             <use xlink:href="#tabler-calendar"></use>
@@ -750,7 +750,7 @@
                 <hr class="my-3">
                 <div class="px-3 mb-2">
                     <div class="small text-muted mb-1">{{ request.session.get('username', 'Admin') }}</div>
-                    <form action="/admin/logout" method="post" class="d-inline">
+                    <form action="/bot-admin/logout" method="post" class="d-inline">
                         <button type="submit" class="btn btn-outline-danger btn-sm w-100">
                             <svg class="icon me-2" width="16" height="16">
                                 <use xlink:href="#tabler-logout"></use>

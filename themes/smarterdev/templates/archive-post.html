@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block page_type %}archive{% endblock %}
+{% block page_title %}Blog{% endblock %}
+
+{% block page_css %}
+    <link rel="stylesheet" href="{{ theme_url('css/pages/blog.css') }}">
+    <style>
+    .empty-hero {
+      min-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      z-index: 1;
+      padding: 8rem 2rem 6rem;
+      text-align: center;
+    }
+    .empty-num {
+      font-family: var(--display);
+      font-size: clamp(5rem, 16vw, 12rem);
+      color: var(--cyan);
+      line-height: .85;
+      letter-spacing: 0;
+      text-shadow: 0 0 80px rgba(0,212,255,.2);
+      margin-bottom: .5rem;
+    }
+    .empty-hero .code-label { color: var(--cyan); }
+    </style>
+{% endblock %}
+
+{% block content %}
+{% if pages %}
+<section style="padding-top:6rem">
+    <div class="container">
+        <div class="reveal">
+            <div class="code-label">// blog.list()</div>
+            <div class="sec-h">From the blog.</div>
+            <div class="sec-p">Thoughts on developer growth, architecture, and what AI means for our craft.</div>
+        </div>
+        <div class="related-grid" style="margin-top:2rem">
+            {% for page in pages %}
+            <a href="/post/{{ page.slug }}" class="related-card reveal">
+                <div class="r-title">{{ page.title }}</div>
+                <div class="r-meta">{% if page.published_at %}{{ page.published_at.strftime('%b %d, %Y') }}{% endif %}</div>
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</section>
+{% else %}
+<div class="empty-hero">
+    <div class="code-label">// blog.list()</div>
+    <div class="empty-num">0</div>
+    <div class="hero-sub">No posts yet. First one's compiling.</div>
+    <a href="/" class="btn-glow">Back to Home</a>
+</div>
+{% endif %}
+{% endblock %}

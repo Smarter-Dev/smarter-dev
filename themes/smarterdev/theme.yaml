@@ -1,0 +1,24 @@
+name: smarterdev
+display_name: Smarter Dev
+version: 1.0.0
+
+fonts:
+  - https://fonts.googleapis.com/css2?family=Bungee+Hairline&family=Bruno+Ace+SC&family=Inter:wght@400;500;600;700&display=swap
+
+css:
+  - css/framework.css
+  - css/background.css
+  - css/animations.css
+  - css/components/buttons.css
+  - css/components/cards.css
+  - css/components/terminal.css
+  - css/components/badges.css
+  - css/components/forms.css
+  - css/components/lists.css
+  - css/components/nav.css
+  - css/components/charts.css
+  - css/components/status.css
+
+js:
+  - js/hex-warp.js
+  - js/status.js

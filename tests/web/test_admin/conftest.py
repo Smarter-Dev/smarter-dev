@@ -34,7 +34,7 @@ def admin_app():
     ]
     
     app = Starlette(
-        routes=[Mount("/admin", Mount("", routes=admin_routes))],
+        routes=[Mount("/bot-admin", Mount("", routes=admin_routes))],
         middleware=middleware,
     )
     

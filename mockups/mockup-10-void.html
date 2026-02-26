@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — Void Architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600&family=Satoshi:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#050709;--surface:#0a0c12;--line:rgba(255,255,255,.035);
+  --cyan:#00d4ff;--teal:#0ea5e9;--ice:#bae6fd;
+  --green:#34d399;--amber:#fbbf24;--rose:#fb7185;
+  --gray:#3b4555;--mid:#5c6b7f;--light:#8fa0b5;--white:#dfe8f0;
+  --mono:'Fira Code',monospace;--sans:'Satoshi',sans-serif;
+}
+html{scroll-behavior:smooth}
+body{font-family:var(--sans);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.7}
+
+/* BG — single very subtle warm spot */
+.void-bg{
+  position:fixed;inset:0;z-index:0;
+  background:radial-gradient(ellipse 60% 50% at 50% 30%,rgba(0,212,255,.02),transparent);
+}
+
+.mockup-nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  padding:10px 16px;background:rgba(5,7,9,.94);backdrop-filter:blur(24px);
+  border-bottom:1px solid var(--line);font-family:var(--mono);font-size:.68rem;
+}
+.mockup-nav a{color:var(--gray);text-decoration:none;padding:5px 12px;border-radius:6px;border:1px solid transparent;transition:all .2s;white-space:nowrap}
+.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.2)}
+.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.05)}
+
+.reveal{opacity:0;transform:translateY(14px);transition:all .6s cubic-bezier(.25,.46,.45,.94)}
+.reveal.visible{opacity:1;transform:none}
+
+.code-label{font-family:var(--mono);font-size:.72rem;color:var(--teal);margin-bottom:1.5rem;opacity:.7}
+
+/* ==================== HERO ==================== */
+/* Ultra-minimal. Massive type. Breathes. */
+.hero{
+  min-height:100vh;display:flex;flex-direction:column;justify-content:center;
+  position:relative;z-index:1;
+  padding:8rem clamp(2rem,8vw,10rem) 4rem;
+}
+.hero-h1{
+  font-size:clamp(3.5rem,9vw,8rem);font-weight:900;line-height:.88;
+  color:var(--white);margin-bottom:2rem;letter-spacing:-.04em;
+  max-width:900px;
+}
+.hero-h1 .line2{
+  color:transparent;-webkit-text-stroke:1.5px var(--cyan);
+}
+.hero-p{
+  font-size:clamp(1rem,1.6vw,1.15rem);color:var(--mid);max-width:440px;
+  line-height:1.85;margin-bottom:2.5rem;
+}
+.hero-p strong{color:var(--white);font-weight:600}
+.hero-cta{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:13px 32px;border-radius:10px;font-family:var(--sans);font-size:.88rem;font-weight:700;
+  background:var(--cyan);color:var(--bg);border:none;cursor:pointer;text-decoration:none;
+  transition:all .25s;box-shadow:0 2px 14px rgba(0,212,255,.12);
+}
+.hero-cta:hover{box-shadow:0 4px 28px rgba(0,212,255,.22);transform:translateY(-1px)}
+.hero-meta{
+  display:flex;gap:3rem;margin-top:5rem;
+}
+.hero-meta .item{display:flex;flex-direction:column}
+.hero-meta .val{font-family:var(--mono);font-size:1.6rem;font-weight:600;color:var(--white);line-height:1}
+.hero-meta .lbl{font-size:.75rem;color:var(--gray);margin-top:4px}
+
+/* Horizontal rule */
+.hr{height:1px;background:var(--line);margin:0 clamp(2rem,8vw,10rem);position:relative;z-index:1}
+
+/* ==================== SECTIONS ==================== */
+section{position:relative;z-index:1;padding:clamp(60px,8vw,110px) clamp(2rem,8vw,10rem)}
+.sec-h{font-size:clamp(2rem,4vw,3.2rem);font-weight:900;color:var(--white);line-height:1.08;margin-bottom:.5rem;letter-spacing:-.02em}
+.sec-p{font-size:.92rem;color:var(--mid);max-width:460px;margin-bottom:3rem;line-height:1.8}
+
+/* Pillars — full-width stacked rows, not cards */
+.pillars{display:flex;flex-direction:column;gap:0}
+.pillar{
+  display:grid;grid-template-columns:200px 1fr;gap:3rem;align-items:baseline;
+  padding:2.5rem 0;border-top:1px solid var(--line);
+  transition:background .3s;
+}
+.pillar:last-child{border-bottom:1px solid var(--line)}
+.pillar:hover{background:rgba(0,212,255,.01)}
+.pillar .p-num{font-family:var(--mono);font-size:.68rem;color:var(--cyan);letter-spacing:.1em}
+.pillar h3{font-size:1.3rem;font-weight:700;color:var(--white);margin-bottom:.5rem}
+.pillar p{font-size:.88rem;color:var(--mid);line-height:1.75;max-width:500px}
+
+/* Terminal — floating in space */
+.term-wrap{max-width:720px}
+.term{
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;
+  box-shadow:0 20px 60px rgba(0,0,0,.3);
+}
+.term-bar{display:flex;align-items:center;gap:6px;padding:11px 16px;border-bottom:1px solid var(--line)}
+.td{width:9px;height:9px;border-radius:50%}
+.td.r{background:var(--rose)}.td.y{background:var(--amber)}.td.g{background:var(--green)}
+.term-bar .f{margin-left:auto;font-family:var(--mono);font-size:.65rem;color:var(--gray)}
+.term-code{padding:1.5rem 1.75rem;font-family:var(--mono);font-size:.78rem;line-height:2.2}
+.cm{color:#2a3545}.kw{color:var(--amber)}.fn{color:var(--cyan)}.st{color:var(--green)}
+.term-ft{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line)}
+.tfi{padding:1rem;text-align:center;border-right:1px solid var(--line)}
+.tfi:last-child{border-right:none}
+.tfi strong{display:block;font-family:var(--mono);font-size:.95rem;color:var(--cyan);margin-bottom:1px}
+.tfi span{font-size:.62rem;color:var(--gray);letter-spacing:.06em;text-transform:uppercase}
+
+/* Bytes — horizontal minimal list */
+.bytes-list{display:flex;flex-direction:column;gap:0;max-width:560px}
+.byte-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:1.25rem 0;border-bottom:1px solid var(--line);
+}
+.byte-row:first-child{border-top:1px solid var(--line)}
+.byte-row .left{display:flex;align-items:center;gap:16px}
+.byte-row .pts{font-family:var(--mono);font-size:.95rem;font-weight:600;color:var(--cyan);width:48px}
+.byte-row .nm{font-size:.9rem;font-weight:600;color:var(--white)}
+.byte-row .ds{font-size:.72rem;color:var(--gray)}
+
+/* Stats — scattered, huge */
+.stats-area{
+  display:flex;justify-content:space-between;align-items:baseline;
+  flex-wrap:wrap;gap:2rem;padding:2rem 0;
+}
+.stat .num{font-family:var(--mono);font-size:clamp(2.5rem,5vw,4rem);font-weight:700;color:var(--white);line-height:1;letter-spacing:-.03em}
+.stat .num .u{color:var(--cyan);font-size:.45em;font-weight:400}
+.stat .lbl{font-size:.72rem;color:var(--gray);margin-top:4px}
+
+/* Quotes — full width, stacked */
+.quotes{display:flex;flex-direction:column;gap:0}
+.q{
+  display:grid;grid-template-columns:1fr auto;gap:3rem;align-items:center;
+  padding:2.5rem 0;border-top:1px solid var(--line);
+}
+.q:last-child{border-bottom:1px solid var(--line)}
+.q blockquote{font-size:1.05rem;color:var(--light);line-height:1.8;max-width:600px}
+.q .who{text-align:right;white-space:nowrap}
+.q .nm{font-size:.82rem;font-weight:600;color:var(--white);display:block}
+.q .rl{font-size:.72rem;color:var(--gray)}
+
+/* CTA — ultra minimal */
+.cta{padding:clamp(100px,12vw,180px) clamp(2rem,8vw,10rem);position:relative;z-index:1}
+.cta-h{
+  font-size:clamp(2.5rem,6vw,5rem);font-weight:900;line-height:.95;
+  color:var(--white);margin-bottom:2rem;letter-spacing:-.03em;
+}
+.cta-h .hl{color:var(--cyan)}
+.foot{padding:2rem clamp(2rem,8vw,10rem);font-family:var(--mono);font-size:.62rem;color:var(--gray);border-top:1px solid var(--line);position:relative;z-index:1}
+
+@media(max-width:900px){
+  .pillar{grid-template-columns:1fr;gap:.75rem}
+  .q{grid-template-columns:1fr;gap:1rem}
+  .q .who{text-align:left}
+  .hero-meta{flex-wrap:wrap;gap:1.5rem}
+  .stats-area{justify-content:center}
+}
+</style>
+</head>
+<body>
+
+<div class="void-bg"></div>
+
+<nav class="mockup-nav">
+  <a href="mockup-6-obsidian.html">06 Obsidian</a>
+  <a href="mockup-7-frost.html">07 Frost</a>
+  <a href="mockup-8-topology.html">08 Topology</a>
+  <a href="mockup-9-carbon.html">09 Carbon</a>
+  <a href="mockup-10-void.html" class="active">10 Void</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="reveal">
+    <h1 class="hero-h1">AI writes<br>code.<br><span class="line2">We build<br>developers.</span></h1>
+    <p class="hero-p">Smarter Dev sharpens <strong>critical thinking</strong>, <strong>architecture</strong>, and <strong>adversarial reasoning</strong> — the skills that make you irreplaceable.</p>
+    <a href="#" class="hero-cta">Join 15,000+ Developers &rarr;</a>
+    <div class="hero-meta">
+      <div class="item"><span class="val">15K+</span><span class="lbl">Developers</span></div>
+      <div class="item"><span class="val">730</span><span class="lbl">Challenges</span></div>
+      <div class="item"><span class="val">98%</span><span class="lbl">Satisfaction</span></div>
+    </div>
+  </div>
+</section>
+
+<div class="hr"></div>
+
+<!-- PILLARS -->
+<section>
+  <div class="reveal">
+    <div class="code-label">// skills.sharpen()</div>
+    <div class="sec-h">What we build.</div>
+    <div class="sec-p">Three disciplines AI can't replicate. Pure thinking, zero filler.</div>
+  </div>
+  <div class="pillars">
+    <div class="pillar reveal">
+      <div class="p-num">01 CRITICAL THINKING</div>
+      <div><h3>Ask harder questions.</h3><p>Evaluate trade-offs. Deconstruct assumptions. Spot the invisible constraints that redirect entire projects. This is the skill that compounds forever.</p></div>
+    </div>
+    <div class="pillar reveal">
+      <div class="p-num">02 ARCHITECTURE</div>
+      <div><h3>Design systems, not functions.</h3><p>Boundaries, contracts, failure modes, scale. Copilot writes lines — you decide the shape of the entire thing. That's not going away.</p></div>
+    </div>
+    <div class="pillar reveal">
+      <div class="p-num">03 ADVERSARIAL REASONING</div>
+      <div><h3>Think like an attacker.</h3><p>Find the edge case before production does. Exploit the assumption. Build with paranoia baked in. The best defense is understanding the offense.</p></div>
+    </div>
+  </div>
+</section>
+
+<div class="hr"></div>
+
+<!-- RUNHACKS -->
+<section>
+  <div class="reveal">
+    <div class="code-label">// runhacks.execute()</div>
+    <div class="sec-h">Daily challenges.</div>
+    <div class="sec-p">Real problems. Real constraints. The kind of thinking no tutorial teaches.</div>
+  </div>
+  <div class="term-wrap reveal">
+    <div class="term">
+      <div class="term-bar"><div class="td r"></div><div class="td y"></div><div class="td g"></div><div class="f">challenge_731.sh</div></div>
+      <div class="term-code">
+        <div><span class="cm"># Distributed cache: 2% stale reads</span></div>
+        <div><span class="cm"># Replication healthy. TTLs correct.</span></div>
+        <div><span class="cm"># Difficulty: Hard | Reward: 150 Bytes</span></div>
+        <div>&nbsp;</div>
+        <div><span class="kw">function</span> <span class="fn">diagnose</span>() {</div>
+        <div>&nbsp;&nbsp;<span class="cm"># What architectural assumption is wrong?</span></div>
+        <div>&nbsp;&nbsp;<span class="kw">echo</span> <span class="st">"Think architecture, not code."</span></div>
+        <div>}</div>
+      </div>
+      <div class="term-ft">
+        <div class="tfi"><strong>Daily</strong><span>Frequency</span></div>
+        <div class="tfi"><strong>3 Tiers</strong><span>Difficulty</span></div>
+        <div class="tfi"><strong>Peer</strong><span>Review</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="hr"></div>
+
+<!-- BYTES -->
+<section>
+  <div class="reveal">
+    <div class="code-label">// bytes.earn()</div>
+    <div class="sec-h">Earn Bytes.</div>
+    <div class="sec-p">Your growth, quantified.</div>
+  </div>
+  <div class="bytes-list reveal">
+    <div class="byte-row"><div class="left"><span class="pts">+5</span><span class="nm">Daily Check-in</span></div><span class="ds">Consistency compounds</span></div>
+    <div class="byte-row"><div class="left"><span class="pts">+50</span><span class="nm">Solve a RunHack</span></div><span class="ds">Ship a real solution</span></div>
+    <div class="byte-row"><div class="left"><span class="pts">+25</span><span class="nm">Peer Review</span></div><span class="ds">Give actionable feedback</span></div>
+    <div class="byte-row"><div class="left"><span class="pts">+100</span><span class="nm">Top Solution</span></div><span class="ds">Community-voted best</span></div>
+  </div>
+</section>
+
+<div class="hr"></div>
+
+<!-- STATS -->
+<section>
+  <div class="stats-area reveal">
+    <div class="stat"><div class="num">15<span class="u">K+</span></div><div class="lbl">Developers</div></div>
+    <div class="stat"><div class="num">730</div><div class="lbl">Challenges</div></div>
+    <div class="stat"><div class="num">42<span class="u">K</span></div><div class="lbl">Solutions</div></div>
+    <div class="stat"><div class="num">98<span class="u">%</span></div><div class="lbl">"Worth it"</div></div>
+  </div>
+</section>
+
+<div class="hr"></div>
+
+<!-- TESTIMONIALS -->
+<section>
+  <div class="reveal">
+    <div class="code-label">// community.listen()</div>
+    <div class="sec-h">From the community.</div>
+  </div>
+  <div class="quotes">
+    <div class="q reveal">
+      <blockquote>"Smarter Dev rewired how I approach problems. I don't just code anymore — I architect. My team noticed within weeks."</blockquote>
+      <div class="who"><span class="nm">Maya Rodriguez</span><span class="rl">Senior Engineer @ Vercel</span></div>
+    </div>
+    <div class="q reveal">
+      <blockquote>"RunHacks challenges are the closest thing to real production problems I've found outside of actual production. Addictive."</blockquote>
+      <div class="who"><span class="nm">James Kim</span><span class="rl">Full-Stack Developer</span></div>
+    </div>
+    <div class="q reveal">
+      <blockquote>"No gatekeeping. No egos. Just developers showing up every day to get better. This is what dev communities should be."</blockquote>
+      <div class="who"><span class="nm">Sarah Petrov</span><span class="rl">Tech Lead @ Stripe</span></div>
+    </div>
+  </div>
+</section>
+
+<div class="hr"></div>
+
+<!-- CTA -->
+<section class="cta">
+  <div class="reveal">
+    <div class="cta-h">Stop writing code.<br><span class="hl">Start thinking.</span></div>
+    <a href="#" class="hero-cta" style="font-size:.88rem;padding:14px 34px">Join on Discord &rarr;</a>
+  </div>
+</section>
+
+<div class="foot">&copy; 2026 Smarter Dev</div>
+
+<script>
+const obs=new IntersectionObserver(e=>{e.forEach(x=>{if(x.isIntersecting){x.target.classList.add('visible');obs.unobserve(x.target)}})},{threshold:.1});
+document.querySelectorAll('.reveal').forEach(el=>obs.observe(el));
+</script>
+</body>
+</html>

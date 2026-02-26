@@ -11,7 +11,7 @@
 {% block page_actions %}
 <div class="col-auto ms-auto d-print-none">
     <div class="btn-list">
-        <a href="/admin/api-keys/create" class="btn btn-primary d-sm-inline-block">
+        <a href="/bot-admin/api-keys/create" class="btn btn-primary d-sm-inline-block">
             <svg class="icon" width="24" height="24">
                 <use xlink:href="#tabler-plus"></use>
             </svg>
@@ -99,7 +99,7 @@
                                     </td>
                                     <td>
                                         {% if key.is_active %}
-                                        <form method="post" action="/admin/api-keys/{{ key.id }}/delete" style="display: inline;">
+                                        <form method="post" action="/bot-admin/api-keys/{{ key.id }}/delete" style="display: inline;">
                                             <button type="submit" class="btn btn-sm btn-outline-danger" 
                                                     onclick="return confirm('Are you sure you want to revoke this API key? This action cannot be undone.')">
                                                 <svg class="icon" width="16" height="16">
@@ -130,7 +130,7 @@
                                 Create your first API key to enable bot authentication and external integrations.
                             </p>
                             <div class="empty-action">
-                                <a href="/admin/api-keys/create" class="btn btn-primary">
+                                <a href="/bot-admin/api-keys/create" class="btn btn-primary">
                                     <svg class="icon" width="24" height="24">
                                         <use xlink:href="#tabler-plus"></use>
                                     </svg>

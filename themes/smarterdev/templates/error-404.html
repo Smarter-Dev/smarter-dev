@@ -1,0 +1,25 @@
+{% extends "error.html" %}
+
+{% block content %}
+<div class="err-hero">
+    <div class="code-label">// error.catch(404)</div>
+    <div class="err-num">404</div>
+    <div class="hero-sub" style="margin-bottom:1rem">These aren't the routes you're looking for.</div>
+    <div class="err-path"><code id="miss-path"></code></div>
+    <a href="/" class="btn-glow" style="margin-top:1.5rem">Back to Home</a>
+</div>
+<script>document.getElementById('miss-path').textContent=window.location.pathname;</script>
+{% endblock %}
+
+{% block page_css %}
+{{ super() }}
+<style>
+.err-path {
+    font-family: var(--mono);
+    font-size: .95rem;
+    color: var(--rose);
+    opacity: .6;
+    margin-top: .25rem;
+}
+</style>
+{% endblock %}

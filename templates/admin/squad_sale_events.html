@@ -5,15 +5,15 @@
 {% block page_title %}Squad Sale Events{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
 <li class="breadcrumb-item active">Squad Sale Events</li>
 {% endblock %}
 
 {% block page_actions %}
 <div class="col-auto ms-auto d-print-none">
     <div class="btn-list">
-        <a href="/admin/guilds/{{ guild.id }}" class="btn btn-outline-primary">
+        <a href="/bot-admin/guilds/{{ guild.id }}" class="btn btn-outline-primary">
             <svg class="icon me-2" width="24" height="24">
                 <use xlink:href="#tabler-arrow-left"></use>
             </svg>
@@ -249,7 +249,7 @@
                 <h5 class="modal-title" id="createSaleEventModalLabel">Create Sale Event</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <form id="createSaleEventForm" method="post" action="/admin/guilds/{{ guild.id }}/squad-sale-events">
+            <form id="createSaleEventForm" method="post" action="/bot-admin/guilds/{{ guild.id }}/squad-sale-events">
                 <div class="modal-body">
                     <div class="row">
                         <div class="col-md-6 mb-3">
@@ -542,7 +542,7 @@ window.editSaleEvent = function(eventId, name, description, startTime, duration,
     utcTime.setMinutes(utcTime.getMinutes() - utcTime.getTimezoneOffset());
     document.getElementById('edit_start_time').value = utcTime.toISOString().slice(0, 16);
     
-    document.getElementById('editSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/edit';
+    document.getElementById('editSaleEventForm').action = '/bot-admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/edit';
     
     // Show the modal - use jQuery/Tabler approach
     const modalElement = document.getElementById('editSaleEventModal');
@@ -559,7 +559,7 @@ window.editSaleEvent = function(eventId, name, description, startTime, duration,
 
 window.toggleSaleEvent = async function(eventId, currentStatus) {
     try {
-        const response = await fetch('/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/toggle', {
+        const response = await fetch('/bot-admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/toggle', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -579,7 +579,7 @@ window.toggleSaleEvent = async function(eventId, currentStatus) {
 window.deleteSaleEvent = function(eventId, eventName) {
     document.getElementById('delete_event_id').value = eventId;
     document.getElementById('delete_event_name').textContent = eventName;
-    document.getElementById('deleteSaleEventForm').action = '/admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/delete';
+    document.getElementById('deleteSaleEventForm').action = '/bot-admin/guilds/{{ guild.id }}/squad-sale-events/' + eventId + '/delete';
     
     // Show the modal - use jQuery/Tabler approach
     const modalElement = document.getElementById('deleteSaleEventModal');

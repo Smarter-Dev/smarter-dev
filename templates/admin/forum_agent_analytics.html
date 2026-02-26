@@ -5,16 +5,16 @@
 {% block page_title %}{{ agent.name }} Analytics{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/forum-agents">Forum Agents</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}/forum-agents">Forum Agents</a></li>
 <li class="breadcrumb-item active">{{ agent.name }} Analytics</li>
 {% endblock %}
 
 {% block page_actions %}
 <div class="col-auto ms-auto d-print-none">
     <div class="btn-list">
-        <a href="/admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/edit" class="btn btn-primary">
+        <a href="/bot-admin/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/edit" class="btn btn-primary">
             <svg class="icon me-2" width="16" height="16">
                 <use xlink:href="#tabler-edit"></use>
             </svg>
@@ -318,7 +318,7 @@ function viewResponseDetails(responseId) {
     document.body.appendChild(backdrop);
     
     // Fetch actual response details
-    fetch(`/admin/api/forum-responses/${responseId}/details`)
+    fetch(`/bot-admin/api/forum-responses/${responseId}/details`)
         .then(response => response.json())
         .then(data => {
             if (data.error) {

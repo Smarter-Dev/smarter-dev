@@ -1,0 +1,111 @@
+/* ══════════════════════════════════════════════════════
+   Blog — Article typography, author card, related posts
+   ══════════════════════════════════════════════════════ */
+
+/* ── Article Header ── */
+.article-header {
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  padding: 8rem 2rem 4rem;
+  max-width: 860px;
+  margin: 0 auto;
+}
+.article-header .code-label { margin-bottom: 1.5rem }
+.article-title {
+  font-family: var(--display);
+  font-size: clamp(2rem, 5.5vw, 3.8rem);
+  color: var(--white);
+  line-height: 1.1;
+  letter-spacing: .06em;
+  margin-bottom: 1.25rem;
+  text-shadow: 0 0 40px rgba(0,212,255,.1);
+}
+.article-meta { font-family: var(--body); font-size: .82rem; color: var(--mid); margin-bottom: 1.75rem; letter-spacing: .02em }
+.article-meta .author-name { color: var(--cyan); font-weight: 600 }
+.article-meta .sep { margin: 0 .6rem; opacity: .4 }
+.article-tags { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap }
+.article-divider { width: 60px; height: 1px; background: linear-gradient(90deg, transparent, var(--cyan), transparent); margin: 3rem auto 0; opacity: .4 }
+
+/* ── Article Body ── */
+.article-body {
+  position: relative;
+  z-index: 1;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 3rem 2rem 4rem;
+}
+.article-body p { font-size: 1rem; color: var(--light); line-height: 1.85; margin-bottom: 1.75rem }
+.article-body p strong { color: var(--white); font-weight: 600 }
+.article-body h2 {
+  font-family: var(--heading);
+  font-size: clamp(.95rem, 2vw, 1.25rem);
+  color: var(--white);
+  letter-spacing: .03em;
+  margin: 3rem 0 1.25rem;
+  padding-bottom: .75rem;
+  border-bottom: 1px solid rgba(0,212,255,.08);
+  position: relative;
+}
+.article-body h2::before { content: ''; position: absolute; bottom: -1px; left: 0; width: 40px; height: 1px; background: var(--cyan) }
+.article-body h3 {
+  font-family: var(--heading);
+  font-size: .82rem;
+  color: var(--white);
+  letter-spacing: .03em;
+  margin: 2rem 0 .75rem;
+}
+
+/* ── Blockquote ── */
+.article-body blockquote { border-left: 3px solid var(--cyan); margin: 2.5rem 0; padding: 1.5rem 2rem; background: rgba(0,212,255,.02) }
+.article-body blockquote p { font-size: 1.2rem; font-style: italic; color: var(--white); line-height: 1.75; margin-bottom: 0 }
+.article-body blockquote .quote-attr { font-family: var(--heading); font-size: .6rem; color: var(--mid); letter-spacing: .06em; margin-top: .75rem; font-style: normal }
+
+/* ── Numbered List ── */
+.article-body ol { list-style: none; counter-reset: tips; margin: 1.5rem 0 2rem; padding: 0 }
+.article-body ol li {
+  counter-increment: tips;
+  position: relative;
+  padding: 1rem 1rem 1rem 3.5rem;
+  margin-bottom: .5rem;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  transition: all .25s;
+}
+.article-body ol li:hover { border-color: rgba(0,212,255,.18); box-shadow: inset 0 0 12px rgba(0,212,255,.03) }
+.article-body ol li::before { content: counter(tips, decimal-leading-zero); position: absolute; left: 1rem; top: 1rem; font-family: var(--heading); font-size: .75rem; color: var(--cyan); letter-spacing: .04em }
+.article-body ol li strong { color: var(--white); font-weight: 600; display: block; margin-bottom: .25rem; font-size: .92rem }
+.article-body ol li span { font-size: .88rem; color: var(--mid); line-height: 1.7 }
+
+/* ── CTA Banner ── */
+.article-cta { margin: 2.5rem 0 3rem; padding: 2rem; text-align: center; border: 1px solid rgba(0,212,255,.12); background: rgba(0,212,255,.02) }
+.article-cta p { font-size: .95rem; color: var(--light); margin-bottom: 1.25rem; line-height: 1.7 }
+
+/* ── Author Card ── */
+.author-card { position: relative; z-index: 1; max-width: 720px; margin: 0 auto; padding: 0 2rem }
+.author-card-inner { display: flex; align-items: center; gap: 1.5rem; padding: 2rem; background: var(--surface); border: 1px solid rgba(0,212,255,.08); border-top: 2px solid rgba(0,212,255,.12) }
+.author-avatar { width: 64px; height: 64px; background: linear-gradient(135deg, rgba(0,212,255,.15), rgba(0,212,255,.05)); border: 1px solid rgba(0,212,255,.2); display: flex; align-items: center; justify-content: center; flex-shrink: 0 }
+.author-avatar span { font-family: var(--heading); font-size: 1.1rem; color: var(--cyan); letter-spacing: .04em }
+.author-info { flex: 1; min-width: 0 }
+.author-info .name { font-family: var(--heading); font-size: .85rem; color: var(--white); letter-spacing: .03em; margin-bottom: .25rem }
+.author-info .bio { font-size: .82rem; color: var(--mid); line-height: 1.65 }
+.author-follow { flex-shrink: 0 }
+
+/* ── Related Section ── */
+.related-section { position: relative; z-index: 1; max-width: 960px; margin: 0 auto; padding: 4rem 2rem 5rem }
+.related-section .section-label { font-family: var(--heading); font-size: .65rem; color: var(--cyan); letter-spacing: .08em; opacity: .75; margin-bottom: .75rem }
+.related-section .section-title { font-family: var(--heading); font-size: clamp(.95rem, 1.8vw, 1.15rem); color: var(--white); letter-spacing: .03em; margin-bottom: 2rem }
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .related-grid { grid-template-columns: 1fr }
+  .author-card-inner { flex-direction: column; text-align: center; gap: 1rem }
+  .article-header { padding: 7rem 1.5rem 3rem }
+  .article-body { padding: 2rem 1.5rem 3rem }
+  .article-body blockquote { padding: 1.25rem 1.5rem }
+  .author-follow { margin-top: .5rem }
+}
+@media (max-width: 480px) {
+  .article-title { font-size: 1.8rem }
+  .article-body h2 { font-size: .9rem }
+}

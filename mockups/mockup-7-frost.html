@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — Frost</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#060a11;--frost:rgba(12,18,30,.55);--frost-border:rgba(0,212,255,.08);
+  --frost-hover:rgba(0,212,255,.12);
+  --cyan:#00d4ff;--teal:#06b6d4;--ice:#a5f3fc;
+  --green:#34d399;--amber:#fbbf24;--rose:#fb7185;
+  --gray:#475569;--mid:#7c8da0;--light:#b4c4d4;--white:#e8eff5;
+  --mono:'Geist Mono',monospace;--sans:'Plus Jakarta Sans',sans-serif;
+  --r:20px;
+}
+html{scroll-behavior:smooth}
+body{font-family:var(--sans);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.7}
+
+/* BG — layered color pools with frosted feeling */
+.bg{
+  position:fixed;inset:0;z-index:0;
+  background:
+    radial-gradient(ellipse 35% 40% at 15% 10%,rgba(0,212,255,.06),transparent),
+    radial-gradient(ellipse 30% 35% at 85% 20%,rgba(6,182,212,.04),transparent),
+    radial-gradient(ellipse 45% 30% at 50% 85%,rgba(0,212,255,.035),transparent),
+    radial-gradient(ellipse 80% 80% at 50% 50%,rgba(6,10,17,1),rgba(6,10,17,1));
+}
+/* Noise grain */
+.bg::after{
+  content:'';position:fixed;inset:0;opacity:.025;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size:200px;
+}
+
+.mockup-nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  padding:10px 16px;background:rgba(6,10,17,.88);backdrop-filter:blur(30px);
+  border-bottom:1px solid rgba(0,212,255,.05);font-family:var(--mono);font-size:.72rem;
+}
+.mockup-nav a{color:var(--gray);text-decoration:none;padding:5px 12px;border-radius:8px;border:1px solid transparent;transition:all .2s;white-space:nowrap}
+.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.2)}
+.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.06)}
+
+.reveal{opacity:0;transform:translateY(18px);transition:all .6s cubic-bezier(.25,.46,.45,.94)}
+.reveal.visible{opacity:1;transform:none}
+
+/* Frost glass panel */
+.frost{
+  background:var(--frost);backdrop-filter:blur(24px) saturate(1.3);
+  border:1px solid var(--frost-border);border-radius:var(--r);
+  box-shadow:0 4px 24px rgba(0,0,0,.2);
+  transition:border-color .3s;
+}
+.frost:hover{border-color:var(--frost-hover)}
+
+/* Code labels */
+.code-label{
+  font-family:var(--mono);font-size:.76rem;color:var(--teal);margin-bottom:1.25rem;opacity:.85;
+}
+.sec-h{font-size:clamp(1.8rem,3.5vw,2.8rem);font-weight:800;color:var(--white);line-height:1.15;margin-bottom:.6rem}
+.sec-p{font-size:.95rem;color:var(--mid);max-width:520px;margin-bottom:3rem;line-height:1.75}
+
+/* ==================== HERO ==================== */
+.hero{
+  min-height:100vh;display:flex;align-items:center;justify-content:center;
+  position:relative;z-index:1;padding:7rem 2rem 4rem;text-align:center;
+}
+.hero-content{max-width:680px}
+.hero-chip{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:6px 18px;border-radius:100px;font-family:var(--mono);font-size:.73rem;
+  margin-bottom:2.5rem;color:var(--teal);
+}
+.hero-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--green)}
+.hero-h1{
+  font-size:clamp(2.8rem,6.5vw,5rem);font-weight:800;line-height:.95;
+  color:var(--white);margin-bottom:1.5rem;letter-spacing:-.025em;
+}
+.hero-h1 .gr{
+  background:linear-gradient(135deg,var(--cyan),var(--ice));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.hero-sub{font-size:clamp(1rem,1.7vw,1.1rem);color:var(--mid);max-width:480px;margin:0 auto 2.5rem;line-height:1.8}
+.hero-sub strong{color:var(--white);font-weight:600}
+.hero-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.btn-glow{
+  padding:13px 34px;border-radius:14px;font-size:.9rem;font-weight:700;
+  background:linear-gradient(135deg,var(--cyan),var(--teal));color:var(--bg);border:none;cursor:pointer;
+  box-shadow:0 4px 20px rgba(0,212,255,.18);transition:all .25s;text-decoration:none;
+}
+.btn-glow:hover{box-shadow:0 6px 32px rgba(0,212,255,.28);transform:translateY(-1px)}
+.btn-ghost{
+  padding:13px 34px;border-radius:14px;font-size:.9rem;font-weight:600;
+  background:transparent;color:var(--light);border:1px solid rgba(255,255,255,.08);cursor:pointer;
+  transition:all .25s;text-decoration:none;
+}
+.btn-ghost:hover{border-color:rgba(255,255,255,.15);background:rgba(255,255,255,.02)}
+
+/* Floating proof bar below hero */
+.proof-bar{
+  display:flex;justify-content:center;gap:1rem;margin-top:4rem;flex-wrap:wrap;
+}
+.proof-item{
+  padding:1rem 1.75rem;display:flex;align-items:center;gap:12px;
+}
+.proof-item .p-num{font-family:var(--mono);font-size:1.3rem;font-weight:700;color:var(--cyan)}
+.proof-item .p-lbl{font-size:.8rem;color:var(--mid)}
+
+/* ==================== SECTIONS ==================== */
+section{position:relative;z-index:1;padding:clamp(60px,8vw,100px) clamp(2rem,5vw,5rem)}
+.container{max-width:1080px;margin:0 auto}
+
+/* Pillars — frosted cards with inner glow */
+.pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem}
+.pillar{padding:2.5rem 2rem;position:relative;overflow:hidden}
+.pillar .glow{
+  position:absolute;top:-40px;right:-40px;width:120px;height:120px;border-radius:50%;
+  background:radial-gradient(circle,rgba(0,212,255,.08),transparent);pointer-events:none;
+}
+.pillar .tag{font-family:var(--mono);font-size:.65rem;color:var(--teal);margin-bottom:1.25rem;letter-spacing:.05em}
+.pillar h3{font-size:1.15rem;font-weight:700;color:var(--white);margin-bottom:.6rem}
+.pillar p{font-size:.85rem;color:var(--mid);line-height:1.75}
+
+/* Terminal */
+.term{max-width:780px;margin:0 auto;overflow:hidden}
+.term-bar{
+  display:flex;align-items:center;gap:7px;padding:13px 18px;
+  border-bottom:1px solid rgba(255,255,255,.04);background:rgba(0,0,0,.15);
+}
+.dot{width:10px;height:10px;border-radius:50%}
+.dot.r{background:var(--rose)}.dot.y{background:var(--amber)}.dot.g{background:var(--green)}
+.term-bar .fname{margin-left:auto;font-family:var(--mono);font-size:.7rem;color:var(--gray)}
+.term-code{padding:1.75rem 2rem;font-family:var(--mono);font-size:.8rem;line-height:2.2}
+.c{color:#3a4d60}.k{color:var(--amber)}.f{color:var(--cyan)}.s{color:var(--green)}.n{color:var(--rose)}
+.term-metrics{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(255,255,255,.04)}
+.tm{padding:1.25rem;text-align:center}
+.tm strong{display:block;font-family:var(--mono);font-size:1.1rem;color:var(--cyan);margin-bottom:2px}
+.tm span{font-size:.7rem;color:var(--gray);letter-spacing:.05em}
+
+/* Bytes — horizontal frosted cards */
+.bytes-wrap{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem}
+.byte-card{padding:1.75rem 1.25rem;text-align:center}
+.byte-card .val{font-family:var(--mono);font-size:1.6rem;font-weight:700;color:var(--cyan);margin-bottom:.5rem}
+.byte-card .label{font-size:.88rem;font-weight:600;color:var(--white);margin-bottom:.2rem}
+.byte-card .desc{font-size:.75rem;color:var(--gray)}
+
+/* Stats */
+.stats-row{
+  display:flex;justify-content:space-around;flex-wrap:wrap;gap:2rem;
+  padding:3.5rem 0;border-top:1px solid rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.04);
+}
+.stat{text-align:center;flex:1;min-width:100px}
+.stat .num{font-family:var(--mono);font-size:clamp(2rem,4vw,2.6rem);font-weight:700;color:var(--white)}
+.stat .num .u{color:var(--cyan);font-size:.55em;font-weight:400}
+.stat .lbl{font-size:.78rem;color:var(--gray);margin-top:.2rem}
+
+/* Testimonials — staggered frost cards */
+.testi-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem;margin-top:2rem}
+.testi-card{padding:2rem}
+.testi-card:nth-child(2){transform:translateY(1.5rem)}
+.testi-card blockquote{font-size:.88rem;color:var(--light);line-height:1.8;margin-bottom:1.25rem}
+.testi-card .who{display:flex;align-items:center;gap:10px}
+.testi-card .av{
+  width:34px;height:34px;border-radius:50%;display:grid;place-items:center;
+  background:linear-gradient(135deg,var(--cyan),var(--teal));color:var(--bg);
+  font-family:var(--mono);font-size:.7rem;font-weight:600;
+}
+.testi-card .nm{font-size:.8rem;font-weight:600;color:var(--white)}
+.testi-card .rl{font-size:.7rem;color:var(--gray)}
+
+/* CTA */
+.cta{text-align:center;padding:clamp(80px,10vw,140px) 2rem;position:relative;z-index:1}
+.cta-h{font-size:clamp(2rem,4.5vw,3.5rem);font-weight:800;color:var(--white);line-height:1.1;margin-bottom:.5rem}
+.cta-h .hl{
+  background:linear-gradient(135deg,var(--cyan),var(--ice));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.cta-p{color:var(--mid);font-size:1rem;margin-bottom:2.5rem}
+.foot{text-align:center;padding:2rem;font-family:var(--mono);font-size:.68rem;color:var(--gray);border-top:1px solid rgba(255,255,255,.03);position:relative;z-index:1}
+
+@media(max-width:900px){
+  .pillars,.testi-grid{grid-template-columns:1fr}
+  .testi-card:nth-child(2){transform:none}
+  .bytes-wrap{grid-template-columns:1fr 1fr}
+  .proof-bar{flex-direction:column;align-items:center}
+}
+@media(max-width:600px){.bytes-wrap{grid-template-columns:1fr}.term-metrics{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="bg"></div>
+
+<nav class="mockup-nav">
+  <a href="mockup-6-obsidian.html">06 Obsidian</a>
+  <a href="mockup-7-frost.html" class="active">07 Frost</a>
+  <a href="mockup-8-topology.html">08 Topology</a>
+  <a href="mockup-9-carbon.html">09 Carbon</a>
+  <a href="mockup-10-void.html">10 Void</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-content">
+    <div class="hero-chip frost reveal"><span class="dot"></span> 15,000+ developers and growing</div>
+    <h1 class="hero-h1 reveal">Build the skills<br><span class="gr">AI can't replace.</span></h1>
+    <p class="hero-sub reveal">Smarter Dev is a developer community focused on what actually matters — <strong>critical thinking</strong>, <strong>architecture</strong>, and <strong>adversarial reasoning</strong>.</p>
+    <div class="hero-btns reveal">
+      <a href="#" class="btn-glow">Join on Discord</a>
+      <a href="#how" class="btn-ghost">See how it works</a>
+    </div>
+    <div class="proof-bar reveal">
+      <div class="proof-item frost"><div class="p-num">15K+</div><div class="p-lbl">Developers</div></div>
+      <div class="proof-item frost"><div class="p-num">730</div><div class="p-lbl">Challenges</div></div>
+      <div class="proof-item frost"><div class="p-num">98%</div><div class="p-lbl">"Worth it"</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- PILLARS -->
+<section id="how">
+  <div class="container">
+    <div class="reveal">
+      <div class="code-label">// skills.sharpen()</div>
+      <div class="sec-h">Three pillars of developer growth.</div>
+      <div class="sec-p">AI handles syntax. We handle the thinking that makes syntax matter.</div>
+    </div>
+    <div class="pillars">
+      <div class="pillar frost reveal">
+        <div class="glow"></div>
+        <div class="tag">01 &mdash; Foundation</div>
+        <h3>Critical Thinking</h3>
+        <p>Evaluate trade-offs. Spot hidden assumptions. Ask the questions that change the direction of a project. The skill that compounds forever.</p>
+      </div>
+      <div class="pillar frost reveal">
+        <div class="glow"></div>
+        <div class="tag">02 &mdash; Structure</div>
+        <h3>Architecture</h3>
+        <p>Design systems that survive production. Boundaries, contracts, failure modes — the thinking AI can't reason about.</p>
+      </div>
+      <div class="pillar frost reveal">
+        <div class="glow"></div>
+        <div class="tag">03 &mdash; Defense</div>
+        <h3>Adversarial Reasoning</h3>
+        <p>Think like an attacker. Find the edge case before production does. Build paranoid systems that hold up when reality pushes back.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- RUNHACKS -->
+<section>
+  <div class="container">
+    <div class="reveal">
+      <div class="code-label">// runhacks.execute()</div>
+      <div class="sec-h">Daily challenges. Real growth.</div>
+      <div class="sec-p">Architectural problems and debugging puzzles that train how you think, not just what you type.</div>
+    </div>
+    <div class="term frost reveal">
+      <div class="term-bar">
+        <div class="dot r"></div><div class="dot y"></div><div class="dot g"></div>
+        <div class="fname">challenge_731.sh</div>
+      </div>
+      <div class="term-code">
+        <div><span class="c"># Distributed cache: 2% stale reads</span></div>
+        <div><span class="c"># Replication healthy. TTLs correct. No lag.</span></div>
+        <div><span class="c"># Difficulty: Hard | Reward: 150 Bytes</span></div>
+        <div>&nbsp;</div>
+        <div><span class="k">function</span> <span class="f">diagnose</span>() {</div>
+        <div>&nbsp;&nbsp;<span class="c"># What architectural assumption is wrong?</span></div>
+        <div>&nbsp;&nbsp;<span class="k">echo</span> <span class="s">"Think architecture, not code."</span></div>
+        <div>}</div>
+      </div>
+      <div class="term-metrics">
+        <div class="tm"><strong>Daily</strong><span>Frequency</span></div>
+        <div class="tm"><strong>3 Tiers</strong><span>Difficulty</span></div>
+        <div class="tm"><strong>Peer</strong><span>Review</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- BYTES -->
+<section>
+  <div class="container">
+    <div class="reveal">
+      <div class="code-label">// bytes.earn()</div>
+      <div class="sec-h">Earn Bytes. Track your growth.</div>
+      <div class="sec-p">A reward system that values consistency, contribution, and quality over clout.</div>
+    </div>
+    <div class="bytes-wrap reveal">
+      <div class="byte-card frost"><div class="val">+5</div><div class="label">Check-in</div><div class="desc">Daily consistency</div></div>
+      <div class="byte-card frost"><div class="val">+50</div><div class="label">RunHack</div><div class="desc">Ship a solution</div></div>
+      <div class="byte-card frost"><div class="val">+25</div><div class="label">Review</div><div class="desc">Give real feedback</div></div>
+      <div class="byte-card frost"><div class="val">+100</div><div class="label">Top Pick</div><div class="desc">Best solution voted</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<section>
+  <div class="container">
+    <div class="stats-row reveal">
+      <div class="stat"><div class="num">15<span class="u">K+</span></div><div class="lbl">Developers</div></div>
+      <div class="stat"><div class="num">730</div><div class="lbl">Challenges</div></div>
+      <div class="stat"><div class="num">42<span class="u">K</span></div><div class="lbl">Solutions</div></div>
+      <div class="stat"><div class="num">98<span class="u">%</span></div><div class="lbl">"Worth it"</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- TESTIMONIALS -->
+<section>
+  <div class="container">
+    <div class="reveal">
+      <div class="code-label">// community.listen()</div>
+      <div class="sec-h">What developers say.</div>
+    </div>
+    <div class="testi-grid">
+      <div class="testi-card frost reveal">
+        <blockquote>"I stopped vibe-coding with AI and started understanding the systems I was building. Smarter Dev changed how I approach everything."</blockquote>
+        <div class="who"><div class="av">MR</div><div><div class="nm">Maya Rodriguez</div><div class="rl">Senior Engineer @ Vercel</div></div></div>
+      </div>
+      <div class="testi-card frost reveal">
+        <blockquote>"RunHacks is addictive. 200+ challenges in and every single one made me think differently. The peer reviews are honest and invaluable."</blockquote>
+        <div class="who"><div class="av">JK</div><div><div class="nm">James Kim</div><div class="rl">Full-Stack Developer</div></div></div>
+      </div>
+      <div class="testi-card frost reveal">
+        <blockquote>"No ego. No gatekeeping. Just developers who want to get better, helping each other. It's rare and it's real."</blockquote>
+        <div class="who"><div class="av">SP</div><div><div class="nm">Sarah Petrov</div><div class="rl">Tech Lead @ Stripe</div></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta">
+  <div class="reveal">
+    <div class="cta-h">Stop writing code.<br><span class="hl">Start thinking.</span></div>
+    <p class="cta-p">Join 15,000 developers building AI-proof skills.</p>
+    <a href="#" class="btn-glow" style="font-size:.95rem;padding:15px 40px">Join on Discord &rarr;</a>
+  </div>
+</section>
+
+<div class="foot">&copy; 2026 Smarter Dev — developers helping developers get better.</div>
+
+<script>
+const obs=new IntersectionObserver(e=>{e.forEach(x=>{if(x.isIntersecting){x.target.classList.add('visible');obs.unobserve(x.target)}})},{threshold:.1});
+document.querySelectorAll('.reveal').forEach(el=>obs.observe(el));
+</script>
+</body>
+</html>

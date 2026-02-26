@@ -5,16 +5,16 @@
 {% block page_title %}Quests{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds">Guilds</a></li>
 <li class="breadcrumb-item">
-  <a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a>
+  <a href="/bot-admin/guilds/{{ guild.id }}">{{ guild.name }}</a>
 </li>
 <li class="breadcrumb-item active">Quests</li>
 {% endblock %}
 
 {% block page_actions %}
 <div class="col-auto ms-auto d-print-none">
-  <a href="/admin/guilds/{{ guild.id }}/quests/create" class="btn btn-primary">
+  <a href="/bot-admin/guilds/{{ guild.id }}/quests/create" class="btn btn-primary">
     <svg class="icon me-2" width="24" height="24">
       <use xlink:href="#tabler-plus"></use>
     </svg>
@@ -98,7 +98,7 @@
               <div class="btn-group">
                 <!-- Edit -->
                 <a
-                  href="/admin/guilds/{{ guild.id }}/quests/{{ quest.id }}/edit{% if dq %}?date={{ dq.active_date.isoformat() }}{% endif %}"
+                  href="/bot-admin/guilds/{{ guild.id }}/quests/{{ quest.id }}/edit{% if dq %}?date={{ dq.active_date.isoformat() }}{% endif %}"
                   class="btn btn-sm btn-outline-secondary"
                   title="Edit Quest"
                 >
@@ -110,7 +110,7 @@
                 <!-- Delete -->
                 <form
                   method="post"
-                  action="/admin/guilds/{{ guild.id }}/quests/{{ quest.id }}/delete"
+                  action="/bot-admin/guilds/{{ guild.id }}/quests/{{ quest.id }}/delete"
                   onsubmit="return confirm('Are you sure you want to delete this quest?')"
                   class="d-inline"
                 >
@@ -142,7 +142,7 @@
     <h3>No quests yet</h3>
     <p class="text-muted">Create your first quest to get started.</p>
     <a
-      href="/admin/guilds/{{ guild.id }}/quests/create"
+      href="/bot-admin/guilds/{{ guild.id }}/quests/create"
       class="btn btn-primary"
     >
       <svg class="icon me-2" width="24" height="24">

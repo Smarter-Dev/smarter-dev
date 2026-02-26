@@ -5,28 +5,28 @@
 {% block page_title %}Campaign Challenges{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/campaigns">Campaigns</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}/campaigns">Campaigns</a></li>
 <li class="breadcrumb-item active">{{ campaign.title }}</li>
 {% endblock %}
 
 {% block page_actions %}
 <div class="col-auto ms-auto d-print-none">
     <div class="btn-list">
-        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages" class="btn btn-outline-secondary">
+        <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages" class="btn btn-outline-secondary">
             <svg class="icon me-2" width="24" height="24">
                 <use xlink:href="#tabler-calendar-time"></use>
             </svg>
             Scheduled Messages
         </a>
-        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/edit" class="btn btn-outline-primary">
+        <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/edit" class="btn btn-outline-primary">
             <svg class="icon me-2" width="24" height="24">
                 <use xlink:href="#tabler-settings"></use>
             </svg>
             Campaign Settings
         </a>
-        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges/create" class="btn btn-primary">
+        <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges/create" class="btn btn-primary">
             <svg class="icon me-2" width="24" height="24">
                 <use xlink:href="#tabler-plus"></use>
             </svg>
@@ -219,7 +219,7 @@
                     </svg>
                     <h3>No challenges yet</h3>
                     <p class="text-muted">Add your first challenge to get this campaign started.</p>
-                    <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges/create" class="btn btn-primary">
+                    <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges/create" class="btn btn-primary">
                         <svg class="icon me-2" width="24" height="24">
                             <use xlink:href="#tabler-plus"></use>
                         </svg>

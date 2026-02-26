@@ -1,0 +1,30 @@
+site_name: Smarter Dev
+theme: smarterdev
+debug: true
+
+db:
+  url: $DATABASE_URL
+
+auth:
+  providers:
+    dummy: {}
+
+controllers:
+  - skrift.admin.controller:AdminController
+  - smarter_dev.web.controllers:PagesController
+  - smarter_dev.web.controllers:api_mount
+  - smarter_dev.web.controllers:bot_admin_mount
+
+page_types:
+  - name: post
+    plural: posts
+    icon: pen-tool
+
+middleware:
+  - smarter_dev.web.middleware.partial:create_partial_middleware
+
+security_headers:
+  enabled: false
+
+rate_limit:
+  enabled: false

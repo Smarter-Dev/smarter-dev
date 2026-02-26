@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block page_type %}post{% endblock %}
+{% block page_title %}{{ page.title }}{% endblock %}
+
+{% block page_css %}
+    <link rel="stylesheet" href="{{ theme_url('css/pages/blog.css') }}">
+{% endblock %}
+
+{% block content %}
+<header class="article-header reveal">
+    <div class="code-label">// blog.read()</div>
+    <h1 class="article-title">{{ page.title }}</h1>
+    <div class="article-meta">
+        {% if page.user %}
+            By <span class="author-name">{{ page.user.display_name or page.user.email }}</span>
+            <span class="sep">&middot;</span>
+        {% endif %}
+        {% if page.published_at %}{{ page.published_at.strftime('%b %d, %Y') }}{% elif page.created_at %}{{ page.created_at.strftime('%b %d, %Y') }}{% endif %}
+    </div>
+    <div class="article-divider"></div>
+</header>
+
+<article class="article-body">
+    <div class="reveal">
+        {{ page.content|markdown|safe }}
+    </div>
+</article>
+
+{% if page.user %}
+<section class="author-card reveal">
+    <div class="author-card-inner">
+        <div class="author-avatar">
+            <span>{{ (page.user.display_name or page.user.email)[:2]|upper }}</span>
+        </div>
+        <div class="author-info">
+            <div class="name">{{ page.user.display_name or page.user.email }}</div>
+        </div>
+    </div>
+</section>
+{% endif %}
+
+{% endblock %}

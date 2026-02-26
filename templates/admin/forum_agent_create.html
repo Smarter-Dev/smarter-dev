@@ -5,9 +5,9 @@
 {% block page_title %}Create Forum Agent{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/forum-agents">Forum Agents</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}/forum-agents">Forum Agents</a></li>
 <li class="breadcrumb-item active">Create Agent</li>
 {% endblock %}
 
@@ -180,7 +180,7 @@ If you decide to respond, provide a helpful, relevant response."></textarea>
                 </div>
                 <div class="card-footer text-end">
                     <div class="d-flex">
-                        <a href="/admin/guilds/{{ guild.id }}/forum-agents" class="btn btn-link">Cancel</a>
+                        <a href="/bot-admin/guilds/{{ guild.id }}/forum-agents" class="btn btn-link">Cancel</a>
                         <button type="submit" class="btn btn-primary ms-auto">
                             <svg class="icon me-2" width="16" height="16">
                                 <use xlink:href="#tabler-device-floppy"></use>

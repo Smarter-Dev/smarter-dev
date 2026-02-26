@@ -1,0 +1,145 @@
+/* ══════════════════════════════════════════════════════
+   Smarter Dev — Design Framework
+   Variables, reset, base typography, layout utilities
+   ══════════════════════════════════════════════════════ */
+
+/* ── Reset ── */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+
+/* ── Design Tokens ── */
+:root {
+  /* Colors */
+  --bg: #020408;
+  --surface: #080c14;
+  --cyan: #00d4ff;
+  --green: #22c55e;
+  --amber: #eab308;
+  --rose: #ef4444;
+  --gray: #2a3a4e;
+  --mid: #4a6078;
+  --light: #8098b0;
+  --white: #d4e0ec;
+
+  /* Typography */
+  --display: 'Bungee Hairline', sans-serif;
+  --heading: 'Bruno Ace SC', sans-serif;
+  --body: 'Inter', Arial, sans-serif;
+  --mono: 'Courier New', monospace;
+
+  /* Borders */
+  --border-subtle: 1px solid rgba(0,212,255,.06);
+  --border-hover: 1px solid rgba(0,212,255,.15);
+  --border-active: 1px solid var(--cyan);
+
+  /* Shadows */
+  --glow-sm: 0 0 15px rgba(0,212,255,.15);
+  --glow-md: 0 0 30px rgba(0,212,255,.03);
+  --inset-glow: inset 0 0 20px rgba(0,212,255,.05);
+}
+
+/* ── Base ── */
+html { scroll-behavior: smooth }
+
+body {
+  font-family: var(--body);
+  background: var(--bg);
+  color: var(--light);
+  overflow-x: hidden;
+  line-height: 1.7;
+}
+
+/* ── Typography ── */
+.code-label {
+  font-family: var(--heading);
+  font-size: .65rem;
+  color: var(--cyan);
+  margin-bottom: 1rem;
+  opacity: .75;
+  letter-spacing: .08em;
+}
+
+.sec-h {
+  font-family: var(--heading);
+  font-size: clamp(1.4rem, 2.8vw, 2rem);
+  color: var(--white);
+  line-height: 1.2;
+  margin-bottom: .5rem;
+  letter-spacing: .02em;
+}
+
+.sec-p {
+  font-size: .9rem;
+  color: var(--mid);
+  max-width: 480px;
+  margin-bottom: 2.5rem;
+  line-height: 1.75;
+}
+
+/* ── Pitch Row ── */
+.pitch-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  align-items: center;
+}
+.pitch-text .sec-p:last-child {
+  margin-bottom: 0;
+}
+.pitch-term {
+  width: 100%;
+}
+@media (max-width: 768px) {
+  .pitch-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Layout Utilities ── */
+section {
+  position: relative;
+  z-index: 1;
+  padding: clamp(50px, 7vw, 90px) clamp(2rem, 6vw, 8rem);
+}
+
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+/* ── Footer ── */
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  font-family: var(--heading);
+  font-size: .55rem;
+  color: var(--gray);
+  border-top: 1px solid rgba(0,212,255,.04);
+  position: relative;
+  z-index: 1;
+  letter-spacing: .06em;
+}
+.foot a {
+  color: var(--mid);
+  text-decoration: none;
+  transition: color .2s;
+}
+.foot a:hover {
+  color: var(--cyan);
+}
+
+/* ── Responsive Breakpoints ── */
+@media (max-width: 900px) {
+  /* Tablet adjustments handled per-component */
+}
+@media (max-width: 600px) {
+  /* Small tablet */
+}
+@media (max-width: 520px) {
+  /* Mobile */
+}
+@media (max-width: 480px) {
+  /* Small mobile */
+}
