@@ -6,7 +6,7 @@ on:
 env:
   # Set to "true" to run migrations only (skip app deployment).
   # Remove or set to "false" when ready to deploy the app.
-  SKIP_DEPLOY: "true"
+  SKIP_DEPLOY: "false"
 
 jobs:
   build-and-deploy:
