@@ -24,4 +24,14 @@ spec:
               key: secret-key
         - name: SKRIFT_ENV
           value: "production"
+        - name: DISCORD_APPLICATION_ID
+          valueFrom:
+            secretKeyRef:
+              name: smarter-dev-secrets
+              key: discord-application-id
+        - name: DISCORD_APPLICATION_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: smarter-dev-secrets
+              key: discord-client-secret
   backoffLimit: 3
