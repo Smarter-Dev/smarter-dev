@@ -79,10 +79,10 @@
 
 <section>
     <div class="container">
-        <div class="reveal" style="text-align:center">
+        <div class="reveal sudo-philosophy">
             <div class="code-label">// sudo.philosophy()</div>
             <div class="sec-h">One membership. Root access.</div>
-            <p class="sudo-sub" style="max-width:560px;margin:0 auto">You already have access to the community. sudo elevates your permissions. One membership, everything unlocks — no subscription sprawl, no per-feature nickel-and-diming. Just root access to the full Smarter Dev experience.</p>
+            <p class="sudo-sub sudo-philosophy-sub">You already have access to the community. sudo elevates your permissions. One membership, everything unlocks — no subscription sprawl, no per-feature nickel-and-diming. Just root access to the full Smarter Dev experience.</p>
         </div>
     </div>
 </section>
@@ -92,7 +92,7 @@
         <div class="reveal">
             <div class="cta-h">sudo is coming.</div>
             <div class="cta-h2">Get notified when it launches.</div>
-            <div class="sudo-signup" style="margin:0 auto">
+            <div class="sudo-signup sudo-signup-centered">
                 <form class="sudo-signup-form" id="sudo-signup-form">
                     <input type="hidden" name="campaign_slug" value="sudo-launch">
                     <input type="email" name="email" placeholder="dev@example.com" required>
@@ -106,7 +106,7 @@
 {% endblock %}
 
 {% block page_scripts %}
-<script>
+<script nonce="{{ csp_nonce() }}">
 (function() {
     var logo = document.getElementById('sudo-logo');
     var rest = document.getElementById('sudo-hero-rest');

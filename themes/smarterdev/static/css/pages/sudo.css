@@ -123,10 +123,15 @@
   line-height: 1.75;
 }
 
+/* ── Sudo Philosophy ── */
+.sudo-philosophy { text-align: center }
+.sudo-philosophy-sub { max-width: 560px; margin: 0 auto }
+
 /* ── Sudo Signup ── */
 .sudo-signup {
   max-width: 500px;
 }
+.sudo-signup-centered { margin: 0 auto }
 .sudo-signup-form {
   display: flex;
   gap: 0;
