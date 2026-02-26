@@ -3,6 +3,11 @@ on:
     branches:
       - main
 
+env:
+  # Set to "true" to run migrations only (skip app deployment).
+  # Remove or set to "false" when ready to deploy the app.
+  SKIP_DEPLOY: "true"
+
 jobs:
   build-and-deploy:
     name: Build and Deploy to K8s on Digital Ocean
@@ -20,6 +25,8 @@ jobs:
         TAG=$(echo $GITHUB_SHA | head -c7)
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-bot.yaml
+        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/migration-job.yaml
+        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/migration-job-skrift.yaml
 
     - name: Install doctl
       uses: digitalocean/action-doctl@v2
@@ -53,14 +60,29 @@ jobs:
     - name: Apply ConfigMap
       run: kubectl apply -f $GITHUB_WORKSPACE/k8s/configmap.yaml
 
+    - name: Run legacy database migrations
+      run: |
+        kubectl delete job smarter-dev-migration -n smarter-dev --ignore-not-found
+        kubectl apply -f $GITHUB_WORKSPACE/k8s/migration-job.yaml
+        kubectl wait --for=condition=complete --timeout=120s -n smarter-dev job/smarter-dev-migration
+
+    - name: Run Skrift database migrations
+      run: |
+        kubectl delete job smarter-dev-skrift-migration -n smarter-dev --ignore-not-found
+        kubectl apply -f $GITHUB_WORKSPACE/k8s/migration-job-skrift.yaml
+        kubectl wait --for=condition=complete --timeout=120s -n smarter-dev job/smarter-dev-skrift-migration
+
     - name: Deploy to DigitalOcean Kubernetes
+      if: env.SKIP_DEPLOY != 'true'
       run: |
         kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy-bot.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/site.yaml
 
     - name: Verify web deployment
+      if: env.SKIP_DEPLOY != 'true'
       run: kubectl rollout status deployment/smarter-dev-website
 
     - name: Verify bot deployment
+      if: env.SKIP_DEPLOY != 'true'
       run: kubectl rollout status deployment/smarter-dev-bot

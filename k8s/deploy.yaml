@@ -109,6 +109,13 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: anthropic-api-key
+                  - name: SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: secret-key
+                  - name: SKRIFT_ENV
+                    value: "production"
                 resources:
                     requests:
                         cpu: 100m
