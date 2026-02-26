@@ -34,7 +34,7 @@
   justify-content: center;
   position: relative;
   z-index: 1;
-  padding: 7rem 2rem 4rem;
+  padding: 7rem 2rem 8rem;
   text-align: center;
 }
 .hero-chip {
@@ -64,7 +64,7 @@
   font-size: clamp(3.2rem, 8vw, 6.5rem);
   color: var(--white);
   line-height: 1;
-  margin-bottom: .5rem;
+  margin-bottom: 2.5rem;
   letter-spacing: .15em;
   text-shadow: 0 0 40px rgba(0,212,255,.15);
 }
@@ -76,8 +76,8 @@
   text-shadow: 0 0 30px rgba(0,212,255,.3);
   vertical-align: 0.14em;
 }
-.hero-sub { font-family: var(--heading); font-size: clamp(.75rem, 1.3vw, .9rem); color: var(--mid); margin-bottom: 1.5rem; letter-spacing: .06em }
-.hero-p { font-size: 1rem; color: var(--mid); max-width: 480px; margin: 0 auto 2.5rem; line-height: 1.8 }
+.hero-sub { font-family: var(--heading); font-size: clamp(.75rem, 1.3vw, .9rem); color: var(--mid); margin-bottom: 3.5rem; letter-spacing: .06em }
+.hero-p { font-size: 1rem; color: var(--mid); max-width: 480px; margin: 0 auto 4rem; line-height: 1.8 }
 .hero-p strong { color: var(--white); font-weight: 600 }
 .hero-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap }
 .hero-proof { display: flex; gap: 2.5rem; margin-top: 4rem; flex-wrap: wrap; justify-content: center }
@@ -110,8 +110,8 @@
 
 /* ── CTA ── */
 .cta { text-align: center; padding: clamp(70px, 10vw, 130px) 2rem; position: relative; z-index: 1 }
-.cta-h { font-family: var(--display); font-size: clamp(1.8rem, 4.5vw, 3.5rem); color: var(--white); line-height: 1.1; margin-bottom: .25rem; letter-spacing: .08em; text-shadow: 0 0 30px rgba(0,212,255,.1) }
-.cta-h2 { font-family: var(--heading); font-size: clamp(1.2rem, 2.5vw, 1.8rem); color: var(--cyan); margin-bottom: 2rem; letter-spacing: .04em; text-shadow: 0 0 20px rgba(0,212,255,.15) }
+.cta-h { font-family: var(--display); font-size: clamp(1.8rem, 4.5vw, 3.5rem); color: var(--white); line-height: 1.1; margin-bottom: 1rem; letter-spacing: .08em; text-shadow: 0 0 30px rgba(0,212,255,.1) }
+.cta-h2 { font-family: var(--heading); font-size: clamp(.85rem, 1.5vw, 1rem); color: var(--light); max-width: 520px; margin: 0 auto; line-height: 1.8; letter-spacing: .02em }
 
 /* ── Responsive ── */
 @media (max-width: 900px) {

@@ -1,0 +1,89 @@
+/* ══════════════════════════════════════════════════════
+   Badges — .difficulty-badge, .status-badge, .tag, .pr-label, .confidence-badge
+   ══════════════════════════════════════════════════════ */
+
+/* ── Difficulty Badge ── */
+.difficulty-badge {
+  display: inline-block;
+  padding: 3px 12px;
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .08em;
+  border: 1px solid;
+}
+.difficulty-badge.hard { color: var(--rose); border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.06) }
+.difficulty-badge.medium { color: var(--amber); border-color: rgba(234,179,8,.35); background: rgba(234,179,8,.06) }
+.difficulty-badge.easy { color: var(--green); border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.06) }
+
+/* ── Status Badge ── */
+.status-badge {
+  font-family: var(--heading);
+  font-size: .5rem;
+  letter-spacing: .08em;
+  padding: 3px 10px;
+  border: 1px solid;
+}
+.status-badge.completed { color: var(--green); border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.06) }
+.status-badge.in-progress { color: var(--amber); border-color: rgba(234,179,8,.35); background: rgba(234,179,8,.06) }
+.status-badge.failed { color: var(--rose); border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.06) }
+
+/* ── Tag ── */
+.tag {
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .06em;
+  padding: 5px 14px;
+  border: 1px solid rgba(0,212,255,.18);
+  color: var(--cyan);
+  background: rgba(0,212,255,.04);
+  transition: all .25s;
+}
+.tag:hover { background: rgba(0,212,255,.1); border-color: rgba(0,212,255,.35) }
+
+/* ── PR Label ── */
+.pr-label {
+  font-family: var(--heading);
+  font-size: .42rem;
+  letter-spacing: .06em;
+  padding: 2px 6px;
+  border: 1px solid;
+}
+.pr-label.review { color: var(--amber); border-color: rgba(234,179,8,.3); background: rgba(234,179,8,.04) }
+.pr-label.approved { color: var(--green); border-color: rgba(34,197,94,.3); background: rgba(34,197,94,.04) }
+.pr-label.changes { color: var(--rose); border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.04) }
+.pr-label.draft-label { color: var(--gray); border-color: rgba(42,58,78,.5); background: rgba(42,58,78,.15) }
+
+/* ── Confidence Badge ── */
+.confidence-badge {
+  font-family: var(--heading);
+  font-size: .48rem;
+  letter-spacing: .08em;
+  padding: 2px 8px;
+  border: 1px solid;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.confidence-badge.high { color: var(--green); border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.06) }
+.confidence-badge.medium { color: var(--amber); border-color: rgba(234,179,8,.35); background: rgba(234,179,8,.06) }
+
+/* ── Status Live ── */
+.status-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .08em;
+  padding: 4px 12px;
+  border: 1px solid rgba(34,197,94,.35);
+  color: var(--green);
+  background: rgba(34,197,94,.06);
+}
+.status-live .pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: pulse 2s infinite;
+}

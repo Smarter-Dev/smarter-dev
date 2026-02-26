@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — Neon Circuit</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#05070f;--bg2:#0b0f1e;--cyan:#00d4ff;--magenta:#ff00aa;--green:#00ff88;
+  --amber:#ffcc00;--gray:#667788;--light:#b8c8d8;--white:#f0f4f8;
+  --mono:'Space Mono',monospace;--sans:'Syne',sans-serif;
+}
+html{scroll-behavior:smooth}
+body{font-family:var(--sans);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.65}
+
+/* Navigation */
+.mockup-nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  display:flex;align-items:center;justify-content:center;gap:12px;
+  padding:12px 20px;background:rgba(5,7,15,.85);backdrop-filter:blur(20px);
+  border-bottom:1px solid rgba(0,212,255,.1);font-family:var(--mono);font-size:.75rem;
+}
+.mockup-nav a{
+  color:var(--gray);text-decoration:none;padding:6px 14px;border-radius:6px;
+  border:1px solid transparent;transition:all .2s;white-space:nowrap;
+}
+.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.3)}
+.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.08)}
+
+/* Circuit pattern */
+.circuit-bg{
+  position:fixed;inset:0;z-index:0;overflow:hidden;opacity:.35;
+}
+.circuit-line{
+  position:absolute;background:var(--cyan);
+}
+.circuit-line.h{height:1px;animation:circuitH 8s linear infinite}
+.circuit-line.v{width:1px;animation:circuitV 8s linear infinite}
+.circuit-node{
+  position:absolute;width:8px;height:8px;border-radius:50%;border:1px solid var(--cyan);
+  animation:nodePulse 3s ease-in-out infinite;
+}
+@keyframes circuitH{0%{left:-200px;opacity:0}10%{opacity:1}90%{opacity:1}100%{left:calc(100% + 200px);opacity:0}}
+@keyframes circuitV{0%{top:-200px;opacity:0}10%{opacity:1}90%{opacity:1}100%{top:calc(100% + 200px);opacity:0}}
+@keyframes nodePulse{0%,100%{box-shadow:0 0 4px var(--cyan)}50%{box-shadow:0 0 20px var(--cyan)}}
+
+/* Neon glow utility */
+.neon{text-shadow:0 0 10px var(--cyan),0 0 40px rgba(0,212,255,.3)}
+.neon-magenta{text-shadow:0 0 10px var(--magenta),0 0 40px rgba(255,0,170,.3)}
+
+.reveal{opacity:0;transform:translateY(30px);transition:all .7s cubic-bezier(.4,0,.2,1)}
+.reveal.visible{opacity:1;transform:none}
+
+/* HERO */
+.hero{
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  position:relative;z-index:1;padding:6rem 2rem 2rem;text-align:center;
+}
+.hero-glow{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:min(90vw,700px);height:min(90vw,700px);border-radius:50%;
+  background:radial-gradient(circle,rgba(0,212,255,.07) 0%,rgba(255,0,170,.03) 40%,transparent 70%);
+  pointer-events:none;
+}
+.logo{font-family:var(--sans);font-size:clamp(3rem,8vw,6rem);font-weight:800;line-height:1;margin-bottom:1.5rem}
+.logo .s{color:var(--white);letter-spacing:.08em}
+.logo .d{color:var(--cyan);position:relative}
+.logo .d::after{
+  content:'';position:absolute;bottom:-.1em;left:0;right:0;height:4px;
+  background:linear-gradient(90deg,var(--cyan),var(--magenta));border-radius:2px;
+}
+.hero-tag{
+  font-family:var(--mono);font-size:clamp(1rem,2.2vw,1.4rem);font-weight:400;
+  color:var(--light);margin-bottom:.5rem;
+}
+.hero-tag .hl{color:var(--cyan)}
+.hero-sub{font-size:1.1rem;color:var(--gray);max-width:520px;margin:0 auto 3rem}
+.hero-btns{display:flex;gap:16px;flex-wrap:wrap;justify-content:center}
+.btn-primary{
+  padding:16px 40px;border-radius:60px;font-family:var(--sans);font-size:1rem;font-weight:600;
+  background:linear-gradient(135deg,var(--cyan),#0088cc);color:var(--bg);border:none;cursor:pointer;
+  box-shadow:0 0 30px rgba(0,212,255,.25);transition:all .3s;text-decoration:none;
+}
+.btn-primary:hover{box-shadow:0 0 60px rgba(0,212,255,.4);transform:translateY(-2px)}
+.btn-ghost{
+  padding:16px 40px;border-radius:60px;font-family:var(--sans);font-size:1rem;font-weight:600;
+  background:transparent;color:var(--cyan);border:2px solid var(--cyan);cursor:pointer;
+  transition:all .3s;text-decoration:none;
+}
+.btn-ghost:hover{background:rgba(0,212,255,.08)}
+
+/* Sections */
+section{position:relative;z-index:1;padding:clamp(80px,10vw,140px) clamp(20px,5vw,80px)}
+.sec-center{max-width:1100px;margin:0 auto}
+.sec-label{
+  font-family:var(--mono);font-size:.8rem;letter-spacing:.15em;text-transform:uppercase;
+  color:var(--magenta);margin-bottom:1rem;
+}
+.sec-title{
+  font-size:clamp(2rem,4vw,3.2rem);font-weight:800;color:var(--white);
+  line-height:1.15;margin-bottom:1rem;
+}
+.sec-desc{font-size:1.05rem;color:var(--gray);max-width:600px;margin-bottom:3rem}
+
+/* Feature cards - cyberpunk style */
+.features{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:2px}
+.feature{
+  padding:2.5rem;position:relative;overflow:hidden;
+  background:rgba(11,15,30,.8);border:1px solid rgba(0,212,255,.08);
+  transition:all .4s;
+}
+.feature::before{
+  content:'';position:absolute;top:0;left:0;width:100%;height:2px;
+  background:linear-gradient(90deg,var(--cyan),var(--magenta));
+  transform:scaleX(0);transform-origin:left;transition:transform .4s;
+}
+.feature:hover::before{transform:scaleX(1)}
+.feature:hover{background:rgba(0,212,255,.03);border-color:rgba(0,212,255,.15)}
+.feature-num{
+  font-family:var(--mono);font-size:3rem;font-weight:700;
+  background:linear-gradient(135deg,var(--cyan),var(--magenta));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  line-height:1;margin-bottom:1rem;
+}
+.feature h3{font-size:1.3rem;font-weight:700;color:var(--white);margin-bottom:.75rem}
+.feature p{color:var(--gray);font-size:.9rem;line-height:1.7}
+
+/* Challenge showcase */
+.challenge-wrap{
+  max-width:800px;margin:0 auto;
+  background:var(--bg2);border:2px solid rgba(0,212,255,.15);border-radius:4px;
+  overflow:hidden;position:relative;
+}
+.challenge-wrap::before{
+  content:'';position:absolute;inset:-2px;border-radius:6px;
+  background:linear-gradient(135deg,var(--cyan),var(--magenta),var(--cyan));
+  z-index:-1;opacity:.3;filter:blur(20px);
+}
+.ch-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px 24px;background:rgba(0,212,255,.04);border-bottom:1px solid rgba(0,212,255,.1);
+}
+.ch-header .title{font-family:var(--mono);font-size:.9rem;color:var(--cyan)}
+.ch-header .diff{
+  font-family:var(--mono);font-size:.75rem;padding:4px 12px;border-radius:4px;
+  background:rgba(255,0,170,.1);color:var(--magenta);border:1px solid rgba(255,0,170,.2);
+}
+.ch-body{padding:2rem;font-family:var(--mono);font-size:.85rem;line-height:2.2;color:var(--light)}
+.ch-body .comment{color:var(--gray)}
+.ch-body .keyword{color:var(--magenta)}
+.ch-body .func{color:var(--cyan)}
+.ch-body .string{color:var(--green)}
+
+/* Bytes section */
+.bytes-flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1.5rem;margin-top:2rem}
+.byte-card{
+  padding:2rem;text-align:center;border-radius:12px;position:relative;
+  background:linear-gradient(160deg,rgba(0,212,255,.05),rgba(255,0,170,.03));
+  border:1px solid rgba(0,212,255,.1);transition:all .3s;
+}
+.byte-card:hover{transform:translateY(-4px);border-color:rgba(0,212,255,.25)}
+.byte-val{
+  font-family:var(--mono);font-size:2rem;font-weight:700;color:var(--cyan);
+  margin-bottom:.5rem;
+}
+.byte-label{font-size:.95rem;font-weight:600;color:var(--white);margin-bottom:.25rem}
+.byte-desc{font-size:.8rem;color:var(--gray)}
+
+/* Stats */
+.stats-row{
+  display:flex;flex-wrap:wrap;justify-content:space-around;gap:3rem;
+  padding:3rem 0;
+}
+.stat-item{text-align:center}
+.stat-big{
+  font-family:var(--mono);font-size:clamp(2.5rem,5vw,4rem);font-weight:700;line-height:1;
+}
+.stat-big.cyan{color:var(--cyan)}
+.stat-big.magenta{color:var(--magenta)}
+.stat-big.green{color:var(--green)}
+.stat-big.amber{color:var(--amber)}
+.stat-small{font-size:.85rem;color:var(--gray);margin-top:.5rem}
+
+/* Testimonials */
+.test-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:2rem;margin-top:2rem}
+.test-card{
+  padding:2rem;border-left:3px solid var(--cyan);
+  background:rgba(0,212,255,.02);position:relative;
+}
+.test-card:nth-child(2){border-left-color:var(--magenta)}
+.test-card:nth-child(3){border-left-color:var(--green)}
+.test-card blockquote{font-size:.95rem;color:var(--light);line-height:1.8;margin-bottom:1.5rem;font-style:italic}
+.test-who{display:flex;align-items:center;gap:12px}
+.test-av{
+  width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-weight:700;font-size:.8rem;color:var(--bg);
+}
+.test-av.c1{background:var(--cyan)}.test-av.c2{background:var(--magenta)}.test-av.c3{background:var(--green)}
+.test-name{font-size:.85rem;font-weight:600;color:var(--white)}
+.test-role{font-size:.75rem;color:var(--gray)}
+
+/* Footer */
+.final-cta{
+  text-align:center;padding:clamp(80px,10vw,160px) 2rem;position:relative;z-index:1;
+}
+.final-big{
+  font-size:clamp(2rem,5vw,4rem);font-weight:800;color:var(--white);line-height:1.15;margin-bottom:.5rem;
+}
+.final-big .acc{
+  background:linear-gradient(135deg,var(--cyan),var(--magenta));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}
+.final-sub{color:var(--gray);font-size:1.1rem;margin-bottom:3rem}
+.footer-bar{
+  text-align:center;padding:2rem;font-family:var(--mono);font-size:.7rem;color:var(--gray);
+  border-top:1px solid rgba(255,255,255,.04);position:relative;z-index:1;
+}
+
+@media(max-width:768px){
+  .features{grid-template-columns:1fr}
+  .stats-row{gap:2rem}
+  .test-grid{grid-template-columns:1fr}
+  .bytes-flow{grid-template-columns:1fr 1fr}
+}
+@media(max-width:480px){
+  .bytes-flow{grid-template-columns:1fr}
+  .hero-btns{flex-direction:column;align-items:center}
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav class="mockup-nav">
+  <a href="mockup-1-terminal.html">01 Terminal</a>
+  <a href="mockup-2-neon-circuit.html" class="active">02 Neon Circuit</a>
+  <a href="mockup-3-glass-forge.html">03 Glass Forge</a>
+  <a href="mockup-4-signal-noise.html">04 Signal Noise</a>
+  <a href="mockup-5-blueprint.html">05 Blueprint</a>
+</nav>
+
+<!-- Circuit BG -->
+<div class="circuit-bg" id="circuitBg"></div>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-glow"></div>
+  <div class="logo reveal"><span class="s">SMARTER </span><span class="d">Dev</span></div>
+  <div class="hero-tag reveal">AI writes code. <span class="hl">We build developers.</span></div>
+  <p class="hero-sub reveal">A 15,000-member community sharpening the skills that matter most in the AI era — critical thinking, architecture, and adversarial reasoning.</p>
+  <div class="hero-btns reveal">
+    <a href="#" class="btn-primary">Join the Community</a>
+    <a href="#features" class="btn-ghost">See How It Works</a>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="sec-center">
+    <div class="reveal">
+      <div class="sec-label">// what we sharpen</div>
+      <div class="sec-title">Three pillars. One mission.</div>
+      <div class="sec-desc">Every challenge, conversation, and review is designed to strengthen the skills AI can't replicate.</div>
+    </div>
+    <div class="features">
+      <div class="feature reveal">
+        <div class="feature-num">01</div>
+        <h3>Critical Thinking</h3>
+        <p>Break down ambiguity. Evaluate trade-offs. Ask the questions nobody else is asking. This is the skill that separates senior devs from prompt-jockeys.</p>
+      </div>
+      <div class="feature reveal">
+        <div class="feature-num">02</div>
+        <h3>Architecture</h3>
+        <p>Design systems that survive reality. Think in boundaries, contracts, and failure modes. Copilot fills in lines — you decide the shape of the whole thing.</p>
+      </div>
+      <div class="feature reveal">
+        <div class="feature-num">03</div>
+        <h3>Adversarial Reasoning</h3>
+        <p>Think like an attacker. Find the edge case. Exploit the assumption. Then build something that holds up when the real world tries to break it.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- RUNHACKS -->
+<section>
+  <div class="sec-center">
+    <div class="reveal">
+      <div class="sec-label">// runhacks.sh</div>
+      <div class="sec-title">Daily challenges that actually matter.</div>
+      <div class="sec-desc">Not LeetCode. Not trivia. Real problems that force you to think before you type.</div>
+    </div>
+    <div class="challenge-wrap reveal">
+      <div class="ch-header">
+        <div class="title">challenge_731.sh</div>
+        <div class="diff">HARD</div>
+      </div>
+      <div class="ch-body">
+        <div><span class="comment"># Reverse-engineer this microservice's failure mode</span></div>
+        <div><span class="comment"># The load balancer is healthy. The database is up.</span></div>
+        <div><span class="comment"># But 2% of requests return 500. Why?</span></div>
+        <div>&nbsp;</div>
+        <div><span class="keyword">analyze</span> <span class="func">--logs</span> production.log <span class="func">--window</span> <span class="string">"4h"</span></div>
+        <div><span class="keyword">trace</span> <span class="func">--request-id</span> <span class="string">"abc-789"</span> <span class="func">--depth</span> full</div>
+        <div>&nbsp;</div>
+        <div><span class="comment"># Hint: The answer isn't in the code. It's in the architecture.</span></div>
+        <div><span class="comment"># Reward: 150 Bytes | Deadline: 24h</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- BYTES -->
+<section>
+  <div class="sec-center">
+    <div class="reveal">
+      <div class="sec-label">// bytes economy</div>
+      <div class="sec-title">Show up. Earn Bytes. Level up.</div>
+      <div class="sec-desc">Your commitment to growth, quantified. Bytes reward consistency, quality, and community contribution.</div>
+    </div>
+    <div class="bytes-flow reveal">
+      <div class="byte-card">
+        <div class="byte-val">+5</div>
+        <div class="byte-label">Daily Check-in</div>
+        <div class="byte-desc">Consistency is the cheat code</div>
+      </div>
+      <div class="byte-card">
+        <div class="byte-val">+50</div>
+        <div class="byte-label">Solve a RunHack</div>
+        <div class="byte-desc">Ship a working solution</div>
+      </div>
+      <div class="byte-card">
+        <div class="byte-val">+25</div>
+        <div class="byte-label">Peer Review</div>
+        <div class="byte-desc">Give real, actionable feedback</div>
+      </div>
+      <div class="byte-card">
+        <div class="byte-val">+100</div>
+        <div class="byte-label">Top Solution</div>
+        <div class="byte-desc">Community-voted best approach</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<section>
+  <div class="sec-center reveal">
+    <div class="stats-row">
+      <div class="stat-item"><div class="stat-big cyan">15K+</div><div class="stat-small">Developers</div></div>
+      <div class="stat-item"><div class="stat-big magenta">730</div><div class="stat-small">Challenges</div></div>
+      <div class="stat-item"><div class="stat-big green">42K</div><div class="stat-small">Solutions</div></div>
+      <div class="stat-item"><div class="stat-big amber">98%</div><div class="stat-small">Say "worth it"</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- TESTIMONIALS -->
+<section>
+  <div class="sec-center">
+    <div class="reveal">
+      <div class="sec-label">// from the community</div>
+      <div class="sec-title">Real developers. Real words.</div>
+    </div>
+    <div class="test-grid">
+      <div class="test-card reveal">
+        <blockquote>"I stopped copy-pasting from ChatGPT and started understanding what I was building. Smarter Dev's challenges force that shift."</blockquote>
+        <div class="test-who"><div class="test-av c1">MR</div><div><div class="test-name">Maya Rodriguez</div><div class="test-role">Senior Engineer @ Vercel</div></div></div>
+      </div>
+      <div class="test-card reveal">
+        <blockquote>"RunHacks broke me out of tutorial hell. The peer reviews are honest and the community is the most supportive I've found online."</blockquote>
+        <div class="test-who"><div class="test-av c2">JK</div><div><div class="test-name">James Kim</div><div class="test-role">Full-Stack Developer</div></div></div>
+      </div>
+      <div class="test-card reveal">
+        <blockquote>"I've hired three people from this community. The quality of thinking is noticeably higher. These devs understand systems, not just syntax."</blockquote>
+        <div class="test-who"><div class="test-av c3">SP</div><div><div class="test-name">Sarah Petrov</div><div class="test-role">Tech Lead @ Stripe</div></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FINAL CTA -->
+<section class="final-cta">
+  <div class="reveal">
+    <div class="final-big">Stop writing code.<br><span class="acc">Start thinking.</span></div>
+    <p class="final-sub">Join 15,000 devs building AI-proof skills.</p>
+    <a href="#" class="btn-primary" style="font-size:1.1rem;padding:18px 50px">
+      Join on Discord &rarr;
+    </a>
+  </div>
+</section>
+
+<div class="footer-bar">&copy; 2026 Smarter Dev — developers helping developers get better.</div>
+
+<script>
+// Circuit BG generation
+const bg = document.getElementById('circuitBg');
+function spawnCircuit(){
+  const isH = Math.random()>.5;
+  const el = document.createElement('div');
+  el.className = 'circuit-line '+(isH?'h':'v');
+  if(isH){
+    el.style.top = Math.random()*100+'%';
+    el.style.width = (100+Math.random()*300)+'px';
+    el.style.animationDuration = (5+Math.random()*8)+'s';
+    el.style.opacity = .1+Math.random()*.2;
+  } else {
+    el.style.left = Math.random()*100+'%';
+    el.style.height = (100+Math.random()*300)+'px';
+    el.style.animationDuration = (5+Math.random()*8)+'s';
+    el.style.opacity = .1+Math.random()*.2;
+  }
+  bg.appendChild(el);
+  el.addEventListener('animationend',()=>el.remove());
+}
+// Spawn nodes
+for(let i=0;i<12;i++){
+  const n = document.createElement('div');
+  n.className='circuit-node';
+  n.style.left=Math.random()*100+'%';
+  n.style.top=Math.random()*100+'%';
+  n.style.animationDelay=Math.random()*3+'s';
+  bg.appendChild(n);
+}
+setInterval(spawnCircuit,800);
+
+// Scroll reveal
+const obs = new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');obs.unobserve(e.target)}});
+},{threshold:.12});
+document.querySelectorAll('.reveal').forEach(el=>obs.observe(el));
+</script>
+</body>
+</html>

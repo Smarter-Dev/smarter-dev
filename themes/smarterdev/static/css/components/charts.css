@@ -1,0 +1,66 @@
+/* ══════════════════════════════════════════════════════
+   Charts — Sparklines, progress bars, build health chart
+   ══════════════════════════════════════════════════════ */
+
+/* ── Chart Metric Cards ── */
+.chart-metrics-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-bottom: 24px }
+.chart-metric {
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  padding: 16px 20px;
+  transition: all .3s;
+  position: relative;
+}
+.chart-metric:hover { border-color: rgba(0,212,255,.2) }
+.chart-metric-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px }
+.chart-metric-header .cm-value { font-family: var(--display); font-size: clamp(1.4rem, 2.2vw, 1.8rem); color: var(--white); line-height: 1; text-shadow: 0 0 15px rgba(0,212,255,.1) }
+.chart-metric-header .cm-value.green { color: var(--green); text-shadow: 0 0 15px rgba(34,197,94,.15) }
+.chart-metric-header .cm-value.rose { color: var(--rose); text-shadow: 0 0 15px rgba(239,68,68,.15) }
+.chart-metric-header .cm-value .unit { font-family: var(--heading); color: var(--cyan); font-size: .5em; margin-left: 2px }
+.chart-metric-header .cm-delta { font-family: var(--heading); font-size: .5rem; letter-spacing: .06em; padding: 2px 6px; border: 1px solid; margin-top: 4px }
+.cm-delta.up { color: var(--green); border-color: rgba(34,197,94,.3); background: rgba(34,197,94,.04) }
+.cm-delta.down { color: var(--rose); border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.04) }
+.chart-metric .cm-label { font-family: var(--heading); font-size: .5rem; color: var(--gray); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px }
+
+/* ── Sparkline ── */
+.sparkline-wrap { height: 40px; position: relative }
+.sparkline-wrap svg { display: block; width: 100%; height: 100% }
+
+/* ── Chart Container ── */
+.chart-container { width: 100%; overflow-x: auto; position: relative }
+.chart-container svg { display: block; width: 100%; height: auto }
+.chart-container svg text { font-family: var(--heading); fill: var(--gray); font-size: 9px; letter-spacing: .04em }
+
+/* ── Chart Legend ── */
+.chart-legend { display: flex; gap: 20px; padding: 12px 16px 8px; justify-content: flex-end }
+.chart-legend-item { display: flex; align-items: center; gap: 6px; font-family: var(--heading); font-size: .52rem; color: var(--gray); letter-spacing: .06em }
+.chart-legend-item .swatch { width: 10px; height: 10px }
+.chart-legend-item .swatch.success { background: var(--green); opacity: .6 }
+.chart-legend-item .swatch.failed { background: var(--rose); opacity: .6 }
+
+/* ── Chart Tooltip ── */
+.chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(2,4,8,.95);
+  border: 1px solid rgba(0,212,255,.2);
+  padding: 8px 12px;
+  font-family: var(--heading);
+  font-size: .55rem;
+  color: var(--white);
+  letter-spacing: .04em;
+  opacity: 0;
+  transition: opacity .15s;
+  z-index: 50;
+  white-space: nowrap;
+}
+.chart-tooltip .tt-date { color: var(--cyan); margin-bottom: 4px }
+.chart-tooltip .tt-row { display: flex; align-items: center; gap: 6px; margin-top: 2px }
+.chart-tooltip .tt-dot { width: 6px; height: 6px; border-radius: 50% }
+.chart-tooltip .tt-dot.success { background: var(--green) }
+.chart-tooltip .tt-dot.failed { background: var(--rose) }
+
+/* ── Responsive ── */
+@media (max-width: 520px) {
+  .chart-metrics-row { grid-template-columns: 1fr }
+}

@@ -6,10 +6,70 @@
 .sudo-hero {
   text-align: center;
   padding-top: 8rem;
+  padding-bottom: 4rem;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sudo-logo {
+  font-family: var(--display);
+  font-size: clamp(4rem, 10vw, 8rem);
+  color: var(--cyan);
+  line-height: 1;
+  margin-bottom: .75rem;
+  letter-spacing: .15em;
+  text-shadow: 0 0 40px rgba(0,212,255,.25), 0 0 80px rgba(0,212,255,.1);
+}
+.sudo-logo span {
+  display: inline-block;
+  color: transparent;
+  line-height: .85;
+  letter-spacing: 0;
+  margin-right: .15em;
+}
+.sudo-logo span:last-child {
+  margin-right: 0;
+}
+.sudo-logo span.show {
+  color: var(--cyan);
+}
+.sudo-logo span.cursor {
+  border-bottom: .08em solid rgba(0,212,255,.5);
+  animation: cursorBlink .6s step-end infinite;
+}
+@keyframes cursorBlink {
+  50% { border-color: transparent }
+}
+.sudo-hero-rest > * {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity .5s ease, transform .5s ease;
+}
+.sudo-hero-rest > .show {
+  opacity: 1;
+  transform: none;
+}
+.sudo-hero .sudo-tagline {
+  font-family: var(--heading);
+  font-size: clamp(1rem, 2vw, 1.3rem);
+  color: var(--white);
+  margin-bottom: 1rem;
+  letter-spacing: .03em;
+}
+.sudo-hero .sudo-sub {
+  font-size: .9rem;
+  color: var(--mid);
+  max-width: 480px;
+  margin: 0 auto 2rem;
+  line-height: 1.75;
+}
+.sudo-hero .sudo-signup {
+  margin: 0 auto 3rem;
 }
 .sudo-hero .term {
   max-width: 600px;
-  margin: 0 auto 2.5rem;
+  margin: 0 auto;
   text-align: left;
 }
 .sudo-hero .term-body .line {
@@ -23,21 +83,6 @@
 @keyframes termLine {
   from { opacity: 0; transform: translateY(4px) }
   to   { opacity: 1; transform: none }
-}
-
-.sudo-hero .sudo-tagline {
-  font-family: var(--heading);
-  font-size: clamp(1rem, 2vw, 1.3rem);
-  color: var(--white);
-  margin-bottom: .5rem;
-  letter-spacing: .03em;
-}
-.sudo-hero .sudo-sub {
-  font-size: .9rem;
-  color: var(--mid);
-  max-width: 480px;
-  margin: 0 auto;
-  line-height: 1.75;
 }
 
 /* ── Sudo Reasons ── */

@@ -1,0 +1,82 @@
+/* ══════════════════════════════════════════════════════
+   Terminal — .term, .term-bar, .term-body, syntax highlighting
+   ══════════════════════════════════════════════════════ */
+
+.term {
+  background: var(--surface);
+  overflow: hidden;
+  border: 1px solid rgba(0,212,255,.1);
+  box-shadow: 0 0 30px rgba(0,212,255,.03);
+}
+
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 16px;
+  background: rgba(0,0,0,.3);
+  border-bottom: 1px solid rgba(0,212,255,.06);
+}
+
+.term-bar .p {
+  margin-left: auto;
+  font-family: var(--heading);
+  font-size: .55rem;
+  color: var(--gray);
+  letter-spacing: .05em;
+}
+
+.term-bar .lang-badge {
+  font-family: var(--heading);
+  font-size: .5rem;
+  color: var(--cyan);
+  letter-spacing: .06em;
+  padding: 2px 8px;
+  border: 1px solid rgba(0,212,255,.2);
+  background: rgba(0,212,255,.04);
+}
+
+.term-body {
+  padding: 1.5rem 1.75rem;
+  font-family: var(--mono);
+  font-size: .78rem;
+  line-height: 2.2;
+  overflow-x: auto;
+}
+
+.term-info {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid rgba(0,212,255,.06);
+}
+
+.ti {
+  padding: 1rem;
+  text-align: center;
+  border-right: 1px solid rgba(0,212,255,.04);
+}
+.ti:last-child { border-right: none }
+.ti strong {
+  display: block;
+  font-family: var(--heading);
+  font-size: .8rem;
+  color: var(--cyan);
+  margin-bottom: 1px;
+  letter-spacing: .03em;
+  text-shadow: 0 0 8px rgba(0,212,255,.2);
+}
+.ti span {
+  font-size: .6rem;
+  color: var(--gray);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+/* ── Syntax Highlighting ── */
+.cm { color: var(--mid) }
+.kw { color: var(--amber) }
+.fn { color: var(--cyan) }
+.st { color: var(--green) }
+.num { color: var(--rose) }
+.op { color: var(--mid) }
+.comment { color: #2a4a3e; font-style: italic }

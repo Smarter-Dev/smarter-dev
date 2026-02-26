@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — Warp Hex</title>
+<link href="https://fonts.googleapis.com/css2?family=Bungee+Hairline&family=Bruno+Ace+SC&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#020408;--surface:#080c14;--cyan:#00d4ff;--green:#22c55e;--amber:#eab308;--rose:#ef4444;--gray:#2a3a4e;--mid:#4a6078;--light:#8098b0;--white:#d4e0ec;--display:'Bungee Hairline',sans-serif;--heading:'Bruno Ace SC',sans-serif;--body:'Inter',Arial,sans-serif}
+html{scroll-behavior:smooth}body{font-family:var(--body);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.7}
+#bg{position:fixed;inset:0;z-index:0}
+.mockup-nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;background:rgba(2,4,8,.92);backdrop-filter:blur(24px);border-bottom:1px solid rgba(0,212,255,.06);font-family:var(--heading);font-size:.62rem;letter-spacing:.05em}
+.mockup-nav a{color:var(--gray);text-decoration:none;padding:5px 12px;border:1px solid transparent;transition:all .2s;white-space:nowrap}.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.25)}.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.06)}
+.reveal{opacity:0;transform:translateY(16px);transition:all .55s cubic-bezier(.25,.46,.45,.94)}.reveal.visible{opacity:1;transform:none}
+.code-label{font-family:var(--heading);font-size:.65rem;color:var(--cyan);margin-bottom:1rem;opacity:.75;letter-spacing:.08em}
+.sec-h{font-family:var(--heading);font-size:clamp(1.4rem,2.8vw,2rem);color:var(--white);line-height:1.2;margin-bottom:.5rem;letter-spacing:.02em}
+.sec-p{font-size:.9rem;color:var(--mid);max-width:480px;margin-bottom:2.5rem;line-height:1.75}
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;z-index:1;padding:7rem 2rem 4rem;text-align:center}
+.hero-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 18px;border-radius:100px;font-family:var(--heading);font-size:.6rem;background:rgba(0,212,255,.04);border:1px solid rgba(0,212,255,.12);color:var(--cyan);margin-bottom:2.5rem;letter-spacing:.08em}
+.hero-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.hero-logo{font-family:var(--display);font-size:clamp(3.2rem,8vw,6.5rem);color:var(--white);line-height:1;margin-bottom:.5rem;letter-spacing:.15em;text-shadow:0 0 40px rgba(0,212,255,.15)}
+.hero-logo .dev{font-family:var(--heading);color:var(--cyan);letter-spacing:.06em;font-size:.8em;text-shadow:0 0 30px rgba(0,212,255,.3)}
+.hero-sub{font-family:var(--heading);font-size:clamp(.75rem,1.3vw,.9rem);color:var(--mid);margin-bottom:1.5rem;letter-spacing:.06em}
+.hero-p{font-size:1rem;color:var(--mid);max-width:480px;margin:0 auto 2.5rem;line-height:1.8}.hero-p strong{color:var(--white);font-weight:600}
+.hero-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.btn-glow{padding:13px 34px;font-family:var(--heading);font-size:.7rem;letter-spacing:.06em;background:transparent;color:var(--cyan);border:1.5px solid var(--cyan);border-radius:0;cursor:pointer;box-shadow:0 0 15px rgba(0,212,255,.15),inset 0 0 15px rgba(0,212,255,.05);transition:all .3s;text-decoration:none}.btn-glow:hover{background:var(--cyan);color:var(--bg);box-shadow:0 0 30px rgba(0,212,255,.3)}
+.btn-ghost{padding:13px 34px;font-family:var(--heading);font-size:.7rem;letter-spacing:.06em;background:transparent;color:var(--mid);border:1px solid rgba(255,255,255,.08);border-radius:0;cursor:pointer;transition:all .25s;text-decoration:none}.btn-ghost:hover{border-color:rgba(0,212,255,.2);color:var(--light)}
+.hero-proof{display:flex;gap:2.5rem;margin-top:4rem;flex-wrap:wrap;justify-content:center}
+.hp .n{font-family:var(--heading);font-size:.9rem;color:var(--white);letter-spacing:.04em;text-shadow:0 0 10px rgba(0,212,255,.1)}.hp .l{font-size:.72rem;color:var(--gray);margin-top:2px}
+section{position:relative;z-index:1;padding:clamp(50px,7vw,90px) clamp(2rem,6vw,8rem)}.container{max-width:1080px;margin:0 auto}
+.pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:1px}
+.pillar{padding:2.25rem 2rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);border-top:2px solid rgba(0,212,255,.08);transition:all .3s;position:relative}
+.pillar::after{content:'';position:absolute;inset:0;opacity:0;transition:opacity .3s;box-shadow:inset 0 0 20px rgba(0,212,255,.05)}.pillar:hover{border-color:rgba(0,212,255,.2);border-top-color:var(--cyan)}.pillar:hover::after{opacity:1}
+.pillar .idx{font-family:var(--heading);font-size:.55rem;color:var(--cyan);margin-bottom:1rem;letter-spacing:.15em}
+.pillar h3{font-family:var(--heading);font-size:.85rem;color:var(--white);margin-bottom:.5rem;letter-spacing:.03em}.pillar p{font-size:.82rem;color:var(--mid);line-height:1.75}
+.term{max-width:760px;margin:0 auto;background:var(--surface);overflow:hidden;border:1px solid rgba(0,212,255,.1);box-shadow:0 0 30px rgba(0,212,255,.03)}
+.term-bar{display:flex;align-items:center;gap:7px;padding:11px 16px;background:rgba(0,0,0,.3);border-bottom:1px solid rgba(0,212,255,.06)}
+.term-bar .p{margin-left:auto;font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.05em}
+.term-body{padding:1.5rem 1.75rem;font-family:'Courier New',monospace;font-size:.78rem;line-height:2.2}
+.cm{color:#1e2e3e}.kw{color:var(--amber)}.fn{color:var(--cyan)}.st{color:var(--green)}
+.term-info{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(0,212,255,.06)}
+.ti{padding:1rem;text-align:center;border-right:1px solid rgba(0,212,255,.04)}.ti:last-child{border-right:none}
+.ti strong{display:block;font-family:var(--heading);font-size:.8rem;color:var(--cyan);margin-bottom:1px;letter-spacing:.03em;text-shadow:0 0 8px rgba(0,212,255,.2)}.ti span{font-size:.6rem;color:var(--gray);letter-spacing:.08em;text-transform:uppercase}
+.bytes-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;max-width:600px}
+.bg-item{display:flex;align-items:center;gap:14px;padding:1.15rem 1.5rem;background:var(--surface);border:1px solid rgba(0,212,255,.04);transition:all .2s}.bg-item:hover{border-color:rgba(0,212,255,.15);box-shadow:inset 0 0 12px rgba(0,212,255,.03)}
+.bg-item .pts{font-family:var(--heading);font-size:.82rem;color:var(--cyan);min-width:44px;letter-spacing:.03em;text-shadow:0 0 6px rgba(0,212,255,.2)}
+.bg-item .nm{font-size:.85rem;font-weight:600;color:var(--white)}.bg-item .ds{font-size:.7rem;color:var(--gray);margin-top:1px}
+.stats{display:flex;justify-content:space-between;flex-wrap:wrap;gap:2rem;padding:3rem 0;border-top:1px solid rgba(0,212,255,.06);border-bottom:1px solid rgba(0,212,255,.06)}
+.stat{text-align:center;flex:1;min-width:100px}.stat .num{font-family:var(--display);font-size:clamp(2rem,4vw,3rem);color:var(--white);line-height:1;text-shadow:0 0 20px rgba(0,212,255,.1)}.stat .num .u{font-family:var(--heading);color:var(--cyan);font-size:.45em}.stat .lbl{font-size:.72rem;color:var(--gray);margin-top:.15rem}
+.quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:2rem}
+.q{padding:2rem;background:var(--surface);border:1px solid rgba(0,212,255,.04);border-left:2px solid transparent;transition:all .3s}.q:hover{border-left-color:var(--cyan);box-shadow:inset 0 0 15px rgba(0,212,255,.02)}
+.q blockquote{font-size:.85rem;color:var(--light);line-height:1.8;margin-bottom:1.25rem}.q .who{font-size:.7rem}.q .nm{color:var(--white);font-weight:600}.q .rl{color:var(--gray)}
+.cta{text-align:center;padding:clamp(70px,10vw,130px) 2rem;position:relative;z-index:1}
+.cta-h{font-family:var(--display);font-size:clamp(1.8rem,4.5vw,3.5rem);color:var(--white);line-height:1.1;margin-bottom:.25rem;letter-spacing:.08em;text-shadow:0 0 30px rgba(0,212,255,.1)}
+.cta-h2{font-family:var(--heading);font-size:clamp(1.2rem,2.5vw,1.8rem);color:var(--cyan);margin-bottom:2rem;letter-spacing:.04em;text-shadow:0 0 20px rgba(0,212,255,.15)}
+.foot{text-align:center;padding:1.5rem;font-family:var(--heading);font-size:.55rem;color:var(--gray);border-top:1px solid rgba(0,212,255,.04);position:relative;z-index:1;letter-spacing:.06em}
+@media(max-width:900px){.pillars,.quotes{grid-template-columns:1fr}.bytes-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.stats{flex-direction:column;align-items:center}}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<nav class="mockup-nav">
+  <a href="mockup-42-warp-hex.html" class="active">42 Hex Warp</a>
+  <a href="mockup-43-dashboard.html">43 Dashboard</a>
+  <a href="mockup-44-blog.html">44 Blog</a>
+  <a href="mockup-45-questionnaire.html">45 Questionnaire</a>
+  <a href="mockup-46-research-prompt.html">46 Research</a>
+  <a href="mockup-47-research-output.html">47 Output</a>
+  <a href="mockup-48-github-actions.html">48 GitHub</a>
+</nav>
+
+<section class="hero">
+  <div class="hero-chip reveal"><span class="dot"></span> 15,000+ developers and growing</div>
+  <div class="hero-logo reveal">SMARTER <span class="dev">Dev</span></div>
+  <div class="hero-sub reveal">AI writes code. We build developers.</div>
+  <p class="hero-p reveal">A community focused on what actually matters — <strong>critical thinking</strong>, <strong>architecture</strong>, and <strong>adversarial reasoning</strong>. No gatekeeping. No fluff. Just developers getting better, together.</p>
+  <div class="hero-btns reveal"><a href="#" class="btn-glow">Join on Discord</a><a href="#how" class="btn-ghost">How it works</a></div>
+  <div class="hero-proof reveal"><div class="hp"><div class="n">15K+</div><div class="l">Developers</div></div><div class="hp"><div class="n">730</div><div class="l">Challenges</div></div><div class="hp"><div class="n">98%</div><div class="l">"Worth it"</div></div></div>
+</section>
+<section id="how"><div class="container"><div class="reveal"><div class="code-label">// skills.sharpen()</div><div class="sec-h">Three pillars of developer growth.</div><div class="sec-p">AI handles syntax. We handle the thinking that makes syntax matter.</div></div>
+<div class="pillars"><div class="pillar reveal"><div class="idx">DISCIPLINE 01</div><h3>Critical Thinking</h3><p>Evaluate trade-offs. Spot invisible assumptions. Ask the questions that redirect entire projects. The skill that compounds forever.</p></div><div class="pillar reveal"><div class="idx">DISCIPLINE 02</div><h3>Architecture</h3><p>Design systems that survive production. Boundaries, contracts, failure modes — the thinking AI can't do for you.</p></div><div class="pillar reveal"><div class="idx">DISCIPLINE 03</div><h3>Adversarial Reasoning</h3><p>Think like an attacker. Find the edge case before production does. Build paranoid systems that hold up when reality pushes back.</p></div></div></div></section>
+<section><div class="container"><div class="reveal"><div class="code-label">// runhacks.execute()</div><div class="sec-h">Daily challenges. Real growth.</div><div class="sec-p">Real scenarios that train how you think, not just what you type.</div></div>
+<div class="term reveal"><div class="term-bar"><div class="p">challenge_731.sh</div></div><div class="term-body"><div><span class="cm"># Distributed cache: 2% stale reads</span></div><div><span class="cm"># Replication healthy. TTLs correct.</span></div><div><span class="cm"># Difficulty: Hard | Reward: 150 Bytes</span></div><div>&nbsp;</div><div><span class="kw">function</span> <span class="fn">diagnose</span>() {</div><div>&nbsp;&nbsp;<span class="cm"># What architectural assumption is wrong?</span></div><div>&nbsp;&nbsp;<span class="kw">echo</span> <span class="st">"Think architecture, not code."</span></div><div>}</div></div><div class="term-info"><div class="ti"><strong>Daily</strong><span>Frequency</span></div><div class="ti"><strong>3 Tiers</strong><span>Difficulty</span></div><div class="ti"><strong>Peer</strong><span>Review</span></div></div></div></div></section>
+<section><div class="container"><div class="reveal"><div class="code-label">// bytes.earn()</div><div class="sec-h">Earn Bytes. Track your growth.</div><div class="sec-p">A reward system that values consistency, contribution, and quality over clout.</div></div>
+<div class="bytes-grid reveal"><div class="bg-item"><div class="pts">+5</div><div><div class="nm">Daily Check-in</div><div class="ds">Consistency compounds</div></div></div><div class="bg-item"><div class="pts">+50</div><div><div class="nm">Solve a RunHack</div><div class="ds">Ship a real solution</div></div></div><div class="bg-item"><div class="pts">+25</div><div><div class="nm">Peer Review</div><div class="ds">Give actionable feedback</div></div></div><div class="bg-item"><div class="pts">+100</div><div><div class="nm">Top Solution</div><div class="ds">Community-voted best</div></div></div></div></div></section>
+<section><div class="container"><div class="stats reveal"><div class="stat"><div class="num">15<span class="u">K+</span></div><div class="lbl">Developers</div></div><div class="stat"><div class="num">730</div><div class="lbl">Challenges</div></div><div class="stat"><div class="num">42<span class="u">K</span></div><div class="lbl">Solutions</div></div><div class="stat"><div class="num">98<span class="u">%</span></div><div class="lbl">"Worth it"</div></div></div></div></section>
+<section><div class="container"><div class="reveal"><div class="code-label">// community.listen()</div><div class="sec-h">What developers say.</div></div>
+<div class="quotes"><div class="q reveal"><blockquote>"I stopped vibe-coding with AI and started understanding the systems I was building. Smarter Dev changed how I approach everything."</blockquote><div class="who"><span class="nm">Maya Rodriguez</span> &mdash; <span class="rl">Senior Engineer @ Vercel</span></div></div><div class="q reveal"><blockquote>"RunHacks is addictive in the best way. 200+ challenges in and every single one made me think differently about code."</blockquote><div class="who"><span class="nm">James Kim</span> &mdash; <span class="rl">Full-Stack Developer</span></div></div><div class="q reveal"><blockquote>"No ego. No gatekeeping. Just devs helping devs get better. This is what communities should look like."</blockquote><div class="who"><span class="nm">Sarah Petrov</span> &mdash; <span class="rl">Tech Lead @ Stripe</span></div></div></div></div></section>
+<section class="cta"><div class="reveal"><div class="cta-h">Stop writing code.</div><div class="cta-h2">Start thinking.</div><a href="#" class="btn-glow" style="padding:14px 36px">Join on Discord &rarr;</a></div></section>
+<div class="foot">&copy; 2026 SMARTER DEV</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('bg');
+  const ctx = canvas.getContext('2d');
+
+  // Hex grid config — pointy-top hexagons
+  const HEX_SIZE = 18; // radius center to vertex
+  const H_SPACING = HEX_SIZE * Math.sqrt(3); // ~31px horizontal between centers
+  const V_SPACING = HEX_SIZE * 1.5;          // ~27px vertical between rows
+  const DOT_RADIUS = 2;
+  const INFLUENCE_RADIUS = 200;
+  const MAX_DISPLACEMENT = 20;
+  const LERP_SPEED = 0.08;
+  const AMBIENT_AMPLITUDE = 1;
+  const AMBIENT_SPEED = 0.0008;
+  const CLICK_DURATION = 500;
+  const HEX_LINE_REST = 0.025;
+  const HEX_LINE_ACTIVE = 0.08;
+  const PATH_COUNT = 60;
+  const PATH_SPEED = 1.2;
+  const TURN_CHANCE = 0.2;
+  const SEGMENT_FADE = 0.001;
+  const SEGMENT_PEAK_ALPHA = 0.12;
+
+  let dots = [];
+  let cols = 0;
+  let rows = 0;
+  let mouseX = -9999;
+  let mouseY = -9999;
+  let mouseActive = false;
+  let clickTime = 0;
+  let clickActive = false;
+  let animId = null;
+  let time = 0;
+  let traces = [];
+
+  // Hex vertex offsets for pointy-top hexagon (for drawing outlines)
+  const hexVerts = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.PI / 180 * (60 * i - 30);
+    hexVerts.push({ x: HEX_SIZE * Math.cos(angle), y: HEX_SIZE * Math.sin(angle) });
+  }
+
+  function createDots() {
+    const w = canvas.width;
+    const h = canvas.height;
+    cols = Math.ceil(w / H_SPACING) + 3;
+    rows = Math.ceil(h / V_SPACING) + 3;
+
+    dots = [];
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const isOdd = row % 2 === 1;
+        dots.push({
+          baseX: col * H_SPACING + (isOdd ? H_SPACING * 0.5 : 0) - H_SPACING,
+          baseY: row * V_SPACING - V_SPACING,
+          offsetX: 0,
+          offsetY: 0,
+          targetOffsetX: 0,
+          targetOffsetY: 0,
+          col: col,
+          row: row,
+          phaseX: Math.random() * Math.PI * 2,
+          phaseY: Math.random() * Math.PI * 2
+        });
+      }
+    }
+
+    initTraces();
+  }
+
+  function getDot(row, col) {
+    if (row < 0 || row >= rows || col < 0 || col >= cols) return null;
+    return dots[row * cols + col];
+  }
+
+  // Get the two "downward" hex neighbors for a given row,col
+  function downNeighbors(row, col) {
+    const isOdd = row % 2 === 1;
+    if (isOdd) {
+      // odd row: down-left = (row+1, col), down-right = (row+1, col+1)
+      return [{ row: row + 1, col: col }, { row: row + 1, col: col + 1 }];
+    } else {
+      // even row: down-left = (row+1, col-1), down-right = (row+1, col)
+      return [{ row: row + 1, col: col - 1 }, { row: row + 1, col: col }];
+    }
+  }
+
+  function buildRoute(startCol) {
+    const route = [];
+    let col = startCol;
+    for (let row = 0; row < rows; row++) {
+      route.push({ row: row, col: col });
+      // Maybe jog horizontally
+      if (Math.random() < TURN_CHANCE && row < rows - 1) {
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        const newCol = col + dir;
+        if (newCol >= 0 && newCol < cols) {
+          route.push({ row: row, col: newCol });
+          col = newCol;
+        }
+      }
+      // Pick one of two down neighbors for the next row
+      if (row < rows - 1) {
+        const dns = downNeighbors(row, col);
+        const pick = dns[Math.random() < 0.5 ? 0 : 1];
+        if (pick.col >= 0 && pick.col < cols) {
+          col = pick.col;
+        } else {
+          col = dns[0].col >= 0 && dns[0].col < cols ? dns[0].col : dns[1].col;
+        }
+      }
+    }
+    return route;
+  }
+
+  let recentSpawnCols = [];
+
+  function pickSpawnCol() {
+    const MIN_DIST = 8;
+    for (let attempts = 0; attempts < 200; attempts++) {
+      const col = Math.floor(Math.random() * cols);
+      let tooClose = false;
+      for (const prev of recentSpawnCols) {
+        if (Math.abs(col - prev) < MIN_DIST) { tooClose = true; break; }
+      }
+      if (!tooClose) {
+        recentSpawnCols.push(col);
+        if (recentSpawnCols.length > 3) recentSpawnCols.shift();
+        return col;
+      }
+    }
+    const col = Math.floor(Math.random() * cols);
+    recentSpawnCols.push(col);
+    if (recentSpawnCols.length > 3) recentSpawnCols.shift();
+    return col;
+  }
+
+  function spawnTrace() {
+    const col = pickSpawnCol();
+    return {
+      route: buildRoute(col),
+      step: 0,
+      progress: 0,
+      speed: PATH_SPEED * (0.5 + Math.random() * 0.8),
+      segments: []
+    };
+  }
+
+  function initTraces() {
+    recentSpawnCols = [];
+    traces = [];
+    for (let i = 0; i < PATH_COUNT; i++) {
+      const t = spawnTrace();
+      t.step = Math.floor(Math.random() * t.route.length * 0.8);
+      traces.push(t);
+    }
+  }
+
+  function updateTraces() {
+    for (let i = 0; i < traces.length; i++) {
+      const t = traces[i];
+
+      if (t.step < t.route.length - 1) {
+        const from = t.route[t.step];
+        const to = t.route[t.step + 1];
+        const d1 = getDot(from.row, from.col);
+        const d2 = getDot(to.row, to.col);
+
+        let stepDist = H_SPACING;
+        if (d1 && d2) {
+          const dx = d2.baseX - d1.baseX;
+          const dy = d2.baseY - d1.baseY;
+          stepDist = Math.sqrt(dx * dx + dy * dy) || H_SPACING;
+        }
+
+        t.progress += t.speed / stepDist;
+
+        if (t.progress >= 1) {
+          t.segments.push({
+            fromRow: from.row, fromCol: from.col,
+            toRow: to.row, toCol: to.col,
+            alpha: SEGMENT_PEAK_ALPHA
+          });
+          t.progress -= 1;
+          t.step++;
+        }
+      } else {
+        traces[i] = spawnTrace();
+      }
+
+      for (let j = t.segments.length - 1; j >= 0; j--) {
+        t.segments[j].alpha -= SEGMENT_FADE;
+        if (t.segments[j].alpha <= 0) t.segments.splice(j, 1);
+      }
+    }
+  }
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr;
+    canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + 'px';
+    canvas.style.height = window.innerHeight + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    createDots();
+  }
+
+  function onMouseMove(e) { mouseX = e.clientX; mouseY = e.clientY; mouseActive = true; }
+  function onMouseLeave() { mouseActive = false; mouseX = -9999; mouseY = -9999; }
+  function onClick() { clickTime = performance.now(); clickActive = true; }
+
+  function update(now) {
+    time = now;
+
+    let clickFactor = 0;
+    if (clickActive) {
+      const elapsed = now - clickTime;
+      if (elapsed < CLICK_DURATION) {
+        clickFactor = 1 - (elapsed / CLICK_DURATION);
+        clickFactor *= clickFactor;
+      } else {
+        clickActive = false;
+      }
+    }
+
+    const influenceRadSq = INFLUENCE_RADIUS * INFLUENCE_RADIUS;
+
+    for (let i = 0; i < dots.length; i++) {
+      const dot = dots[i];
+      const ambientX = Math.sin(now * AMBIENT_SPEED + dot.phaseX) * AMBIENT_AMPLITUDE;
+      const ambientY = Math.cos(now * AMBIENT_SPEED * 0.7 + dot.phaseY) * AMBIENT_AMPLITUDE;
+
+      let dispX = 0, dispY = 0;
+
+      if (mouseActive) {
+        const dx = dot.baseX - mouseX;
+        const dy = dot.baseY - mouseY;
+        const distSq = dx * dx + dy * dy;
+
+        if (distSq < influenceRadSq && distSq > 0.01) {
+          const dist = Math.sqrt(distSq);
+          const prox = 1 - (dist / INFLUENCE_RADIUS);
+          const strength = prox * prox * MAX_DISPLACEMENT;
+          const dirX = dx / dist;
+          const dirY = dy / dist;
+          const blend = 1 - 2 * clickFactor;
+          dispX = dirX * strength * blend;
+          dispY = dirY * strength * blend;
+        }
+      }
+
+      dot.targetOffsetX = dispX + ambientX;
+      dot.targetOffsetY = dispY + ambientY;
+      dot.offsetX += (dot.targetOffsetX - dot.offsetX) * LERP_SPEED;
+      dot.offsetY += (dot.targetOffsetY - dot.offsetY) * LERP_SPEED;
+    }
+
+    updateTraces();
+  }
+
+  function drawHex(cx, cy, alpha) {
+    ctx.beginPath();
+    ctx.moveTo(cx + hexVerts[0].x, cy + hexVerts[0].y);
+    for (let i = 1; i < 6; i++) {
+      ctx.lineTo(cx + hexVerts[i].x, cy + hexVerts[i].y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = 'rgba(0,212,255,' + alpha.toFixed(4) + ')';
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+  }
+
+  function draw() {
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    ctx.clearRect(0, 0, w, h);
+
+    // Draw hex outlines and dots
+    for (let i = 0; i < dots.length; i++) {
+      const dot = dots[i];
+      const x = dot.baseX + dot.offsetX;
+      const y = dot.baseY + dot.offsetY;
+
+      const disp = Math.sqrt(dot.offsetX * dot.offsetX + dot.offsetY * dot.offsetY);
+      const effectiveDisp = Math.max(0, disp - AMBIENT_AMPLITUDE);
+      const dispNorm = Math.min(effectiveDisp / MAX_DISPLACEMENT, 1);
+
+      // Hex outline
+      const hexAlpha = HEX_LINE_REST + (HEX_LINE_ACTIVE - HEX_LINE_REST) * dispNorm;
+      drawHex(x, y, hexAlpha);
+
+      // Center dot
+      const dotAlpha = 0.06 + (0.3 - 0.06) * dispNorm;
+      ctx.beginPath();
+      ctx.arc(x, y, DOT_RADIUS, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0,212,255,' + dotAlpha.toFixed(3) + ')';
+      ctx.fill();
+    }
+
+    // Draw animated traces
+    for (const t of traces) {
+      for (const seg of t.segments) {
+        const d1 = getDot(seg.fromRow, seg.fromCol);
+        const d2 = getDot(seg.toRow, seg.toCol);
+        if (!d1 || !d2) continue;
+        ctx.beginPath();
+        ctx.moveTo(d1.baseX + d1.offsetX, d1.baseY + d1.offsetY);
+        ctx.lineTo(d2.baseX + d2.offsetX, d2.baseY + d2.offsetY);
+        ctx.strokeStyle = 'rgba(0,212,255,' + seg.alpha.toFixed(4) + ')';
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+      }
+
+      if (t.step < t.route.length - 1) {
+        const from = t.route[t.step];
+        const to = t.route[t.step + 1];
+        const d1 = getDot(from.row, from.col);
+        const d2 = getDot(to.row, to.col);
+        if (d1 && d2) {
+          const x1 = d1.baseX + d1.offsetX, y1 = d1.baseY + d1.offsetY;
+          const x2 = d2.baseX + d2.offsetX, y2 = d2.baseY + d2.offsetY;
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x1 + (x2 - x1) * t.progress, y1 + (y2 - y1) * t.progress);
+          ctx.strokeStyle = 'rgba(0,212,255,' + SEGMENT_PEAK_ALPHA + ')';
+          ctx.lineWidth = 2.5;
+          ctx.stroke();
+        }
+      }
+    }
+  }
+
+  function loop(now) {
+    update(now);
+    draw();
+    animId = requestAnimationFrame(loop);
+  }
+
+  resize();
+  window.addEventListener('resize', resize);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseleave', onMouseLeave);
+  window.addEventListener('click', onClick);
+  animId = requestAnimationFrame(loop);
+
+  const obs = new IntersectionObserver(e => {
+    e.forEach(x => {
+      if (x.isIntersecting) { x.target.classList.add('visible'); obs.unobserve(x.target); }
+    });
+  }, { threshold: .1 });
+  document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+})();
+</script>
+</body>
+</html>

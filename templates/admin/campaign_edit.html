@@ -5,9 +5,9 @@
 {% block page_title %}Edit Campaign{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/campaigns">Campaigns</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}/campaigns">Campaigns</a></li>
 <li class="breadcrumb-item active">{{ campaign.title }}</li>
 {% endblock %}
 
@@ -222,7 +222,7 @@
                             </svg>
                             Update Campaign
                         </button>
-                        <a href="/admin/guilds/{{ guild.id }}/campaigns" class="btn btn-link">Cancel</a>
+                        <a href="/bot-admin/guilds/{{ guild.id }}/campaigns" class="btn btn-link">Cancel</a>
                     </div>
                 </form>
             </div>
@@ -266,7 +266,7 @@
                 </dl>
                 
                 <div class="mt-3">
-                    <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" 
+                    <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" 
                        class="btn btn-outline-primary w-100">
                         <svg class="icon me-2" width="24" height="24">
                             <use xlink:href="#tabler-list"></use>

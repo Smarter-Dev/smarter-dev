@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="sk-partials" content="{% block partial_names %}masthead,content,footer{% endblock %}">
+    <meta name="sk-page-type" content="{% block page_type %}{{ page_type|default('page') }}{% endblock %}">
+
+    {% block seo_meta %}
+    {% if seo_meta %}
+    {% if seo_meta.description %}<meta name="description" content="{{ seo_meta.description }}">{% endif %}
+    {% if seo_meta.robots %}<meta name="robots" content="{{ seo_meta.robots }}">{% endif %}
+    <link rel="canonical" href="{{ seo_meta.canonical_url }}">
+    {% endif %}
+    {% endblock %}
+
+    {% block og_meta %}
+    {% if og_meta %}
+    <meta property="og:title" content="{{ og_meta.title }}">
+    {% if og_meta.description %}<meta property="og:description" content="{{ og_meta.description }}">{% endif %}
+    {% if og_meta.image %}<meta property="og:image" content="{{ og_meta.image }}">{% endif %}
+    <meta property="og:url" content="{{ og_meta.url }}">
+    <meta property="og:site_name" content="{{ og_meta.site_name }}">
+    <meta property="og:type" content="{{ og_meta.type }}">
+    {% endif %}
+    {% endblock %}
+
+    <title>{% block title %}{% block page_title %}Smarter Dev{% endblock %} — Smarter Dev{% endblock %}</title>
+
+    {% block head %}
+    <link rel="icon" type="image/png" href="{{ static_url('site/favicon.png') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Bungee+Hairline&family=Bruno+Ace+SC&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ theme_url('css/framework.css') }}">
+    <link rel="stylesheet" href="{{ theme_url('css/background.css') }}">
+    <link rel="stylesheet" href="{{ theme_url('css/animations.css') }}">
+    <link rel="stylesheet" href="{{ theme_url('css/components/buttons.css') }}">
+    <link rel="stylesheet" href="{{ theme_url('css/components/cards.css') }}">
+    <link rel="stylesheet" href="{{ theme_url('css/components/terminal.css') }}">
+    <link rel="stylesheet" href="{{ theme_url('css/components/badges.css') }}">
+    <link rel="stylesheet" href="{{ theme_url('css/components/forms.css') }}">
+    <link rel="stylesheet" href="{{ theme_url('css/components/lists.css') }}">
+    <link rel="stylesheet" href="{{ theme_url('css/components/nav.css') }}">
+    <link rel="stylesheet" href="{{ theme_url('css/components/charts.css') }}">
+    <link rel="stylesheet" href="{{ theme_url('css/components/status.css') }}">
+    {% block page_css %}{% endblock %}
+    {% endblock %}
+</head>
+<body>
+    {% block body_start %}
+    <canvas id="bg"></canvas>
+    {% endblock %}
+
+    <header data-sk-partial="masthead">
+        {% block masthead %}
+        {% include "_partials/masthead.html" %}
+        {% endblock %}
+    </header>
+
+    <main data-sk-partial="content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer data-sk-partial="footer">
+        {% block footer %}
+        {% include "_partials/footer.html" %}
+        {% endblock %}
+    </footer>
+
+    <script src="{{ theme_url('js/spa-nav.js') }}"></script>
+    {% block scripts %}
+    <script src="{{ theme_url('js/hex-warp.js') }}"></script>
+    <script src="{{ theme_url('js/status.js') }}"></script>
+    {% block page_scripts %}{% endblock %}
+    {% endblock %}
+</body>
+</html>

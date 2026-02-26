@@ -5,11 +5,11 @@
 {% block page_title %}Create Scheduled Message{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/campaigns">Campaigns</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges">{{ campaign.title }}</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages">Scheduled Messages</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}/campaigns">Campaigns</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges">{{ campaign.title }}</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages">Scheduled Messages</a></li>
 <li class="breadcrumb-item active">Create</li>
 {% endblock %}
 
@@ -91,7 +91,7 @@
                             </svg>
                             Create Scheduled Message
                         </button>
-                        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages" class="btn btn-link">Cancel</a>
+                        <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages" class="btn btn-link">Cancel</a>
                     </div>
                 </form>
             </div>

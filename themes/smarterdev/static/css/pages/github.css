@@ -1,0 +1,17 @@
+/* ══════════════════════════════════════════════════════
+   GitHub — GitHub dashboard page-specific overrides
+   ══════════════════════════════════════════════════════ */
+
+/* The GitHub dashboard reuses .dash-wrap, .dash-header, .dash-columns,
+   .chart-metrics-row, .metrics-row, .active-actions-grid, .repo-grid,
+   .runs-list from the component files. This file contains any
+   page-specific layout overrides. */
+
+/* GitHub two-column layout uses 1fr 1fr instead of the 1.5fr 1fr default */
+.github-dash .dash-columns {
+  grid-template-columns: 1fr 1fr;
+}
+
+@media (max-width: 900px) {
+  .github-dash .dash-columns { grid-template-columns: 1fr }
+}

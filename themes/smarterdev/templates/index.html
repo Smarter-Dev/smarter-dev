@@ -1,113 +1,95 @@
 {% extends "base.html" %}
 
 {% block page_type %}home{% endblock %}
-{% block page_title %}AI writes code. We build developers{% endblock %}
+{% block page_title %}Build the skills AI can't replace{% endblock %}
 
 {% block page_css %}
-    <link rel="stylesheet" href="/static/theme/css/pages/sudo.css">
+    <link rel="stylesheet" href="{{ theme_url('css/pages/sudo.css') }}">
 {% endblock %}
 
 {% block content %}
 <section class="hero">
     <div class="hero-chip reveal"><span class="dot"></span> 13,000+ developers and growing</div>
     <div class="hero-logo reveal">SMARTER <span class="dev">Dev</span></div>
-    <div class="hero-sub reveal">AI writes code. We build developers.</div>
+    <div class="hero-sub reveal">Build the skills AI can't replace.</div>
     <p class="hero-p reveal">A community focused on what actually matters — <strong>critical thinking</strong>, <strong>architecture</strong>, and <strong>adversarial reasoning</strong>. No gatekeeping. No fluff. Just developers getting better, together.</p>
     <div class="hero-btns reveal">
         <a href="https://discord.gg/de8kajxbYS" class="btn-glow" target="_blank" data-sk-no-spa>Join on Discord</a>
-        <a href="/sudo" class="btn-ghost">Explore sudo &rarr;</a>
+        <a href="/sudo" class="btn-ghost" data-sk-no-spa>Explore sudo &rarr;</a>
     </div>
     <div class="hero-proof reveal">
         <div class="hp"><div class="n">13K+</div><div class="l">Developers</div></div>
         <div class="hp"><div class="n">4.5★</div><div class="l">Disboard</div></div>
+        <div class="hp"><div class="n">6+</div><div class="l">Years</div></div>
     </div>
 </section>
 
-<section id="how">
+<section>
+    <div class="container">
+        <div class="pitch-row reveal">
+            <div class="pitch-text">
+                <div class="code-label">// why.smarterdev()</div>
+                <div class="sec-h">Not another tutorial site.</div>
+                <p class="sec-p">Smarter Dev is a community of developers who already know how to code and want to keep getting sharper. We're focused on the skills that define the AI era — specification, architecture, security thinking, adversarial reasoning — not syntax basics.</p>
+                <p class="sec-p">This isn't a content dump. It's an active community where people show up, push each other, and build real skills together. 13,000+ developers across 6 years, still growing.</p>
+            </div>
+            <div class="term pitch-term">
+                <div class="term-bar"><div class="p">challenge_731.sh</div></div>
+                <div class="term-body">
+                    <div><span class="cm"># Distributed cache: 2% stale reads</span></div>
+                    <div><span class="cm"># Replication healthy. TTLs correct.</span></div>
+                    <div><span class="cm"># Difficulty: Hard | Reward: 150 Bytes</span></div>
+                    <div>&nbsp;</div>
+                    <div><span class="kw">function</span> <span class="fn">diagnose</span>() {</div>
+                    <div>&nbsp;&nbsp;<span class="cm"># What architectural assumption is wrong?</span></div>
+                    <div>&nbsp;&nbsp;<span class="kw">echo</span> <span class="st">"Think architecture, not code."</span></div>
+                    <div>}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section>
     <div class="container">
         <div class="reveal">
-            <div class="code-label">// community.join()</div>
-            <div class="sec-h">Three pillars of Smarter Dev.</div>
-            <div class="sec-p">Everything you need to level up — a community, a system, and real challenges.</div>
+            <div class="code-label">// community.ls()</div>
+            <div class="sec-h">What you'll find here.</div>
         </div>
         <div class="pillars">
             <div class="pillar reveal">
                 <div class="idx">01</div>
-                <h3>Discord Community</h3>
-                <p>13,000+ developers sharing knowledge, reviewing code, and pushing each other forward. Active discussions, mentorship, and zero gatekeeping.</p>
+                <h3>The Community</h3>
+                <p>Active Discord with real conversations, tech help, code reviews, and squads you can join to work on things together.</p>
             </div>
-            <div class="pillar reveal">
+            <div class="pillar coming reveal">
                 <div class="idx">02</div>
-                <h3>Bytes & Squads</h3>
-                <p>Earn Bytes for contributions. Join Squads to tackle challenges together. A reward system that values consistency and quality over clout.</p>
+                <h3>Learning Resources</h3>
+                <p>Challenges that train how you think, courses built around real tools, and curated paths that sequence it all into progression.</p>
             </div>
-            <div class="pillar reveal">
+            <div class="pillar coming reveal">
                 <div class="idx">03</div>
-                <h3>Challenges</h3>
-                <p>Challenges that train how you think, not just what you type. Real scenarios, peer review, and difficulty tiers from beginner to brutal.</p>
+                <h3>Tools & Experiences</h3>
+                <p>AI-powered tools and interactive scenarios being built on the platform — things you use, not just read about.</p>
             </div>
-        </div>
-    </div>
-</section>
-
-<section>
-    <div class="container">
-        <div class="reveal">
-            <div class="code-label">// challenges.execute()</div>
-            <div class="sec-h">Real challenges. Real growth.</div>
-            <div class="sec-p">Real scenarios that train how you think, not just what you type.</div>
-        </div>
-        <div class="term reveal">
-            <div class="term-bar"><div class="p">challenge_731.sh</div></div>
-            <div class="term-body">
-                <div><span class="cm"># Distributed cache: 2% stale reads</span></div>
-                <div><span class="cm"># Replication healthy. TTLs correct.</span></div>
-                <div><span class="cm"># Difficulty: Hard | Reward: 150 Bytes</span></div>
-                <div>&nbsp;</div>
-                <div><span class="kw">function</span> <span class="fn">diagnose</span>() {</div>
-                <div>&nbsp;&nbsp;<span class="cm"># What architectural assumption is wrong?</span></div>
-                <div>&nbsp;&nbsp;<span class="kw">echo</span> <span class="st">"Think architecture, not code."</span></div>
-                <div>}</div>
-            </div>
-            <div class="term-info">
-                <div class="ti"><strong>Regular</strong><span>Frequency</span></div>
-                <div class="ti"><strong>3 Tiers</strong><span>Difficulty</span></div>
-                <div class="ti"><strong>Peer</strong><span>Review</span></div>
-            </div>
-        </div>
-    </div>
-</section>
-
-<section>
-    <div class="container">
-        <div class="reveal">
-            <div class="code-label">// bytes.earn()</div>
-            <div class="sec-h">Earn Bytes. Track your growth.</div>
-            <div class="sec-p">A reward system that values consistency, contribution, and quality over clout.</div>
-        </div>
-        <div class="bytes-grid reveal">
-            <div class="bg-item"><div class="pts">+5</div><div><div class="nm">Daily Check-in</div><div class="ds">Consistency compounds</div></div></div>
-            <div class="bg-item"><div class="pts">+50</div><div><div class="nm">Solve a Challenge</div><div class="ds">Ship a real solution</div></div></div>
-            <div class="bg-item"><div class="pts">+25</div><div><div class="nm">Peer Review</div><div class="ds">Give actionable feedback</div></div></div>
-            <div class="bg-item"><div class="pts">+100</div><div><div class="nm">Top Solution</div><div class="ds">Community-voted best</div></div></div>
         </div>
     </div>
 </section>
 
 <div class="sudo-strip reveal">
     <div class="sudo-strip-inner">
-        <div class="sudo-strip-cmd"><span class="kw">$</span> <span class="fn">sudo</span> smarter-dev --unlock <span class="cm"># one membership, root access to everything</span></div>
-        <a href="/sudo" class="sudo-strip-link">Explore sudo &rarr;</a>
+        <div class="sudo-strip-cmd"><span class="kw">$</span> <span class="fn">sudo</span> smarter-dev --unlock <span class="cm"># something bigger is coming</span></div>
+        <a href="/sudo" class="sudo-strip-link" data-sk-no-spa>Explore sudo &rarr;</a>
     </div>
 </div>
 
 <section class="cta">
     <div class="reveal">
-        <div class="cta-h">Stop writing code.</div>
-        <div class="cta-h2">Start thinking.</div>
-        <div class="hero-btns" style="justify-content:center">
-            <a href="https://discord.gg/de8kajxbYS" class="btn-glow" style="padding:14px 36px" target="_blank" data-sk-no-spa>Join on Discord &rarr;</a>
-            <a href="/sudo" class="btn-ghost" style="padding:14px 36px">Explore sudo &rarr;</a>
+        <div class="code-label">// ready.init()</div>
+        <div class="cta-h">Come build with us.</div>
+        <div class="cta-h2">The developers who thrive in the AI era aren't the ones consuming content &mdash; they're the ones sharpening each other.</div>
+        <div class="hero-btns" style="justify-content:center; margin-top: 2.5rem">
+            <a href="https://discord.gg/de8kajxbYS" class="btn-glow" style="padding:14px 36px" target="_blank" data-sk-no-spa>Join 13,000+ developers &rarr;</a>
         </div>
     </div>
 </section>

@@ -46,6 +46,9 @@ from smarter_dev.web.api.routers.repeating_messages import (
 )
 from smarter_dev.web.api.routers.members import router as members_router
 from smarter_dev.web.api.routers.advent_of_code import router as advent_of_code_router
+from smarter_dev.web.api.routers.campaign_signups import (
+    router as campaign_signups_router,
+)
 from smarter_dev.web.api.schemas import (
     ErrorResponse,
     ValidationErrorResponse,
@@ -121,6 +124,7 @@ api = FastAPI(
     docs_url=docs_url,
     redoc_url=redoc_url,
     openapi_url=openapi_url,
+    redirect_slashes=False,
 )
 
 
@@ -407,6 +411,8 @@ api.include_router(repeating_messages_router, tags=["Repeating Message Managemen
 api.include_router(members_router, tags=["Members"])
 
 api.include_router(advent_of_code_router, tags=["Advent of Code"])
+
+api.include_router(campaign_signups_router, tags=["Campaign Signups"])
 
 
 # Health check endpoint

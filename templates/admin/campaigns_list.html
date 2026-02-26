@@ -5,15 +5,15 @@
 {% block page_title %}Challenge Campaigns{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item"><a href="/admin/guilds">Guilds</a></li>
-<li class="breadcrumb-item"><a href="/admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds">Guilds</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/guilds/{{ guild.id }}">{{ guild.name }}</a></li>
 <li class="breadcrumb-item active">Campaigns</li>
 {% endblock %}
 
 {% block page_actions %}
 <div class="col-auto ms-auto d-print-none">
     <div class="btn-list">
-        <a href="/admin/guilds/{{ guild.id }}/campaigns/create" class="btn btn-primary">
+        <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/create" class="btn btn-primary">
             <svg class="icon me-2" width="24" height="24">
                 <use xlink:href="#tabler-plus"></use>
             </svg>
@@ -142,7 +142,7 @@
                                     {% endif %}
                                 </td>
                                 <td>
-                                    <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" class="text-decoration-none">
+                                    <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" class="text-decoration-none">
                                         {{ campaign.challenges|length }} challenges
                                     </a>
                                 </td>
@@ -152,19 +152,19 @@
                                 </td>
                                 <td>
                                     <div class="btn-group" role="group">
-                                        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" 
+                                        <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" 
                                            class="btn btn-sm btn-outline-primary" title="Manage Challenges">
                                             <svg class="icon" width="16" height="16">
                                                 <use xlink:href="#tabler-list"></use>
                                             </svg>
                                         </a>
-                                        <a href="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/edit" 
+                                        <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/edit" 
                                            class="btn btn-sm btn-outline-secondary" title="Edit Campaign">
                                             <svg class="icon" width="16" height="16">
                                                 <use xlink:href="#tabler-edit"></use>
                                             </svg>
                                         </a>
-                                        <form method="post" action="/admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/delete" 
+                                        <form method="post" action="/bot-admin/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/delete" 
                                               onsubmit="return confirm('Are you sure you want to delete this campaign?')" class="d-inline">
                                             <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete Campaign">
                                                 <svg class="icon" width="16" height="16">
@@ -217,7 +217,7 @@
                     </svg>
                     <h3>No campaigns yet</h3>
                     <p class="text-muted">Get started by creating your first challenge campaign.</p>
-                    <a href="/admin/guilds/{{ guild.id }}/campaigns/create" class="btn btn-primary">
+                    <a href="/bot-admin/guilds/{{ guild.id }}/campaigns/create" class="btn btn-primary">
                         <svg class="icon me-2" width="24" height="24">
                             <use xlink:href="#tabler-plus"></use>
                         </svg>

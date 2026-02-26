@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — Research Output</title>
+<link href="https://fonts.googleapis.com/css2?family=Bungee+Hairline&family=Bruno+Ace+SC&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#020408;--surface:#080c14;--cyan:#00d4ff;--green:#22c55e;--amber:#eab308;--rose:#ef4444;--gray:#2a3a4e;--mid:#4a6078;--light:#8098b0;--white:#d4e0ec;--display:'Bungee Hairline',sans-serif;--heading:'Bruno Ace SC',sans-serif;--body:'Inter',Arial,sans-serif}
+html{scroll-behavior:smooth}body{font-family:var(--body);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.7}
+#bg{position:fixed;inset:0;z-index:0}
+.mockup-nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;background:rgba(2,4,8,.92);backdrop-filter:blur(24px);border-bottom:1px solid rgba(0,212,255,.06);font-family:var(--heading);font-size:.62rem;letter-spacing:.05em;flex-wrap:wrap}
+.mockup-nav a{color:var(--gray);text-decoration:none;padding:5px 12px;border:1px solid transparent;transition:all .2s;white-space:nowrap}.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.25)}.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.06)}
+.reveal{opacity:0;transform:translateY(16px);transition:all .55s cubic-bezier(.25,.46,.45,.94)}.reveal.visible{opacity:1;transform:none}
+.code-label{font-family:var(--heading);font-size:.65rem;color:var(--cyan);margin-bottom:1rem;opacity:.75;letter-spacing:.08em}
+
+/* ── Report Header ── */
+.report-header{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:6rem 2rem 2rem}
+.breadcrumb{font-family:var(--heading);font-size:.6rem;color:var(--gray);letter-spacing:.06em;margin-bottom:1.25rem}
+.breadcrumb a{color:var(--cyan);text-decoration:none;transition:color .2s}.breadcrumb a:hover{color:var(--white)}
+.breadcrumb .sep{margin:0 .5rem;opacity:.5}
+.report-query{font-family:var(--display);font-size:clamp(1.4rem,3.5vw,2.2rem);color:var(--white);line-height:1.2;letter-spacing:.04em;margin-bottom:1.5rem;text-shadow:0 0 30px rgba(0,212,255,.08)}
+.report-meta{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-bottom:1.5rem;border-bottom:1px solid rgba(0,212,255,.06)}
+.status-live{display:inline-flex;align-items:center;gap:6px;font-family:var(--heading);font-size:.55rem;letter-spacing:.08em;padding:4px 12px;border:1px solid rgba(34,197,94,.35);color:var(--green);background:rgba(34,197,94,.06)}
+.status-live .pulse{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.meta-item{font-family:var(--heading);font-size:.58rem;color:var(--gray);letter-spacing:.05em}
+.meta-item strong{color:var(--light)}
+.btn-rerun{padding:6px 18px;font-family:var(--heading);font-size:.55rem;letter-spacing:.06em;background:transparent;color:var(--cyan);border:1px solid rgba(0,212,255,.3);cursor:pointer;transition:all .25s;margin-left:auto}.btn-rerun:hover{background:rgba(0,212,255,.08);border-color:var(--cyan)}
+
+/* ── Layout: Sidebar + Content ── */
+.report-layout{position:relative;z-index:1;max-width:960px;margin:0 auto;display:grid;grid-template-columns:200px 1fr;gap:32px;padding:2rem 2rem 4rem}
+
+/* ── TOC Sidebar ── */
+.toc-sidebar{position:sticky;top:60px;align-self:start;max-height:calc(100vh - 80px);overflow-y:auto}
+.toc-list{list-style:none}
+.toc-item{display:block;padding:8px 14px;font-family:var(--heading);font-size:.56rem;color:var(--gray);letter-spacing:.05em;text-decoration:none;border-left:2px solid rgba(0,212,255,.06);transition:all .2s;cursor:pointer}
+.toc-item:hover{color:var(--light);border-left-color:rgba(0,212,255,.25)}
+.toc-item.active{color:var(--cyan);border-left-color:var(--cyan);background:rgba(0,212,255,.03)}
+
+/* ── Content Area ── */
+.report-content{min-width:0}
+
+/* Section headings */
+.report-content h2{font-family:var(--heading);font-size:clamp(.9rem,1.8vw,1.15rem);color:var(--white);letter-spacing:.03em;margin:2.5rem 0 1.25rem;padding-bottom:.75rem;border-bottom:1px solid rgba(0,212,255,.08);position:relative;scroll-margin-top:70px}
+.report-content h2::before{content:'';position:absolute;bottom:-1px;left:0;width:40px;height:1px;background:var(--cyan)}
+.report-content h3{font-family:var(--heading);font-size:.82rem;color:var(--white);letter-spacing:.03em;margin:2rem 0 .75rem;scroll-margin-top:70px}
+.report-content p{font-size:.92rem;color:var(--light);line-height:1.85;margin-bottom:1.5rem}
+.report-content p strong{color:var(--white);font-weight:600}
+
+/* Stat cards */
+.stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin:1.5rem 0 2rem}
+.stat-card{background:var(--surface);border:1px solid rgba(0,212,255,.06);padding:18px 16px;text-align:center;transition:all .3s}
+.stat-card:hover{border-color:rgba(0,212,255,.2)}
+.stat-card .stat-value{font-family:var(--display);font-size:clamp(1.2rem,2vw,1.6rem);color:var(--white);line-height:1;margin-bottom:4px;text-shadow:0 0 15px rgba(0,212,255,.1)}
+.stat-card .stat-value .unit{font-family:var(--heading);color:var(--cyan);font-size:.5em;margin-left:2px}
+.stat-card .stat-label{font-family:var(--heading);font-size:.52rem;color:var(--gray);letter-spacing:.08em;text-transform:uppercase}
+
+/* Findings list */
+.findings-list{list-style:none;counter-reset:findings;margin:1rem 0 2rem}
+.finding-item{counter-increment:findings;display:flex;align-items:flex-start;gap:14px;padding:1rem 1.25rem;margin-bottom:.5rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);transition:all .25s}
+.finding-item:hover{border-color:rgba(0,212,255,.18)}
+.finding-num{font-family:var(--heading);font-size:.7rem;color:var(--cyan);min-width:24px;letter-spacing:.04em;padding-top:2px}
+.finding-body{flex:1;min-width:0}
+.finding-body strong{color:var(--white);font-weight:600;display:block;margin-bottom:.25rem;font-size:.88rem}
+.finding-body span{font-size:.82rem;color:var(--mid);line-height:1.7}
+.confidence-badge{font-family:var(--heading);font-size:.48rem;letter-spacing:.08em;padding:2px 8px;border:1px solid;flex-shrink:0;margin-top:3px}
+.confidence-badge.high{color:var(--green);border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.06)}
+.confidence-badge.medium{color:var(--amber);border-color:rgba(234,179,8,.35);background:rgba(234,179,8,.06)}
+
+/* Terminal code blocks */
+.term{background:var(--surface);overflow:hidden;border:1px solid rgba(0,212,255,.1);box-shadow:0 0 30px rgba(0,212,255,.03);margin:1.5rem 0 2rem}
+.term-bar{display:flex;align-items:center;gap:7px;padding:11px 16px;background:rgba(0,0,0,.3);border-bottom:1px solid rgba(0,212,255,.06)}
+.term-bar .p{margin-left:auto;font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.05em}
+.term-bar .lang-badge{font-family:var(--heading);font-size:.5rem;color:var(--cyan);letter-spacing:.06em;padding:2px 8px;border:1px solid rgba(0,212,255,.2);background:rgba(0,212,255,.04)}
+.term-body{padding:1.5rem 1.75rem;font-family:'Courier New',monospace;font-size:.78rem;line-height:2.2;overflow-x:auto}
+.cm{color:#1e2e3e}.kw{color:var(--amber)}.fn{color:var(--cyan)}.st{color:var(--green)}.op{color:var(--mid)}.comment{color:#2a4a3e;font-style:italic}
+
+/* Blockquote */
+.report-content blockquote{border-left:3px solid var(--cyan);margin:2rem 0;padding:1.25rem 1.5rem;background:rgba(0,212,255,.02)}
+.report-content blockquote p{font-size:1.05rem;font-style:italic;color:var(--white);line-height:1.75;margin-bottom:0}
+.report-content blockquote .quote-attr{font-family:var(--heading);font-size:.55rem;color:var(--mid);letter-spacing:.06em;margin-top:.6rem;font-style:normal}
+
+/* Sources grid */
+.sources-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;margin:1.5rem 0 2rem}
+.source-card{padding:1.25rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);transition:all .3s;cursor:pointer}
+.source-card:hover{border-color:rgba(0,212,255,.18)}
+.source-card .source-title{font-size:.82rem;color:var(--white);font-weight:500;margin-bottom:.4rem;line-height:1.4}
+.source-card .source-url{font-size:.68rem;color:var(--cyan);margin-bottom:.6rem;opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.source-card .relevance-bar{height:3px;background:rgba(0,212,255,.08);margin-top:.5rem}
+.source-card .relevance-fill{height:100%;background:var(--cyan);box-shadow:0 0 6px rgba(0,212,255,.25)}
+.source-card .relevance-label{display:flex;justify-content:space-between;margin-top:.3rem}
+.source-card .relevance-label span{font-family:var(--heading);font-size:.48rem;color:var(--gray);letter-spacing:.06em}
+
+/* Related topics */
+.related-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin:1.5rem 0}
+.related-card{padding:1.5rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);border-top:2px solid rgba(0,212,255,.06);transition:all .3s;cursor:pointer;text-decoration:none;display:block}
+.related-card:hover{border-top-color:var(--cyan);border-color:rgba(0,212,255,.18);box-shadow:inset 0 0 15px rgba(0,212,255,.03)}
+.related-card .r-tag{font-family:var(--heading);font-size:.5rem;color:var(--cyan);letter-spacing:.1em;margin-bottom:.6rem;opacity:.7}
+.related-card .r-title{font-size:.82rem;color:var(--white);font-weight:500;line-height:1.5;margin-bottom:.4rem}
+.related-card .r-desc{font-size:.7rem;color:var(--gray);line-height:1.6}
+
+/* ── Footer ── */
+.foot{text-align:center;padding:1.5rem;font-family:var(--heading);font-size:.55rem;color:var(--gray);border-top:1px solid rgba(0,212,255,.04);position:relative;z-index:1;letter-spacing:.06em}
+
+/* ── Responsive ── */
+@media(max-width:900px){
+  .report-layout{grid-template-columns:1fr}
+  .toc-sidebar{display:none}
+  .stat-row{grid-template-columns:1fr}
+  .sources-grid{grid-template-columns:1fr}
+  .related-grid{grid-template-columns:1fr}
+}
+@media(max-width:520px){
+  .report-header{padding:5.5rem 1rem 1.5rem}
+  .report-layout{padding:1rem 1rem 3rem}
+  .report-meta{flex-direction:column;align-items:flex-start;gap:8px}
+  .btn-rerun{margin-left:0}
+}
+@media(max-width:480px){
+  .report-query{font-size:1.3rem}
+}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<nav class="mockup-nav">
+  <a href="mockup-42-warp-hex.html">42 Hex Warp</a>
+  <a href="mockup-43-dashboard.html">43 Dashboard</a>
+  <a href="mockup-44-blog.html">44 Blog</a>
+  <a href="mockup-45-questionnaire.html">45 Questionnaire</a>
+  <a href="mockup-46-research-prompt.html">46 Research</a>
+  <a href="mockup-47-research-output.html" class="active">47 Output</a>
+  <a href="mockup-48-github-actions.html">48 GitHub</a>
+</nav>
+
+<!-- ── Report Header ── -->
+<header class="report-header reveal">
+  <div class="breadcrumb">
+    <a href="mockup-46-research-prompt.html">Research</a>
+    <span class="sep">/</span>
+    Run #1847
+  </div>
+  <h1 class="report-query">How do distributed consensus algorithms handle network partitions in practice?</h1>
+  <div class="report-meta">
+    <span class="status-live"><span class="pulse"></span> COMPLETED</span>
+    <span class="meta-item"><strong>8m 42s</strong> duration</span>
+    <span class="meta-item">Feb 25, 2026 &middot; 2:14 PM</span>
+    <button class="btn-rerun">Re-run &rarr;</button>
+  </div>
+</header>
+
+<!-- ── Report Layout ── -->
+<div class="report-layout">
+
+  <!-- TOC Sidebar -->
+  <aside class="toc-sidebar reveal">
+    <ul class="toc-list">
+      <li><a class="toc-item active" href="#executive-summary">Executive Summary</a></li>
+      <li><a class="toc-item" href="#key-findings">Key Findings</a></li>
+      <li><a class="toc-item" href="#technical-deep-dive">Technical Deep Dive</a></li>
+      <li><a class="toc-item" href="#code-examples">Code Examples</a></li>
+      <li><a class="toc-item" href="#sources">Sources</a></li>
+      <li><a class="toc-item" href="#related-topics">Related Topics</a></li>
+    </ul>
+  </aside>
+
+  <!-- Content -->
+  <main class="report-content">
+
+    <!-- Executive Summary -->
+    <section id="executive-summary" class="reveal">
+      <h2>Executive Summary</h2>
+      <p>Distributed consensus algorithms fundamentally address the challenge of maintaining agreement across nodes in the presence of failures. When network partitions occur, these algorithms must make explicit trade-offs between <strong>availability</strong> and <strong>consistency</strong>, as formalized by the CAP theorem. Our research analyzed implementations across Raft, Paxos, and newer protocols like EPaxos to understand how production systems navigate these trade-offs.</p>
+      <p>The practical reality diverges significantly from theoretical guarantees. Production systems implement a spectrum of strategies including <strong>leader-based quorum writes</strong>, <strong>hinted handoff mechanisms</strong>, and <strong>conflict-free replicated data types (CRDTs)</strong> to maintain partial availability during partitions while preserving strong consistency for critical operations.</p>
+      <p>Key insight: the most resilient systems don't try to solve partitions &mdash; they <strong>design around their inevitability</strong>, using techniques like partition-aware routing and graceful degradation to maintain useful operation even when full consensus is temporarily impossible.</p>
+
+      <div class="stat-row">
+        <div class="stat-card">
+          <div class="stat-value">47<span class="unit">src</span></div>
+          <div class="stat-label">Sources Analyzed</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">12</div>
+          <div class="stat-label">Code Examples</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">8</div>
+          <div class="stat-label">Patterns Found</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Key Findings -->
+    <section id="key-findings" class="reveal">
+      <h2>Key Findings</h2>
+      <ol class="findings-list">
+        <li class="finding-item">
+          <span class="finding-num">01</span>
+          <div class="finding-body">
+            <strong>Raft's leader election creates a predictable partition response</strong>
+            <span>When a Raft cluster partitions, the side with the majority continues operating normally. The minority side stops accepting writes entirely, providing strong consistency at the cost of availability. This behavior is well-understood and testable.</span>
+          </div>
+          <span class="confidence-badge high">HIGH</span>
+        </li>
+        <li class="finding-item">
+          <span class="finding-num">02</span>
+          <div class="finding-body">
+            <strong>Multi-Paxos implementations vary wildly in partition handling</strong>
+            <span>Unlike Raft's prescriptive approach, Paxos leaves many implementation details open. Production systems like Google's Spanner and CockroachDB implement substantially different partition strategies despite both using Paxos-family protocols.</span>
+          </div>
+          <span class="confidence-badge high">HIGH</span>
+        </li>
+        <li class="finding-item">
+          <span class="finding-num">03</span>
+          <div class="finding-body">
+            <strong>Partition detection is the actual hard problem</strong>
+            <span>Most algorithms assume clean partition boundaries, but real networks exhibit partial connectivity, asymmetric failures, and gray failures. Detection latency (typically 10-30 seconds) dominates the practical impact more than the consensus algorithm itself.</span>
+          </div>
+          <span class="confidence-badge high">HIGH</span>
+        </li>
+        <li class="finding-item">
+          <span class="finding-num">04</span>
+          <div class="finding-body">
+            <strong>CRDTs offer a viable alternative for specific workloads</strong>
+            <span>For data types that support commutative operations (counters, sets, registers), CRDTs allow continued writes on both sides of a partition with guaranteed conflict resolution. However, they're limited to specific data structures.</span>
+          </div>
+          <span class="confidence-badge medium">MEDIUM</span>
+        </li>
+        <li class="finding-item">
+          <span class="finding-num">05</span>
+          <div class="finding-body">
+            <strong>Hybrid approaches dominate production systems</strong>
+            <span>Real systems rarely use a single consensus strategy. Most implement tiered consistency: strong consensus for metadata and coordination, eventual consistency for bulk data, and CRDTs for counters and presence.</span>
+          </div>
+          <span class="confidence-badge high">HIGH</span>
+        </li>
+      </ol>
+    </section>
+
+    <!-- Technical Deep Dive -->
+    <section id="technical-deep-dive" class="reveal">
+      <h2>Technical Deep Dive</h2>
+
+      <h3>Raft: The Predictable Path</h3>
+      <p>Raft's design makes partition behavior deterministic. When a partition occurs, the cluster splits into sides. The side containing a majority of nodes (n/2 + 1) will elect a new leader if the current leader is on the minority side. The majority side continues accepting reads and writes normally.</p>
+      <p>The minority side enters a <strong>follower timeout loop</strong>, repeatedly attempting leader elections that will never succeed because they can't reach a quorum. This is by design &mdash; it prevents split-brain scenarios at the cost of complete unavailability for the minority partition.</p>
+
+      <blockquote>
+        <p>"The key insight of Raft isn't that it solves consensus differently &mdash; it's that it makes the failure modes obvious and predictable."</p>
+        <div class="quote-attr">&mdash; Diego Ongaro, Raft paper (2014)</div>
+      </blockquote>
+
+      <h3>The Gray Failure Problem</h3>
+      <p>Traditional partition models assume binary connectivity: either two nodes can communicate or they can't. Reality is messier. <strong>Gray failures</strong> manifest as increased latency, packet loss, or intermittent connectivity that triggers and resolves repeatedly.</p>
+      <p>These scenarios cause the most production incidents because they can lead to <strong>oscillating leader elections</strong>, where a node repeatedly gains and loses leadership, causing write amplification and client retries that compound the problem.</p>
+    </section>
+
+    <!-- Code Examples -->
+    <section id="code-examples" class="reveal">
+      <h2>Code Examples</h2>
+
+      <div class="term">
+        <div class="term-bar">
+          <span class="lang-badge">PYTHON</span>
+          <span class="p">partition_aware_client.py</span>
+        </div>
+        <div class="term-body">
+<span class="kw">class</span> <span class="fn">PartitionAwareClient</span><span class="op">:</span>
+    <span class="comment"># Route requests based on partition state</span>
+    <span class="kw">def</span> <span class="fn">__init__</span><span class="op">(</span><span class="fn">self</span><span class="op">,</span> <span class="fn">nodes</span><span class="op">,</span> <span class="fn">quorum_size</span><span class="op">):</span>
+        <span class="fn">self</span><span class="op">.</span><span class="fn">nodes</span> <span class="op">=</span> <span class="fn">nodes</span>
+        <span class="fn">self</span><span class="op">.</span><span class="fn">quorum</span> <span class="op">=</span> <span class="fn">quorum_size</span>
+        <span class="fn">self</span><span class="op">.</span><span class="fn">health</span> <span class="op">=</span> <span class="op">{</span><span class="fn">n</span><span class="op">:</span> <span class="kw">True</span> <span class="kw">for</span> <span class="fn">n</span> <span class="kw">in</span> <span class="fn">nodes</span><span class="op">}</span>
+
+    <span class="kw">async def</span> <span class="fn">write</span><span class="op">(</span><span class="fn">self</span><span class="op">,</span> <span class="fn">key</span><span class="op">,</span> <span class="fn">value</span><span class="op">):</span>
+        <span class="fn">reachable</span> <span class="op">=</span> <span class="kw">await</span> <span class="fn">self</span><span class="op">.</span><span class="fn">_probe_nodes</span><span class="op">()</span>
+        <span class="kw">if</span> <span class="fn">len</span><span class="op">(</span><span class="fn">reachable</span><span class="op">)</span> <span class="op">&lt;</span> <span class="fn">self</span><span class="op">.</span><span class="fn">quorum</span><span class="op">:</span>
+            <span class="kw">raise</span> <span class="fn">PartitionError</span><span class="op">(</span>
+                <span class="st">"Insufficient nodes for quorum"</span><span class="op">,</span>
+                <span class="fn">available</span><span class="op">=</span><span class="fn">len</span><span class="op">(</span><span class="fn">reachable</span><span class="op">),</span>
+                <span class="fn">required</span><span class="op">=</span><span class="fn">self</span><span class="op">.</span><span class="fn">quorum</span>
+            <span class="op">)</span>
+        <span class="kw">return await</span> <span class="fn">self</span><span class="op">.</span><span class="fn">_quorum_write</span><span class="op">(</span><span class="fn">reachable</span><span class="op">,</span> <span class="fn">key</span><span class="op">,</span> <span class="fn">value</span><span class="op">)</span>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="term-bar">
+          <span class="lang-badge">GO</span>
+          <span class="p">gray_failure_detector.go</span>
+        </div>
+        <div class="term-body">
+<span class="kw">type</span> <span class="fn">GrayFailureDetector</span> <span class="kw">struct</span> <span class="op">{</span>
+    <span class="fn">window</span>     <span class="fn">time</span><span class="op">.</span><span class="fn">Duration</span>
+    <span class="fn">threshold</span>  <span class="fn">float64</span>
+    <span class="fn">samples</span>    <span class="op">[]</span><span class="fn">LatencySample</span>
+<span class="op">}</span>
+
+<span class="kw">func</span> <span class="op">(</span><span class="fn">d</span> <span class="op">*</span><span class="fn">GrayFailureDetector</span><span class="op">)</span> <span class="fn">IsHealthy</span><span class="op">(</span><span class="fn">nodeID</span> <span class="fn">string</span><span class="op">)</span> <span class="fn">bool</span> <span class="op">{</span>
+    <span class="fn">recent</span> <span class="op">:=</span> <span class="fn">d</span><span class="op">.</span><span class="fn">samplesInWindow</span><span class="op">(</span><span class="fn">nodeID</span><span class="op">)</span>
+    <span class="kw">if</span> <span class="fn">len</span><span class="op">(</span><span class="fn">recent</span><span class="op">)</span> <span class="op">==</span> <span class="op">0</span> <span class="op">{</span>
+        <span class="kw">return</span> <span class="kw">false</span>  <span class="comment">// no data = assume unhealthy</span>
+    <span class="op">}</span>
+    <span class="fn">successRate</span> <span class="op">:=</span> <span class="fn">d</span><span class="op">.</span><span class="fn">calcSuccessRate</span><span class="op">(</span><span class="fn">recent</span><span class="op">)</span>
+    <span class="kw">return</span> <span class="fn">successRate</span> <span class="op">&gt;=</span> <span class="fn">d</span><span class="op">.</span><span class="fn">threshold</span>
+<span class="op">}</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sources -->
+    <section id="sources" class="reveal">
+      <h2>Sources</h2>
+      <div class="sources-grid">
+        <div class="source-card">
+          <div class="source-title">In Search of an Understandable Consensus Algorithm (Raft)</div>
+          <div class="source-url">raft.github.io/raft.pdf</div>
+          <div class="relevance-bar"><div class="relevance-fill" style="width:95%"></div></div>
+          <div class="relevance-label"><span>RELEVANCE</span><span>95%</span></div>
+        </div>
+        <div class="source-card">
+          <div class="source-title">Paxos Made Live: An Engineering Perspective</div>
+          <div class="source-url">research.google/pubs/pub33002</div>
+          <div class="relevance-bar"><div class="relevance-fill" style="width:88%"></div></div>
+          <div class="relevance-label"><span>RELEVANCE</span><span>88%</span></div>
+        </div>
+        <div class="source-card">
+          <div class="source-title">Gray Failure: The Achilles' Heel of Cloud-Scale Systems</div>
+          <div class="source-url">usenix.org/conference/hotos17</div>
+          <div class="relevance-bar"><div class="relevance-fill" style="width:82%"></div></div>
+          <div class="relevance-label"><span>RELEVANCE</span><span>82%</span></div>
+        </div>
+        <div class="source-card">
+          <div class="source-title">CockroachDB: The Resilient Geo-Distributed SQL Database</div>
+          <div class="source-url">dl.acm.org/doi/10.1145/3318464</div>
+          <div class="relevance-bar"><div class="relevance-fill" style="width:76%"></div></div>
+          <div class="relevance-label"><span>RELEVANCE</span><span>76%</span></div>
+        </div>
+        <div class="source-card">
+          <div class="source-title">A Comprehensive Study of CRDTs</div>
+          <div class="source-url">hal.inria.fr/inria-00555588</div>
+          <div class="relevance-bar"><div class="relevance-fill" style="width:71%"></div></div>
+          <div class="relevance-label"><span>RELEVANCE</span><span>71%</span></div>
+        </div>
+        <div class="source-card">
+          <div class="source-title">Jepsen: Distributed Systems Safety Testing</div>
+          <div class="source-url">jepsen.io/analyses</div>
+          <div class="relevance-bar"><div class="relevance-fill" style="width:68%"></div></div>
+          <div class="relevance-label"><span>RELEVANCE</span><span>68%</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Related Topics -->
+    <section id="related-topics" class="reveal">
+      <h2>Related Topics</h2>
+      <div class="related-grid">
+        <a href="#" class="related-card">
+          <div class="r-tag">FOLLOW-UP</div>
+          <div class="r-title">How does CockroachDB implement multi-region consensus?</div>
+          <div class="r-desc">Deep dive into geo-distributed Raft groups and cross-region latency optimization.</div>
+        </a>
+        <a href="#" class="related-card">
+          <div class="r-tag">RELATED</div>
+          <div class="r-title">Byzantine fault tolerance vs crash fault tolerance trade-offs</div>
+          <div class="r-desc">When do you need BFT, and what does it cost in performance and complexity?</div>
+        </a>
+        <a href="#" class="related-card">
+          <div class="r-tag">DEEPER</div>
+          <div class="r-title">Implementing conflict-free replicated data types from scratch</div>
+          <div class="r-desc">Build G-Counters, LWW-Registers, and OR-Sets with convergence proofs.</div>
+        </a>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer class="foot">&copy; 2026 SMARTER DEV</footer>
+
+<script>
+(function() {
+  // ── TOC active state tracking ──
+  var tocItems = document.querySelectorAll('.toc-item');
+  var sections = [];
+  tocItems.forEach(function(item) {
+    var target = document.querySelector(item.getAttribute('href'));
+    if (target) sections.push({ el: target, link: item });
+  });
+
+  function updateTOC() {
+    var scrollY = window.scrollY + 100;
+    var active = null;
+    for (var i = sections.length - 1; i >= 0; i--) {
+      if (sections[i].el.offsetTop <= scrollY) { active = sections[i]; break; }
+    }
+    tocItems.forEach(function(item) { item.classList.remove('active'); });
+    if (active) active.link.classList.add('active');
+  }
+  window.addEventListener('scroll', updateTOC);
+  updateTOC();
+
+  // ── Hex Warp Background ──
+  var canvas = document.getElementById('bg');
+  var ctx = canvas.getContext('2d');
+
+  var HEX_SIZE = 18;
+  var H_SPACING = HEX_SIZE * Math.sqrt(3);
+  var V_SPACING = HEX_SIZE * 1.5;
+  var DOT_RADIUS = 2;
+  var INFLUENCE_RADIUS = 200;
+  var MAX_DISPLACEMENT = 20;
+  var LERP_SPEED = 0.08;
+  var AMBIENT_AMPLITUDE = 1;
+  var AMBIENT_SPEED = 0.0008;
+  var CLICK_DURATION = 500;
+  var HEX_LINE_REST = 0.025;
+  var HEX_LINE_ACTIVE = 0.08;
+  var PATH_COUNT = 60;
+  var PATH_SPEED = 1.2;
+  var TURN_CHANCE = 0.2;
+  var SEGMENT_FADE = 0.001;
+  var SEGMENT_PEAK_ALPHA = 0.12;
+
+  var dots = [];
+  var cols = 0;
+  var rows = 0;
+  var mouseX = -9999;
+  var mouseY = -9999;
+  var mouseActive = false;
+  var clickTime = 0;
+  var clickActive = false;
+  var animId = null;
+  var time = 0;
+  var traces = [];
+
+  var hexVerts = [];
+  for (var i = 0; i < 6; i++) {
+    var angle = Math.PI / 180 * (60 * i - 30);
+    hexVerts.push({ x: HEX_SIZE * Math.cos(angle), y: HEX_SIZE * Math.sin(angle) });
+  }
+
+  function createDots() {
+    var w = canvas.width, h = canvas.height;
+    cols = Math.ceil(w / H_SPACING) + 3;
+    rows = Math.ceil(h / V_SPACING) + 3;
+    dots = [];
+    for (var row = 0; row < rows; row++) {
+      for (var col = 0; col < cols; col++) {
+        var isOdd = row % 2 === 1;
+        dots.push({ baseX: col * H_SPACING + (isOdd ? H_SPACING * 0.5 : 0) - H_SPACING, baseY: row * V_SPACING - V_SPACING, offsetX: 0, offsetY: 0, targetOffsetX: 0, targetOffsetY: 0, col: col, row: row, phaseX: Math.random() * Math.PI * 2, phaseY: Math.random() * Math.PI * 2 });
+      }
+    }
+    initTraces();
+  }
+
+  function getDot(row, col) { if (row < 0 || row >= rows || col < 0 || col >= cols) return null; return dots[row * cols + col]; }
+
+  function downNeighbors(row, col) {
+    var isOdd = row % 2 === 1;
+    if (isOdd) return [{ row: row + 1, col: col }, { row: row + 1, col: col + 1 }];
+    return [{ row: row + 1, col: col - 1 }, { row: row + 1, col: col }];
+  }
+
+  function buildRoute(startCol) {
+    var route = []; var col = startCol;
+    for (var row = 0; row < rows; row++) {
+      route.push({ row: row, col: col });
+      if (Math.random() < TURN_CHANCE && row < rows - 1) { var dir = Math.random() < 0.5 ? -1 : 1; var newCol = col + dir; if (newCol >= 0 && newCol < cols) { route.push({ row: row, col: newCol }); col = newCol; } }
+      if (row < rows - 1) { var dns = downNeighbors(row, col); var pick = dns[Math.random() < 0.5 ? 0 : 1]; if (pick.col >= 0 && pick.col < cols) col = pick.col; else col = dns[0].col >= 0 && dns[0].col < cols ? dns[0].col : dns[1].col; }
+    }
+    return route;
+  }
+
+  var recentSpawnCols = [];
+  function pickSpawnCol() {
+    var MIN_DIST = 8;
+    for (var a = 0; a < 200; a++) { var col = Math.floor(Math.random() * cols); var bad = false; for (var p = 0; p < recentSpawnCols.length; p++) { if (Math.abs(col - recentSpawnCols[p]) < MIN_DIST) { bad = true; break; } } if (!bad) { recentSpawnCols.push(col); if (recentSpawnCols.length > 3) recentSpawnCols.shift(); return col; } }
+    var col = Math.floor(Math.random() * cols); recentSpawnCols.push(col); if (recentSpawnCols.length > 3) recentSpawnCols.shift(); return col;
+  }
+
+  function spawnTrace() { var col = pickSpawnCol(); return { route: buildRoute(col), step: 0, progress: 0, speed: PATH_SPEED * (0.5 + Math.random() * 0.8), segments: [] }; }
+
+  function initTraces() { recentSpawnCols = []; traces = []; for (var i = 0; i < PATH_COUNT; i++) { var t = spawnTrace(); t.step = Math.floor(Math.random() * t.route.length * 0.8); traces.push(t); } }
+
+  function updateTraces() {
+    for (var i = 0; i < traces.length; i++) {
+      var t = traces[i];
+      if (t.step < t.route.length - 1) { var from = t.route[t.step], to = t.route[t.step + 1]; var d1 = getDot(from.row, from.col), d2 = getDot(to.row, to.col); var stepDist = H_SPACING; if (d1 && d2) { var dx = d2.baseX - d1.baseX, dy = d2.baseY - d1.baseY; stepDist = Math.sqrt(dx*dx+dy*dy) || H_SPACING; } t.progress += t.speed / stepDist; if (t.progress >= 1) { t.segments.push({ fromRow: from.row, fromCol: from.col, toRow: to.row, toCol: to.col, alpha: SEGMENT_PEAK_ALPHA }); t.progress -= 1; t.step++; } } else { traces[i] = spawnTrace(); }
+      for (var j = t.segments.length - 1; j >= 0; j--) { t.segments[j].alpha -= SEGMENT_FADE; if (t.segments[j].alpha <= 0) t.segments.splice(j, 1); }
+    }
+  }
+
+  function resize() { var dpr = window.devicePixelRatio || 1; canvas.width = window.innerWidth * dpr; canvas.height = window.innerHeight * dpr; canvas.style.width = window.innerWidth + 'px'; canvas.style.height = window.innerHeight + 'px'; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); createDots(); }
+
+  function onMouseMove(e) { mouseX = e.clientX; mouseY = e.clientY; mouseActive = true; }
+  function onMouseLeave() { mouseActive = false; mouseX = -9999; mouseY = -9999; }
+  function onClick() { clickTime = performance.now(); clickActive = true; }
+
+  function update(now) {
+    time = now;
+    var clickFactor = 0;
+    if (clickActive) { var el = now - clickTime; if (el < CLICK_DURATION) { clickFactor = 1 - el/CLICK_DURATION; clickFactor *= clickFactor; } else clickActive = false; }
+    var irSq = INFLUENCE_RADIUS * INFLUENCE_RADIUS;
+    for (var i = 0; i < dots.length; i++) {
+      var dot = dots[i];
+      var ax = Math.sin(now * AMBIENT_SPEED + dot.phaseX) * AMBIENT_AMPLITUDE;
+      var ay = Math.cos(now * AMBIENT_SPEED * 0.7 + dot.phaseY) * AMBIENT_AMPLITUDE;
+      var dx2 = 0, dy2 = 0;
+      if (mouseActive) { var ddx = dot.baseX - mouseX, ddy = dot.baseY - mouseY, dSq = ddx*ddx+ddy*ddy;
+        if (dSq < irSq && dSq > 0.01) { var d = Math.sqrt(dSq), p = 1-d/INFLUENCE_RADIUS, s = p*p*MAX_DISPLACEMENT, b = 1-2*clickFactor; dx2 = ddx/d*s*b; dy2 = ddy/d*s*b; } }
+      dot.targetOffsetX = dx2 + ax; dot.targetOffsetY = dy2 + ay;
+      dot.offsetX += (dot.targetOffsetX - dot.offsetX) * LERP_SPEED;
+      dot.offsetY += (dot.targetOffsetY - dot.offsetY) * LERP_SPEED;
+    }
+    updateTraces();
+  }
+
+  function drawHex(cx, cy, alpha) {
+    ctx.beginPath(); ctx.moveTo(cx + hexVerts[0].x, cy + hexVerts[0].y);
+    for (var i = 1; i < 6; i++) ctx.lineTo(cx + hexVerts[i].x, cy + hexVerts[i].y);
+    ctx.closePath(); ctx.strokeStyle = 'rgba(0,212,255,' + alpha.toFixed(4) + ')'; ctx.lineWidth = 0.5; ctx.stroke();
+  }
+
+  function draw() {
+    var w = window.innerWidth, h = window.innerHeight;
+    ctx.clearRect(0, 0, w, h);
+    for (var i = 0; i < dots.length; i++) {
+      var dot = dots[i], x = dot.baseX + dot.offsetX, y = dot.baseY + dot.offsetY;
+      var disp = Math.sqrt(dot.offsetX*dot.offsetX + dot.offsetY*dot.offsetY);
+      var ed = Math.max(0, disp - AMBIENT_AMPLITUDE), dn = Math.min(ed / MAX_DISPLACEMENT, 1);
+      drawHex(x, y, HEX_LINE_REST + (HEX_LINE_ACTIVE - HEX_LINE_REST) * dn);
+      ctx.beginPath(); ctx.arc(x, y, DOT_RADIUS, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(0,212,255,' + (0.06 + 0.24*dn).toFixed(3) + ')'; ctx.fill();
+    }
+    for (var ti = 0; ti < traces.length; ti++) {
+      var t = traces[ti];
+      for (var si = 0; si < t.segments.length; si++) {
+        var seg = t.segments[si];
+        var d1 = getDot(seg.fromRow, seg.fromCol), d2 = getDot(seg.toRow, seg.toCol);
+        if (!d1||!d2) continue;
+        ctx.beginPath(); ctx.moveTo(d1.baseX+d1.offsetX, d1.baseY+d1.offsetY);
+        ctx.lineTo(d2.baseX+d2.offsetX, d2.baseY+d2.offsetY);
+        ctx.strokeStyle = 'rgba(0,212,255,' + seg.alpha.toFixed(4) + ')'; ctx.lineWidth = 2.5; ctx.stroke();
+      }
+      if (t.step < t.route.length - 1) {
+        var from = t.route[t.step], to = t.route[t.step+1];
+        var d1 = getDot(from.row, from.col), d2 = getDot(to.row, to.col);
+        if (d1&&d2) { var x1=d1.baseX+d1.offsetX,y1=d1.baseY+d1.offsetY,x2=d2.baseX+d2.offsetX,y2=d2.baseY+d2.offsetY;
+          ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x1+(x2-x1)*t.progress, y1+(y2-y1)*t.progress);
+          ctx.strokeStyle='rgba(0,212,255,'+SEGMENT_PEAK_ALPHA+')'; ctx.lineWidth=2.5; ctx.stroke(); }
+      }
+    }
+  }
+
+  function loop(now) { update(now); draw(); animId = requestAnimationFrame(loop); }
+  resize();
+  window.addEventListener('resize', resize);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseleave', onMouseLeave);
+  window.addEventListener('click', onClick);
+  animId = requestAnimationFrame(loop);
+
+  var obs = new IntersectionObserver(function(e) { e.forEach(function(x) { if (x.isIntersecting) { x.target.classList.add('visible'); obs.unobserve(x.target); } }); }, { threshold: .1 });
+  document.querySelectorAll('.reveal').forEach(function(el) { obs.observe(el); });
+})();
+</script>
+</body>
+</html>

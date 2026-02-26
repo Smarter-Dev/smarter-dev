@@ -3,8 +3,8 @@
 {% block title %}Edit Blog Post - Smarter Dev Admin{% endblock %}
 
 {% block breadcrumb_items %}
-<li class="breadcrumb-item"><a href="/admin">Dashboard</a></li>
-<li class="breadcrumb-item"><a href="/admin/blogs">Blog Posts</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin">Dashboard</a></li>
+<li class="breadcrumb-item"><a href="/bot-admin/blogs">Blog Posts</a></li>
 <li class="breadcrumb-item active" aria-current="page">Edit</li>
 {% endblock %}
 
@@ -39,7 +39,7 @@
                 {% if blog_post.is_published %}
                 <a href="/blog/{{ blog_post.slug }}" class="btn btn-sm btn-outline-secondary" target="_blank">View post</a>
                 {% endif %}
-                <a href="/admin/blogs" class="btn btn-sm btn-outline-primary">Back to list</a>
+                <a href="/bot-admin/blogs" class="btn btn-sm btn-outline-primary">Back to list</a>
             </div>
         </div>
         {% endif %}
@@ -160,10 +160,10 @@
                             
                             <div class="form-footer">
                                 <button type="submit" class="btn btn-primary">Update blog post</button>
-                                <a href="/admin/blogs" class="btn btn-link">Cancel</a>
+                                <a href="/bot-admin/blogs" class="btn btn-link">Cancel</a>
                                 {% if blog_post %}
                                 <div class="ms-auto">
-                                    <form method="post" action="/admin/blogs/{{ blog_post.id }}/delete" style="display: inline;" 
+                                    <form method="post" action="/bot-admin/blogs/{{ blog_post.id }}/delete" style="display: inline;" 
                                           onsubmit="return confirm('Are you sure you want to delete this blog post? This action cannot be undone.')">
                                         <button type="submit" class="btn btn-outline-danger">Delete post</button>
                                     </form>

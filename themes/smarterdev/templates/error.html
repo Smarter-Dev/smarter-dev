@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block page_type %}error{% endblock %}
+{% block page_title %}{{ status_code|default('Error') }}{% endblock %}
+
+{% block page_css %}
+<style>
+:root { --hex-accent: #ef4444; }
+.err-hero {
+  min-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+  padding: 8rem 2rem 6rem;
+  text-align: center;
+}
+.err-num {
+  font-family: var(--display);
+  font-size: clamp(5rem, 16vw, 12rem);
+  color: var(--rose);
+  line-height: .85;
+  letter-spacing: .1em;
+  text-shadow: 0 0 80px rgba(239,68,68,.2);
+  margin-bottom: .5rem;
+}
+.err-hero .code-label { color: var(--rose); }
+.err-hero .btn-glow {
+  color: var(--rose);
+  border-color: var(--rose);
+  box-shadow: 0 0 15px rgba(239,68,68,.15), inset 0 0 15px rgba(239,68,68,.05);
+}
+.err-hero .btn-glow:hover {
+  background: var(--rose);
+  color: var(--bg);
+  box-shadow: 0 0 30px rgba(239,68,68,.3);
+}
+.err-path {
+  font-family: var(--mono);
+  font-size: .95rem;
+  color: var(--muted);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="err-hero">
+    <div class="code-label">// error.catch({{ status_code|default('?') }})</div>
+    <div class="err-num">{{ status_code|default('ERR') }}</div>
+    {% if status_code == 404 %}
+    <div class="hero-sub" style="margin-bottom:.5rem">These aren't the routes you're looking for.</div>
+    <div class="err-path">couldn't find <code id="miss-path"></code></div>
+    <script>document.getElementById('miss-path').textContent = window.location.pathname;</script>
+    <a href="/" class="btn-glow" style="margin-top:1.5rem">Back to Home</a>
+    {% else %}
+    <div class="hero-sub" style="margin-bottom:2rem">{{ message|default('Something went wrong.') }}</div>
+    <a href="/" class="btn-glow">Back to Home</a>
+    {% endif %}
+</div>
+{% endblock %}

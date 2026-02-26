@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — GitHub Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Bungee+Hairline&family=Bruno+Ace+SC&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#020408;--surface:#080c14;--cyan:#00d4ff;--green:#22c55e;--amber:#eab308;--rose:#ef4444;--gray:#2a3a4e;--mid:#4a6078;--light:#8098b0;--white:#d4e0ec;--display:'Bungee Hairline',sans-serif;--heading:'Bruno Ace SC',sans-serif;--body:'Inter',Arial,sans-serif}
+html{scroll-behavior:smooth}body{font-family:var(--body);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.7}
+#bg{position:fixed;inset:0;z-index:0}
+.mockup-nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;background:rgba(2,4,8,.92);backdrop-filter:blur(24px);border-bottom:1px solid rgba(0,212,255,.06);font-family:var(--heading);font-size:.62rem;letter-spacing:.05em;flex-wrap:wrap}
+.mockup-nav a{color:var(--gray);text-decoration:none;padding:5px 12px;border:1px solid transparent;transition:all .2s;white-space:nowrap}.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.25)}.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.06)}
+.reveal{opacity:0;transform:translateY(16px);transition:all .55s cubic-bezier(.25,.46,.45,.94)}.reveal.visible{opacity:1;transform:none}
+.code-label{font-family:var(--heading);font-size:.65rem;color:var(--cyan);margin-bottom:1rem;opacity:.75;letter-spacing:.08em}
+.sec-h{font-family:var(--heading);font-size:clamp(1.4rem,2.8vw,2rem);color:var(--white);line-height:1.2;margin-bottom:.5rem;letter-spacing:.02em}
+
+/* ── Dashboard Wrap ── */
+.dash-wrap{position:relative;z-index:1;max-width:1120px;margin:0 auto;padding:70px 24px 40px}
+.dash-header{display:flex;align-items:flex-end;justify-content:space-between;padding:18px 0 24px;border-bottom:1px solid rgba(0,212,255,.06);margin-bottom:24px;flex-wrap:wrap;gap:16px}
+.dash-header .sec-p{font-size:.9rem;color:var(--mid);max-width:480px;line-height:1.75;margin:0}
+
+/* ── Metrics Row (above the fold) ── */
+.metrics-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-bottom:24px}
+.metric-card{background:var(--surface);border:1px solid rgba(0,212,255,.06);padding:18px 16px;transition:all .3s;position:relative;text-align:center}
+.metric-card::after{content:'';position:absolute;inset:0;opacity:0;transition:opacity .3s;box-shadow:inset 0 0 20px rgba(0,212,255,.05)}.metric-card:hover::after{opacity:1}.metric-card:hover{border-color:rgba(0,212,255,.2)}
+.metric-card .m-value{font-family:var(--display);font-size:clamp(1.2rem,2vw,1.6rem);color:var(--white);line-height:1;margin-bottom:3px;text-shadow:0 0 15px rgba(0,212,255,.1)}
+.metric-card .m-value .unit{font-family:var(--heading);color:var(--cyan);font-size:.5em;margin-left:2px}
+.metric-card .m-value.green{color:var(--green);text-shadow:0 0 15px rgba(34,197,94,.15)}
+.metric-card .m-value.amber{color:var(--amber);text-shadow:0 0 15px rgba(234,179,8,.15)}
+.metric-card .m-value.rose{color:var(--rose);text-shadow:0 0 15px rgba(239,68,68,.15)}
+.metric-card .m-label{font-family:var(--heading);font-size:.5rem;color:var(--gray);letter-spacing:.08em;text-transform:uppercase}
+
+/* ── Chart Metric Cards ── */
+.chart-metrics-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-bottom:24px}
+.chart-metric{background:var(--surface);border:1px solid rgba(0,212,255,.06);padding:16px 20px;transition:all .3s;position:relative}
+.chart-metric:hover{border-color:rgba(0,212,255,.2)}
+.chart-metric-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px}
+.chart-metric-header .cm-value{font-family:var(--display);font-size:clamp(1.4rem,2.2vw,1.8rem);color:var(--white);line-height:1;text-shadow:0 0 15px rgba(0,212,255,.1)}
+.chart-metric-header .cm-value.green{color:var(--green);text-shadow:0 0 15px rgba(34,197,94,.15)}
+.chart-metric-header .cm-value.rose{color:var(--rose);text-shadow:0 0 15px rgba(239,68,68,.15)}
+.chart-metric-header .cm-value .unit{font-family:var(--heading);color:var(--cyan);font-size:.5em;margin-left:2px}
+.chart-metric-header .cm-delta{font-family:var(--heading);font-size:.5rem;letter-spacing:.06em;padding:2px 6px;border:1px solid;margin-top:4px}
+.cm-delta.up{color:var(--green);border-color:rgba(34,197,94,.3);background:rgba(34,197,94,.04)}
+.cm-delta.down{color:var(--rose);border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.04)}
+.chart-metric .cm-label{font-family:var(--heading);font-size:.5rem;color:var(--gray);letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px}
+.sparkline-wrap{height:40px;position:relative}
+.sparkline-wrap svg{display:block;width:100%;height:100%}
+
+/* ── Two-column layout ── */
+.dash-columns{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:24px}
+
+/* ── Card base ── */
+.dash-card{background:var(--surface);border:1px solid rgba(0,212,255,.06);transition:all .3s}
+.dash-card:hover{border-color:rgba(0,212,255,.12)}
+.dash-card-header{padding:16px 20px 0}
+.dash-card-body{padding:12px 20px 20px}
+
+/* ── Active Actions (full-width cards) ── */
+.active-actions-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;margin-bottom:24px}
+.action-card{background:var(--surface);border:1px solid rgba(0,212,255,.06);padding:16px 20px;transition:all .3s;position:relative;overflow:hidden}
+.action-card:hover{border-color:rgba(0,212,255,.18)}
+.action-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.action-card.running::before{background:var(--amber);box-shadow:0 0 12px var(--amber)}
+.action-card.queued::before{background:var(--mid)}
+.action-card-top{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.action-status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;animation:pulse 2s infinite}
+.action-status-dot.running{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.action-status-dot.queued{background:var(--mid);box-shadow:0 0 6px var(--mid)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.action-repo{font-family:var(--heading);font-size:.65rem;color:var(--white);letter-spacing:.03em;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.action-elapsed{font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.04em;flex-shrink:0;padding:2px 8px;border:1px solid rgba(0,212,255,.08);background:rgba(0,212,255,.02)}
+.action-detail{font-size:.72rem;color:var(--mid);line-height:1.6}
+.action-detail code{font-family:'Courier New',monospace;font-size:.66rem;color:var(--cyan);background:rgba(0,212,255,.04);padding:0 4px}
+.action-detail .branch{color:var(--amber)}
+.action-workflow{font-family:var(--heading);font-size:.5rem;color:var(--gray);letter-spacing:.06em;margin-top:6px;display:flex;align-items:center;gap:8px}
+.action-workflow .action-step{color:var(--mid)}
+.action-progress{height:2px;background:rgba(0,212,255,.06);margin-top:10px;overflow:hidden}
+.action-progress .bar{height:100%;transition:width .3s;background:var(--amber);box-shadow:0 0 6px rgba(234,179,8,.3)}
+
+/* ── Open PRs ── */
+.pr-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid rgba(0,212,255,.04)}
+.pr-item:last-child{border-bottom:none}
+.pr-icon{width:20px;height:20px;flex-shrink:0;margin-top:2px}
+.pr-icon svg{width:16px;height:16px;fill:none;stroke:var(--green);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.pr-icon.draft svg{stroke:var(--gray)}
+.pr-info{flex:1;min-width:0}
+.pr-title{font-size:.8rem;color:var(--white);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pr-meta{font-size:.68rem;color:var(--mid)}
+.pr-meta .repo{color:var(--cyan);font-family:var(--heading);font-size:.58rem;letter-spacing:.03em}
+.pr-labels{display:flex;gap:4px;margin-top:3px}
+.pr-label{font-family:var(--heading);font-size:.42rem;letter-spacing:.06em;padding:2px 6px;border:1px solid}
+.pr-label.review{color:var(--amber);border-color:rgba(234,179,8,.3);background:rgba(234,179,8,.04)}
+.pr-label.approved{color:var(--green);border-color:rgba(34,197,94,.3);background:rgba(34,197,94,.04)}
+.pr-label.changes{color:var(--rose);border-color:rgba(239,68,68,.3);background:rgba(239,68,68,.04)}
+.pr-label.draft-label{color:var(--gray);border-color:rgba(42,58,78,.5);background:rgba(42,58,78,.15)}
+.pr-time{font-size:.65rem;color:var(--gray);flex-shrink:0;margin-top:2px}
+
+/* ── Open Issues ── */
+.issue-item{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid rgba(0,212,255,.04)}
+.issue-item:last-child{border-bottom:none}
+.issue-icon{width:20px;height:20px;flex-shrink:0;margin-top:2px}
+.issue-icon svg{width:16px;height:16px;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.issue-icon.bug svg{stroke:var(--rose)}
+.issue-icon.feature svg{stroke:var(--cyan)}
+.issue-icon.question svg{stroke:var(--amber)}
+.issue-info{flex:1;min-width:0}
+.issue-title{font-size:.8rem;color:var(--white);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.issue-meta{font-size:.68rem;color:var(--mid)}
+.issue-meta .repo{color:var(--cyan);font-family:var(--heading);font-size:.58rem;letter-spacing:.03em}
+.issue-time{font-size:.65rem;color:var(--gray);flex-shrink:0;margin-top:2px}
+
+/* ── Contribution Chart ── */
+.term{background:var(--surface);overflow:hidden;border:1px solid rgba(0,212,255,.1);box-shadow:0 0 30px rgba(0,212,255,.03);margin-bottom:24px}
+.term-bar{display:flex;align-items:center;gap:7px;padding:11px 16px;background:rgba(0,0,0,.3);border-bottom:1px solid rgba(0,212,255,.06)}
+.term-bar .p{margin-left:auto;font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.05em}
+.term-body{padding:1.5rem}
+.chart-container{width:100%;overflow-x:auto}
+.chart-container svg{display:block;width:100%;height:auto}
+.chart-container svg text{font-family:var(--heading);fill:var(--gray);font-size:9px;letter-spacing:.04em}
+.chart-legend{display:flex;gap:20px;padding:12px 16px 8px;justify-content:flex-end}
+.chart-legend-item{display:flex;align-items:center;gap:6px;font-family:var(--heading);font-size:.52rem;color:var(--gray);letter-spacing:.06em}
+.chart-legend-item .swatch{width:10px;height:10px}
+.chart-legend-item .swatch.success{background:var(--green);opacity:.6}
+.chart-legend-item .swatch.failed{background:var(--rose);opacity:.6}
+.chart-tooltip{position:absolute;pointer-events:none;background:rgba(2,4,8,.95);border:1px solid rgba(0,212,255,.2);padding:8px 12px;font-family:var(--heading);font-size:.55rem;color:var(--white);letter-spacing:.04em;opacity:0;transition:opacity .15s;z-index:50;white-space:nowrap}
+.chart-tooltip .tt-date{color:var(--cyan);margin-bottom:4px}
+.chart-tooltip .tt-row{display:flex;align-items:center;gap:6px;margin-top:2px}
+.chart-tooltip .tt-dot{width:6px;height:6px;border-radius:50%}
+.chart-tooltip .tt-dot.success{background:var(--green)}
+.chart-tooltip .tt-dot.failed{background:var(--rose)}
+
+/* ── Recently Updated Repos ── */
+.repo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-bottom:24px}
+.repo-card{padding:1.25rem 1.5rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);transition:all .3s;cursor:pointer}
+.repo-card:hover{border-color:rgba(0,212,255,.18);box-shadow:inset 0 0 15px rgba(0,212,255,.03)}
+.repo-card-header{display:flex;align-items:center;gap:10px;margin-bottom:.5rem}
+.repo-name{font-family:var(--heading);font-size:.7rem;color:var(--white);letter-spacing:.03em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.repo-status{font-family:var(--heading);font-size:.45rem;letter-spacing:.08em;padding:2px 8px;border:1px solid;flex-shrink:0}
+.repo-status.passing{color:var(--green);border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.06)}
+.repo-status.failing{color:var(--rose);border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.06)}
+.repo-status.running{color:var(--amber);border-color:rgba(234,179,8,.35);background:rgba(234,179,8,.06)}
+.repo-detail{font-size:.7rem;color:var(--mid);line-height:1.5;margin-bottom:.5rem}
+.repo-detail code{font-family:'Courier New',monospace;font-size:.66rem;color:var(--cyan);background:rgba(0,212,255,.04);padding:0 4px}
+.repo-detail .branch{color:var(--amber)}
+.repo-detail .duration{color:var(--gray);margin-left:4px}
+.repo-bar-row{display:flex;align-items:center;gap:8px}
+.repo-bar-label{font-family:var(--heading);font-size:.45rem;color:var(--gray);letter-spacing:.06em;white-space:nowrap}
+.repo-bar{flex:1;height:3px;background:rgba(0,212,255,.06);display:flex}
+.repo-bar .bar-pass{height:100%;background:var(--green);opacity:.7}
+.repo-bar .bar-fail{height:100%;background:var(--rose);opacity:.7}
+.repo-bar-pct{font-family:var(--heading);font-size:.48rem;color:var(--green);letter-spacing:.04em;min-width:26px;text-align:right}
+
+/* ── Recent Runs ── */
+.runs-list{list-style:none}
+.run-item{border:1px solid rgba(0,212,255,.06);border-bottom:none;background:var(--surface);transition:all .2s}
+.run-item:last-child{border-bottom:1px solid rgba(0,212,255,.06)}
+.run-item:hover{border-color:rgba(0,212,255,.15)}
+.run-header{display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;transition:background .15s}
+.run-header:hover{background:rgba(0,212,255,.02)}
+.run-status-icon{width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.run-status-icon svg{width:14px;height:14px;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.run-status-icon.success svg{stroke:var(--green)}
+.run-status-icon.failed svg{stroke:var(--rose)}
+.run-status-icon.running svg{stroke:var(--amber)}
+.run-workflow{font-family:var(--heading);font-size:.62rem;color:var(--white);letter-spacing:.03em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.run-branch{font-size:.66rem;color:var(--amber);font-family:'Courier New',monospace}
+.run-commit{font-size:.66rem;color:var(--mid);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.run-duration{font-family:var(--heading);font-size:.52rem;color:var(--gray);letter-spacing:.04em;min-width:48px;text-align:right}
+.run-time{font-size:.62rem;color:var(--gray);min-width:55px;text-align:right}
+.run-expand{width:20px;height:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--gray);transition:transform .2s,color .2s;cursor:pointer}
+.run-expand svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.run-item.expanded .run-expand{transform:rotate(180deg);color:var(--cyan)}
+.run-details{max-height:0;overflow:hidden;transition:max-height .3s ease;background:rgba(0,0,0,.15)}
+.run-item.expanded .run-details{max-height:500px}
+.run-steps{list-style:none;padding:8px 16px 12px 48px}
+.run-step{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(0,212,255,.03)}
+.run-step:last-child{border-bottom:none}
+.step-icon{width:14px;height:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.step-icon svg{width:10px;height:10px;fill:none;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round}
+.step-icon.success svg{stroke:var(--green)}
+.step-icon.failed svg{stroke:var(--rose)}
+.step-icon.skipped svg{stroke:var(--gray)}
+.step-name{font-size:.72rem;color:var(--light);flex:1}
+.step-duration{font-family:var(--heading);font-size:.5rem;color:var(--gray);letter-spacing:.04em}
+
+/* ── Footer ── */
+.foot{text-align:center;padding:1.5rem;font-family:var(--heading);font-size:.55rem;color:var(--gray);border-top:1px solid rgba(0,212,255,.04);position:relative;z-index:1;letter-spacing:.06em}
+
+/* ── Responsive ── */
+@media(max-width:900px){
+  .chart-metrics-row{grid-template-columns:1fr 1fr 1fr}
+  .metrics-row{grid-template-columns:repeat(3,1fr)}
+  .active-actions-grid{grid-template-columns:1fr}
+  .dash-columns{grid-template-columns:1fr}
+  .repo-grid{grid-template-columns:1fr}
+  .run-commit{display:none}
+}
+@media(max-width:520px){
+  .chart-metrics-row{grid-template-columns:1fr}
+  .metrics-row{grid-template-columns:repeat(3,1fr)}
+  .dash-header{flex-direction:column;align-items:flex-start}
+  .run-branch{display:none}
+  .run-duration{display:none}
+}
+@media(max-width:480px){
+  .metrics-row{grid-template-columns:1fr}
+  .run-time{display:none}
+}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<nav class="mockup-nav">
+  <a href="mockup-42-warp-hex.html">42 Hex Warp</a>
+  <a href="mockup-43-dashboard.html">43 Dashboard</a>
+  <a href="mockup-44-blog.html">44 Blog</a>
+  <a href="mockup-45-questionnaire.html">45 Questionnaire</a>
+  <a href="mockup-46-research-prompt.html">46 Research</a>
+  <a href="mockup-47-research-output.html">47 Output</a>
+  <a href="mockup-48-github-actions.html" class="active">48 GitHub</a>
+</nav>
+
+<div class="dash-wrap">
+
+  <!-- ── Header ── -->
+  <div class="dash-header reveal">
+    <div>
+      <div class="code-label">// github.dashboard()</div>
+      <div class="sec-h">GitHub Dashboard</div>
+      <p class="sec-p">Live overview of repos, actions, pull requests, and issues.</p>
+    </div>
+  </div>
+
+  <!-- ── Chart Metrics (Commits, Pass Rate, Failed) ── -->
+  <div class="chart-metrics-row">
+    <div class="chart-metric reveal">
+      <div class="cm-label">Commits (7d)</div>
+      <div class="chart-metric-header">
+        <div class="cm-value">247</div>
+        <span class="cm-delta up">+12%</span>
+      </div>
+      <div class="sparkline-wrap"><svg id="sparkCommits" viewBox="0 0 200 40" preserveAspectRatio="none"></svg></div>
+    </div>
+    <div class="chart-metric reveal">
+      <div class="cm-label">Actions Pass Rate (7d)</div>
+      <div class="chart-metric-header">
+        <div class="cm-value green">94<span class="unit">%</span></div>
+        <span class="cm-delta up">+2%</span>
+      </div>
+      <div class="sparkline-wrap"><svg id="sparkPassRate" viewBox="0 0 200 40" preserveAspectRatio="none"></svg></div>
+    </div>
+    <div class="chart-metric reveal">
+      <div class="cm-label">Failed Actions (7d)</div>
+      <div class="chart-metric-header">
+        <div class="cm-value rose">18</div>
+        <span class="cm-delta down">+3</span>
+      </div>
+      <div class="sparkline-wrap"><svg id="sparkFailed" viewBox="0 0 200 40" preserveAspectRatio="none"></svg></div>
+    </div>
+  </div>
+
+  <!-- ── Simple Metrics Row ── -->
+  <div class="metrics-row" style="margin-bottom:24px">
+    <div class="metric-card reveal">
+      <div class="m-value amber">7</div>
+      <div class="m-label">Open PRs</div>
+    </div>
+    <div class="metric-card reveal">
+      <div class="m-value">12</div>
+      <div class="m-label">Merged This Week</div>
+    </div>
+    <div class="metric-card reveal">
+      <div class="m-value">18</div>
+      <div class="m-label">Open Issues</div>
+    </div>
+  </div>
+
+  <!-- ── Active Actions (full-width cards) ── -->
+  <div class="reveal" style="margin-bottom:12px">
+    <div class="code-label">// actions.active()</div>
+  </div>
+  <div class="active-actions-grid">
+    <div class="action-card running reveal">
+      <div class="action-card-top">
+        <div class="action-status-dot running"></div>
+        <div class="action-repo">smarter-dev/research-engine</div>
+        <div class="action-elapsed">2m 14s</div>
+      </div>
+      <div class="action-detail">CI / Build &amp; Test &middot; <span class="branch">feat/parallel-fetch</span> &middot; <code>1c9f4a2</code></div>
+      <div class="action-workflow"><span class="action-step">Checkout</span> &rarr; <span class="action-step">Setup</span> &rarr; <span class="action-step">Install</span> &rarr; <span class="action-step" style="color:var(--amber)">Tests</span> &rarr; <span class="action-step">Build</span></div>
+      <div class="action-progress"><div class="bar" style="width:62%"></div></div>
+    </div>
+    <div class="action-card running reveal">
+      <div class="action-card-top">
+        <div class="action-status-dot running"></div>
+        <div class="action-repo">smarter-dev/web-app</div>
+        <div class="action-elapsed">0m 48s</div>
+      </div>
+      <div class="action-detail">Deploy / Staging &middot; <span class="branch">feat/onboarding-v2</span> &middot; <code>d47e2b1</code></div>
+      <div class="action-workflow"><span class="action-step">Checkout</span> &rarr; <span class="action-step" style="color:var(--amber)">Build</span> &rarr; <span class="action-step">Push</span> &rarr; <span class="action-step">Deploy</span></div>
+      <div class="action-progress"><div class="bar" style="width:28%"></div></div>
+    </div>
+    <div class="action-card queued reveal">
+      <div class="action-card-top">
+        <div class="action-status-dot queued"></div>
+        <div class="action-repo">smarter-dev/infra</div>
+        <div class="action-elapsed">queued</div>
+      </div>
+      <div class="action-detail">Terraform Plan &middot; <span class="branch">main</span> &middot; <code>7d4a1e3</code></div>
+      <div class="action-workflow"><span class="action-step">Init</span> &rarr; <span class="action-step">Validate</span> &rarr; <span class="action-step">Plan</span> &rarr; <span class="action-step">Report</span></div>
+      <div class="action-progress"><div class="bar" style="width:0%"></div></div>
+    </div>
+    <div class="action-card running reveal">
+      <div class="action-card-top">
+        <div class="action-status-dot running"></div>
+        <div class="action-repo">smarter-dev/discord-bot</div>
+        <div class="action-elapsed">1m 05s</div>
+      </div>
+      <div class="action-detail">CI / Lint + Test &middot; <span class="branch">fix/url-handler</span> &middot; <code>e9788f8</code></div>
+      <div class="action-workflow"><span class="action-step">Checkout</span> &rarr; <span class="action-step">Setup</span> &rarr; <span class="action-step" style="color:var(--amber)">Lint</span> &rarr; <span class="action-step">Tests</span></div>
+      <div class="action-progress"><div class="bar" style="width:45%"></div></div>
+    </div>
+  </div>
+
+  <!-- ── Open PRs + Open Issues ── -->
+  <div class="dash-columns">
+    <div class="dash-card reveal">
+      <div class="dash-card-header">
+        <div class="code-label">// prs.open()</div>
+      </div>
+      <div class="dash-card-body">
+        <div class="pr-item">
+          <div class="pr-icon"><svg viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div>
+          <div class="pr-info">
+            <div class="pr-title">Add rate limiting to /v2/research endpoints</div>
+            <div class="pr-meta"><span class="repo">api-gateway</span> &middot; #247 by James K.</div>
+            <div class="pr-labels"><span class="pr-label review">NEEDS REVIEW</span></div>
+          </div>
+          <div class="pr-time">2h ago</div>
+        </div>
+        <div class="pr-item">
+          <div class="pr-icon"><svg viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div>
+          <div class="pr-info">
+            <div class="pr-title">Implement parallel source fetching for research engine</div>
+            <div class="pr-meta"><span class="repo">research-engine</span> &middot; #182 by Maya R.</div>
+            <div class="pr-labels"><span class="pr-label approved">APPROVED</span></div>
+          </div>
+          <div class="pr-time">4h ago</div>
+        </div>
+        <div class="pr-item">
+          <div class="pr-icon"><svg viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div>
+          <div class="pr-info">
+            <div class="pr-title">Redesign onboarding flow with skill assessment</div>
+            <div class="pr-meta"><span class="repo">web-app</span> &middot; #891 by Sarah P.</div>
+            <div class="pr-labels"><span class="pr-label changes">CHANGES REQUESTED</span></div>
+          </div>
+          <div class="pr-time">6h ago</div>
+        </div>
+        <div class="pr-item">
+          <div class="pr-icon draft"><svg viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" y1="9" x2="6" y2="21"/></svg></div>
+          <div class="pr-info">
+            <div class="pr-title">WIP: Migrate challenge engine to event sourcing</div>
+            <div class="pr-meta"><span class="repo">runhack-engine</span> &middot; #403 by Alex K.</div>
+            <div class="pr-labels"><span class="pr-label draft-label">DRAFT</span></div>
+          </div>
+          <div class="pr-time">1d ago</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Open Issues -->
+    <div class="dash-card reveal">
+      <div class="dash-card-header">
+        <div class="code-label">// issues.open()</div>
+      </div>
+      <div class="dash-card-body">
+        <div class="issue-item">
+          <div class="issue-icon bug"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></div>
+          <div class="issue-info">
+            <div class="issue-title">Research engine returns 500 on queries with special characters</div>
+            <div class="issue-meta"><span class="repo">research-engine</span> &middot; #178</div>
+          </div>
+          <div class="issue-time">1h ago</div>
+        </div>
+        <div class="issue-item">
+          <div class="issue-icon feature"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div>
+          <div class="issue-info">
+            <div class="issue-title">Add webhook notifications for completed research runs</div>
+            <div class="issue-meta"><span class="repo">research-engine</span> &middot; #175</div>
+          </div>
+          <div class="issue-time">3h ago</div>
+        </div>
+        <div class="issue-item">
+          <div class="issue-icon bug"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></div>
+          <div class="issue-info">
+            <div class="issue-title">Discord bot crashes when processing URLs with unicode paths</div>
+            <div class="issue-meta"><span class="repo">discord-bot</span> &middot; #94</div>
+          </div>
+          <div class="issue-time">5h ago</div>
+        </div>
+        <div class="issue-item">
+          <div class="issue-icon question"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+          <div class="issue-info">
+            <div class="issue-title">Should RunHack difficulty auto-adjust based on user history?</div>
+            <div class="issue-meta"><span class="repo">runhack-engine</span> &middot; #398</div>
+          </div>
+          <div class="issue-time">8h ago</div>
+        </div>
+        <div class="issue-item">
+          <div class="issue-icon feature"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></div>
+          <div class="issue-info">
+            <div class="issue-title">Support dark/light theme toggle on web-app</div>
+            <div class="issue-meta"><span class="repo">web-app</span> &middot; #882</div>
+          </div>
+          <div class="issue-time">1d ago</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Build Health Chart ── -->
+  <div class="term reveal">
+    <div class="term-bar">
+      <div class="p">actions_health.svg &middot; last 21 days</div>
+    </div>
+    <div class="term-body" style="padding:1rem 1rem .5rem;position:relative">
+      <div class="chart-container" id="chartContainer">
+        <svg id="buildChart" viewBox="0 0 800 220" preserveAspectRatio="xMidYMid meet"></svg>
+      </div>
+      <div class="chart-tooltip" id="chartTooltip"></div>
+      <div class="chart-legend">
+        <span class="chart-legend-item"><span class="swatch success"></span> Successful</span>
+        <span class="chart-legend-item"><span class="swatch failed"></span> Failed</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Recently Updated Repos ── -->
+  <div class="reveal">
+    <div class="code-label">// repos.recent()</div>
+  </div>
+  <div class="repo-grid">
+    <div class="repo-card reveal">
+      <div class="repo-card-header">
+        <span class="repo-name">smarter-dev/web-app</span>
+        <span class="repo-status passing">PASSING</span>
+      </div>
+      <div class="repo-detail">
+        <code>a3f8c21</code> Update auth middleware
+        <br><span class="branch">main</span> <span class="duration">&middot; 2m 14s</span>
+      </div>
+      <div class="repo-bar-row">
+        <span class="repo-bar-label">LAST 10</span>
+        <div class="repo-bar"><div class="bar-pass" style="width:100%"></div></div>
+        <span class="repo-bar-pct">100%</span>
+      </div>
+    </div>
+    <div class="repo-card reveal">
+      <div class="repo-card-header">
+        <span class="repo-name">smarter-dev/api-gateway</span>
+        <span class="repo-status failing">FAILING</span>
+      </div>
+      <div class="repo-detail">
+        <code>e7b2d09</code> Add rate limiting
+        <br><span class="branch">feat/rate-limits</span> <span class="duration">&middot; 4m 31s</span>
+      </div>
+      <div class="repo-bar-row">
+        <span class="repo-bar-label">LAST 10</span>
+        <div class="repo-bar"><div class="bar-pass" style="width:70%"></div><div class="bar-fail" style="width:30%"></div></div>
+        <span class="repo-bar-pct" style="color:var(--amber)">70%</span>
+      </div>
+    </div>
+    <div class="repo-card reveal">
+      <div class="repo-card-header">
+        <span class="repo-name">smarter-dev/discord-bot</span>
+        <span class="repo-status passing">PASSING</span>
+      </div>
+      <div class="repo-detail">
+        <code>5591bc4</code> Remove youtube-transcript-api
+        <br><span class="branch">main</span> <span class="duration">&middot; 1m 48s</span>
+      </div>
+      <div class="repo-bar-row">
+        <span class="repo-bar-label">LAST 10</span>
+        <div class="repo-bar"><div class="bar-pass" style="width:90%"></div><div class="bar-fail" style="width:10%"></div></div>
+        <span class="repo-bar-pct">90%</span>
+      </div>
+    </div>
+    <div class="repo-card reveal">
+      <div class="repo-card-header">
+        <span class="repo-name">smarter-dev/research-engine</span>
+        <span class="repo-status running">RUNNING</span>
+      </div>
+      <div class="repo-detail">
+        <code>1c9f4a2</code> Parallel source fetching
+        <br><span class="branch">feat/parallel-fetch</span> <span class="duration">&middot; running</span>
+      </div>
+      <div class="repo-bar-row">
+        <span class="repo-bar-label">LAST 10</span>
+        <div class="repo-bar"><div class="bar-pass" style="width:80%"></div><div class="bar-fail" style="width:20%"></div></div>
+        <span class="repo-bar-pct" style="color:var(--amber)">80%</span>
+      </div>
+    </div>
+    <div class="repo-card reveal">
+      <div class="repo-card-header">
+        <span class="repo-name">smarter-dev/runhack-engine</span>
+        <span class="repo-status passing">PASSING</span>
+      </div>
+      <div class="repo-detail">
+        <code>b82e7f1</code> Fix scoring edge case
+        <br><span class="branch">main</span> <span class="duration">&middot; 3m 22s</span>
+      </div>
+      <div class="repo-bar-row">
+        <span class="repo-bar-label">LAST 10</span>
+        <div class="repo-bar"><div class="bar-pass" style="width:100%"></div></div>
+        <span class="repo-bar-pct">100%</span>
+      </div>
+    </div>
+    <div class="repo-card reveal">
+      <div class="repo-card-header">
+        <span class="repo-name">smarter-dev/infra</span>
+        <span class="repo-status passing">PASSING</span>
+      </div>
+      <div class="repo-detail">
+        <code>7d4a1e3</code> Terraform us-west-2
+        <br><span class="branch">main</span> <span class="duration">&middot; 8m 05s</span>
+      </div>
+      <div class="repo-bar-row">
+        <span class="repo-bar-label">LAST 10</span>
+        <div class="repo-bar"><div class="bar-pass" style="width:90%"></div><div class="bar-fail" style="width:10%"></div></div>
+        <span class="repo-bar-pct">90%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Recent Action Runs ── -->
+  <div class="reveal" style="margin-bottom:12px">
+    <div class="code-label">// actions.recent()</div>
+  </div>
+  <div style="margin-bottom:24px">
+    <ul class="runs-list">
+      <li class="run-item reveal">
+        <div class="run-header" onclick="this.parentElement.classList.toggle('expanded')">
+          <div class="run-status-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+          <span class="run-workflow">web-app / CI Build &amp; Test</span>
+          <span class="run-branch">main</span>
+          <span class="run-commit">a3f8c21 Update auth middleware</span>
+          <span class="run-duration">2m 14s</span>
+          <span class="run-time">3m ago</span>
+          <div class="run-expand"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></div>
+        </div>
+        <div class="run-details">
+          <ul class="run-steps">
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Checkout</span><span class="step-duration">2s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Setup Python 3.12</span><span class="step-duration">8s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Install dependencies</span><span class="step-duration">24s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Run linter</span><span class="step-duration">12s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Run tests</span><span class="step-duration">1m 18s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Build Docker image</span><span class="step-duration">10s</span></li>
+          </ul>
+        </div>
+      </li>
+      <li class="run-item reveal">
+        <div class="run-header" onclick="this.parentElement.classList.toggle('expanded')">
+          <div class="run-status-icon failed"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></div>
+          <span class="run-workflow">api-gateway / CI Build &amp; Test</span>
+          <span class="run-branch">feat/rate-limits</span>
+          <span class="run-commit">e7b2d09 Add rate limiting</span>
+          <span class="run-duration">4m 31s</span>
+          <span class="run-time">18m ago</span>
+          <div class="run-expand"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></div>
+        </div>
+        <div class="run-details">
+          <ul class="run-steps">
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Checkout</span><span class="step-duration">2s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Install dependencies</span><span class="step-duration">22s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Run linter</span><span class="step-duration">11s</span></li>
+            <li class="run-step"><div class="step-icon failed"><svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></div><span class="step-name">Run tests</span><span class="step-duration">3m 41s</span></li>
+            <li class="run-step"><div class="step-icon skipped"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/></svg></div><span class="step-name">Build Docker image</span><span class="step-duration">skipped</span></li>
+          </ul>
+        </div>
+      </li>
+      <li class="run-item reveal">
+        <div class="run-header" onclick="this.parentElement.classList.toggle('expanded')">
+          <div class="run-status-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+          <span class="run-workflow">discord-bot / Deploy Production</span>
+          <span class="run-branch">main</span>
+          <span class="run-commit">5591bc4 Remove youtube-transcript</span>
+          <span class="run-duration">1m 48s</span>
+          <span class="run-time">42m ago</span>
+          <div class="run-expand"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></div>
+        </div>
+        <div class="run-details">
+          <ul class="run-steps">
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Checkout</span><span class="step-duration">1s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Build Docker image</span><span class="step-duration">32s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Push to registry</span><span class="step-duration">18s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Deploy to production</span><span class="step-duration">47s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Health check</span><span class="step-duration">10s</span></li>
+          </ul>
+        </div>
+      </li>
+      <li class="run-item reveal">
+        <div class="run-header" onclick="this.parentElement.classList.toggle('expanded')">
+          <div class="run-status-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+          <span class="run-workflow">runhack-engine / CI Build &amp; Test</span>
+          <span class="run-branch">main</span>
+          <span class="run-commit">b82e7f1 Fix challenge scoring</span>
+          <span class="run-duration">3m 22s</span>
+          <span class="run-time">1h ago</span>
+          <div class="run-expand"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></div>
+        </div>
+        <div class="run-details">
+          <ul class="run-steps">
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Checkout</span><span class="step-duration">2s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Setup Python 3.12</span><span class="step-duration">8s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Install dependencies</span><span class="step-duration">25s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Run linter</span><span class="step-duration">13s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Run tests</span><span class="step-duration">2m 24s</span></li>
+            <li class="run-step"><div class="step-icon success"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div><span class="step-name">Build Docker image</span><span class="step-duration">10s</span></li>
+          </ul>
+        </div>
+      </li>
+    </ul>
+  </div>
+
+</div>
+
+<footer class="foot">&copy; 2026 SMARTER DEV</footer>
+
+<script>
+(function() {
+  // ── Sparkline Charts ──
+  function drawSparkline(svgId, data, color, fillColor) {
+    var svg = document.getElementById(svgId);
+    if (!svg) return;
+    var w = 200, h = 40, pad = 2;
+    var max = Math.max.apply(null, data);
+    var min = Math.min.apply(null, data);
+    var range = max - min || 1;
+    var points = [];
+    for (var i = 0; i < data.length; i++) {
+      var x = pad + (i / (data.length - 1)) * (w - pad * 2);
+      var y = pad + (1 - (data[i] - min) / range) * (h - pad * 2);
+      points.push(x + ',' + y);
+    }
+    var fillPath = 'M' + pad + ',' + h + ' L' + points.join(' L') + ' L' + (w - pad) + ',' + h + ' Z';
+    var linePath = 'M' + points.join(' L');
+    svg.innerHTML =
+      '<defs><linearGradient id="grad-' + svgId + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="' + fillColor + '" stop-opacity="0.3"/><stop offset="100%" stop-color="' + fillColor + '" stop-opacity="0"/></linearGradient></defs>' +
+      '<path d="' + fillPath + '" fill="url(#grad-' + svgId + ')"/>' +
+      '<path d="' + linePath + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<circle cx="' + points[points.length-1].split(',')[0] + '" cy="' + points[points.length-1].split(',')[1] + '" r="2.5" fill="' + color + '"/>';
+  }
+  drawSparkline('sparkCommits', [28,35,42,31,38,45,37], 'rgba(0,212,255,0.8)', 'rgba(0,212,255,1)');
+  drawSparkline('sparkPassRate', [91,93,89,95,92,96,94], 'rgba(34,197,94,0.8)', 'rgba(34,197,94,1)');
+  drawSparkline('sparkFailed', [2,4,1,5,3,1,3], 'rgba(239,68,68,0.8)', 'rgba(239,68,68,1)');
+
+  // ── Build Health Chart (SVG) ──
+  var chartData = [
+    { date: 'Feb 5',  success: 52, failed: 4 },
+    { date: 'Feb 6',  success: 58, failed: 2 },
+    { date: 'Feb 7',  success: 45, failed: 5 },
+    { date: 'Feb 8',  success: 61, failed: 3 },
+    { date: 'Feb 9',  success: 38, failed: 1 },
+    { date: 'Feb 10', success: 42, failed: 2 },
+    { date: 'Feb 11', success: 55, failed: 6 },
+    { date: 'Feb 12', success: 63, failed: 3 },
+    { date: 'Feb 13', success: 59, failed: 2 },
+    { date: 'Feb 14', success: 48, failed: 4 },
+    { date: 'Feb 15', success: 54, failed: 1 },
+    { date: 'Feb 16', success: 40, failed: 3 },
+    { date: 'Feb 17', success: 44, failed: 2 },
+    { date: 'Feb 18', success: 67, failed: 8 },
+    { date: 'Feb 19', success: 62, failed: 5 },
+    { date: 'Feb 20', success: 58, failed: 3 },
+    { date: 'Feb 21', success: 55, failed: 2 },
+    { date: 'Feb 22', success: 50, failed: 4 },
+    { date: 'Feb 23', success: 46, failed: 1 },
+    { date: 'Feb 24', success: 60, failed: 3 },
+    { date: 'Feb 25', success: 57, failed: 2 }
+  ];
+  var svg = document.getElementById('buildChart');
+  var tooltip = document.getElementById('chartTooltip');
+  var chartContainer = document.getElementById('chartContainer');
+  var pad = { top: 20, right: 20, bottom: 30, left: 40 };
+  var w = 800, h = 220;
+  var cw = w - pad.left - pad.right;
+  var ch = h - pad.top - pad.bottom;
+  var maxTotal = 0;
+  chartData.forEach(function(d) { var t = d.success + d.failed; if (t > maxTotal) maxTotal = t; });
+  maxTotal = Math.ceil(maxTotal / 10) * 10;
+  function x(i) { return pad.left + (i / (chartData.length - 1)) * cw; }
+  function y(val) { return pad.top + ch - (val / maxTotal) * ch; }
+  var gridHTML = '';
+  for (var gi = 0; gi <= 4; gi++) { var gv = (maxTotal / 4) * gi; var gy = y(gv); gridHTML += '<line x1="' + pad.left + '" y1="' + gy + '" x2="' + (w - pad.right) + '" y2="' + gy + '" stroke="rgba(0,212,255,0.04)" stroke-width="1"/>'; gridHTML += '<text x="' + (pad.left - 8) + '" y="' + (gy + 3) + '" text-anchor="end">' + Math.round(gv) + '</text>'; }
+  var totalPath = 'M' + x(0) + ',' + y(chartData[0].success + chartData[0].failed);
+  for (var i = 1; i < chartData.length; i++) totalPath += ' L' + x(i) + ',' + y(chartData[i].success + chartData[i].failed);
+  totalPath += ' L' + x(chartData.length - 1) + ',' + y(0) + ' L' + x(0) + ',' + y(0) + ' Z';
+  var successPath = 'M' + x(0) + ',' + y(chartData[0].success);
+  for (var i = 1; i < chartData.length; i++) successPath += ' L' + x(i) + ',' + y(chartData[i].success);
+  successPath += ' L' + x(chartData.length - 1) + ',' + y(0) + ' L' + x(0) + ',' + y(0) + ' Z';
+  var totalLine = 'M' + x(0) + ',' + y(chartData[0].success + chartData[0].failed);
+  for (var i = 1; i < chartData.length; i++) totalLine += ' L' + x(i) + ',' + y(chartData[i].success + chartData[i].failed);
+  var successLine = 'M' + x(0) + ',' + y(chartData[0].success);
+  for (var i = 1; i < chartData.length; i++) successLine += ' L' + x(i) + ',' + y(chartData[i].success);
+  var labelsHTML = '';
+  for (var i = 0; i < chartData.length; i += 3) { labelsHTML += '<text x="' + x(i) + '" y="' + (h - 6) + '" text-anchor="middle">' + chartData[i].date + '</text>'; }
+  var hitsHTML = '';
+  var dotW = cw / (chartData.length - 1);
+  for (var i = 0; i < chartData.length; i++) { hitsHTML += '<rect x="' + (x(i) - dotW/2) + '" y="' + pad.top + '" width="' + dotW + '" height="' + ch + '" fill="transparent" data-idx="' + i + '"/>'; hitsHTML += '<circle cx="' + x(i) + '" cy="' + y(chartData[i].success + chartData[i].failed) + '" r="0" fill="var(--rose)" class="chart-dot" data-idx="' + i + '"/>'; hitsHTML += '<circle cx="' + x(i) + '" cy="' + y(chartData[i].success) + '" r="0" fill="var(--green)" class="chart-dot-s" data-idx="' + i + '"/>'; }
+  svg.innerHTML = gridHTML + '<path d="' + totalPath + '" fill="rgba(239,68,68,0.08)"/>' + '<path d="' + successPath + '" fill="rgba(34,197,94,0.08)"/>' + '<path d="' + totalLine + '" fill="none" stroke="rgba(239,68,68,0.35)" stroke-width="1.5"/>' + '<path d="' + successLine + '" fill="none" stroke="rgba(34,197,94,0.4)" stroke-width="1.5"/>' + labelsHTML + hitsHTML;
+  chartContainer.addEventListener('mousemove', function(e) {
+    var rect = chartContainer.getBoundingClientRect(); var mx = e.clientX - rect.left; var scale = rect.width / w; var dataX = (mx / scale - pad.left) / cw * (chartData.length - 1); var idx = Math.round(dataX);
+    if (idx < 0 || idx >= chartData.length) { tooltip.style.opacity = '0'; return; }
+    var d = chartData[idx];
+    tooltip.innerHTML = '<div class="tt-date">' + d.date + '</div><div class="tt-row"><span class="tt-dot success"></span> ' + d.success + ' successful</div><div class="tt-row"><span class="tt-dot failed"></span> ' + d.failed + ' failed</div>';
+    tooltip.style.opacity = '1'; tooltip.style.left = (x(idx) * scale - 40) + 'px'; tooltip.style.top = (y(d.success + d.failed) * scale - 60) + 'px';
+    svg.querySelectorAll('.chart-dot, .chart-dot-s').forEach(function(dot) { dot.setAttribute('r', dot.dataset.idx == idx ? '4' : '0'); });
+  });
+  chartContainer.addEventListener('mouseleave', function() { tooltip.style.opacity = '0'; svg.querySelectorAll('.chart-dot, .chart-dot-s').forEach(function(dot) { dot.setAttribute('r', '0'); }); });
+
+  // ── Hex Warp Background ──
+  var canvas = document.getElementById('bg');
+  var ctx = canvas.getContext('2d');
+  var HEX_SIZE = 18, H_SPACING = HEX_SIZE * Math.sqrt(3), V_SPACING = HEX_SIZE * 1.5, DOT_RADIUS = 2, INFLUENCE_RADIUS = 200, MAX_DISPLACEMENT = 20, LERP_SPEED = 0.08, AMBIENT_AMPLITUDE = 1, AMBIENT_SPEED = 0.0008, CLICK_DURATION = 500, HEX_LINE_REST = 0.025, HEX_LINE_ACTIVE = 0.08, PATH_COUNT = 60, PATH_SPEED = 1.2, TURN_CHANCE = 0.2, SEGMENT_FADE = 0.001, SEGMENT_PEAK_ALPHA = 0.12;
+  var dots = [], cols = 0, rows = 0, mouseX = -9999, mouseY = -9999, mouseActive = false, clickTime = 0, clickActive = false, animId = null, time = 0, traces = [];
+  var hexVerts = [];
+  for (var i = 0; i < 6; i++) { var angle = Math.PI / 180 * (60 * i - 30); hexVerts.push({ x: HEX_SIZE * Math.cos(angle), y: HEX_SIZE * Math.sin(angle) }); }
+  function createDots() { var w = canvas.width, h = canvas.height; cols = Math.ceil(w / H_SPACING) + 3; rows = Math.ceil(h / V_SPACING) + 3; dots = []; for (var row = 0; row < rows; row++) { for (var col = 0; col < cols; col++) { var isOdd = row % 2 === 1; dots.push({ baseX: col * H_SPACING + (isOdd ? H_SPACING * 0.5 : 0) - H_SPACING, baseY: row * V_SPACING - V_SPACING, offsetX: 0, offsetY: 0, targetOffsetX: 0, targetOffsetY: 0, col: col, row: row, phaseX: Math.random() * Math.PI * 2, phaseY: Math.random() * Math.PI * 2 }); } } initTraces(); }
+  function getDot(row, col) { if (row < 0 || row >= rows || col < 0 || col >= cols) return null; return dots[row * cols + col]; }
+  function downNeighbors(row, col) { var isOdd = row % 2 === 1; if (isOdd) return [{ row: row + 1, col: col }, { row: row + 1, col: col + 1 }]; return [{ row: row + 1, col: col - 1 }, { row: row + 1, col: col }]; }
+  function buildRoute(startCol) { var route = []; var col = startCol; for (var row = 0; row < rows; row++) { route.push({ row: row, col: col }); if (Math.random() < TURN_CHANCE && row < rows - 1) { var dir = Math.random() < 0.5 ? -1 : 1; var newCol = col + dir; if (newCol >= 0 && newCol < cols) { route.push({ row: row, col: newCol }); col = newCol; } } if (row < rows - 1) { var dns = downNeighbors(row, col); var pick = dns[Math.random() < 0.5 ? 0 : 1]; if (pick.col >= 0 && pick.col < cols) col = pick.col; else col = dns[0].col >= 0 && dns[0].col < cols ? dns[0].col : dns[1].col; } } return route; }
+  var recentSpawnCols = [];
+  function pickSpawnCol() { var MIN_DIST = 8; for (var a = 0; a < 200; a++) { var col = Math.floor(Math.random() * cols); var bad = false; for (var p = 0; p < recentSpawnCols.length; p++) { if (Math.abs(col - recentSpawnCols[p]) < MIN_DIST) { bad = true; break; } } if (!bad) { recentSpawnCols.push(col); if (recentSpawnCols.length > 3) recentSpawnCols.shift(); return col; } } var col = Math.floor(Math.random() * cols); recentSpawnCols.push(col); if (recentSpawnCols.length > 3) recentSpawnCols.shift(); return col; }
+  function spawnTrace() { var col = pickSpawnCol(); return { route: buildRoute(col), step: 0, progress: 0, speed: PATH_SPEED * (0.5 + Math.random() * 0.8), segments: [] }; }
+  function initTraces() { recentSpawnCols = []; traces = []; for (var i = 0; i < PATH_COUNT; i++) { var t = spawnTrace(); t.step = Math.floor(Math.random() * t.route.length * 0.8); traces.push(t); } }
+  function updateTraces() { for (var i = 0; i < traces.length; i++) { var t = traces[i]; if (t.step < t.route.length - 1) { var from = t.route[t.step], to = t.route[t.step + 1]; var d1 = getDot(from.row, from.col), d2 = getDot(to.row, to.col); var stepDist = H_SPACING; if (d1 && d2) { var dx = d2.baseX - d1.baseX, dy = d2.baseY - d1.baseY; stepDist = Math.sqrt(dx*dx+dy*dy) || H_SPACING; } t.progress += t.speed / stepDist; if (t.progress >= 1) { t.segments.push({ fromRow: from.row, fromCol: from.col, toRow: to.row, toCol: to.col, alpha: SEGMENT_PEAK_ALPHA }); t.progress -= 1; t.step++; } } else { traces[i] = spawnTrace(); } for (var j = t.segments.length - 1; j >= 0; j--) { t.segments[j].alpha -= SEGMENT_FADE; if (t.segments[j].alpha <= 0) t.segments.splice(j, 1); } } }
+  function resize() { var dpr = window.devicePixelRatio || 1; canvas.width = window.innerWidth * dpr; canvas.height = window.innerHeight * dpr; canvas.style.width = window.innerWidth + 'px'; canvas.style.height = window.innerHeight + 'px'; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); createDots(); }
+  function onMouseMove(e) { mouseX = e.clientX; mouseY = e.clientY; mouseActive = true; }
+  function onMouseLeave() { mouseActive = false; mouseX = -9999; mouseY = -9999; }
+  function onClick() { clickTime = performance.now(); clickActive = true; }
+  function update(now) { time = now; var clickFactor = 0; if (clickActive) { var el = now - clickTime; if (el < CLICK_DURATION) { clickFactor = 1 - el/CLICK_DURATION; clickFactor *= clickFactor; } else clickActive = false; } var irSq = INFLUENCE_RADIUS * INFLUENCE_RADIUS; for (var i = 0; i < dots.length; i++) { var dot = dots[i]; var ax = Math.sin(now * AMBIENT_SPEED + dot.phaseX) * AMBIENT_AMPLITUDE; var ay = Math.cos(now * AMBIENT_SPEED * 0.7 + dot.phaseY) * AMBIENT_AMPLITUDE; var dx2 = 0, dy2 = 0; if (mouseActive) { var ddx = dot.baseX - mouseX, ddy = dot.baseY - mouseY, dSq = ddx*ddx+ddy*ddy; if (dSq < irSq && dSq > 0.01) { var d = Math.sqrt(dSq), p = 1-d/INFLUENCE_RADIUS, s = p*p*MAX_DISPLACEMENT, b = 1-2*clickFactor; dx2 = ddx/d*s*b; dy2 = ddy/d*s*b; } } dot.targetOffsetX = dx2 + ax; dot.targetOffsetY = dy2 + ay; dot.offsetX += (dot.targetOffsetX - dot.offsetX) * LERP_SPEED; dot.offsetY += (dot.targetOffsetY - dot.offsetY) * LERP_SPEED; } updateTraces(); }
+  function drawHex(cx, cy, alpha) { ctx.beginPath(); ctx.moveTo(cx + hexVerts[0].x, cy + hexVerts[0].y); for (var i = 1; i < 6; i++) ctx.lineTo(cx + hexVerts[i].x, cy + hexVerts[i].y); ctx.closePath(); ctx.strokeStyle = 'rgba(0,212,255,' + alpha.toFixed(4) + ')'; ctx.lineWidth = 0.5; ctx.stroke(); }
+  function draw() { var w = window.innerWidth, h = window.innerHeight; ctx.clearRect(0, 0, w, h); for (var i = 0; i < dots.length; i++) { var dot = dots[i], x = dot.baseX + dot.offsetX, y = dot.baseY + dot.offsetY; var disp = Math.sqrt(dot.offsetX*dot.offsetX + dot.offsetY*dot.offsetY); var ed = Math.max(0, disp - AMBIENT_AMPLITUDE), dn = Math.min(ed / MAX_DISPLACEMENT, 1); drawHex(x, y, HEX_LINE_REST + (HEX_LINE_ACTIVE - HEX_LINE_REST) * dn); ctx.beginPath(); ctx.arc(x, y, DOT_RADIUS, 0, Math.PI*2); ctx.fillStyle = 'rgba(0,212,255,' + (0.06 + 0.24*dn).toFixed(3) + ')'; ctx.fill(); } for (var ti = 0; ti < traces.length; ti++) { var t = traces[ti]; for (var si = 0; si < t.segments.length; si++) { var seg = t.segments[si]; var d1 = getDot(seg.fromRow, seg.fromCol), d2 = getDot(seg.toRow, seg.toCol); if (!d1||!d2) continue; ctx.beginPath(); ctx.moveTo(d1.baseX+d1.offsetX, d1.baseY+d1.offsetY); ctx.lineTo(d2.baseX+d2.offsetX, d2.baseY+d2.offsetY); ctx.strokeStyle = 'rgba(0,212,255,' + seg.alpha.toFixed(4) + ')'; ctx.lineWidth = 2.5; ctx.stroke(); } if (t.step < t.route.length - 1) { var from = t.route[t.step], to = t.route[t.step+1]; var d1 = getDot(from.row, from.col), d2 = getDot(to.row, to.col); if (d1&&d2) { var x1=d1.baseX+d1.offsetX,y1=d1.baseY+d1.offsetY,x2=d2.baseX+d2.offsetX,y2=d2.baseY+d2.offsetY; ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x1+(x2-x1)*t.progress, y1+(y2-y1)*t.progress); ctx.strokeStyle='rgba(0,212,255,'+SEGMENT_PEAK_ALPHA+')'; ctx.lineWidth=2.5; ctx.stroke(); } } } }
+  function loop(now) { update(now); draw(); animId = requestAnimationFrame(loop); }
+  resize();
+  window.addEventListener('resize', resize);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseleave', onMouseLeave);
+  window.addEventListener('click', onClick);
+  animId = requestAnimationFrame(loop);
+  var obs = new IntersectionObserver(function(e) { e.forEach(function(x) { if (x.isIntersecting) { x.target.classList.add('visible'); obs.unobserve(x.target); } }); }, { threshold: .1 });
+  document.querySelectorAll('.reveal').forEach(function(el) { obs.observe(el); });
+})();
+</script>
+</body>
+</html>

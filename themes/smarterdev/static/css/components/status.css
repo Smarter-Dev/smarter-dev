@@ -1,0 +1,66 @@
+/* ══════════════════════════════════════════════════════
+   Status — SSE connection status indicator
+   ══════════════════════════════════════════════════════ */
+
+.sk-connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity .3s;
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .06em;
+}
+
+/* Show when JS sets a status class */
+.sk-connection-status.sk-status--online,
+.sk-connection-status.sk-status--offline,
+.sk-connection-status.sk-status--linking {
+  opacity: 1;
+}
+
+.sk-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gray);
+  transition: all .3s;
+}
+
+.sk-status-label {
+  color: var(--gray);
+  transition: color .3s;
+}
+
+/* ── Online ── */
+.sk-status--online .sk-status-dot {
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+}
+.sk-status--online .sk-status-label {
+  color: var(--green);
+}
+
+/* ── Offline ── */
+.sk-status--offline .sk-status-dot {
+  background: var(--rose);
+}
+.sk-status--offline .sk-status-label {
+  color: var(--rose);
+}
+
+/* ── Linking (connecting/reconnecting) ── */
+.sk-status--linking .sk-status-dot {
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber);
+  animation: status-pulse 2s infinite;
+}
+.sk-status--linking .sk-status-label {
+  color: var(--amber);
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1 }
+  50% { opacity: .3 }
+}

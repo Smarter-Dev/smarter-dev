@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — Questionnaire</title>
+<link href="https://fonts.googleapis.com/css2?family=Bungee+Hairline&family=Bruno+Ace+SC&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#020408;--surface:#080c14;--cyan:#00d4ff;--green:#22c55e;--amber:#eab308;--rose:#ef4444;--gray:#2a3a4e;--mid:#4a6078;--light:#8098b0;--white:#d4e0ec;--display:'Bungee Hairline',sans-serif;--heading:'Bruno Ace SC',sans-serif;--body:'Inter',Arial,sans-serif}
+html{scroll-behavior:smooth}body{font-family:var(--body);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.7}
+#bg{position:fixed;inset:0;z-index:0}
+.mockup-nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;background:rgba(2,4,8,.92);backdrop-filter:blur(24px);border-bottom:1px solid rgba(0,212,255,.06);font-family:var(--heading);font-size:.62rem;letter-spacing:.05em}
+.mockup-nav a{color:var(--gray);text-decoration:none;padding:5px 12px;border:1px solid transparent;transition:all .2s;white-space:nowrap}.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.25)}.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.06)}
+.reveal{opacity:0;transform:translateY(16px);transition:all .55s cubic-bezier(.25,.46,.45,.94)}.reveal.visible{opacity:1;transform:none}
+.code-label{font-family:var(--heading);font-size:.65rem;color:var(--cyan);margin-bottom:1rem;opacity:.75;letter-spacing:.08em}
+
+/* ── Button styles ── */
+.btn-glow{padding:13px 34px;font-family:var(--heading);font-size:.7rem;letter-spacing:.06em;background:transparent;color:var(--cyan);border:1.5px solid var(--cyan);border-radius:0;cursor:pointer;box-shadow:0 0 15px rgba(0,212,255,.15),inset 0 0 15px rgba(0,212,255,.05);transition:all .3s;text-decoration:none}.btn-glow:hover{background:var(--cyan);color:var(--bg);box-shadow:0 0 30px rgba(0,212,255,.3)}
+.btn-ghost{padding:13px 34px;font-family:var(--heading);font-size:.7rem;letter-spacing:.06em;background:transparent;color:var(--mid);border:1px solid rgba(255,255,255,.08);border-radius:0;cursor:pointer;transition:all .25s;text-decoration:none}.btn-ghost:hover{border-color:rgba(0,212,255,.2);color:var(--light)}
+
+/* ── Terminal card styles ── */
+.term{background:var(--surface);overflow:hidden;border:1px solid rgba(0,212,255,.1);box-shadow:0 0 30px rgba(0,212,255,.03)}
+.term-bar{display:flex;align-items:center;gap:7px;padding:11px 16px;background:rgba(0,0,0,.3);border-bottom:1px solid rgba(0,212,255,.06)}
+.term-bar .p{margin-left:auto;font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.05em}
+
+/* ── Questionnaire-specific styles ── */
+
+.q-page{position:relative;z-index:1;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 24px 60px}
+
+/* Header area */
+.q-header{text-align:center;margin-bottom:36px;max-width:640px}
+.q-header .code-label{margin-bottom:14px}
+.q-title{font-family:var(--display);font-size:clamp(1.6rem,4vw,2.4rem);color:var(--white);line-height:1.2;margin-bottom:12px;letter-spacing:.06em}
+.q-subtitle{font-size:.9rem;color:var(--mid);line-height:1.7;max-width:480px;margin:0 auto 28px}
+
+/* Progress bar */
+.q-progress-wrap{display:flex;align-items:center;gap:14px;justify-content:center}
+.q-step-label{font-family:var(--heading);font-size:.6rem;color:var(--gray);letter-spacing:.06em;white-space:nowrap}
+.q-progress-bar{width:180px;height:3px;background:rgba(0,212,255,.08);position:relative;overflow:hidden}
+.q-progress-fill{position:absolute;left:0;top:0;height:100%;width:40%;background:var(--cyan);box-shadow:0 0 8px rgba(0,212,255,.4);transition:width .4s ease}
+
+/* Question terminal card */
+.q-card{width:100%;max-width:640px;margin-bottom:32px}
+.q-card .term{width:100%}
+.q-body{padding:28px 28px 24px}
+.q-question{font-family:var(--heading);font-size:.82rem;color:var(--white);letter-spacing:.04em;margin-bottom:22px;line-height:1.6}
+
+/* Answer options */
+.q-options{display:flex;flex-direction:column;gap:10px;margin-bottom:28px}
+.q-option{background:var(--surface);border:1px solid rgba(0,212,255,.06);padding:18px 20px;cursor:pointer;transition:all .25s;position:relative;border-left:3px solid transparent}
+.q-option:hover{border-color:rgba(0,212,255,.15);border-left-color:rgba(0,212,255,.15)}
+.q-option.selected{border-left:3px solid var(--cyan);background:rgba(0,212,255,.03);box-shadow:inset 0 0 15px rgba(0,212,255,.04)}
+.q-option.selected .q-option-title{color:var(--cyan)}
+.q-option-title{font-family:var(--heading);font-size:.68rem;color:var(--white);letter-spacing:.04em;margin-bottom:4px;transition:color .25s}
+.q-option-desc{font-size:.82rem;color:var(--mid);line-height:1.6}
+
+/* Navigation buttons */
+.q-nav{display:flex;align-items:center;justify-content:space-between;padding:0 28px 28px}
+
+/* Step dots */
+.q-dots{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:28px}
+.q-dot{width:8px;height:8px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.1);transition:all .3s}
+.q-dot.active{background:var(--cyan);border-color:var(--cyan);box-shadow:0 0 8px rgba(0,212,255,.3)}
+.q-dot.completed{background:rgba(0,212,255,.25);border-color:rgba(0,212,255,.3)}
+
+/* Reassurance note */
+.q-note{text-align:center;font-size:.75rem;color:var(--gray);max-width:420px;line-height:1.6}
+
+/* ── Responsive ── */
+@media(max-width:640px){
+  .q-body{padding:22px 18px 18px}
+  .q-nav{padding:0 18px 20px}
+  .q-option{padding:14px 16px}
+  .q-title{font-size:1.4rem}
+  .q-subtitle{font-size:.82rem}
+  .q-progress-bar{width:120px}
+  .btn-glow,.btn-ghost{padding:11px 22px;font-size:.62rem}
+}
+@media(max-width:420px){
+  .q-page{padding:70px 14px 40px}
+  .q-body{padding:18px 14px 14px}
+  .q-nav{padding:0 14px 18px;gap:10px}
+  .q-option{padding:12px 14px}
+  .q-option-desc{font-size:.76rem}
+}
+</style>
+</head>
+<body>
+
+<canvas id="bg"></canvas>
+
+<nav class="mockup-nav">
+  <a href="mockup-42-warp-hex.html">42 Hex Warp</a>
+  <a href="mockup-43-dashboard.html">43 Dashboard</a>
+  <a href="mockup-44-blog.html">44 Blog</a>
+  <a href="mockup-45-questionnaire.html" class="active">45 Questionnaire</a>
+  <a href="mockup-46-research-prompt.html">46 Research</a>
+  <a href="mockup-47-research-output.html">47 Output</a>
+  <a href="mockup-48-github-actions.html">48 GitHub</a>
+</nav>
+
+<main class="q-page">
+
+  <!-- Header -->
+  <section class="q-header reveal">
+    <div class="code-label">// onboard.init()</div>
+    <h1 class="q-title">Let's calibrate your path.</h1>
+    <p class="q-subtitle">Answer a few questions so we can tailor your challenges, recommendations, and community experience.</p>
+    <div class="q-progress-wrap">
+      <span class="q-step-label">Step 2 of 5</span>
+      <div class="q-progress-bar">
+        <div class="q-progress-fill"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Question card -->
+  <section class="q-card reveal">
+    <div class="term">
+      <div class="term-bar">
+        <span class="p">question_02.sh</span>
+      </div>
+      <div class="q-body">
+        <h2 class="q-question">What's your biggest growth area right now?</h2>
+        <div class="q-options">
+          <div class="q-option selected" data-value="system-design">
+            <div class="q-option-title">System Design</div>
+            <div class="q-option-desc">I want to architect systems that scale and survive production</div>
+          </div>
+          <div class="q-option" data-value="security-mindset">
+            <div class="q-option-title">Security Mindset</div>
+            <div class="q-option-desc">I want to think like an attacker and build paranoid systems</div>
+          </div>
+          <div class="q-option" data-value="code-review">
+            <div class="q-option-title">Code Review</div>
+            <div class="q-option-desc">I want to give and receive better feedback on code</div>
+          </div>
+          <div class="q-option" data-value="problem-decomposition">
+            <div class="q-option-title">Problem Decomposition</div>
+            <div class="q-option-desc">I want to break complex problems into manageable pieces</div>
+          </div>
+        </div>
+      </div>
+      <div class="q-nav">
+        <button class="btn-ghost">Back</button>
+        <button class="btn-glow">Continue</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Step indicators -->
+  <div class="q-dots reveal">
+    <div class="q-dot completed"></div>
+    <div class="q-dot active"></div>
+    <div class="q-dot"></div>
+    <div class="q-dot"></div>
+    <div class="q-dot"></div>
+  </div>
+
+  <!-- Reassurance note -->
+  <p class="q-note reveal">Your answers help us personalize your experience. You can update these anytime in Settings.</p>
+
+</main>
+
+<script>
+(function() {
+  const canvas = document.getElementById('bg');
+  const ctx = canvas.getContext('2d');
+
+  const HEX_SIZE = 18;
+  const H_SPACING = HEX_SIZE * Math.sqrt(3);
+  const V_SPACING = HEX_SIZE * 1.5;
+  const DOT_RADIUS = 2;
+  const INFLUENCE_RADIUS = 200;
+  const MAX_DISPLACEMENT = 20;
+  const LERP_SPEED = 0.08;
+  const AMBIENT_AMPLITUDE = 1;
+  const AMBIENT_SPEED = 0.0008;
+  const CLICK_DURATION = 500;
+  const HEX_LINE_REST = 0.025;
+  const HEX_LINE_ACTIVE = 0.08;
+  const PATH_COUNT = 60;
+  const PATH_SPEED = 1.2;
+  const TURN_CHANCE = 0.2;
+  const SEGMENT_FADE = 0.001;
+  const SEGMENT_PEAK_ALPHA = 0.12;
+
+  let dots = [];
+  let cols = 0;
+  let rows = 0;
+  let mouseX = -9999;
+  let mouseY = -9999;
+  let mouseActive = false;
+  let clickTime = 0;
+  let clickActive = false;
+  let animId = null;
+  let time = 0;
+  let traces = [];
+
+  const hexVerts = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.PI / 180 * (60 * i - 30);
+    hexVerts.push({ x: HEX_SIZE * Math.cos(angle), y: HEX_SIZE * Math.sin(angle) });
+  }
+
+  function createDots() {
+    const w = canvas.width;
+    const h = canvas.height;
+    cols = Math.ceil(w / H_SPACING) + 3;
+    rows = Math.ceil(h / V_SPACING) + 3;
+    dots = [];
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const isOdd = row % 2 === 1;
+        dots.push({
+          baseX: col * H_SPACING + (isOdd ? H_SPACING * 0.5 : 0) - H_SPACING,
+          baseY: row * V_SPACING - V_SPACING,
+          offsetX: 0, offsetY: 0,
+          targetOffsetX: 0, targetOffsetY: 0,
+          col: col, row: row,
+          phaseX: Math.random() * Math.PI * 2,
+          phaseY: Math.random() * Math.PI * 2
+        });
+      }
+    }
+    initTraces();
+  }
+
+  function getDot(row, col) {
+    if (row < 0 || row >= rows || col < 0 || col >= cols) return null;
+    return dots[row * cols + col];
+  }
+
+  function downNeighbors(row, col) {
+    const isOdd = row % 2 === 1;
+    if (isOdd) return [{ row: row + 1, col: col }, { row: row + 1, col: col + 1 }];
+    return [{ row: row + 1, col: col - 1 }, { row: row + 1, col: col }];
+  }
+
+  function buildRoute(startCol) {
+    const route = [];
+    let col = startCol;
+    for (let row = 0; row < rows; row++) {
+      route.push({ row: row, col: col });
+      if (Math.random() < TURN_CHANCE && row < rows - 1) {
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        const newCol = col + dir;
+        if (newCol >= 0 && newCol < cols) { route.push({ row: row, col: newCol }); col = newCol; }
+      }
+      if (row < rows - 1) {
+        const dns = downNeighbors(row, col);
+        const pick = dns[Math.random() < 0.5 ? 0 : 1];
+        if (pick.col >= 0 && pick.col < cols) col = pick.col;
+        else col = dns[0].col >= 0 && dns[0].col < cols ? dns[0].col : dns[1].col;
+      }
+    }
+    return route;
+  }
+
+  let recentSpawnCols = [];
+  function pickSpawnCol() {
+    const MIN_DIST = 8;
+    for (let a = 0; a < 200; a++) {
+      const col = Math.floor(Math.random() * cols);
+      let bad = false;
+      for (const p of recentSpawnCols) { if (Math.abs(col - p) < MIN_DIST) { bad = true; break; } }
+      if (!bad) { recentSpawnCols.push(col); if (recentSpawnCols.length > 3) recentSpawnCols.shift(); return col; }
+    }
+    const col = Math.floor(Math.random() * cols);
+    recentSpawnCols.push(col); if (recentSpawnCols.length > 3) recentSpawnCols.shift();
+    return col;
+  }
+
+  function spawnTrace() {
+    const col = pickSpawnCol();
+    return { route: buildRoute(col), step: 0, progress: 0, speed: PATH_SPEED * (0.5 + Math.random() * 0.8), segments: [] };
+  }
+
+  function initTraces() {
+    recentSpawnCols = []; traces = [];
+    for (let i = 0; i < PATH_COUNT; i++) { const t = spawnTrace(); t.step = Math.floor(Math.random() * t.route.length * 0.8); traces.push(t); }
+  }
+
+  function updateTraces() {
+    for (let i = 0; i < traces.length; i++) {
+      const t = traces[i];
+      if (t.step < t.route.length - 1) {
+        const from = t.route[t.step], to = t.route[t.step + 1];
+        const d1 = getDot(from.row, from.col), d2 = getDot(to.row, to.col);
+        let stepDist = H_SPACING;
+        if (d1 && d2) { const dx = d2.baseX - d1.baseX, dy = d2.baseY - d1.baseY; stepDist = Math.sqrt(dx*dx+dy*dy) || H_SPACING; }
+        t.progress += t.speed / stepDist;
+        if (t.progress >= 1) { t.segments.push({ fromRow: from.row, fromCol: from.col, toRow: to.row, toCol: to.col, alpha: SEGMENT_PEAK_ALPHA }); t.progress -= 1; t.step++; }
+      } else { traces[i] = spawnTrace(); }
+      for (let j = t.segments.length - 1; j >= 0; j--) { t.segments[j].alpha -= SEGMENT_FADE; if (t.segments[j].alpha <= 0) t.segments.splice(j, 1); }
+    }
+  }
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr; canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + 'px'; canvas.style.height = window.innerHeight + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); createDots();
+  }
+
+  function onMouseMove(e) { mouseX = e.clientX; mouseY = e.clientY; mouseActive = true; }
+  function onMouseLeave() { mouseActive = false; mouseX = -9999; mouseY = -9999; }
+  function onClick() { clickTime = performance.now(); clickActive = true; }
+
+  function update(now) {
+    time = now;
+    let clickFactor = 0;
+    if (clickActive) { const el = now - clickTime; if (el < CLICK_DURATION) { clickFactor = 1 - el/CLICK_DURATION; clickFactor *= clickFactor; } else clickActive = false; }
+    const irSq = INFLUENCE_RADIUS * INFLUENCE_RADIUS;
+    for (let i = 0; i < dots.length; i++) {
+      const dot = dots[i];
+      const ax = Math.sin(now * AMBIENT_SPEED + dot.phaseX) * AMBIENT_AMPLITUDE;
+      const ay = Math.cos(now * AMBIENT_SPEED * 0.7 + dot.phaseY) * AMBIENT_AMPLITUDE;
+      let dx2 = 0, dy2 = 0;
+      if (mouseActive) { const ddx = dot.baseX - mouseX, ddy = dot.baseY - mouseY, dSq = ddx*ddx+ddy*ddy;
+        if (dSq < irSq && dSq > 0.01) { const d = Math.sqrt(dSq), p = 1-d/INFLUENCE_RADIUS, s = p*p*MAX_DISPLACEMENT, b = 1-2*clickFactor; dx2 = ddx/d*s*b; dy2 = ddy/d*s*b; } }
+      dot.targetOffsetX = dx2 + ax; dot.targetOffsetY = dy2 + ay;
+      dot.offsetX += (dot.targetOffsetX - dot.offsetX) * LERP_SPEED;
+      dot.offsetY += (dot.targetOffsetY - dot.offsetY) * LERP_SPEED;
+    }
+    updateTraces();
+  }
+
+  function drawHex(cx, cy, alpha) {
+    ctx.beginPath(); ctx.moveTo(cx + hexVerts[0].x, cy + hexVerts[0].y);
+    for (let i = 1; i < 6; i++) ctx.lineTo(cx + hexVerts[i].x, cy + hexVerts[i].y);
+    ctx.closePath(); ctx.strokeStyle = 'rgba(0,212,255,' + alpha.toFixed(4) + ')'; ctx.lineWidth = 0.5; ctx.stroke();
+  }
+
+  function draw() {
+    const w = window.innerWidth, h = window.innerHeight;
+    ctx.clearRect(0, 0, w, h);
+    for (let i = 0; i < dots.length; i++) {
+      const dot = dots[i], x = dot.baseX + dot.offsetX, y = dot.baseY + dot.offsetY;
+      const disp = Math.sqrt(dot.offsetX*dot.offsetX + dot.offsetY*dot.offsetY);
+      const ed = Math.max(0, disp - AMBIENT_AMPLITUDE), dn = Math.min(ed / MAX_DISPLACEMENT, 1);
+      drawHex(x, y, HEX_LINE_REST + (HEX_LINE_ACTIVE - HEX_LINE_REST) * dn);
+      ctx.beginPath(); ctx.arc(x, y, DOT_RADIUS, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(0,212,255,' + (0.06 + 0.24*dn).toFixed(3) + ')'; ctx.fill();
+    }
+    for (const t of traces) {
+      for (const seg of t.segments) {
+        const d1 = getDot(seg.fromRow, seg.fromCol), d2 = getDot(seg.toRow, seg.toCol);
+        if (!d1||!d2) continue;
+        ctx.beginPath(); ctx.moveTo(d1.baseX+d1.offsetX, d1.baseY+d1.offsetY);
+        ctx.lineTo(d2.baseX+d2.offsetX, d2.baseY+d2.offsetY);
+        ctx.strokeStyle = 'rgba(0,212,255,' + seg.alpha.toFixed(4) + ')'; ctx.lineWidth = 2.5; ctx.stroke();
+      }
+      if (t.step < t.route.length - 1) {
+        const from = t.route[t.step], to = t.route[t.step+1];
+        const d1 = getDot(from.row, from.col), d2 = getDot(to.row, to.col);
+        if (d1&&d2) { const x1=d1.baseX+d1.offsetX,y1=d1.baseY+d1.offsetY,x2=d2.baseX+d2.offsetX,y2=d2.baseY+d2.offsetY;
+          ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x1+(x2-x1)*t.progress, y1+(y2-y1)*t.progress);
+          ctx.strokeStyle='rgba(0,212,255,'+SEGMENT_PEAK_ALPHA+')'; ctx.lineWidth=2.5; ctx.stroke(); }
+      }
+    }
+  }
+
+  function loop(now) { update(now); draw(); animId = requestAnimationFrame(loop); }
+  resize();
+  window.addEventListener('resize', resize);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseleave', onMouseLeave);
+  window.addEventListener('click', onClick);
+  animId = requestAnimationFrame(loop);
+
+  const obs = new IntersectionObserver(e => { e.forEach(x => { if (x.isIntersecting) { x.target.classList.add('visible'); obs.unobserve(x.target); } }); }, { threshold: .1 });
+  document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+})();
+
+/* Option selection interactivity */
+document.querySelectorAll('.q-option').forEach(option => {
+  option.addEventListener('click', function(e) {
+    e.stopPropagation();
+    document.querySelectorAll('.q-option').forEach(o => o.classList.remove('selected'));
+    this.classList.add('selected');
+  });
+});
+</script>
+
+</body>
+</html>

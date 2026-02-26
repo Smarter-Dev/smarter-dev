@@ -370,7 +370,7 @@
                     <span class="navbar-toggler-icon"></span>
                 </button>
                 <h1 class="navbar-brand navbar-brand-autodark d-none-navbar-horizontal pe-0 pe-md-3">
-                    <a href="/admin">
+                    <a href="/bot-admin">
                         <img src="/static/favicon.png" width="32" height="32" alt="Smarter Dev" class="navbar-brand-image">
                         Smarter Dev Admin
                     </a>
@@ -387,7 +387,7 @@
                             </div>
                         </a>
                         <div class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
-                            <form action="/admin/logout" method="post" class="dropdown-item-text">
+                            <form action="/bot-admin/logout" method="post" class="dropdown-item-text">
                                 <button type="submit" class="btn btn-link p-0 text-decoration-none">
                                     <svg class="icon me-2" width="24" height="24">
                                         <use xlink:href="#tabler-logout"></use>
@@ -401,7 +401,7 @@
                 <div class="collapse navbar-collapse" id="navbar-menu">
                     <div class="navbar-nav pt-lg-3">
                         <div class="nav-item">
-                            <a class="nav-link {% if request.url.path == '/admin' or request.url.path == '/admin/' %}active{% endif %}" href="/admin">
+                            <a class="nav-link {% if request.url.path == '/bot-admin' or request.url.path == '/bot-admin/' %}active{% endif %}" href="/bot-admin">
                                 <span class="nav-link-icon d-md-none d-lg-inline-block">
                                     <svg class="icon" width="24" height="24">
                                         <use xlink:href="#tabler-dashboard"></use>
@@ -411,7 +411,7 @@
                             </a>
                         </div>
                         <div class="nav-item">
-                            <a class="nav-link {% if '/guilds' in request.url.path %}active{% endif %}" href="/admin/guilds">
+                            <a class="nav-link {% if '/guilds' in request.url.path %}active{% endif %}" href="/bot-admin/guilds">
                                 <span class="nav-link-icon d-md-none d-lg-inline-block">
                                     <svg class="icon" width="24" height="24">
                                         <use xlink:href="#tabler-building-community"></use>
@@ -421,7 +421,7 @@
                             </a>
                         </div>
                         <div class="nav-item">
-                            <a class="nav-link {% if '/api-keys' in request.url.path %}active{% endif %}" href="/admin/api-keys">
+                            <a class="nav-link {% if '/api-keys' in request.url.path %}active{% endif %}" href="/bot-admin/api-keys">
                                 <span class="nav-link-icon d-md-none d-lg-inline-block">
                                     <svg class="icon" width="24" height="24">
                                         <use xlink:href="#tabler-key"></use>
@@ -431,7 +431,7 @@
                             </a>
                         </div>
                         <div class="nav-item">
-                            <a class="nav-link {% if '/conversations' in request.url.path %}active{% endif %}" href="/admin/conversations">
+                            <a class="nav-link {% if '/conversations' in request.url.path %}active{% endif %}" href="/bot-admin/conversations">
                                 <span class="nav-link-icon d-md-none d-lg-inline-block">
                                     <svg class="icon" width="24" height="24">
                                         <use xlink:href="#tabler-messages"></use>
@@ -441,7 +441,7 @@
                             </a>
                         </div>
                         <div class="nav-item">
-                            <a class="nav-link {% if '/blogs' in request.url.path %}active{% endif %}" href="/admin/blogs">
+                            <a class="nav-link {% if '/blogs' in request.url.path %}active{% endif %}" href="/bot-admin/blogs">
                                 <span class="nav-link-icon d-md-none d-lg-inline-block">
                                     <svg class="icon" width="24" height="24">
                                         <use xlink:href="#tabler-article"></use>
@@ -467,7 +467,7 @@
                             <div class="page-pretitle">
                                 <nav aria-label="breadcrumb">
                                     <ol class="breadcrumb">
-                                        <li class="breadcrumb-item"><a href="/admin">Admin</a></li>
+                                        <li class="breadcrumb-item"><a href="/bot-admin">Admin</a></li>
                                         {% block breadcrumb_items %}{% endblock %}
                                     </ol>
                                 </nav>

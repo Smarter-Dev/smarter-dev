@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — AI Research Prompt</title>
+<link href="https://fonts.googleapis.com/css2?family=Bungee+Hairline&family=Bruno+Ace+SC&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#020408;--surface:#080c14;--cyan:#00d4ff;--green:#22c55e;--amber:#eab308;--rose:#ef4444;--gray:#2a3a4e;--mid:#4a6078;--light:#8098b0;--white:#d4e0ec;--display:'Bungee Hairline',sans-serif;--heading:'Bruno Ace SC',sans-serif;--body:'Inter',Arial,sans-serif}
+html{scroll-behavior:smooth}body{font-family:var(--body);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.7}
+#bg{position:fixed;inset:0;z-index:0}
+.mockup-nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;background:rgba(2,4,8,.92);backdrop-filter:blur(24px);border-bottom:1px solid rgba(0,212,255,.06);font-family:var(--heading);font-size:.62rem;letter-spacing:.05em;flex-wrap:wrap}
+.mockup-nav a{color:var(--gray);text-decoration:none;padding:5px 12px;border:1px solid transparent;transition:all .2s;white-space:nowrap}.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.25)}.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.06)}
+.reveal{opacity:0;transform:translateY(16px);transition:all .55s cubic-bezier(.25,.46,.45,.94)}.reveal.visible{opacity:1;transform:none}
+.code-label{font-family:var(--heading);font-size:.65rem;color:var(--cyan);margin-bottom:1rem;opacity:.75;letter-spacing:.08em}
+.sec-h{font-family:var(--heading);font-size:clamp(1.4rem,2.8vw,2rem);color:var(--white);line-height:1.2;margin-bottom:.5rem;letter-spacing:.02em}
+.sec-p{font-size:.9rem;color:var(--mid);max-width:480px;margin:0 auto .5rem;line-height:1.75}
+
+/* ── Launch Pad ── */
+.launch-pad{position:relative;z-index:1;max-width:820px;margin:0 auto;padding:7rem 2rem 4rem;text-align:center}
+
+/* ── Terminal Input Card ── */
+.term{background:var(--surface);overflow:hidden;border:1px solid rgba(0,212,255,.1);box-shadow:0 0 30px rgba(0,212,255,.03);margin:2rem auto 0;max-width:760px}
+.term-bar{display:flex;align-items:center;gap:7px;padding:11px 16px;background:rgba(0,0,0,.3);border-bottom:1px solid rgba(0,212,255,.06)}
+.term-bar .p{margin-left:auto;font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.05em}
+.term-body{padding:1.25rem 1.5rem}
+.research-textarea{width:100%;min-height:120px;background:transparent;border:none;outline:none;resize:vertical;font-family:'Courier New',monospace;font-size:.85rem;color:var(--white);line-height:2;caret-color:var(--cyan)}
+.research-textarea::placeholder{color:var(--gray)}
+.char-counter{text-align:right;font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.06em;padding:0 1.5rem .75rem;transition:color .2s}
+.char-counter.warn{color:var(--amber)}
+.char-counter.limit{color:var(--rose)}
+
+/* ── Sources Container (entire thing is the drop zone) ── */
+.sources-area{max-width:760px;margin:0 auto;border:1.5px dashed rgba(0,212,255,.1);background:var(--surface);transition:all .25s;position:relative}
+.sources-area.dragover{border-color:var(--cyan);background:rgba(0,212,255,.03)}
+.sources-area input[type="file"]{display:none}
+.sources-header{display:flex;align-items:center;gap:10px;padding:12px 18px 0}
+.sources-label{font-family:var(--heading);font-size:.5rem;color:var(--gray);letter-spacing:.08em;text-transform:uppercase}
+.sources-add-btn{display:flex;align-items:center;justify-content:center;width:20px;height:20px;background:transparent;border:1px solid rgba(0,212,255,.15);color:var(--gray);cursor:pointer;transition:all .2s;flex-shrink:0;padding:0}
+.sources-add-btn:hover{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.04)}
+.sources-add-btn svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.sources-body{padding:8px 18px 14px}
+
+/* ── Empty state (centered prompt) ── */
+.sources-empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:10px 0 4px;text-align:center}
+.sources-empty-icon svg{width:20px;height:20px;fill:none;stroke:var(--gray);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;transition:stroke .2s}
+.sources-area:hover .sources-empty-icon svg,.sources-area.dragover .sources-empty-icon svg{stroke:var(--cyan)}
+.sources-empty-text{font-family:var(--heading);font-size:.52rem;color:var(--gray);letter-spacing:.06em;transition:color .2s}
+.sources-area:hover .sources-empty-text,.sources-area.dragover .sources-empty-text{color:var(--light)}
+
+/* ── Source Chips (shown when sources added) ── */
+.source-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.source-chip{display:flex;align-items:center;gap:5px;padding:5px 10px;font-family:var(--heading);font-size:.52rem;letter-spacing:.06em;color:var(--cyan);border:1px solid var(--cyan);background:rgba(0,212,255,.06);transition:all .2s;animation:chipIn .2s ease}
+@keyframes chipIn{from{opacity:0;transform:scale(.9)}to{opacity:1;transform:none}}
+.source-chip svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0;cursor:pointer;opacity:.5;transition:opacity .15s}
+.source-chip svg:hover{opacity:1}
+
+/* ── Add Source Dropdown ── */
+.add-source-wrap{position:relative}
+.add-source-dropdown{position:absolute;top:calc(100% + 4px);left:0;min-width:180px;background:var(--surface);border:1px solid rgba(0,212,255,.15);z-index:20;display:none;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.add-source-dropdown.visible{display:block}
+.add-source-option{display:flex;align-items:center;gap:8px;padding:9px 12px;font-size:.75rem;color:var(--light);cursor:pointer;transition:all .15s}
+.add-source-option:hover{background:rgba(0,212,255,.06);color:var(--white)}
+.add-source-option svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.add-source-option.disabled{opacity:.35;pointer-events:none}
+.add-source-divider{height:1px;background:rgba(0,212,255,.08);margin:2px 0}
+
+/* ── Split Submit Button (depth + run) ── */
+.submit-row{max-width:760px;margin:0 auto;display:flex;align-items:stretch}
+.split-btn{display:flex;align-items:stretch;flex:1}
+.split-btn-main{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:14px 24px;font-family:var(--heading);font-size:.72rem;letter-spacing:.06em;background:transparent;color:var(--cyan);border:1.5px solid var(--cyan);border-right:none;cursor:pointer;box-shadow:0 0 15px rgba(0,212,255,.15),inset 0 0 15px rgba(0,212,255,.05);transition:all .3s;white-space:nowrap}
+.split-btn-main:hover{background:var(--cyan);color:var(--bg);box-shadow:0 0 30px rgba(0,212,255,.3)}
+.split-btn-main svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.split-btn-depth{position:relative}
+.split-btn-toggle{display:flex;align-items:center;gap:6px;padding:14px 16px;font-family:var(--heading);font-size:.55rem;letter-spacing:.06em;color:var(--cyan);background:rgba(0,212,255,.04);border:1.5px solid var(--cyan);cursor:pointer;transition:all .2s;white-space:nowrap;height:100%}
+.split-btn-toggle:hover{background:rgba(0,212,255,.1)}
+.split-btn-toggle svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;transition:transform .2s}
+.split-btn-toggle.open svg{transform:rotate(180deg)}
+.depth-dropdown{position:absolute;bottom:calc(100% + 4px);right:0;min-width:200px;background:var(--surface);border:1px solid rgba(0,212,255,.15);z-index:20;display:none;box-shadow:0 -8px 24px rgba(0,0,0,.5)}
+.depth-dropdown.visible{display:block}
+.depth-option{padding:10px 14px;font-size:.78rem;color:var(--light);cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:space-between}
+.depth-option:hover{background:rgba(0,212,255,.06);color:var(--white)}
+.depth-option.selected{color:var(--cyan)}
+.depth-option .opt-time{font-size:.6rem;color:var(--gray);font-family:var(--heading);letter-spacing:.04em}
+
+/* ── Recent Research History ── */
+.history-section{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:0 2rem 4rem}
+.history-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:1.5rem}
+.history-card{padding:1.5rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);border-top:2px solid rgba(0,212,255,.06);transition:all .3s;cursor:pointer}
+.history-card:hover{border-top-color:var(--cyan);border-color:rgba(0,212,255,.18);box-shadow:inset 0 0 15px rgba(0,212,255,.03)}
+.history-query{font-size:.82rem;color:var(--white);font-weight:500;margin-bottom:.75rem;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.history-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.status-badge{font-family:var(--heading);font-size:.5rem;letter-spacing:.08em;padding:3px 10px;border:1px solid}
+.status-badge.completed{color:var(--green);border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.06)}
+.status-badge.in-progress{color:var(--amber);border-color:rgba(234,179,8,.35);background:rgba(234,179,8,.06)}
+.status-badge.failed{color:var(--rose);border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.06)}
+.history-duration{font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.04em}
+.history-time{font-size:.68rem;color:var(--gray);margin-left:auto}
+.history-sources{display:flex;gap:4px;margin-top:6px}
+.history-src{font-family:var(--heading);font-size:.42rem;letter-spacing:.06em;padding:2px 6px;border:1px solid rgba(0,212,255,.12);color:var(--mid)}
+
+/* ── Suggested Topics ── */
+.topics-section{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:0 2rem 5rem}
+.topics-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:1.5rem}
+.topic-card{padding:1.5rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);border-left:2px solid transparent;transition:all .3s;cursor:pointer;text-decoration:none;display:block}
+.topic-card:hover{border-left-color:var(--cyan);border-color:rgba(0,212,255,.18);box-shadow:inset 0 0 15px rgba(0,212,255,.03)}
+.topic-tag{font-family:var(--heading);font-size:.5rem;color:var(--cyan);letter-spacing:.1em;margin-bottom:.6rem;opacity:.7}
+.topic-title{font-size:.85rem;color:var(--white);font-weight:500;line-height:1.5;margin-bottom:.4rem}
+.topic-desc{font-size:.72rem;color:var(--gray);line-height:1.6}
+
+/* ── Footer ── */
+.foot{text-align:center;padding:1.5rem;font-family:var(--heading);font-size:.55rem;color:var(--gray);border-top:1px solid rgba(0,212,255,.04);position:relative;z-index:1;letter-spacing:.06em}
+
+/* ── Responsive ── */
+@media(max-width:900px){
+  .history-grid,.topics-grid{grid-template-columns:1fr}
+}
+@media(max-width:520px){
+  .launch-pad{padding:6rem 1rem 3rem}
+  .source-chips{gap:4px}
+}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<nav class="mockup-nav">
+  <a href="mockup-42-warp-hex.html">42 Hex Warp</a>
+  <a href="mockup-43-dashboard.html">43 Dashboard</a>
+  <a href="mockup-44-blog.html">44 Blog</a>
+  <a href="mockup-45-questionnaire.html">45 Questionnaire</a>
+  <a href="mockup-46-research-prompt.html" class="active">46 Research</a>
+  <a href="mockup-47-research-output.html">47 Output</a>
+  <a href="mockup-48-github-actions.html">48 GitHub</a>
+</nav>
+
+<!-- ── Launch Pad ── -->
+<section class="launch-pad">
+  <div class="reveal">
+    <div class="code-label">// research.init()</div>
+    <div class="sec-h">What do you want to understand?</div>
+    <div class="sec-p">AI-powered deep research across codebases, documentation, and architecture patterns.</div>
+  </div>
+
+  <!-- Terminal Input -->
+  <div class="term reveal">
+    <div class="term-bar">
+      <div class="p">research_query.sh</div>
+    </div>
+    <div class="term-body">
+      <textarea class="research-textarea" id="researchInput" placeholder="Describe what you want to research... e.g. 'How do distributed consensus algorithms handle network partitions in practice?'" maxlength="2000"></textarea>
+    </div>
+    <div class="char-counter" id="charCounter">0 / 2,000</div>
+  </div>
+
+  <!-- Sources Container (entire area is the drop zone) -->
+  <div class="sources-area reveal" id="sourcesArea">
+    <div class="sources-header">
+      <div class="sources-label">Sources</div>
+      <div class="add-source-wrap" id="addSourceWrap">
+        <button class="sources-add-btn" id="addSourceBtn">
+          <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <div class="add-source-dropdown" id="addSourceDropdown">
+          <div class="add-source-option" id="uploadFilesOption">
+            <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Upload Files
+          </div>
+          <div class="add-source-divider"></div>
+          <div class="add-source-option" data-source="github" data-label="GitHub Repos">
+            <svg viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+            GitHub Repos
+          </div>
+          <div class="add-source-option" data-source="docs" data-label="Documentation">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Documentation
+          </div>
+          <div class="add-source-option" data-source="web" data-label="Web">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            Web
+          </div>
+          <div class="add-source-option" data-source="papers" data-label="Papers">
+            <svg viewBox="0 0 24 24"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+            Papers
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="sources-body">
+      <!-- Empty state -->
+      <div class="sources-empty-state" id="sourcesEmptyState">
+        <div class="sources-empty-icon">
+          <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </div>
+        <div class="sources-empty-text">Upload files or choose sources</div>
+      </div>
+      <!-- Chips (hidden when empty) -->
+      <div class="source-chips" id="sourceChips" style="display:none"></div>
+    </div>
+    <input type="file" id="fileInput" multiple>
+  </div>
+
+  <!-- Split Submit: Run + Depth selector -->
+  <div class="submit-row reveal">
+    <div class="split-btn">
+      <button class="split-btn-main" id="runResearch">
+        <svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        Deep Dive
+      </button>
+      <div class="split-btn-depth">
+        <button class="split-btn-toggle" id="depthToggle">
+          <svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="depth-dropdown" id="depthDropdown">
+          <div class="depth-option" data-value="quick" data-label="Quick Overview">Quick Overview <span class="opt-time">~2 min</span></div>
+          <div class="depth-option selected" data-value="deep" data-label="Deep Dive">Deep Dive <span class="opt-time">~8 min</span></div>
+          <div class="depth-option" data-value="comprehensive" data-label="Comprehensive">Comprehensive <span class="opt-time">~20 min</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Recent Research History ── -->
+<section class="history-section">
+  <div class="reveal">
+    <div class="code-label">// research.history()</div>
+    <div class="sec-h" style="text-align:left">Recent Research</div>
+  </div>
+  <div class="history-grid">
+    <div class="history-card reveal">
+      <div class="history-query">How do event-driven architectures handle backpressure at scale?</div>
+      <div class="history-meta">
+        <span class="status-badge completed">COMPLETED</span>
+        <span class="history-duration">4m 32s</span>
+        <span class="history-time">2h ago</span>
+      </div>
+      <div class="history-sources"><span class="history-src">GITHUB</span><span class="history-src">DOCS</span></div>
+    </div>
+    <div class="history-card reveal">
+      <div class="history-query">Compare CQRS vs traditional CRUD for high-write workloads</div>
+      <div class="history-meta">
+        <span class="status-badge completed">COMPLETED</span>
+        <span class="history-duration">8m 15s</span>
+        <span class="history-time">5h ago</span>
+      </div>
+      <div class="history-sources"><span class="history-src">PAPERS</span><span class="history-src">WEB</span></div>
+    </div>
+    <div class="history-card reveal">
+      <div class="history-query">What are the security implications of WebSocket connections in microservice architectures?</div>
+      <div class="history-meta">
+        <span class="status-badge in-progress">IN PROGRESS</span>
+        <span class="history-duration">12m 04s</span>
+        <span class="history-time">6h ago</span>
+      </div>
+      <div class="history-sources"><span class="history-src">GITHUB</span><span class="history-src">DOCS</span><span class="history-src">WEB</span></div>
+    </div>
+    <div class="history-card reveal">
+      <div class="history-query">Best practices for database migration strategies in zero-downtime deployments</div>
+      <div class="history-meta">
+        <span class="status-badge completed">COMPLETED</span>
+        <span class="history-duration">6m 48s</span>
+        <span class="history-time">1d ago</span>
+      </div>
+      <div class="history-sources"><span class="history-src">DOCS</span><span class="history-src">FILES</span></div>
+    </div>
+    <div class="history-card reveal">
+      <div class="history-query">Analyze trade-offs between gRPC and REST for internal service communication</div>
+      <div class="history-meta">
+        <span class="status-badge failed">FAILED</span>
+        <span class="history-duration">1m 12s</span>
+        <span class="history-time">1d ago</span>
+      </div>
+      <div class="history-sources"><span class="history-src">WEB</span></div>
+    </div>
+    <div class="history-card reveal">
+      <div class="history-query">How does the actor model compare to CSP for concurrent system design?</div>
+      <div class="history-meta">
+        <span class="status-badge completed">COMPLETED</span>
+        <span class="history-duration">5m 21s</span>
+        <span class="history-time">2d ago</span>
+      </div>
+      <div class="history-sources"><span class="history-src">PAPERS</span><span class="history-src">GITHUB</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Suggested Topics ── -->
+<section class="topics-section">
+  <div class="reveal">
+    <div class="code-label">// topics.suggest()</div>
+    <div class="sec-h" style="text-align:left">Suggested Topics</div>
+  </div>
+  <div class="topics-grid">
+    <a href="#" class="topic-card reveal">
+      <div class="topic-tag">ARCHITECTURE</div>
+      <div class="topic-title">Strangler Fig Pattern for Legacy System Migration</div>
+      <div class="topic-desc">Incrementally replace monolith components with microservices without downtime.</div>
+    </a>
+    <a href="#" class="topic-card reveal">
+      <div class="topic-tag">SECURITY</div>
+      <div class="topic-title">OAuth 2.1 vs OIDC: When to Use Which</div>
+      <div class="topic-desc">Authorization frameworks compared for API-first applications.</div>
+    </a>
+    <a href="#" class="topic-card reveal">
+      <div class="topic-tag">PERFORMANCE</div>
+      <div class="topic-title">Understanding Tail Latency in Distributed Systems</div>
+      <div class="topic-desc">Why p99 matters more than average and how to optimize for it.</div>
+    </a>
+    <a href="#" class="topic-card reveal">
+      <div class="topic-tag">ARCHITECTURE</div>
+      <div class="topic-title">Cell-Based Architecture for Fault Isolation</div>
+      <div class="topic-desc">How AWS and Azure use cell architecture to contain blast radius.</div>
+    </a>
+    <a href="#" class="topic-card reveal">
+      <div class="topic-tag">DATA ENGINEERING</div>
+      <div class="topic-title">Stream Processing vs Batch: The Convergence</div>
+      <div class="topic-desc">Kappa architecture and the unification of real-time and batch pipelines.</div>
+    </a>
+    <a href="#" class="topic-card reveal">
+      <div class="topic-tag">SECURITY</div>
+      <div class="topic-title">Supply Chain Attacks in Open Source Dependencies</div>
+      <div class="topic-desc">Analyzing recent incidents and defensive strategies for dependency management.</div>
+    </a>
+  </div>
+</section>
+
+<footer class="foot">&copy; 2026 SMARTER DEV</footer>
+
+<script>
+(function() {
+  // ── Source management ──
+  var sourcesArea = document.getElementById('sourcesArea');
+  var sourceChips = document.getElementById('sourceChips');
+  var emptyState = document.getElementById('sourcesEmptyState');
+  var addSourceBtn = document.getElementById('addSourceBtn');
+  var addSourceDropdown = document.getElementById('addSourceDropdown');
+  var fileInput = document.getElementById('fileInput');
+  var activeSources = {};
+
+  function updateSourcesUI() {
+    var keys = Object.keys(activeSources);
+    var empty = keys.length === 0;
+    emptyState.style.display = empty ? 'flex' : 'none';
+    sourceChips.style.display = empty ? 'none' : 'flex';
+    // Update disabled state on dropdown options
+    document.querySelectorAll('.add-source-option').forEach(function(opt) {
+      if (activeSources[opt.dataset.source]) opt.classList.add('disabled');
+      else opt.classList.remove('disabled');
+    });
+  }
+
+  function addSourceChip(source, label) {
+    if (activeSources[source]) return;
+    activeSources[source] = true;
+    var chip = document.createElement('div');
+    chip.className = 'source-chip';
+    chip.dataset.source = source;
+    chip.innerHTML = label + ' <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+    chip.querySelector('svg').addEventListener('click', function(e) {
+      e.stopPropagation();
+      delete activeSources[source];
+      chip.remove();
+      updateSourcesUI();
+    });
+    sourceChips.appendChild(chip);
+    updateSourcesUI();
+  }
+
+  // Clicking the empty state opens file picker
+  emptyState.addEventListener('click', function(e) {
+    e.stopPropagation();
+    fileInput.click();
+  });
+  emptyState.style.cursor = 'pointer';
+
+  addSourceBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    addSourceDropdown.classList.toggle('visible');
+  });
+  document.addEventListener('click', function() {
+    addSourceDropdown.classList.remove('visible');
+  });
+  addSourceDropdown.addEventListener('click', function(e) { e.stopPropagation(); });
+  // Upload Files option triggers file picker
+  document.getElementById('uploadFilesOption').addEventListener('click', function() {
+    addSourceDropdown.classList.remove('visible');
+    fileInput.click();
+  });
+  // Source type options
+  document.querySelectorAll('.add-source-option[data-source]').forEach(function(opt) {
+    opt.addEventListener('click', function() {
+      addSourceChip(opt.dataset.source, opt.dataset.label);
+      addSourceDropdown.classList.remove('visible');
+    });
+  });
+
+  // ── Drag & drop on the entire sources area ──
+  sourcesArea.addEventListener('dragover', function(e) { e.preventDefault(); sourcesArea.classList.add('dragover'); });
+  sourcesArea.addEventListener('dragleave', function(e) {
+    if (!sourcesArea.contains(e.relatedTarget)) sourcesArea.classList.remove('dragover');
+  });
+  sourcesArea.addEventListener('drop', function(e) {
+    e.preventDefault();
+    sourcesArea.classList.remove('dragover');
+    var files = e.dataTransfer.files;
+    for (var i = 0; i < files.length; i++) {
+      addSourceChip('file-' + files[i].name, files[i].name);
+    }
+  });
+  fileInput.addEventListener('change', function() {
+    for (var i = 0; i < fileInput.files.length; i++) {
+      addSourceChip('file-' + fileInput.files[i].name, fileInput.files[i].name);
+    }
+    fileInput.value = '';
+  });
+
+  // ── Depth split-button dropdown ──
+  var depthToggle = document.getElementById('depthToggle');
+  var depthDropdown = document.getElementById('depthDropdown');
+  var runBtn = document.getElementById('runResearch');
+  depthToggle.addEventListener('click', function(e) {
+    e.stopPropagation();
+    depthDropdown.classList.toggle('visible');
+    depthToggle.classList.toggle('open');
+  });
+  document.addEventListener('click', function() {
+    depthDropdown.classList.remove('visible');
+    depthToggle.classList.remove('open');
+  });
+  depthDropdown.addEventListener('click', function(e) { e.stopPropagation(); });
+  document.querySelectorAll('.depth-option').forEach(function(opt) {
+    opt.addEventListener('click', function() {
+      document.querySelectorAll('.depth-option').forEach(function(o) { o.classList.remove('selected'); });
+      opt.classList.add('selected');
+      runBtn.innerHTML = '<svg viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg> ' + opt.dataset.label;
+      depthDropdown.classList.remove('visible');
+      depthToggle.classList.remove('open');
+    });
+  });
+
+  // ── Character counter ──
+  var textarea = document.getElementById('researchInput');
+  var counter = document.getElementById('charCounter');
+  textarea.addEventListener('input', function() {
+    var len = textarea.value.length;
+    counter.textContent = len.toLocaleString() + ' / 2,000';
+    counter.className = 'char-counter';
+    if (len > 1800) counter.classList.add('limit');
+    else if (len > 1500) counter.classList.add('warn');
+  });
+
+  // ── Hex Warp Background ──
+  var canvas = document.getElementById('bg');
+  var ctx = canvas.getContext('2d');
+  var HEX_SIZE = 18;
+  var H_SPACING = HEX_SIZE * Math.sqrt(3);
+  var V_SPACING = HEX_SIZE * 1.5;
+  var DOT_RADIUS = 2;
+  var INFLUENCE_RADIUS = 200;
+  var MAX_DISPLACEMENT = 20;
+  var LERP_SPEED = 0.08;
+  var AMBIENT_AMPLITUDE = 1;
+  var AMBIENT_SPEED = 0.0008;
+  var CLICK_DURATION = 500;
+  var HEX_LINE_REST = 0.025;
+  var HEX_LINE_ACTIVE = 0.08;
+  var PATH_COUNT = 60;
+  var PATH_SPEED = 1.2;
+  var TURN_CHANCE = 0.2;
+  var SEGMENT_FADE = 0.001;
+  var SEGMENT_PEAK_ALPHA = 0.12;
+  var dots = [], cols = 0, rows = 0, mouseX = -9999, mouseY = -9999, mouseActive = false, clickTime = 0, clickActive = false, animId = null, time = 0, traces = [];
+  var hexVerts = [];
+  for (var i = 0; i < 6; i++) { var angle = Math.PI / 180 * (60 * i - 30); hexVerts.push({ x: HEX_SIZE * Math.cos(angle), y: HEX_SIZE * Math.sin(angle) }); }
+  function createDots() { var w = canvas.width, h = canvas.height; cols = Math.ceil(w / H_SPACING) + 3; rows = Math.ceil(h / V_SPACING) + 3; dots = []; for (var row = 0; row < rows; row++) { for (var col = 0; col < cols; col++) { var isOdd = row % 2 === 1; dots.push({ baseX: col * H_SPACING + (isOdd ? H_SPACING * 0.5 : 0) - H_SPACING, baseY: row * V_SPACING - V_SPACING, offsetX: 0, offsetY: 0, targetOffsetX: 0, targetOffsetY: 0, col: col, row: row, phaseX: Math.random() * Math.PI * 2, phaseY: Math.random() * Math.PI * 2 }); } } initTraces(); }
+  function getDot(row, col) { if (row < 0 || row >= rows || col < 0 || col >= cols) return null; return dots[row * cols + col]; }
+  function downNeighbors(row, col) { var isOdd = row % 2 === 1; if (isOdd) return [{ row: row + 1, col: col }, { row: row + 1, col: col + 1 }]; return [{ row: row + 1, col: col - 1 }, { row: row + 1, col: col }]; }
+  function buildRoute(startCol) { var route = []; var col = startCol; for (var row = 0; row < rows; row++) { route.push({ row: row, col: col }); if (Math.random() < TURN_CHANCE && row < rows - 1) { var dir = Math.random() < 0.5 ? -1 : 1; var newCol = col + dir; if (newCol >= 0 && newCol < cols) { route.push({ row: row, col: newCol }); col = newCol; } } if (row < rows - 1) { var dns = downNeighbors(row, col); var pick = dns[Math.random() < 0.5 ? 0 : 1]; if (pick.col >= 0 && pick.col < cols) col = pick.col; else col = dns[0].col >= 0 && dns[0].col < cols ? dns[0].col : dns[1].col; } } return route; }
+  var recentSpawnCols = [];
+  function pickSpawnCol() { var MIN_DIST = 8; for (var a = 0; a < 200; a++) { var col = Math.floor(Math.random() * cols); var bad = false; for (var p = 0; p < recentSpawnCols.length; p++) { if (Math.abs(col - recentSpawnCols[p]) < MIN_DIST) { bad = true; break; } } if (!bad) { recentSpawnCols.push(col); if (recentSpawnCols.length > 3) recentSpawnCols.shift(); return col; } } var col = Math.floor(Math.random() * cols); recentSpawnCols.push(col); if (recentSpawnCols.length > 3) recentSpawnCols.shift(); return col; }
+  function spawnTrace() { var col = pickSpawnCol(); return { route: buildRoute(col), step: 0, progress: 0, speed: PATH_SPEED * (0.5 + Math.random() * 0.8), segments: [] }; }
+  function initTraces() { recentSpawnCols = []; traces = []; for (var i = 0; i < PATH_COUNT; i++) { var t = spawnTrace(); t.step = Math.floor(Math.random() * t.route.length * 0.8); traces.push(t); } }
+  function updateTraces() { for (var i = 0; i < traces.length; i++) { var t = traces[i]; if (t.step < t.route.length - 1) { var from = t.route[t.step], to = t.route[t.step + 1]; var d1 = getDot(from.row, from.col), d2 = getDot(to.row, to.col); var stepDist = H_SPACING; if (d1 && d2) { var dx = d2.baseX - d1.baseX, dy = d2.baseY - d1.baseY; stepDist = Math.sqrt(dx*dx+dy*dy) || H_SPACING; } t.progress += t.speed / stepDist; if (t.progress >= 1) { t.segments.push({ fromRow: from.row, fromCol: from.col, toRow: to.row, toCol: to.col, alpha: SEGMENT_PEAK_ALPHA }); t.progress -= 1; t.step++; } } else { traces[i] = spawnTrace(); } for (var j = t.segments.length - 1; j >= 0; j--) { t.segments[j].alpha -= SEGMENT_FADE; if (t.segments[j].alpha <= 0) t.segments.splice(j, 1); } } }
+  function resize() { var dpr = window.devicePixelRatio || 1; canvas.width = window.innerWidth * dpr; canvas.height = window.innerHeight * dpr; canvas.style.width = window.innerWidth + 'px'; canvas.style.height = window.innerHeight + 'px'; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); createDots(); }
+  function onMouseMove(e) { mouseX = e.clientX; mouseY = e.clientY; mouseActive = true; }
+  function onMouseLeave() { mouseActive = false; mouseX = -9999; mouseY = -9999; }
+  function onClick() { clickTime = performance.now(); clickActive = true; }
+  function update(now) { time = now; var clickFactor = 0; if (clickActive) { var el = now - clickTime; if (el < CLICK_DURATION) { clickFactor = 1 - el/CLICK_DURATION; clickFactor *= clickFactor; } else clickActive = false; } var irSq = INFLUENCE_RADIUS * INFLUENCE_RADIUS; for (var i = 0; i < dots.length; i++) { var dot = dots[i]; var ax = Math.sin(now * AMBIENT_SPEED + dot.phaseX) * AMBIENT_AMPLITUDE; var ay = Math.cos(now * AMBIENT_SPEED * 0.7 + dot.phaseY) * AMBIENT_AMPLITUDE; var dx2 = 0, dy2 = 0; if (mouseActive) { var ddx = dot.baseX - mouseX, ddy = dot.baseY - mouseY, dSq = ddx*ddx+ddy*ddy; if (dSq < irSq && dSq > 0.01) { var d = Math.sqrt(dSq), p = 1-d/INFLUENCE_RADIUS, s = p*p*MAX_DISPLACEMENT, b = 1-2*clickFactor; dx2 = ddx/d*s*b; dy2 = ddy/d*s*b; } } dot.targetOffsetX = dx2 + ax; dot.targetOffsetY = dy2 + ay; dot.offsetX += (dot.targetOffsetX - dot.offsetX) * LERP_SPEED; dot.offsetY += (dot.targetOffsetY - dot.offsetY) * LERP_SPEED; } updateTraces(); }
+  function drawHex(cx, cy, alpha) { ctx.beginPath(); ctx.moveTo(cx + hexVerts[0].x, cy + hexVerts[0].y); for (var i = 1; i < 6; i++) ctx.lineTo(cx + hexVerts[i].x, cy + hexVerts[i].y); ctx.closePath(); ctx.strokeStyle = 'rgba(0,212,255,' + alpha.toFixed(4) + ')'; ctx.lineWidth = 0.5; ctx.stroke(); }
+  function draw() { var w = window.innerWidth, h = window.innerHeight; ctx.clearRect(0, 0, w, h); for (var i = 0; i < dots.length; i++) { var dot = dots[i], x = dot.baseX + dot.offsetX, y = dot.baseY + dot.offsetY; var disp = Math.sqrt(dot.offsetX*dot.offsetX + dot.offsetY*dot.offsetY); var ed = Math.max(0, disp - AMBIENT_AMPLITUDE), dn = Math.min(ed / MAX_DISPLACEMENT, 1); drawHex(x, y, HEX_LINE_REST + (HEX_LINE_ACTIVE - HEX_LINE_REST) * dn); ctx.beginPath(); ctx.arc(x, y, DOT_RADIUS, 0, Math.PI*2); ctx.fillStyle = 'rgba(0,212,255,' + (0.06 + 0.24*dn).toFixed(3) + ')'; ctx.fill(); } for (var ti = 0; ti < traces.length; ti++) { var t = traces[ti]; for (var si = 0; si < t.segments.length; si++) { var seg = t.segments[si]; var d1 = getDot(seg.fromRow, seg.fromCol), d2 = getDot(seg.toRow, seg.toCol); if (!d1||!d2) continue; ctx.beginPath(); ctx.moveTo(d1.baseX+d1.offsetX, d1.baseY+d1.offsetY); ctx.lineTo(d2.baseX+d2.offsetX, d2.baseY+d2.offsetY); ctx.strokeStyle = 'rgba(0,212,255,' + seg.alpha.toFixed(4) + ')'; ctx.lineWidth = 2.5; ctx.stroke(); } if (t.step < t.route.length - 1) { var from = t.route[t.step], to = t.route[t.step+1]; var d1 = getDot(from.row, from.col), d2 = getDot(to.row, to.col); if (d1&&d2) { var x1=d1.baseX+d1.offsetX,y1=d1.baseY+d1.offsetY,x2=d2.baseX+d2.offsetX,y2=d2.baseY+d2.offsetY; ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x1+(x2-x1)*t.progress, y1+(y2-y1)*t.progress); ctx.strokeStyle='rgba(0,212,255,'+SEGMENT_PEAK_ALPHA+')'; ctx.lineWidth=2.5; ctx.stroke(); } } }
+  }
+  function loop(now) { update(now); draw(); animId = requestAnimationFrame(loop); }
+  resize();
+  window.addEventListener('resize', resize);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseleave', onMouseLeave);
+  window.addEventListener('click', onClick);
+  animId = requestAnimationFrame(loop);
+  var obs = new IntersectionObserver(function(e) { e.forEach(function(x) { if (x.isIntersecting) { x.target.classList.add('visible'); obs.unobserve(x.target); } }); }, { threshold: .1 });
+  document.querySelectorAll('.reveal').forEach(function(el) { obs.observe(el); });
+})();
+</script>
+</body>
+</html>

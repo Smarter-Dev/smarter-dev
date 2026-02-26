@@ -55,7 +55,7 @@ class Settings(BaseSettings):
         description="API secret key for authentication",
     )
     api_base_url: str = Field(
-        default="http://localhost:8888/api",
+        default="http://localhost:8000/api",
         description="Base URL for API endpoints",
     )
     
@@ -229,9 +229,9 @@ class Settings(BaseSettings):
         
         # Default redirect URIs based on environment
         if self.is_development:
-            return "http://localhost:8000/admin/auth/discord/callback"
+            return "http://localhost:8000/bot-admin/auth/discord/callback"
         else:
-            return "https://smarter.dev/admin/auth/discord/callback"
+            return "https://smarter.dev/bot-admin/auth/discord/callback"
 
 
 # Global settings instance

@@ -82,7 +82,7 @@ class DiscordOAuthService:
         request.session['oauth_state'] = state
         
         # Store the original path for redirect after login
-        next_path = request.query_params.get('next', '/admin')
+        next_path = request.query_params.get('next', '/bot-admin')
         request.session['oauth_next'] = next_path
         
         # Build Discord OAuth URL manually

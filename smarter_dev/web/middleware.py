@@ -79,7 +79,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             "/docs",
             "/redoc", 
             "/openapi.json",
-            "/admin/"  # Admin endpoints have their own rate limiting
+            "/bot-admin/"  # Admin endpoints have their own rate limiting
         ]
         
         for skip_path in skip_paths:

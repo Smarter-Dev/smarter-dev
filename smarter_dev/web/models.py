@@ -24,6 +24,48 @@ from sqlalchemy.sql import func
 from smarter_dev.shared.database import Base
 
 
+class CampaignSignup(Base):
+    """Email/Discord signups for marketing campaigns (e.g. sudo launch).
+
+    Separate from the Campaign model which tracks challenge competitions.
+    """
+
+    __tablename__ = "campaign_signups"
+    __table_args__ = (
+        UniqueConstraint(
+            "campaign_slug", "email",
+            name="uq_campaign_signups_slug_email",
+        ),
+        UniqueConstraint(
+            "campaign_slug", "discord_id",
+            name="uq_campaign_signups_slug_discord_id",
+        ),
+        CheckConstraint(
+            "email IS NOT NULL OR discord_id IS NOT NULL",
+            name="at_least_one_contact",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    campaign_slug: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+    email: Mapped[Optional[str]] = mapped_column(
+        String(320),
+        nullable=True,
+    )
+    discord_id: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+
+
 class BytesBalance(Base):
     """User balance tracking for the bytes economy system.
     

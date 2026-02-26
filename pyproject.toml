@@ -2,7 +2,7 @@
 name = "smarter-dev"
 version = "0.1.0"
 description = "Discord bot with bytes economy and squads system, plus web API and admin interface"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 authors = [
     {name = "Smarter Dev Team"}
 ]
@@ -19,12 +19,13 @@ classifiers = [
 dependencies = [
     # Web framework
     "starlette>=0.47.1",
-    "uvicorn[standard]>=0.35.0",
+    "hypercorn>=0.17.0",
     "jinja2>=3.1.6",
     "markdown>=3.4.0",
     # Core shared dependencies
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
     "opencv-python>=4.12.0.88",
     "cairosvg>=2.8.2",
@@ -70,6 +71,7 @@ web = [
     "redis>=5.0.0",
     "httpx>=0.24.0",
     "authlib>=1.2.0",
+    "skrift>=0.1.0a50",
 ]
 
 # Development dependencies
