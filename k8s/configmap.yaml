@@ -13,8 +13,11 @@ data:
   WEB_HOST: "0.0.0.0"
   WEB_PORT: "8000"
   
+  # Skrift CMS environment
+  SKRIFT_ENV: "production"
+
   # Discord OAuth redirect URI
-  DISCORD_REDIRECT_URI: "https://smarter.dev/admin/auth/callback"
+  DISCORD_REDIRECT_URI: "https://smarter.dev/bot-admin/auth/discord/callback"
   
   # Rate limiting configuration
   RATE_LIMIT_ENABLED: "true"
