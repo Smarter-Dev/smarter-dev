@@ -10,7 +10,7 @@ spec:
       containers:
       - name: migration
         image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
-        command: ["uv", "run", "alembic", "upgrade", "head"]
+        command: ["uv", "run", "alembic", "-c", "alembic/alembic.ini", "upgrade", "head"]
         env:
         - name: DATABASE_URL
           valueFrom:
