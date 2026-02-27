@@ -1,0 +1,80 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Campaign Signups - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Campaign Signups</h1>
+    <p>{{ total }} signup{{ 's' if total != 1 else '' }} ({{ confirmed_count }} confirmed)</p>
+</hgroup>
+
+<div class="sk-panel">
+    <div class="sk-panel-head">Filters</div>
+    <div class="sk-panel-body">
+        <form method="get" action="/admin/campaign-signups" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
+            <div>
+                <label for="campaign"><strong>Campaign</strong></label><br>
+                <select name="campaign" id="campaign">
+                    <option value="">All Campaigns</option>
+                    {% for slug in campaign_slugs %}
+                    <option value="{{ slug }}" {% if filters.campaign == slug %}selected{% endif %}>
+                        {{ slug }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="status"><strong>Status</strong></label><br>
+                <select name="status" id="status">
+                    <option value="">All</option>
+                    <option value="confirmed" {% if filters.status == 'confirmed' %}selected{% endif %}>Confirmed</option>
+                    <option value="unconfirmed" {% if filters.status == 'unconfirmed' %}selected{% endif %}>Unconfirmed</option>
+                </select>
+            </div>
+            <div>
+                <button type="submit" class="sk-btn-outline sk-btn-small">Filter</button>
+                <a href="/admin/campaign-signups" class="sk-btn-outline sk-btn-small">Clear</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if signups %}
+<table class="sk-admin-table">
+    <thead>
+        <tr>
+            <th>Email</th>
+            <th>Discord ID</th>
+            <th>Campaign</th>
+            <th>Status</th>
+            <th>Signed Up</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for signup in signups %}
+        <tr>
+            <td>{{ signup.email or '—' }}</td>
+            <td>{{ signup.discord_id or '—' }}</td>
+            <td><span class="sk-pill">{{ signup.campaign_slug }}</span></td>
+            <td>
+                {% if signup.email_confirmed %}
+                <span class="sk-pill sk-pill-published">Confirmed</span>
+                {% else %}
+                <span class="sk-pill sk-pill-draft">Unconfirmed</span>
+                {% endif %}
+            </td>
+            <td>{{ signup.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="sk-no-items">
+    {% if filters.campaign or filters.status %}
+    No signups match your filters.
+    {% else %}
+    No campaign signups have been recorded yet.
+    {% endif %}
+</p>
+{% endif %}
+{% endblock %}
