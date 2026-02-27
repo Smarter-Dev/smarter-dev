@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import ssl
 from datetime import datetime
 from typing import AsyncGenerator
 from typing import Optional
@@ -30,45 +29,42 @@ from smarter_dev.shared.config import get_settings
 logger = logging.getLogger(__name__)
 
 
-def convert_postgres_url_for_asyncpg(database_url: str) -> tuple[str, dict]:
+def convert_postgres_url_for_asyncpg(database_url: str) -> str:
     """Convert PostgreSQL URL with sslmode to asyncpg-compatible format.
-    
+
+    asyncpg uses ``ssl=require`` (not ``sslmode=require``). This converts
+    the libpq-style ``sslmode`` parameter to asyncpg's ``ssl`` parameter
+    so asyncpg handles SSL natively — matching how Skrift/Litestar apps
+    connect through pgbouncer without issues.
+
     Args:
         database_url: Database URL that may contain sslmode parameter
-        
+
     Returns:
-        Tuple of (cleaned_url, connect_args) for asyncpg
+        Cleaned URL with asyncpg-compatible ssl parameter
     """
     if not database_url.startswith(('postgresql+asyncpg://', 'postgresql://')):
-        return database_url, {}
-    
+        return database_url
+
     parsed = urlparse(database_url)
     query_params = parse_qs(parsed.query)
-    connect_args = {}
-    
-    # Handle sslmode parameter
+
+    # Convert sslmode → ssl for asyncpg compatibility
     if 'sslmode' in query_params:
         sslmode = query_params.pop('sslmode')[0]
         if sslmode in ('require', 'prefer'):
-            # Create SSL context that allows self-signed certificates
-            # This is needed for DigitalOcean managed PostgreSQL
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
-            connect_args['ssl'] = ssl_context
+            query_params['ssl'] = ['require']
         elif sslmode == 'disable':
-            connect_args['ssl'] = False
-        # For 'allow' and other modes, let asyncpg decide
-    
-    # Rebuild URL without sslmode
+            query_params['ssl'] = ['disable']
+
+    # Rebuild URL
     if query_params:
         query_string = urlencode(query_params, doseq=True)
         new_parsed = parsed._replace(query=query_string)
     else:
         new_parsed = parsed._replace(query='')
-    
-    cleaned_url = urlunparse(new_parsed)
-    return cleaned_url, connect_args
+
+    return urlunparse(new_parsed)
 
 
 # Database naming convention for consistent constraint names
@@ -110,41 +106,35 @@ _session_maker: Optional[async_sessionmaker[AsyncSession]] = None
 def create_engine(settings: Settings) -> AsyncEngine:
     """Create async SQLAlchemy engine with proper configuration."""
     database_url = settings.effective_database_url
-    
+
     # Convert PostgreSQL URL to asyncpg-compatible format
-    cleaned_url, pg_connect_args = convert_postgres_url_for_asyncpg(database_url)
+    cleaned_url = convert_postgres_url_for_asyncpg(database_url)
 
     # Engine Configuration
     engine_kwargs = {
-        "echo": True,
-        "echo_pool": True,
+        "echo": settings.debug,
         "future": True,
     }
-    
+
     # Pool configuration based on environment
     if settings.is_testing:
         # Use StaticPool for testing to maintain connections
-        test_connect_args = {"check_same_thread": False}
-        test_connect_args.update(pg_connect_args)
         engine_kwargs.update({
             "poolclass": StaticPool,
             "pool_pre_ping": True,
             "pool_recycle": -1,
-            "connect_args": test_connect_args,
+            "connect_args": {"check_same_thread": False},
         })
     else:
         # Production/development pool configuration
+        # Keep pool small — pgbouncer handles connection pooling
         engine_kwargs.update({
-            "pool_size": 20,
-            "max_overflow": 30,
+            "pool_size": 5,
+            "max_overflow": 10,
             "pool_pre_ping": True,
             "pool_recycle": 3600,  # 1 hour
         })
-        
-        # Add PostgreSQL connection args for production
-        if pg_connect_args:
-            engine_kwargs["connect_args"] = pg_connect_args
-    
+
     engine = create_async_engine(cleaned_url, **engine_kwargs)
     
     # Set up event listeners
