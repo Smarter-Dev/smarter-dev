@@ -72,7 +72,7 @@ web = [
     "redis>=5.0.0",
     "httpx>=0.24.0",
     "authlib>=1.2.0",
-    "skrift>=0.1.0a52",
+    "skrift>=0.1.0a54",
 ]
 
 # Development dependencies
