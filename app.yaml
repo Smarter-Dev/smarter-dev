@@ -13,6 +13,7 @@ auth:
       client_secret: $DISCORD_APPLICATION_SECRET
 
 controllers:
+  - skrift.admin.controller:AdminController
   - smarter_dev.web.controllers:PagesController
   - smarter_dev.web.controllers:api_mount
   - smarter_dev.web.controllers:bot_admin_mount

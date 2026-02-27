@@ -111,7 +111,7 @@
 /* ── CTA ── */
 .cta { text-align: center; padding: clamp(70px, 10vw, 130px) 2rem; position: relative; z-index: 1 }
 .cta-h { font-family: var(--display); font-size: clamp(1.8rem, 4.5vw, 3.5rem); color: var(--white); line-height: 1.1; margin-bottom: 1rem; letter-spacing: .08em; text-shadow: 0 0 30px rgba(0,212,255,.1) }
-.cta-h2 { font-family: var(--heading); font-size: clamp(.85rem, 1.5vw, 1rem); color: var(--light); max-width: 520px; margin: 0 auto; line-height: 1.8; letter-spacing: .02em }
+.cta-h2 { font-family: var(--heading); font-size: clamp(.85rem, 1.5vw, 1rem); color: var(--light); max-width: 520px; margin: 0 auto 2rem; line-height: 1.8; letter-spacing: .02em }
 
 /* ── Responsive ── */
 @media (max-width: 900px) {

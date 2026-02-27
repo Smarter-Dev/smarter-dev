@@ -81,9 +81,9 @@ spec:
                         key: discord-client-secret
                   - name: DISCORD_REDIRECT_URI
                     valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: discord-redirect-uri
+                      configMapKeyRef:
+                        name: smarter-dev-config
+                        key: DISCORD_REDIRECT_URI
                   - name: DISCORD_BOT_TOKEN
                     valueFrom:
                       secretKeyRef:
