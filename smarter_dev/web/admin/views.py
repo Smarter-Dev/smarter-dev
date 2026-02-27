@@ -153,7 +153,7 @@ async def dashboard(request: Request) -> Response:
         
         return templates.TemplateResponse(
             request,
-            "admin/dashboard.html",
+            "bot-admin/dashboard.html",
             {
                 "guilds": guild_stats,
                 "total_users": total_users,
@@ -173,7 +173,7 @@ async def dashboard(request: Request) -> Response:
         logger.error(f"Discord API error in dashboard: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/dashboard.html",
+            "bot-admin/dashboard.html",
             {
                 "guilds": [],
                 "error": f"Discord API error: {e}",
@@ -193,7 +193,7 @@ async def dashboard(request: Request) -> Response:
         logger.error(f"Unexpected error in dashboard: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/dashboard.html",
+            "bot-admin/dashboard.html",
             {
                 "guilds": [],
                 "error": "An unexpected error occurred while loading the dashboard.",
@@ -218,7 +218,7 @@ async def guild_list(request: Request) -> Response:
         
         return templates.TemplateResponse(
             request,
-            "admin/guild_list.html",
+            "bot-admin/guild_list.html",
             {
                 "guilds": guilds
             }
@@ -228,7 +228,7 @@ async def guild_list(request: Request) -> Response:
         logger.error(f"Discord API error in guild list: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/guild_list.html",
+            "bot-admin/guild_list.html",
             {
                 "guilds": [],
                 "error": f"Discord API error: {e}"
@@ -301,7 +301,7 @@ async def guild_detail(request: Request) -> Response:
         
         return templates.TemplateResponse(
             request,
-            "admin/guild_detail.html",
+            "bot-admin/guild_detail.html",
             {
                 "guild": guild,
                 "guilds": all_guilds,
@@ -321,7 +321,7 @@ async def guild_detail(request: Request) -> Response:
     except GuildNotFoundError:
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": f"Guild {guild_id} not found or bot is not a member.",
                 "error_code": 404
@@ -332,7 +332,7 @@ async def guild_detail(request: Request) -> Response:
         logger.error(f"Discord API error in guild detail: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": f"Discord API error: {e}",
                 "error_code": 503
@@ -343,7 +343,7 @@ async def guild_detail(request: Request) -> Response:
         logger.error(f"Unexpected error in guild detail: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "An unexpected error occurred while loading guild details.",
                 "error_code": 500
@@ -385,7 +385,7 @@ async def bytes_config(request: Request) -> Response:
                 
                 return templates.TemplateResponse(
                     request,
-                    "admin/bytes_config.html",
+                    "bot-admin/bytes_config.html",
                     {
                         "guild": guild,
                         "guilds": all_guilds,
@@ -457,7 +457,7 @@ async def bytes_config(request: Request) -> Response:
                 
                 return templates.TemplateResponse(
                     request,
-                    "admin/bytes_config.html",
+                    "bot-admin/bytes_config.html",
                     {
                         "guild": guild,
                         "guilds": all_guilds,
@@ -481,7 +481,7 @@ async def bytes_config(request: Request) -> Response:
                 
                 return templates.TemplateResponse(
                     request,
-                    "admin/bytes_config.html",
+                    "bot-admin/bytes_config.html",
                     {
                         "guild": guild,
                         "guilds": all_guilds,
@@ -494,7 +494,7 @@ async def bytes_config(request: Request) -> Response:
     except GuildNotFoundError:
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": f"Guild {guild_id} not found or bot is not a member.",
                 "error_code": 404
@@ -505,7 +505,7 @@ async def bytes_config(request: Request) -> Response:
         logger.error(f"Unexpected error in bytes config: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "An unexpected error occurred while managing bytes configuration.",
                 "error_code": 500
@@ -550,7 +550,7 @@ async def squads_config(request: Request) -> Response:
                 
                 return templates.TemplateResponse(
                     request,
-                    "admin/squads_config.html",
+                    "bot-admin/squads_config.html",
                     {
                         "guild": guild,
                         "guild_roles": guild_roles,
@@ -618,7 +618,7 @@ async def squads_config(request: Request) -> Response:
                 
                 return templates.TemplateResponse(
                     request,
-                    "admin/squads_config.html",
+                    "bot-admin/squads_config.html",
                     {
                         "guild": guild,
                         "guild_roles": guild_roles,
@@ -638,7 +638,7 @@ async def squads_config(request: Request) -> Response:
                     squad_members = []
                 return templates.TemplateResponse(
                     request,
-                    "admin/squads_config.html",
+                    "bot-admin/squads_config.html",
                     {
                         "guild": guild,
                         "guild_roles": guild_roles,
@@ -669,7 +669,7 @@ async def squads_config(request: Request) -> Response:
                 
                 return templates.TemplateResponse(
                     request,
-                    "admin/squads_config.html",
+                    "bot-admin/squads_config.html",
                     {
                         "guild": guild,
                         "guild_roles": guild_roles,
@@ -684,7 +684,7 @@ async def squads_config(request: Request) -> Response:
     except GuildNotFoundError:
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": f"Guild {guild_id} not found or bot is not a member.",
                 "error_code": 404
@@ -695,7 +695,7 @@ async def squads_config(request: Request) -> Response:
         logger.error(f"Unexpected error in squads config: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "An unexpected error occurred while managing squad configuration.",
                 "error_code": 500
@@ -720,7 +720,7 @@ async def api_keys_list(request: Request) -> Response:
             
             return templates.TemplateResponse(
                 request,
-                "admin/api_keys.html",
+                "bot-admin/api_keys.html",
                 {
                     "api_keys": keys,
                     "total": total
@@ -731,7 +731,7 @@ async def api_keys_list(request: Request) -> Response:
         logger.error(f"Error loading API keys: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "Failed to load API keys.",
                 "error_code": 500
@@ -745,7 +745,7 @@ async def api_keys_create(request: Request) -> Response:
     if request.method == "GET":
         return templates.TemplateResponse(
             request,
-            "admin/api_keys_create.html"
+            "bot-admin/api_keys_create.html"
         )
     
     # POST - Create API key
@@ -759,7 +759,7 @@ async def api_keys_create(request: Request) -> Response:
         if not name:
             return templates.TemplateResponse(
                 request,
-                "admin/api_keys_create.html",
+                "bot-admin/api_keys_create.html",
                 {
                     "error": "API key name is required.",
                     "form_data": {
@@ -799,7 +799,7 @@ async def api_keys_create(request: Request) -> Response:
         # Show the API key (only displayed once)
         return templates.TemplateResponse(
             request,
-            "admin/api_keys_created.html",
+            "bot-admin/api_keys_created.html",
             {
                 "api_key": api_key,
                 "full_key": full_key
@@ -809,7 +809,7 @@ async def api_keys_create(request: Request) -> Response:
     except ValueError as e:
         return templates.TemplateResponse(
             request,
-            "admin/api_keys_create.html",
+            "bot-admin/api_keys_create.html",
             {
                 "error": f"Invalid input: {e}",
                 "form_data": dict(form)
@@ -820,7 +820,7 @@ async def api_keys_create(request: Request) -> Response:
         logger.error(f"Error creating API key: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/api_keys_create.html",
+            "bot-admin/api_keys_create.html",
             {
                 "error": "Failed to create API key. Please try again.",
                 "form_data": dict(form) if 'form' in locals() else {}
@@ -843,7 +843,7 @@ async def api_keys_delete(request: Request) -> Response:
             if not api_key:
                 return templates.TemplateResponse(
                     request,
-                    "admin/error.html",
+                    "bot-admin/error.html",
                     {
                         "error": "API key not found.",
                         "error_code": 404
@@ -866,7 +866,7 @@ async def api_keys_delete(request: Request) -> Response:
     except ValueError:
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "Invalid API key ID.",
                 "error_code": 400
@@ -877,7 +877,7 @@ async def api_keys_delete(request: Request) -> Response:
         logger.error(f"Error deleting API key: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "Failed to delete API key.",
                 "error_code": 500
@@ -949,7 +949,7 @@ async def conversations_list(request: Request) -> Response:
             
             return templates.TemplateResponse(
                 request,
-                "admin/conversations.html",
+                "bot-admin/conversations.html",
                 {
                     "conversations": conversations,
                     "total": total,
@@ -971,7 +971,7 @@ async def conversations_list(request: Request) -> Response:
         logger.error(f"Error listing conversations: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "Failed to load conversations.",
                 "error_code": 500
@@ -994,7 +994,7 @@ async def conversation_detail(request: Request) -> Response:
             if not conversation:
                 return templates.TemplateResponse(
                     request,
-                    "admin/error.html",
+                    "bot-admin/error.html",
                     {
                         "error": "Conversation not found.",
                         "error_code": 404
@@ -1010,7 +1010,7 @@ async def conversation_detail(request: Request) -> Response:
             
             return templates.TemplateResponse(
                 request,
-                "admin/conversation_detail.html",
+                "bot-admin/conversation_detail.html",
                 {
                     "conversation": conversation,
                     "guild": guild_info
@@ -1020,7 +1020,7 @@ async def conversation_detail(request: Request) -> Response:
     except ValueError:
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "Invalid conversation ID.",
                 "error_code": 400
@@ -1031,7 +1031,7 @@ async def conversation_detail(request: Request) -> Response:
         logger.error(f"Error viewing conversation: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "Failed to load conversation.",
                 "error_code": 500
@@ -1066,7 +1066,7 @@ async def cleanup_expired_conversations(request: Request) -> Response:
                 
                 return templates.TemplateResponse(
                     request,
-                    "admin/cleanup_result.html",
+                    "bot-admin/cleanup_result.html",
                     {
                         "success": True,
                         "cleaned_count": len(expired_conversations),
@@ -1108,7 +1108,7 @@ async def cleanup_expired_conversations(request: Request) -> Response:
             
             return templates.TemplateResponse(
                 request,
-                "admin/conversation_cleanup.html",
+                "bot-admin/conversation_cleanup.html",
                 {
                     "standard_count": standard_count,
                     "minimal_count": minimal_count,
@@ -1122,7 +1122,7 @@ async def cleanup_expired_conversations(request: Request) -> Response:
         logger.error(f"Error in conversation cleanup: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "Failed to perform conversation cleanup.",
                 "error_code": 500
@@ -1144,7 +1144,7 @@ async def blog_list(request: Request) -> Response:
             
             return templates.TemplateResponse(
                 request,
-                "admin/blog_list.html",
+                "bot-admin/blog_list.html",
                 {
                     "blog_posts": blog_posts
                 }
@@ -1154,7 +1154,7 @@ async def blog_list(request: Request) -> Response:
         logger.error(f"Error in blog list: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "Failed to load blog posts.",
                 "error_code": 500
@@ -1177,7 +1177,7 @@ async def blog_create(request: Request) -> Response:
             if not title or not body or not author:
                 return templates.TemplateResponse(
                     request,
-                    "admin/blog_create.html",
+                    "bot-admin/blog_create.html",
                     {
                         "error": "Title, body, and author are required.",
                         "title": title,
@@ -1198,7 +1198,7 @@ async def blog_create(request: Request) -> Response:
                 if existing_result.scalar_one_or_none():
                     return templates.TemplateResponse(
                         request,
-                        "admin/blog_create.html",
+                        "bot-admin/blog_create.html",
                         {
                             "error": f"A blog post with slug '{slug}' already exists.",
                             "title": title,
@@ -1224,7 +1224,7 @@ async def blog_create(request: Request) -> Response:
                 
                 return templates.TemplateResponse(
                     request,
-                    "admin/blog_create.html",
+                    "bot-admin/blog_create.html",
                     {
                         "success": f"Blog post '{title}' created successfully!",
                         "blog_post": blog_post
@@ -1234,7 +1234,7 @@ async def blog_create(request: Request) -> Response:
         except IntegrityError:
             return templates.TemplateResponse(
                 request,
-                "admin/blog_create.html",
+                "bot-admin/blog_create.html",
                 {
                     "error": "A blog post with this slug already exists.",
                     "title": title,
@@ -1247,7 +1247,7 @@ async def blog_create(request: Request) -> Response:
             logger.error(f"Error creating blog post: {e}")
             return templates.TemplateResponse(
                 request,
-                "admin/blog_create.html",
+                "bot-admin/blog_create.html",
                 {
                     "error": "Failed to create blog post.",
                     "title": title,
@@ -1260,7 +1260,7 @@ async def blog_create(request: Request) -> Response:
     # GET request - show create form
     return templates.TemplateResponse(
         request,
-        "admin/blog_create.html",
+        "bot-admin/blog_create.html",
         {}
     )
 
@@ -1280,7 +1280,7 @@ async def blog_edit(request: Request) -> Response:
             if not blog_post:
                 return templates.TemplateResponse(
                     request,
-                    "admin/error.html",
+                    "bot-admin/error.html",
                     {
                         "error": "Blog post not found.",
                         "error_code": 404
@@ -1299,7 +1299,7 @@ async def blog_edit(request: Request) -> Response:
                 if not title or not body or not author:
                     return templates.TemplateResponse(
                         request,
-                        "admin/blog_edit.html",
+                        "bot-admin/blog_edit.html",
                         {
                             "error": "Title, body, and author are required.",
                             "blog_post": blog_post,
@@ -1323,7 +1323,7 @@ async def blog_edit(request: Request) -> Response:
                     if existing_result.scalar_one_or_none():
                         return templates.TemplateResponse(
                             request,
-                            "admin/blog_edit.html",
+                            "bot-admin/blog_edit.html",
                             {
                                 "error": f"A blog post with slug '{new_slug}' already exists.",
                                 "blog_post": blog_post,
@@ -1357,7 +1357,7 @@ async def blog_edit(request: Request) -> Response:
                 
                 return templates.TemplateResponse(
                     request,
-                    "admin/blog_edit.html",
+                    "bot-admin/blog_edit.html",
                     {
                         "success": f"Blog post '{title}' updated successfully!",
                         "blog_post": blog_post
@@ -1367,7 +1367,7 @@ async def blog_edit(request: Request) -> Response:
             # GET request - show edit form
             return templates.TemplateResponse(
                 request,
-                "admin/blog_edit.html",
+                "bot-admin/blog_edit.html",
                 {
                     "blog_post": blog_post
                 }
@@ -1376,7 +1376,7 @@ async def blog_edit(request: Request) -> Response:
     except ValueError:
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "Invalid blog post ID.",
                 "error_code": 400
@@ -1387,7 +1387,7 @@ async def blog_edit(request: Request) -> Response:
         logger.error(f"Error editing blog post: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "Failed to edit blog post.",
                 "error_code": 500
@@ -1411,7 +1411,7 @@ async def blog_delete(request: Request) -> Response:
             if not blog_post:
                 return templates.TemplateResponse(
                     request,
-                    "admin/error.html",
+                    "bot-admin/error.html",
                     {
                         "error": "Blog post not found.",
                         "error_code": 404
@@ -1426,7 +1426,7 @@ async def blog_delete(request: Request) -> Response:
             # Redirect to blog list (we'll handle this with a simple template response for now)
             return templates.TemplateResponse(
                 request,
-                "admin/blog_list.html",
+                "bot-admin/blog_list.html",
                 {
                     "success": f"Blog post '{blog_post.title}' deleted successfully!",
                     "blog_posts": []  # We could reload the list here
@@ -1436,7 +1436,7 @@ async def blog_delete(request: Request) -> Response:
     except ValueError:
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "Invalid blog post ID.",
                 "error_code": 400
@@ -1447,7 +1447,7 @@ async def blog_delete(request: Request) -> Response:
         logger.error(f"Error deleting blog post: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "Failed to delete blog post.",
                 "error_code": 500
@@ -1611,7 +1611,7 @@ async def forum_agents_list(request: Request) -> Response:
             "title": f"Forum Agents - {guild_info.name}",
         }
         
-        return templates.TemplateResponse("admin/forum_agents_list.html", context)
+        return templates.TemplateResponse("bot-admin/forum_agents_list.html", context)
         
     except GuildNotFoundError:
         context = {
@@ -1619,14 +1619,14 @@ async def forum_agents_list(request: Request) -> Response:
             "error": "Guild not found",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except DiscordAPIError as e:
         context = {
             "request": request,
             "error": f"Discord API error: {e}",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=503)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=503)
     except Exception as e:
         logger.error(f"Error listing forum agents for guild {guild_id}: {e}")
         context = {
@@ -1634,7 +1634,7 @@ async def forum_agents_list(request: Request) -> Response:
             "error": "Database error occurred",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def forum_agent_create(request: Request) -> Response:
@@ -1652,7 +1652,7 @@ async def forum_agent_create(request: Request) -> Response:
                 "guild": guild_info,
                 "title": f"Create Forum Agent - {guild_info.name}",
             }
-            return templates.TemplateResponse("admin/forum_agent_create.html", context)
+            return templates.TemplateResponse("bot-admin/forum_agent_create.html", context)
         
         elif request.method == "POST":
             # Process form submission
@@ -1688,7 +1688,7 @@ async def forum_agent_create(request: Request) -> Response:
                     "form_data": data,
                     "title": f"Create Forum Agent - {guild_info.name}",
                 }
-                return templates.TemplateResponse("admin/forum_agent_create.html", context, status_code=400)
+                return templates.TemplateResponse("bot-admin/forum_agent_create.html", context, status_code=400)
             
             # Create agent
             async with get_db_session_context() as session:
@@ -1725,7 +1725,7 @@ async def forum_agent_create(request: Request) -> Response:
                         "form_data": data,
                         "title": f"Create Forum Agent - {guild_info.name}",
                     }
-                    return templates.TemplateResponse("admin/forum_agent_create.html", context, status_code=500)
+                    return templates.TemplateResponse("bot-admin/forum_agent_create.html", context, status_code=500)
         
     except GuildNotFoundError:
         context = {
@@ -1733,7 +1733,7 @@ async def forum_agent_create(request: Request) -> Response:
             "error": "Guild not found",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error in forum agent create for guild {guild_id}: {e}")
         context = {
@@ -1741,7 +1741,7 @@ async def forum_agent_create(request: Request) -> Response:
             "error": "An unexpected error occurred",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def forum_agent_edit(request: Request) -> Response:
@@ -1764,7 +1764,7 @@ async def forum_agent_edit(request: Request) -> Response:
                     "error": "Forum agent not found",
                     "title": "Error"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             if request.method == "GET":
                 # Load notification topics if agent has tagging enabled
@@ -1809,7 +1809,7 @@ async def forum_agent_edit(request: Request) -> Response:
                     "notification_topics": notification_topics,
                     "title": f"Edit Forum Agent: {agent.name}",
                 }
-                return templates.TemplateResponse("admin/forum_agent_edit.html", context)
+                return templates.TemplateResponse("bot-admin/forum_agent_edit.html", context)
             
             elif request.method == "POST":
                 # Process form submission
@@ -1846,7 +1846,7 @@ async def forum_agent_edit(request: Request) -> Response:
                         "form_data": data,
                         "title": f"Edit Forum Agent: {agent.name}",
                     }
-                    return templates.TemplateResponse("admin/forum_agent_edit.html", context, status_code=400)
+                    return templates.TemplateResponse("bot-admin/forum_agent_edit.html", context, status_code=400)
                 
                 # Update agent
                 try:
@@ -1882,7 +1882,7 @@ async def forum_agent_edit(request: Request) -> Response:
                         "form_data": data,
                         "title": f"Edit Forum Agent: {agent.name}",
                     }
-                    return templates.TemplateResponse("admin/forum_agent_edit.html", context, status_code=500)
+                    return templates.TemplateResponse("bot-admin/forum_agent_edit.html", context, status_code=500)
         
     except GuildNotFoundError:
         context = {
@@ -1890,7 +1890,7 @@ async def forum_agent_edit(request: Request) -> Response:
             "error": "Guild not found",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error in forum agent edit for guild {guild_id}, agent {agent_id}: {e}")
         context = {
@@ -1898,7 +1898,7 @@ async def forum_agent_edit(request: Request) -> Response:
             "error": "An unexpected error occurred",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def forum_agent_delete(request: Request) -> Response:
@@ -1918,7 +1918,7 @@ async def forum_agent_delete(request: Request) -> Response:
                     "error": "Forum agent not found",
                     "title": "Error"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
         
         # Redirect to agents list
         return RedirectResponse(
@@ -1933,7 +1933,7 @@ async def forum_agent_delete(request: Request) -> Response:
             "error": "Failed to delete forum agent",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def forum_agent_toggle(request: Request) -> Response:
@@ -1953,7 +1953,7 @@ async def forum_agent_toggle(request: Request) -> Response:
                     "error": "Forum agent not found",
                     "title": "Error"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
         
         # Redirect to agents list
         return RedirectResponse(
@@ -1968,7 +1968,7 @@ async def forum_agent_toggle(request: Request) -> Response:
             "error": "Failed to toggle forum agent",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def forum_agent_analytics(request: Request) -> Response:
@@ -1992,7 +1992,7 @@ async def forum_agent_analytics(request: Request) -> Response:
                     "error": "Forum agent not found",
                     "title": "Error"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
         
         # Handle empty analytics (agent not found)
         if not analytics or 'agent' not in analytics:
@@ -2001,7 +2001,7 @@ async def forum_agent_analytics(request: Request) -> Response:
                 "error": f"Forum agent {agent_id} not found in guild {guild_id}",
                 "title": "Error"
             }
-            return templates.TemplateResponse("admin/error.html", context, status_code=404)
+            return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
         
         # Flatten and adapt analytics structure for template convenience
         stats = analytics['statistics']
@@ -2024,7 +2024,7 @@ async def forum_agent_analytics(request: Request) -> Response:
             "title": f"Analytics: {analytics['agent']['name']}",
         }
         
-        return templates.TemplateResponse("admin/forum_agent_analytics.html", context)
+        return templates.TemplateResponse("bot-admin/forum_agent_analytics.html", context)
         
     except GuildNotFoundError:
         context = {
@@ -2032,7 +2032,7 @@ async def forum_agent_analytics(request: Request) -> Response:
             "error": "Guild not found",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         import traceback
         logger.error(f"Error getting forum agent analytics for {agent_id}: {e}")
@@ -2042,7 +2042,7 @@ async def forum_agent_analytics(request: Request) -> Response:
             "error": "Failed to load analytics",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def get_forum_response_details(request: Request) -> Response:
@@ -2118,7 +2118,7 @@ async def forum_agents_bulk(request: Request) -> Response:
                 "error": "Invalid bulk operation request",
                 "title": "Error"
             }
-            return templates.TemplateResponse("admin/error.html", context, status_code=400)
+            return templates.TemplateResponse("bot-admin/error.html", context, status_code=400)
         
         # Convert string UUIDs to UUID objects
         uuid_agent_ids = [UUID(aid) for aid in agent_ids]
@@ -2145,7 +2145,7 @@ async def forum_agents_bulk(request: Request) -> Response:
             "error": "Failed to perform bulk operation",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 # ============================================================================
@@ -2186,7 +2186,7 @@ async def campaigns_list(request: Request) -> Response:
                 "title": f"Campaigns - {guild.name}"
             }
             
-        return templates.TemplateResponse("admin/campaigns_list.html", context)
+        return templates.TemplateResponse("bot-admin/campaigns_list.html", context)
         
     except GuildNotFoundError:
         context = {
@@ -2194,7 +2194,7 @@ async def campaigns_list(request: Request) -> Response:
             "error": "Guild not found or bot not in guild",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error in campaigns list for guild {guild_id}: {e}")
         context = {
@@ -2202,7 +2202,7 @@ async def campaigns_list(request: Request) -> Response:
             "error": "Failed to load campaigns",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 async def campaign_create(request: Request) -> Response:
     """Create a new campaign."""
@@ -2226,7 +2226,7 @@ async def campaign_create(request: Request) -> Response:
                 "channels": channels,
                 "title": f"Create Campaign - {guild.name}"
             }
-            return templates.TemplateResponse("admin/campaign_create.html", context)
+            return templates.TemplateResponse("bot-admin/campaign_create.html", context)
         
         elif request.method == "POST":
             # Handle form submission
@@ -2312,7 +2312,7 @@ async def campaign_create(request: Request) -> Response:
                     "form_data": form_data,
                     "title": f"Create Campaign - {guild.name}"
                 }
-                return templates.TemplateResponse("admin/campaign_create.html", context, status_code=400)
+                return templates.TemplateResponse("bot-admin/campaign_create.html", context, status_code=400)
             
             # Create campaign
             async with get_db_session_context() as session:
@@ -2354,7 +2354,7 @@ async def campaign_create(request: Request) -> Response:
                         "form_data": form_data,
                         "title": f"Create Campaign - {guild.name}"
                     }
-                    return templates.TemplateResponse("admin/campaign_create.html", context, status_code=400)
+                    return templates.TemplateResponse("bot-admin/campaign_create.html", context, status_code=400)
     
     except GuildNotFoundError:
         context = {
@@ -2362,7 +2362,7 @@ async def campaign_create(request: Request) -> Response:
             "error": "Guild not found or bot not in guild",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error in campaign create for guild {guild_id}: {e}")
         context = {
@@ -2370,7 +2370,7 @@ async def campaign_create(request: Request) -> Response:
             "error": "Failed to create campaign",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def campaign_edit(request: Request) -> Response:
@@ -2392,7 +2392,7 @@ async def campaign_edit(request: Request) -> Response:
                     "error": "Campaign not found",
                     "title": "Campaign Not Found"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             if request.method == "GET":
                 # Get announcement channels for form
@@ -2408,7 +2408,7 @@ async def campaign_edit(request: Request) -> Response:
                     "channels": channels,
                     "title": f"Edit Campaign - {campaign.title}"
                 }
-                return templates.TemplateResponse("admin/campaign_edit.html", context)
+                return templates.TemplateResponse("bot-admin/campaign_edit.html", context)
             
             elif request.method == "POST":
                 # Handle form submission
@@ -2467,7 +2467,7 @@ async def campaign_edit(request: Request) -> Response:
                         "form_data": form_data,
                         "title": f"Edit Campaign - {campaign.title}"
                     }
-                    return templates.TemplateResponse("admin/campaign_edit.html", context, status_code=400)
+                    return templates.TemplateResponse("bot-admin/campaign_edit.html", context, status_code=400)
                 
                 # Update campaign
                 try:
@@ -2508,7 +2508,7 @@ async def campaign_edit(request: Request) -> Response:
                         "form_data": form_data,
                         "title": f"Edit Campaign - {campaign.title}"
                     }
-                    return templates.TemplateResponse("admin/campaign_edit.html", context, status_code=400)
+                    return templates.TemplateResponse("bot-admin/campaign_edit.html", context, status_code=400)
     
     except GuildNotFoundError:
         context = {
@@ -2516,7 +2516,7 @@ async def campaign_edit(request: Request) -> Response:
             "error": "Guild not found or bot not in guild",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error in campaign edit for guild {guild_id}: {e}")
         context = {
@@ -2524,7 +2524,7 @@ async def campaign_edit(request: Request) -> Response:
             "error": "Failed to edit campaign",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def campaign_delete(request: Request) -> Response:
@@ -2590,7 +2590,7 @@ async def quests_list(request: Request) -> Response:
     ]
 
     return templates.TemplateResponse(
-        "admin/quests_list.html",
+        "bot-admin/quests_list.html",
         {
             "request": request,
             "guild": guild,
@@ -2611,7 +2611,7 @@ async def quest_edit(request: Request) -> Response:
 
         if not quest or quest.guild_id != guild_id:
             return templates.TemplateResponse(
-                "admin/error.html",
+                "bot-admin/error.html",
                 {"request": request, "error": "Quest not found"},
                 status_code=404,
             )
@@ -2630,7 +2630,7 @@ async def quest_edit(request: Request) -> Response:
 
         if request.method == "GET":
             return templates.TemplateResponse(
-                "admin/quest_edit.html",
+                "bot-admin/quest_edit.html",
                 {
                     "request": request,
                     "guild": guild,
@@ -2675,7 +2675,7 @@ async def quest_schedule(request: Request) -> Response:
 
     if not isinstance(raw_date, str) or not raw_date:
         return templates.TemplateResponse(
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "request": request,
                 "error": "Active date is required",
@@ -2719,7 +2719,7 @@ async def quest_schedule(request: Request) -> Response:
 
         if conflict:
             return templates.TemplateResponse(
-                "admin/quest_edit.html",
+                "bot-admin/quest_edit.html",
                 {
                     "request": request,
                     "guild": await get_guild_info(guild_id),
@@ -2791,7 +2791,7 @@ async def quest_create(request: Request) -> Response:
 
     if request.method == "GET":
         return templates.TemplateResponse(
-            "admin/quest_create.html",
+            "bot-admin/quest_create.html",
             {
                 "request": request,
                 "guild": guild,
@@ -2828,7 +2828,7 @@ async def quest_create(request: Request) -> Response:
 
     if errors:
         return templates.TemplateResponse(
-            "admin/quest_create.html",
+            "bot-admin/quest_create.html",
             {
                 "request": request,
                 "guild": guild,
@@ -2874,7 +2874,7 @@ async def campaign_challenges(request: Request) -> Response:
                     "error": "Campaign not found",
                     "title": "Campaign Not Found"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             context = {
                 "request": request,
@@ -2884,7 +2884,7 @@ async def campaign_challenges(request: Request) -> Response:
                 "title": f"Challenges - {campaign.title}"
             }
             
-        return templates.TemplateResponse("admin/campaign_challenges.html", context)
+        return templates.TemplateResponse("bot-admin/campaign_challenges.html", context)
         
     except GuildNotFoundError:
         context = {
@@ -2892,7 +2892,7 @@ async def campaign_challenges(request: Request) -> Response:
             "error": "Guild not found or bot not in guild",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error in campaign challenges for guild {guild_id}: {e}")
         context = {
@@ -2900,7 +2900,7 @@ async def campaign_challenges(request: Request) -> Response:
             "error": "Failed to load campaign challenges",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 @admin_required
@@ -2923,7 +2923,7 @@ async def challenge_create(request: Request) -> Response:
                     "error": "Campaign not found",
                     "title": "Campaign Not Found"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             if request.method == "GET":
                 context = {
@@ -2932,7 +2932,7 @@ async def challenge_create(request: Request) -> Response:
                     "campaign": campaign,
                     "title": f"Create Challenge - {campaign.title}"
                 }
-                return templates.TemplateResponse("admin/challenge_create.html", context)
+                return templates.TemplateResponse("bot-admin/challenge_create.html", context)
             
             elif request.method == "POST":
                 form = await request.form()
@@ -2970,7 +2970,7 @@ async def challenge_create(request: Request) -> Response:
                         "form_data": form,
                         "title": f"Create Challenge - {campaign.title}"
                     }
-                    return templates.TemplateResponse("admin/challenge_create.html", context, status_code=400)
+                    return templates.TemplateResponse("bot-admin/challenge_create.html", context, status_code=400)
                 
                 # Get next order position
                 max_position = 0
@@ -3000,7 +3000,7 @@ async def challenge_create(request: Request) -> Response:
             "error": "Guild not found or bot not in guild",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error creating challenge for campaign {campaign_id}: {e}")
         context = {
@@ -3008,7 +3008,7 @@ async def challenge_create(request: Request) -> Response:
             "error": "Failed to create challenge",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 # ============================================================================
@@ -3035,7 +3035,7 @@ async def scheduled_messages_list(request: Request) -> Response:
                     "error": "Campaign not found",
                     "title": "Campaign Not Found"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             # Get scheduled messages
             message_ops = ScheduledMessageOperations(session)
@@ -3049,7 +3049,7 @@ async def scheduled_messages_list(request: Request) -> Response:
                 "title": f"Scheduled Messages - {campaign.title}"
             }
             
-        return templates.TemplateResponse("admin/scheduled_messages_list.html", context)
+        return templates.TemplateResponse("bot-admin/scheduled_messages_list.html", context)
         
     except GuildNotFoundError:
         context = {
@@ -3057,7 +3057,7 @@ async def scheduled_messages_list(request: Request) -> Response:
             "error": "Guild not found or bot not in guild",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error in scheduled messages list for campaign {campaign_id}: {e}")
         context = {
@@ -3065,7 +3065,7 @@ async def scheduled_messages_list(request: Request) -> Response:
             "error": "Failed to load scheduled messages",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def scheduled_message_create(request: Request) -> Response:
@@ -3088,7 +3088,7 @@ async def scheduled_message_create(request: Request) -> Response:
                     "error": "Campaign not found",
                     "title": "Campaign Not Found"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             if request.method == "GET":
                 context = {
@@ -3097,7 +3097,7 @@ async def scheduled_message_create(request: Request) -> Response:
                     "campaign": campaign,
                     "title": f"Create Scheduled Message - {campaign.title}"
                 }
-                return templates.TemplateResponse("admin/scheduled_message_create.html", context)
+                return templates.TemplateResponse("bot-admin/scheduled_message_create.html", context)
             
             elif request.method == "POST":
                 # Handle form submission
@@ -3144,7 +3144,7 @@ async def scheduled_message_create(request: Request) -> Response:
                         "form_data": form_data,
                         "title": f"Create Scheduled Message - {campaign.title}"
                     }
-                    return templates.TemplateResponse("admin/scheduled_message_create.html", context, status_code=400)
+                    return templates.TemplateResponse("bot-admin/scheduled_message_create.html", context, status_code=400)
                 
                 # Create scheduled message
                 message_ops = ScheduledMessageOperations(session)
@@ -3169,7 +3169,7 @@ async def scheduled_message_create(request: Request) -> Response:
             "error": "Guild not found or bot not in guild",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error creating scheduled message for campaign {campaign_id}: {e}")
         context = {
@@ -3177,7 +3177,7 @@ async def scheduled_message_create(request: Request) -> Response:
             "error": "Failed to create scheduled message",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def scheduled_message_edit(request: Request) -> Response:
@@ -3201,7 +3201,7 @@ async def scheduled_message_edit(request: Request) -> Response:
                     "error": "Campaign not found",
                     "title": "Campaign Not Found"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             # Get scheduled message
             message_ops = ScheduledMessageOperations(session)
@@ -3213,7 +3213,7 @@ async def scheduled_message_edit(request: Request) -> Response:
                     "error": "Scheduled message not found",
                     "title": "Scheduled Message Not Found"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             if request.method == "GET":
                 context = {
@@ -3223,7 +3223,7 @@ async def scheduled_message_edit(request: Request) -> Response:
                     "scheduled_message": scheduled_message,
                     "title": f"Edit Scheduled Message - {scheduled_message.title}"
                 }
-                return templates.TemplateResponse("admin/scheduled_message_edit.html", context)
+                return templates.TemplateResponse("bot-admin/scheduled_message_edit.html", context)
             
             elif request.method == "POST":
                 # Handle form submission
@@ -3271,7 +3271,7 @@ async def scheduled_message_edit(request: Request) -> Response:
                         "form_data": form_data,
                         "title": f"Edit Scheduled Message - {scheduled_message.title}"
                     }
-                    return templates.TemplateResponse("admin/scheduled_message_edit.html", context, status_code=400)
+                    return templates.TemplateResponse("bot-admin/scheduled_message_edit.html", context, status_code=400)
                 
                 # Update scheduled message
                 await message_ops.update_scheduled_message(
@@ -3295,7 +3295,7 @@ async def scheduled_message_edit(request: Request) -> Response:
             "error": "Guild not found or bot not in guild",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error editing scheduled message {message_id}: {e}")
         context = {
@@ -3303,7 +3303,7 @@ async def scheduled_message_edit(request: Request) -> Response:
             "error": "Failed to edit scheduled message",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def scheduled_message_delete(request: Request) -> Response:
@@ -3323,7 +3323,7 @@ async def scheduled_message_delete(request: Request) -> Response:
                     "error": "Scheduled message not found",
                     "title": "Scheduled Message Not Found"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             # Redirect to scheduled messages list
             return RedirectResponse(
@@ -3338,7 +3338,7 @@ async def scheduled_message_delete(request: Request) -> Response:
             "error": "Failed to delete scheduled message",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def squad_sale_events_list(request: Request) -> Response:
@@ -3373,7 +3373,7 @@ async def squad_sale_events_list(request: Request) -> Response:
                 
                 return templates.TemplateResponse(
                     request,
-                    "admin/squad_sale_events.html",
+                    "bot-admin/squad_sale_events.html",
                     {
                         "guild": guild,
                         "guilds": all_guilds,
@@ -3415,7 +3415,7 @@ async def squad_sale_events_list(request: Request) -> Response:
                 
                 return templates.TemplateResponse(
                     request,
-                    "admin/squad_sale_events.html",
+                    "bot-admin/squad_sale_events.html",
                     {
                         "guild": guild,
                         "events": events,
@@ -3430,7 +3430,7 @@ async def squad_sale_events_list(request: Request) -> Response:
             "error": "Guild not found or bot not in guild",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error in squad sale events list for guild {guild_id}: {e}")
         context = {
@@ -3438,7 +3438,7 @@ async def squad_sale_events_list(request: Request) -> Response:
             "error": "An error occurred while loading sale events",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def squad_sale_event_edit(request: Request) -> Response:
@@ -3461,7 +3461,7 @@ async def squad_sale_event_edit(request: Request) -> Response:
                     "error": "Sale event not found",
                     "title": "Sale Event Not Found"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             # Handle form submission
             form = await request.form()
@@ -3495,7 +3495,7 @@ async def squad_sale_event_edit(request: Request) -> Response:
                     "error": str(e),
                     "title": "Update Error"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=400)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=400)
             
     except GuildNotFoundError:
         context = {
@@ -3503,7 +3503,7 @@ async def squad_sale_event_edit(request: Request) -> Response:
             "error": "Guild not found or bot not in guild",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error editing sale event {event_id}: {e}")
         context = {
@@ -3511,7 +3511,7 @@ async def squad_sale_event_edit(request: Request) -> Response:
             "error": "Failed to update sale event",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def squad_sale_event_toggle(request: Request) -> Response:
@@ -3553,7 +3553,7 @@ async def squad_sale_event_delete(request: Request) -> Response:
                     "error": "Sale event not found",
                     "title": "Sale Event Not Found"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             await session.commit()
             logger.info(f"Deleted sale event {event_id} in guild {guild_id}")
@@ -3571,7 +3571,7 @@ async def squad_sale_event_delete(request: Request) -> Response:
             "error": "Failed to delete sale event",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 # Repeating Messages Views
@@ -3607,7 +3607,7 @@ async def repeating_messages_list(request: Request) -> Response:
                     "success": request.query_params.get("success")
                 }
                 
-                return templates.TemplateResponse("admin/repeating_messages_list.html", context)
+                return templates.TemplateResponse("bot-admin/repeating_messages_list.html", context)
             
             elif request.method == "POST":
                 # Create new repeating message
@@ -3670,7 +3670,7 @@ async def repeating_messages_list(request: Request) -> Response:
                         "title": f"Repeating Messages - {guild.name}",
                         "error": str(e)
                     }
-                    return templates.TemplateResponse("admin/repeating_messages_list.html", context)
+                    return templates.TemplateResponse("bot-admin/repeating_messages_list.html", context)
                 
     except GuildNotFoundError:
         context = {
@@ -3678,7 +3678,7 @@ async def repeating_messages_list(request: Request) -> Response:
             "error": "Guild not found",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     
     except Exception as e:
         logger.error(f"Error in repeating messages for guild {guild_id}: {e}")
@@ -3687,7 +3687,7 @@ async def repeating_messages_list(request: Request) -> Response:
             "error": "Failed to load repeating messages",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def repeating_message_create(request: Request) -> Response:
@@ -3710,7 +3710,7 @@ async def repeating_message_create(request: Request) -> Response:
                 "roles": roles,
                 "title": f"Create Repeating Message - {guild.name}"
             }
-            return templates.TemplateResponse("admin/repeating_message_form.html", context)
+            return templates.TemplateResponse("bot-admin/repeating_message_form.html", context)
         
         elif request.method == "POST":
             # Process form submission
@@ -3778,7 +3778,7 @@ async def repeating_message_create(request: Request) -> Response:
                     "error": str(e),
                     "form_data": form_data
                 }
-                return templates.TemplateResponse("admin/repeating_message_form.html", context)
+                return templates.TemplateResponse("bot-admin/repeating_message_form.html", context)
     
     except GuildNotFoundError:
         context = {
@@ -3786,7 +3786,7 @@ async def repeating_message_create(request: Request) -> Response:
             "error": "Guild not found",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     
     except Exception as e:
         logger.error(f"Error creating repeating message for guild {guild_id}: {e}")
@@ -3795,7 +3795,7 @@ async def repeating_message_create(request: Request) -> Response:
             "error": "Failed to create repeating message",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def repeating_message_edit(request: Request) -> Response:
@@ -3817,7 +3817,7 @@ async def repeating_message_edit(request: Request) -> Response:
                     "error": "Repeating message not found",
                     "title": "Message Not Found"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             if request.method == "GET":
                 # Get channels and roles
@@ -3832,7 +3832,7 @@ async def repeating_message_edit(request: Request) -> Response:
                     "roles": roles,
                     "title": f"Edit Repeating Message - {guild.name}"
                 }
-                return templates.TemplateResponse("admin/repeating_message_edit.html", context)
+                return templates.TemplateResponse("bot-admin/repeating_message_edit.html", context)
             
             elif request.method == "POST":
                 # Process form submission
@@ -3884,7 +3884,7 @@ async def repeating_message_edit(request: Request) -> Response:
                         "title": f"Edit Repeating Message - {guild.name}",
                         "error": str(e)
                     }
-                    return templates.TemplateResponse("admin/repeating_message_edit.html", context)
+                    return templates.TemplateResponse("bot-admin/repeating_message_edit.html", context)
     
     except GuildNotFoundError:
         context = {
@@ -3892,7 +3892,7 @@ async def repeating_message_edit(request: Request) -> Response:
             "error": "Guild not found",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     
     except Exception as e:
         logger.error(f"Error editing repeating message {message_id}: {e}")
@@ -3901,7 +3901,7 @@ async def repeating_message_edit(request: Request) -> Response:
             "error": "Failed to edit repeating message",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def repeating_message_delete(request: Request) -> Response:
@@ -3920,7 +3920,7 @@ async def repeating_message_delete(request: Request) -> Response:
                     "error": "Repeating message not found",
                     "title": "Message Not Found"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             # Delete the message
             success = await message_ops.delete_repeating_message(message_id)
@@ -3937,7 +3937,7 @@ async def repeating_message_delete(request: Request) -> Response:
                     "error": "Failed to delete repeating message",
                     "title": "Error"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=500)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
     
     except Exception as e:
         logger.error(f"Error deleting repeating message {message_id}: {e}")
@@ -3946,7 +3946,7 @@ async def repeating_message_delete(request: Request) -> Response:
             "error": "Failed to delete repeating message",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def repeating_message_toggle(request: Request) -> Response:
@@ -3965,7 +3965,7 @@ async def repeating_message_toggle(request: Request) -> Response:
                     "error": "Repeating message not found", 
                     "title": "Message Not Found"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=404)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
             
             # Toggle active status
             new_status = not message.is_active
@@ -3984,7 +3984,7 @@ async def repeating_message_toggle(request: Request) -> Response:
                     "error": "Failed to toggle repeating message",
                     "title": "Error"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=500)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
     
     except Exception as e:
         logger.error(f"Error toggling repeating message {message_id}: {e}")
@@ -3993,7 +3993,7 @@ async def repeating_message_toggle(request: Request) -> Response:
             "error": "Failed to toggle repeating message",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def audit_log_config(request: Request) -> Response:
@@ -4029,7 +4029,7 @@ async def audit_log_config(request: Request) -> Response:
 
                 return templates.TemplateResponse(
                     request,
-                    "admin/audit_log_config.html",
+                    "bot-admin/audit_log_config.html",
                     {
                         "guild": guild,
                         "guilds": all_guilds,
@@ -4076,7 +4076,7 @@ async def audit_log_config(request: Request) -> Response:
                     "error": f"Failed to update configuration: {str(e)}",
                     "title": "Error"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=500)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
     except GuildNotFoundError:
         context = {
@@ -4084,7 +4084,7 @@ async def audit_log_config(request: Request) -> Response:
             "error": f"Guild {guild_id} not found or bot is not a member",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error loading audit log config for guild {guild_id}: {e}")
         context = {
@@ -4092,7 +4092,7 @@ async def audit_log_config(request: Request) -> Response:
             "error": "Failed to load audit log configuration",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def advent_of_code_config(request: Request) -> Response:
@@ -4131,7 +4131,7 @@ async def advent_of_code_config(request: Request) -> Response:
 
                 return templates.TemplateResponse(
                     request,
-                    "admin/advent_of_code_config.html",
+                    "bot-admin/advent_of_code_config.html",
                     {
                         "guild": guild,
                         "guilds": all_guilds,
@@ -4174,7 +4174,7 @@ async def advent_of_code_config(request: Request) -> Response:
                     "error": f"Failed to update configuration: {str(e)}",
                     "title": "Error"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=500)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
     except GuildNotFoundError:
         context = {
@@ -4182,7 +4182,7 @@ async def advent_of_code_config(request: Request) -> Response:
             "error": f"Guild {guild_id} not found or bot is not a member",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error loading AoC config for guild {guild_id}: {e}")
         context = {
@@ -4190,7 +4190,7 @@ async def advent_of_code_config(request: Request) -> Response:
             "error": "Failed to load Advent of Code configuration",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def attachment_filter_config(request: Request) -> Response:
@@ -4217,7 +4217,7 @@ async def attachment_filter_config(request: Request) -> Response:
 
                 return templates.TemplateResponse(
                     request,
-                    "admin/attachment_filter_config.html",
+                    "bot-admin/attachment_filter_config.html",
                     {
                         "guild": guild,
                         "guilds": all_guilds,
@@ -4279,7 +4279,7 @@ async def attachment_filter_config(request: Request) -> Response:
                     "error": f"Failed to update configuration: {str(e)}",
                     "title": "Error"
                 }
-                return templates.TemplateResponse("admin/error.html", context, status_code=500)
+                return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
     except GuildNotFoundError:
         context = {
@@ -4287,7 +4287,7 @@ async def attachment_filter_config(request: Request) -> Response:
             "error": f"Guild {guild_id} not found or bot is not a member",
             "title": "Guild Not Found"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=404)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=404)
     except Exception as e:
         logger.error(f"Error loading attachment filter config for guild {guild_id}: {e}")
         context = {
@@ -4295,7 +4295,7 @@ async def attachment_filter_config(request: Request) -> Response:
             "error": "Failed to load attachment filter configuration",
             "title": "Error"
         }
-        return templates.TemplateResponse("admin/error.html", context, status_code=500)
+        return templates.TemplateResponse("bot-admin/error.html", context, status_code=500)
 
 
 async def campaign_signups_list(request: Request) -> Response:
@@ -4332,7 +4332,7 @@ async def campaign_signups_list(request: Request) -> Response:
 
             return templates.TemplateResponse(
                 request,
-                "admin/campaign_signups.html",
+                "bot-admin/campaign_signups.html",
                 {
                     "signups": signups,
                     "total": total,
@@ -4349,7 +4349,7 @@ async def campaign_signups_list(request: Request) -> Response:
         logger.error(f"Error loading campaign signups: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/error.html",
+            "bot-admin/error.html",
             {
                 "error": "Failed to load campaign signups.",
                 "title": "Error",
