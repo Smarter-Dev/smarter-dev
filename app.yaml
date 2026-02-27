@@ -11,6 +11,9 @@ auth:
     discord:
       client_id: $DISCORD_APPLICATION_ID
       client_secret: $DISCORD_APPLICATION_SECRET
+      scopes:
+        - identify
+        - email
 
 controllers:
   - skrift.admin.controller:AdminController
