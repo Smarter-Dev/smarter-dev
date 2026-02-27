@@ -11,17 +11,12 @@ in smarter_dev.web.controllers.
 # Set the database schema BEFORE importing the ASGI app so that the
 # startup setup-check query qualifies table names (e.g. skrift.settings)
 # and succeeds through pgbouncer where search_path cannot be changed.
-import yaml
-from pathlib import Path as _Path
+from skrift.db.base import Base
+from skrift.config import get_settings as _get_settings
 
-_config_path = _Path("app.yaml")
-if _config_path.exists():
-    with open(_config_path) as _f:
-        _raw = yaml.safe_load(_f)
-    _schema = (_raw or {}).get("db", {}).get("schema")
-    if _schema:
-        from skrift.db.base import Base
-        Base.metadata.schema = _schema
+_cfg = _get_settings()
+if _cfg.db.db_schema:
+    Base.metadata.schema = _cfg.db.db_schema
 
 from skrift.asgi import app  # noqa: F401
 
