@@ -46,6 +46,7 @@ dependencies = [
     "dspy-ai>=3.0.0",
     "hikari>=2.1.1",
     "google-genai>=1.62.0",
+    "resend>=2.0.0",
 ]
 
 [dependency-groups]

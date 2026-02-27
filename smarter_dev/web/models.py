@@ -64,6 +64,18 @@ class CampaignSignup(Base):
         String(20),
         nullable=True,
     )
+    email_confirmed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    confirmation_token: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
 
 
 class BytesBalance(Base):
