@@ -109,6 +109,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: anthropic-api-key
+                  - name: RESEND_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: resend-api-key
                   - name: SECRET_KEY
                     valueFrom:
                       secretKeyRef:

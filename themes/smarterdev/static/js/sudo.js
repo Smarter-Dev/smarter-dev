@@ -55,7 +55,7 @@
             .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
             .then(function(res) {
                 if (res.ok) {
-                    pair.msg.textContent = 'You\'re on the list. We\'ll let you know.';
+                    pair.msg.textContent = 'Check your inbox to confirm your email.';
                     pair.msg.className = 'sudo-signup-msg ok';
                     pair.form.querySelector('input[name="email"]').value = '';
                 } else {

@@ -117,6 +117,16 @@ class Settings(BaseSettings):
         description="Log file path",
     )
     
+    # Email (Resend)
+    resend_api_key: Optional[str] = Field(
+        default=None,
+        description="Resend API key for transactional email",
+    )
+    site_base_url: str = Field(
+        default="http://localhost:8000",
+        description="Public base URL for the site (used in confirmation links)",
+    )
+
     # Analytics
     google_analytics_id: Optional[str] = Field(
         default=None,
