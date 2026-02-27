@@ -47,7 +47,7 @@
             pair.msg.textContent = '';
             pair.msg.className = 'sudo-signup-msg';
 
-            fetch('/api/campaign-signups', {
+            fetch('/v2/api/campaign-signups', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({campaign_slug: slug, email: email})

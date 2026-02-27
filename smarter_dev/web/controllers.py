@@ -3,10 +3,18 @@
 Handles static marketing pages, redirects, and mounts the FastAPI API.
 """
 
+import logging
+
 from litestar import Controller, get
 from litestar.handlers import asgi
 from litestar.response import Redirect, Template
 from litestar.types import Receive, Scope, Send
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from smarter_dev.web.models import CampaignSignup
+
+logger = logging.getLogger(__name__)
 
 
 class PagesController(Controller):
@@ -21,6 +29,27 @@ class PagesController(Controller):
     @get("/sudo")
     async def sudo_page(self) -> Template:
         return Template("page-sudo.html")
+
+    @get("/sudo/confirm")
+    async def confirm_signup(self, token: str, db_session: AsyncSession) -> Template:
+        """Confirm a sudo waitlist email via token and render themed result."""
+        result = await db_session.execute(
+            select(CampaignSignup).where(
+                CampaignSignup.confirmation_token == token
+            )
+        )
+        signup = result.scalar_one_or_none()
+
+        if signup:
+            signup.email_confirmed = True
+            signup.confirmation_token = None
+            await db_session.commit()
+            logger.info("Email confirmed for signup %s", signup.id)
+
+        return Template(
+            "page-sudo-confirm.html",
+            context={"success": signup is not None},
+        )
 
     @get("/discord")
     async def discord_redirect(self) -> Redirect:
