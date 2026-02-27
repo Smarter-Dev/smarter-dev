@@ -22,6 +22,7 @@ controllers:
   - smarter_dev.web.controllers:api_mount
   - smarter_dev.web.controllers:bot_admin_mount
   - smarter_dev.web.campaign_signups_admin:CampaignSignupsAdminController
+  - smarter_dev.web.campaign_signups_api:CampaignSignupsApiController
 
 # Partials system (SPA navigation)
 partials:

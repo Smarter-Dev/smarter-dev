@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block page_type %}sudo{% endblock %}
+{% block page_title %}{% if success %}Email Confirmed{% else %}Invalid Link{% endif %}{% endblock %}
+
+{% block page_css %}
+    <link rel="stylesheet" href="{{ theme_url('css/pages/sudo.css') }}">
+    <style>
+        .confirm-section {
+            min-height: 60vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4rem 1rem;
+        }
+
+        .confirm-card {
+            text-align: center;
+            max-width: 520px;
+            padding: 3rem 2.5rem;
+            border: 1px solid rgba(0, 212, 255, 0.08);
+            border-radius: 8px;
+            background: rgba(8, 12, 20, 0.85);
+        }
+
+        .confirm-icon {
+            font-size: 3rem;
+            margin-bottom: 1.5rem;
+            line-height: 1;
+        }
+
+        .confirm-icon .prompt {
+            font-family: 'Courier New', monospace;
+            font-weight: 700;
+        }
+
+        .confirm-icon.success .prompt { color: #00d4ff; }
+        .confirm-icon.error .prompt   { color: #ff4040; }
+
+        .confirm-card h1 {
+            font-family: 'Bruno Ace SC', monospace;
+            font-size: 1.35rem;
+            color: #d4e0ec;
+            margin: 0 0 0.75rem;
+        }
+
+        .confirm-card p {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.95rem;
+            color: #8098b0;
+            line-height: 1.6;
+            margin: 0 0 1.5rem;
+        }
+
+        .confirm-card .term {
+            text-align: left;
+            margin: 1.5rem 0 0;
+        }
+
+        .confirm-card .btn-outline {
+            display: inline-block;
+            padding: 0.7rem 2rem;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            text-decoration: none;
+            border-radius: 6px;
+        }
+
+        .confirm-card .btn-outline.primary {
+            color: #00d4ff;
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            background: rgba(0, 212, 255, 0.06);
+        }
+
+        .confirm-card .btn-outline.primary:hover {
+            background: rgba(0, 212, 255, 0.12);
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.08);
+        }
+    </style>
+{% endblock %}
+
+{% block content %}
+<section class="confirm-section">
+    <div class="confirm-card">
+        {% if success %}
+        <div class="confirm-icon success"><span class="prompt">$_</span></div>
+        <h1>Access granted.</h1>
+        <p>Your email is confirmed. You're on the sudo waitlist&mdash;we'll ping you the moment it goes live.</p>
+        <div class="term">
+            <div class="term-bar"><div class="p">smarter-dev</div></div>
+            <div class="term-body">
+                <div class="line"><span class="kw">$</span> <span class="fn">sudo</span> verify --email</div>
+                <div class="line"><span class="st">[ok]</span> email confirmed</div>
+                <div class="line"><span class="st">[ok]</span> <span class="fn">waitlist position locked</span></div>
+            </div>
+        </div>
+        {% else %}
+        <div class="confirm-icon error"><span class="prompt">!_</span></div>
+        <h1>Invalid or expired link.</h1>
+        <p>This confirmation link is no longer valid. If you haven't confirmed yet, sign up again and we'll send a fresh link.</p>
+        <a href="/sudo" class="btn-outline primary">Back to sudo</a>
+        {% endif %}
+    </div>
+</section>
+{% endblock %}
