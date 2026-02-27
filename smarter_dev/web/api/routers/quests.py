@@ -62,6 +62,8 @@ async def get_current_daily_quest(
         return {"quest": quest_data}
 
     except DatabaseOperationError as e:
+        if "UndefinedTableError" in str(e):
+            return {"quest": None, "message": "Quest tables not yet created"}
         logger.error(f"Database error getting daily quest: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -260,6 +262,8 @@ async def get_daily_quest_scoreboard(
         }
 
     except DatabaseOperationError as e:
+        if "UndefinedTableError" in str(e):
+            return {"quest": None, "scoreboard": []}
         logger.error(f"Database error getting daily quest scoreboard: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -285,6 +289,8 @@ async def get_detailed_scoreboard(
             }
 
     except DatabaseOperationError as e:
+        if "UndefinedTableError" in str(e):
+            return {"quest": None, "detailed_scoreboard": [], "total_submissions": 0, "total_challenges": 0}
         logger.error(f"Database error getting detailed scoreboard: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -327,6 +333,9 @@ async def get_upcoming_quest_announcements(
         return {"quests": quest_list}
 
     except DatabaseOperationError as e:
+        if "UndefinedTableError" in str(e):
+            logger.warning("Quest tables not yet created — returning empty list")
+            return {"quests": []}
         logger.error(f"Failed to get upcoming quest announcements: {e}")
         raise HTTPException(500, "Failed to retrieve upcoming quests")
 
@@ -346,6 +355,8 @@ async def mark_daily_quest_announced(
         return {"success": True}
 
     except DatabaseOperationError as e:
+        if "UndefinedTableError" in str(e):
+            raise HTTPException(404, "Quest tables not yet created")
         logger.error(f"Failed to mark quest announced: {e}")
         raise HTTPException(500, "Failed to mark quest announced")
 
@@ -365,6 +376,8 @@ async def mark_daily_quest_active(
         return {"success": True}
 
     except DatabaseOperationError as e:
+        if "UndefinedTableError" in str(e):
+            raise HTTPException(404, "Quest tables not yet created")
         logger.error(f"Failed to activate daily quest: {e}")
         raise HTTPException(500, "Failed to activate daily quest")
 
