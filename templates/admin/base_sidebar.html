@@ -344,6 +344,15 @@
                         </span>
                         <span class="nav-link-title">Blog</span>
                     </a>
+
+                    <a class="nav-link {% if '/campaign-signups' in request.url.path %}active{% endif %}" href="/bot-admin/campaign-signups" aria-current="{% if '/campaign-signups' in request.url.path %}page{% endif %}">
+                        <span class="nav-link-icon">
+                            <svg class="icon" width="24" height="24">
+                                <use xlink:href="#tabler-mail"></use>
+                            </svg>
+                        </span>
+                        <span class="nav-link-title">Signups</span>
+                    </a>
                 </nav>
             </div>
             
@@ -642,7 +651,16 @@
                     </span>
                     <span class="nav-link-title">Blog</span>
                 </a>
-                
+
+                <a class="nav-link {% if '/campaign-signups' in request.url.path %}active{% endif %}" href="/bot-admin/campaign-signups">
+                    <span class="nav-link-icon">
+                        <svg class="icon" width="24" height="24">
+                            <use xlink:href="#tabler-mail"></use>
+                        </svg>
+                    </span>
+                    <span class="nav-link-title">Signups</span>
+                </a>
+
                 {% if guild %}
                 <!-- Guild Section -->
                 <hr class="my-3">
