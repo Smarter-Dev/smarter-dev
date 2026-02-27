@@ -32,6 +32,10 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://smarter_dev:smarter_dev_password@localhost:5432/smarter_dev",
         description="Database connection URL",
     )
+    legacy_database_url: Optional[str] = Field(
+        default=None,
+        description="Legacy bot-admin database URL (falls back to database_url)",
+    )
     
     # Redis
     redis_url: str = Field(
@@ -223,6 +227,13 @@ class Settings(BaseSettings):
         if self.is_testing and self.test_database_url:
             return self.test_database_url
         return self.database_url
+
+    @property
+    def effective_legacy_database_url(self) -> str:
+        """Get the legacy bot-admin database URL, falling back to database_url."""
+        if self.is_testing and self.test_database_url:
+            return self.test_database_url
+        return self.legacy_database_url or self.database_url
 
     @property
     def effective_redis_url(self) -> str:

@@ -103,9 +103,16 @@ _engine: Optional[AsyncEngine] = None
 _session_maker: Optional[async_sessionmaker[AsyncSession]] = None
 
 
-def create_engine(settings: Settings) -> AsyncEngine:
-    """Create async SQLAlchemy engine with proper configuration."""
-    database_url = settings.effective_database_url
+def create_engine(settings: Settings, *, use_legacy_db: bool = True) -> AsyncEngine:
+    """Create async SQLAlchemy engine with proper configuration.
+
+    Args:
+        settings: Application settings
+        use_legacy_db: When True, use the legacy database URL for the
+            bot-admin's own tables (public schema). When False, use the
+            primary database URL (for Skrift).
+    """
+    database_url = settings.effective_legacy_database_url if use_legacy_db else settings.effective_database_url
 
     # Convert PostgreSQL URL to asyncpg-compatible format
     cleaned_url = convert_postgres_url_for_asyncpg(database_url)
