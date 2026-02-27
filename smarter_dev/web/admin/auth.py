@@ -72,7 +72,7 @@ async def login(request: Request):
             logger.error(f"Discord OAuth configuration error: {e}")
             return templates.TemplateResponse(
                 request,
-                "admin/login.html",
+                "bot-admin/login.html",
                 {
                     "error": f"Authentication service unavailable: {e}",
                     "config_error": True
@@ -83,7 +83,7 @@ async def login(request: Request):
     # POST method not supported - Discord OAuth only
     return templates.TemplateResponse(
         request,
-        "admin/login.html",
+        "bot-admin/login.html",
         {
             "error": "Username/password authentication is disabled. Please use Discord OAuth.",
             "oauth_only": True
@@ -120,7 +120,7 @@ async def discord_oauth_callback(request: Request):
         logger.warning(f"Discord OAuth access denied: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/login.html",
+            "bot-admin/login.html",
             {
                 "permission_error": True
             },
@@ -130,7 +130,7 @@ async def discord_oauth_callback(request: Request):
         logger.error(f"Discord OAuth error: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/login.html",
+            "bot-admin/login.html",
             {
                 "error": f"Authentication failed: {e}",
                 "fallback_login": True
@@ -141,7 +141,7 @@ async def discord_oauth_callback(request: Request):
         logger.error(f"Unexpected error during Discord OAuth callback: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/login.html",
+            "bot-admin/login.html",
             {
                 "error": "An unexpected error occurred during authentication. Please try again.",
                 "fallback_login": True
