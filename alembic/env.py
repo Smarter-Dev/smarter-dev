@@ -30,8 +30,9 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Set the database URL from environment
+# Alembic manages the legacy bot-admin tables (public schema)
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.effective_database_url)
+config.set_main_option("sqlalchemy.url", settings.effective_legacy_database_url)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
@@ -87,8 +88,8 @@ async def run_async_migrations() -> None:
     """Run migrations in async mode."""
     configuration = config.get_section(config.config_ini_section, {})
 
-    # Override with the current database URL and fix SSL parameters for asyncpg
-    db_url = settings.effective_database_url
+    # Override with the legacy database URL and fix SSL parameters for asyncpg
+    db_url = settings.effective_legacy_database_url
     # Convert sslmode=require to ssl=require for asyncpg compatibility
     if "sslmode=require" in db_url:
         db_url = db_url.replace("sslmode=require", "ssl=require")
