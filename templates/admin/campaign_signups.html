@@ -1,0 +1,113 @@
+{% extends "admin/base_sidebar.html" %}
+
+{% block title %}Campaign Signups - Smarter Dev Admin{% endblock %}
+
+{% block page_title %}Campaign Signups{% endblock %}
+
+{% block content %}
+        <!-- Filters -->
+        <div class="row row-cards mb-3">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Filters</h3>
+                    </div>
+                    <div class="card-body">
+                        <form method="get" action="/bot-admin/campaign-signups">
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <label class="form-label">Campaign</label>
+                                    <select name="campaign" class="form-select">
+                                        <option value="">All Campaigns</option>
+                                        {% for slug in campaign_slugs %}
+                                        <option value="{{ slug }}" {% if filters.campaign == slug %}selected{% endif %}>
+                                            {{ slug }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Status</label>
+                                    <select name="status" class="form-select">
+                                        <option value="">All</option>
+                                        <option value="confirmed" {% if filters.status == 'confirmed' %}selected{% endif %}>Confirmed</option>
+                                        <option value="unconfirmed" {% if filters.status == 'unconfirmed' %}selected{% endif %}>Unconfirmed</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row mt-3">
+                                <div class="col">
+                                    <button type="submit" class="btn btn-primary">
+                                        <svg class="icon" width="24" height="24">
+                                            <use xlink:href="#tabler-search"></use>
+                                        </svg>
+                                        Filter
+                                    </button>
+                                    <a href="/bot-admin/campaign-signups" class="btn btn-outline-secondary ms-2">
+                                        Clear
+                                    </a>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Signups List -->
+        <div class="row row-deck row-cards">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">{{ total }} signup{{ 's' if total != 1 }} ({{ confirmed_count }} confirmed)</h3>
+                    </div>
+
+                    {% if signups %}
+                    <div class="table-responsive">
+                        <table class="table table-vcenter card-table">
+                            <thead>
+                                <tr>
+                                    <th>Email</th>
+                                    <th>Discord ID</th>
+                                    <th>Campaign</th>
+                                    <th>Status</th>
+                                    <th>Signed Up</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for signup in signups %}
+                                <tr>
+                                    <td>{{ signup.email or '—' }}</td>
+                                    <td>{{ signup.discord_id or '—' }}</td>
+                                    <td><span class="badge bg-azure-lt">{{ signup.campaign_slug }}</span></td>
+                                    <td>
+                                        {% if signup.email_confirmed %}
+                                        <span class="badge bg-green">Confirmed</span>
+                                        {% else %}
+                                        <span class="badge bg-yellow">Unconfirmed</span>
+                                        {% endif %}
+                                    </td>
+                                    <td>{{ signup.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="card-body">
+                        <div class="empty">
+                            <p class="empty-title">No signups found</p>
+                            <p class="empty-subtitle text-muted">
+                                {% if filters.campaign or filters.status %}
+                                Try adjusting your filters.
+                                {% else %}
+                                No campaign signups have been recorded yet.
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+{% endblock %}

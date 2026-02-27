@@ -61,6 +61,7 @@ from smarter_dev.web.admin.views import (
     audit_log_config,
     advent_of_code_config,
     attachment_filter_config,
+    campaign_signups_list,
 )
 
 
@@ -205,6 +206,12 @@ admin_routes = [
         admin_required(cleanup_expired_conversations),
         methods=["GET", "POST"],
         name="admin_conversation_cleanup",
+    ),
+    # Campaign signups
+    Route(
+        "/campaign-signups",
+        admin_required(campaign_signups_list),
+        name="admin_campaign_signups",
     ),
     # Blog management
     Route("/blogs", admin_required(blog_list), name="admin_blogs"),

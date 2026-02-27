@@ -38,7 +38,8 @@ from smarter_dev.web.models import (
     AuditLogConfig,
     AdventOfCodeConfig,
     AdventOfCodeThread,
-    AttachmentFilterConfig
+    AttachmentFilterConfig,
+    CampaignSignup,
 )
 from smarter_dev.web.crud import BytesOperations, BytesConfigOperations, SquadOperations, SquadSaleEventOperations, APIKeyOperations, ForumAgentOperations, CampaignOperations, ScheduledMessageOperations, RepeatingMessageOperations, AuditLogConfigOperations, AdventOfCodeConfigOperations, AttachmentFilterConfigOperations, ConflictError
 from smarter_dev.web.security import generate_secure_api_key
@@ -4295,3 +4296,63 @@ async def attachment_filter_config(request: Request) -> Response:
             "title": "Error"
         }
         return templates.TemplateResponse("admin/error.html", context, status_code=500)
+
+
+async def campaign_signups_list(request: Request) -> Response:
+    """List campaign signups with filtering by campaign and confirmation status."""
+    try:
+        campaign = request.query_params.get("campaign", "")
+        status = request.query_params.get("status", "")
+
+        async with get_db_session_context() as session:
+            query = select(CampaignSignup)
+
+            if campaign:
+                query = query.where(CampaignSignup.campaign_slug == campaign)
+
+            if status == "confirmed":
+                query = query.where(CampaignSignup.email_confirmed == True)
+            elif status == "unconfirmed":
+                query = query.where(CampaignSignup.email_confirmed == False)
+
+            query = query.order_by(CampaignSignup.created_at.desc())
+
+            result = await session.execute(query)
+            signups = result.scalars().all()
+
+            # Distinct campaign slugs for filter dropdown
+            slugs_result = await session.execute(
+                select(distinct(CampaignSignup.campaign_slug)).order_by(CampaignSignup.campaign_slug)
+            )
+            campaign_slugs = slugs_result.scalars().all()
+
+            # Summary counts
+            total = len(signups)
+            confirmed_count = sum(1 for s in signups if s.email_confirmed)
+
+            return templates.TemplateResponse(
+                request,
+                "admin/campaign_signups.html",
+                {
+                    "signups": signups,
+                    "total": total,
+                    "confirmed_count": confirmed_count,
+                    "campaign_slugs": campaign_slugs,
+                    "filters": {
+                        "campaign": campaign,
+                        "status": status,
+                    },
+                },
+            )
+
+    except Exception as e:
+        logger.error(f"Error loading campaign signups: {e}")
+        return templates.TemplateResponse(
+            request,
+            "admin/error.html",
+            {
+                "error": "Failed to load campaign signups.",
+                "title": "Error",
+            },
+            status_code=500,
+        )
