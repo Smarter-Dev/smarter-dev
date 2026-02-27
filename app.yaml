@@ -14,6 +14,7 @@ auth:
 
 controllers:
   - skrift.admin.controller:AdminController
+  - skrift.controllers.auth:AuthController
   - smarter_dev.web.controllers:PagesController
   - smarter_dev.web.controllers:api_mount
   - smarter_dev.web.controllers:bot_admin_mount
