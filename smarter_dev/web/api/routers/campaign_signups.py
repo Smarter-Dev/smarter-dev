@@ -6,8 +6,11 @@ like the sudo launch waitlist.
 
 from __future__ import annotations
 
+import base64
 import logging
 import re
+from functools import lru_cache
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, status
@@ -31,16 +34,61 @@ class CampaignSignupRequest(BaseModel):
     discord_id: str | None = None
 
 
+_RESOURCES_DIR = Path(__file__).resolve().parents[4] / "resources"
+
+
+@lru_cache
+def _image_b64(name: str) -> str:
+    """Load a resource image and return its base64-encoded string."""
+    return base64.b64encode((_RESOURCES_DIR / name).read_bytes()).decode()
+
+
+def _build_confirmation_html(confirm_url: str) -> str:
+    """Build the styled HTML for the sudo waitlist confirmation email."""
+    bg = _image_b64("email-hex-bg.png")
+    logo = _image_b64("email-logo.png")
+    return f"""\
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Confirm your email</title>
+<!--[if mso]><style>table,td{{font-family:Arial,Helvetica,sans-serif!important}}</style><![endif]-->
+</head>
+<body style="margin:0;padding:0;background-color:#010306;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#020408;background-image:url('data:image/png;base64,{bg}');background-repeat:repeat">
+<tr><td align="center" style="padding:32px 16px">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;width:100%">
+    <tr><td align="center" style="padding:40px 24px 28px"><img src="data:image/png;base64,{logo}" alt="SMARTER Dev" width="306" height="58" style="display:block;border:0;outline:none;width:306px;max-width:100%;height:auto"></td></tr>
+    <tr><td align="center" style="padding:0 60px 32px"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="80" style="width:80px"><tr><td style="height:1px;background:linear-gradient(90deg,transparent,#00d4ff,transparent);font-size:1px;line-height:1px">&nbsp;</td></tr></table></td></tr>
+    <tr><td style="padding:0 12px"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:#080c14;border:1px solid rgba(0,212,255,0.08);border-radius:8px">
+      <tr><td style="padding:40px 36px 16px">
+        <p style="margin:0 0 20px;font-family:Arial,Helvetica,sans-serif;font-size:22px;font-weight:700;color:#d4e0ec;line-height:1.3">You've requested elevated privileges.</p>
+        <p style="margin:0 0 28px;font-family:Arial,Helvetica,sans-serif;font-size:15px;color:#8098b0;line-height:1.6">You're on the <code style="color:#d4e0ec;font-family:'Courier New',monospace">sudo</code> waitlist. Hit the button below to confirm your email and we'll ping you the moment our premium membership goes live.</p>
+      </td></tr>
+      <tr><td align="center" style="padding:4px 36px 36px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="background-color:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.3);border-radius:6px;box-shadow:0 0 20px rgba(0,212,255,0.08),inset 0 0 20px rgba(0,212,255,0.04)"><a href="{confirm_url}" target="_blank" style="display:inline-block;padding:14px 40px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;color:#00d4ff;text-decoration:none;letter-spacing:1px;text-transform:uppercase">Grant Access</a></td></tr></table></td></tr>
+      <tr><td style="padding:0 36px"><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td style="height:1px;background-color:rgba(0,212,255,0.06);font-size:1px;line-height:1px">&nbsp;</td></tr></table></td></tr>
+      <tr><td style="padding:24px 36px 36px">
+        <p style="margin:0 0 12px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#4a6078;line-height:1.6">If you didn't request this, you can safely ignore this email.</p>
+        <p style="margin:0;font-family:'Courier New',monospace;font-size:12px;color:#2a3a4e;line-height:1.5">// link.expires_in = "48h"</p>
+      </td></tr>
+    </table></td></tr>
+    <tr><td align="center" style="padding:32px 24px 16px">
+      <p style="margin:0 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#2a3a4e"><a href="https://discord.gg/de8kajxbYS" target="_blank" style="color:#4a6078;text-decoration:none">Discord</a>&nbsp;&middot;&nbsp;<a href="https://smarter.dev" target="_blank" style="color:#4a6078;text-decoration:none">smarter.dev</a></p>
+      <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#1a2836">&copy; 2026 Smarter Dev</p>
+    </td></tr>
+  </table>
+</td></tr>
+</table>
+</body>
+</html>"""
+
+
 async def _send_confirmation(email: str, token: str) -> None:
-    """Build and send the confirmation email."""
+    """Build and send the styled confirmation email."""
     settings = get_settings()
     confirm_url = f"{settings.site_base_url}/api/campaign-signups/confirm?token={token}"
-    html = (
-        "<p>Thanks for signing up for the <strong>sudo</strong> waitlist!</p>"
-        f'<p><a href="{confirm_url}">Click here to confirm your email</a></p>'
-        "<p>If you didn't request this, you can safely ignore this email.</p>"
-    )
-    await send_email(email, "Confirm your sudo waitlist signup", html)
+    html = _build_confirmation_html(confirm_url)
+    await send_email(email, "sudo: confirm your identity", html)
 
 
 @router.post("", status_code=201)
