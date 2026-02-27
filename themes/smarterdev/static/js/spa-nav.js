@@ -208,6 +208,7 @@
    * Handle form submissions (GET forms only).
    */
   function onSubmit(event) {
+    if (event.defaultPrevented) return;
     const form = event.target;
     if (form.method && form.method.toUpperCase() !== 'GET') return;
     if (form.hasAttribute(NO_SPA_ATTR)) return;
