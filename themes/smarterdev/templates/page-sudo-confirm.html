@@ -14,95 +14,102 @@
             padding: 4rem 1rem;
         }
 
-        .confirm-card {
+        .confirm-section .term {
+            width: 100%;
+            max-width: 420px;
+        }
+
+        .confirm-section .term-body .line {
+            visibility: hidden;
+        }
+
+        .confirm-section .term-body .line.visible {
+            visibility: visible;
+        }
+
+        /* Typing cursor */
+        .confirm-section .typed-cmd::after {
+            content: '\2588';
+            animation: blink .7s step-end infinite;
+            color: var(--cyan);
+        }
+        .confirm-section .typed-cmd.done::after {
+            display: none;
+        }
+
+        @keyframes blink {
+            50% { opacity: 0 }
+        }
+
+        /* Back link beneath terminal (error state) */
+        .confirm-back {
             text-align: center;
-            max-width: 520px;
-            padding: 3rem 2.5rem;
-            border: 1px solid rgba(0, 212, 255, 0.08);
-            border-radius: 8px;
-            background: rgba(8, 12, 20, 0.85);
+            margin-top: 1.25rem;
         }
-
-        .confirm-icon {
-            font-size: 3rem;
-            margin-bottom: 1.5rem;
-            line-height: 1;
-        }
-
-        .confirm-icon .prompt {
-            font-family: 'Courier New', monospace;
-            font-weight: 700;
-        }
-
-        .confirm-icon.success .prompt { color: #00d4ff; }
-        .confirm-icon.error .prompt   { color: #ff4040; }
-
-        .confirm-card h1 {
-            font-family: 'Bruno Ace SC', monospace;
-            font-size: 1.35rem;
-            color: #d4e0ec;
-            margin: 0 0 0.75rem;
-        }
-
-        .confirm-card p {
-            font-family: 'Inter', sans-serif;
-            font-size: 0.95rem;
-            color: #8098b0;
-            line-height: 1.6;
-            margin: 0 0 1.5rem;
-        }
-
-        .confirm-card .term {
-            text-align: left;
-            margin: 1.5rem 0 0;
-        }
-
-        .confirm-card .btn-outline {
-            display: inline-block;
-            padding: 0.7rem 2rem;
-            font-family: 'Inter', sans-serif;
-            font-size: 0.85rem;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            text-transform: uppercase;
+        .confirm-back a {
+            font-family: var(--mono);
+            font-size: .75rem;
+            color: var(--gray);
             text-decoration: none;
-            border-radius: 6px;
+            letter-spacing: .04em;
         }
-
-        .confirm-card .btn-outline.primary {
-            color: #00d4ff;
-            border: 1px solid rgba(0, 212, 255, 0.3);
-            background: rgba(0, 212, 255, 0.06);
-        }
-
-        .confirm-card .btn-outline.primary:hover {
-            background: rgba(0, 212, 255, 0.12);
-            box-shadow: 0 0 20px rgba(0, 212, 255, 0.08);
+        .confirm-back a:hover {
+            color: var(--cyan);
         }
     </style>
 {% endblock %}
 
 {% block content %}
 <section class="confirm-section">
-    <div class="confirm-card">
+    <div>
         {% if success %}
-        <div class="confirm-icon success"><span class="prompt">$_</span></div>
-        <h1>Access granted.</h1>
-        <p>Your email is confirmed. You're on the sudo waitlist&mdash;we'll ping you the moment it goes live.</p>
         <div class="term">
             <div class="term-bar"><div class="p">smarter-dev</div></div>
             <div class="term-body">
-                <div class="line"><span class="kw">$</span> <span class="fn">sudo</span> verify --email</div>
-                <div class="line"><span class="st">[ok]</span> email confirmed</div>
-                <div class="line"><span class="st">[ok]</span> <span class="fn">waitlist position locked</span></div>
+                <div class="line" id="cmd-line"><span class="kw">$</span> <span class="fn typed-cmd" id="typed-cmd"></span></div>
+                <div class="line" id="out-1"><span class="st">[ok]</span> email confirmed</div>
+                <div class="line" id="out-2"><span class="st">[ok]</span> <span class="fn">waitlist position locked</span></div>
             </div>
         </div>
         {% else %}
-        <div class="confirm-icon error"><span class="prompt">!_</span></div>
-        <h1>Invalid or expired link.</h1>
-        <p>This confirmation link is no longer valid. If you haven't confirmed yet, sign up again and we'll send a fresh link.</p>
-        <a href="/sudo" class="btn-outline primary">Back to sudo</a>
+        <div class="term">
+            <div class="term-bar"><div class="p">smarter-dev</div></div>
+            <div class="term-body">
+                <div class="line" id="cmd-line"><span class="kw">$</span> <span class="fn typed-cmd" id="typed-cmd"></span></div>
+                <div class="line" id="out-1"><span class="num">[err]</span> token invalid or expired</div>
+                <div class="line" id="out-2"><span class="cm">// sign up again at /sudo</span></div>
+            </div>
+        </div>
+        <div class="confirm-back"><a href="/sudo">&larr; back to /sudo</a></div>
         {% endif %}
     </div>
 </section>
+{% endblock %}
+
+{% block page_scripts %}
+<script>
+(function () {
+    var cmd = '{{ "sudo verify --email" if success else "sudo verify --token" }}';
+    var el = document.getElementById('typed-cmd');
+    var cmdLine = document.getElementById('cmd-line');
+    var out1 = document.getElementById('out-1');
+    var out2 = document.getElementById('out-2');
+    var i = 0;
+
+    cmdLine.classList.add('visible');
+
+    function typeNext() {
+        if (i < cmd.length) {
+            el.textContent += cmd[i++];
+            setTimeout(typeNext, 40 + Math.random() * 40);
+        } else {
+            el.classList.add('done');
+            setTimeout(function () { out1.classList.add('visible'); }, 400);
+            setTimeout(function () { out2.classList.add('visible'); }, 900);
+        }
+    }
+
+    setTimeout(typeNext, 500);
+})();
+</script>
 {% endblock %}
