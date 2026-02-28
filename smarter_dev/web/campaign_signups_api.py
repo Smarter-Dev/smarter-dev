@@ -10,16 +10,19 @@ from __future__ import annotations
 import base64
 import logging
 import re
+import time
+from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
 from uuid import uuid4
 
-from litestar import Controller, post
+from litestar import Controller, Request, post
 from litestar.exceptions import HTTPException
 from litestar.status_codes import (
     HTTP_201_CREATED,
     HTTP_409_CONFLICT,
     HTTP_422_UNPROCESSABLE_ENTITY,
+    HTTP_429_TOO_MANY_REQUESTS,
 )
 from msgspec import Struct
 from sqlalchemy import select, and_
@@ -32,6 +35,25 @@ from smarter_dev.web.models import CampaignSignup
 logger = logging.getLogger(__name__)
 
 _RESOURCES_DIR = Path(__file__).resolve().parents[2] / "resources"
+
+# Per-IP rate limiting: max 5 requests per 60-second window.
+_RATE_LIMIT = 5
+_RATE_WINDOW = 60  # seconds
+_request_log: dict[str, list[float]] = defaultdict(list)
+
+
+def _check_rate_limit(ip: str) -> None:
+    """Raise 429 if the IP has exceeded the signup rate limit."""
+    now = time.monotonic()
+    timestamps = _request_log[ip]
+    # Prune entries outside the window
+    _request_log[ip] = timestamps = [t for t in timestamps if now - t < _RATE_WINDOW]
+    if len(timestamps) >= _RATE_LIMIT:
+        raise HTTPException(
+            status_code=HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests. Please try again later.",
+        )
+    timestamps.append(now)
 
 
 @lru_cache
@@ -103,9 +125,11 @@ class CampaignSignupsApiController(Controller):
 
     @post("", status_code=HTTP_201_CREATED)
     async def create_signup(
-        self, data: SignupBody, db_session: AsyncSession
+        self, data: SignupBody, request: Request, db_session: AsyncSession
     ) -> dict:
         """Register interest in a campaign."""
+        _check_rate_limit(request.client.host if request.client else "unknown")
+
         if not data.email and not data.discord_id:
             raise HTTPException(
                 status_code=HTTP_422_UNPROCESSABLE_ENTITY,
