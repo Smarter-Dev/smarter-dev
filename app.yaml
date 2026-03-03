@@ -36,6 +36,21 @@ page_types:
     plural: posts
     icon: pen-tool
 
+storage:
+  default: default
+  stores:
+    default:
+      backend: s3
+      max_upload_size: 10485760
+      s3:
+        bucket: production-bucket-zechz-1234
+        region: sfo3
+        endpoint_url: https://sfo3.digitaloceanspaces.com
+        access_key_id: $SPACES_ACCESS_KEY
+        secret_access_key: $SPACES_SECRET_KEY
+        acl: public-read
+        public_url: https://production-bucket-zechz-1234.sfo3.digitaloceanspaces.com
+
 # Legacy site — existing Starlette app serves from subdomain
 legacy:
   subdomain: legacy.smarter.dev
