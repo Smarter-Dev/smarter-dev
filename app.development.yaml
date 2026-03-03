@@ -12,12 +12,20 @@ auth:
     discord:
       client_id: $DISCORD_APPLICATION_ID
       client_secret: $DISCORD_APPLICATION_SECRET
+      scopes:
+        - identify
+        - email
 
 controllers:
   - skrift.admin.controller:AdminController
-  - smarter_dev.web.controllers:PagesController
+  - skrift.controllers.auth:AuthController
+  - skrift.controllers.web:WebController
+  - smarter_dev.web.controllers:SudoController
+  - smarter_dev.web.controllers:discord_redirect
   - smarter_dev.web.controllers:api_mount
   - smarter_dev.web.controllers:bot_admin_mount
+  - smarter_dev.web.campaign_signups_admin:CampaignSignupsAdminController
+  - smarter_dev.web.campaign_signups_api:CampaignSignupsApiController
 
 page_types:
   - name: post
