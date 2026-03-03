@@ -1,6 +1,6 @@
 """Custom page controllers for Smarter Dev.
 
-Handles static marketing pages, redirects, and mounts the FastAPI API.
+Handles custom logic routes, redirects, and mounts the FastAPI API.
 """
 
 import logging
@@ -17,20 +17,12 @@ from smarter_dev.web.models import CampaignSignup
 logger = logging.getLogger(__name__)
 
 
-class PagesController(Controller):
-    """Serves marketing pages that don't need database-backed content."""
+class SudoController(Controller):
+    """Handles sudo campaign routes."""
 
-    path = "/"
+    path = "/sudo"
 
-    @get("/")
-    async def homepage(self) -> Template:
-        return Template("index.html")
-
-    @get("/sudo")
-    async def sudo_page(self) -> Template:
-        return Template("page-sudo.html")
-
-    @get("/sudo/confirm")
+    @get("/confirm")
     async def confirm_signup(self, token: str, db_session: AsyncSession) -> Template:
         """Confirm a sudo waitlist email via token and render themed result."""
         result = await db_session.execute(
@@ -51,9 +43,10 @@ class PagesController(Controller):
             context={"success": signup is not None},
         )
 
-    @get("/discord")
-    async def discord_redirect(self) -> Redirect:
-        return Redirect("https://discord.gg/de8kajxbYS")
+
+@get("/discord")
+async def discord_redirect() -> Redirect:
+    return Redirect("https://discord.gg/de8kajxbYS")
 
 
 @asgi("/api", is_mount=True, copy_scope=True)
