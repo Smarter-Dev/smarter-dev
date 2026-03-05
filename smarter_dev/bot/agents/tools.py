@@ -1409,12 +1409,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             logger.debug(f"[Tool] Using Gemini to extract answer from {len(content)} chars")
 
-            # Initialize Gemini 2.5 Flash Lite via the judge model
+            # Initialize Gemini 3.1 Flash Lite via the judge model
             import dspy
 
             from smarter_dev.llm_config import get_llm_model
 
-            gemini_lm = get_llm_model("judge")  # gemini-2.5-flash-lite
+            gemini_lm = get_llm_model("judge")  # gemini-3.1-flash-lite-preview
 
             # Use context manager to temporarily use Gemini without affecting global LLM config
             with dspy.context(lm=gemini_lm):
