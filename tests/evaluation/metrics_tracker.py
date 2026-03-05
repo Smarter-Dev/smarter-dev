@@ -30,13 +30,13 @@ class TokenUsage:
 
         Prices as of January 2025 (per million tokens):
         - Gemini 2.5 Flash: $0.075 input, $0.30 output
-        - Gemini 2.5 Flash Lite: $0.05 input, $0.20 output
+        - Gemini 3.1 Flash Lite: $0.25 input, $1.50 output
         - Claude Haiku 4.5: $1.00 input, $5.00 output
         - Claude Sonnet 4.5: $3.00 input, $15.00 output
         """
         pricing = {
             "gemini-2.5-flash": (0.075, 0.30),
-            "gemini-2.5-flash-lite": (0.05, 0.20),
+            "gemini-3.1-flash-lite-preview": (0.25, 1.50),
             "claude-haiku-4-5": (1.00, 5.00),
             "claude-sonnet-4-5": (3.00, 15.00),
             # Legacy model names (for backward compatibility)

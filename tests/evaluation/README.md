@@ -6,7 +6,7 @@ Comprehensive evaluation suite for comparing different LLM models on mention age
 
 This framework evaluates how well different language models perform as the core planning/decision-making component of the mention agent. It tests models across:
 
-- **4 Models**: Gemini 2.5 Flash, Gemini 2.5 Flash Lite, Claude Haiku 4.5, Claude Sonnet 4.5
+- **4 Models**: Gemini 2.5 Flash, Gemini 3.1 Flash Lite, Claude Haiku 4.5, Claude Sonnet 4.5
 - **30 Scenarios**: Covering tool usage, conversation patterns, and edge cases
 - **4 Metric Categories**: Quality, Cost, Latency, Tool Usage Accuracy
 
@@ -250,14 +250,14 @@ pytest tests/evaluation/test_model_comparison.py::test_single_scenario -v -s
 | Model | Provider | Model ID | Released | Use Case |
 |-------|----------|----------|----------|----------|
 | Gemini 2.5 Flash | Google | `gemini/gemini-2.5-flash` | - | Balanced performance |
-| Gemini 2.5 Flash Lite | Google | `gemini/gemini-2.5-flash-lite` | - | Current baseline, fast & cheap |
+| Gemini 3.1 Flash Lite | Google | `gemini/gemini-3.1-flash-lite-preview` | Mar 3, 2026 | Current baseline, fast & cheap |
 | Claude Haiku 4.5 | Anthropic | `anthropic/claude-haiku-4-5-20251001` | Oct 1, 2025 | Fast, cost-effective |
 | Claude Sonnet 4.5 | Anthropic | `anthropic/claude-sonnet-4-5-20250929` | Sep 29, 2025 | Highest quality |
 
 ### Model Naming
 
 Use DSPy/LiteLLM format with `anthropic/` prefix:
-- **Gemini 2.5**: `gemini/gemini-2.5-flash`, `gemini/gemini-2.5-flash-lite`
+- **Gemini**: `gemini/gemini-2.5-flash`, `gemini/gemini-3.1-flash-lite-preview`
 - **Claude Haiku 4.5**: `anthropic/claude-haiku-4-5-20251001` (dated) or `anthropic/claude-haiku-4-5` (alias)
 - **Claude Sonnet 4.5**: `anthropic/claude-sonnet-4-5-20250929` (dated) or `anthropic/claude-sonnet-4-5` (alias)
 
@@ -279,7 +279,7 @@ Approximate costs for full evaluation (4 models × 30 scenarios = 120 runs):
 
 | Model | Pricing (per MTok) | Est. Cost per Run | Total Cost (30 scenarios) |
 |-------|-------------------|-------------------|---------------------------|
-| Gemini 2.5 Flash Lite | $0.05 / $0.20 | ~$0.001 | ~$0.03 |
+| Gemini 3.1 Flash Lite | $0.25 / $1.50 | ~$0.002 | ~$0.06 |
 | Gemini 2.5 Flash | $0.075 / $0.30 | ~$0.002 | ~$0.06 |
 | Claude Haiku 4.5 | $1.00 / $5.00 | ~$0.005 | ~$0.15 |
 | Claude Sonnet 4.5 | $3.00 / $15.00 | ~$0.02 | ~$0.60 |
@@ -336,7 +336,7 @@ After running evaluations:
 
 This evaluation framework was designed to help decide how to architect the mention agent:
 
-- **Current**: Gemini 2.5 Flash Lite (router) + Claude Haiku (planning/technical)
+- **Current**: Gemini 3.1 Flash Lite (router) + Claude Haiku (planning/technical)
 - **Options**: Single model for all tasks, or different models for different roles
 - **Goal**: Find optimal balance of cost, quality, speed, and accuracy
 
