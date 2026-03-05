@@ -31,6 +31,6 @@ data:
   SITE_BASE_URL: "https://smarter.dev"
 
   # LLM Model Configuration
-  LLM_FAST_MODEL: "gemini/gemini-2.5-flash-lite"
+  LLM_FAST_MODEL: "gemini/gemini-3.1-flash-lite-preview"
   LLM_MEDIUM_MODEL: "claude-haiku-4-5-20251001"
-  LLM_JUDGE_MODEL: "gemini/gemini-2.5-flash-lite"
+  LLM_JUDGE_MODEL: "gemini/gemini-3.1-flash-lite-preview"

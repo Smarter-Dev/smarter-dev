@@ -23,9 +23,9 @@ def get_llm_model(model_type: str = "fast") -> dspy.LM:
         Configured dspy.LM instance
 
     Environment Variables:
-        LLM_FAST_MODEL: Fast model for quick operations (default: gemini/gemini-2.5-flash-lite)
+        LLM_FAST_MODEL: Fast model for quick operations (default: gemini/gemini-3.1-flash-lite-preview)
         LLM_MEDIUM_MODEL: Medium intelligence model (default: claude-haiku-4-5-20251001)
-        LLM_JUDGE_MODEL: Model for LLM-as-judge tests (default: gemini/gemini-2.5-flash-lite)
+        LLM_JUDGE_MODEL: Model for LLM-as-judge tests (default: gemini/gemini-3.1-flash-lite-preview)
         OPENAI_API_KEY: OpenAI API key
         GEMINI_API_KEY: Google Gemini API key
         ANTHROPIC_API_KEY: Anthropic API key
@@ -42,12 +42,12 @@ def get_llm_model(model_type: str = "fast") -> dspy.LM:
     """
     # Get model based on type
     if model_type == "judge":
-        model_name = os.getenv("LLM_JUDGE_MODEL", "gemini/gemini-2.5-flash-lite")
+        model_name = os.getenv("LLM_JUDGE_MODEL", "gemini/gemini-3.1-flash-lite-preview")
     elif model_type == "medium":
         model_name = os.getenv("LLM_MEDIUM_MODEL", "claude-haiku-4-5-20251001")
     else:
         # "fast" or "default" (for backwards compatibility)
-        model_name = os.getenv("LLM_FAST_MODEL", "gemini/gemini-2.5-flash-lite")
+        model_name = os.getenv("LLM_FAST_MODEL", "gemini/gemini-3.1-flash-lite-preview")
     
     # Determine API key based on model provider
     api_key = _get_api_key_for_model(model_name)
@@ -69,6 +69,10 @@ def get_llm_model(model_type: str = "fast") -> dspy.LM:
     else:
         formatted_model_name = model_name
     
+    # Gemini 3.x models: set thinking level to minimal for fast/cheap operations
+    if provider == "gemini":
+        kwargs["reasoning_effort"] = "minimal"
+
     # OpenAI reasoning models (o1, GPT-5) require specific parameters
     if _is_reasoning_model(model_name):
         kwargs["temperature"] = 1.0
@@ -87,14 +91,14 @@ def get_model_info(model_type: str = "fast") -> dict:
         Dict with model_name, provider, has_api_key, and env_var info
     """
     if model_type == "judge":
-        model_name = os.getenv("LLM_JUDGE_MODEL", "gemini/gemini-2.5-flash-lite")
+        model_name = os.getenv("LLM_JUDGE_MODEL", "gemini/gemini-3.1-flash-lite-preview")
         env_var = "LLM_JUDGE_MODEL"
     elif model_type == "medium":
         model_name = os.getenv("LLM_MEDIUM_MODEL", "claude-haiku-4-5-20251001")
         env_var = "LLM_MEDIUM_MODEL"
     else:
         # "fast" or "default" (for backwards compatibility)
-        model_name = os.getenv("LLM_FAST_MODEL", "gemini/gemini-2.5-flash-lite")
+        model_name = os.getenv("LLM_FAST_MODEL", "gemini/gemini-3.1-flash-lite-preview")
         env_var = "LLM_FAST_MODEL"
 
     provider = _get_provider_from_model(model_name)

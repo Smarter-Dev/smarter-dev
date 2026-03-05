@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A comprehensive evaluation system to compare **Gemini 2.5 Flash**, **Gemini 2.5 Flash Lite**, **Claude Haiku 4.5**, and **Claude Sonnet 4.5** for the mention agent's planning capabilities.
+A comprehensive evaluation system to compare **Gemini 2.5 Flash**, **Gemini 3.1 Flash Lite**, **Claude Haiku 4.5**, and **Claude Sonnet 4.5** for the mention agent's planning capabilities.
 
 **✨ NEW: Fast Planning-Only Evaluation** - Tests planning abilities without executing actions. **12x faster** than full execution!
 
