@@ -69,10 +69,6 @@ def get_llm_model(model_type: str = "fast") -> dspy.LM:
     else:
         formatted_model_name = model_name
     
-    # Gemini 3.x models: set thinking level to minimal for fast/cheap operations
-    if provider == "gemini":
-        kwargs["reasoning_effort"] = "minimal"
-
     # OpenAI reasoning models (o1, GPT-5) require specific parameters
     if _is_reasoning_model(model_name):
         kwargs["temperature"] = 1.0
