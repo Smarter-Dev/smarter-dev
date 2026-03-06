@@ -190,8 +190,17 @@ class WatchLoop:
 
         logger.debug(
             f"Watcher {watcher.id} evaluation: should_respond={result.should_respond}, "
+            f"is_stop_request={result.is_stop_request}, "
             f"reasoning='{result.reasoning[:50]}...'"
         )
+
+        # If evaluation detects a stop request, silently remove this watcher
+        if result.is_stop_request:
+            await channel_state.remove_watcher(watcher.id)
+            logger.info(
+                f"Watcher {watcher.id} removed: stop request detected in non-mention message"
+            )
+            return
 
         if result.should_respond:
             # Mark relevant messages as consumed
@@ -392,6 +401,24 @@ async def get_or_create_watch_loop(
             loop.start()
 
         return loop
+
+
+async def kill_channel_watchers(channel_id: int) -> int:
+    """Kill all watchers in a channel and stop the watch loop.
+
+    Args:
+        channel_id: Discord channel ID
+
+    Returns:
+        Number of watchers killed
+    """
+    watch_manager = get_watch_manager()
+    removed = await watch_manager.clear_channel(channel_id)
+    await stop_watch_loop(channel_id)
+    count = len(removed)
+    if count:
+        logger.info(f"Killed {count} watchers in channel {channel_id}")
+    return count
 
 
 async def stop_watch_loop(channel_id: int) -> None:
