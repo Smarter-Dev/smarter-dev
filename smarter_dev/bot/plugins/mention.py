@@ -27,8 +27,14 @@ from smarter_dev.bot.agents.watcher import WatcherContext
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.channel_state import get_channel_state_manager
 from smarter_dev.bot.services.rate_limiter import rate_limiter
-from smarter_dev.bot.services.watch_loop import get_or_create_watch_loop
+from smarter_dev.bot.services.watch_loop import get_or_create_watch_loop, kill_channel_watchers
 from smarter_dev.bot.services.watch_manager import get_watch_manager
+from smarter_dev.bot.utils.stop_detection import (
+    is_channel_on_cooldown,
+    is_stop_request,
+    random_stop_ack,
+    set_channel_cooldown,
+)
 from smarter_dev.shared.config import get_settings
 
 if TYPE_CHECKING:
@@ -133,6 +139,11 @@ async def handle_mention(event: hikari.MessageCreateEvent) -> None:
         f"author={event.author.username} content='{(event.content or '')[:50]}...'"
     )
 
+    # If channel is on cooldown after a stop request, silently ignore
+    if is_channel_on_cooldown(event.channel_id):
+        logger.info(f"[{request_id}] Channel {event.channel_id} is on cooldown - ignoring mention")
+        return
+
     # Extract the question (remove bot mention)
     bot_user = plugin.bot.get_me()
     user_question = event.content
@@ -140,6 +151,19 @@ async def handle_mention(event: hikari.MessageCreateEvent) -> None:
         if user_id == bot_user.id:
             user_question = user_question.replace(f"<@{user_id}>", "").replace(f"<@!{user_id}>", "")
     user_question = user_question.strip()
+
+    # Check for stop/dismissal request before anything else (zero LLM cost)
+    if is_stop_request(event.content or ""):
+        killed = await kill_channel_watchers(event.channel_id)
+        had_watchers = killed > 0
+        ack = random_stop_ack(had_watchers)
+        set_channel_cooldown(event.channel_id)
+        logger.info(
+            f"[{request_id}] Stop request detected - killed {killed} watchers, "
+            f"cooldown set for channel {event.channel_id}"
+        )
+        await plugin.bot.rest.create_message(event.channel_id, ack, reply=event.message)
+        return
 
     # Check rate limiting
     if not rate_limiter.check_token_limit():
@@ -453,6 +477,9 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
         # Handle direct @mention with multi-agent pipeline
         await handle_mention(event)
     else:
+        # Skip watcher queueing if channel is on cooldown
+        if is_channel_on_cooldown(event.channel_id):
+            return
         # Check if channel has active watchers
         watch_manager = get_watch_manager()
         if await watch_manager.has_active_watchers(event.channel_id):
