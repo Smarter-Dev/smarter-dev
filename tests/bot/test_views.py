@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 import asyncio
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, patch
 from datetime import datetime
 from uuid import uuid4
 import hikari
@@ -169,8 +169,9 @@ class TestSquadSelectView:
             guild_id="123456789",
             squads_service=mock_squads_service
         )
-        
-        # Mock successful join result
+
+        # Mock successful join result - Squad already has welcome_message=None
+        # and announcement_channel=None by default
         mock_result = JoinSquadResult(
             success=True,
             squad=mock_squads[0],
@@ -180,28 +181,34 @@ class TestSquadSelectView:
             reason=None
         )
         mock_squads_service.join_squad.return_value = mock_result
-        
+
         # Mock ComponentInteraction
         mock_interaction = Mock(spec=hikari.ComponentInteraction)
         mock_interaction.custom_id = "squad_select"
         mock_interaction.values = [str(mock_squads[0].id)]
         mock_interaction.create_initial_response = AsyncMock()
-        
+        mock_interaction.edit_initial_response = AsyncMock()
+        mock_interaction.user = Mock(display_name="TestUser", username="testuser")
+        mock_interaction.get_guild = Mock(return_value=Mock(get_member=Mock(return_value=None)))
+
         mock_event = Mock(spec=hikari.InteractionCreateEvent)
         mock_event.interaction = mock_interaction
-        
-        await view.handle_interaction(mock_event)
-        
-        # Verify service was called
-        mock_squads_service.join_squad.assert_called_once_with(
-            "123456789",
-            "987654321",
-            mock_squads[0].id,
-            1000
-        )
-        
-        # Verify response was created
+
+        with patch('smarter_dev.bot.views.squad_views.get_generator') as mock_gen:
+            mock_gen.return_value.create_success_embed.return_value = Mock(name="success_image")
+            await view.handle_interaction(mock_event)
+
+        # Verify service was called with 5 args (includes username)
+        mock_squads_service.join_squad.assert_called_once()
+        call_args = mock_squads_service.join_squad.call_args[0]
+        assert call_args[0] == "123456789"
+        assert call_args[1] == "987654321"
+        assert call_args[2] == mock_squads[0].id
+        assert call_args[3] == 1000
+
+        # Verify the interaction was deferred first, then edited
         mock_interaction.create_initial_response.assert_called_once()
+        mock_interaction.edit_initial_response.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_handle_interaction_wrong_custom_id(self, mock_squads, mock_squads_service):

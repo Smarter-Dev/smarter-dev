@@ -87,36 +87,36 @@ class TestBytesOperations:
         assert result.streak_count == 5
     
     async def test_get_balance_new_user_with_config(
-        self, 
-        bytes_ops, 
-        db_session: AsyncSession, 
+        self,
+        bytes_ops,
+        db_session: AsyncSession,
         sample_config
     ):
-        """Test getting balance for new user with existing guild config."""
+        """Test getting balance for new user raises NotFoundError (no auto-create)."""
+        # Act & Assert - get_balance no longer auto-creates
+        with pytest.raises(NotFoundError):
+            await bytes_ops.get_balance(db_session, "test_guild_123", "new_user_789")
+
+    async def test_get_or_create_balance_new_user(
+        self,
+        bytes_ops,
+        db_session: AsyncSession,
+    ):
+        """Test get_or_create_balance auto-creates balance with 0 for new user."""
         # Act
-        result = await bytes_ops.get_balance(db_session, "test_guild_123", "new_user_789")
-        
+        result = await bytes_ops.get_or_create_balance(db_session, "test_guild_123", "new_user_789")
+
         # Assert
         assert result.guild_id == "test_guild_123"
         assert result.user_id == "new_user_789"
-        assert result.balance == 100  # From config starting_balance
-        assert result.total_received == 100  # Starting balance counts as received
-        assert result.total_sent == 0
-        assert result.streak_count == 0
-        assert result.last_daily is None
+        assert result.balance == 0
+        assert result.total_received == 0
     
     async def test_get_balance_new_user_new_guild(self, bytes_ops, db_session: AsyncSession):
-        """Test getting balance for new user in new guild (creates default config)."""
-        # Act
-        result = await bytes_ops.get_balance(db_session, "new_guild_999", "new_user_888")
-        
-        # Assert
-        assert result.guild_id == "new_guild_999"
-        assert result.user_id == "new_user_888"
-        assert result.balance == 100  # Default starting balance
-        assert result.total_received == 100  # Starting balance counts as received
-        assert result.total_sent == 0
-        assert result.streak_count == 0
+        """Test getting balance for new user in new guild raises NotFoundError."""
+        # Act & Assert - get_balance no longer auto-creates
+        with pytest.raises(NotFoundError):
+            await bytes_ops.get_balance(db_session, "new_guild_999", "new_user_888")
     
     async def test_create_transaction_successful(self, bytes_ops, db_session: AsyncSession):
         """Test successful transaction creation with balance updates."""
@@ -218,12 +218,23 @@ class TestBytesOperations:
         assert receiver.balance == 50
     
     async def test_create_transaction_new_users(
-        self, 
-        bytes_ops, 
-        db_session: AsyncSession, 
+        self,
+        bytes_ops,
+        db_session: AsyncSession,
         sample_config
     ):
-        """Test transaction between new users (auto-creates balances)."""
+        """Test transaction where giver has balance and receiver is auto-created."""
+        # Arrange - pre-create giver with sufficient balance
+        giver = BytesBalance(
+            guild_id="test_guild_123",
+            user_id="new_giver_123",
+            balance=100,
+            total_received=100,
+            total_sent=0
+        )
+        db_session.add(giver)
+        await db_session.commit()
+
         # Act
         transaction = await bytes_ops.create_transaction(
             db_session,
@@ -234,23 +245,23 @@ class TestBytesOperations:
             receiver_username="NewReceiver",
             amount=25
         )
-        
+
         # Commit to see the changes
         await db_session.commit()
-        
+
         # Assert transaction created
         assert transaction.amount == 25
         assert transaction.giver_id == "new_giver_123"
         assert transaction.receiver_id == "new_receiver_456"
-        
-        # Assert balances were created and updated
+
+        # Assert balances were updated
         giver_balance = await bytes_ops.get_balance(db_session, "test_guild_123", "new_giver_123")
         receiver_balance = await bytes_ops.get_balance(db_session, "test_guild_123", "new_receiver_456")
-        
-        assert giver_balance.balance == 75  # 100 starting - 25 sent
+
+        assert giver_balance.balance == 75  # 100 - 25 sent
         assert giver_balance.total_sent == 25
-        assert receiver_balance.balance == 125  # 100 starting + 25 received
-        assert receiver_balance.total_received == 125
+        assert receiver_balance.balance == 25  # 0 (auto-created) + 25 received
+        assert receiver_balance.total_received == 25
     
     async def test_get_leaderboard_ordered_correctly(self, bytes_ops, db_session: AsyncSession):
         """Test leaderboard returns users ordered by balance descending."""
@@ -387,16 +398,17 @@ class TestBytesOperations:
         )
         db_session.add(balance)
         await db_session.commit()
-        
+
         # Act
-        updated_balance = await bytes_ops.update_daily_reward(
+        updated_balance, assigned_squad = await bytes_ops.update_daily_reward(
             db_session,
             guild_id="test_guild_123",
             user_id="daily_user_123",
+            username="DailyUser",
             daily_amount=10,
             streak_bonus=2
         )
-        
+
         # Assert
         assert updated_balance.balance == 120  # 100 + (10 * 2)
         assert updated_balance.total_received == 120  # 100 + 20
@@ -418,16 +430,17 @@ class TestBytesOperations:
         )
         db_session.add(balance)
         await db_session.commit()
-        
+
         # Act
-        updated_balance = await bytes_ops.update_daily_reward(
+        updated_balance, assigned_squad = await bytes_ops.update_daily_reward(
             db_session,
             guild_id="test_guild_123",
             user_id="streak_user_123",
+            username="StreakUser",
             daily_amount=10,
             streak_bonus=4  # 7-day streak bonus
         )
-        
+
         # Assert
         assert updated_balance.balance == 190  # 150 + (10 * 4)
         assert updated_balance.total_received == 240  # 200 + 40

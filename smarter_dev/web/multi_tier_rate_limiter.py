@@ -89,35 +89,34 @@ class MultiTierRateLimiter:
             return windows[-1]
     
     async def _get_usage_count_for_window(
-        self, 
-        api_key: APIKey, 
+        self,
+        api_key: APIKey,
         db: AsyncSession,
         window: RateLimitWindow,
         current_time: datetime
     ) -> int:
         """Get the number of requests made within a specific time window.
-        
+
         Uses security_logs table to get accurate counts for each window.
+        Uses ORM query to handle UUID conversion across database backends.
         """
+        from sqlalchemy import select, func, and_
+        from smarter_dev.web.models import SecurityLog
+
         window_start = current_time - timedelta(seconds=window.duration_seconds)
-        
-        # Query security logs for API requests within the window
-        query = text("""
-            SELECT COUNT(*) 
-            FROM security_logs 
-            WHERE api_key_id = :api_key_id 
-              AND action = 'api_request'
-              AND created_at >= :window_start
-        """)
-        
-        result = await db.execute(
-            query, 
-            {
-                "api_key_id": api_key.id,
-                "window_start": window_start
-            }
+
+        stmt = (
+            select(func.count(SecurityLog.id))
+            .where(
+                and_(
+                    SecurityLog.api_key_id == api_key.id,
+                    SecurityLog.action == "api_request",
+                    SecurityLog.timestamp >= window_start,
+                )
+            )
         )
-        
+
+        result = await db.execute(stmt)
         count = result.scalar()
         return count or 0
     

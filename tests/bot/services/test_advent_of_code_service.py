@@ -255,8 +255,9 @@ class TestCheckAndCreateThreads:
 
         # Should have created thread for day 6
         mock_bot.rest.create_forum_post.assert_called_once()
-        call_kwargs = mock_bot.rest.create_forum_post.call_args[1]
-        assert "Day 6" in call_kwargs["name"]
+        call_args = mock_bot.rest.create_forum_post.call_args
+        thread_title = call_args[0][1]  # Second positional argument
+        assert "Day 6" in thread_title
 
     @patch('smarter_dev.bot.services.advent_of_code_service.datetime')
     async def test_november_30_2359_58_becomes_december_1(self, mock_datetime, service, mock_api_client, mock_bot, mock_aoc_agent):
@@ -280,8 +281,9 @@ class TestCheckAndCreateThreads:
 
         # Should have created thread for day 1
         mock_bot.rest.create_forum_post.assert_called_once()
-        call_kwargs = mock_bot.rest.create_forum_post.call_args[1]
-        assert "Day 1" in call_kwargs["name"]
+        call_args = mock_bot.rest.create_forum_post.call_args
+        thread_title = call_args[0][1]  # Second positional argument
+        assert "Day 1" in thread_title
 
 
 class TestProcessConfig:
@@ -330,10 +332,12 @@ class TestCreateAoCThread:
         await service._create_aoc_thread("123", "456", 2025, 5)
 
         mock_bot.rest.create_forum_post.assert_called_once()
-        call_kwargs = mock_bot.rest.create_forum_post.call_args[1]
-        assert call_kwargs["name"] == "Day 5 - Advent of Code"
-        assert "Test AoC message!" in call_kwargs["content"]
-        assert "adventofcode.com/2025/day/5" in call_kwargs["content"]
+        call_args = mock_bot.rest.create_forum_post.call_args
+        thread_title = call_args[0][1]  # Second positional argument
+        content = call_args[1]["content"]
+        assert thread_title == "Day 5 - Advent of Code"
+        assert "Test AoC message!" in content
+        assert "adventofcode.com/2025/day/5" in content
 
     async def test_creates_final_day_special_thread(self, service, mock_api_client, mock_bot, mock_aoc_agent):
         """Creates thread with special format for the final day (Day 12)."""
@@ -341,12 +345,14 @@ class TestCreateAoCThread:
 
         await service._create_aoc_thread("123", "456", 2025, 12)
 
-        call_kwargs = mock_bot.rest.create_forum_post.call_args[1]
-        assert "Day 12" in call_kwargs["name"]
+        call_args = mock_bot.rest.create_forum_post.call_args
+        thread_title = call_args[0][1]  # Second positional argument
+        content = call_args[1]["content"]
+        assert "Day 12" in thread_title
         # Final day uses H1 heading
-        assert "# Advent of Code 2025 - Day 12 (Final Day!)" in call_kwargs["content"]
-        assert "final challenge" in call_kwargs["content"]
-        assert "Merry Christmas" in call_kwargs["content"]
+        assert "# Advent of Code 2025 - Day 12 (Final Day!)" in content
+        assert "final challenge" in content
+        assert "Merry Christmas" in content
 
     async def test_uses_fallback_on_llm_error(self, service, mock_api_client, mock_bot):
         """Uses fallback message when LLM fails."""

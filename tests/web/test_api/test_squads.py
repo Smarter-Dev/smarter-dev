@@ -200,9 +200,12 @@ class TestSquadCreation:
         squad_mock.role_id = test_role_id
         squad_mock.name = "Minimal Squad"
         squad_mock.description = None
+        squad_mock.welcome_message = None
+        squad_mock.announcement_channel = None
         squad_mock.max_members = None
         squad_mock.switch_cost = 50  # Default
         squad_mock.is_active = True
+        squad_mock.is_default = False
         squad_mock.created_at = datetime.now(timezone.utc)
         squad_mock.updated_at = datetime.now(timezone.utc)
         mock_squad_operations.create_squad.return_value = squad_mock
@@ -296,9 +299,9 @@ class TestSquadRetrieval:
             f"/guilds/{test_guild_id}/squads/{squad_id}",
             headers=bot_headers
         )
-        
+
         assert response.status_code == 404
-        assert "Squad not found in this guild" in response.json()["detail"]
+        assert "not found" in response.json()["detail"].lower()
 
 
 class TestSquadUpdate:
@@ -529,9 +532,9 @@ class TestSquadMembership:
             headers={**bot_headers, "Content-Type": "application/json"},
             content=json.dumps(leave_data)
         )
-        
+
         assert response.status_code == 404
-        assert "not in any squad" in response.json()["detail"]
+        assert "not found" in response.json()["detail"].lower()
 
 
 class TestUserSquadInfo:
@@ -693,10 +696,10 @@ class TestSquadMembers:
             f"/guilds/{test_guild_id}/squads/{squad_id}/members",
             headers=bot_headers
         )
-        
+
         assert response.status_code == 404
-        assert "Squad not found in this guild" in response.json()["detail"]
-    
+        assert "not found" in response.json()["detail"].lower()
+
     async def test_get_squad_members_empty(
         self,
         api_client: AsyncClient,

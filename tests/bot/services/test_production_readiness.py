@@ -705,20 +705,20 @@ class TestProductionScalability:
         """Test cache efficiency with large user base."""
         service, cache_data = scalable_service
         
-        # First pass - populate cache
+        # First pass - populate cache (use_cache=True to enable caching)
         user_count = 2000
-        
+
         for i in range(user_count):
-            await service.get_balance("111111111111111111", f"98765432109876543{i}")
-        
+            await service.get_balance("111111111111111111", f"98765432109876543{i}", use_cache=True)
+
         # Verify cache population
         assert len(cache_data) == user_count
-        
+
         # Second pass - should hit cache
         start_time = time.time()
-        
+
         for i in range(user_count):
-            await service.get_balance("111111111111111111", f"98765432109876543{i}")
+            await service.get_balance("111111111111111111", f"98765432109876543{i}", use_cache=True)
         
         cache_duration = time.time() - start_time
         cache_rps = user_count / cache_duration

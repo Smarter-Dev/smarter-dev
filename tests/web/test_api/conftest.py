@@ -6,6 +6,8 @@ from typing import AsyncGenerator, Dict, Any
 from unittest.mock import Mock, AsyncMock, patch
 
 import pytest
+from fastapi import Request, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -13,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 from smarter_dev.shared.config import override_settings
 from smarter_dev.shared.database import Base, async_sessionmaker
 from smarter_dev.web.api.app import api
+from smarter_dev.web.api.dependencies import security
 
 
 @pytest.fixture(scope="function")
@@ -157,18 +160,65 @@ async def real_db_session(real_db_engine) -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest.fixture
-async def api_client(api_settings) -> AsyncGenerator[AsyncClient, None]:
+def api_session_mock():
+    """Shared database session mock used by api_client.
+
+    Tests that need to configure the database session (e.g., for raw SQL queries)
+    should inject this fixture and configure it directly.
+    """
+    session_mock = AsyncMock(spec=AsyncSession)
+    session_mock.commit = AsyncMock()
+    session_mock.rollback = AsyncMock()
+    session_mock.close = AsyncMock()
+    return session_mock
+
+
+@pytest.fixture
+async def api_client(api_settings, api_session_mock) -> AsyncGenerator[AsyncClient, None]:
     """Create an async HTTP client for API testing (with mocked database)."""
+    from smarter_dev.web.api.dependencies import verify_api_key, get_database_session
+
+    # Create a mock APIKey object to return from the overridden dependency
+    mock_api_key = Mock()
+    mock_api_key.id = "test-api-key-id"
+    mock_api_key.name = "Test API Key"
+    mock_api_key.key_prefix = "sk-test"
+    mock_api_key.scopes = ["bot:read", "bot:write"]
+    mock_api_key.is_active = True
+    mock_api_key.is_expired = False
+    mock_api_key.is_valid = True
+    mock_api_key.expires_at = None
+    mock_api_key.rate_limit_per_hour = 1000
+    mock_api_key.usage_count = 0
+    mock_api_key.created_by = "test_system"
+
+    async def mock_verify_api_key(
+        credentials: HTTPAuthorizationCredentials = Security(security),
+    ):
+        """Mock API key verification that still requires Bearer token presence.
+
+        The Security(security) dependency ensures FastAPI's HTTPBearer still
+        checks for the Authorization header, returning 403 if missing.
+        """
+        return mock_api_key
+
+    async def mock_get_database_session():
+        yield api_session_mock
+
     # Mock database initialization to avoid connection issues in tests
     with patch('smarter_dev.web.api.app.init_database'), \
          patch('smarter_dev.web.api.app.close_database'), \
          patch('smarter_dev.shared.config.get_settings', return_value=api_settings), \
          patch('smarter_dev.web.api.dependencies.get_settings', return_value=api_settings), \
          patch('smarter_dev.web.api.routers.auth.get_settings', return_value=api_settings):
-        
+
         # Override settings in the API app
         api.state.settings = api_settings
-        
+
+        # Override the auth dependency to avoid hitting the real database
+        api.dependency_overrides[verify_api_key] = mock_verify_api_key
+        api.dependency_overrides[get_database_session] = mock_get_database_session
+
         try:
             async with AsyncClient(
                 transport=ASGITransport(app=api),
@@ -176,8 +226,10 @@ async def api_client(api_settings) -> AsyncGenerator[AsyncClient, None]:
             ) as client:
                 yield client
         finally:
-            # Ensure API state cleanup
+            # Ensure API state and dependency override cleanup
             try:
+                api.dependency_overrides.pop(verify_api_key, None)
+                api.dependency_overrides.pop(get_database_session, None)
                 if hasattr(api, 'state'):
                     api.state.settings = None
             except Exception:
@@ -327,7 +379,9 @@ def sample_bytes_config_data(test_guild_id) -> Dict[str, Any]:
         "starting_balance": 100,
         "max_transfer": 1000,
         "daily_cooldown_hours": 24,
+        "transfer_cooldown_hours": 0,
         "streak_bonuses": {"4": 2, "8": 2, "16": 3, "32": 5},
+        "role_rewards": {},
         "transfer_tax_rate": 0.0,
         "is_enabled": True
     }
@@ -341,9 +395,12 @@ def sample_squad_data(test_guild_id, test_role_id) -> Dict[str, Any]:
         "role_id": test_role_id,
         "name": "Test Squad",
         "description": "A test squad for testing",
+        "welcome_message": None,
+        "announcement_channel": None,
         "max_members": 10,
         "switch_cost": 50,
-        "is_active": True
+        "is_active": True,
+        "is_default": False,
     }
 
 
@@ -398,10 +455,26 @@ def mock_bytes_config_operations():
 @pytest.fixture
 def mock_squad_operations():
     """Mock SquadOperations for testing."""
-    with patch('smarter_dev.web.api.routers.squads.SquadOperations') as mock:
+    from smarter_dev.web.api.schemas import SquadCostInfo
+
+    async def mock_add_cost_info(squad_data, guild_id, session):
+        """Bypass sale event lookups in tests."""
+        no_cost = SquadCostInfo(
+            original_cost=squad_data.get('switch_cost', 0),
+            current_cost=squad_data.get('switch_cost', 0),
+            discount_percent=None,
+            active_sale=None,
+            is_on_sale=False
+        )
+        squad_data['join_cost_info'] = no_cost
+        squad_data['switch_cost_info'] = no_cost
+        return squad_data
+
+    with patch('smarter_dev.web.api.routers.squads.SquadOperations') as mock, \
+         patch('smarter_dev.web.api.routers.squads._add_cost_info_to_squad', side_effect=mock_add_cost_info):
         mock_instance = Mock()
         mock.return_value = mock_instance
-        
+
         # Configure common mock returns
         mock_instance.get_squad = AsyncMock()
         mock_instance.get_guild_squads = AsyncMock()
@@ -411,21 +484,17 @@ def mock_squad_operations():
         mock_instance.get_user_squad = AsyncMock()
         mock_instance.get_squad_members = AsyncMock()
         mock_instance._get_squad_member_count = AsyncMock()
-        
+
         yield mock_instance
 
 
 @pytest.fixture
-def mock_db_session():
-    """Mock database session for API testing."""
-    with patch('smarter_dev.web.api.dependencies.get_db_session') as mock:
-        session_mock = AsyncMock(spec=AsyncSession)
-        session_mock.commit = AsyncMock()
-        session_mock.rollback = AsyncMock()
-        session_mock.close = AsyncMock()
-        
-        async def mock_get_session():
-            yield session_mock
-            
-        mock.side_effect = mock_get_session
-        yield session_mock
+def mock_db_session(api_session_mock):
+    """Mock database session for API testing.
+
+    This returns the same shared session mock that the api_client fixture
+    injects into the FastAPI dependency system, so tests can configure
+    the session (e.g., setting execute return values) and have them
+    take effect in endpoint code.
+    """
+    return api_session_mock

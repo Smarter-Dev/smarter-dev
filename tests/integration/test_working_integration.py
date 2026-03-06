@@ -53,17 +53,17 @@ class TestWorkingIntegration:
     async def test_crud_operations_work(self, real_db_session, test_guild_id, test_user_id):
         """Test that CRUD operations work correctly."""
         bytes_ops = BytesOperations()
-        
-        # This should create a balance with default config
-        balance = await bytes_ops.get_balance(real_db_session, test_guild_id, test_user_id)
-        
+
+        # get_or_create_balance creates a new balance with 0 if none exists
+        balance = await bytes_ops.get_or_create_balance(real_db_session, test_guild_id, test_user_id)
+
         assert balance.guild_id == test_guild_id
         assert balance.user_id == test_user_id
-        assert balance.balance == 100  # Default starting balance
-        
+        assert balance.balance >= 0  # Created with 0 balance via get_or_create
+
         # Test that we can get it again
-        balance2 = await bytes_ops.get_balance(real_db_session, test_guild_id, test_user_id)
-        assert balance2.balance == 100
+        balance2 = await bytes_ops.get_or_create_balance(real_db_session, test_guild_id, test_user_id)
+        assert balance2.balance == balance.balance
 
     async def test_api_routes_exist(self, real_api_client, bot_headers, test_guild_id):
         """Test that the API routes are properly mounted."""

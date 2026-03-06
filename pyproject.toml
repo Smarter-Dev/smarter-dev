@@ -52,9 +52,7 @@ bot = [
     "httpx>=0.24.0", # For API client to communicate with web service
     "dspy>=2.6.27",
     "ddgs>=3.8.0",
-    "markdownify>=0.11.6", # Convert HTML to Markdown
     "pdfplumber>=0.11.0", # Extract text from PDFs
-    "beautifulsoup4>=4.12.0", # HTML sanitization
 ]
 
 # Web API dependencies

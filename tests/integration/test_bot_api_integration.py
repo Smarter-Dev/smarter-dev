@@ -169,14 +169,14 @@ class TestBotAPIIntegration:
         admin_auth_headers: dict[str, str]
     ):
         """Test bot API rate limiting integration."""
-        # Create API key with very low rate limit
+        # Create API key via admin endpoint
         low_limit_key_data = {
             "name": "Rate Limit Integration Test",
             "scopes": ["bot:read"],
-            "rate_limit_per_hour": 3,  # Very low limit
+            "rate_limit_per_hour": 3,
             "description": "Testing rate limiting integration"
         }
-        
+
         response = await real_api_client.post(
             "/admin/api-keys",
             json=low_limit_key_data,
@@ -184,11 +184,28 @@ class TestBotAPIIntegration:
         )
         assert response.status_code == 201
         rate_limited_key = response.json()["api_key"]
-        
+        key_id = response.json()["id"]
+
+        # The multi-tier rate limiter checks rate_limit_per_second (default 10),
+        # rate_limit_per_minute (default 180), rate_limit_per_15_minutes (default 2500).
+        # The admin API only sets rate_limit_per_hour. We need to directly update
+        # the multi-tier fields in the database to set a very low per-second limit.
+        from smarter_dev.web.security import hash_api_key
+        from smarter_dev.web.crud import APIKeyOperations
+        api_key_ops = APIKeyOperations()
+        db_key = await api_key_ops.get_api_key_by_hash(
+            real_db_session,
+            hash_api_key(rate_limited_key)
+        )
+        assert db_key is not None
+        db_key.rate_limit_per_second = 2  # Very low: 2 requests per second
+        db_key.rate_limit_per_minute = 3  # 3 requests per minute
+        await real_db_session.commit()
+
         # Make requests up to the limit
         successful_requests = 0
         api_key_headers = {"Authorization": f"Bearer {rate_limited_key}"}
-        
+
         for i in range(3):
             response = await real_api_client.get(
                 f"/guilds/123456789012345678/bytes/balance/987654321098765432",
@@ -198,14 +215,14 @@ class TestBotAPIIntegration:
                 successful_requests += 1
             elif response.status_code == 429:
                 break  # Hit rate limit earlier than expected
-        
+
         # The next request should trigger rate limiting (429 Too Many Requests)
         response = await real_api_client.get(
             f"/guilds/123456789012345678/bytes/balance/987654321098765432",
             headers=api_key_headers
         )
-        
-        # Should get rate limited
+
+        # Should get rate limited (per-minute limit of 3 exceeded after 3+ requests)
         assert response.status_code == 429
 
     async def test_bot_api_concurrent_operations(

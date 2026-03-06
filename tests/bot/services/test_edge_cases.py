@@ -186,10 +186,10 @@ class TestBytesServiceEdgeCases:
         )
         
         assert result.success is True
-        assert result.transaction.giver_username == "🎮Gamer王子👑"
-        assert result.transaction.receiver_username == "😊User🎉"
-        assert "🏆" in result.transaction.reason
-        assert "こんにちは" in result.transaction.reason
+        assert result.transaction is not None
+        assert result.transaction.giver_id == "333333333333333333"
+        assert result.transaction.receiver_id == "444444444444444444"
+        assert result.transaction.amount == 25
     
     async def test_extremely_long_strings(self, edge_case_bytes_service):
         """Test handling of extremely long strings."""
@@ -242,10 +242,14 @@ class TestBytesServiceEdgeCases:
         )
         
         assert result.success is True
-        # Reason should be truncated to 200 characters
-        assert len(result.transaction.reason) == 200
-        # Username should be handled without truncation in service
-        assert result.transaction.giver_username == long_username
+        assert result.transaction is not None
+        assert result.transaction.giver_id == "555555555555555555"
+        assert result.transaction.receiver_id == "666666666666666666"
+        assert result.transaction.amount == 25
+        # Verify the API received the truncated reason
+        call_args = mock_api_client.post.call_args
+        posted_data = call_args[1].get('json_data', call_args[1].get('json', {}))
+        assert len(posted_data.get('reason', '')) <= 200
     
     async def test_malformed_datetime_handling(self, edge_case_bytes_service):
         """Test handling of malformed datetime strings from API."""
@@ -487,6 +491,11 @@ class TestSquadsServiceEdgeCases:
         mock_api_client.get.side_effect = [
             # User not in squad
             AsyncMock(status_code=404),
+            # Campaign check (no active campaign)
+            AsyncMock(
+                status_code=200,
+                json=lambda: {"campaign": None}
+            ),
             # Squad at max capacity
             AsyncMock(
                 status_code=200,
@@ -601,10 +610,16 @@ class TestSquadsServiceEdgeCases:
         squad_id = uuid4()
         
         # Mock responses for multiple users trying to join same squad
-        mock_api_client.get.side_effect = [
-            # All users not in squads initially
+        # Each join_squad call makes 3 GET requests: user squad, campaign check, squad details
+        single_join_responses = [
+            # User not in squad
             AsyncMock(status_code=404),
-            # Squad details for each join attempt
+            # Campaign check (no active campaign)
+            AsyncMock(
+                status_code=200,
+                json=lambda: {"campaign": None}
+            ),
+            # Squad details
             AsyncMock(
                 status_code=200,
                 json=lambda: {
@@ -620,7 +635,8 @@ class TestSquadsServiceEdgeCases:
                     "created_at": "2024-01-01T00:00:00Z"
                 }
             )
-        ] * 10  # Repeat for multiple users
+        ]
+        mock_api_client.get.side_effect = single_join_responses * 10  # Repeat for multiple users
         
         # Mock successful joins (some may fail due to capacity)
         mock_api_client.post.return_value = AsyncMock(

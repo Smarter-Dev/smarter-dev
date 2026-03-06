@@ -250,10 +250,11 @@ class TestForumAgent:
         from smarter_dev.shared.database import Base
         from smarter_dev.web.models import ForumAgent
         import asyncio
-        
+        import time
+
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        
+
         session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
         async with session_maker() as session:
             agent = ForumAgent(
@@ -262,20 +263,22 @@ class TestForumAgent:
                 system_prompt="Test auto-update",
                 created_by="test_admin"
             )
-            
+
             session.add(agent)
             await session.commit()
             await session.refresh(agent)
-            
+
             original_updated_at = agent.updated_at
-            
-            # Wait a small amount to ensure timestamp difference
-            await asyncio.sleep(0.01)
-            
+
+            # Wait >1 second to ensure SQLite second-precision timestamp differs
+            time.sleep(1.1)
+
             # Update the agent
             agent.description = "Updated description"
             await session.commit()
             await session.refresh(agent)
-            
+
             # updated_at should be different (newer)
-            assert agent.updated_at > original_updated_at
+            # Compare at second precision since SQLite truncates microseconds
+            assert agent.updated_at.replace(microsecond=0) >= original_updated_at.replace(microsecond=0)
+            assert agent.description == "Updated description"

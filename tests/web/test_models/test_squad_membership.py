@@ -44,26 +44,35 @@ class TestSquadMembership:
         """Test creating and retrieving SquadMembership records."""
         from sqlalchemy.ext.asyncio import async_sessionmaker
         from smarter_dev.shared.database import Base
-        from smarter_dev.web.models import SquadMembership
-        
+        from smarter_dev.web.models import Squad, SquadMembership
+
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        
+
         session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
         async with session_maker() as session:
-            squad_id = uuid4()
+            # Create parent squad first to satisfy FK constraint
+            squad = Squad(
+                guild_id="membership_guild_456",
+                role_id="role_999",
+                name="Test Squad",
+            )
+            session.add(squad)
+            await session.commit()
+            await session.refresh(squad)
+
             membership = SquadMembership(
-                squad_id=squad_id,
+                squad_id=squad.id,
                 user_id="membership_user_123",
                 guild_id="membership_guild_456"
             )
-            
+
             session.add(membership)
             await session.commit()
             await session.refresh(membership)
-            
+
             # Verify creation per Session 2 specification
-            assert membership.squad_id == squad_id
+            assert membership.squad_id == squad.id
             assert membership.user_id == "membership_user_123"
             assert membership.guild_id == "membership_guild_456"
             assert membership.joined_at is not None  # Should be auto-set by server_default

@@ -84,42 +84,40 @@ class TestStreakIntegration:
         balance_mock.created_at = now
         balance_mock.updated_at = now
         
-        # Updated balance after claim
+        # Updated balance after claim (new user gets starting_balance=100 as reward)
         updated_balance_mock = Mock()
         updated_balance_mock.guild_id = test_guild_id
         updated_balance_mock.user_id = test_user_id
-        updated_balance_mock.balance = 110  # 100 + 10 daily reward
-        updated_balance_mock.total_received = 10
+        updated_balance_mock.balance = 200  # 100 starting + 100 (starting_balance as first daily)
+        updated_balance_mock.total_received = 100
         updated_balance_mock.total_sent = 0
         updated_balance_mock.streak_count = 1  # First day of streak
         updated_balance_mock.last_daily = date(2024, 1, 15)
         updated_balance_mock.created_at = datetime(2024, 1, 1, 0, 0, 0)
         updated_balance_mock.updated_at = datetime(2024, 1, 15, 0, 0, 0)
-        
+
         mock_bytes_operations.get_balance.return_value = balance_mock
-        mock_bytes_operations.update_daily_reward.return_value = updated_balance_mock
-        
+        mock_bytes_operations.update_daily_reward.return_value = (updated_balance_mock, None)
+
         # Make API call
         response = await api_client.post(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-            headers=bot_headers
+            f"/guilds/{test_guild_id}/bytes/daily",
+            headers=bot_headers,
+            json={"user_id": test_user_id}
         )
-        
+
         # Verify response
         assert response.status_code == 200
         data = response.json()
-        
-        assert data["reward_amount"] == 10  # Base daily amount
-        assert data["streak_bonus"] == 1    # No bonus for first day
+
+        # New users get starting_balance (100) as their first daily reward
+        assert data["reward_amount"] == 100  # starting_balance for new user
+        assert data["streak_bonus"] == 1     # No bonus for first day
         assert data["balance"]["streak_count"] == 1
-        assert data["balance"]["balance"] == 110
-        
+        assert data["balance"]["balance"] == 200
+
         # Verify CRUD was called with correct parameters
         mock_bytes_operations.update_daily_reward.assert_called_once()
-        call_args = mock_bytes_operations.update_daily_reward.call_args
-        # Args: (db, guild_id, user_id, daily_amount, streak_bonus, new_streak_count, claim_date)
-        assert call_args[0][5] == 1  # new_streak_count
-        assert call_args[0][6] == date(2024, 1, 15)  # claim_date
     
     # @pytest.mark.skip(reason="Complex integration test - skipping for core functionality focus") 
     async def test_consecutive_days_streak_building(
@@ -169,28 +167,31 @@ class TestStreakIntegration:
         updated_balance_mock.updated_at = datetime(2024, 1, 15, 0, 0, 0)
         
         mock_bytes_operations.get_balance.return_value = balance_mock
-        mock_bytes_operations.update_daily_reward.return_value = updated_balance_mock
-        
+        mock_bytes_operations.update_daily_reward.return_value = (updated_balance_mock, None)
+
         # Make API call
         response = await api_client.post(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-            headers=bot_headers
+            f"/guilds/{test_guild_id}/bytes/daily",
+            headers=bot_headers,
+            json={"user_id": test_user_id}
         )
         
         # Verify response
         assert response.status_code == 200
         data = response.json()
         
-        assert data["reward_amount"] == 20  # 10 * 2 (7-day bonus)
-        assert data["streak_bonus"] == 2    # 7-day bonus
+        # Streak bonuses are at milestones 8, 16, 32 (divisibility-based)
+        # Day 7 streak doesn't hit any milestone, so bonus = 1
+        assert data["reward_amount"] == 10  # 10 * 1 (no bonus at day 7)
+        assert data["streak_bonus"] == 1    # No bonus at day 7
         assert data["balance"]["streak_count"] == 7
         assert data["balance"]["balance"] == 180
-        
+
         # Verify CRUD was called with correct parameters
         call_args = mock_bytes_operations.update_daily_reward.call_args
-        # Args: (session, guild_id, user_id, daily_amount, streak_bonus, new_streak_count, claim_date)
-        assert call_args[0][5] == 7  # new_streak_count
-        assert call_args[0][4] == 2  # streak_bonus
+        # Args: (session, guild_id, user_id, username, reward_amount, streak_bonus, new_streak_count, claim_date)
+        assert call_args[0][6] == 7  # new_streak_count
+        assert call_args[0][5] == 1  # streak_bonus
     
     # @pytest.mark.skip(reason="Complex integration test - skipping for core functionality focus")
     async def test_streak_breaks_after_missing_day(
@@ -240,12 +241,13 @@ class TestStreakIntegration:
         updated_balance_mock.updated_at = datetime(2024, 1, 15, 0, 0, 0)
         
         mock_bytes_operations.get_balance.return_value = balance_mock
-        mock_bytes_operations.update_daily_reward.return_value = updated_balance_mock
-        
+        mock_bytes_operations.update_daily_reward.return_value = (updated_balance_mock, None)
+
         # Make API call
         response = await api_client.post(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-            headers=bot_headers
+            f"/guilds/{test_guild_id}/bytes/daily",
+            headers=bot_headers,
+            json={"user_id": test_user_id}
         )
         
         # Verify response
@@ -259,9 +261,9 @@ class TestStreakIntegration:
         
         # Verify CRUD was called with streak reset
         call_args = mock_bytes_operations.update_daily_reward.call_args
-        # Args: (session, guild_id, user_id, daily_amount, streak_bonus, new_streak_count, claim_date)
-        assert call_args[0][5] == 1  # new_streak_count
-        assert call_args[0][4] == 1  # streak_bonus
+        # Args: (session, guild_id, user_id, username, reward_amount, streak_bonus, new_streak_count, claim_date)
+        assert call_args[0][6] == 1  # new_streak_count
+        assert call_args[0][5] == 1  # streak_bonus
     
     # @pytest.mark.skip(reason="Complex integration test - skipping for core functionality focus")
     async def test_duplicate_claim_blocked(
@@ -298,19 +300,20 @@ class TestStreakIntegration:
         balance_mock.updated_at = datetime(2024, 1, 15, 0, 0, 0)
         
         mock_bytes_operations.get_balance.return_value = balance_mock
-        
+
         # Make API call
         response = await api_client.post(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-            headers=bot_headers
+            f"/guilds/{test_guild_id}/bytes/daily",
+            headers=bot_headers,
+            json={"user_id": test_user_id}
         )
-        
+
         # Verify response is conflict error
         assert response.status_code == 409
         # Just check that the response contains the error message somewhere
         response_text = response.text
         assert "Daily reward has already been claimed today" in response_text
-        
+
         # Verify CRUD update was not called
         mock_bytes_operations.update_daily_reward.assert_not_called()
     
@@ -325,8 +328,8 @@ class TestStreakIntegration:
         mock_bytes_config_operations,
         mock_date_provider: MockDateProvider
     ):
-        """Test calculation with high streak reaching 30-day bonus."""
-        # Setup config with 30-day bonus
+        """Test calculation with high streak reaching 32-day bonus (divisibility-based)."""
+        # Setup config with milestone bonuses (divisibility-based)
         config_data = {
             "guild_id": test_guild_id,
             "daily_amount": 25,
@@ -337,56 +340,57 @@ class TestStreakIntegration:
             "transfer_tax_rate": 0.0,
             "is_enabled": True
         }
-        
+
         config_mock = Mock()
         for key, value in config_data.items():
             setattr(config_mock, key, value)
         mock_bytes_config_operations.get_config.return_value = config_mock
-        
-        # Day 30 of streak
+
+        # Day 32 of streak (divisible by 32 -> 5x bonus)
         current_date = date(2024, 1, 15)
         yesterday = date(2024, 1, 14)
         mock_date_provider.set_date(current_date)
-        
+
         balance_mock = Mock()
         balance_mock.guild_id = test_guild_id
         balance_mock.user_id = test_user_id
         balance_mock.balance = 2000
         balance_mock.total_received = 1900
         balance_mock.total_sent = 0
-        balance_mock.streak_count = 29  # 29-day streak, claiming 30th
+        balance_mock.streak_count = 31  # 31-day streak, claiming 32nd
         balance_mock.last_daily = yesterday
         balance_mock.created_at = datetime(2024, 1, 1, 0, 0, 0)
         balance_mock.updated_at = datetime(2024, 1, 14, 0, 0, 0)
-        
-        # Updated balance after 30th day claim (gets 30-day bonus)
+
+        # Updated balance after 32nd day claim (gets 32-day bonus: 25 * 5 = 125)
         updated_balance_mock = Mock()
         updated_balance_mock.guild_id = test_guild_id
         updated_balance_mock.user_id = test_user_id
         updated_balance_mock.balance = 2125  # 2000 + (25 * 5) = 2125
         updated_balance_mock.total_received = 2025
         updated_balance_mock.total_sent = 0
-        updated_balance_mock.streak_count = 30
+        updated_balance_mock.streak_count = 32
         updated_balance_mock.last_daily = current_date
         updated_balance_mock.created_at = datetime(2024, 1, 1, 0, 0, 0)
         updated_balance_mock.updated_at = datetime(2024, 1, 15, 0, 0, 0)
-        
+
         mock_bytes_operations.get_balance.return_value = balance_mock
-        mock_bytes_operations.update_daily_reward.return_value = updated_balance_mock
-        
+        mock_bytes_operations.update_daily_reward.return_value = (updated_balance_mock, None)
+
         # Make API call
         response = await api_client.post(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-            headers=bot_headers
+            f"/guilds/{test_guild_id}/bytes/daily",
+            headers=bot_headers,
+            json={"user_id": test_user_id}
         )
-        
+
         # Verify response
         assert response.status_code == 200
         data = response.json()
-        
-        assert data["reward_amount"] == 125  # 25 * 5 (30-day bonus)
-        assert data["streak_bonus"] == 5     # 30-day bonus
-        assert data["balance"]["streak_count"] == 30
+
+        assert data["reward_amount"] == 125  # 25 * 5 (32-day bonus, divisible by 32)
+        assert data["streak_bonus"] == 5     # 32-day bonus
+        assert data["balance"]["streak_count"] == 32
         assert data["balance"]["balance"] == 2125
 
 
@@ -419,9 +423,10 @@ class TestDateBoundaryIntegration:
         config_mock = Mock()
         config_mock.guild_id = test_guild_id
         config_mock.daily_amount = 15
+        config_mock.starting_balance = 100
         config_mock.streak_bonuses = {"8": 2}
         mock_bytes_config_operations.get_config.return_value = config_mock
-        
+
         # User claimed on Jan 31
         balance_mock = Mock()
         balance_mock.guild_id = test_guild_id
@@ -446,12 +451,13 @@ class TestDateBoundaryIntegration:
         updated_balance_mock.updated_at = datetime(2024, 2, 1, 0, 0, 0)
         
         mock_bytes_operations.get_balance.return_value = balance_mock
-        mock_bytes_operations.update_daily_reward.return_value = updated_balance_mock
-        
+        mock_bytes_operations.update_daily_reward.return_value = (updated_balance_mock, None)
+
         # Make API call
         response = await api_client.post(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-            headers=bot_headers
+            f"/guilds/{test_guild_id}/bytes/daily",
+            headers=bot_headers,
+            json={"user_id": test_user_id}
         )
         
         # Verify response
@@ -464,9 +470,9 @@ class TestDateBoundaryIntegration:
         
         # Verify correct date was passed to CRUD
         call_args = mock_bytes_operations.update_daily_reward.call_args
-        # Args: (session, guild_id, user_id, daily_amount, streak_bonus, new_streak_count, claim_date)
-        assert call_args[0][6] == date(2024, 2, 1)  # claim_date
-    
+        # Args: (session, guild_id, user_id, username, reward_amount, streak_bonus, new_streak_count, claim_date)
+        assert call_args[0][7] == date(2024, 2, 1)  # claim_date
+
     async def test_leap_year_boundary_claim(
         self,
         api_client: AsyncClient,
@@ -485,9 +491,10 @@ class TestDateBoundaryIntegration:
         config_mock = Mock()
         config_mock.guild_id = test_guild_id
         config_mock.daily_amount = 20
+        config_mock.starting_balance = 100
         config_mock.streak_bonuses = {"16": 3}
         mock_bytes_config_operations.get_config.return_value = config_mock
-        
+
         # User claimed on Feb 28
         balance_mock = Mock()
         balance_mock.guild_id = test_guild_id
@@ -512,12 +519,13 @@ class TestDateBoundaryIntegration:
         updated_balance_mock.updated_at = datetime(2024, 2, 29, 0, 0, 0)
         
         mock_bytes_operations.get_balance.return_value = balance_mock
-        mock_bytes_operations.update_daily_reward.return_value = updated_balance_mock
-        
+        mock_bytes_operations.update_daily_reward.return_value = (updated_balance_mock, None)
+
         # Make API call
         response = await api_client.post(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-            headers=bot_headers
+            f"/guilds/{test_guild_id}/bytes/daily",
+            headers=bot_headers,
+            json={"user_id": test_user_id}
         )
         
         # Verify response
@@ -530,8 +538,8 @@ class TestDateBoundaryIntegration:
         
         # Verify correct leap year date was passed to CRUD
         call_args = mock_bytes_operations.update_daily_reward.call_args
-        # Args: (session, guild_id, user_id, daily_amount, streak_bonus, new_streak_count, claim_date)
-        assert call_args[0][6] == date(2024, 2, 29)  # claim_date
+        # Args: (session, guild_id, user_id, username, reward_amount, streak_bonus, new_streak_count, claim_date)
+        assert call_args[0][7] == date(2024, 2, 29)  # claim_date
 
 
 # @pytest.mark.skip(reason="Complex integration test - skipping for core functionality focus")
@@ -561,9 +569,10 @@ class TestErrorHandlingIntegration:
         config_mock = Mock()
         config_mock.guild_id = test_guild_id
         config_mock.daily_amount = 10
+        config_mock.starting_balance = 100
         config_mock.streak_bonuses = {"8": 2}
         mock_bytes_config_operations.get_config.return_value = config_mock
-        
+
         # Setup balance
         balance_mock = Mock()
         balance_mock.guild_id = test_guild_id
@@ -575,9 +584,9 @@ class TestErrorHandlingIntegration:
         balance_mock.last_daily = None
         balance_mock.created_at = datetime(2024, 1, 1, 0, 0, 0)
         balance_mock.updated_at = datetime(2024, 1, 1, 0, 0, 0)
-        
+
         mock_bytes_operations.get_balance.return_value = balance_mock
-        
+
         # Make update_daily_reward raise a database error
         mock_bytes_operations.update_daily_reward.side_effect = DatabaseOperationError(
             "Database connection failed"
@@ -585,10 +594,11 @@ class TestErrorHandlingIntegration:
         
         # Make API call
         response = await api_client.post(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-            headers=bot_headers
+            f"/guilds/{test_guild_id}/bytes/daily",
+            headers=bot_headers,
+            json={"user_id": test_user_id}
         )
-        
+
         # Verify error response
         assert response.status_code == 500
         data = response.json()
@@ -629,18 +639,19 @@ class TestErrorHandlingIntegration:
         balance_mock.updated_at = datetime(2024, 1, 16, 0, 0, 0)
         
         mock_bytes_operations.get_balance.return_value = balance_mock
-        
+
         # Make API call
         response = await api_client.post(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-            headers=bot_headers
+            f"/guilds/{test_guild_id}/bytes/daily",
+            headers=bot_headers,
+            json={"user_id": test_user_id}
         )
-        
+
         # Verify error response (can't claim because "already claimed today")
         assert response.status_code == 409
         # Just check that the response contains the error message somewhere
         response_text = response.text
         assert "Daily reward has already been claimed today" in response_text
-        
+
         # Verify CRUD update was not called due to corruption
         mock_bytes_operations.update_daily_reward.assert_not_called()

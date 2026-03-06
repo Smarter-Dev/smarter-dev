@@ -14,6 +14,7 @@ import uuid
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -87,7 +88,14 @@ async def test_engine():
         future=True,
         connect_args={"check_same_thread": False},
     )
-    
+
+    # Enable SQLite foreign key enforcement
+    @event.listens_for(engine.sync_engine, "connect")
+    def set_sqlite_pragma(dbapi_conn, connection_record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     try:
         # Create all tables
         async with engine.begin() as conn:

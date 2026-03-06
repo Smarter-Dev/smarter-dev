@@ -62,7 +62,7 @@ class TestSquadsServiceListing:
         
         # Verify API call
         mock_api_client.get.assert_called_once_with(
-            f"/guilds/{test_guild_id}/squads",
+            f"/guilds/{test_guild_id}/squads/",
             params={},
             timeout=10.0
         )
@@ -89,7 +89,7 @@ class TestSquadsServiceListing:
         
         # Verify API call with correct parameter
         mock_api_client.get.assert_called_once_with(
-            f"/guilds/{test_guild_id}/squads",
+            f"/guilds/{test_guild_id}/squads/",
             params={"include_inactive": "true"},
             timeout=10.0
         )
@@ -349,43 +349,50 @@ class TestSquadsServiceJoinSquad:
         # Mock user not in any squad
         no_squad_response = AsyncMock()
         no_squad_response.status_code = 404
-        
-        # Mock squad details
+
+        # Mock campaign check (no active campaign)
+        campaign_response = AsyncMock()
+        campaign_response.status_code = 200
+        campaign_response.json = Mock(return_value={"campaign": None})
+
+        # Mock squad details - use switch_cost=0 for free join
+        free_squad_data = squad_api_response.copy()
+        free_squad_data["switch_cost"] = 0
         squad_response = AsyncMock()
         squad_response.status_code = 200
-        squad_response.json = Mock(return_value=squad_api_response)
-        
+        squad_response.json = Mock(return_value=free_squad_data)
+
         # Mock successful join
         join_response = AsyncMock()
         join_response.status_code = 200
         join_response.json = Mock(return_value={"success": True})
-        
-        # Set up API call sequence
-        mock_api_client.get.side_effect = [no_squad_response, squad_response]
+
+        # Set up API call sequence: user squad + campaign check + squad details
+        mock_api_client.get.side_effect = [no_squad_response, campaign_response, squad_response]
         mock_api_client.post.return_value = join_response
-        
+
         # Call service
         result = await squads_service.join_squad(
             test_guild_id,
             test_user_id,
             test_squad_id,
-            current_balance=200  # Sufficient for 100 cost squad
+            current_balance=200
         )
-        
+
         # Verify result
         assert isinstance(result, JoinSquadResult)
         assert result.success is True
         assert result.squad is not None
         assert result.squad.name == "Test Squad"
         assert result.previous_squad is None
-        assert result.cost == 0  # No cost for first squad
+        assert result.cost == 0  # Free squad (switch_cost=0)
         assert result.new_balance == 200
-        
+
         # Verify API calls
-        assert mock_api_client.get.call_count == 2  # User squad + squad details
+        assert mock_api_client.get.call_count == 3  # User squad + campaign check + squad details
         mock_api_client.post.assert_called_once_with(
             f"/guilds/{test_guild_id}/squads/{test_squad_id}/join",
-            json_data={"user_id": test_user_id},
+            json_data={"user_id": test_user_id, "username": None},
             timeout=15.0
         )
     
@@ -403,28 +410,38 @@ class TestSquadsServiceJoinSquad:
         current_squad_data = squad_api_response.copy()
         current_squad_data["id"] = str(uuid4())
         current_squad_data["name"] = "Current Squad"
-        
+
         current_squad_response = AsyncMock()
         current_squad_response.status_code = 200
         current_squad_response.json = Mock(return_value={
             "squad": current_squad_data,
             "member_since": "2024-01-10T12:00:00Z"
         })
-        
+
+        # Mock campaign check (no active campaign)
+        campaign_response = AsyncMock()
+        campaign_response.status_code = 200
+        campaign_response.json = Mock(return_value={"campaign": None})
+
         # Mock target squad details
         target_squad_response = AsyncMock()
         target_squad_response.status_code = 200
         target_squad_response.json = Mock(return_value=squad_api_response)
-        
+
+        # Mock balance fetch after join (join_cost > 0 triggers balance fetch)
+        balance_response = AsyncMock()
+        balance_response.status_code = 200
+        balance_response.json = Mock(return_value={"balance": 100})
+
         # Mock successful join
         join_response = AsyncMock()
         join_response.status_code = 200
         join_response.json = Mock(return_value={"success": True})
-        
-        # Set up API call sequence
-        mock_api_client.get.side_effect = [current_squad_response, target_squad_response]
+
+        # Set up API call sequence: user squad + campaign check + squad details + balance fetch
+        mock_api_client.get.side_effect = [current_squad_response, campaign_response, target_squad_response, balance_response]
         mock_api_client.post.return_value = join_response
-        
+
         # Call service
         result = await squads_service.join_squad(
             test_guild_id,
@@ -432,13 +449,13 @@ class TestSquadsServiceJoinSquad:
             test_squad_id,
             current_balance=200
         )
-        
+
         # Verify result
         assert result.success is True
         assert result.previous_squad is not None
         assert result.previous_squad.name == "Current Squad"
-        assert result.cost == 100  # Switch cost from squad_api_response
-        assert result.new_balance == 100  # 200 - 100
+        assert result.cost == 100  # current_switch_cost from squad_api_response
+        assert result.new_balance == 100  # fetched from API
     
     async def test_join_squad_insufficient_balance(
         self,
@@ -451,13 +468,13 @@ class TestSquadsServiceJoinSquad:
     ):
         """Test squad joining with insufficient balance."""
         from uuid import uuid4
-        
+
         # Create different squad for current squad (user is in different squad)
         current_squad_id = uuid4()
         current_squad_data = squad_api_response.copy()
         current_squad_data["id"] = str(current_squad_id)
         current_squad_data["name"] = "Current Squad"
-        
+
         # Mock user in current squad
         current_squad_response = AsyncMock()
         current_squad_response.status_code = 200
@@ -465,14 +482,19 @@ class TestSquadsServiceJoinSquad:
             "squad": current_squad_data,
             "member_since": "2024-01-10T12:00:00Z"
         })
-        
+
+        # Mock campaign check (no active campaign)
+        campaign_response = AsyncMock()
+        campaign_response.status_code = 200
+        campaign_response.json = Mock(return_value={"campaign": None})
+
         # Mock target squad details (different from current)
         target_squad_response = AsyncMock()
         target_squad_response.status_code = 200
         target_squad_response.json = Mock(return_value=squad_api_response)
-        
-        mock_api_client.get.side_effect = [current_squad_response, target_squad_response]
-        
+
+        mock_api_client.get.side_effect = [current_squad_response, campaign_response, target_squad_response]
+
         # Call service with insufficient balance
         result = await squads_service.join_squad(
             test_guild_id,
@@ -480,7 +502,7 @@ class TestSquadsServiceJoinSquad:
             test_squad_id,
             current_balance=50  # Less than 100 switch cost
         )
-        
+
         # Verify result
         assert result.success is False
         assert "Insufficient bytes" in result.reason
@@ -503,14 +525,19 @@ class TestSquadsServiceJoinSquad:
             "squad": squad_api_response,
             "member_since": "2024-01-10T12:00:00Z"
         })
-        
+
+        # Mock campaign check (no active campaign)
+        campaign_response = AsyncMock()
+        campaign_response.status_code = 200
+        campaign_response.json = Mock(return_value={"campaign": None})
+
         # Mock target squad details (same squad)
         target_squad_response = AsyncMock()
         target_squad_response.status_code = 200
         target_squad_response.json = Mock(return_value=squad_api_response)
-        
-        mock_api_client.get.side_effect = [current_squad_response, target_squad_response]
-        
+
+        mock_api_client.get.side_effect = [current_squad_response, campaign_response, target_squad_response]
+
         # Call service
         result = await squads_service.join_squad(
             test_guild_id,
@@ -518,7 +545,7 @@ class TestSquadsServiceJoinSquad:
             test_squad_id,
             current_balance=200
         )
-        
+
         # Verify result
         assert result.success is False
         assert "already in" in result.reason
@@ -535,12 +562,17 @@ class TestSquadsServiceJoinSquad:
         # Mock user not in squad
         no_squad_response = AsyncMock()
         no_squad_response.status_code = 404
-        
+
+        # Mock campaign check (no active campaign)
+        campaign_response = AsyncMock()
+        campaign_response.status_code = 200
+        campaign_response.json = Mock(return_value={"campaign": None})
+
         # Mock squad not found
         squad_not_found_response = AsyncMock()
         squad_not_found_response.status_code = 404
-        mock_api_client.get.side_effect = [no_squad_response, ResourceNotFoundError("squad", str(test_squad_id))]
-        
+        mock_api_client.get.side_effect = [no_squad_response, campaign_response, squad_not_found_response]
+
         # Call service
         result = await squads_service.join_squad(
             test_guild_id,
@@ -548,10 +580,10 @@ class TestSquadsServiceJoinSquad:
             test_squad_id,
             current_balance=200
         )
-        
+
         # Verify result
         assert result.success is False
-        assert "not found" in result.reason
+        assert "not found" in result.reason.lower()
     
     async def test_join_squad_inactive_squad(
         self,
@@ -566,17 +598,22 @@ class TestSquadsServiceJoinSquad:
         # Mock user not in squad
         no_squad_response = AsyncMock()
         no_squad_response.status_code = 404
-        
+
+        # Mock campaign check (no active campaign)
+        campaign_response = AsyncMock()
+        campaign_response.status_code = 200
+        campaign_response.json = Mock(return_value={"campaign": None})
+
         # Mock inactive squad
         inactive_squad_data = squad_api_response.copy()
         inactive_squad_data["is_active"] = False
-        
+
         squad_response = AsyncMock()
         squad_response.status_code = 200
         squad_response.json = Mock(return_value=inactive_squad_data)
-        
-        mock_api_client.get.side_effect = [no_squad_response, squad_response]
-        
+
+        mock_api_client.get.side_effect = [no_squad_response, campaign_response, squad_response]
+
         # Call service
         result = await squads_service.join_squad(
             test_guild_id,
@@ -584,7 +621,7 @@ class TestSquadsServiceJoinSquad:
             test_squad_id,
             current_balance=200
         )
-        
+
         # Verify result
         assert result.success is False
         assert "inactive" in result.reason
@@ -602,17 +639,22 @@ class TestSquadsServiceJoinSquad:
         # Mock user not in squad
         no_squad_response = AsyncMock()
         no_squad_response.status_code = 404
-        
+
+        # Mock campaign check (no active campaign)
+        campaign_response = AsyncMock()
+        campaign_response.status_code = 200
+        campaign_response.json = Mock(return_value={"campaign": None})
+
         # Mock full squad
         full_squad_data = squad_api_response.copy()
         full_squad_data["member_count"] = 20  # Same as max_members
-        
+
         squad_response = AsyncMock()
         squad_response.status_code = 200
         squad_response.json = Mock(return_value=full_squad_data)
-        
-        mock_api_client.get.side_effect = [no_squad_response, squad_response]
-        
+
+        mock_api_client.get.side_effect = [no_squad_response, campaign_response, squad_response]
+
         # Call service
         result = await squads_service.join_squad(
             test_guild_id,
@@ -620,7 +662,7 @@ class TestSquadsServiceJoinSquad:
             test_squad_id,
             current_balance=200
         )
-        
+
         # Verify result
         assert result.success is False
         assert "full" in result.reason
@@ -951,21 +993,29 @@ class TestSquadsServiceErrorHandling:
         # Mock successful join flow
         no_squad_response = AsyncMock()
         no_squad_response.status_code = 404
-        
+
+        # Mock campaign check (no active campaign)
+        campaign_response = AsyncMock()
+        campaign_response.status_code = 200
+        campaign_response.json = Mock(return_value={"campaign": None})
+
+        # Use free squad to avoid balance fetch
+        free_squad_data = squad_api_response.copy()
+        free_squad_data["switch_cost"] = 0
         squad_response = AsyncMock()
         squad_response.status_code = 200
-        squad_response.json = Mock(return_value=squad_api_response)
-        
+        squad_response.json = Mock(return_value=free_squad_data)
+
         join_response = AsyncMock()
         join_response.status_code = 200
         join_response.json = Mock(return_value={"success": True})
-        
-        mock_api_client.get.side_effect = [no_squad_response, squad_response]
+
+        mock_api_client.get.side_effect = [no_squad_response, campaign_response, squad_response]
         mock_api_client.post.return_value = join_response
-        
+
         # Call service
         await squads_service.join_squad(test_guild_id, test_user_id, test_squad_id, 200)
-        
+
         # Verify cache invalidations
         assert mock_cache_manager.delete.call_count >= 2  # User squad + squad members
         assert mock_cache_manager.clear_pattern.call_count >= 1  # Squad list pattern
