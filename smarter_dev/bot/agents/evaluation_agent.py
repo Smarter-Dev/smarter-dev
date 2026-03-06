@@ -48,50 +48,47 @@ class EvaluationSignature(dspy.Signature):
     """Evaluate whether new messages continue a conversation the bot is watching.
 
     The bot just responded and is watching for the user to continue the conversation.
-    Your job is to determine if new messages are a continuation - this includes BOTH
-    questions AND statements/replies.
-
-    ## should_respond=True when:
-    - User replies to what the bot said (even just a statement or reaction)
-    - User answers a question the bot asked them
-    - User shares their thoughts on the topic being discussed
-    - User asks a follow-up question
-    - User wants to continue chatting about the same topic
-    - Message naturally continues the conversation thread
-
-    Example: If bot asked "What do YOU think ice cream tastes like?", then:
-    - "I think it tastes sweet and creamy" → RESPOND (answering the bot's question)
-    - "vanilla is my favorite" → RESPOND (continuing the topic)
-    - "lol good question" → RESPOND (engaging with the conversation)
-
-    ## should_respond=False when:
-    - Message is about a COMPLETELY DIFFERENT subject
-    - Message is clearly directed at someone else
-    - Bot is @mentioned for a NEW unrelated question
-    - Message is from a different conversation thread entirely
-
-    Example: "can someone get me a soda?" or "hey @bot explain quantum physics" are NOT relevant.
+    Your job is to determine if new messages warrant ANOTHER bot response.
 
     ## Key Principle
 
-    If the user is engaging with the conversation in ANY way (question, answer, statement,
-    reaction), respond. Only ignore messages that are clearly unrelated or directed elsewhere.
+    **Err on the side of NOT responding.** The user can always @mention the bot again
+    if they want its attention. Unwanted responses are worse than missed ones.
+
+    ## should_respond=True ONLY when:
+    - User directly answers a question the bot asked
+    - User asks a follow-up question about what the bot said
+    - User explicitly continues the topic with substantive content (2+ sentences or a clear question)
+
+    ## should_respond=False when:
+    - Simple reactions: "lol", "nice", "ok", "true", "haha", "yeah", emoji-only messages
+    - Acknowledgments: "thanks", "cool", "got it", "interesting", "good point"
+    - One-word or very short messages that are just reactions (not questions)
+    - Messages clearly directed at other humans
+    - Message is about a different subject
+    - Stop/dismissal messages: "stop", "shut up", "enough", "go away", etc.
+    - Bot is @mentioned for a NEW unrelated question
+    - Vague or ambiguous messages where it's unclear if the user wants a response
+
+    ## is_stop_request
+
+    Set is_stop_request=True if the message is telling the bot to stop, go away, shut up,
+    or otherwise dismissing it. This includes polite forms like "that's enough" or "I'm done".
 
     ## Personality Hints
 
-    For casual/social conversations, suggest personality traits to make the response more fun.
-    Read the user's emotional tone and match appropriately:
+    For casual/social conversations where should_respond=True, suggest personality traits:
     - If user seems sad/frustrated → be supportive, gentle
     - If user is playful/joking → be witty, playful back
     - If user is curious → be enthusiastic, share interesting tidbits
-    - If user is excited → match their energy
 
     ## Output
 
-    - should_respond: True if user is continuing the conversation
+    - should_respond: True ONLY if user is substantively continuing the conversation
+    - is_stop_request: True if the user is telling the bot to stop/go away
     - relevant_message_ids: Comma-separated IDs (empty if should_respond=False)
     - reasoning: Brief explanation
-    - personality_hint: For casual chats, suggest tone/traits (e.g., "playful and curious", "dry wit", "supportive and warm")
+    - personality_hint: For casual chats, suggest tone/traits
     """
 
     watching_for: str = dspy.InputField(
@@ -111,7 +108,10 @@ class EvaluationSignature(dspy.Signature):
     )
 
     should_respond: bool = dspy.OutputField(
-        description="True if the new messages are relevant and warrant a response"
+        description="True ONLY if the new messages substantively continue the conversation and warrant a response"
+    )
+    is_stop_request: bool = dspy.OutputField(
+        description="True if the user is telling the bot to stop, go away, shut up, or dismissing it"
     )
     relevant_message_ids: str = dspy.OutputField(
         description="Comma-separated list of message IDs that are relevant (empty if should_respond is False)"
@@ -142,6 +142,9 @@ class EvaluationResult:
 
     personality_hint: str = ""
     """Suggested personality/tone for the response (for casual conversations)."""
+
+    is_stop_request: bool = False
+    """Whether the user is telling the bot to stop/go away."""
 
 
 class EvaluationAgent:
@@ -196,6 +199,16 @@ class EvaluationAgent:
             # Extract personality hint
             personality_hint = getattr(result, "personality_hint", "") or ""
 
+            # Parse is_stop_request
+            is_stop = getattr(result, "is_stop_request", False)
+            if isinstance(is_stop, str):
+                is_stop = is_stop.lower().strip() in ("true", "yes", "1")
+
+            # If stop detected, force should_respond=False
+            if is_stop:
+                should_respond = False
+                logger.info("Evaluation agent detected stop request — forcing should_respond=False")
+
             # Estimate tokens
             estimated_tokens = (
                 len(watching_for) + len(original_context) + len(new_messages)
@@ -203,6 +216,7 @@ class EvaluationAgent:
 
             logger.debug(
                 f"Evaluation result: should_respond={should_respond}, "
+                f"is_stop_request={is_stop}, "
                 f"relevant_ids={relevant_message_ids}, "
                 f"personality_hint='{personality_hint}', "
                 f"reasoning='{result.reasoning[:100]}...'"
@@ -213,7 +227,8 @@ class EvaluationAgent:
                 relevant_message_ids=relevant_message_ids,
                 reasoning=result.reasoning or "",
                 tokens_used=estimated_tokens,
-                personality_hint=personality_hint
+                personality_hint=personality_hint,
+                is_stop_request=is_stop
             )
 
         except Exception as e:

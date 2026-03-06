@@ -181,6 +181,21 @@ class ChannelWatchState:
             sorted_ids = sorted(self.consumed_message_ids, key=lambda x: int(x) if x.isdigit() else 0)
             self.consumed_message_ids = set(sorted_ids[-500:])
 
+    async def clear_all_watchers(self) -> list[Watcher]:
+        """Remove ALL watchers from this channel.
+
+        Returns:
+            List of watchers that were removed
+        """
+        async with self.watchers_lock:
+            removed = list(self.watchers.values())
+            self.watchers.clear()
+            if removed:
+                logger.info(
+                    f"Channel {self.channel_id}: Cleared {len(removed)} watchers"
+                )
+            return removed
+
     async def cleanup_expired_watchers(self) -> list[Watcher]:
         """Remove and return expired watchers.
 
@@ -303,6 +318,23 @@ class WatchManager:
             if channel_id not in self.channels:
                 return None
             return await self.channels[channel_id].remove_watcher(watcher_id)
+
+    async def clear_channel(self, channel_id: int) -> list[Watcher]:
+        """Clear all watchers and remove channel state entirely.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            List of watchers that were removed
+        """
+        async with self._lock:
+            if channel_id not in self.channels:
+                return []
+            removed = await self.channels[channel_id].clear_all_watchers()
+            del self.channels[channel_id]
+            logger.info(f"Cleared channel {channel_id}: removed {len(removed)} watchers")
+            return removed
 
     async def cleanup_stale_watchers(self) -> dict[int, list[Watcher]]:
         """Clean up expired watchers across all channels.
