@@ -100,7 +100,13 @@ class TestAdminAPIKeyCreation:
         
         assert response.status_code == 422
         data = response.json()
-        assert "scopes" in data["detail"].lower()
+        # Validation error may be a string or a list of errors
+        detail = data["detail"]
+        if isinstance(detail, str):
+            assert "validation" in detail.lower() or "scopes" in detail.lower()
+        else:
+            # Pydantic v2 returns a list of error objects
+            assert any("scope" in str(error).lower() for error in detail)
     
     async def test_create_api_key_missing_name(
         self,

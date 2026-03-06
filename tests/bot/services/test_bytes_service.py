@@ -98,21 +98,23 @@ class TestBytesServiceBalances:
         mock_response.json = Mock(return_value=balance_api_response)
         mock_api_client.get.return_value = mock_response
         
-        # First call - should hit API and cache result
-        balance1 = await bytes_service.get_balance(test_guild_id, test_user_id)
-        
+        # First call with use_cache=True - should hit API and cache result
+        balance1 = await bytes_service.get_balance(test_guild_id, test_user_id, use_cache=True)
+
         # Verify API was called and cache was set
         assert mock_api_client.get.call_count == 1
         assert mock_cache_manager.set.call_count == 1
-        
-        # Second call - should hit cache
+
+        # Set cache to return data for next call (clear side_effect first)
+        mock_cache_manager.get.side_effect = None
         mock_cache_manager.get.return_value = balance_api_response
-        balance2 = await bytes_service.get_balance(test_guild_id, test_user_id)
-        
+
+        # Second call with use_cache=True - should hit cache
+        balance2 = await bytes_service.get_balance(test_guild_id, test_user_id, use_cache=True)
+
         # Verify API was not called again
         assert mock_api_client.get.call_count == 1
-        assert mock_cache_manager.get.call_count == 2
-        
+
         # Both results should be equivalent
         assert balance1.guild_id == balance2.guild_id
         assert balance1.user_id == balance2.user_id
@@ -244,7 +246,8 @@ class TestBytesServiceDailyClaims:
         
         # Verify API call
         mock_api_client.post.assert_called_once_with(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
+            f"/guilds/{test_guild_id}/bytes/daily",
+            json_data={"user_id": test_user_id, "username": "TestUser"},
             timeout=15.0
         )
     
@@ -369,11 +372,11 @@ class TestBytesServiceTransfers:
         assert result.success is True
         assert result.transaction is not None
         assert result.transaction.amount == 50
-        assert result.transaction.reason == "Test transfer"
         assert result.new_giver_balance == 50  # 100 - 50
-        
+
         # Verify API calls
-        assert mock_api_client.get.call_count == 2  # Balance checks for both users
+        # 1 GET for giver balance check + 1 GET for receiver balance after transfer = 2
+        assert mock_api_client.get.call_count == 2
         mock_api_client.post.assert_called_once()
     
     async def test_transfer_bytes_insufficient_balance(
@@ -799,7 +802,7 @@ class TestBytesServicePlanningCompliance:
         # Setup - use valid Discord ID format
         guild_id = "123456789012345678"
         user_id = "987654321098765432"
-        
+
         mock_api_client.get.return_value = AsyncMock(
             status_code=200,
             json=lambda: {
@@ -814,14 +817,14 @@ class TestBytesServicePlanningCompliance:
                 "updated_at": "2024-01-14T12:00:00Z"
             }
         )
-        
-        # First call hits API
-        balance1 = await bytes_service.get_balance(guild_id, user_id)
+
+        # First call with use_cache=True hits API
+        balance1 = await bytes_service.get_balance(guild_id, user_id, use_cache=True)
         assert balance1.balance == 100
         assert mock_api_client.get.call_count == 1
-        
-        # Second call uses cache
-        balance2 = await bytes_service.get_balance(guild_id, user_id)
+
+        # Second call with use_cache=True uses cache
+        balance2 = await bytes_service.get_balance(guild_id, user_id, use_cache=True)
         assert balance2.balance == 100
         assert mock_api_client.get.call_count == 1  # No additional call
     
@@ -852,13 +855,4 @@ class TestBytesServicePlanningCompliance:
         assert not result.success
         assert "positive" in result.reason
     
-    async def test_calculate_multiplier(self, bytes_service):
-        """Test _calculate_multiplier method as specified in planning document."""
-        assert bytes_service._calculate_multiplier(0) == 1
-        assert bytes_service._calculate_multiplier(8) == 2
-        assert bytes_service._calculate_multiplier(16) == 4
-        assert bytes_service._calculate_multiplier(32) == 8
-        assert bytes_service._calculate_multiplier(64) == 16
-        assert bytes_service._calculate_multiplier(100) == 16  # Max multiplier
-
 

@@ -115,46 +115,39 @@ class TestSecurityLogging:
         real_db_session: AsyncSession
     ):
         """Test that failed API key authentication attempts are logged."""
-        # Use an invalid API key
-        fake_key = "sd_test_" + "x" * 40  # Invalid but properly formatted key
+        # Use a properly formatted but nonexistent API key
+        # Must be sk- + 43 base64url chars to pass format validation
+        fake_key = "sk-" + "a" * 43
         auth_headers = {"Authorization": f"Bearer {fake_key}"}
-        
+
         response = await real_api_client.get(
             "/guilds/123456789012345678/bytes/balance/987654321098765432",
             headers=auth_headers
         )
         assert response.status_code == 401
-        
+
         # Wait a bit for the log to be committed
         import asyncio
-        await asyncio.sleep(0.1)
-        
-        # Check that authentication failure was logged using a fresh session
+        await asyncio.sleep(0.2)
+
+        # Check that authentication failure was logged using the test db session
         from smarter_dev.web.security_logger import SecurityLogger
-        from smarter_dev.shared.database import get_db_session
-        
+
         security_logger = SecurityLogger()
-        
-        # Use a fresh database session to query logs
-        async for fresh_session in get_db_session():
-            try:
-                # Get recent failed authentication logs
-                recent_logs = await security_logger.get_recent_logs(
-                    fresh_session,
-                    action="authentication_failed",
-                    limit=10
-                )
-                
-                # Should have at least one failed auth log
-                assert len(recent_logs) >= 1, f"Expected at least 1 failed auth log, found {len(recent_logs)}"
-                failed_log = recent_logs[0]
-                assert failed_log.action == "authentication_failed"
-                assert failed_log.success is False
-                assert fake_key[:10] in failed_log.details  # Should log partial key for identification
-                break
-            except Exception as e:
-                print(f"Error querying logs: {e}")
-                raise
+
+        # Query the test database for failed auth logs
+        recent_logs = await security_logger.get_recent_logs(
+            real_db_session,
+            action="authentication_failed",
+            limit=10
+        )
+
+        # Should have at least one failed auth log
+        assert len(recent_logs) >= 1, f"Expected at least 1 failed auth log, found {len(recent_logs)}"
+        failed_log = recent_logs[0]
+        assert failed_log.action == "authentication_failed"
+        assert failed_log.success is False
+        assert fake_key[:10] in failed_log.details  # Should log partial key for identification
 
     async def test_log_api_key_rate_limit_exceeded(
         self,
@@ -163,46 +156,50 @@ class TestSecurityLogging:
         admin_auth_headers: dict[str, str]
     ):
         """Test that rate limit violations are logged."""
-        # Create API key with very low rate limit
-        key_data = {
-            "name": "Rate Limit Log Test",
-            "scopes": ["bot:read"],
-            "rate_limit_per_hour": 1,  # Very low limit
-            "description": "Testing rate limit logging"
-        }
-        
-        response = await real_api_client.post(
-            "/admin/api-keys",
-            json=key_data,
-            headers=admin_auth_headers
+        # Create API key directly with a very low per-second limit
+        from smarter_dev.web.security import generate_secure_api_key
+
+        full_key, key_hash, key_prefix = generate_secure_api_key()
+        api_key = APIKey(
+            name="Rate Limit Log Test",
+            key_hash=key_hash,
+            key_prefix=key_prefix,
+            scopes=["bot:read", "bot:write"],
+            rate_limit_per_hour=10000,
+            rate_limit_per_second=1,  # Very low per-second limit
+            rate_limit_per_minute=180,
+            rate_limit_per_15_minutes=2500,
+            created_by="test",
+            is_active=True,
         )
-        assert response.status_code == 201
-        test_key = response.json()["api_key"]
-        key_id = UUID(response.json()["id"])
-        
-        auth_headers = {"Authorization": f"Bearer {test_key}"}
-        
+        real_db_session.add(api_key)
+        await real_db_session.commit()
+        await real_db_session.refresh(api_key)
+        key_id = api_key.id
+
+        auth_headers = {"Authorization": f"Bearer {full_key}"}
+
         # Make first request (should succeed)
         response1 = await real_api_client.get(
             "/guilds/123456789012345678/bytes/balance/987654321098765432",
             headers=auth_headers
         )
         assert response1.status_code in [200, 404]
-        
+
         # Make second request (should be rate limited)
         response2 = await real_api_client.get(
             "/guilds/123456789012345678/bytes/balance/987654321098765432",
             headers=auth_headers
         )
         assert response2.status_code == 429
-        
+
         # Check that rate limit violation was logged
         from smarter_dev.web.security_logger import SecurityLogger
         security_logger = SecurityLogger()
-        
+
         logs = await security_logger.get_logs_for_api_key(real_db_session, key_id)
         rate_limit_logs = [log for log in logs if log.action == "rate_limit_exceeded"]
-        
+
         assert len(rate_limit_logs) >= 1
         rate_limit_log = rate_limit_logs[0]
         assert rate_limit_log.api_key_id == key_id
@@ -261,9 +258,11 @@ class TestSecurityLogging:
         real_db_session: AsyncSession
     ):
         """Test logging of suspicious authentication patterns."""
-        fake_key = "sd_test_" + "x" * 40
+        # Use a properly formatted but nonexistent key so format validation passes
+        # and the security logger is actually called
+        fake_key = "sk-" + "b" * 43
         auth_headers = {"Authorization": f"Bearer {fake_key}"}
-        
+
         # Make multiple failed authentication attempts rapidly
         for i in range(5):
             response = await real_api_client.get(
@@ -271,29 +270,33 @@ class TestSecurityLogging:
                 headers=auth_headers
             )
             assert response.status_code == 401
-        
+
+        # Wait for logs to be committed
+        import asyncio
+        await asyncio.sleep(0.2)
+
         # Check for suspicious activity detection
         from smarter_dev.web.security_logger import SecurityLogger
         security_logger = SecurityLogger()
-        
+
         # Check for rapid failed attempts (suspicious activity)
         recent_logs = await security_logger.get_recent_logs(
             real_db_session,
             action="authentication_failed",
             limit=10
         )
-        
+
         # Should have multiple failed attempts from same source
         failed_attempts = [log for log in recent_logs if fake_key[:10] in log.details]
         assert len(failed_attempts) >= 5
-        
+
         # Check if suspicious activity was flagged
         suspicious_logs = await security_logger.get_recent_logs(
             real_db_session,
             action="suspicious_activity",
             limit=5
         )
-        
+
         if suspicious_logs:
             suspicious_log = suspicious_logs[0]
             assert suspicious_log.action == "suspicious_activity"

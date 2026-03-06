@@ -75,6 +75,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: anthropic-api-key
+                  - name: JINA_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: jina-api-key
                 resources:
                     requests:
                         cpu: 100m

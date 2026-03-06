@@ -625,7 +625,11 @@ class APIKey(Base):
         """Check if the API key has expired."""
         if self.expires_at is None:
             return False
-        return datetime.now(timezone.utc) > self.expires_at
+        expires = self.expires_at
+        # Handle timezone-naive datetimes (e.g. from SQLite) by assuming UTC
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > expires
     
     @property
     def is_valid(self) -> bool:
@@ -1040,14 +1044,14 @@ class BlogPost(Base):
 
 class ForumAgent(Base):
     """Forum monitoring agent configuration for AI-driven post responses.
-    
+
     Stores per-guild agent configurations that monitor forum channels and
     automatically evaluate new posts to determine if they warrant AI responses.
     Each agent has a customizable system prompt and configurable thresholds.
     """
-    
+
     __tablename__ = "forum_agents"
-    
+
     # Primary key
     id: Mapped[UUID] = mapped_column(
         PostgresUUID(as_uuid=True),
@@ -1055,12 +1059,11 @@ class ForumAgent(Base):
         default=uuid4,
         doc="Unique identifier for the forum agent"
     )
-    
-    # Guild context
+
+    # Guild context (index defined in __table_args__)
     guild_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
         doc="Discord guild (server) snowflake ID"
     )
     
@@ -1296,7 +1299,7 @@ class ForumAgentResponse(Base):
     responded_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        index=True,
+
         doc="Timestamp when the response was posted (if responded=True)"
     )
     
@@ -1347,7 +1350,7 @@ class ForumNotificationTopic(Base):
     """
     
     __tablename__ = "forum_notification_topics"
-    
+
     # Primary key
     id: Mapped[UUID] = mapped_column(
         PostgresUUID(as_uuid=True),
@@ -1355,18 +1358,16 @@ class ForumNotificationTopic(Base):
         default=uuid4,
         doc="Unique identifier for the notification topic"
     )
-    
-    # Guild and forum context
+
+    # Guild and forum context (indexes defined in __table_args__)
     guild_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
         doc="Discord guild (server) snowflake ID"
     )
     forum_channel_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
         doc="Discord forum channel snowflake ID"
     )
     
@@ -1438,13 +1439,13 @@ class ForumUserSubscription(Base):
     guild_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord guild (server) snowflake ID"
     )
     user_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord user snowflake ID"
     )
     username: Mapped[str] = mapped_column(
@@ -1455,7 +1456,7 @@ class ForumUserSubscription(Base):
     forum_channel_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord forum channel snowflake ID"
     )
     
@@ -1533,7 +1534,7 @@ class Quest(Base):
     guild_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord guild (server) snowflake ID this quest belongs to",
     )
 
@@ -1853,7 +1854,7 @@ class Campaign(Base):
     guild_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord guild (server) snowflake ID"
     )
     
@@ -1874,7 +1875,7 @@ class Campaign(Base):
     start_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        index=True,
+
         doc="When the campaign begins and first challenge is released"
     )
     release_cadence_hours: Mapped[int] = mapped_column(
@@ -1997,7 +1998,7 @@ class Challenge(Base):
         PostgresUUID(as_uuid=True),
         ForeignKey("campaigns.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
+
         doc="Campaign this challenge belongs to"
     )
     
@@ -2049,13 +2050,13 @@ class Challenge(Base):
         Boolean,
         nullable=False,
         default=False,
-        index=True,
+
         doc="Whether this challenge has been released to participants"
     )
     released_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        index=True,
+
         doc="Timestamp when the challenge was released"
     )
     
@@ -2064,13 +2065,13 @@ class Challenge(Base):
         Boolean,
         nullable=False,
         default=False,
-        index=True,
+
         doc="Whether this challenge has been announced to Discord channels"
     )
     announced_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        index=True,
+
         doc="Timestamp when the challenge was announced to Discord channels"
     )
     
@@ -2238,7 +2239,7 @@ class ScheduledMessage(Base):
         PostgresUUID(as_uuid=True),
         ForeignKey("campaigns.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
+
         doc="Campaign this scheduled message belongs to"
     )
     
@@ -2264,7 +2265,7 @@ class ScheduledMessage(Base):
     scheduled_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        index=True,
+
         doc="When this message should be sent"
     )
     
@@ -2273,7 +2274,7 @@ class ScheduledMessage(Base):
         Boolean,
         nullable=False,
         default=False,
-        index=True,
+
         doc="Whether this scheduled message has been sent"
     )
     sent_at: Mapped[Optional[datetime]] = mapped_column(
@@ -2457,7 +2458,7 @@ class SquadSaleEvent(Base):
     guild_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord guild (server) snowflake ID"
     )
     
@@ -2478,7 +2479,7 @@ class SquadSaleEvent(Base):
     start_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        index=True,
+
         doc="When the sale event starts"
     )
     duration_hours: Mapped[int] = mapped_column(
@@ -2641,13 +2642,13 @@ class RepeatingMessage(Base):
     guild_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord guild (server) snowflake ID"
     )
     channel_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord channel snowflake ID where messages are sent"
     )
     
@@ -2680,7 +2681,7 @@ class RepeatingMessage(Base):
     next_send_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        index=True,
+
         doc="UTC datetime when the next message should be sent"
     )
     is_active: Mapped[bool] = mapped_column(

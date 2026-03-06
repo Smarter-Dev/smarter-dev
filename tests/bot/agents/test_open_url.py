@@ -1,57 +1,97 @@
-"""Tests for open_url HTML sanitization and YouTube metadata support."""
+"""Tests for open_url Jina Reader integration and YouTube metadata support."""
 
+from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
 
+from smarter_dev.bot.agents.tools import _HTML_TAG_RE
+from smarter_dev.bot.agents.tools import _SCRIPT_STYLE_RE
+from smarter_dev.bot.agents.tools import fetch_via_jina
 from smarter_dev.bot.agents.tools import fetch_youtube_metadata
 from smarter_dev.bot.agents.tools import is_youtube_url
-from smarter_dev.bot.agents.tools import sanitize_html
 
 
-class TestSanitizeHtml:
-    def test_strips_scripts_and_styles(self):
-        html = """<html><head><title>Test</title></head><body>
-        <script>alert('xss')</script>
-        <style>.foo{color:red}</style>
-        <nav>Nav stuff</nav>
-        <footer>Footer stuff</footer>
-        <p>Real content</p>
-        </body></html>"""
-        result = sanitize_html(html)
-        assert "alert" not in result
-        assert "color:red" not in result
-        assert "Nav stuff" not in result
-        assert "Footer stuff" not in result
-        assert "Real content" in result
+class TestFallbackHtmlStripping:
+    """Test the regex-based fallback when Jina is unavailable."""
 
-    def test_preserves_content(self):
-        html = """<div><h1>Title</h1><p>Paragraph text</p><ul><li>Item</li></ul></div>"""
-        result = sanitize_html(html)
-        assert "Title" in result
-        assert "Paragraph text" in result
-        assert "Item" in result
+    def test_strips_scripts(self):
+        html = "<div><script>alert('xss')</script><p>Content</p></div>"
+        cleaned = _SCRIPT_STYLE_RE.sub("", html)
+        cleaned = _HTML_TAG_RE.sub("", cleaned)
+        assert "alert" not in cleaned
+        assert "Content" in cleaned
 
-    def test_removes_non_content_classes(self):
-        html = """<div>
-        <div class="sidebar">Sidebar</div>
-        <div id="cookie-banner">Cookie</div>
-        <div class="ad-container">Ad</div>
-        <div class="main-content">Real content</div>
-        </div>"""
-        result = sanitize_html(html)
-        assert "Sidebar" not in result
-        assert "Cookie" not in result
-        assert "Ad" not in result
-        assert "Real content" in result
+    def test_strips_styles(self):
+        html = "<div><style>.foo{color:red}</style><p>Content</p></div>"
+        cleaned = _SCRIPT_STYLE_RE.sub("", html)
+        cleaned = _HTML_TAG_RE.sub("", cleaned)
+        assert "color:red" not in cleaned
+        assert "Content" in cleaned
 
-    def test_removes_iframes_and_noscript(self):
-        html = """<div><iframe src="x"></iframe><noscript>no js</noscript><p>Content</p></div>"""
-        result = sanitize_html(html)
-        assert "iframe" not in result
-        assert "no js" not in result
-        assert "Content" in result
+    def test_preserves_text_content(self):
+        html = "<div><h1>Title</h1><p>Paragraph</p></div>"
+        cleaned = _HTML_TAG_RE.sub("", html)
+        assert "Title" in cleaned
+        assert "Paragraph" in cleaned
+
+
+class TestFetchViaJina:
+    @pytest.mark.asyncio
+    async def test_returns_content_on_success(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "data": {
+                "title": "Test Page",
+                "description": "A test page",
+                "content": "# Test\nHello world",
+                "url": "https://example.com",
+            }
+        }
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_resp
+
+        with patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            result = await fetch_via_jina("https://example.com")
+
+        assert result is not None
+        assert result["title"] == "Test Page"
+        assert result["content"] == "# Test\nHello world"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_failure(self):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_resp
+
+        with patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            result = await fetch_via_jina("https://example.com")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_exception(self):
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = Exception("Network error")
+
+        with patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            result = await fetch_via_jina("https://example.com")
+
+        assert result is None
 
 
 class TestIsYoutubeUrl:
@@ -79,58 +119,43 @@ class TestIsYoutubeUrl:
 class TestFetchYoutubeMetadata:
     @pytest.mark.asyncio
     async def test_returns_metadata(self):
+        jina_result = {
+            "title": "Test Video",
+            "description": "A test description",
+            "content": "Video transcript...",
+            "url": "https://www.youtube.com/watch?v=abc",
+        }
+
         mock_oembed_resp = MagicMock()
         mock_oembed_resp.status_code = 200
         mock_oembed_resp.json.return_value = {"title": "Test Video", "author_name": "Test Channel"}
 
-        mock_page_resp = MagicMock()
-        mock_page_resp.status_code = 200
-        mock_page_resp.text = '<html><head><meta name="description" content="A test description"></head></html>'
+        mock_client = AsyncMock()
+        mock_client.get.return_value = mock_oembed_resp
 
-        async def mock_get(url, **kwargs):
-            if "oembed" in url:
-                return mock_oembed_resp
-            return mock_page_resp
-
-        mock_client = MagicMock()
-        mock_client.get = mock_get
-
-        async def aenter(_):
-            return mock_client
-
-        async def aexit(_, *args):
-            pass
-
-        with patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_client_cls:
-            ctx = MagicMock()
-            ctx.__aenter__ = aenter
-            ctx.__aexit__ = aexit
-            mock_client_cls.return_value = ctx
+        with (
+            patch("smarter_dev.bot.agents.tools.fetch_via_jina", return_value=jina_result) as mock_jina,
+            patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_cls,
+        ):
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             metadata = await fetch_youtube_metadata("https://www.youtube.com/watch?v=abc")
-            assert metadata["title"] == "Test Video"
-            assert metadata["author"] == "Test Channel"
-            assert metadata["description"] == "A test description"
+
+        assert metadata["title"] == "Test Video"
+        assert metadata["author"] == "Test Channel"
+        assert metadata["description"] == "A test description"
 
     @pytest.mark.asyncio
     async def test_returns_empty_on_failure(self):
-        async def mock_get(url, **kwargs):
-            raise Exception("Network error")
-
-        mock_client = MagicMock()
-        mock_client.get = mock_get
-
-        async def aenter(_):
-            return mock_client
-
-        async def aexit(_, *args):
-            pass
-
-        with patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_client_cls:
-            ctx = MagicMock()
-            ctx.__aenter__ = aenter
-            ctx.__aexit__ = aexit
-            mock_client_cls.return_value = ctx
+        with (
+            patch("smarter_dev.bot.agents.tools.fetch_via_jina", return_value=None),
+            patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_cls,
+        ):
+            mock_client = AsyncMock()
+            mock_client.get.side_effect = Exception("Network error")
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             metadata = await fetch_youtube_metadata("https://www.youtube.com/watch?v=abc")
             assert metadata == {}

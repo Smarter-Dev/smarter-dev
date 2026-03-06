@@ -27,7 +27,7 @@ class TestAdminDashboard:
         # Mock database queries
         mock_session.execute.return_value.scalar.return_value = 10
         
-        response = authenticated_client.get("/admin/")
+        response = authenticated_client.get("/bot-admin/")
         
         assert response.status_code == 200
         assert b"Dashboard" in response.content
@@ -38,17 +38,17 @@ class TestAdminDashboard:
         """Test dashboard with Discord API error."""
         mock_get_guilds.side_effect = DiscordAPIError("API error")
         
-        response = authenticated_client.get("/admin/")
+        response = authenticated_client.get("/bot-admin/")
         
         assert response.status_code == 200
         assert b"Discord API error" in response.content
     
     def test_dashboard_requires_authentication(self, admin_client):
         """Test dashboard requires authentication."""
-        response = admin_client.get("/admin/", follow_redirects=False)
+        response = admin_client.get("/bot-admin/", follow_redirects=False)
         
         assert response.status_code == 303
-        assert "/admin/login" in response.headers["location"]
+        assert "/bot-admin/login" in response.headers["location"]
 
 
 class TestGuildList:
@@ -59,7 +59,7 @@ class TestGuildList:
         """Test successful guild list rendering."""
         mock_get_guilds.return_value = mock_discord_guilds
         
-        response = authenticated_client.get("/admin/guilds")
+        response = authenticated_client.get("/bot-admin/guilds")
         
         assert response.status_code == 200
         assert b"Guild Management" in response.content
@@ -71,17 +71,17 @@ class TestGuildList:
         # Configure AsyncMock for async function  
         mock_get_guilds.side_effect = DiscordAPIError("API error")
         
-        response = authenticated_client.get("/admin/guilds")
+        response = authenticated_client.get("/bot-admin/guilds")
         
         assert response.status_code == 200
         assert b"Discord API error" in response.content
     
     def test_guild_list_requires_authentication(self, admin_client):
         """Test guild list requires authentication."""
-        response = admin_client.get("/admin/guilds", follow_redirects=False)
+        response = admin_client.get("/bot-admin/guilds", follow_redirects=False)
         
         assert response.status_code == 303
-        assert "/admin/login" in response.headers["location"]
+        assert "/bot-admin/login" in response.headers["location"]
 
 
 class TestGuildDetail:
@@ -129,7 +129,7 @@ class TestGuildDetail:
                     # Return transaction result first, then stats result
                     mock_session.execute.side_effect = [mock_transaction_result, mock_stats_result]
                     
-                    response = authenticated_client.get("/admin/guilds/123456789012345678")
+                    response = authenticated_client.get("/bot-admin/guilds/123456789012345678")
                     
                     assert response.status_code == 200
                     assert b"Test Guild 1" in response.content
@@ -139,17 +139,17 @@ class TestGuildDetail:
         """Test guild detail with guild not found."""
         mock_get_guild.side_effect = GuildNotFoundError("Guild not found")
         
-        response = authenticated_client.get("/admin/guilds/invalid_guild_id")
+        response = authenticated_client.get("/bot-admin/guilds/invalid_guild_id")
         
         assert response.status_code == 404
         assert b"Guild invalid_guild_id not found" in response.content
     
     def test_guild_detail_requires_authentication(self, admin_client):
         """Test guild detail requires authentication."""
-        response = admin_client.get("/admin/guilds/123456789012345678", follow_redirects=False)
+        response = admin_client.get("/bot-admin/guilds/123456789012345678", follow_redirects=False)
         
         assert response.status_code == 303
-        assert "/admin/login" in response.headers["location"]
+        assert "/bot-admin/login" in response.headers["location"]
 
 
 class TestBytesConfig:
@@ -187,7 +187,7 @@ class TestBytesConfig:
                 mock_config_instance.get_config.side_effect = Exception("Config not found")
                 mock_config_instance.create_config.side_effect = Exception("Create failed")
                 
-                response = authenticated_client.get("/admin/guilds/123456789012345678/bytes")
+                response = authenticated_client.get("/bot-admin/guilds/123456789012345678/bytes")
                 
                 assert response.status_code == 200
                 assert b"Bytes Configuration" in response.content
@@ -226,7 +226,7 @@ class TestBytesConfig:
                 mock_redis_client.publish.return_value = None
                 
                 response = authenticated_client.post(
-                    "/admin/guilds/123456789012345678/bytes",
+                    "/bot-admin/guilds/123456789012345678/bytes",
                     data=sample_form_data
                 )
                 
@@ -238,17 +238,17 @@ class TestBytesConfig:
         """Test bytes config with guild not found."""
         mock_get_guild.side_effect = GuildNotFoundError("Guild not found")
         
-        response = authenticated_client.get("/admin/guilds/invalid_guild_id/bytes")
+        response = authenticated_client.get("/bot-admin/guilds/invalid_guild_id/bytes")
         
         assert response.status_code == 404
         assert b"Guild invalid_guild_id not found" in response.content
     
     def test_bytes_config_requires_authentication(self, admin_client):
         """Test bytes config requires authentication."""
-        response = admin_client.get("/admin/guilds/123456789012345678/bytes", follow_redirects=False)
+        response = admin_client.get("/bot-admin/guilds/123456789012345678/bytes", follow_redirects=False)
         
         assert response.status_code == 303
-        assert "/admin/login" in response.headers["location"]
+        assert "/bot-admin/login" in response.headers["location"]
 
 
 class TestSquadsConfig:
@@ -274,7 +274,7 @@ class TestSquadsConfig:
             mock_ops.return_value = mock_instance
             mock_instance.list_squads.return_value = []
             
-            response = authenticated_client.get("/admin/guilds/123456789012345678/squads")
+            response = authenticated_client.get("/bot-admin/guilds/123456789012345678/squads")
             
             assert response.status_code == 200
             assert b"Squad Management" in response.content
@@ -301,7 +301,7 @@ class TestSquadsConfig:
             mock_instance.list_squads.return_value = []
             
             response = authenticated_client.post(
-                "/admin/guilds/123456789012345678/squads",
+                "/bot-admin/guilds/123456789012345678/squads",
                 data=sample_squad_data
             )
             
@@ -331,7 +331,7 @@ class TestSquadsConfig:
             
             squad_id = str(uuid4())
             response = authenticated_client.post(
-                "/admin/guilds/123456789012345678/squads",
+                "/bot-admin/guilds/123456789012345678/squads",
                 data={
                     "action": "update",
                     "squad_id": squad_id,
@@ -367,7 +367,7 @@ class TestSquadsConfig:
             
             squad_id = str(uuid4())
             response = authenticated_client.post(
-                "/admin/guilds/123456789012345678/squads",
+                "/bot-admin/guilds/123456789012345678/squads",
                 data={
                     "action": "delete",
                     "squad_id": squad_id
@@ -382,17 +382,17 @@ class TestSquadsConfig:
         """Test squads config with guild not found."""
         mock_get_guild.side_effect = GuildNotFoundError("Guild not found")
         
-        response = authenticated_client.get("/admin/guilds/invalid_guild_id/squads")
+        response = authenticated_client.get("/bot-admin/guilds/invalid_guild_id/squads")
         
         assert response.status_code == 404
         assert b"Guild invalid_guild_id not found" in response.content
     
     def test_squads_config_requires_authentication(self, admin_client):
         """Test squads config requires authentication."""
-        response = admin_client.get("/admin/guilds/123456789012345678/squads", follow_redirects=False)
+        response = admin_client.get("/bot-admin/guilds/123456789012345678/squads", follow_redirects=False)
         
         assert response.status_code == 303
-        assert "/admin/login" in response.headers["location"]
+        assert "/bot-admin/login" in response.headers["location"]
 
 
 class TestViewErrorHandling:
@@ -403,7 +403,7 @@ class TestViewErrorHandling:
         """Test dashboard with unexpected error."""
         mock_get_guilds.side_effect = Exception("Unexpected error")
         
-        response = authenticated_client.get("/admin/")
+        response = authenticated_client.get("/bot-admin/")
         
         assert response.status_code == 200
         assert b"An unexpected error occurred" in response.content
@@ -413,7 +413,7 @@ class TestViewErrorHandling:
         """Test guild detail with unexpected error."""
         mock_get_guild.side_effect = Exception("Unexpected error")
         
-        response = authenticated_client.get("/admin/guilds/123456789012345678")
+        response = authenticated_client.get("/bot-admin/guilds/123456789012345678")
         
         assert response.status_code == 500
         assert b"An unexpected error occurred" in response.content
@@ -450,7 +450,7 @@ class TestViewErrorHandling:
                 mock_config_instance.get_config.side_effect = Exception("Config not found")
                 
                 response = authenticated_client.post(
-                    "/admin/guilds/123456789012345678/bytes",
+                    "/bot-admin/guilds/123456789012345678/bytes",
                     data={
                         "starting_balance": "invalid",  # Invalid data
                         "daily_amount": "10"

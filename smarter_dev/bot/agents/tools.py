@@ -17,14 +17,13 @@ from datetime import timedelta
 from typing import Any
 from urllib.parse import urlparse
 
+import os
 import re
 
 import dspy
 import httpx
 import pdfplumber
-from bs4 import BeautifulSoup
 from ddgs import DDGS
-from markdownify import markdownify as md
 from smarter_dev.bot.services.channel_state import get_channel_state_manager
 
 logger = logging.getLogger(__name__)
@@ -32,34 +31,9 @@ logger = logging.getLogger(__name__)
 # Custom user agent for the bot
 BOT_USER_AGENT = "Smarter Dev Discord Bot - admin@smarter.dev"
 
-# Tags to remove during HTML sanitization
-_STRIP_TAGS = {"script", "style", "head", "nav", "footer", "iframe", "noscript", "svg", "img", "link", "meta"}
-
-# Patterns for non-content class/id attributes
-_NON_CONTENT_PATTERNS = re.compile(r"sidebar|cookie|banner|ad-|ads-|advert|popup|modal|newsletter|social-share", re.IGNORECASE)
-
-
-def sanitize_html(html: str) -> str:
-    """Strip non-content elements from HTML before markdown conversion."""
-    soup = BeautifulSoup(html, "html.parser")
-
-    # Remove unwanted tags entirely
-    for tag in soup.find_all(_STRIP_TAGS):
-        tag.decompose()
-
-    # Remove elements with non-content class/id (collect first to avoid mutation during iteration)
-    to_remove = []
-    for el in soup.find_all(True):
-        if el.attrs is None:
-            continue
-        classes = " ".join(el.get("class", []))
-        el_id = el.get("id", "")
-        if _NON_CONTENT_PATTERNS.search(classes) or _NON_CONTENT_PATTERNS.search(el_id):
-            to_remove.append(el)
-    for el in to_remove:
-        el.decompose()
-
-    return str(soup)
+# Regex patterns for fallback HTML stripping (used when Jina is unavailable)
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def is_youtube_url(url: str) -> bool:
@@ -69,26 +43,56 @@ def is_youtube_url(url: str) -> bool:
     return hostname in ("www.youtube.com", "youtube.com", "youtu.be", "m.youtube.com")
 
 
+async def fetch_via_jina(url: str) -> dict[str, str] | None:
+    """Fetch a URL via Jina Reader API, returning markdown content.
+
+    Returns dict with keys ``title``, ``description``, ``content``, ``url``
+    on success, or ``None`` on failure.
+    """
+    api_key = os.environ.get("JINA_API_KEY", "")
+    headers: dict[str, str] = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(f"https://r.jina.ai/{url}", headers=headers)
+            if resp.status_code != 200:
+                logger.debug(f"[Tool] Jina Reader returned {resp.status_code} for {url}")
+                return None
+            data = resp.json().get("data", {})
+            return {
+                "title": data.get("title", ""),
+                "description": data.get("description", ""),
+                "content": data.get("content", ""),
+                "url": data.get("url", url),
+            }
+    except Exception as e:
+        logger.debug(f"[Tool] Jina Reader failed for {url}: {e}")
+        return None
+
+
 async def fetch_youtube_metadata(url: str) -> dict[str, str]:
-    """Fetch YouTube video metadata via oEmbed API. Returns dict with title, author, description."""
+    """Fetch YouTube video metadata via Jina Reader + oEmbed. Returns dict with title, author, description."""
     metadata: dict[str, str] = {}
     try:
+        # Use Jina Reader for title and description
+        jina_data = await fetch_via_jina(url)
+        if jina_data:
+            if jina_data["title"]:
+                metadata["title"] = jina_data["title"]
+            if jina_data["description"]:
+                metadata["description"] = jina_data["description"]
+
+        # oEmbed for author name (Jina doesn't reliably return channel name)
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # oEmbed for title and author
             oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
             resp = await client.get(oembed_url)
             if resp.status_code == 200:
                 data = resp.json()
-                metadata["title"] = data.get("title", "")
                 metadata["author"] = data.get("author_name", "")
-
-            # Fetch page for description from meta tags
-            page_resp = await client.get(url, follow_redirects=True, headers={"User-Agent": BOT_USER_AGENT})
-            if page_resp.status_code == 200:
-                soup = BeautifulSoup(page_resp.text, "html.parser")
-                desc_tag = soup.find("meta", attrs={"name": "description"})
-                if desc_tag:
-                    metadata["description"] = desc_tag.get("content", "")
+                # Backfill title from oEmbed if Jina didn't provide it
+                if "title" not in metadata and data.get("title"):
+                    metadata["title"] = data["title"]
     except Exception as e:
         logger.debug(f"[Tool] Could not fetch YouTube metadata: {e}")
     return metadata
@@ -1323,9 +1327,14 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                         # Process content based on content type
                         if "html" in content_type:
                             logger.debug(f"[Tool] Converting HTML to Markdown for {url}")
-                            html_content = response.text
-                            html_content = sanitize_html(html_content)
-                            content = md(html_content, heading_style="ATX")
+                            jina_result = await fetch_via_jina(url)
+                            if jina_result and jina_result["content"]:
+                                content = jina_result["content"]
+                            else:
+                                # Fallback: strip script/style then HTML tags
+                                raw = response.text
+                                raw = _SCRIPT_STYLE_RE.sub("", raw)
+                                content = _HTML_TAG_RE.sub("", raw)
                             content_type_str = "html"
 
                         elif "pdf" in content_type:
