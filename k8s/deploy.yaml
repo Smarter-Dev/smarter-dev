@@ -134,6 +134,26 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: brave-search-api-key
+                  - name: GITHUB_CLIENT_ID
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: github-client-id
+                  - name: GITHUB_CLIENT_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: github-client-secret
+                  - name: GOOGLE_CLIENT_ID
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: google-client-id
+                  - name: GOOGLE_CLIENT_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: google-client-secret
                   - name: SKRIFT_ENV
                     value: "production"
                 resources:
