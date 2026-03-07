@@ -1,5 +1,8 @@
 <nav class="site-nav">
     <a href="/" class="nav-logo">SMARTER <span class="dev">Dev</span></a>
+    <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
+        <span></span><span></span><span></span>
+    </button>
     <div class="nav-links">
         <div class="sk-connection-status" data-sk-status>
             <span class="sk-status-dot"></span>
@@ -11,3 +14,14 @@
         <a href="https://discord.gg/de8kajxbYS" target="_blank" data-sk-no-spa>Discord</a>
     </div>
 </nav>
+<script>
+(function(){
+    var btn = document.querySelector('.nav-toggle');
+    if (!btn) return;
+    btn.addEventListener('click', function(){
+        var links = document.querySelector('.nav-links');
+        var open = links.classList.toggle('open');
+        btn.setAttribute('aria-expanded', open);
+    });
+})();
+</script>
