@@ -1,33 +1,322 @@
 {% extends "base.html" %}
 
 {% block page_type %}scan-result{% endblock %}
-{% block page_title %}Research Result{% endblock %}
+{% block page_title %}{% if session and session.name %}{{ session.name }}{% else %}Research Result{% endif %}{% endblock %}
 
 {% block page_css %}
     <link rel="stylesheet" href="{{ theme_url('css/pages/research.css') }}">
     <style nonce="{{ csp_nonce() }}">
     .scan-sidebar-heading{font-family:var(--heading);font-size:.58rem;color:var(--mid);letter-spacing:.1em;margin-bottom:1rem}
     .scan-sidebar-empty{font-size:.75rem;color:var(--gray)}
+
+    /* Status badge */
+    .scan-status{font-family:var(--heading);font-size:.5rem;letter-spacing:.1em;padding:3px 10px;display:inline-block}
+    .scan-status-running{background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.25);color:var(--cyan);animation:scan-pulse 2s ease-in-out infinite}
+    .scan-status-complete{background:rgba(0,255,136,.08);border:1px solid rgba(0,255,136,.2);color:#0f8}
+    .scan-status-error{background:rgba(255,68,68,.08);border:1px solid rgba(255,68,68,.2);color:#f44}
+
+    /* Pulse animation */
+    @keyframes scan-pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+    /* Tool activity */
+    .scan-tools{margin:1.5rem 0;border:1px solid rgba(0,212,255,.06);background:var(--surface)}
+    .scan-tools-header{font-family:var(--heading);font-size:.55rem;letter-spacing:.1em;color:var(--mid);padding:.75rem 1rem;border-bottom:1px solid rgba(0,212,255,.06);cursor:pointer;display:flex;align-items:center;gap:.5rem;user-select:none}
+    .scan-tools-header::before{content:'';display:inline-block;width:0;height:0;border-left:5px solid var(--mid);border-top:4px solid transparent;border-bottom:4px solid transparent;transition:transform .2s}
+    .scan-tools[open] .scan-tools-header::before{transform:rotate(90deg)}
+    .scan-tools-list{padding:0;margin:0;list-style:none}
+    .scan-tool-entry{padding:.6rem 1rem;border-bottom:1px solid rgba(0,212,255,.04);font-size:.78rem;color:var(--light);display:flex;align-items:center;gap:.5rem}
+    .scan-tool-entry:last-child{border-bottom:none}
+    .scan-tool-name{font-family:var(--heading);font-size:.55rem;letter-spacing:.06em;color:var(--cyan)}
+    .scan-tool-args{color:var(--gray);font-size:.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:400px}
+    .scan-tool-running{animation:scan-pulse 1.5s ease-in-out infinite}
+    .scan-tool-done{cursor:pointer}
+    .scan-tool-done:hover{background:rgba(0,212,255,.03)}
+    .scan-tool-content{display:none;padding:.5rem 1rem .75rem;font-size:.72rem;color:var(--gray);line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow-y:auto;border-bottom:1px solid rgba(0,212,255,.04)}
+    .scan-tool-content.expanded{display:block}
+
+    /* Response area */
+    .scan-response{min-height:100px}
+    .scan-response-empty{color:var(--gray);font-size:.85rem;font-style:italic}
+
+    /* Action bar */
+    .scan-actions{display:flex;gap:8px;margin-top:2rem;padding-top:1.5rem;border-top:1px solid rgba(0,212,255,.06)}
+    .scan-action-btn{font-family:var(--heading);font-size:.5rem;letter-spacing:.1em;padding:.5rem 1.2rem;background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.12);color:var(--cyan);cursor:pointer;transition:all .2s}
+    .scan-action-btn:hover{background:rgba(0,212,255,.14);border-color:var(--cyan)}
+
+    /* Timer */
+    .scan-timer{font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.04em}
     </style>
 {% endblock %}
 
 {% block content %}
 <div class="report-header">
-    <div class="report-query">Research Result</div>
+    <div class="report-query">{% if session and session.name %}{{ session.name }}{% else %}Research Result{% endif %}</div>
     <div class="report-meta">
+        {% if session %}
+        <span class="meta-item"><strong>QUERY</strong> {{ session.query }}</span>
+        <span class="meta-item">
+            <strong>STATUS</strong>
+            <span id="scan-status" class="scan-status scan-status-{{ session.status }}">{{ session.status|upper }}</span>
+        </span>
+        <span class="meta-item"><strong>TIME</strong> <span id="scan-timer" class="scan-timer">--</span></span>
+        {% else %}
         <span class="meta-item"><strong>ID</strong> {{ result_id }}</span>
-        <span class="meta-item"><strong>STATUS</strong> Pending</span>
+        <span class="meta-item"><strong>STATUS</strong> Not found</span>
+        {% endif %}
     </div>
 </div>
 
+{% if session %}
 <div class="report-layout">
     <aside>
         <h3 class="scan-sidebar-heading">SOURCES</h3>
-        <p class="scan-sidebar-empty">No sources yet</p>
+        {% if session.status == 'complete' and session.sources %}
+        <ul style="list-style:none;padding:0;margin:0">
+            {% for src in session.sources %}
+            <li style="margin-bottom:.6rem">
+                <a href="{{ src.url if src.url is defined else src['url'] }}" target="_blank" rel="noopener" style="font-size:.72rem;color:var(--cyan);text-decoration:none">
+                    {{ src.title if src.title is defined else src['title'] }}
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="scan-sidebar-empty" id="scan-sources-empty">No sources yet</p>
+        {% endif %}
     </aside>
 
     <div class="report-content">
-        <p>This research result is not yet available. When the Scan API is connected, full results will be displayed here with source citations, code examples, and follow-up context.</p>
+        <!-- Tool activity -->
+        <details class="scan-tools" id="scan-tools" {% if session.status == 'running' %}open{% endif %}>
+            <summary class="scan-tools-header">TOOL ACTIVITY <span id="scan-tool-count">({% if session.tool_log %}{{ session.tool_log|length }}{% else %}0{% endif %})</span></summary>
+            <ul class="scan-tools-list" id="scan-tools-list">
+                {% if session.status != 'running' and session.tool_log %}
+                {% for entry in session.tool_log %}
+                <li class="scan-tool-entry scan-tool-done" onclick="this.nextElementSibling&&this.nextElementSibling.classList.toggle('expanded')">
+                    <span class="scan-tool-name">{{ entry.tool if entry.tool is defined else entry['tool'] }}</span>
+                    <span class="scan-tool-args">{{ (entry.input if entry.input is defined else entry['input'])|string|truncate(80) }}</span>
+                </li>
+                {% if entry.content is defined or entry.get is callable %}
+                <div class="scan-tool-content">{{ entry.content if entry.content is defined else entry.get('content', '') }}</div>
+                {% else %}
+                <div class="scan-tool-content"></div>
+                {% endif %}
+                {% endfor %}
+                {% endif %}
+            </ul>
+        </details>
+
+        <!-- Response -->
+        <div class="scan-response" id="scan-response">
+            {% if session.status == 'complete' and session.response %}
+            {{ session.response }}
+            {% elif session.status == 'error' %}
+            <p style="color:#f44">{{ session.error_message }}</p>
+            {% elif session.status == 'running' %}
+            <p class="scan-response-empty" id="scan-response-placeholder">Researching...</p>
+            {% else %}
+            <p class="scan-response-empty">No response available.</p>
+            {% endif %}
+        </div>
+
+        <!-- Action bar (visible after completion) -->
+        <div class="scan-actions" id="scan-actions" style="{% if session.status != 'complete' %}display:none{% endif %}">
+            <button class="scan-action-btn" id="scan-copy-btn" type="button">COPY</button>
+            <button class="scan-action-btn" id="scan-download-btn" type="button">DOWNLOAD</button>
+        </div>
     </div>
 </div>
+{% else %}
+<div class="report-layout">
+    <aside>
+        <h3 class="scan-sidebar-heading">SOURCES</h3>
+        <p class="scan-sidebar-empty">Not found</p>
+    </aside>
+    <div class="report-content">
+        <p>This research session was not found.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block page_scripts %}
+{% if session and session.status == 'running' %}
+<script nonce="{{ csp_nonce() }}">
+(function() {
+    const startedAt = new Date("{{ session.created_at.isoformat() }}Z");
+    const timerEl = document.getElementById("scan-timer");
+    const statusEl = document.getElementById("scan-status");
+    const toolsList = document.getElementById("scan-tools-list");
+    const toolsDetail = document.getElementById("scan-tools");
+    const toolCount = document.getElementById("scan-tool-count");
+    const responseEl = document.getElementById("scan-response");
+    const placeholder = document.getElementById("scan-response-placeholder");
+    const actionsEl = document.getElementById("scan-actions");
+    let responseText = "";
+    let toolEntryCount = 0;
+    let timerInterval;
+    let completed = false;
+
+    function formatDuration(ms) {
+        const s = Math.floor(ms / 1000);
+        const m = Math.floor(s / 60);
+        const rem = s % 60;
+        return m > 0 ? m + "m " + rem + "s" : rem + "s";
+    }
+
+    timerInterval = setInterval(function() {
+        if (completed) return;
+        timerEl.textContent = formatDuration(Date.now() - startedAt.getTime());
+    }, 1000);
+    timerEl.textContent = formatDuration(Date.now() - startedAt.getTime());
+
+    document.addEventListener("sk:notification", function(e) {
+        const data = e.detail;
+        if (!data || !data.type) return;
+
+        // Suppress default toast rendering
+        e.preventDefault();
+
+        if (data.type === "tool_use") {
+            toolEntryCount++;
+            toolCount.textContent = "(" + toolEntryCount + ")";
+            const li = document.createElement("li");
+            li.className = "scan-tool-entry scan-tool-running";
+            li.dataset.tool = data.tool || "";
+            li.innerHTML =
+                '<span class="scan-tool-name">' + (data.tool || "tool") + '</span>' +
+                '<span class="scan-tool-args">' + escapeHtml(summarizeArgs(data.input)) + '</span>';
+            const contentDiv = document.createElement("div");
+            contentDiv.className = "scan-tool-content";
+            toolsList.appendChild(li);
+            toolsList.appendChild(contentDiv);
+        }
+
+        else if (data.type === "tool_result") {
+            const entries = toolsList.querySelectorAll(".scan-tool-entry.scan-tool-running");
+            for (const entry of entries) {
+                if (entry.dataset.tool === data.tool) {
+                    entry.classList.remove("scan-tool-running");
+                    entry.classList.add("scan-tool-done");
+                    entry.onclick = function() {
+                        const next = this.nextElementSibling;
+                        if (next && next.classList.contains("scan-tool-content")) {
+                            next.classList.toggle("expanded");
+                        }
+                    };
+                    const contentDiv = entry.nextElementSibling;
+                    if (contentDiv && contentDiv.classList.contains("scan-tool-content") && data.content) {
+                        contentDiv.textContent = data.content;
+                    }
+                    break;
+                }
+            }
+        }
+
+        else if (data.type === "response_chunk") {
+            if (placeholder) placeholder.remove();
+            responseText += (data.delta || "");
+            responseEl.textContent = responseText;
+        }
+
+        else if (data.type === "complete") {
+            completed = true;
+            clearInterval(timerInterval);
+
+            statusEl.textContent = "COMPLETE";
+            statusEl.className = "scan-status scan-status-complete";
+
+            if (data.duration) {
+                timerEl.textContent = data.duration + "s";
+            }
+
+            if (data.response) {
+                responseText = data.response;
+                responseEl.textContent = responseText;
+            }
+
+            if (placeholder) placeholder.remove();
+
+            // Collapse tools
+            if (toolsDetail) toolsDetail.removeAttribute("open");
+
+            // Show actions
+            actionsEl.style.display = "flex";
+        }
+
+        else if (data.type === "error") {
+            completed = true;
+            clearInterval(timerInterval);
+
+            statusEl.textContent = "ERROR";
+            statusEl.className = "scan-status scan-status-error";
+
+            if (placeholder) placeholder.remove();
+            responseEl.innerHTML = '<p style="color:#f44">' + escapeHtml(data.error || "Unknown error") + '</p>';
+        }
+    });
+
+    // Copy button
+    document.getElementById("scan-copy-btn").addEventListener("click", function() {
+        navigator.clipboard.writeText(responseText).then(function() {
+            const btn = document.getElementById("scan-copy-btn");
+            btn.textContent = "COPIED";
+            setTimeout(function() { btn.textContent = "COPY"; }, 2000);
+        });
+    });
+
+    // Download button
+    document.getElementById("scan-download-btn").addEventListener("click", function() {
+        const blob = new Blob([responseText], { type: "text/markdown" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "scan-result.md";
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    function escapeHtml(str) {
+        const div = document.createElement("div");
+        div.textContent = str || "";
+        return div.innerHTML;
+    }
+
+    function summarizeArgs(input) {
+        if (!input || typeof input !== "object") return "";
+        const parts = [];
+        for (const [k, v] of Object.entries(input)) {
+            const val = typeof v === "string" ? v : JSON.stringify(v);
+            parts.push(k + "=" + (val.length > 60 ? val.slice(0, 60) + "..." : val));
+        }
+        return parts.join(", ");
+    }
+})();
+</script>
+{% elif session and session.status == 'complete' %}
+<script nonce="{{ csp_nonce() }}">
+(function() {
+    const responseEl = document.getElementById("scan-response");
+    const responseText = responseEl ? responseEl.textContent : "";
+
+    document.getElementById("scan-copy-btn").addEventListener("click", function() {
+        navigator.clipboard.writeText(responseText).then(function() {
+            const btn = document.getElementById("scan-copy-btn");
+            btn.textContent = "COPIED";
+            setTimeout(function() { btn.textContent = "COPY"; }, 2000);
+        });
+    });
+
+    document.getElementById("scan-download-btn").addEventListener("click", function() {
+        const blob = new Blob([responseText], { type: "text/markdown" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "scan-result.md";
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+})();
+</script>
+{% endif %}
 {% endblock %}

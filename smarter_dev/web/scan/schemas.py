@@ -38,6 +38,7 @@ class SourceSchema(BaseModel):
 class ResearchSessionSchema(BaseModel):
     id: UUID
     query: str
+    name: str | None = None
     user_id: str
     guild_id: str | None = None
     channel_id: str | None = None

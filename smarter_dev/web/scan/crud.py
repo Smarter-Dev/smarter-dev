@@ -21,12 +21,14 @@ class ResearchSessionOperations:
         session: AsyncSession,
         query: str,
         user_id: str,
+        name: str | None = None,
         guild_id: str | None = None,
         channel_id: str | None = None,
         context: dict | None = None,
     ) -> ResearchSession:
         research = ResearchSession(
             query=query,
+            name=name,
             user_id=user_id,
             guild_id=guild_id,
             channel_id=channel_id,

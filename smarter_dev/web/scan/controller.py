@@ -1,13 +1,19 @@
 """Scan subdomain controllers for scan.smarter.dev."""
 
 import logging
+from typing import Annotated
 
-from litestar import Controller, Request, get
-from litestar.response import Template
+from litestar import Controller, Request, get, post
+from litestar.enums import RequestEncodingType
+from litestar.params import Body
+from litestar.response import Redirect, Template
+from skrift.auth.guards import Permission, auth_guard
 from skrift.lib.notifications import subscribe_source, _ensure_nid
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.web.scan.agent import generate_session_name
 from smarter_dev.web.scan.crud import ResearchSessionOperations
+from smarter_dev.web.scan.runner import start_research_task
 
 logger = logging.getLogger(__name__)
 ops = ResearchSessionOperations()
@@ -19,9 +25,37 @@ class ScanController(Controller):
     path = "/"
 
     @get("/")
-    async def landing(self) -> Template:
+    async def landing(self, request: Request) -> Template:
         """Scan landing page with search input and topic grid."""
-        return Template("scan/landing.html")
+        user_id = request.session.get("user_id") if request.session else None
+        return Template("scan/landing.html", context={"user_id": user_id})
+
+    @post(
+        "/",
+        guards=[auth_guard, Permission("use-scan")],
+    )
+    async def submit(
+        self,
+        request: Request,
+        db_session: AsyncSession,
+        data: Annotated[dict, Body(media_type=RequestEncodingType.URL_ENCODED)],
+    ) -> Redirect:
+        """Submit a research query."""
+        query = data.get("query", "").strip()
+        if not query:
+            return Redirect(path="/")
+
+        user_id = request.session.get("user_id", "")
+        name = await generate_session_name(query)
+
+        research = await ops.create_session(
+            db_session, query=query, user_id=user_id, name=name
+        )
+        await db_session.commit()
+
+        start_research_task(research.id, query, user_id)
+
+        return Redirect(path=f"/r/{research.id}")
 
     @get("/r/{result_id:str}")
     async def result(
@@ -31,8 +65,6 @@ class ScanController(Controller):
         session_data = await ops.get_session(db_session, result_id)
 
         if session_data and session_data.status == "running":
-            # Subscribe the visitor's Skrift session to the research source
-            # so they receive timeseries notifications via /notifications/stream
             nid = _ensure_nid(request)
             if nid:
                 await subscribe_source(f"session:{nid}", f"research:{result_id}")
