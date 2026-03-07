@@ -69,7 +69,7 @@
             <strong>STATUS</strong>
             <span id="scan-status" class="scan-status scan-status-{{ session.status }}">{{ session.status|upper }}</span>
         </span>
-        <span class="meta-item"><strong>TIME</strong> <span id="scan-timer" class="scan-timer">--</span></span>
+        <span class="meta-item"><strong>TIME</strong> <span id="scan-timer" class="scan-timer">{% if session.status == 'complete' %}{{ ((session.updated_at - session.created_at).total_seconds()|round(0)|int) }}s{% else %}--{% endif %}</span></span>
         {% else %}
         <span class="meta-item"><strong>ID</strong> {{ result_id }}</span>
         <span class="meta-item"><strong>STATUS</strong> Not found</span>
@@ -79,23 +79,6 @@
 
 {% if session %}
 <div class="report-layout">
-    <aside>
-        <h3 class="scan-sidebar-heading">SOURCES</h3>
-        {% if session.status == 'complete' and session.sources %}
-        <ul class="scan-sources-list">
-            {% for src in session.sources %}
-            <li>
-                <a href="{{ src.url if src.url is defined else src['url'] }}" target="_blank" rel="noopener" class="scan-source-link">
-                    {{ src.title if src.title is defined else src['title'] }}
-                </a>
-            </li>
-            {% endfor %}
-        </ul>
-        {% else %}
-        <p class="scan-sidebar-empty" id="scan-sources-empty">No sources yet</p>
-        {% endif %}
-    </aside>
-
     <div class="report-content">
         <!-- Tool activity -->
         <details class="scan-tools" id="scan-tools" {% if session.status == 'running' %}open{% endif %}>
@@ -136,16 +119,33 @@
             <button class="scan-action-btn" id="scan-download-btn" type="button">DOWNLOAD</button>
         </div>
     </div>
+
+    <aside>
+        <h3 class="scan-sidebar-heading">SOURCES</h3>
+        {% if session.status == 'complete' and session.sources %}
+        <ul class="scan-sources-list">
+            {% for src in session.sources %}
+            <li>
+                <a href="{{ src.url if src.url is defined else src['url'] }}" target="_blank" rel="noopener" class="scan-source-link">
+                    {{ src.title if src.title is defined else src['title'] }}
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="scan-sidebar-empty" id="scan-sources-empty">No sources yet</p>
+        {% endif %}
+    </aside>
 </div>
 {% else %}
 <div class="report-layout">
+    <div class="report-content">
+        <p>This research session was not found.</p>
+    </div>
     <aside>
         <h3 class="scan-sidebar-heading">SOURCES</h3>
         <p class="scan-sidebar-empty">Not found</p>
     </aside>
-    <div class="report-content">
-        <p>This research session was not found.</p>
-    </div>
 </div>
 {% endif %}
 {% endblock %}

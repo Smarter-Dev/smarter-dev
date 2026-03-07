@@ -46,6 +46,7 @@ class ScanController(Controller):
             return Redirect(path="/")
 
         user_id = request.session.get("user_id", "")
+        tz = data.get("tz", "").strip() or None
         name = await generate_session_name(query)
 
         research = await ops.create_session(
@@ -53,7 +54,7 @@ class ScanController(Controller):
         )
         await db_session.commit()
 
-        start_research_task(research.id, query, user_id)
+        start_research_task(research.id, query, user_id, tz=tz)
 
         return Redirect(path=f"/r/{research.id}")
 

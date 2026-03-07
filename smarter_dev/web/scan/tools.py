@@ -18,25 +18,34 @@ logger = logging.getLogger(__name__)
 USER_AGENT = "Smarter Dev Scan Agent - admin@smarter.dev"
 
 
-class URLRateLimiter:
-    """Enforces a minimum delay between requests to the same domain."""
+class RateLimiter:
+    """Enforces a minimum delay between requests to the same key."""
 
-    MIN_DELAY_SECONDS = 5
-
-    def __init__(self) -> None:
+    def __init__(self, min_delay: float = 5.0) -> None:
+        self._min_delay = min_delay
         self._last_request: dict[str, datetime] = {}
         self._lock = asyncio.Lock()
 
-    async def wait_if_needed(self, url: str) -> None:
+    async def wait(self, key: str = "__global__") -> None:
         async with self._lock:
-            domain = urlparse(url).netloc
-            if domain in self._last_request:
-                elapsed = (datetime.now() - self._last_request[domain]).total_seconds()
-                if elapsed < self.MIN_DELAY_SECONDS:
-                    wait = self.MIN_DELAY_SECONDS - elapsed
-                    logger.debug("Rate limit: waiting %.1fs for %s", wait, domain)
+            if key in self._last_request:
+                elapsed = (datetime.now() - self._last_request[key]).total_seconds()
+                if elapsed < self._min_delay:
+                    wait = self._min_delay - elapsed
+                    logger.debug("Rate limit: waiting %.1fs for %s", wait, key)
                     await asyncio.sleep(wait)
-            self._last_request[domain] = datetime.now()
+            self._last_request[key] = datetime.now()
+
+
+class URLRateLimiter(RateLimiter):
+    """Per-domain rate limiter for URL requests."""
+
+    def __init__(self, min_delay: float = 5.0) -> None:
+        super().__init__(min_delay)
+
+    async def wait_if_needed(self, url: str) -> None:
+        domain = urlparse(url).netloc
+        await self.wait(domain)
 
 
 async def brave_search(
