@@ -81,6 +81,7 @@ sites:
   scan:
     subdomain: scan
     controllers:
+      - skrift.controllers.notifications:NotificationsController
       - smarter_dev.web.scan.controller:ScanController
 
 # Legacy site — existing Starlette app serves from subdomain
