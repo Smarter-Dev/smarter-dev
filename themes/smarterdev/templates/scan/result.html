@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block page_type %}scan-result{% endblock %}
+{% block page_title %}Research Result{% endblock %}
+
+{% block page_css %}
+    <link rel="stylesheet" href="{{ theme_url('css/pages/research.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="report-header">
+    <div class="report-query">Research Result</div>
+    <div class="report-meta">
+        <span class="meta-item"><strong>ID</strong> {{ result_id }}</span>
+        <span class="meta-item"><strong>STATUS</strong> Pending</span>
+    </div>
+</div>
+
+<div class="report-layout">
+    <aside>
+        <h3 style="font-family: var(--heading); font-size: .58rem; color: var(--mid); letter-spacing: .1em; margin-bottom: 1rem;">SOURCES</h3>
+        <p style="font-size: .75rem; color: var(--gray);">No sources yet</p>
+    </aside>
+
+    <div class="report-content">
+        <p>This research result is not yet available. When the Scan API is connected, full results will be displayed here with source citations, code examples, and follow-up context.</p>
+    </div>
+</div>
+{% endblock %}
