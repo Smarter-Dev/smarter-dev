@@ -1,0 +1,62 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Create API Key - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Create API Key</h1>
+    <p><a href="/admin/api-keys">&larr; Back to API Keys</a></p>
+</hgroup>
+
+<form method="post" action="/admin/api-keys">
+    {{ csrf_field() }}
+
+    <label for="name">Name</label>
+    <input type="text" id="name" name="name" required placeholder="e.g. Discord Bot, Scan Service">
+    <small class="sk-text-muted">A human-readable name to identify this key</small>
+
+    <label for="description">Description</label>
+    <textarea id="description" name="description" rows="2" placeholder="Optional description of what this key is used for"></textarea>
+    <small class="sk-text-muted">Optional notes about the key's purpose</small>
+
+    <label>Scopes</label>
+    <small class="sk-text-muted">Select the permissions this key should have</small>
+
+    <fieldset>
+        <legend>Bot</legend>
+        <label><input type="checkbox" name="scopes" value="bot:read"> bot:read</label>
+        <label><input type="checkbox" name="scopes" value="bot:write"> bot:write</label>
+        <label><input type="checkbox" name="scopes" value="bot:manage"> bot:manage</label>
+    </fieldset>
+
+    <fieldset>
+        <legend>Admin</legend>
+        <label><input type="checkbox" name="scopes" value="admin:read"> admin:read</label>
+        <label><input type="checkbox" name="scopes" value="admin:write"> admin:write</label>
+        <label><input type="checkbox" name="scopes" value="admin:manage"> admin:manage</label>
+    </fieldset>
+
+    <fieldset>
+        <legend>System</legend>
+        <label><input type="checkbox" name="scopes" value="system:read"> system:read</label>
+        <label><input type="checkbox" name="scopes" value="system:write"> system:write</label>
+        <label><input type="checkbox" name="scopes" value="system:manage"> system:manage</label>
+    </fieldset>
+
+    <fieldset>
+        <legend>Scan</legend>
+        <label><input type="checkbox" name="scopes" value="scan:read"> scan:read</label>
+        <label><input type="checkbox" name="scopes" value="scan:write"> scan:write</label>
+        <label><input type="checkbox" name="scopes" value="scan:manage"> scan:manage</label>
+    </fieldset>
+
+    <label for="rate_limit_per_hour">Rate Limit (per hour)</label>
+    <input type="number" id="rate_limit_per_hour" name="rate_limit_per_hour" value="1000" min="1">
+    <small class="sk-text-muted">Maximum number of API requests allowed per hour</small>
+
+    <div class="sk-form-actions">
+        <button type="submit">Create API Key</button>
+        <a href="/admin/api-keys" role="button" class="sk-btn-outline">Cancel</a>
+    </div>
+</form>
+{% endblock %}

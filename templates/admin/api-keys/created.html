@@ -1,0 +1,44 @@
+{% extends "admin/base.html" %}
+
+{% block title %}API Key Created - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>API Key Created</h1>
+    <p>Your new API key for <strong>{{ api_key.name }}</strong></p>
+</hgroup>
+
+<article style="border: 1.5px solid var(--sk-color-warning, #f59e0b); border-radius: var(--sk-radius-lg, 8px); padding: var(--sk-space-md, 1rem); margin-bottom: var(--sk-space-lg, 1.5rem); background: rgba(245, 158, 11, 0.06);">
+    <p><strong>Copy this key now.</strong> It will not be shown again.</p>
+    <code style="display: block; padding: var(--sk-space-sm, 0.5rem); background: var(--sk-color-surface, #1a1a2e); border-radius: var(--sk-radius-sm, 4px); word-break: break-all; font-size: 0.95rem; user-select: all;">{{ plaintext_key }}</code>
+</article>
+
+<table class="sk-admin-table">
+    <tbody>
+        <tr>
+            <td><strong>Name</strong></td>
+            <td>{{ api_key.name }}</td>
+        </tr>
+        <tr>
+            <td><strong>Prefix</strong></td>
+            <td><code>{{ api_key.key_prefix }}...</code></td>
+        </tr>
+        <tr>
+            <td><strong>Scopes</strong></td>
+            <td>
+                {% for scope in api_key.scopes %}
+                <span class="sk-role-badge">{{ scope }}</span>
+                {% endfor %}
+            </td>
+        </tr>
+        <tr>
+            <td><strong>Rate Limit</strong></td>
+            <td>{{ api_key.rate_limit_per_hour }}/hr</td>
+        </tr>
+    </tbody>
+</table>
+
+<div class="sk-form-actions">
+    <a href="/admin/api-keys" role="button">Back to API Keys</a>
+</div>
+{% endblock %}
