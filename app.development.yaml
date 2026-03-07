@@ -1,6 +1,7 @@
 site_name: Smarter Dev
 theme: smarterdev
 debug: true
+domain: localhost
 
 db:
   url: $DATABASE_URL
@@ -26,6 +27,7 @@ controllers:
   - smarter_dev.web.controllers:bot_admin_mount
   - smarter_dev.web.campaign_signups_admin:CampaignSignupsAdminController
   - smarter_dev.web.campaign_signups_api:CampaignSignupsApiController
+  - smarter_dev.web.api_keys_admin:APIKeyAdminController
 
 page_types:
   - name: post
@@ -40,3 +42,9 @@ security_headers:
 
 rate_limit:
   enabled: false
+
+sites:
+  scan:
+    subdomain: scan
+    controllers:
+      - smarter_dev.web.scan.controller:ScanController

@@ -1,12 +1,18 @@
 site_name: Smarter Dev
 theme: smarterdev
+domain: smarter.dev
 
 db:
   url: $DATABASE_URL
   schema: skrift
 
+session:
+  cookie_domain: ".smarter.dev"
+
 auth:
   redirect_base_url: "https://smarter.dev"
+  allowed_redirect_domains:
+    - "*.smarter.dev"
   providers:
     discord:
       client_id: $DISCORD_APPLICATION_ID
@@ -25,6 +31,7 @@ controllers:
   - smarter_dev.web.controllers:bot_admin_mount
   - smarter_dev.web.campaign_signups_admin:CampaignSignupsAdminController
   - smarter_dev.web.campaign_signups_api:CampaignSignupsApiController
+  - smarter_dev.web.api_keys_admin:APIKeyAdminController
 
 # Partials system (SPA navigation)
 partials:
@@ -50,6 +57,12 @@ storage:
         secret_access_key: $SPACES_SECRET_KEY
         acl: public-read
         public_url: https://production-bucket-zechz-1234.sfo3.digitaloceanspaces.com
+
+sites:
+  scan:
+    subdomain: scan
+    controllers:
+      - smarter_dev.web.scan.controller:ScanController
 
 # Legacy site — existing Starlette app serves from subdomain
 legacy:
