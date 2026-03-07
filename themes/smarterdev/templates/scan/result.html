@@ -5,6 +5,10 @@
 
 {% block page_css %}
     <link rel="stylesheet" href="{{ theme_url('css/pages/research.css') }}">
+    <style nonce="{{ csp_nonce() }}">
+    .scan-sidebar-heading{font-family:var(--heading);font-size:.58rem;color:var(--mid);letter-spacing:.1em;margin-bottom:1rem}
+    .scan-sidebar-empty{font-size:.75rem;color:var(--gray)}
+    </style>
 {% endblock %}
 
 {% block content %}
@@ -18,8 +22,8 @@
 
 <div class="report-layout">
     <aside>
-        <h3 style="font-family: var(--heading); font-size: .58rem; color: var(--mid); letter-spacing: .1em; margin-bottom: 1rem;">SOURCES</h3>
-        <p style="font-size: .75rem; color: var(--gray);">No sources yet</p>
+        <h3 class="scan-sidebar-heading">SOURCES</h3>
+        <p class="scan-sidebar-empty">No sources yet</p>
     </aside>
 
     <div class="report-content">

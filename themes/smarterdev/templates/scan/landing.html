@@ -5,24 +5,33 @@
 
 {% block page_css %}
     <link rel="stylesheet" href="{{ theme_url('css/pages/research.css') }}">
+    <style nonce="{{ csp_nonce() }}">
+    .scan-title{font-family:var(--display);font-size:clamp(2rem,5vw,3.2rem);color:var(--white);letter-spacing:.06em;margin-bottom:.75rem;text-shadow:0 0 40px rgba(0,212,255,.1)}
+    .scan-subtitle{font-family:var(--heading);font-size:.65rem;color:var(--mid);letter-spacing:.12em;margin-bottom:2.5rem}
+    .scan-form{position:relative;max-width:600px;margin:0 auto}
+    .scan-input{width:100%;padding:1rem 1.25rem;font-size:.95rem;font-family:var(--body);background:var(--surface);border:1px solid rgba(0,212,255,.12);color:var(--white);outline:none;opacity:.5;cursor:not-allowed}
+    .scan-coming-soon{font-family:var(--heading);font-size:.5rem;color:var(--gray);letter-spacing:.08em;margin-top:.75rem}
+    .scan-section-heading{font-family:var(--heading);font-size:.65rem;color:var(--mid);letter-spacing:.12em}
+    .scan-placeholder-card{opacity:.35;cursor:default}
+    .scan-topic-card-disabled{cursor:default}
+    </style>
 {% endblock %}
 
 {% block content %}
 <section class="launch-pad">
-    <h1 style="font-family: var(--display); font-size: clamp(2rem, 5vw, 3.2rem); color: var(--white); letter-spacing: .06em; margin-bottom: .75rem; text-shadow: 0 0 40px rgba(0,212,255,.1);">Scan</h1>
-    <p style="font-family: var(--heading); font-size: .65rem; color: var(--mid); letter-spacing: .12em; margin-bottom: 2.5rem;">RESEARCH ENGINE</p>
+    <h1 class="scan-title">Scan</h1>
+    <p class="scan-subtitle">RESEARCH ENGINE</p>
 
-    <form style="position: relative; max-width: 600px; margin: 0 auto;">
-        <input type="text" disabled placeholder="What do you want to research?"
-               style="width: 100%; padding: 1rem 1.25rem; font-size: .95rem; font-family: var(--body); background: var(--surface); border: 1px solid rgba(0,212,255,.12); color: var(--white); outline: none; opacity: .5; cursor: not-allowed;">
-        <p style="font-family: var(--heading); font-size: .5rem; color: var(--gray); letter-spacing: .08em; margin-top: .75rem;">COMING SOON</p>
+    <form class="scan-form">
+        <input type="text" disabled placeholder="What do you want to research?" class="scan-input">
+        <p class="scan-coming-soon">COMING SOON</p>
     </form>
 </section>
 
 <section class="history-section">
-    <h2 style="font-family: var(--heading); font-size: .65rem; color: var(--mid); letter-spacing: .12em;">RECENT SCANS</h2>
+    <h2 class="scan-section-heading">RECENT SCANS</h2>
     <div class="history-grid">
-        <div class="history-card" style="opacity: .35; cursor: default;">
+        <div class="history-card scan-placeholder-card">
             <div class="history-query">No scans yet</div>
             <div class="history-meta">
                 <span class="history-time">Results will appear here</span>
@@ -32,19 +41,19 @@
 </section>
 
 <section class="topics-section">
-    <h2 style="font-family: var(--heading); font-size: .65rem; color: var(--mid); letter-spacing: .12em;">TOPICS</h2>
+    <h2 class="scan-section-heading">TOPICS</h2>
     <div class="topics-grid">
-        <div class="topic-card" style="cursor: default;">
+        <div class="topic-card scan-topic-card-disabled">
             <div class="topic-tag">FRAMEWORKS</div>
             <div class="topic-title">Web Frameworks</div>
             <div class="topic-desc">FastAPI, Litestar, Django, Flask — architecture, patterns, and best practices</div>
         </div>
-        <div class="topic-card" style="cursor: default;">
+        <div class="topic-card scan-topic-card-disabled">
             <div class="topic-tag">INFRASTRUCTURE</div>
             <div class="topic-title">DevOps & Deployment</div>
             <div class="topic-desc">Kubernetes, containers, CI/CD pipelines, and cloud infrastructure</div>
         </div>
-        <div class="topic-card" style="cursor: default;">
+        <div class="topic-card scan-topic-card-disabled">
             <div class="topic-tag">SECURITY</div>
             <div class="topic-title">Application Security</div>
             <div class="topic-desc">OWASP, auth patterns, secrets management, and vulnerability research</div>
