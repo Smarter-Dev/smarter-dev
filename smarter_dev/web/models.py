@@ -3252,6 +3252,7 @@ class ResearchSession(Base):
         default=uuid4,
     )
     query: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     user_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     guild_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     channel_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)

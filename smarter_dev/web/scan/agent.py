@@ -12,7 +12,7 @@ from pydantic_ai import Agent, RunContext
 from smarter_dev.web.scan import tools
 from smarter_dev.web.scan.tools import URLRateLimiter
 
-MODEL = "google-gla:gemini-2.0-flash-lite"
+MODEL = "google-gla:gemini-3.1-flash-lite-preview"
 
 
 @dataclass
@@ -57,6 +57,21 @@ research_agent = Agent(
     output_type=ResearchResult,
     instructions=SYSTEM_PROMPT,
 )
+
+
+_naming_agent = Agent(
+    output_type=str,
+    instructions="Generate a short title (3-8 words) for this research query. Return only the title, no quotes.",
+)
+
+
+async def generate_session_name(query: str) -> str:
+    """Generate a short descriptive name for a research session."""
+    try:
+        result = await _naming_agent.run(query, model=MODEL)
+        return result.output[:200]
+    except Exception:
+        return query[:200]
 
 
 @research_agent.tool

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from uuid import UUID
 
 import httpx
@@ -16,6 +17,8 @@ from pydantic_ai.messages import (
     FinalResultEvent,
     FunctionToolCallEvent,
     FunctionToolResultEvent,
+    PartDeltaEvent,
+    TextPartDelta,
 )
 from skrift.lib.notifications import NotificationMode, notify_source
 
@@ -55,6 +58,7 @@ async def run_research(
     subscribe to that source to receive live updates.
     """
     sid = str(session_id)
+    start_time = time.monotonic()
 
     await _emit(sid, "status", stage="planning", message="Analyzing query...")
 
@@ -93,15 +97,25 @@ async def run_research(
 
                 elif isinstance(event, FunctionToolResultEvent):
                     tool_name = event.result.tool_name
+                    content = str(event.result.content)[:5120]
                     await _emit(
                         sid, "tool_result",
                         tool=tool_name,
                         status="complete",
+                        content=content,
                     )
                     for entry in reversed(tool_log):
                         if entry["tool"] == tool_name and entry["status"] == "running":
                             entry["status"] = "complete"
+                            entry["content"] = content
                             break
+
+                elif isinstance(event, PartDeltaEvent):
+                    if isinstance(event.delta, TextPartDelta):
+                        await _emit(
+                            sid, "response_chunk",
+                            delta=event.delta.content_delta,
+                        )
 
                 elif isinstance(event, FinalResultEvent):
                     await _emit(
@@ -115,6 +129,8 @@ async def run_research(
 
             if result_data is None:
                 raise RuntimeError("Agent completed without producing a result")
+
+            duration = time.monotonic() - start_time
 
             # Persist to DB
             async with get_db_session_context() as db_session:
@@ -133,6 +149,8 @@ async def run_research(
                 result_id=sid,
                 result_url=f"https://scan.smarter.dev/r/{sid}",
                 summary=result_data.summary,
+                response=result_data.response,
+                duration=round(duration, 2),
             )
 
     except Exception as e:
