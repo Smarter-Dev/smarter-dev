@@ -5,10 +5,13 @@
 {% block admin_content %}
 <hgroup>
     <h1>API Keys</h1>
-    <p>Manage API keys for integrations &middot; <a href="/admin/api-keys/create">Create API Key</a></p>
+    <p>Manage API keys for integrations</p>
 </hgroup>
 
 {% if api_keys %}
+<div style="display: flex; justify-content: flex-end; margin-bottom: 1rem;">
+    <a href="/admin/api-keys/create" role="button" class="sk-btn-outline sk-btn-small">Create Key</a>
+</div>
 <table class="sk-admin-table">
     <thead>
         <tr>
@@ -66,6 +69,8 @@
     </tbody>
 </table>
 {% else %}
-<p class="sk-no-items">No API keys have been created yet.</p>
+<div style="display: flex; justify-content: center; padding: 3rem 0;">
+    <a href="/admin/api-keys/create" role="button">Create Key</a>
+</div>
 {% endif %}
 {% endblock %}
