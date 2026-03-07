@@ -18,9 +18,6 @@
     .scan-signin{font-family:var(--heading);font-size:.5rem;color:var(--gray);letter-spacing:.08em;margin-top:.75rem}
     .scan-signin a{color:var(--cyan);text-decoration:none}
     .scan-signin a:hover{text-decoration:underline}
-    .scan-section-heading{font-family:var(--heading);font-size:.65rem;color:var(--mid);letter-spacing:.12em}
-    .scan-placeholder-card{opacity:.35;cursor:default}
-    .scan-topic-card-disabled{cursor:default}
     </style>
 {% endblock %}
 
@@ -42,39 +39,6 @@
         <p class="scan-signin"><a href="/auth/login">Sign in</a> to use Scan</p>
     </form>
     {% endif %}
-</section>
-
-<section class="history-section">
-    <h2 class="scan-section-heading">RECENT SCANS</h2>
-    <div class="history-grid">
-        <div class="history-card scan-placeholder-card">
-            <div class="history-query">No scans yet</div>
-            <div class="history-meta">
-                <span class="history-time">Results will appear here</span>
-            </div>
-        </div>
-    </div>
-</section>
-
-<section class="topics-section">
-    <h2 class="scan-section-heading">TOPICS</h2>
-    <div class="topics-grid">
-        <div class="topic-card scan-topic-card-disabled">
-            <div class="topic-tag">FRAMEWORKS</div>
-            <div class="topic-title">Web Frameworks</div>
-            <div class="topic-desc">FastAPI, Litestar, Django, Flask — architecture, patterns, and best practices</div>
-        </div>
-        <div class="topic-card scan-topic-card-disabled">
-            <div class="topic-tag">INFRASTRUCTURE</div>
-            <div class="topic-title">DevOps & Deployment</div>
-            <div class="topic-desc">Kubernetes, containers, CI/CD pipelines, and cloud infrastructure</div>
-        </div>
-        <div class="topic-card scan-topic-card-disabled">
-            <div class="topic-tag">SECURITY</div>
-            <div class="topic-title">Application Security</div>
-            <div class="topic-desc">OWASP, auth patterns, secrets management, and vulnerability research</div>
-        </div>
-    </div>
 </section>
 {% endblock %}
 
