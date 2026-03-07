@@ -14,6 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.models import CampaignSignup
 
+import smarter_dev.web.roles  # noqa: F401  — registers custom Skrift roles at import time
+
 logger = logging.getLogger(__name__)
 
 

@@ -124,6 +124,16 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: secret-key
+                  - name: JINA_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: jina-api-key
+                  - name: BRAVE_SEARCH_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: brave-search-api-key
                   - name: SKRIFT_ENV
                     value: "production"
                 resources:
