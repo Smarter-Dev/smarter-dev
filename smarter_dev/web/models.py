@@ -3239,3 +3239,32 @@ class AttachmentFilterConfig(Base):
     def __repr__(self) -> str:
         """String representation of the attachment filter config."""
         return f"<AttachmentFilterConfig(guild_id='{self.guild_id}', active={self.is_active})>"
+
+
+class ResearchSession(Base):
+    """A research session created by the Scan research agent."""
+
+    __tablename__ = "research_sessions"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    guild_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    channel_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="running"
+    )
+    response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sources: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=list)
+    tool_log: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=list)
+    followups: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=list)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    context: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<ResearchSession(id='{self.id}', status='{self.status}')>"
