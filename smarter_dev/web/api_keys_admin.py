@@ -38,7 +38,7 @@ class APIKeyAdminController(Controller):
         """List all API keys."""
         ctx = await get_admin_context(request, db_session)
         ops = APIKeyOperations()
-        api_keys = await ops.list_api_keys(db_session, include_inactive=True)
+        api_keys, _total = await ops.list_api_keys(db_session, limit=1000)
         flash_messages = get_flash_messages(request)
         return TemplateResponse(
             "admin/api-keys/list.html",
