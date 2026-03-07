@@ -45,6 +45,17 @@
 
     /* Timer */
     .scan-timer{font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.04em}
+
+    /* Sources list */
+    .scan-sources-list{list-style:none;padding:0;margin:0}
+    .scan-sources-list li{margin-bottom:.6rem}
+    .scan-source-link{font-size:.72rem;color:var(--cyan);text-decoration:none}
+
+    /* Error text */
+    .scan-error-text{color:#f44}
+
+    /* Hidden state */
+    .scan-hidden{display:none}
     </style>
 {% endblock %}
 
@@ -71,10 +82,10 @@
     <aside>
         <h3 class="scan-sidebar-heading">SOURCES</h3>
         {% if session.status == 'complete' and session.sources %}
-        <ul style="list-style:none;padding:0;margin:0">
+        <ul class="scan-sources-list">
             {% for src in session.sources %}
-            <li style="margin-bottom:.6rem">
-                <a href="{{ src.url if src.url is defined else src['url'] }}" target="_blank" rel="noopener" style="font-size:.72rem;color:var(--cyan);text-decoration:none">
+            <li>
+                <a href="{{ src.url if src.url is defined else src['url'] }}" target="_blank" rel="noopener" class="scan-source-link">
                     {{ src.title if src.title is defined else src['title'] }}
                 </a>
             </li>
@@ -111,7 +122,7 @@
             {% if session.status == 'complete' and session.response %}
             {{ session.response }}
             {% elif session.status == 'error' %}
-            <p style="color:#f44">{{ session.error_message }}</p>
+            <p class="scan-error-text">{{ session.error_message }}</p>
             {% elif session.status == 'running' %}
             <p class="scan-response-empty" id="scan-response-placeholder">Researching...</p>
             {% else %}
@@ -120,7 +131,7 @@
         </div>
 
         <!-- Action bar (visible after completion) -->
-        <div class="scan-actions" id="scan-actions" style="{% if session.status != 'complete' %}display:none{% endif %}">
+        <div class="scan-actions{% if session.status != 'complete' %} scan-hidden{% endif %}" id="scan-actions">
             <button class="scan-action-btn" id="scan-copy-btn" type="button">COPY</button>
             <button class="scan-action-btn" id="scan-download-btn" type="button">DOWNLOAD</button>
         </div>
@@ -241,7 +252,7 @@
             if (toolsDetail) toolsDetail.removeAttribute("open");
 
             // Show actions
-            actionsEl.style.display = "flex";
+            actionsEl.classList.remove("scan-hidden");
         }
 
         else if (data.type === "error") {
@@ -252,7 +263,7 @@
             statusEl.className = "scan-status scan-status-error";
 
             if (placeholder) placeholder.remove();
-            responseEl.innerHTML = '<p style="color:#f44">' + escapeHtml(data.error || "Unknown error") + '</p>';
+            responseEl.innerHTML = '<p class="scan-error-text">' + escapeHtml(data.error || "Unknown error") + '</p>';
         }
     });
 
