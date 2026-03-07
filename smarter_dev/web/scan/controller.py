@@ -8,7 +8,7 @@ from litestar.enums import RequestEncodingType
 from litestar.params import Body
 from litestar.response import Redirect, Template
 from skrift.auth.guards import Permission, auth_guard
-from skrift.lib.notifications import subscribe_source, _ensure_nid
+from skrift.lib.notifications import subscribe_source
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.scan.agent import generate_session_name
@@ -65,9 +65,9 @@ class ScanController(Controller):
         session_data = await ops.get_session(db_session, result_id)
 
         if session_data and session_data.status == "running":
-            nid = _ensure_nid(request)
-            if nid:
-                await subscribe_source(f"session:{nid}", f"research:{result_id}")
+            user_id = request.session.get("user_id")
+            if user_id:
+                await subscribe_source(f"user:{user_id}", f"research:{result_id}")
 
         return Template(
             "scan/result.html",

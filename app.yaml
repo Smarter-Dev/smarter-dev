@@ -71,6 +71,12 @@ storage:
         acl: public-read
         public_url: https://production-bucket-zechz-1234.sfo3.digitaloceanspaces.com
 
+redis:
+  url: redis://redis.infra.svc.cluster.local:6379/0
+
+notifications:
+  backend: "skrift.lib.notification_backends:RedisBackend"
+
 sites:
   scan:
     subdomain: scan

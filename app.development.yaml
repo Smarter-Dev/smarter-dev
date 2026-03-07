@@ -56,6 +56,12 @@ security_headers:
 rate_limit:
   enabled: false
 
+redis:
+  url: redis://localhost:6379/0
+
+notifications:
+  backend: "skrift.lib.notification_backends:RedisBackend"
+
 sites:
   scan:
     subdomain: scan

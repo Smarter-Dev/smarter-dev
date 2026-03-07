@@ -153,6 +153,9 @@
 {% block page_scripts %}
 {% if session and session.status == 'running' %}
 <script nonce="{{ csp_nonce() }}">
+if (window.__skriftNotifications) {
+    window.__skriftNotifications.configure({ persistConnection: true });
+}
 (function() {
     const startedAt = new Date("{{ session.created_at.isoformat() }}Z");
     const timerEl = document.getElementById("scan-timer");
