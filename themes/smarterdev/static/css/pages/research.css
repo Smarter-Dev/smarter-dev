@@ -72,7 +72,7 @@
 .meta-item strong { color: var(--light) }
 
 /* ── Report Layout ── */
-.report-layout { position: relative; z-index: 1; max-width: 960px; margin: 0 auto; display: grid; grid-template-columns: 200px 1fr; gap: 32px; padding: 2rem 2rem 4rem }
+.report-layout { position: relative; z-index: 1; max-width: 960px; margin: 0 auto; display: grid; grid-template-columns: 1fr 200px; gap: 32px; padding: 2rem 2rem 4rem }
 .report-content { min-width: 0 }
 .report-content h2 {
   font-family: var(--heading);

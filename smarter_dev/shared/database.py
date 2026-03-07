@@ -220,7 +220,9 @@ def get_skrift_db_session_context():
         settings = get_settings()
         _skrift_engine = create_engine(settings, use_legacy_db=False)
         _skrift_session_maker = async_sessionmaker(
-            _skrift_engine,
+            _skrift_engine.execution_options(
+                schema_translate_map={None: "skrift"}
+            ),
             class_=AsyncSession,
             expire_on_commit=False,
             autoflush=False,

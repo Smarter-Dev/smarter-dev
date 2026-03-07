@@ -57,7 +57,7 @@ rate_limit:
   enabled: false
 
 redis:
-  url: redis://localhost:6379/0
+  url: $REDIS_URL
 
 notifications:
   backend: "skrift.lib.notification_backends:RedisBackend"

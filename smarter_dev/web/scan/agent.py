@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
 
 from smarter_dev.web.scan import tools
-from smarter_dev.web.scan.tools import URLRateLimiter
+from smarter_dev.web.scan.tools import RateLimiter, URLRateLimiter
 
 MODEL = "google-gla:gemini-3.1-flash-lite-preview"
 
@@ -19,7 +19,8 @@ MODEL = "google-gla:gemini-3.1-flash-lite-preview"
 class ResearchDeps:
     session_id: str
     http_client: httpx.AsyncClient
-    url_rate_limiter: URLRateLimiter
+    search_rate_limiter: RateLimiter
+    read_rate_limiter: URLRateLimiter
 
 
 class Source(BaseModel):
@@ -37,17 +38,60 @@ class ResearchResult(BaseModel):
 
 
 SYSTEM_PROMPT = """\
-You are a research assistant for software developers. Your job is to search the web, \
-read relevant sources, and synthesize a comprehensive, well-cited response.
+You are a research agent. You answer questions by searching the web, \
+understanding the topic, and writing a clear response the user can \
+immediately act on.
 
-Guidelines:
-- Use brave_search to find relevant sources for the query.
-- Use jina_read to read the full content of promising URLs.
-- Cite sources inline using markdown links [title](url).
-- Provide a thorough response with code examples when relevant.
-- Include a 2-3 sentence summary suitable for a Discord message.
-- Classify each source as docs, repo, article, video, forum, or other.
-- Mark sources you actually cited in the response as cited=True.
+## How to research
+
+You have two tools: `search` (web search) and `read` (read a URL's full \
+content). You can call `search` multiple times per turn and they run in \
+parallel.
+
+### Phase 1 — Survey and orient
+
+Start with 2-3 broad parallel searches (num_results 2-3) to get the lay \
+of the land. Always include a recency query — if something has recently \
+changed that affects the answer, the user needs to know immediately.
+
+After the survey, identify the real question the user is trying to answer. \
+It may not be exactly what they asked — understand what they actually need.
+
+### Phase 2 — Research the answer
+
+Use `read` on the most promising URLs from your searches, and run \
+additional `search` queries as needed. Prioritize practical, \
+actionable information over background context.
+
+Stop when you have enough to give the user a clear, confident answer.
+
+## How to write the answer
+
+Your answer IS the final output — there is no post-processing. Use \
+markdown formatting.
+
+Before writing, plan the piece. Decide:
+1. **The lead** — what directly answers the user's question? Open with it.
+2. **The close** — the actionable conclusion of it all.
+3. **The support** — what evidence and context connect the lead to the \
+close? Only include what earns its space.
+
+Then write. Don't summarize what you found — pull out the most important \
+details and supporting information, and build a compelling, original \
+narrative that informs the user and answers their query. Natural prose, \
+not a listicle. Cite every factual claim with [n]. Use tables when \
+comparing parallel items. Keep it tight — say what needs saying and stop.
+
+## Citations
+
+Renumber sources sequentially as [1], [2], [3]. Every [n] in the text \
+must appear in ## Sources, and every source must be cited at least once.
+
+End with ## Sources as [n] Title — URL
+
+Also return structured source data: classify each source as docs, repo, \
+article, video, forum, or other. Mark sources you cited as cited=True. \
+Include a 2-3 sentence summary suitable for a short notification.
 """
 
 # Defer model resolution by not passing it at construction time.
@@ -75,17 +119,40 @@ async def generate_session_name(query: str) -> str:
 
 
 @research_agent.tool
-async def brave_search(
+async def search(
     ctx: RunContext[ResearchDeps], query: str, num_results: int = 5
-) -> list[dict]:
-    """Search the web using Brave Search. Returns a list of results with title, url, and description."""
-    return await tools.brave_search(
+) -> str:
+    """Search the web. Returns results with title, url, and description."""
+    await ctx.deps.search_rate_limiter.wait()
+    results = await tools.brave_search(
         ctx.deps.http_client, query, min(num_results, 10)
     )
+    if not results:
+        return "No results found."
+    if len(results) == 1 and "error" in results[0]:
+        return results[0]["error"]
+    lines = []
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. {r.get('title', 'Untitled')}")
+        lines.append(f"   {r.get('url', '')}")
+        if r.get("description"):
+            lines.append(f"   {r['description']}")
+        lines.append("")
+    return "\n".join(lines)
 
 
 @research_agent.tool
-async def jina_read(ctx: RunContext[ResearchDeps], url: str) -> dict:
-    """Read the full content of a URL. Returns the page title, description, and markdown content."""
-    await ctx.deps.url_rate_limiter.wait_if_needed(url)
-    return await tools.jina_read(ctx.deps.http_client, url)
+async def read(ctx: RunContext[ResearchDeps], url: str) -> str:
+    """Read the full content of a URL. Returns the page text as markdown."""
+    await ctx.deps.read_rate_limiter.wait_if_needed(url)
+    result = await tools.jina_read(ctx.deps.http_client, url)
+    if "error" in result:
+        return result["error"]
+    parts = []
+    if result.get("title"):
+        parts.append(f"# {result['title']}")
+    if result.get("description"):
+        parts.append(result["description"])
+    if result.get("content"):
+        parts.append(result["content"])
+    return "\n\n".join(parts) if parts else "No content found."

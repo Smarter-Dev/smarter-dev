@@ -9,6 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import zoneinfo
+from datetime import datetime
 from uuid import UUID
 
 import httpx
@@ -23,9 +25,9 @@ from pydantic_ai.messages import (
 from skrift.lib.notifications import NotificationMode, notify_source
 
 from smarter_dev.shared.database import get_skrift_db_session_context
-from smarter_dev.web.scan.agent import MODEL, ResearchDeps, ResearchResult, research_agent
+from smarter_dev.web.scan.agent import MODEL, SYSTEM_PROMPT, ResearchDeps, ResearchResult, research_agent
 from smarter_dev.web.scan.crud import ResearchSessionOperations
-from smarter_dev.web.scan.tools import URLRateLimiter
+from smarter_dev.web.scan.tools import RateLimiter, URLRateLimiter
 
 logger = logging.getLogger(__name__)
 ops = ResearchSessionOperations()
@@ -49,7 +51,7 @@ async def run_research(
     session_id: UUID,
     query: str,
     user_id: str,
-    context: dict | None = None,
+    tz: str | None = None,
 ) -> None:
     """Run the research agent as a background task.
 
@@ -59,6 +61,14 @@ async def run_research(
     """
     sid = str(session_id)
     start_time = time.monotonic()
+
+    # Build current date string in user's timezone for the system prompt
+    try:
+        user_tz = zoneinfo.ZoneInfo(tz) if tz else None
+    except (KeyError, ValueError):
+        user_tz = None
+    now = datetime.now(user_tz)
+    date_context = f"Today is {now.strftime('%A, %B %-d, %Y')}."
 
     await _emit(sid, "status", stage="planning", message="Analyzing query...")
 
@@ -72,13 +82,16 @@ async def run_research(
             deps = ResearchDeps(
                 session_id=sid,
                 http_client=http_client,
-                url_rate_limiter=URLRateLimiter(),
+                search_rate_limiter=RateLimiter(min_delay=1.5),
+                read_rate_limiter=URLRateLimiter(min_delay=0.0),
             )
 
             result_data: ResearchResult | None = None
 
+            instructions = f"{SYSTEM_PROMPT}\n\n{date_context}"
+
             async for event in research_agent.run_stream_events(
-                query, deps=deps, model=MODEL
+                query, deps=deps, model=MODEL, instructions=instructions
             ):
                 if isinstance(event, FunctionToolCallEvent):
                     tool_name = event.part.tool_name
@@ -170,10 +183,10 @@ def start_research_task(
     session_id: UUID,
     query: str,
     user_id: str,
-    context: dict | None = None,
+    tz: str | None = None,
 ) -> asyncio.Task:
     """Create and return an asyncio.Task for the research agent."""
     return asyncio.create_task(
-        run_research(session_id, query, user_id, context),
+        run_research(session_id, query, user_id, tz=tz),
         name=f"research:{session_id}",
     )

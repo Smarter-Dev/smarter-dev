@@ -32,6 +32,7 @@
     {% if user_id %}
     <form class="scan-form" method="post" action="/">
         {{ csrf_field() }}
+        <input type="hidden" name="tz" id="scan-tz">
         <textarea name="query" placeholder="What do you want to research?" class="scan-input" required maxlength="2000" autofocus rows="1"></textarea>
         <button type="submit" class="scan-submit">SCAN</button>
     </form>
@@ -81,6 +82,8 @@
 {% if user_id %}
 <script nonce="{{ csp_nonce() }}">
 (function(){
+    var tzEl = document.getElementById('scan-tz');
+    if (tzEl) tzEl.value = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
     var ta = document.querySelector('.scan-input');
     if (!ta || ta.tagName !== 'TEXTAREA') return;
     function grow(){ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';}
