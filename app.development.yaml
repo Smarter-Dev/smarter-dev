@@ -66,4 +66,5 @@ sites:
   scan:
     subdomain: scan
     controllers:
+      - skrift.controllers.notifications:NotificationsController
       - smarter_dev.web.scan.controller:ScanController
