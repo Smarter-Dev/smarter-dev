@@ -9,11 +9,11 @@
     .scan-title{font-family:var(--display);font-size:clamp(2rem,5vw,3.2rem);color:var(--white);letter-spacing:.06em;margin-bottom:.75rem;text-shadow:0 0 40px rgba(0,212,255,.1)}
     .scan-subtitle{font-family:var(--heading);font-size:.65rem;color:var(--mid);letter-spacing:.12em;margin-bottom:2.5rem}
     .scan-form{position:relative;max-width:600px;margin:0 auto}
-    .scan-input{width:100%;padding:1rem 1.25rem;font-size:.95rem;font-family:var(--body);background:var(--surface);border:1px solid rgba(0,212,255,.12);color:var(--white);outline:none;transition:border-color .2s}
+    .scan-input{width:100%;padding:1rem 5.5rem 1rem 1.25rem;font-size:.95rem;font-family:var(--body);background:var(--surface);border:1px solid rgba(0,212,255,.12);color:var(--white);outline:none;transition:border-color .2s;resize:none;overflow:hidden;min-height:3.2rem;line-height:1.5;box-sizing:border-box;display:block}
     .scan-input:focus{border-color:var(--cyan);box-shadow:0 0 20px rgba(0,212,255,.06)}
     .scan-input::placeholder{color:var(--gray)}
-    .scan-input:disabled{opacity:.5;cursor:not-allowed}
-    .scan-submit{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-family:var(--heading);font-size:.55rem;letter-spacing:.1em;padding:.5rem 1rem;background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.2);color:var(--cyan);cursor:pointer;transition:all .2s}
+    .scan-input:disabled{opacity:.5;cursor:not-allowed;padding-right:1.25rem}
+    .scan-submit{position:absolute;right:8px;top:1rem;font-family:var(--heading);font-size:.55rem;letter-spacing:.1em;padding:.5rem 1rem;background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.2);color:var(--cyan);cursor:pointer;transition:all .2s}
     .scan-submit:hover{background:rgba(0,212,255,.18);border-color:var(--cyan)}
     .scan-signin{font-family:var(--heading);font-size:.5rem;color:var(--gray);letter-spacing:.08em;margin-top:.75rem}
     .scan-signin a{color:var(--cyan);text-decoration:none}
@@ -32,12 +32,12 @@
     {% if user_id %}
     <form class="scan-form" method="post" action="/">
         {{ csrf_field() }}
-        <input type="text" name="query" placeholder="What do you want to research?" class="scan-input" required maxlength="2000" autofocus>
+        <textarea name="query" placeholder="What do you want to research?" class="scan-input" required maxlength="2000" autofocus rows="1"></textarea>
         <button type="submit" class="scan-submit">SCAN</button>
     </form>
     {% else %}
     <form class="scan-form">
-        <input type="text" disabled placeholder="What do you want to research?" class="scan-input">
+        <textarea disabled placeholder="What do you want to research?" class="scan-input" rows="1"></textarea>
         <p class="scan-signin"><a href="/auth/login">Sign in</a> to use Scan</p>
     </form>
     {% endif %}
@@ -75,4 +75,20 @@
         </div>
     </div>
 </section>
+{% endblock %}
+
+{% block page_scripts %}
+{% if user_id %}
+<script nonce="{{ csp_nonce() }}">
+(function(){
+    var ta = document.querySelector('.scan-input');
+    if (!ta || ta.tagName !== 'TEXTAREA') return;
+    function grow(){ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';}
+    ta.addEventListener('input', grow);
+    ta.addEventListener('keydown', function(e){
+        if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();ta.form.requestSubmit();}
+    });
+})();
+</script>
+{% endif %}
 {% endblock %}

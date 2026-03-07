@@ -203,6 +203,31 @@ def get_db_session_context():
     return session_maker()
 
 
+# Skrift-schema engine and session maker (for background tasks that need the main DB)
+_skrift_engine: Optional[AsyncEngine] = None
+_skrift_session_maker: Optional[async_sessionmaker[AsyncSession]] = None
+
+
+def get_skrift_db_session_context():
+    """Get a database session context for the Skrift schema.
+
+    Unlike ``get_db_session_context`` (which targets the legacy database),
+    this creates sessions against the primary DATABASE_URL with the
+    ``skrift`` schema translate map, matching what Litestar injects.
+    """
+    global _skrift_engine, _skrift_session_maker
+    if _skrift_session_maker is None:
+        settings = get_settings()
+        _skrift_engine = create_engine(settings, use_legacy_db=False)
+        _skrift_session_maker = async_sessionmaker(
+            _skrift_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+    return _skrift_session_maker()
+
+
 async def init_database() -> None:
     """Initialize database connection and create tables if needed."""
     global _engine, _session_maker

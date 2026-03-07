@@ -22,7 +22,7 @@ from pydantic_ai.messages import (
 )
 from skrift.lib.notifications import NotificationMode, notify_source
 
-from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.shared.database import get_skrift_db_session_context
 from smarter_dev.web.scan.agent import MODEL, ResearchDeps, ResearchResult, research_agent
 from smarter_dev.web.scan.crud import ResearchSessionOperations
 from smarter_dev.web.scan.tools import URLRateLimiter
@@ -133,7 +133,7 @@ async def run_research(
             duration = time.monotonic() - start_time
 
             # Persist to DB
-            async with get_db_session_context() as db_session:
+            async with get_skrift_db_session_context() as db_session:
                 await ops.update_session_result(
                     db_session,
                     session_id,
@@ -158,7 +158,7 @@ async def run_research(
         error_msg = f"{type(e).__name__}: {e}"
 
         try:
-            async with get_db_session_context() as db_session:
+            async with get_skrift_db_session_context() as db_session:
                 await ops.update_session_error(db_session, session_id, error_msg)
         except Exception:
             logger.exception("Failed to persist error for session %s", sid)
