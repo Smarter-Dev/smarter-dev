@@ -120,7 +120,7 @@
         <!-- Response -->
         <div class="scan-response" id="scan-response">
             {% if session.status == 'complete' and session.response %}
-            {{ session.response }}
+            {{ session.response|markdown|safe }}
             {% elif session.status == 'error' %}
             <p class="scan-error-text">{{ session.error_message }}</p>
             {% elif session.status == 'running' %}
@@ -152,6 +152,7 @@
 
 {% block page_scripts %}
 {% if session and session.status == 'running' %}
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script nonce="{{ csp_nonce() }}">
 if (window.__skriftNotifications) {
     window.__skriftNotifications.configure({ persistConnection: true });
@@ -230,7 +231,7 @@ if (window.__skriftNotifications) {
         else if (data.type === "response_chunk") {
             if (placeholder) placeholder.remove();
             responseText += (data.delta || "");
-            responseEl.textContent = responseText;
+            responseEl.innerHTML = typeof marked !== "undefined" ? marked.parse(responseText) : responseText;
         }
 
         else if (data.type === "complete") {
@@ -246,7 +247,7 @@ if (window.__skriftNotifications) {
 
             if (data.response) {
                 responseText = data.response;
-                responseEl.textContent = responseText;
+                responseEl.innerHTML = typeof marked !== "undefined" ? marked.parse(responseText) : responseText;
             }
 
             if (placeholder) placeholder.remove();
