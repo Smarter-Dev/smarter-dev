@@ -150,7 +150,20 @@ async def jina_read(client: httpx.AsyncClient, url: str) -> dict:
         if resp.status_code != 200:
             return {"error": f"Jina Reader returned {resp.status_code}", "url": url}
 
-        data = resp.json().get("data", {})
+        try:
+            data = resp.json().get("data", {})
+        except Exception:
+            # Jina sometimes returns non-JSON (e.g. for blocked sites)
+            text = resp.text[:3000] if resp.text else ""
+            if text:
+                return {
+                    "title": "",
+                    "description": "",
+                    "content": text,
+                    "url": url,
+                }
+            return {"error": "Jina Reader returned non-JSON response", "url": url}
+
         return {
             "title": data.get("title", ""),
             "description": data.get("description", ""),
@@ -159,5 +172,5 @@ async def jina_read(client: httpx.AsyncClient, url: str) -> dict:
         }
 
     except Exception as e:
-        logger.error("Jina Reader failed for %s: %s", url, e)
-        return {"error": f"Failed to read URL: {e}", "url": url}
+        logger.error("Jina Reader failed for %s: %s (%s)", url, e, type(e).__name__)
+        return {"error": f"Failed to read URL ({type(e).__name__}): {e}", "url": url}
