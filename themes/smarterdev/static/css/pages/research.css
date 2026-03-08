@@ -93,6 +93,14 @@
 .report-content blockquote p { font-size: 1.05rem; font-style: italic; color: var(--white); line-height: 1.75; margin-bottom: 0 }
 .report-content blockquote .quote-attr { font-family: var(--heading); font-size: .55rem; color: var(--mid); letter-spacing: .06em; margin-top: .6rem; font-style: normal }
 
+/* Tables */
+.report-content table { width: 100%; border-collapse: collapse; margin: 1.5rem 0 2rem; font-size: .85rem }
+.report-content thead { border-bottom: 2px solid rgba(0,212,255,.15) }
+.report-content th { font-family: var(--heading); font-size: .6rem; letter-spacing: .06em; color: var(--cyan); text-align: left; padding: .6rem .75rem; background: rgba(0,212,255,.04) }
+.report-content td { padding: .55rem .75rem; color: var(--light); border-bottom: 1px solid rgba(0,212,255,.06) }
+.report-content tbody tr:hover { background: rgba(0,212,255,.03) }
+.report-content td strong { color: var(--white) }
+
 /* Stat Row */
 .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 1.5rem 0 2rem }
 
