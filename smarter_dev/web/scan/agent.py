@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import logging
 from dataclasses import dataclass
@@ -10,7 +11,6 @@ from typing import Literal
 import httpx
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart
 from pydantic_ai.usage import RunUsage
 
 from smarter_dev.web.scan import tools
@@ -41,21 +41,6 @@ class ResearchResult(BaseModel):
     response: str
     sources: list[Source]
     summary: str
-
-
-class SubAgentURL(BaseModel):
-    """A URL found and summarized by the research sub-agent."""
-
-    url: str
-    title: str
-    summary: str
-
-
-class SubAgentResult(BaseModel):
-    """Result from the research sub-agent."""
-
-    answer: str
-    urls: list[SubAgentURL]
 
 
 SYSTEM_PROMPT = """\
@@ -114,15 +99,6 @@ article, video, forum, or other. Mark sources you cited as cited=True. \
 Include a 2-3 sentence summary suitable for a short notification.
 """
 
-_SUB_AGENT_PROMPT = """\
-You are a focused web research assistant. Given a question, search the \
-web and read pages to find the answer. Use multiple searches to explore \
-different angles and verify information.
-
-Return a clear, factual answer with the URLs you found most useful and \
-a brief summary of each.
-"""
-
 # Defer model resolution by not passing it at construction time.
 # The model is specified at run time via `model=MODEL`.
 research_agent = Agent(
@@ -132,58 +108,24 @@ research_agent = Agent(
 )
 
 
-# --- Research sub-agent (search + read tools) ---
+# --- Flash Lite pipeline helpers ---
 
-_research_sub_agent = Agent(
-    deps_type=ResearchDeps,
-    output_type=SubAgentResult,
-    instructions=_SUB_AGENT_PROMPT,
+_query_agent = Agent(
+    output_type=str,
+    instructions=(
+        "Generate a single, effective web search query for the given question. "
+        "Return only the search query string, nothing else."
+    ),
 )
 
-
-@_research_sub_agent.tool
-async def search(
-    ctx: RunContext[ResearchDeps], query: str, num_results: int = 5
-) -> str:
-    """Search the web. Returns results with title, url, description, and page content."""
-    await ctx.deps.search_rate_limiter.wait()
-    results = await tools.jina_search(
-        ctx.deps.http_client, query, min(num_results, 5)
-    )
-    if not results:
-        return "No results found."
-    if len(results) == 1 and "error" in results[0]:
-        return results[0]["error"]
-    lines = []
-    for i, r in enumerate(results, 1):
-        lines.append(f"{i}. {r.get('title', 'Untitled')}")
-        lines.append(f"   {r.get('url', '')}")
-        if r.get("description"):
-            lines.append(f"   {r['description']}")
-        if r.get("content"):
-            # Include truncated content so the agent has real page data
-            content = r["content"][:3000]
-            lines.append(f"   ---")
-            lines.append(f"   {content}")
-        lines.append("")
-    return "\n".join(lines)
-
-
-@_research_sub_agent.tool
-async def read(ctx: RunContext[ResearchDeps], url: str) -> str:
-    """Read the full content of a URL. Returns the page text as markdown."""
-    await ctx.deps.read_rate_limiter.wait_if_needed(url)
-    result = await tools.jina_read(ctx.deps.http_client, url)
-    if "error" in result:
-        return result["error"]
-    parts = []
-    if result.get("title"):
-        parts.append(f"# {result['title']}")
-    if result.get("description"):
-        parts.append(result["description"])
-    if result.get("content"):
-        parts.append(result["content"])
-    return "\n\n".join(parts) if parts else "No content found."
+_summarize_agent = Agent(
+    output_type=str,
+    instructions=(
+        "Summarize the provided web page content in 2-4 sentences, "
+        "focusing on information relevant to the user's question. "
+        "Be factual and concise."
+    ),
+)
 
 
 def _usage_to_dict(usage: RunUsage) -> dict:
@@ -192,81 +134,134 @@ def _usage_to_dict(usage: RunUsage) -> dict:
     return {k: v for k, v in d.items() if v}
 
 
-def _extract_sub_agent_tools(messages: list) -> list[dict]:
-    """Extract structured tool calls from sub-agent messages.
+async def _run_research_pipeline(
+    question: str,
+    deps: ResearchDeps,
+) -> tuple[str, list[dict]]:
+    """Run the research pipeline: query generation → search → read → summarize.
 
-    Returns a list of dicts with: tool, input, content, status.
-    Suitable for nested rendering in the UI.
+    Returns (formatted_result, sub_tools_for_ui).
     """
-    # First pass: collect tool calls keyed by tool_call_id
-    calls: dict[str, dict] = {}
-    for msg in messages:
-        if isinstance(msg, ModelResponse):
-            for part in msg.parts:
-                if isinstance(part, ToolCallPart):
-                    args = part.args
-                    if isinstance(args, dict):
-                        input_data = args
-                    else:
-                        input_data = {"raw": str(args) if args else ""}
-                    calls[part.tool_call_id] = {
-                        "tool": part.tool_name,
-                        "input": input_data,
-                        "status": "complete",
-                    }
-        elif isinstance(msg, ModelRequest):
-            for part in msg.parts:
-                if isinstance(part, ToolReturnPart):
-                    if part.tool_call_id in calls:
-                        content = str(part.content)
-                        if len(content) > 5120:
-                            content = content[:5120] + "\n... (truncated)"
-                        calls[part.tool_call_id]["content"] = content
+    total_usage = RunUsage()
+    sub_tools: list[dict] = []
 
-    return list(calls.values())
+    # Step 1: Generate search query from question
+    query_result = await _query_agent.run(question, model=MODEL)
+    search_query = query_result.output.strip().strip('"\'')
+    total_usage.incr(query_result.usage())
+
+    # Step 2: Brave Search
+    await deps.search_rate_limiter.wait()
+    search_results = await tools.brave_search(
+        deps.http_client, search_query, num_results=5,
+    )
+
+    # Format search results for UI
+    if search_results and not (len(search_results) == 1 and "error" in search_results[0]):
+        search_display = "\n".join(
+            f"{i}. {r.get('title', 'Untitled')} — {r.get('url', '')}"
+            for i, r in enumerate(search_results, 1)
+        )
+    else:
+        search_display = "No results found."
+
+    sub_tools.append({
+        "tool": "search",
+        "input": {"query": search_query},
+        "content": search_display,
+        "status": "complete",
+    })
+
+    # Step 3: Jina Read top 3 results + Step 4: Summarize each
+    top_results = [
+        r for r in search_results
+        if "error" not in r and r.get("url")
+    ][:3]
+
+    parts: list[str] = []
+
+    async def read_and_summarize(result: dict) -> None:
+        url = result["url"]
+        title = result.get("title", "Untitled")
+
+        await deps.read_rate_limiter.wait_if_needed(url)
+        page = await tools.jina_read(deps.http_client, url)
+
+        if "error" in page:
+            summary = f"Could not read: {page['error']}"
+            sub_tools.append({
+                "tool": "read",
+                "input": {"url": url},
+                "content": summary,
+                "status": "error",
+            })
+            return
+
+        page_content = page.get("content", "")[:6000]
+        if not page_content:
+            summary = "Page had no readable content."
+            sub_tools.append({
+                "tool": "read",
+                "input": {"url": url},
+                "content": summary,
+                "status": "complete",
+            })
+            parts.append(f"[{title}]({url}): {summary}")
+            return
+
+        # Summarize with Flash Lite
+        summarize_result = await _summarize_agent.run(
+            f"Question: {question}\n\nPage ({url}):\n{page_content}",
+            model=MODEL,
+        )
+        summary = summarize_result.output
+        total_usage.incr(summarize_result.usage())
+
+        sub_tools.append({
+            "tool": "read",
+            "input": {"url": url},
+            "content": summary,
+            "status": "complete",
+        })
+        parts.append(f"[{title}]({url}): {summary}")
+
+    # Run reads concurrently
+    await asyncio.gather(*(read_and_summarize(r) for r in top_results))
+
+    # Format result for main agent
+    result_text = "\n\n".join(parts) if parts else "No results could be read."
+    usage_dict = _usage_to_dict(total_usage)
+    if usage_dict:
+        result_text += f"\n\n[pipeline usage: {usage_dict}]"
+
+    return result_text, sub_tools
 
 
 @research_agent.tool
 async def research(ctx: RunContext[ResearchDeps], question: str) -> str:
     """Research a specific question by searching the web and reading pages.
 
-    Delegates to a sub-agent that performs multiple searches and reads
-    to answer the question. Returns relevant URLs and summaries.
+    Runs a pipeline: generates a search query, searches via Brave, reads
+    the top 3 results via Jina, and summarizes each with Flash Lite.
+    Returns summaries with links.
     """
     try:
-        result = await _research_sub_agent.run(
-            question, deps=ctx.deps, model=MODEL,
+        result_text, sub_tools = await _run_research_pipeline(
+            question, ctx.deps,
         )
-        usage = result.usage()
-        usage_dict = _usage_to_dict(usage)
-        output = result.output
 
-        # Format as text for the main agent
-        parts = [output.answer, ""]
-        if output.urls:
-            parts.append("### Sources found:")
-            for u in output.urls:
-                parts.append(f"- [{u.title}]({u.url})")
-                parts.append(f"  {u.summary}")
-                parts.append("")
-
-        if usage_dict:
-            parts.append(f"[sub-agent usage: {usage_dict}]")
-
-        # Store sub-agent tool activity and usage for the runner
-        sub_tools = _extract_sub_agent_tools(result.all_messages())
+        # Store pipeline activity for the runner to pick up
         if not hasattr(ctx.deps, "_sub_agent_usage"):
             ctx.deps._sub_agent_usage = []  # type: ignore[attr-defined]
         ctx.deps._sub_agent_usage.append({  # type: ignore[attr-defined]
             "question": question,
-            "usage": usage_dict,
             "tools": sub_tools,
         })
 
-        return "\n".join(parts)
+        return result_text
 
     except Exception as e:
-        logger.exception("Research sub-agent failed for question: %s", question)
+        logger.exception("Research pipeline failed for question: %s", question)
         return f"Research failed: {e}"
 
 
