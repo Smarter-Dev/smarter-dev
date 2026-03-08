@@ -87,7 +87,7 @@
                 {% if session.status != 'running' and session.tool_log %}
                 {% for entry in session.tool_log %}
                 {% if entry.tool is defined %}
-                <li class="scan-tool-entry scan-tool-done" onclick="this.nextElementSibling&&this.nextElementSibling.classList.toggle('expanded')">
+                <li class="scan-tool-entry scan-tool-done">
                     <span class="scan-tool-name">{{ entry.tool }}</span>
                     <span class="scan-tool-args">{% if entry.tool == 'research' and entry.input is defined and entry.input.question is defined %}{{ entry.input.question|truncate(80) }}{% else %}{{ (entry.input if entry.input is defined else '')|string|truncate(80) }}{% endif %}</span>
                 </li>
@@ -318,6 +318,19 @@ if (window.__skriftNotifications) {
 {% elif session and session.status == 'complete' %}
 <script nonce="{{ csp_nonce() }}">
 (function() {
+    // Tool expansion click handler
+    var toolsList = document.getElementById("scan-tools-list");
+    if (toolsList) {
+        toolsList.addEventListener("click", function(e) {
+            var entry = e.target.closest(".scan-tool-entry");
+            if (!entry) return;
+            var next = entry.nextElementSibling;
+            if (next && next.classList.contains("scan-tool-content")) {
+                next.classList.toggle("expanded");
+            }
+        });
+    }
+
     const responseEl = document.getElementById("scan-response");
     const responseText = responseEl ? responseEl.textContent : "";
 
