@@ -31,7 +31,8 @@
     .scan-tool-running{animation:scan-pulse 1.5s ease-in-out infinite}
     .scan-tool-done{cursor:pointer}
     .scan-tool-done:hover{background:rgba(0,212,255,.03)}
-    .scan-tool-content{display:none;padding:.5rem 1rem .75rem;font-size:.72rem;color:var(--gray);line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:400px;overflow-y:auto;border-bottom:1px solid rgba(0,212,255,.04)}
+    .scan-tool-content{display:none;padding:.5rem 1rem .75rem;font-size:.72rem;color:var(--gray);line-height:1.6;word-break:break-word;max-height:400px;overflow-y:auto;border-bottom:1px solid rgba(0,212,255,.04)}
+    .scan-tool-content--text{white-space:pre-wrap}
     .scan-tool-content.expanded{display:block}
 
     /* Nested sub-agent tools */
@@ -102,24 +103,21 @@
                     <span class="scan-tool-name">{{ entry.tool }}</span>
                     <span class="scan-tool-args">{% if entry.tool == 'research' and entry.input is defined and entry.input.question is defined %}{{ entry.input.question|truncate(80) }}{% else %}{{ (entry.input if entry.input is defined else '')|string|truncate(80) }}{% endif %}</span>
                 </li>
+                {% if entry.sub_tools is defined and entry.sub_tools -%}
                 <div class="scan-tool-content">
-                    {% if entry.sub_tools is defined and entry.sub_tools %}
-                    <ul class="scan-sub-tools">
-                        {% for st in entry.sub_tools %}
-                        <li class="scan-sub-tool">
-                            <span class="scan-sub-tool-name">{{ st.tool }}</span>
-                            <span class="scan-sub-tool-args">{% if st.tool == 'search' and st.input is defined and st.input.query is defined %}{{ st.input.query|truncate(70) }}{% elif st.tool == 'read' and st.input is defined and st.input.url is defined %}{{ st.input.url|truncate(70) }}{% else %}{{ (st.input if st.input is defined else '')|string|truncate(70) }}{% endif %}</span>
-                        </li>
-                        <div class="scan-sub-tool-content">{{ st.content if st.content is defined else '' }}</div>
-                        {% endfor %}
-                    </ul>
-                    {% if entry.content is defined and entry.content %}
-                    <div class="scan-sub-answer">{{ entry.content }}</div>
-                    {% endif %}
-                    {% elif entry.content is defined %}
-                    {{ entry.content }}
-                    {% endif %}
+                <ul class="scan-sub-tools">
+                {%- for st in entry.sub_tools %}
+                <li class="scan-sub-tool"><span class="scan-sub-tool-name">{{ st.tool }}</span> <span class="scan-sub-tool-args">{% if st.tool == 'search' and st.input is defined and st.input.query is defined %}{{ st.input.query|truncate(70) }}{% elif st.tool == 'read' and st.input is defined and st.input.url is defined %}{{ st.input.url|truncate(70) }}{% else %}{{ (st.input if st.input is defined else '')|string|truncate(70) }}{% endif %}</span></li>
+                <div class="scan-sub-tool-content">{{ st.content if st.content is defined else '' }}</div>
+                {%- endfor %}
+                </ul>
+                {% if entry.content is defined and entry.content %}<div class="scan-sub-answer">{{ entry.content }}</div>{% endif %}
                 </div>
+                {% elif entry.content is defined -%}
+                <div class="scan-tool-content scan-tool-content--text">{{ entry.content }}</div>
+                {% else -%}
+                <div class="scan-tool-content"></div>
+                {% endif -%}
                 {% endif %}
                 {% endfor %}
                 {% endif %}
@@ -277,6 +275,7 @@ if (window.__skriftNotifications) {
                                 });
                             });
                         } else if (data.content) {
+                            contentDiv.classList.add("scan-tool-content--text");
                             contentDiv.textContent = data.content;
                         }
                     }
