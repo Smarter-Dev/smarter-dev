@@ -86,14 +86,16 @@
             <ul class="scan-tools-list" id="scan-tools-list">
                 {% if session.status != 'running' and session.tool_log %}
                 {% for entry in session.tool_log %}
+                {% if entry.tool is defined %}
                 <li class="scan-tool-entry scan-tool-done" onclick="this.nextElementSibling&&this.nextElementSibling.classList.toggle('expanded')">
-                    <span class="scan-tool-name">{{ entry.tool if entry.tool is defined else entry['tool'] }}</span>
-                    <span class="scan-tool-args">{{ (entry.input if entry.input is defined else entry['input'])|string|truncate(80) }}</span>
+                    <span class="scan-tool-name">{{ entry.tool }}</span>
+                    <span class="scan-tool-args">{% if entry.tool == 'research' and entry.input is defined and entry.input.question is defined %}{{ entry.input.question|truncate(80) }}{% else %}{{ (entry.input if entry.input is defined else '')|string|truncate(80) }}{% endif %}</span>
                 </li>
-                {% if entry.content is defined or entry.get is callable %}
-                <div class="scan-tool-content">{{ entry.content if entry.content is defined else entry.get('content', '') }}</div>
+                {% if entry.content is defined %}
+                <div class="scan-tool-content">{{ entry.content }}</div>
                 {% else %}
                 <div class="scan-tool-content"></div>
+                {% endif %}
                 {% endif %}
                 {% endfor %}
                 {% endif %}
@@ -200,7 +202,7 @@ if (window.__skriftNotifications) {
             li.dataset.tool = data.tool || "";
             li.innerHTML =
                 '<span class="scan-tool-name">' + (data.tool || "tool") + '</span>' +
-                '<span class="scan-tool-args">' + escapeHtml(summarizeArgs(data.input)) + '</span>';
+                '<span class="scan-tool-args">' + escapeHtml(summarizeArgs(data.input, data.tool)) + '</span>';
             const contentDiv = document.createElement("div");
             contentDiv.className = "scan-tool-content";
             toolsList.appendChild(li);
@@ -297,8 +299,13 @@ if (window.__skriftNotifications) {
         return div.innerHTML;
     }
 
-    function summarizeArgs(input) {
+    function summarizeArgs(input, toolName) {
         if (!input || typeof input !== "object") return "";
+        // For the research tool, just show the question directly
+        if (toolName === "research" && input.question) {
+            const q = input.question;
+            return q.length > 80 ? q.slice(0, 80) + "..." : q;
+        }
         const parts = [];
         for (const [k, v] of Object.entries(input)) {
             const val = typeof v === "string" ? v : JSON.stringify(v);
