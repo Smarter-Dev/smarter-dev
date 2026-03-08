@@ -121,9 +121,13 @@ _query_agent = Agent(
 _summarize_agent = Agent(
     output_type=str,
     instructions=(
-        "Summarize the provided web page content in 2-4 sentences, "
-        "focusing on information relevant to the user's question. "
-        "Be factual and concise."
+        "Analyze the provided web page content in relation to the user's question. "
+        "Provide:\n"
+        "1. A brief summary (2-3 sentences) of what this page covers\n"
+        "2. All relevant facts, data points, and specifics that relate to the question\n"
+        "3. Any caveats, limitations, edge cases, or important details that qualify those facts\n\n"
+        "Be thorough — extract everything useful. The reader needs enough detail to make decisions "
+        "without visiting the page themselves."
     ),
 )
 
