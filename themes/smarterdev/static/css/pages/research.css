@@ -93,6 +93,9 @@
 .report-content blockquote p { font-size: 1.05rem; font-style: italic; color: var(--white); line-height: 1.75; margin-bottom: 0 }
 .report-content blockquote .quote-attr { font-family: var(--heading); font-size: .55rem; color: var(--mid); letter-spacing: .06em; margin-top: .6rem; font-style: normal }
 
+/* Horizontal rules */
+.report-content hr { border: none; height: 1px; background: linear-gradient(90deg, transparent, rgba(0,212,255,.2) 20%, rgba(0,212,255,.2) 80%, transparent); margin: 2.5rem 0 }
+
 /* Tables */
 .report-content table { width: 100%; border-collapse: collapse; margin: 1.5rem 0 2rem; font-size: .85rem }
 .report-content thead { border-bottom: 2px solid rgba(0,212,255,.15) }
