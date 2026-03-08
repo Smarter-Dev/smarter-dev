@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import dataclasses
+import logging
 from dataclasses import dataclass
 from typing import Literal
 
 import httpx
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.usage import RunUsage
 
 from smarter_dev.web.scan import tools
 from smarter_dev.web.scan.tools import RateLimiter, URLRateLimiter
+
+logger = logging.getLogger(__name__)
 
 MODEL = "google-gla:gemini-3.1-flash-lite-preview"
 
@@ -37,31 +42,45 @@ class ResearchResult(BaseModel):
     summary: str
 
 
+class SubAgentURL(BaseModel):
+    """A URL found and summarized by the research sub-agent."""
+
+    url: str
+    title: str
+    summary: str
+
+
+class SubAgentResult(BaseModel):
+    """Result from the research sub-agent."""
+
+    answer: str
+    urls: list[SubAgentURL]
+
+
 SYSTEM_PROMPT = """\
-You are a research agent. You answer questions by searching the web, \
-understanding the topic, and writing a clear response the user can \
+You are a research agent. You answer questions by delegating research \
+to your `research` tool and writing a clear response the user can \
 immediately act on.
 
 ## How to research
 
-You have two tools: `search` (web search) and `read` (read a URL's full \
-content). You can call `search` multiple times per turn and they run in \
-parallel.
+You have one tool: `research(question)`. It searches the web and reads \
+pages to answer a specific question. You can call it multiple times per \
+turn and they run in parallel.
 
 ### Phase 1 — Survey and orient
 
-Start with 2-3 broad parallel searches (num_results 2-3) to get the lay \
-of the land. Always include a recency query — if something has recently \
-changed that affects the answer, the user needs to know immediately.
+Start with 2-3 parallel `research` calls to explore different angles \
+of the query. Always include a recency question — if something has \
+recently changed that affects the answer, the user needs to know.
 
 After the survey, identify the real question the user is trying to answer. \
 It may not be exactly what they asked — understand what they actually need.
 
-### Phase 2 — Research the answer
+### Phase 2 — Deep research
 
-Use `read` on the most promising URLs from your searches, and run \
-additional `search` queries as needed. Prioritize practical, \
-actionable information over background context.
+Use additional `research` calls to fill gaps and verify facts. \
+Prioritize practical, actionable information over background context.
 
 Stop when you have enough to give the user a clear, confident answer.
 
@@ -94,6 +113,15 @@ article, video, forum, or other. Mark sources you cited as cited=True. \
 Include a 2-3 sentence summary suitable for a short notification.
 """
 
+_SUB_AGENT_PROMPT = """\
+You are a focused web research assistant. Given a question, search the \
+web and read pages to find the answer. Use multiple searches to explore \
+different angles and verify information.
+
+Return a clear, factual answer with the URLs you found most useful and \
+a brief summary of each.
+"""
+
 # Defer model resolution by not passing it at construction time.
 # The model is specified at run time via `model=MODEL`.
 research_agent = Agent(
@@ -103,22 +131,16 @@ research_agent = Agent(
 )
 
 
-_naming_agent = Agent(
-    output_type=str,
-    instructions="Generate a short title (3-8 words) for this research query. Return only the title, no quotes.",
+# --- Research sub-agent (search + read tools) ---
+
+_research_sub_agent = Agent(
+    deps_type=ResearchDeps,
+    output_type=SubAgentResult,
+    instructions=_SUB_AGENT_PROMPT,
 )
 
 
-async def generate_session_name(query: str) -> str:
-    """Generate a short descriptive name for a research session."""
-    try:
-        result = await _naming_agent.run(query, model=MODEL)
-        return result.output[:200]
-    except Exception:
-        return query[:200]
-
-
-@research_agent.tool
+@_research_sub_agent.tool
 async def search(
     ctx: RunContext[ResearchDeps], query: str, num_results: int = 5
 ) -> str:
@@ -141,7 +163,7 @@ async def search(
     return "\n".join(lines)
 
 
-@research_agent.tool
+@_research_sub_agent.tool
 async def read(ctx: RunContext[ResearchDeps], url: str) -> str:
     """Read the full content of a URL. Returns the page text as markdown."""
     await ctx.deps.read_rate_limiter.wait_if_needed(url)
@@ -156,3 +178,68 @@ async def read(ctx: RunContext[ResearchDeps], url: str) -> str:
     if result.get("content"):
         parts.append(result["content"])
     return "\n\n".join(parts) if parts else "No content found."
+
+
+def _usage_to_dict(usage: RunUsage) -> dict:
+    """Convert RunUsage to a serializable dict, omitting zero values."""
+    d = dataclasses.asdict(usage)
+    return {k: v for k, v in d.items() if v}
+
+
+@research_agent.tool
+async def research(ctx: RunContext[ResearchDeps], question: str) -> str:
+    """Research a specific question by searching the web and reading pages.
+
+    Delegates to a sub-agent that performs multiple searches and reads
+    to answer the question. Returns relevant URLs and summaries.
+    """
+    try:
+        result = await _research_sub_agent.run(
+            question, deps=ctx.deps, model=MODEL,
+        )
+        usage = result.usage()
+        usage_dict = _usage_to_dict(usage)
+        output = result.output
+
+        # Format as text for the main agent
+        parts = [output.answer, ""]
+        if output.urls:
+            parts.append("### Sources found:")
+            for u in output.urls:
+                parts.append(f"- [{u.title}]({u.url})")
+                parts.append(f"  {u.summary}")
+                parts.append("")
+
+        if usage_dict:
+            parts.append(f"[sub-agent usage: {usage_dict}]")
+
+        # Store usage on the context for the runner to pick up
+        if not hasattr(ctx.deps, "_sub_agent_usage"):
+            ctx.deps._sub_agent_usage = []  # type: ignore[attr-defined]
+        ctx.deps._sub_agent_usage.append({  # type: ignore[attr-defined]
+            "question": question,
+            "usage": usage_dict,
+        })
+
+        return "\n".join(parts)
+
+    except Exception as e:
+        logger.exception("Research sub-agent failed for question: %s", question)
+        return f"Research failed: {e}"
+
+
+# --- Naming agent ---
+
+_naming_agent = Agent(
+    output_type=str,
+    instructions="Generate a short title (3-8 words) for this research query. Return only the title, no quotes.",
+)
+
+
+async def generate_session_name(query: str) -> str:
+    """Generate a short descriptive name for a research session."""
+    try:
+        result = await _naming_agent.run(query, model=MODEL)
+        return result.output[:200]
+    except Exception:
+        return query[:200]

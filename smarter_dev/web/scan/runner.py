@@ -7,6 +7,7 @@ SourceRegistry, and persists results to the database.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import time
 import zoneinfo
@@ -22,6 +23,7 @@ from pydantic_ai.messages import (
     PartDeltaEvent,
     TextPartDelta,
 )
+from pydantic_ai.usage import RunUsage
 from skrift.lib.notifications import NotificationMode, notify_source
 
 from smarter_dev.shared.database import get_skrift_db_session_context
@@ -31,6 +33,12 @@ from smarter_dev.web.scan.tools import RateLimiter, URLRateLimiter
 
 logger = logging.getLogger(__name__)
 ops = ResearchSessionOperations()
+
+
+def _usage_to_dict(usage: RunUsage) -> dict:
+    """Convert RunUsage to a serializable dict, omitting zero values."""
+    d = dataclasses.asdict(usage)
+    return {k: v for k, v in d.items() if v}
 
 
 def _source_key(session_id: str) -> str:
@@ -87,6 +95,7 @@ async def run_research(
             )
 
             result_data: ResearchResult | None = None
+            main_agent_usage: RunUsage | None = None
 
             instructions = f"{SYSTEM_PROMPT}\n\n{date_context}"
 
@@ -139,11 +148,24 @@ async def run_research(
 
                 elif isinstance(event, AgentRunResultEvent):
                     result_data = event.result.output
+                    main_agent_usage = event.result.usage()
 
             if result_data is None:
                 raise RuntimeError("Agent completed without producing a result")
 
             duration = time.monotonic() - start_time
+
+            # Collect usage from main agent
+            main_usage = _usage_to_dict(main_agent_usage) if main_agent_usage else {}
+
+            # Collect sub-agent usage from deps
+            sub_agent_usage = getattr(deps, "_sub_agent_usage", [])
+
+            usage_summary = {
+                "main_agent": main_usage,
+                "sub_agents": sub_agent_usage,
+            }
+            tool_log.append({"type": "usage", **usage_summary})
 
             # Persist to DB
             async with get_skrift_db_session_context() as db_session:
@@ -164,6 +186,7 @@ async def run_research(
                 summary=result_data.summary,
                 response=result_data.response,
                 duration=round(duration, 2),
+                usage=usage_summary,
             )
 
     except Exception as e:
