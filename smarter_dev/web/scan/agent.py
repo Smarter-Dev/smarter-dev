@@ -10,6 +10,7 @@ from typing import Literal
 import httpx
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.messages import ModelRequest, ModelResponse, ToolCallPart, ToolReturnPart
 from pydantic_ai.usage import RunUsage
 
 from smarter_dev.web.scan import tools
@@ -186,6 +187,36 @@ def _usage_to_dict(usage: RunUsage) -> dict:
     return {k: v for k, v in d.items() if v}
 
 
+def _format_sub_agent_activity(messages: list) -> str:
+    """Extract tool calls and results from sub-agent messages into a readable log."""
+    lines: list[str] = []
+    for msg in messages:
+        if isinstance(msg, ModelResponse):
+            for part in msg.parts:
+                if isinstance(part, ToolCallPart):
+                    args = part.args
+                    if isinstance(args, dict):
+                        if part.tool_name == "search":
+                            arg_str = args.get("query", str(args))
+                        elif part.tool_name == "read":
+                            arg_str = args.get("url", str(args))
+                        else:
+                            arg_str = str(args)
+                    else:
+                        arg_str = str(args) if args else ""
+                    lines.append(f"── {part.tool_name}: {arg_str}")
+        elif isinstance(msg, ModelRequest):
+            for part in msg.parts:
+                if isinstance(part, ToolReturnPart):
+                    content = str(part.content)
+                    # Truncate long content but keep enough to be useful
+                    if len(content) > 2000:
+                        content = content[:2000] + "\n... (truncated)"
+                    lines.append(f"   → {content}")
+                    lines.append("")
+    return "\n".join(lines)
+
+
 @research_agent.tool
 async def research(ctx: RunContext[ResearchDeps], question: str) -> str:
     """Research a specific question by searching the web and reading pages.
@@ -213,12 +244,14 @@ async def research(ctx: RunContext[ResearchDeps], question: str) -> str:
         if usage_dict:
             parts.append(f"[sub-agent usage: {usage_dict}]")
 
-        # Store usage on the context for the runner to pick up
+        # Store sub-agent tool activity and usage for the runner
+        activity_log = _format_sub_agent_activity(result.all_messages())
         if not hasattr(ctx.deps, "_sub_agent_usage"):
             ctx.deps._sub_agent_usage = []  # type: ignore[attr-defined]
         ctx.deps._sub_agent_usage.append({  # type: ignore[attr-defined]
             "question": question,
             "usage": usage_dict,
+            "activity": activity_log,
         })
 
         return "\n".join(parts)

@@ -120,6 +120,15 @@ async def run_research(
                 elif isinstance(event, FunctionToolResultEvent):
                     tool_name = event.result.tool_name
                     content = str(event.result.content)[:5120]
+
+                    # For research tool, prepend the sub-agent's search/read activity
+                    if tool_name == "research":
+                        sub_usage_list = getattr(deps, "_sub_agent_usage", [])
+                        if sub_usage_list:
+                            activity = sub_usage_list[-1].get("activity", "")
+                            if activity:
+                                content = f"{activity}\n\n{'─' * 40}\n\n{content}"
+
                     await _emit(
                         sid, "tool_result",
                         tool=tool_name,
