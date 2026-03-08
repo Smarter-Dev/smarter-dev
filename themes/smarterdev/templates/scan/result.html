@@ -31,8 +31,19 @@
     .scan-tool-running{animation:scan-pulse 1.5s ease-in-out infinite}
     .scan-tool-done{cursor:pointer}
     .scan-tool-done:hover{background:rgba(0,212,255,.03)}
-    .scan-tool-content{display:none;padding:.5rem 1rem .75rem;font-size:.72rem;color:var(--gray);line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow-y:auto;border-bottom:1px solid rgba(0,212,255,.04)}
+    .scan-tool-content{display:none;padding:.5rem 1rem .75rem;font-size:.72rem;color:var(--gray);line-height:1.6;white-space:pre-wrap;word-break:break-word;max-height:400px;overflow-y:auto;border-bottom:1px solid rgba(0,212,255,.04)}
     .scan-tool-content.expanded{display:block}
+
+    /* Nested sub-agent tools */
+    .scan-sub-tools{list-style:none;padding:0;margin:0}
+    .scan-sub-tool{padding:.4rem .6rem;border-bottom:1px solid rgba(0,212,255,.03);display:flex;align-items:center;gap:.4rem;cursor:pointer}
+    .scan-sub-tool:last-child{border-bottom:none}
+    .scan-sub-tool:hover{background:rgba(0,212,255,.03)}
+    .scan-sub-tool-name{font-family:var(--heading);font-size:.48rem;letter-spacing:.06em;color:var(--mid)}
+    .scan-sub-tool-args{color:var(--gray);font-size:.68rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:350px}
+    .scan-sub-tool-content{display:none;padding:.3rem .6rem .5rem;font-size:.68rem;color:var(--gray);line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:250px;overflow-y:auto;border-bottom:1px solid rgba(0,212,255,.03);background:rgba(0,0,0,.1)}
+    .scan-sub-tool-content.expanded{display:block}
+    .scan-sub-answer{padding:.5rem .6rem;font-size:.72rem;color:var(--light);line-height:1.6;white-space:pre-wrap;word-break:break-word;border-top:1px solid rgba(0,212,255,.06);margin-top:.3rem}
 
     /* Response area */
     .scan-response{min-height:100px}
@@ -82,7 +93,7 @@
     <div class="report-content">
         <!-- Tool activity -->
         <details class="scan-tools" id="scan-tools" {% if session.status == 'running' %}open{% endif %}>
-            <summary class="scan-tools-header">TOOL ACTIVITY <span id="scan-tool-count">({% if session.tool_log %}{{ session.tool_log|length }}{% else %}0{% endif %})</span></summary>
+            <summary class="scan-tools-header">TOOL ACTIVITY <span id="scan-tool-count">({% if session.tool_log %}{{ session.tool_log|selectattr('tool', 'defined')|list|length }}{% else %}0{% endif %})</span></summary>
             <ul class="scan-tools-list" id="scan-tools-list">
                 {% if session.status != 'running' and session.tool_log %}
                 {% for entry in session.tool_log %}
@@ -91,11 +102,24 @@
                     <span class="scan-tool-name">{{ entry.tool }}</span>
                     <span class="scan-tool-args">{% if entry.tool == 'research' and entry.input is defined and entry.input.question is defined %}{{ entry.input.question|truncate(80) }}{% else %}{{ (entry.input if entry.input is defined else '')|string|truncate(80) }}{% endif %}</span>
                 </li>
-                {% if entry.content is defined %}
-                <div class="scan-tool-content">{{ entry.content }}</div>
-                {% else %}
-                <div class="scan-tool-content"></div>
-                {% endif %}
+                <div class="scan-tool-content">
+                    {% if entry.sub_tools is defined and entry.sub_tools %}
+                    <ul class="scan-sub-tools">
+                        {% for st in entry.sub_tools %}
+                        <li class="scan-sub-tool">
+                            <span class="scan-sub-tool-name">{{ st.tool }}</span>
+                            <span class="scan-sub-tool-args">{% if st.tool == 'search' and st.input is defined and st.input.query is defined %}{{ st.input.query|truncate(70) }}{% elif st.tool == 'read' and st.input is defined and st.input.url is defined %}{{ st.input.url|truncate(70) }}{% else %}{{ (st.input if st.input is defined else '')|string|truncate(70) }}{% endif %}</span>
+                        </li>
+                        <div class="scan-sub-tool-content">{{ st.content if st.content is defined else '' }}</div>
+                        {% endfor %}
+                    </ul>
+                    {% if entry.content is defined and entry.content %}
+                    <div class="scan-sub-answer">{{ entry.content }}</div>
+                    {% endif %}
+                    {% elif entry.content is defined %}
+                    {{ entry.content }}
+                    {% endif %}
+                </div>
                 {% endif %}
                 {% endfor %}
                 {% endif %}
@@ -222,8 +246,39 @@ if (window.__skriftNotifications) {
                         }
                     };
                     const contentDiv = entry.nextElementSibling;
-                    if (contentDiv && contentDiv.classList.contains("scan-tool-content") && data.content) {
-                        contentDiv.textContent = data.content;
+                    if (contentDiv && contentDiv.classList.contains("scan-tool-content")) {
+                        // Render nested sub-tools for research tool
+                        if (data.sub_tools && data.sub_tools.length > 0) {
+                            var html = '<ul class="scan-sub-tools">';
+                            for (var st of data.sub_tools) {
+                                var argText = "";
+                                if (st.tool === "search" && st.input && st.input.query) argText = st.input.query;
+                                else if (st.tool === "read" && st.input && st.input.url) argText = st.input.url;
+                                else argText = JSON.stringify(st.input || {});
+                                if (argText.length > 70) argText = argText.slice(0, 70) + "...";
+                                html += '<li class="scan-sub-tool">' +
+                                    '<span class="scan-sub-tool-name">' + escapeHtml(st.tool) + '</span>' +
+                                    '<span class="scan-sub-tool-args">' + escapeHtml(argText) + '</span></li>' +
+                                    '<div class="scan-sub-tool-content">' + escapeHtml(st.content || "") + '</div>';
+                            }
+                            html += '</ul>';
+                            if (data.content) {
+                                html += '<div class="scan-sub-answer">' + escapeHtml(data.content) + '</div>';
+                            }
+                            contentDiv.innerHTML = html;
+                            // Attach click handlers for sub-tools
+                            contentDiv.querySelectorAll(".scan-sub-tool").forEach(function(subEl) {
+                                subEl.addEventListener("click", function(ev) {
+                                    ev.stopPropagation();
+                                    var subNext = this.nextElementSibling;
+                                    if (subNext && subNext.classList.contains("scan-sub-tool-content")) {
+                                        subNext.classList.toggle("expanded");
+                                    }
+                                });
+                            });
+                        } else if (data.content) {
+                            contentDiv.textContent = data.content;
+                        }
                     }
                     break;
                 }
@@ -318,10 +373,21 @@ if (window.__skriftNotifications) {
 {% elif session and session.status == 'complete' %}
 <script nonce="{{ csp_nonce() }}">
 (function() {
-    // Tool expansion click handler
+    // Tool expansion click handler (top-level and nested sub-tools)
     var toolsList = document.getElementById("scan-tools-list");
     if (toolsList) {
         toolsList.addEventListener("click", function(e) {
+            // Check for sub-tool click first
+            var subTool = e.target.closest(".scan-sub-tool");
+            if (subTool) {
+                e.stopPropagation();
+                var subNext = subTool.nextElementSibling;
+                if (subNext && subNext.classList.contains("scan-sub-tool-content")) {
+                    subNext.classList.toggle("expanded");
+                }
+                return;
+            }
+            // Top-level tool entry click
             var entry = e.target.closest(".scan-tool-entry");
             if (!entry) return;
             var next = entry.nextElementSibling;

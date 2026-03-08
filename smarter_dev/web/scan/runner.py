@@ -121,24 +121,26 @@ async def run_research(
                     tool_name = event.result.tool_name
                     content = str(event.result.content)[:5120]
 
-                    # For research tool, prepend the sub-agent's search/read activity
+                    # For research tool, include the sub-agent's tool activity
+                    sub_tools: list[dict] = []
                     if tool_name == "research":
                         sub_usage_list = getattr(deps, "_sub_agent_usage", [])
                         if sub_usage_list:
-                            activity = sub_usage_list[-1].get("activity", "")
-                            if activity:
-                                content = f"{activity}\n\n{'─' * 40}\n\n{content}"
+                            sub_tools = sub_usage_list[-1].get("tools", [])
 
                     await _emit(
                         sid, "tool_result",
                         tool=tool_name,
                         status="complete",
                         content=content,
+                        sub_tools=sub_tools if sub_tools else None,
                     )
                     for entry in reversed(tool_log):
                         if entry["tool"] == tool_name and entry["status"] == "running":
                             entry["status"] = "complete"
                             entry["content"] = content
+                            if sub_tools:
+                                entry["sub_tools"] = sub_tools
                             break
 
                 elif isinstance(event, PartDeltaEvent):

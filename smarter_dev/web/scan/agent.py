@@ -187,34 +187,38 @@ def _usage_to_dict(usage: RunUsage) -> dict:
     return {k: v for k, v in d.items() if v}
 
 
-def _format_sub_agent_activity(messages: list) -> str:
-    """Extract tool calls and results from sub-agent messages into a readable log."""
-    lines: list[str] = []
+def _extract_sub_agent_tools(messages: list) -> list[dict]:
+    """Extract structured tool calls from sub-agent messages.
+
+    Returns a list of dicts with: tool, input, content, status.
+    Suitable for nested rendering in the UI.
+    """
+    # First pass: collect tool calls keyed by tool_call_id
+    calls: dict[str, dict] = {}
     for msg in messages:
         if isinstance(msg, ModelResponse):
             for part in msg.parts:
                 if isinstance(part, ToolCallPart):
                     args = part.args
                     if isinstance(args, dict):
-                        if part.tool_name == "search":
-                            arg_str = args.get("query", str(args))
-                        elif part.tool_name == "read":
-                            arg_str = args.get("url", str(args))
-                        else:
-                            arg_str = str(args)
+                        input_data = args
                     else:
-                        arg_str = str(args) if args else ""
-                    lines.append(f"── {part.tool_name}: {arg_str}")
+                        input_data = {"raw": str(args) if args else ""}
+                    calls[part.tool_call_id] = {
+                        "tool": part.tool_name,
+                        "input": input_data,
+                        "status": "complete",
+                    }
         elif isinstance(msg, ModelRequest):
             for part in msg.parts:
                 if isinstance(part, ToolReturnPart):
-                    content = str(part.content)
-                    # Truncate long content but keep enough to be useful
-                    if len(content) > 2000:
-                        content = content[:2000] + "\n... (truncated)"
-                    lines.append(f"   → {content}")
-                    lines.append("")
-    return "\n".join(lines)
+                    if part.tool_call_id in calls:
+                        content = str(part.content)
+                        if len(content) > 5120:
+                            content = content[:5120] + "\n... (truncated)"
+                        calls[part.tool_call_id]["content"] = content
+
+    return list(calls.values())
 
 
 @research_agent.tool
@@ -245,13 +249,13 @@ async def research(ctx: RunContext[ResearchDeps], question: str) -> str:
             parts.append(f"[sub-agent usage: {usage_dict}]")
 
         # Store sub-agent tool activity and usage for the runner
-        activity_log = _format_sub_agent_activity(result.all_messages())
+        sub_tools = _extract_sub_agent_tools(result.all_messages())
         if not hasattr(ctx.deps, "_sub_agent_usage"):
             ctx.deps._sub_agent_usage = []  # type: ignore[attr-defined]
         ctx.deps._sub_agent_usage.append({  # type: ignore[attr-defined]
             "question": question,
             "usage": usage_dict,
-            "activity": activity_log,
+            "tools": sub_tools,
         })
 
         return "\n".join(parts)
