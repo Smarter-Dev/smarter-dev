@@ -145,10 +145,10 @@ _research_sub_agent = Agent(
 async def search(
     ctx: RunContext[ResearchDeps], query: str, num_results: int = 5
 ) -> str:
-    """Search the web. Returns results with title, url, and description."""
+    """Search the web. Returns results with title, url, description, and page content."""
     await ctx.deps.search_rate_limiter.wait()
-    results = await tools.brave_search(
-        ctx.deps.http_client, query, min(num_results, 10)
+    results = await tools.jina_search(
+        ctx.deps.http_client, query, min(num_results, 5)
     )
     if not results:
         return "No results found."
@@ -160,6 +160,11 @@ async def search(
         lines.append(f"   {r.get('url', '')}")
         if r.get("description"):
             lines.append(f"   {r['description']}")
+        if r.get("content"):
+            # Include truncated content so the agent has real page data
+            content = r["content"][:3000]
+            lines.append(f"   ---")
+            lines.append(f"   {content}")
         lines.append("")
     return "\n".join(lines)
 

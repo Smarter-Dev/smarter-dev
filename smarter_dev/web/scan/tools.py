@@ -88,6 +88,49 @@ async def brave_search(
         return [{"error": f"Search failed: {e}"}]
 
 
+async def jina_search(
+    client: httpx.AsyncClient,
+    query: str,
+    num_results: int = 5,
+) -> list[dict]:
+    """Search the web via the Jina Search API.
+
+    Returns a list of dicts with keys: title, url, description, content.
+    Unlike Brave Search, Jina returns page content with each result.
+    """
+    api_key = os.environ.get("JINA_API_KEY", "")
+    headers: dict[str, str] = {
+        "Accept": "application/json",
+        "X-Retain-Images": "none",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    try:
+        resp = await client.get(
+            f"https://s.jina.ai/{query}",
+            headers=headers,
+            timeout=30.0,
+        )
+        if resp.status_code != 200:
+            return [{"error": f"Jina Search returned {resp.status_code}"}]
+
+        data = resp.json()
+        results = []
+        for item in data.get("data", [])[:num_results]:
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "description": item.get("description", ""),
+                "content": item.get("content", ""),
+            })
+        return results
+
+    except Exception as e:
+        logger.error("Jina Search failed: %s", e)
+        return [{"error": f"Search failed: {e}"}]
+
+
 async def jina_read(client: httpx.AsyncClient, url: str) -> dict:
     """Read the full content of a URL via the Jina Reader API.
 
