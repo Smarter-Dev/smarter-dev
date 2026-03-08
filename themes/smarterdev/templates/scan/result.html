@@ -111,7 +111,6 @@
                 <div class="scan-sub-tool-content">{{ st.content if st.content is defined else '' }}</div>
                 {%- endfor %}
                 </ul>
-                {% if entry.content is defined and entry.content %}<div class="scan-sub-answer">{{ entry.content }}</div>{% endif %}
                 </div>
                 {% elif entry.content is defined -%}
                 <div class="scan-tool-content scan-tool-content--text">{{ entry.content }}</div>
@@ -260,9 +259,6 @@ if (window.__skriftNotifications) {
                                     '<div class="scan-sub-tool-content">' + escapeHtml(st.content || "") + '</div>';
                             }
                             html += '</ul>';
-                            if (data.content) {
-                                html += '<div class="scan-sub-answer">' + escapeHtml(data.content) + '</div>';
-                            }
                             contentDiv.innerHTML = html;
                             // Attach click handlers for sub-tools
                             contentDiv.querySelectorAll(".scan-sub-tool").forEach(function(subEl) {
