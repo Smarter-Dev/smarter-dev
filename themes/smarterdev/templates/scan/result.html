@@ -81,6 +81,14 @@
     .scan-youtube-title{font-size:.72rem;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     .scan-youtube-channel{font-size:.6rem;color:var(--gray);margin-top:2px}
 
+    /* Character fade animation */
+    @keyframes scan-char-fade{from{opacity:0}to{opacity:1}}
+    .scan-char{opacity:0;animation:scan-char-fade 1s forwards}
+
+    /* YouTube item fade animation */
+    @keyframes scan-yt-fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .scan-yt-animate{opacity:0;animation:scan-yt-fade .5s ease forwards}
+
     /* Hidden state */
     .scan-hidden{display:none}
     </style>
@@ -233,6 +241,7 @@ if (window.__skriftNotifications) {
     let toolEntryCount = 0;
     let timerInterval;
     let completed = false;
+    let bufferedVideos = null;
 
     function formatDuration(ms) {
         const s = Math.floor(ms / 1000);
@@ -270,22 +279,9 @@ if (window.__skriftNotifications) {
 
         else if (eventType === "youtube_videos") {
             if (data.videos && data.videos.length > 0) {
-                var section = document.getElementById("scan-youtube-section");
-                var list = document.getElementById("scan-youtube-list");
-                if (section && list) {
-                    section.classList.remove("scan-hidden");
-                    var html = "";
-                    for (var v of data.videos) {
-                        html += '<li class="scan-youtube-item">' +
-                            '<a href="' + escapeHtml(v.url) + '" target="_blank" rel="noopener" class="scan-youtube-link">' +
-                            (v.thumbnail ? '<img src="' + escapeHtml(v.thumbnail) + '" class="scan-youtube-thumb" alt="" loading="lazy">' : '') +
-                            '<div class="scan-youtube-info">' +
-                            '<div class="scan-youtube-title">' + escapeHtml(v.title) + '</div>' +
-                            '<div class="scan-youtube-channel">' + escapeHtml(v.channel) + '</div>' +
-                            '</div></a></li>';
-                    }
-                    list.innerHTML = html;
-                }
+                bufferedVideos = data.videos;
+                // If already completed, render now
+                if (completed) renderYouTubeVideos(bufferedVideos);
             }
         }
 
@@ -384,6 +380,7 @@ if (window.__skriftNotifications) {
                 responseText = data.response;
                 var rendered = typeof marked !== "undefined" ? marked.parse(responseText) : responseText;
                 responseEl.innerHTML = processCitations(rendered);
+                animateResponseChars(responseEl);
             }
 
             if (placeholder) placeholder.remove();
@@ -393,6 +390,9 @@ if (window.__skriftNotifications) {
 
             // Show actions
             actionsEl.classList.remove("scan-hidden");
+
+            // Render buffered YouTube videos
+            if (bufferedVideos) renderYouTubeVideos(bufferedVideos);
         }
 
         else if (eventType === "error") {
@@ -444,6 +444,51 @@ if (window.__skriftNotifications) {
         const div = document.createElement("div");
         div.textContent = str || "";
         return div.innerHTML;
+    }
+
+    function renderYouTubeVideos(videos) {
+        var section = document.getElementById("scan-youtube-section");
+        var list = document.getElementById("scan-youtube-list");
+        if (!section || !list) return;
+        section.classList.remove("scan-hidden");
+        var html = "";
+        for (var i = 0; i < videos.length; i++) {
+            var v = videos[i];
+            html += '<li class="scan-youtube-item scan-yt-animate" style="animation-delay:' + (i * 200) + 'ms">' +
+                '<a href="' + escapeHtml(v.url) + '" target="_blank" rel="noopener" class="scan-youtube-link">' +
+                (v.thumbnail ? '<img src="' + escapeHtml(v.thumbnail) + '" class="scan-youtube-thumb" alt="" loading="lazy">' : '') +
+                '<div class="scan-youtube-info">' +
+                '<div class="scan-youtube-title">' + escapeHtml(v.title) + '</div>' +
+                '<div class="scan-youtube-channel">' + escapeHtml(v.channel) + '</div>' +
+                '</div></a></li>';
+        }
+        list.innerHTML = html;
+    }
+
+    function animateResponseChars(container) {
+        var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+        var textNodes = [];
+        while (walker.nextNode()) textNodes.push(walker.currentNode);
+        var totalChars = 0;
+        for (var i = 0; i < textNodes.length; i++) totalChars += textNodes[i].textContent.length;
+        // Scale delay so total animation stays ~3s regardless of length
+        var delay = Math.min(50, Math.max(1, Math.floor(3000 / totalChars)));
+        var charIdx = 0;
+        for (var i = 0; i < textNodes.length; i++) {
+            var node = textNodes[i];
+            var text = node.textContent;
+            if (!text) continue;
+            var frag = document.createDocumentFragment();
+            for (var j = 0; j < text.length; j++) {
+                var span = document.createElement("span");
+                span.textContent = text[j];
+                span.className = "scan-char";
+                span.style.animationDelay = (charIdx * delay) + "ms";
+                frag.appendChild(span);
+                charIdx++;
+            }
+            node.parentNode.replaceChild(frag, node);
+        }
     }
 
     function summarizeArgs(input, toolName) {
@@ -499,8 +544,44 @@ if (window.__skriftNotifications) {
         });
     }
 
-    const responseEl = document.getElementById("scan-response");
-    const responseText = responseEl ? responseEl.textContent : "";
+    // Animate response characters on page load
+    var responseEl = document.getElementById("scan-response");
+    var responseText = responseEl ? responseEl.textContent : "";
+    if (responseEl && responseEl.children.length > 0) {
+        animateResponseChars(responseEl);
+    }
+
+    // Animate YouTube videos on page load
+    var ytItems = document.querySelectorAll(".scan-youtube-item");
+    for (var i = 0; i < ytItems.length; i++) {
+        ytItems[i].classList.add("scan-yt-animate");
+        ytItems[i].style.animationDelay = (i * 200) + "ms";
+    }
+
+    function animateResponseChars(container) {
+        var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+        var textNodes = [];
+        while (walker.nextNode()) textNodes.push(walker.currentNode);
+        var totalChars = 0;
+        for (var i = 0; i < textNodes.length; i++) totalChars += textNodes[i].textContent.length;
+        var delay = Math.min(50, Math.max(1, Math.floor(3000 / totalChars)));
+        var charIdx = 0;
+        for (var i = 0; i < textNodes.length; i++) {
+            var node = textNodes[i];
+            var text = node.textContent;
+            if (!text) continue;
+            var frag = document.createDocumentFragment();
+            for (var j = 0; j < text.length; j++) {
+                var span = document.createElement("span");
+                span.textContent = text[j];
+                span.className = "scan-char";
+                span.style.animationDelay = (charIdx * delay) + "ms";
+                frag.appendChild(span);
+                charIdx++;
+            }
+            node.parentNode.replaceChild(frag, node);
+        }
+    }
 
     document.getElementById("scan-copy-btn").addEventListener("click", function() {
         navigator.clipboard.writeText(responseText).then(function() {
