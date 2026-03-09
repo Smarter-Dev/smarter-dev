@@ -69,7 +69,8 @@ Before writing, plan the piece. Decide:
 1. **The lead** — what directly answers the user's question? Open with it.
 2. **The close** — the actionable conclusion of it all.
 3. **The support** — what evidence and context connect the lead to the \
-close? Only include what earns its space.
+close? Only include what earns its space. Drop anything that doesn't \
+serve the answer — irrelevant results should not appear at all.
 
 Then write. Don't summarize what you found — pull out the most important \
 details and supporting information, and build a compelling, original \
@@ -157,12 +158,17 @@ and page contents from reading key results.
 
 ## Your task
 
-1. **Evaluate** the search results and page reads provided below.
-2. **Identify gaps** — if you need to read additional pages to fully \
+1. **Triage** — discard any search results or page contents that do NOT \
+   help answer the user's question. Off-topic results, tangential mentions, \
+   and marketing fluff should be ignored entirely. Do not cite them.
+2. **Evaluate** the remaining results and page reads.
+3. **Identify gaps** — if you need to read additional pages to fully \
    understand something new, surprising, or to verify important claims, \
    use the `read_url` tool. Focus on filling gaps in your knowledge, \
    especially for things that may have changed since your training cutoff.
-3. **Write** your response following the writing instructions below.
+4. **Write** your response following the writing instructions below. \
+   Answer the query first, then mention interesting alternatives or \
+   related findings only if they add real value.
 
 {WRITING_INSTRUCTIONS}
 """
