@@ -373,10 +373,13 @@ async def run_session_meta(
         )
 
         # Fire off YouTube search for tech topics
-        asyncio.create_task(
+        logger.info("Meta for %s: topic=%s, skill=%s — spawning YouTube search", sid, meta.topic, meta.skill_level)
+        task = asyncio.create_task(
             run_youtube_search(session_id, query, user_id, meta.skill_level, meta.topic),
             name=f"youtube:{session_id}",
         )
+        # Hold reference to prevent GC, log errors
+        task.add_done_callback(lambda t: t.result() if not t.cancelled() and t.exception() is None else None)
     except Exception:
         logger.exception("Failed to generate session meta for %s", sid)
 
@@ -396,6 +399,7 @@ async def run_youtube_search(
     sid = str(session_id)
     try:
         yt_query = await generate_youtube_query(query, skill_level, topic)
+        logger.info("YouTube query for %s: %r", sid, yt_query)
         if not yt_query:
             return  # non-tech topic, skip
 
@@ -406,7 +410,7 @@ async def run_youtube_search(
             videos = await youtube_search(http_client, yt_query, num_results=3)
 
         if not videos or (len(videos) == 1 and "error" in videos[0]):
-            logger.warning("YouTube search returned no results for %s", sid)
+            logger.warning("YouTube search returned no/error results for %s: %r", sid, videos)
             return
 
         # Persist videos to session context
@@ -415,6 +419,7 @@ async def run_youtube_search(
                 db_session, session_id, {"youtube_videos": videos},
             )
 
+        logger.info("YouTube: emitting %d videos for %s", len(videos), sid)
         await _emit(
             user_id, sid, "youtube_videos",
             videos=videos,
