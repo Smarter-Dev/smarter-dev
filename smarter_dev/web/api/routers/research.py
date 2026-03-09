@@ -108,11 +108,12 @@ async def stream_research(
 
         return StreamingResponse(_finished(), media_type="text/event-stream")
 
-    # Subscribe a queue to the research source via Skrift's SourceRegistry
-    source_key = f"research:{session_id}"
+    # Listen on the user's notification channel and filter for this session
+    user_key = f"user:{session.user_id}"
+    sid = str(session_id)
     registry = notification_service._registry
     queue: asyncio.Queue = asyncio.Queue()
-    registry.add_listener(source_key, queue)
+    registry.add_listener(user_key, queue)
 
     async def _stream():
         try:
@@ -126,15 +127,20 @@ async def stream_research(
                     yield ": keepalive\n\n"
                     continue
 
-                # Notification is a skrift Notification dataclass
-                event_type = notification.type
+                # Only forward research notifications for this session
+                if not notification.type.startswith("research:"):
+                    continue
                 payload = notification.payload or {}
+                if payload.get("session_id") != sid:
+                    continue
+
+                event_type = notification.type.removeprefix("research:")
                 yield f"event: {event_type}\ndata: {json.dumps(payload, default=str)}\n\n"
 
                 if event_type in ("complete", "error"):
                     break
         finally:
-            registry.remove_listener(source_key, queue)
+            registry.remove_listener(user_key, queue)
 
     return StreamingResponse(_stream(), media_type="text/event-stream")
 

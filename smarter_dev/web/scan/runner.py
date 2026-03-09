@@ -1,7 +1,7 @@
 """Background task orchestrator for research sessions.
 
-Runs the Pydantic AI agent, emits timeseries notifications via Skrift's
-SourceRegistry, and persists results to the database.
+Runs the Pydantic AI agent, emits user-scoped notifications via Skrift's
+notification system, and persists results to the database.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from pydantic_ai.messages import (
     TextPartDelta,
 )
 from pydantic_ai.usage import RunUsage
-from skrift.lib.notifications import NotificationMode, notify_source
+from skrift.lib.notifications import NotificationMode, notify_user
 
 from smarter_dev.shared.database import get_skrift_db_session_context
 from smarter_dev.web.scan.agent import MODEL, SYSTEM_PROMPT, ResearchDeps, ResearchResult, research_agent
@@ -41,16 +41,13 @@ def _usage_to_dict(usage: RunUsage) -> dict:
     return {k: v for k, v in d.items() if v}
 
 
-def _source_key(session_id: str) -> str:
-    return f"research:{session_id}"
-
-
-async def _emit(session_id: str, event_type: str, **payload: object) -> None:
-    """Emit a timeseries notification on the research source."""
-    await notify_source(
-        _source_key(session_id),
-        event_type,
+async def _emit(user_id: str, session_id: str, event_type: str, **payload: object) -> None:
+    """Emit a research notification to the user via Skrift's notification system."""
+    await notify_user(
+        user_id,
+        f"research:{event_type}",
         mode=NotificationMode.TIMESERIES,
+        session_id=session_id,
         **payload,
     )
 
@@ -63,9 +60,9 @@ async def run_research(
 ) -> None:
     """Run the research agent as a background task.
 
-    All progress is emitted as timeseries notifications on the
-    ``research:{session_id}`` source key. Clients (API SSE, web UI)
-    subscribe to that source to receive live updates.
+    All progress is emitted as user-scoped notifications via Skrift's
+    notification system. The result page listens for ``research:*``
+    event types to render live updates.
     """
     sid = str(session_id)
     start_time = time.monotonic()
@@ -78,7 +75,7 @@ async def run_research(
     now = datetime.now(user_tz)
     date_context = f"Today is {now.strftime('%A, %B %-d, %Y')}."
 
-    await _emit(sid, "status", stage="planning", message="Analyzing query...")
+    await _emit(user_id, sid, "status", stage="planning", message="Analyzing query...")
 
     tool_log: list[dict] = []
 
@@ -106,7 +103,7 @@ async def run_research(
                     tool_name = event.part.tool_name
                     tool_args = event.part.args
                     await _emit(
-                        sid, "tool_use",
+                        user_id, sid, "tool_use",
                         tool=tool_name,
                         input=tool_args if isinstance(tool_args, dict) else {},
                         status="running",
@@ -129,7 +126,7 @@ async def run_research(
                             sub_tools = sub_usage_list[-1].get("tools", [])
 
                     await _emit(
-                        sid, "tool_result",
+                        user_id, sid, "tool_result",
                         tool=tool_name,
                         status="complete",
                         content=content,
@@ -146,13 +143,13 @@ async def run_research(
                 elif isinstance(event, PartDeltaEvent):
                     if isinstance(event.delta, TextPartDelta):
                         await _emit(
-                            sid, "response_chunk",
+                            user_id, sid, "response_chunk",
                             delta=event.delta.content_delta,
                         )
 
                 elif isinstance(event, FinalResultEvent):
                     await _emit(
-                        sid, "status",
+                        user_id, sid, "status",
                         stage="synthesizing",
                         message="Composing response...",
                     )
@@ -191,7 +188,7 @@ async def run_research(
 
             # Emit completion
             await _emit(
-                sid, "complete",
+                user_id, sid, "complete",
                 result_id=sid,
                 result_url=f"https://scan.smarter.dev/r/{sid}",
                 summary=result_data.summary,
@@ -210,7 +207,7 @@ async def run_research(
         except Exception:
             logger.exception("Failed to persist error for session %s", sid)
 
-        await _emit(sid, "error", error=error_msg, recoverable=False)
+        await _emit(user_id, sid, "error", error=error_msg, recoverable=False)
 
 
 def start_research_task(

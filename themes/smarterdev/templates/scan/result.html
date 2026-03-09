@@ -212,10 +212,16 @@ if (window.__skriftNotifications) {
         const data = e.detail;
         if (!data || !data.type) return;
 
+        // Only handle research notifications for this session
+        if (!data.type.startsWith("research:")) return;
+        if (data.session_id && data.session_id !== "{{ session.id }}") return;
+
         // Suppress default toast rendering
         e.preventDefault();
 
-        if (data.type === "tool_use") {
+        var eventType = data.type.replace("research:", "");
+
+        if (eventType === "tool_use") {
             toolEntryCount++;
             toolCount.textContent = "(" + toolEntryCount + ")";
             const li = document.createElement("li");
@@ -230,7 +236,7 @@ if (window.__skriftNotifications) {
             toolsList.appendChild(contentDiv);
         }
 
-        else if (data.type === "tool_result") {
+        else if (eventType === "tool_result") {
             const entries = toolsList.querySelectorAll(".scan-tool-entry.scan-tool-running");
             for (const entry of entries) {
                 if (entry.dataset.tool === data.tool) {
@@ -280,13 +286,13 @@ if (window.__skriftNotifications) {
             }
         }
 
-        else if (data.type === "response_chunk") {
+        else if (eventType === "response_chunk") {
             if (placeholder) placeholder.remove();
             responseText += (data.delta || "");
             responseEl.innerHTML = typeof marked !== "undefined" ? marked.parse(responseText) : responseText;
         }
 
-        else if (data.type === "complete") {
+        else if (eventType === "complete") {
             completed = true;
             clearInterval(timerInterval);
 
@@ -311,7 +317,7 @@ if (window.__skriftNotifications) {
             actionsEl.classList.remove("scan-hidden");
         }
 
-        else if (data.type === "error") {
+        else if (eventType === "error") {
             completed = true;
             clearInterval(timerInterval);
 
