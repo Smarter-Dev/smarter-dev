@@ -85,6 +85,22 @@
     .scan-youtube-title{font-size:.72rem;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     .scan-youtube-channel{font-size:.6rem;color:var(--gray);margin-top:2px}
 
+    /* Resource cards */
+    .scan-resources-list{list-style:none;padding:0;margin:0 0 1.5rem}
+    .scan-resource-item{margin-bottom:.6rem}
+    .scan-resource-link{display:flex;gap:.6rem;text-decoration:none;color:var(--light);transition:all .2s;padding:.5rem;border:1px solid rgba(0,212,255,.06);background:var(--surface)}
+    .scan-resource-link:hover{border-color:rgba(0,212,255,.18);background:rgba(0,212,255,.03)}
+    .scan-resource-img{width:60px;height:60px;object-fit:cover;border:1px solid rgba(0,212,255,.08);flex-shrink:0;background:rgba(0,0,0,.2)}
+    .scan-resource-info{min-width:0;flex:1}
+    .scan-resource-title{font-size:.72rem;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .scan-resource-desc{font-size:.62rem;color:var(--gray);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4}
+    .scan-resource-site{display:flex;align-items:center;gap:4px;font-size:.55rem;color:var(--mid);margin-top:3px}
+    .scan-resource-favicon{width:12px;height:12px}
+
+    /* Resource card fade animation */
+    @keyframes scan-res-fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .scan-res-animate{opacity:0;animation:scan-res-fade .5s ease forwards}
+
     /* Character fade animation */
     @keyframes scan-char-fade{from{opacity:0}to{opacity:1}}
     .scan-char{opacity:0;animation:scan-char-fade .4s forwards}
@@ -234,6 +250,34 @@
         </div>
         {% endif %}
 
+        {% if session.context and session.context.resources is defined and session.context.resources %}
+        <div id="scan-resources-section">
+            <h3 class="scan-sidebar-heading">RESOURCES</h3>
+            <ul class="scan-resources-list" id="scan-resources-list">
+                {% for r in session.context.resources %}
+                <li class="scan-resource-item">
+                    <a href="{{ r.url }}" target="_blank" rel="noopener" class="scan-resource-link">
+                        {% if r.og_image is defined and r.og_image %}<img src="{{ r.og_image }}" class="scan-resource-img" alt="" loading="lazy">{% endif %}
+                        <div class="scan-resource-info">
+                            <div class="scan-resource-title">{{ r.title }}</div>
+                            <div class="scan-resource-desc">{{ r.description }}</div>
+                            <div class="scan-resource-site">
+                                {% if r.favicon is defined and r.favicon %}<img src="{{ r.favicon }}" class="scan-resource-favicon" alt="">{% endif %}
+                                {{ r.site_name if r.site_name is defined else '' }}
+                            </div>
+                        </div>
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% else %}
+        <div id="scan-resources-section" class="scan-hidden">
+            <h3 class="scan-sidebar-heading">RESOURCES</h3>
+            <ul class="scan-resources-list" id="scan-resources-list"></ul>
+        </div>
+        {% endif %}
+
         <h3 class="scan-sidebar-heading">SOURCES</h3>
         {% if session.status == 'complete' and session.sources %}
         <ul class="scan-sources-list">
@@ -287,6 +331,7 @@ if (window.__skriftNotifications) {
     let timerInterval;
     let completed = false;
     let bufferedVideos = null;
+    let bufferedResources = null;
 
     function formatDuration(ms) {
         const s = Math.floor(ms / 1000);
@@ -327,6 +372,13 @@ if (window.__skriftNotifications) {
                 bufferedVideos = data.videos;
                 // If already completed, render now
                 if (completed) renderYouTubeVideos(bufferedVideos);
+            }
+        }
+
+        else if (eventType === "resources") {
+            if (data.resources && data.resources.length > 0) {
+                bufferedResources = data.resources;
+                if (completed) renderResources(bufferedResources);
             }
         }
 
@@ -454,8 +506,9 @@ if (window.__skriftNotifications) {
             // Show actions
             actionsEl.classList.remove("scan-hidden");
 
-            // Render buffered YouTube videos
+            // Render buffered sidebar content
             if (bufferedVideos) renderYouTubeVideos(bufferedVideos);
+            if (bufferedResources) renderResources(bufferedResources);
         }
 
         else if (eventType === "error") {
@@ -524,6 +577,28 @@ if (window.__skriftNotifications) {
                 '<div class="scan-youtube-title">' + escapeHtml(v.title) + '</div>' +
                 '<div class="scan-youtube-channel">' + escapeHtml(v.channel) + '</div>' +
                 '</div></a></li>';
+        }
+        list.innerHTML = html;
+    }
+
+    function renderResources(resources) {
+        var section = document.getElementById("scan-resources-section");
+        var list = document.getElementById("scan-resources-list");
+        if (!section || !list) return;
+        section.classList.remove("scan-hidden");
+        var html = "";
+        for (var i = 0; i < resources.length; i++) {
+            var r = resources[i];
+            html += '<li class="scan-resource-item scan-res-animate" style="animation-delay:' + (i * 150) + 'ms">' +
+                '<a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener" class="scan-resource-link">' +
+                (r.og_image ? '<img src="' + escapeHtml(r.og_image) + '" class="scan-resource-img" alt="" loading="lazy">' : '') +
+                '<div class="scan-resource-info">' +
+                '<div class="scan-resource-title">' + escapeHtml(r.title) + '</div>' +
+                '<div class="scan-resource-desc">' + escapeHtml(r.description || '') + '</div>' +
+                '<div class="scan-resource-site">' +
+                (r.favicon ? '<img src="' + escapeHtml(r.favicon) + '" class="scan-resource-favicon" alt="">' : '') +
+                escapeHtml(r.site_name || '') +
+                '</div></div></a></li>';
         }
         list.innerHTML = html;
     }
@@ -640,6 +715,13 @@ if (window.__skriftNotifications) {
     for (var i = 0; i < ytItems.length; i++) {
         ytItems[i].classList.add("scan-yt-animate");
         ytItems[i].style.animationDelay = (i * 200) + "ms";
+    }
+
+    // Animate resource cards on page load
+    var resItems = document.querySelectorAll(".scan-resource-item");
+    for (var i = 0; i < resItems.length; i++) {
+        resItems[i].classList.add("scan-res-animate");
+        resItems[i].style.animationDelay = (i * 150) + "ms";
     }
 
     // Animate code examples on page load

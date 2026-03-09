@@ -807,8 +807,7 @@ class YouTubeRanking(BaseModel):
 
     selected_ids: list[str] = Field(
         description=(
-            "Ordered list of video IDs to recommend, most relevant first. "
-            "Pick 1-3 videos. Return an empty list if none are relevant."
+            "Ordered list of exactly 3 video IDs to recommend, most relevant first."
         ),
     )
 
@@ -837,8 +836,8 @@ _youtube_ranking_agent = Agent(
         "slop, or low-effort content based on their title.\n"
         "5. **Diversity** — If selecting multiple videos, prefer different "
         "angles or channels over redundant content.\n\n"
-        "Return 1-3 video IDs ordered by relevance (best first). "
-        "Return an empty list if none of the results are relevant enough.\n\n"
+        "Return exactly 3 video IDs ordered by relevance (best first). "
+        "Always pick 3 — choose the best available even if they're not perfect.\n\n"
         "Return structured output only."
     ),
 )
@@ -906,3 +905,88 @@ async def rank_youtube_results(
         logger.exception("Failed to rank YouTube results")
         # Fallback: return first 3 unranked
         return videos[:3], RunUsage()
+
+
+# ---------------------------------------------------------------------------
+# Resource ranking agent
+# ---------------------------------------------------------------------------
+
+
+class ResourceRanking(BaseModel):
+    """Output of the resource ranking agent."""
+
+    selected_indices: list[int] = Field(
+        description=(
+            "Ordered list of exactly 5 result indices (0-based) to recommend. "
+            "Rank by importance: official docs first, then tutorials, guides, "
+            "articles, forums."
+        ),
+    )
+
+
+_resource_ranking_agent = Agent(
+    output_type=ResourceRanking,
+    instructions=(
+        "You evaluate web search results and select the 5 most useful "
+        "resources for a user's research query.\n\n"
+        "You will receive:\n"
+        "- The user's original query\n"
+        "- Their skill level\n"
+        "- A numbered list of web results (title, url, description)\n\n"
+        "## Selection criteria\n\n"
+        "1. **Official documentation** — Always rank official docs highest "
+        "when available (e.g. docs.python.org, reactjs.org, MDN).\n"
+        "2. **Tutorials & guides** — High-quality tutorials from reputable "
+        "sources (Real Python, DigitalOcean, LogRocket, etc.).\n"
+        "3. **Skill match** — Match content depth to the user's level. "
+        "Beginners need introductions, experts need reference material.\n"
+        "4. **Authoritative sources** — Prefer well-known platforms "
+        "(GitHub repos, Stack Overflow answers, dev blogs from the "
+        "project maintainers) over random blogs.\n"
+        "5. **No spam** — Skip SEO-farm articles, AI-generated slop, "
+        "listicles with no substance, or paywalled content.\n"
+        "6. **Diversity** — Cover different angles: docs, tutorial, "
+        "example code, discussion thread, blog post.\n\n"
+        "Return exactly 5 indices ordered by importance (most useful first). "
+        "If fewer than 5 good results exist, still pick the best 5 available.\n\n"
+        "Return structured output only."
+    ),
+)
+
+
+async def rank_resource_results(
+    query: str, skill_level: str, results: list[dict],
+) -> tuple[list[dict], RunUsage]:
+    """Rank Brave search results and return the top 5 most useful resources.
+
+    Uses Flash Lite to evaluate relevance, authority, and skill-level match.
+    Returns the selected results in ranked order.
+    """
+    if not results:
+        return [], RunUsage()
+
+    try:
+        lines = []
+        for i, r in enumerate(results):
+            lines.append(
+                f"{i}. \"{r.get('title', 'Untitled')}\" "
+                f"— {r.get('url', '')}\n"
+                f"   {r.get('description', '')}"
+            )
+
+        prompt = (
+            f"## User Query\n{query}\n\n"
+            f"## Skill Level\n{skill_level}\n\n"
+            f"## Web Search Results\n" + "\n".join(lines)
+        )
+        result = await _resource_ranking_agent.run(prompt, model=MODEL)
+
+        ranked = []
+        for idx in result.output.selected_indices[:5]:
+            if 0 <= idx < len(results):
+                ranked.append(results[idx])
+
+        return ranked, result.usage()
+    except Exception:
+        logger.exception("Failed to rank resource results")
+        return results[:5], RunUsage()

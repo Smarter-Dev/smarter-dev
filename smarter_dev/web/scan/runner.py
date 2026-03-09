@@ -12,6 +12,7 @@ import logging
 import time
 import zoneinfo
 from datetime import datetime
+from urllib.parse import urlparse
 from uuid import UUID
 
 import httpx
@@ -36,14 +37,20 @@ from smarter_dev.web.scan.agent import (
     generate_code_examples,
     generate_session_meta,
     generate_youtube_query,
+    rank_resource_results,
     rank_youtube_results,
     research_agent,
     run_lite_pipeline,
 )
-from smarter_dev.web.scan.tools import youtube_search
 from smarter_dev.web.scan.crud import ResearchSessionOperations
 from smarter_dev.web.scan.pricing import calc_session_cost
-from smarter_dev.web.scan.tools import RateLimiter, URLRateLimiter
+from smarter_dev.web.scan.tools import (
+    RateLimiter,
+    URLRateLimiter,
+    brave_search,
+    fetch_og_metadata,
+    youtube_search,
+)
 
 logger = logging.getLogger(__name__)
 ops = ResearchSessionOperations()
@@ -443,14 +450,19 @@ async def run_session_meta(
             topic=meta.topic,
         )
 
-        # Fire off YouTube search for tech topics
-        logger.info("Meta for %s: topic=%s, skill=%s — spawning YouTube search", sid, meta.topic, meta.skill_level)
-        task = asyncio.create_task(
+        # Fire off YouTube + resource searches for tech topics
+        logger.info("Meta for %s: topic=%s, skill=%s — spawning sidebar searches", sid, meta.topic, meta.skill_level)
+        _bg = lambda t: t.result() if not t.cancelled() and t.exception() is None else None  # noqa: E731
+        yt_task = asyncio.create_task(
             run_youtube_search(session_id, query, user_id, meta.skill_level, meta.topic),
             name=f"youtube:{session_id}",
         )
-        # Hold reference to prevent GC, log errors
-        task.add_done_callback(lambda t: t.result() if not t.cancelled() and t.exception() is None else None)
+        yt_task.add_done_callback(_bg)
+        res_task = asyncio.create_task(
+            run_resource_search(session_id, query, user_id, meta.skill_level, meta.topic),
+            name=f"resources:{session_id}",
+        )
+        res_task.add_done_callback(_bg)
     except Exception:
         logger.exception("Failed to generate session meta for %s", sid)
 
@@ -513,6 +525,91 @@ async def run_youtube_search(
         )
     except Exception:
         logger.exception("YouTube search failed for session %s", sid)
+
+
+async def run_resource_search(
+    session_id: UUID,
+    query: str,
+    user_id: str,
+    skill_level: str,
+    topic: str,
+) -> None:
+    """Search Brave for resources, rank via LLM, fetch OG metadata.
+
+    Emits a ``research:resources`` TIMESERIES notification with the
+    top 5 ranked resources including Open Graph metadata for card rendering.
+    """
+    sid = str(session_id)
+    if topic == "other":
+        return
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            headers={"User-Agent": "Smarter Dev Scan Agent - admin@smarter.dev"},
+        ) as http_client:
+            # Search for 15 results so the LLM has good options
+            results = await brave_search(http_client, f"{query} tutorial guide documentation", num_results=15)
+
+        if not results or (len(results) == 1 and "error" in results[0]):
+            logger.warning("Brave resource search returned no results for %s", sid)
+            return
+
+        # LLM ranks and selects top 5
+        ranked, rank_usage = await rank_resource_results(query, skill_level, results)
+        await _persist_aux_usage(session_id, rank_usage)
+
+        if not ranked:
+            logger.info("Resources: LLM selected nothing for %s", sid)
+            return
+
+        logger.info("Resources: selected %d, fetching OG metadata for %s", len(ranked), sid)
+
+        # Fetch OG metadata in parallel
+        async with httpx.AsyncClient(
+            timeout=10.0,
+            headers={"User-Agent": "Smarter Dev Scan Agent - admin@smarter.dev"},
+        ) as http_client:
+            og_tasks = [fetch_og_metadata(http_client, r["url"]) for r in ranked]
+            og_results = await asyncio.gather(*og_tasks, return_exceptions=True)
+
+        # Merge OG metadata into results
+        resources = []
+        for r, og in zip(ranked, og_results):
+            resource = {
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "description": r.get("description", ""),
+            }
+            if isinstance(og, dict):
+                if og.get("og_title"):
+                    resource["title"] = og["og_title"]
+                if og.get("og_description"):
+                    resource["description"] = og["og_description"]
+                if og.get("og_image"):
+                    resource["og_image"] = og["og_image"]
+                if og.get("og_site_name"):
+                    resource["site_name"] = og["og_site_name"]
+                if og.get("favicon"):
+                    resource["favicon"] = og["favicon"]
+            # Derive site_name from URL if not found via OG
+            if "site_name" not in resource:
+                resource["site_name"] = urlparse(r.get("url", "")).netloc.replace("www.", "")
+            resources.append(resource)
+
+        # Persist to session context
+        async with get_skrift_db_session_context() as db_session:
+            await ops.merge_session_context(
+                db_session, session_id, {"resources": resources},
+            )
+
+        logger.info("Resources: emitting %d resources for %s", len(resources), sid)
+        await _emit(
+            user_id, sid, "resources",
+            resources=resources,
+        )
+    except Exception:
+        logger.exception("Resource search failed for session %s", sid)
 
 
 async def run_code_examples(

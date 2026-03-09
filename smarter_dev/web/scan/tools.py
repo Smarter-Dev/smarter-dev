@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -220,3 +221,78 @@ async def jina_read(client: httpx.AsyncClient, url: str) -> dict:
     except Exception as e:
         logger.error("Jina Reader failed for %s: %s (%s)", url, e, type(e).__name__)
         return {"error": f"Failed to read URL ({type(e).__name__}): {e}", "url": url}
+
+
+# ---------------------------------------------------------------------------
+# Open Graph metadata
+# ---------------------------------------------------------------------------
+
+_OG_RE = re.compile(
+    r'<meta\s+(?:[^>]*?\s)?'
+    r'(?:property|name)\s*=\s*["\']og:(\w+)["\']'
+    r'\s+content\s*=\s*["\']([^"\']*)["\']'
+    r'|'
+    r'content\s*=\s*["\']([^"\']*)["\']'
+    r'\s+(?:property|name)\s*=\s*["\']og:(\w+)["\']',
+    re.IGNORECASE,
+)
+
+
+async def fetch_og_metadata(
+    client: httpx.AsyncClient,
+    url: str,
+) -> dict[str, str]:
+    """Fetch Open Graph metadata from a URL.
+
+    Returns a dict with optional keys: og_title, og_description, og_image,
+    og_site_name, favicon.  All values are strings.  Missing tags are omitted.
+    """
+    try:
+        resp = await client.get(
+            url,
+            follow_redirects=True,
+            timeout=8.0,
+            headers={"User-Agent": USER_AGENT},
+        )
+        if resp.status_code != 200:
+            return {}
+
+        # Only parse the <head> to save time
+        text = resp.text[:16_000]
+        result: dict[str, str] = {}
+
+        for m in _OG_RE.finditer(text):
+            # Two capture groups depending on attribute order
+            key = m.group(1) or m.group(4)
+            value = m.group(2) or m.group(3)
+            if key and value:
+                mapped = f"og_{key}"
+                if mapped in ("og_title", "og_description", "og_image", "og_site_name"):
+                    result[mapped] = value
+
+        # Fallback: try <title> tag if no og:title
+        if "og_title" not in result:
+            title_m = re.search(r"<title[^>]*>([^<]+)</title>", text, re.IGNORECASE)
+            if title_m:
+                result["og_title"] = title_m.group(1).strip()
+
+        # Favicon
+        fav_m = re.search(
+            r'<link\s+[^>]*rel\s*=\s*["\'](?:shortcut )?icon["\'][^>]*href\s*=\s*["\']([^"\']+)["\']',
+            text,
+            re.IGNORECASE,
+        )
+        if fav_m:
+            href = fav_m.group(1)
+            if href.startswith("//"):
+                href = "https:" + href
+            elif href.startswith("/"):
+                parsed = urlparse(url)
+                href = f"{parsed.scheme}://{parsed.netloc}{href}"
+            result["favicon"] = href
+
+        return result
+
+    except Exception:
+        logger.debug("OG fetch failed for %s", url)
+        return {}
