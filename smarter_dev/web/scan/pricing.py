@@ -38,6 +38,20 @@ _patch_provider(
     ),
 )
 
+# Gemini 3.0 Flash — not yet in genai-prices
+_patch_provider(
+    "google",
+    types.ModelInfo(
+        id="gemini-3.0-flash-001",
+        match=types.ClauseStartsWith(starts_with="gemini-3.0-flash"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("0.15"),
+            output_mtok=Decimal("0.60"),
+            cache_read_mtok=Decimal("0.0375"),
+        ),
+    ),
+)
+
 # GPT-5.4 — not yet in genai-prices
 _patch_provider(
     "openai",

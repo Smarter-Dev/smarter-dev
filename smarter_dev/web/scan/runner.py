@@ -28,6 +28,7 @@ from skrift.lib.notifications import NotificationMode, notify_user
 
 from smarter_dev.shared.database import get_skrift_db_session_context
 from smarter_dev.web.scan.agent import (
+    CODE_EXAMPLES_MODEL,
     MODEL,
     SYSTEM_PROMPT,
     ResearchDeps,
@@ -54,7 +55,9 @@ def _usage_to_dict(usage: RunUsage) -> dict:
     return {k: v for k, v in d.items() if v}
 
 
-async def _persist_aux_usage(session_id: UUID, usage: RunUsage) -> None:
+async def _persist_aux_usage(
+    session_id: UUID, usage: RunUsage, model: str = MODEL,
+) -> None:
     """Persist auxiliary agent usage (meta, YouTube, code examples) to the session."""
     in_tok = usage.input_tokens or 0
     out_tok = usage.output_tokens or 0
@@ -62,7 +65,7 @@ async def _persist_aux_usage(session_id: UUID, usage: RunUsage) -> None:
     cache_write = usage.cache_write_tokens or 0
     if not (in_tok or out_tok):
         return
-    cost = calc_session_cost(in_tok, out_tok, cache_read, cache_write, MODEL)
+    cost = calc_session_cost(in_tok, out_tok, cache_read, cache_write, model)
     async with get_skrift_db_session_context() as db_session:
         await ops.add_usage(
             db_session, session_id,
@@ -510,7 +513,7 @@ async def run_code_examples(
     sid = str(session_id)
     try:
         result, code_usage = await generate_code_examples(query, response, skill_level)
-        await _persist_aux_usage(session_id, code_usage)
+        await _persist_aux_usage(session_id, code_usage, model=CODE_EXAMPLES_MODEL)
 
         if not result.examples:
             logger.info("No code examples generated for %s", sid)

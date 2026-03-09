@@ -25,6 +25,7 @@ from smarter_dev.web.scan.tools import RateLimiter, URLRateLimiter
 logger = logging.getLogger(__name__)
 
 MODEL = "google-gla:gemini-3.1-flash-lite-preview"
+CODE_EXAMPLES_MODEL = "google-gla:gemini-3.0-flash-001"
 
 
 @dataclass
@@ -760,6 +761,12 @@ _code_examples_agent = Agent(
         "comparisons with no code).\n"
         "6. **Pick the right language.** Use the language most relevant to "
         "the query. If the query is language-agnostic, prefer Python.\n\n"
+        "## Reflection\n\n"
+        "Before finalizing, think about what the most valuable examples "
+        "would be, which should come first, which should come last, and "
+        "what comes between. Once you've written out the examples, review "
+        "each one: is it correct? Does it follow best practices? Could it "
+        "teach bad habits? Correct any issues before returning.\n\n"
         "Return structured output only."
     ),
 )
@@ -768,14 +775,27 @@ _code_examples_agent = Agent(
 async def generate_code_examples(
     query: str, response: str, skill_level: str,
 ) -> tuple[CodeExamplesResult, RunUsage]:
-    """Generate code examples that complement a research response."""
+    """Generate code examples that complement a research response.
+
+    Uses Gemini 3 Flash with MEDIUM thinking for higher-quality code.
+    """
+    from google.genai.types import ThinkingLevel
+
     try:
         prompt = (
             f"## User Query\n{query}\n\n"
             f"## Skill Level\n{skill_level}\n\n"
             f"## Research Response\n{response}"
         )
-        result = await _code_examples_agent.run(prompt, model=MODEL)
+        result = await _code_examples_agent.run(
+            prompt,
+            model=CODE_EXAMPLES_MODEL,
+            model_settings={
+                "google_thinking_config": {
+                    "thinking_level": ThinkingLevel.MEDIUM,
+                },
+            },
+        )
         return result.output, result.usage()
     except Exception:
         logger.exception("Failed to generate code examples")
