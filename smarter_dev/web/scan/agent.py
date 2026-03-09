@@ -782,6 +782,48 @@ async def generate_code_examples(
         return CodeExamplesResult(examples=[])
 
 
+class YouTubeRanking(BaseModel):
+    """Output of the YouTube ranking agent."""
+
+    selected_ids: list[str] = Field(
+        description=(
+            "Ordered list of video IDs to recommend, most relevant first. "
+            "Pick 1-3 videos. Return an empty list if none are relevant."
+        ),
+    )
+
+
+_youtube_ranking_agent = Agent(
+    output_type=YouTubeRanking,
+    instructions=(
+        "You evaluate YouTube search results and select the most relevant "
+        "videos for a user's research query.\n\n"
+        "You will receive:\n"
+        "- The user's original query\n"
+        "- Their skill level\n"
+        "- A numbered list of YouTube videos (title, channel, video_id)\n\n"
+        "## Selection criteria\n\n"
+        "1. **Relevance** — Does the video directly address the query? "
+        "Reject tangential or loosely related videos.\n"
+        "2. **Quality signals** — Prefer established channels, conference "
+        "talks, and well-known educators over random uploads. Channels "
+        "with names like 'Fireship', 'Traversy Media', 'The Coding Train', "
+        "'freeCodeCamp', 'ArjanCodes', 'Tech With Tim', 'ThePrimeagen', "
+        "etc. are strong signals.\n"
+        "3. **Skill match** — A beginner query should get beginner-friendly "
+        "tutorials, not advanced deep-dives. An expert query should get "
+        "advanced content, not intro tutorials.\n"
+        "4. **No spam** — Skip videos that look like clickbait, AI-generated "
+        "slop, or low-effort content based on their title.\n"
+        "5. **Diversity** — If selecting multiple videos, prefer different "
+        "angles or channels over redundant content.\n\n"
+        "Return 1-3 video IDs ordered by relevance (best first). "
+        "Return an empty list if none of the results are relevant enough.\n\n"
+        "Return structured output only."
+    ),
+)
+
+
 async def generate_youtube_query(
     query: str, skill_level: str, topic: str,
 ) -> str | None:
@@ -802,3 +844,45 @@ async def generate_youtube_query(
     except Exception:
         logger.exception("Failed to generate YouTube query")
         return None
+
+
+async def rank_youtube_results(
+    query: str, skill_level: str, videos: list[dict],
+) -> list[dict]:
+    """Rank YouTube search results and return the top 1-3 most relevant.
+
+    Uses Flash Lite to evaluate relevance, quality, and skill-level match.
+    Returns the selected videos in ranked order.
+    """
+    if not videos:
+        return []
+
+    try:
+        # Build a numbered list for the LLM
+        video_lines = []
+        for i, v in enumerate(videos, 1):
+            video_lines.append(
+                f"{i}. [{v.get('video_id', '')}] "
+                f"\"{v.get('title', 'Untitled')}\" "
+                f"by {v.get('channel', 'Unknown')}"
+            )
+
+        prompt = (
+            f"## User Query\n{query}\n\n"
+            f"## Skill Level\n{skill_level}\n\n"
+            f"## YouTube Search Results\n" + "\n".join(video_lines)
+        )
+        result = await _youtube_ranking_agent.run(prompt, model=MODEL)
+
+        # Map selected IDs back to full video dicts, preserving rank order
+        id_to_video = {v.get("video_id", ""): v for v in videos}
+        ranked = []
+        for vid in result.output.selected_ids[:3]:
+            if vid in id_to_video:
+                ranked.append(id_to_video[vid])
+
+        return ranked
+    except Exception:
+        logger.exception("Failed to rank YouTube results")
+        # Fallback: return first 3 unranked
+        return videos[:3]

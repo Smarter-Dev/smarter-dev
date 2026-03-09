@@ -35,6 +35,7 @@ from smarter_dev.web.scan.agent import (
     generate_code_examples,
     generate_session_meta,
     generate_youtube_query,
+    rank_youtube_results,
     research_agent,
     run_lite_pipeline,
 )
@@ -420,10 +421,15 @@ async def run_youtube_search(
     skill_level: str,
     topic: str,
 ) -> None:
-    """Generate a YouTube search query via Flash Lite and fetch 3 videos.
+    """Two-stage YouTube pipeline: search 10 results, then LLM ranks top 3.
+
+    Stage 1: Generate search query via Flash Lite, fetch 10 results from
+    the YouTube Data API.
+    Stage 2: Flash Lite evaluates relevance, quality, and skill-level match,
+    then selects and orders the top 1-3 videos.
 
     Emits a ``research:youtube_videos`` TIMESERIES notification with the
-    results so the sidebar can render them.
+    ranked results so the sidebar can render them.
     """
     sid = str(session_id)
     try:
@@ -436,24 +442,31 @@ async def run_youtube_search(
             timeout=15.0,
             headers={"User-Agent": "Smarter Dev Scan Agent - admin@smarter.dev"},
         ) as http_client:
-            videos = await youtube_search(http_client, yt_query, num_results=3)
-            # Hard cap — never store more than 3 videos regardless of API response
-            videos = videos[:3]
+            videos = await youtube_search(http_client, yt_query, num_results=10)
 
         if not videos or (len(videos) == 1 and "error" in videos[0]):
             logger.warning("YouTube search returned no/error results for %s: %r", sid, videos)
             return
 
-        # Persist videos to session context
+        # Stage 2: LLM ranks and selects the most relevant videos
+        logger.info("YouTube: ranking %d candidates for %s", len(videos), sid)
+        ranked = await rank_youtube_results(query, skill_level, videos)
+
+        if not ranked:
+            logger.info("YouTube: LLM selected no videos for %s", sid)
+            return
+
+        logger.info("YouTube: selected %d videos for %s", len(ranked), sid)
+
+        # Persist ranked videos to session context
         async with get_skrift_db_session_context() as db_session:
             await ops.merge_session_context(
-                db_session, session_id, {"youtube_videos": videos},
+                db_session, session_id, {"youtube_videos": ranked},
             )
 
-        logger.info("YouTube: emitting %d videos for %s", len(videos), sid)
         await _emit(
             user_id, sid, "youtube_videos",
-            videos=videos,
+            videos=ranked,
         )
     except Exception:
         logger.exception("YouTube search failed for session %s", sid)
