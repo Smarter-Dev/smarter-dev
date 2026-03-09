@@ -36,6 +36,7 @@ from smarter_dev.web.scan.agent import (
     run_lite_pipeline,
 )
 from smarter_dev.web.scan.crud import ResearchSessionOperations
+from smarter_dev.web.scan.pricing import calc_session_cost
 from smarter_dev.web.scan.tools import RateLimiter, URLRateLimiter
 
 logger = logging.getLogger(__name__)
@@ -185,9 +186,17 @@ async def run_research(
             # Compute total tokens across main + sub agents
             total_in = main_usage.get("input_tokens", 0)
             total_out = main_usage.get("output_tokens", 0)
+            total_cache_read = main_usage.get("cache_read_tokens", 0)
+            total_cache_write = main_usage.get("cache_write_tokens", 0)
             for sub in sub_agent_usage:
                 total_in += sub.get("input_tokens", 0)
                 total_out += sub.get("output_tokens", 0)
+                total_cache_read += sub.get("cache_read_tokens", 0)
+                total_cache_write += sub.get("cache_write_tokens", 0)
+
+            cost = calc_session_cost(
+                total_in, total_out, total_cache_read, total_cache_write, MODEL,
+            )
 
             # Persist to DB
             async with get_skrift_db_session_context() as db_session:
@@ -200,6 +209,10 @@ async def run_research(
                     tool_log=tool_log,
                     input_tokens=total_in,
                     output_tokens=total_out,
+                    cache_read_tokens=total_cache_read,
+                    cache_write_tokens=total_cache_write,
+                    model_name=MODEL,
+                    cost_usd=cost,
                 )
 
             # Emit completion
@@ -271,6 +284,15 @@ async def run_lite_research(
             usage_summary = {"lite_pipeline": _usage_to_dict(total_usage)}
             tool_log.append({"type": "usage", **usage_summary})
 
+            cache_read = total_usage.cache_read_tokens or 0
+            cache_write = total_usage.cache_write_tokens or 0
+            in_tokens = total_usage.input_tokens or 0
+            out_tokens = total_usage.output_tokens or 0
+
+            cost = calc_session_cost(
+                in_tokens, out_tokens, cache_read, cache_write, MODEL,
+            )
+
             # Persist to DB
             async with get_skrift_db_session_context() as db_session:
                 await ops.update_session_result(
@@ -280,8 +302,12 @@ async def run_lite_research(
                     summary=result_data.summary,
                     sources=[s.model_dump() for s in result_data.sources],
                     tool_log=tool_log,
-                    input_tokens=total_usage.input_tokens or 0,
-                    output_tokens=total_usage.output_tokens or 0,
+                    input_tokens=in_tokens,
+                    output_tokens=out_tokens,
+                    cache_read_tokens=cache_read,
+                    cache_write_tokens=cache_write,
+                    model_name=MODEL,
+                    cost_usd=cost,
                 )
 
             # Emit completion

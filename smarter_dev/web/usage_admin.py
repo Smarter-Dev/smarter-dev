@@ -59,6 +59,7 @@ class UsageAdminController(Controller):
                 func.count().label("session_count"),
                 func.sum(ResearchSession.input_tokens).label("total_input"),
                 func.sum(ResearchSession.output_tokens).label("total_output"),
+                func.sum(ResearchSession.cost_usd).label("total_cost"),
             )
             .where(*filters)
             .group_by(ResearchSession.user_id, ResearchSession.pipeline_mode)
@@ -73,6 +74,7 @@ class UsageAdminController(Controller):
         total_sessions = sum(r.session_count for r in rows)
         total_input = sum(r.total_input or 0 for r in rows)
         total_output = sum(r.total_output or 0 for r in rows)
+        total_cost = sum(r.total_cost or 0 for r in rows)
 
         return TemplateResponse(
             "admin/usage.html",
@@ -81,6 +83,7 @@ class UsageAdminController(Controller):
                 "total_sessions": total_sessions,
                 "total_input": total_input,
                 "total_output": total_output,
+                "total_cost": total_cost,
                 "days": days,
                 "pipeline_mode": pipeline_mode or "",
                 **ctx,

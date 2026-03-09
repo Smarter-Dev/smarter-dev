@@ -6,6 +6,8 @@ from datetime import datetime, timezone, date
 from typing import Optional
 from uuid import UUID, uuid4
 
+from decimal import Decimal
+
 from sqlalchemy import BigInteger
 from sqlalchemy import Boolean
 from sqlalchemy import DateTime, Date
@@ -14,6 +16,7 @@ from sqlalchemy import ForeignKey
 from sqlalchemy import Index, UniqueConstraint, CheckConstraint
 from sqlalchemy import Integer
 from sqlalchemy import JSON
+from sqlalchemy import Numeric
 from sqlalchemy import String
 from sqlalchemy import Text
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
@@ -3269,6 +3272,10 @@ class ResearchSession(Base):
     input_tokens: Mapped[int] = mapped_column(default=0)
     output_tokens: Mapped[int] = mapped_column(default=0)
     pipeline_mode: Mapped[str] = mapped_column(String(20), default="lite")
+    cache_read_tokens: Mapped[int] = mapped_column(default=0)
+    cache_write_tokens: Mapped[int] = mapped_column(default=0)
+    model_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    cost_usd: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6), nullable=True)
 
     def __repr__(self) -> str:
         return f"<ResearchSession(id='{self.id}', status='{self.status}')>"

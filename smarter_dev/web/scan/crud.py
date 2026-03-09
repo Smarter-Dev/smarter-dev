@@ -59,6 +59,10 @@ class ResearchSessionOperations:
         tool_log: list[dict] | None = None,
         input_tokens: int = 0,
         output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        model_name: str | None = None,
+        cost_usd: object = None,
     ) -> None:
         await session.execute(
             update(ResearchSession)
@@ -71,6 +75,10 @@ class ResearchSessionOperations:
                 tool_log=tool_log,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                model_name=model_name,
+                cost_usd=cost_usd,
             )
         )
         await session.commit()
