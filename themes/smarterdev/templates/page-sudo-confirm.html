@@ -5,7 +5,7 @@
 
 {% block page_css %}
     <link rel="stylesheet" href="{{ theme_url('css/pages/sudo.css') }}">
-    <style>
+    <style nonce="{{ csp_nonce() }}">
         .confirm-section {
             min-height: 60vh;
             display: flex;
@@ -87,7 +87,7 @@
 {% endblock %}
 
 {% block page_scripts %}
-<script>
+<script nonce="{{ csp_nonce() }}">
 (function () {
     var cmd = '{{ "sudo verify --email" if success else "sudo verify --token" }}';
     var el = document.getElementById('typed-cmd');

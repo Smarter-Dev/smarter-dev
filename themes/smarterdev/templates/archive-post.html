@@ -5,7 +5,7 @@
 
 {% block page_css %}
     <link rel="stylesheet" href="{{ theme_url('css/pages/blog.css') }}">
-    <style>
+    <style nonce="{{ csp_nonce() }}">
     .empty-hero {
       min-height: 80vh;
       display: flex;

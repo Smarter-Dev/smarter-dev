@@ -75,6 +75,10 @@ storage:
 redis:
   url: $REDIS_URL
 
+security_headers:
+  enabled: true
+  content_security_policy: "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; style-src-attr 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com https:; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
 notifications:
   backend: "skrift.lib.notification_backends:RedisBackend"
 

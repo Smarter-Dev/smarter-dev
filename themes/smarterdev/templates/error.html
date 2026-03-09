@@ -4,7 +4,7 @@
 {% block page_title %}{{ status_code|default('Error') }}{% endblock %}
 
 {% block page_css %}
-<style>
+<style nonce="{{ csp_nonce() }}">
 :root { --hex-accent: #ef4444; }
 .err-hero {
   min-height: 80vh;
@@ -52,7 +52,7 @@
     {% if status_code == 404 %}
     <div class="hero-sub" style="margin-bottom:.5rem">These aren't the routes you're looking for.</div>
     <div class="err-path">couldn't find <code id="miss-path"></code></div>
-    <script>document.getElementById('miss-path').textContent = window.location.pathname;</script>
+    <script nonce="{{ csp_nonce() }}">document.getElementById('miss-path').textContent = window.location.pathname;</script>
     <a href="/" class="btn-glow" style="margin-top:1.5rem">Back to Home</a>
     {% else %}
     <div class="hero-sub" style="margin-bottom:2rem">{{ message|default('Something went wrong.') }}</div>
