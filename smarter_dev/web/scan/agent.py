@@ -623,9 +623,11 @@ class SessionMeta(BaseModel):
     topic: str = Field(
         description=(
             "The primary topic category. One of: "
-            "web-dev, app-dev, backend, full-stack, ai-llm, "
-            "machine-learning, devops, data-engineering, "
-            "security, gamedev, systems, other."
+            "programming, software-engineering, web-dev, app-dev, backend, "
+            "full-stack, ai-llm, machine-learning, devops, data-engineering, "
+            "security, gamedev, systems, other. Use 'programming' for general "
+            "CS concepts (OOP, algorithms, data structures, design patterns). "
+            "Use 'other' ONLY for non-software topics."
         ),
     )
 
@@ -638,9 +640,12 @@ _meta_agent = Agent(
         "of the query. No quotes, no punctuation at the end.\n"
         "2. **skill_level**: Infer from the terminology and depth of the "
         "question — beginner, intermediate, advanced, or expert.\n"
-        "3. **topic**: Classify into exactly one of: web-dev, app-dev, "
-        "backend, full-stack, ai-llm, machine-learning, devops, "
-        "data-engineering, security, gamedev, systems, other.\n\n"
+        "3. **topic**: Classify into exactly one of: programming, "
+        "software-engineering, web-dev, app-dev, backend, full-stack, "
+        "ai-llm, machine-learning, devops, data-engineering, security, "
+        "gamedev, systems, other. Use 'programming' for general CS concepts "
+        "(OOP, algorithms, data structures, design patterns, language features). "
+        "Use 'other' ONLY for non-software topics.\n\n"
         "Return structured output only."
     ),
 )
@@ -699,8 +704,6 @@ async def generate_youtube_query(
     query: str, skill_level: str, topic: str,
 ) -> str | None:
     """Generate a YouTube search query, or None if not suited for video."""
-    if topic == "other":
-        return None
     try:
         prompt = (
             f"User query: {query}\n"
