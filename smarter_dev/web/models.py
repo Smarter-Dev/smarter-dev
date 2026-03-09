@@ -3266,6 +3266,9 @@ class ResearchSession(Base):
     followups: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=list)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     context: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    input_tokens: Mapped[int] = mapped_column(default=0)
+    output_tokens: Mapped[int] = mapped_column(default=0)
+    pipeline_mode: Mapped[str] = mapped_column(String(20), default="lite")
 
     def __repr__(self) -> str:
         return f"<ResearchSession(id='{self.id}', status='{self.status}')>"

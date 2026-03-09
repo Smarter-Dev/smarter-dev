@@ -49,7 +49,8 @@ class ScanController(Controller):
         name = await generate_session_name(query)
 
         research = await ops.create_session(
-            db_session, query=query, user_id=user_id, name=name
+            db_session, query=query, user_id=user_id, name=name,
+            pipeline_mode="lite",
         )
         await db_session.commit()
 
