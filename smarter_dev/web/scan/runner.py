@@ -32,6 +32,7 @@ from smarter_dev.web.scan.agent import (
     SYSTEM_PROMPT,
     ResearchDeps,
     ResearchResult,
+    generate_code_examples,
     generate_session_meta,
     generate_youtube_query,
     research_agent,
@@ -229,6 +230,20 @@ async def run_research(
                 usage=usage_summary,
             )
 
+            # Spawn code examples task if topic is coding-related
+            async with get_skrift_db_session_context() as db_session:
+                session_row = await ops.get_session(db_session, session_id)
+                ctx = session_row.context if session_row else None
+
+            topic = (ctx or {}).get("topic", "other")
+            skill_level = (ctx or {}).get("skill_level", "intermediate")
+            if topic != "other":
+                task = asyncio.create_task(
+                    run_code_examples(session_id, query, result_data.response, user_id, skill_level),
+                    name=f"code_examples:{session_id}",
+                )
+                task.add_done_callback(lambda t: t.result() if not t.cancelled() and t.exception() is None else None)
+
     except Exception as e:
         logger.exception("Research session %s failed", sid)
         error_msg = f"{type(e).__name__}: {e}"
@@ -323,6 +338,20 @@ async def run_lite_research(
                 duration=round(duration, 2),
                 usage=usage_summary,
             )
+
+            # Spawn code examples task if topic is coding-related
+            async with get_skrift_db_session_context() as db_session:
+                session_row = await ops.get_session(db_session, session_id)
+                ctx = session_row.context if session_row else None
+
+            topic = (ctx or {}).get("topic", "other")
+            skill_level = (ctx or {}).get("skill_level", "intermediate")
+            if topic != "other":
+                task = asyncio.create_task(
+                    run_code_examples(session_id, query, result_data.response, user_id, skill_level),
+                    name=f"code_examples:{session_id}",
+                )
+                task.add_done_callback(lambda t: t.result() if not t.cancelled() and t.exception() is None else None)
 
     except Exception as e:
         logger.exception("Lite research session %s failed", sid)
@@ -426,6 +455,43 @@ async def run_youtube_search(
         )
     except Exception:
         logger.exception("YouTube search failed for session %s", sid)
+
+
+async def run_code_examples(
+    session_id: UUID,
+    query: str,
+    response: str,
+    user_id: str,
+    skill_level: str,
+) -> None:
+    """Generate code examples via Flash Lite after the main response completes.
+
+    Emits a ``research:code_examples`` TIMESERIES notification with the
+    results so the result page can render them in the sidebar or content area.
+    """
+    sid = str(session_id)
+    try:
+        result = await generate_code_examples(query, response, skill_level)
+
+        if not result.examples:
+            logger.info("No code examples generated for %s", sid)
+            return
+
+        examples_data = [ex.model_dump() for ex in result.examples]
+
+        # Persist to session context
+        async with get_skrift_db_session_context() as db_session:
+            await ops.merge_session_context(
+                db_session, session_id, {"code_examples": examples_data},
+            )
+
+        logger.info("Code examples: emitting %d examples for %s", len(examples_data), sid)
+        await _emit(
+            user_id, sid, "code_examples",
+            examples=examples_data,
+        )
+    except Exception:
+        logger.exception("Code examples generation failed for session %s", sid)
 
 
 def start_meta_task(

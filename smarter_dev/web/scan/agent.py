@@ -700,6 +700,88 @@ _youtube_query_agent = Agent(
 )
 
 
+# ============================================================================
+# Code examples agent (post-response)
+# ============================================================================
+
+
+class CodeExample(BaseModel):
+    """A single code example."""
+
+    title: str = Field(description="Short descriptive title (3-10 words)")
+    language: str = Field(
+        description="Programming language for syntax highlighting (e.g. python, javascript, go, rust, sql)"
+    )
+    code: str = Field(description="The complete, runnable code example")
+    explanation: str = Field(
+        default="",
+        description="1-2 sentence explanation of what the code demonstrates",
+    )
+
+
+class CodeExamplesResult(BaseModel):
+    """Output of the code examples agent."""
+
+    examples: list[CodeExample] = Field(
+        default_factory=list,
+        description="The code examples. Up to 5 short, 2-3 medium, or 1 large.",
+    )
+
+
+_code_examples_agent = Agent(
+    output_type=CodeExamplesResult,
+    instructions=(
+        "You generate practical code examples that complement a research "
+        "response about a programming or software engineering topic.\n\n"
+        "You will receive:\n"
+        "- The original user query\n"
+        "- The full research response that was generated\n"
+        "- The user's skill level (beginner, intermediate, advanced, expert)\n\n"
+        "## Rules\n\n"
+        "1. **Tailor to skill level.** Beginners need simple, well-commented "
+        "examples. Experts want concise, idiomatic code showing advanced patterns.\n"
+        "2. **Choose the right scale:**\n"
+        "   - Up to 5 SHORT examples (5-15 lines each) for topics with many "
+        "small concepts (e.g. syntax, built-in functions, simple patterns)\n"
+        "   - 2-3 MEDIUM examples (15-40 lines each) for topics that need "
+        "more context (e.g. design patterns, API usage, algorithms)\n"
+        "   - 1 LARGE example (40-100 lines) for topics best shown as a "
+        "complete program (e.g. full implementations, project structures)\n"
+        "   - Mix scales if appropriate.\n"
+        "3. **Be practical.** Examples should be runnable and demonstrate "
+        "real usage, not toy examples. Use realistic variable names and "
+        "scenarios.\n"
+        "4. **Don't repeat the response.** The examples should ADD value "
+        "beyond what the written response already covers — show code the "
+        "response referenced or alluded to, or illustrate concepts from "
+        "a different angle.\n"
+        "5. **Return an empty list** if the topic doesn't benefit from code "
+        "examples (e.g. purely conceptual discussions, career advice, tool "
+        "comparisons with no code).\n"
+        "6. **Pick the right language.** Use the language most relevant to "
+        "the query. If the query is language-agnostic, prefer Python.\n\n"
+        "Return structured output only."
+    ),
+)
+
+
+async def generate_code_examples(
+    query: str, response: str, skill_level: str,
+) -> CodeExamplesResult:
+    """Generate code examples that complement a research response."""
+    try:
+        prompt = (
+            f"## User Query\n{query}\n\n"
+            f"## Skill Level\n{skill_level}\n\n"
+            f"## Research Response\n{response}"
+        )
+        result = await _code_examples_agent.run(prompt, model=MODEL)
+        return result.output
+    except Exception:
+        logger.exception("Failed to generate code examples")
+        return CodeExamplesResult(examples=[])
+
+
 async def generate_youtube_query(
     query: str, skill_level: str, topic: str,
 ) -> str | None:

@@ -83,11 +83,26 @@
 
     /* Character fade animation */
     @keyframes scan-char-fade{from{opacity:0}to{opacity:1}}
-    .scan-char{opacity:0;animation:scan-char-fade 1s forwards}
+    .scan-char{opacity:0;animation:scan-char-fade .4s forwards}
 
     /* YouTube item fade animation */
     @keyframes scan-yt-fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
     .scan-yt-animate{opacity:0;animation:scan-yt-fade .5s ease forwards}
+
+    /* Code examples */
+    .scan-examples-section{margin-top:2.5rem;border-top:1px solid rgba(0,212,255,.06);padding-top:2rem}
+    .scan-examples-heading{font-family:var(--heading);font-size:.58rem;color:var(--mid);letter-spacing:.1em;margin-bottom:1.25rem}
+    .scan-example{margin-bottom:1.5rem;border:1px solid rgba(0,212,255,.08);background:var(--surface)}
+    .scan-example-header{display:flex;justify-content:space-between;align-items:center;padding:.6rem 1rem;border-bottom:1px solid rgba(0,212,255,.06)}
+    .scan-example-title{font-family:var(--heading);font-size:.6rem;letter-spacing:.06em;color:var(--light)}
+    .scan-example-lang{font-family:var(--mono);font-size:.6rem;color:var(--cyan);opacity:.7}
+    .scan-example-code{margin:0;padding:1rem;font-size:.78rem;line-height:1.6;overflow-x:auto;background:rgba(0,0,0,.15)}
+    .scan-example-code code{font-family:var(--mono);color:var(--light);white-space:pre}
+    .scan-example-explanation{padding:.5rem 1rem .6rem;font-size:.72rem;color:var(--gray);line-height:1.5;border-top:1px solid rgba(0,212,255,.04)}
+
+    /* Code example fade animation */
+    @keyframes scan-ex-fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .scan-ex-animate{opacity:0;animation:scan-ex-fade .5s ease forwards}
 
     /* Hidden state */
     .scan-hidden{display:none}
@@ -158,6 +173,30 @@
             <p class="scan-response-empty">No response available.</p>
             {% endif %}
         </div>
+
+        <!-- Code examples -->
+        {% if session.status == 'complete' and session.context and session.context.code_examples is defined and session.context.code_examples %}
+        <div class="scan-examples-section" id="scan-examples-section">
+            <h3 class="scan-examples-heading">CODE EXAMPLES</h3>
+            <div id="scan-examples-list">
+                {% for ex in session.context.code_examples %}
+                <div class="scan-example">
+                    <div class="scan-example-header">
+                        <span class="scan-example-title">{{ ex.title }}</span>
+                        <span class="scan-example-lang">{{ ex.language }}</span>
+                    </div>
+                    <pre class="scan-example-code"><code>{{ ex.code }}</code></pre>
+                    {% if ex.explanation %}<div class="scan-example-explanation">{{ ex.explanation }}</div>{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="scan-examples-section scan-hidden" id="scan-examples-section">
+            <h3 class="scan-examples-heading">CODE EXAMPLES</h3>
+            <div id="scan-examples-list"></div>
+        </div>
+        {% endif %}
 
         <!-- Action bar (visible after completion) -->
         <div class="scan-actions{% if session.status != 'complete' %} scan-hidden{% endif %}" id="scan-actions">
@@ -282,6 +321,12 @@ if (window.__skriftNotifications) {
                 bufferedVideos = data.videos;
                 // If already completed, render now
                 if (completed) renderYouTubeVideos(bufferedVideos);
+            }
+        }
+
+        else if (eventType === "code_examples") {
+            if (data.examples && data.examples.length > 0) {
+                renderCodeExamples(data.examples);
             }
         }
 
@@ -465,14 +510,34 @@ if (window.__skriftNotifications) {
         list.innerHTML = html;
     }
 
+    function renderCodeExamples(examples) {
+        var section = document.getElementById("scan-examples-section");
+        var list = document.getElementById("scan-examples-list");
+        if (!section || !list) return;
+        section.classList.remove("scan-hidden");
+        var html = "";
+        for (var i = 0; i < examples.length; i++) {
+            var ex = examples[i];
+            html += '<div class="scan-example scan-ex-animate" style="animation-delay:' + (i * 200) + 'ms">' +
+                '<div class="scan-example-header">' +
+                '<span class="scan-example-title">' + escapeHtml(ex.title) + '</span>' +
+                '<span class="scan-example-lang">' + escapeHtml(ex.language) + '</span>' +
+                '</div>' +
+                '<pre class="scan-example-code"><code>' + escapeHtml(ex.code) + '</code></pre>' +
+                (ex.explanation ? '<div class="scan-example-explanation">' + escapeHtml(ex.explanation) + '</div>' : '') +
+                '</div>';
+        }
+        list.innerHTML = html;
+    }
+
     function animateResponseChars(container) {
         var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
         var textNodes = [];
         while (walker.nextNode()) textNodes.push(walker.currentNode);
         var totalChars = 0;
         for (var i = 0; i < textNodes.length; i++) totalChars += textNodes[i].textContent.length;
-        // Scale delay so total animation stays ~3s regardless of length
-        var delay = Math.min(50, Math.max(1, Math.floor(3000 / totalChars)));
+        // Scale delay so total animation stays ~1.5s regardless of length
+        var delay = Math.min(50, Math.max(1, Math.floor(1500 / totalChars)));
         var charIdx = 0;
         for (var i = 0; i < textNodes.length; i++) {
             var node = textNodes[i];
@@ -558,13 +623,20 @@ if (window.__skriftNotifications) {
         ytItems[i].style.animationDelay = (i * 200) + "ms";
     }
 
+    // Animate code examples on page load
+    var exItems = document.querySelectorAll(".scan-example");
+    for (var i = 0; i < exItems.length; i++) {
+        exItems[i].classList.add("scan-ex-animate");
+        exItems[i].style.animationDelay = (i * 200) + "ms";
+    }
+
     function animateResponseChars(container) {
         var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
         var textNodes = [];
         while (walker.nextNode()) textNodes.push(walker.currentNode);
         var totalChars = 0;
         for (var i = 0; i < textNodes.length; i++) totalChars += textNodes[i].textContent.length;
-        var delay = Math.min(50, Math.max(1, Math.floor(3000 / totalChars)));
+        var delay = Math.min(50, Math.max(1, Math.floor(1500 / totalChars)));
         var charIdx = 0;
         for (var i = 0; i < textNodes.length; i++) {
             var node = textNodes[i];
