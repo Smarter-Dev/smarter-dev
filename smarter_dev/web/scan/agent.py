@@ -704,6 +704,8 @@ async def generate_youtube_query(
     query: str, skill_level: str, topic: str,
 ) -> str | None:
     """Generate a YouTube search query, or None if not suited for video."""
+    if topic == "other":
+        return None
     try:
         prompt = (
             f"User query: {query}\n"
