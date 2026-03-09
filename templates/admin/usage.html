@@ -1,0 +1,84 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Usage - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Token Usage</h1>
+    <p>{{ "{:,}".format(total_sessions) }} session{{ 's' if total_sessions != 1 else '' }} &middot;
+       {{ "{:,}".format(total_input) }} input &middot;
+       {{ "{:,}".format(total_output) }} output tokens</p>
+</hgroup>
+
+<div class="sk-panel">
+    <div class="sk-panel-head">Filters</div>
+    <div class="sk-panel-body">
+        <form method="get" action="/admin/usage" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
+            <div>
+                <label for="days"><strong>Period</strong></label><br>
+                <select name="days" id="days">
+                    <option value="7" {% if days == 7 %}selected{% endif %}>Last 7 days</option>
+                    <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 days</option>
+                    <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 days</option>
+                    <option value="" {% if not days %}selected{% endif %}>All time</option>
+                </select>
+            </div>
+            <div>
+                <label for="pipeline_mode"><strong>Product</strong></label><br>
+                <select name="pipeline_mode" id="pipeline_mode">
+                    <option value="">All</option>
+                    <option value="lite" {% if pipeline_mode == 'lite' %}selected{% endif %}>Lite Research</option>
+                    <option value="premium" {% if pipeline_mode == 'premium' %}selected{% endif %}>Advanced Research</option>
+                </select>
+            </div>
+            <div>
+                <button type="submit" class="sk-btn-outline sk-btn-small">Filter</button>
+                <a href="/admin/usage" class="sk-btn-outline sk-btn-small">Clear</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if rows %}
+<table class="sk-admin-table">
+    <thead>
+        <tr>
+            <th>User</th>
+            <th>Product</th>
+            <th>Sessions</th>
+            <th>Input Tokens</th>
+            <th>Output Tokens</th>
+            <th>Total</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+        <tr>
+            <td>{{ row.user_id }}</td>
+            <td>
+                {% if row.pipeline_mode == 'lite' %}
+                <span class="sk-pill">Lite</span>
+                {% elif row.pipeline_mode == 'premium' %}
+                <span class="sk-pill sk-pill-published">Advanced</span>
+                {% else %}
+                <span class="sk-pill sk-pill-draft">{{ row.pipeline_mode }}</span>
+                {% endif %}
+            </td>
+            <td>{{ "{:,}".format(row.session_count) }}</td>
+            <td>{{ "{:,}".format(row.total_input or 0) }}</td>
+            <td>{{ "{:,}".format(row.total_output or 0) }}</td>
+            <td>{{ "{:,}".format((row.total_input or 0) + (row.total_output or 0)) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="sk-no-items">
+    {% if days or pipeline_mode %}
+    No usage data matches your filters.
+    {% else %}
+    No research sessions have been recorded yet.
+    {% endif %}
+</p>
+{% endif %}
+{% endblock %}

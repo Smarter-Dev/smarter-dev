@@ -182,6 +182,13 @@ async def run_research(
             }
             tool_log.append({"type": "usage", **usage_summary})
 
+            # Compute total tokens across main + sub agents
+            total_in = main_usage.get("input_tokens", 0)
+            total_out = main_usage.get("output_tokens", 0)
+            for sub in sub_agent_usage:
+                total_in += sub.get("input_tokens", 0)
+                total_out += sub.get("output_tokens", 0)
+
             # Persist to DB
             async with get_skrift_db_session_context() as db_session:
                 await ops.update_session_result(
@@ -191,6 +198,8 @@ async def run_research(
                     summary=result_data.summary,
                     sources=[s.model_dump() for s in result_data.sources],
                     tool_log=tool_log,
+                    input_tokens=total_in,
+                    output_tokens=total_out,
                 )
 
             # Emit completion
@@ -271,6 +280,8 @@ async def run_lite_research(
                     summary=result_data.summary,
                     sources=[s.model_dump() for s in result_data.sources],
                     tool_log=tool_log,
+                    input_tokens=total_usage.input_tokens or 0,
+                    output_tokens=total_usage.output_tokens or 0,
                 )
 
             # Emit completion

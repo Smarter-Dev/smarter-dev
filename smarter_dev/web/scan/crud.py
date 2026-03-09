@@ -25,6 +25,7 @@ class ResearchSessionOperations:
         guild_id: str | None = None,
         channel_id: str | None = None,
         context: dict | None = None,
+        pipeline_mode: str = "lite",
     ) -> ResearchSession:
         research = ResearchSession(
             query=query,
@@ -34,6 +35,7 @@ class ResearchSessionOperations:
             channel_id=channel_id,
             status="running",
             context=context,
+            pipeline_mode=pipeline_mode,
         )
         session.add(research)
         await session.flush()
@@ -55,6 +57,8 @@ class ResearchSessionOperations:
         summary: str,
         sources: list[dict],
         tool_log: list[dict] | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
     ) -> None:
         await session.execute(
             update(ResearchSession)
@@ -65,6 +69,8 @@ class ResearchSessionOperations:
                 summary=summary,
                 sources=sources,
                 tool_log=tool_log,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
             )
         )
         await session.commit()
