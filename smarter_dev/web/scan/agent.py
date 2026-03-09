@@ -463,7 +463,7 @@ _summarize_agent = Agent(
 async def _run_research_pipeline(
     question: str,
     deps: ResearchDeps,
-) -> tuple[str, list[dict]]:
+) -> tuple[str, list[dict], dict]:
     """Run the premium research pipeline: query generation → search → read → summarize.
 
     Returns (formatted_result, sub_tools_for_ui).
@@ -560,7 +560,7 @@ async def _run_research_pipeline(
     if usage_dict:
         result_text += f"\n\n[pipeline usage: {usage_dict}]"
 
-    return result_text, sub_tools
+    return result_text, sub_tools, usage_dict
 
 
 @research_agent.tool
@@ -572,16 +572,17 @@ async def research(ctx: RunContext[ResearchDeps], question: str) -> str:
     Returns summaries with links.
     """
     try:
-        result_text, sub_tools = await _run_research_pipeline(
+        result_text, sub_tools, usage_dict = await _run_research_pipeline(
             question, ctx.deps,
         )
 
-        # Store pipeline activity for the runner to pick up
+        # Store pipeline activity + token usage for the runner to pick up
         if not hasattr(ctx.deps, "_sub_agent_usage"):
             ctx.deps._sub_agent_usage = []  # type: ignore[attr-defined]
         ctx.deps._sub_agent_usage.append({  # type: ignore[attr-defined]
             "question": question,
             "tools": sub_tools,
+            **usage_dict,
         })
 
         return result_text

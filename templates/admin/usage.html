@@ -11,6 +11,7 @@
        ${{ "{:.4f}".format(total_cost) }} total cost</p>
 </hgroup>
 
+{# ── Filters ─────────────────────────────────────────────────────── #}
 <div class="sk-panel">
     <div class="sk-panel-head">Filters</div>
     <div class="sk-panel-body">
@@ -33,6 +34,15 @@
                 </select>
             </div>
             <div>
+                <label for="granularity"><strong>Chart&nbsp;granularity</strong></label><br>
+                <select name="granularity" id="granularity">
+                    <option value="hour" {% if granularity == 'hour' %}selected{% endif %}>Hourly</option>
+                    <option value="day" {% if granularity == 'day' %}selected{% endif %}>Daily</option>
+                    <option value="week" {% if granularity == 'week' %}selected{% endif %}>Weekly</option>
+                    <option value="month" {% if granularity == 'month' %}selected{% endif %}>Monthly</option>
+                </select>
+            </div>
+            <div>
                 <button type="submit" class="sk-btn-outline sk-btn-small">Filter</button>
                 <a href="/admin/usage" class="sk-btn-outline sk-btn-small">Clear</a>
             </div>
@@ -40,48 +50,176 @@
     </div>
 </div>
 
-{% if rows %}
-<table class="sk-admin-table">
-    <thead>
-        <tr>
-            <th>User</th>
-            <th>Product</th>
-            <th>Sessions</th>
-            <th>Input Tokens</th>
-            <th>Output Tokens</th>
-            <th>Total</th>
-            <th>Cost</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for row in rows %}
-        <tr>
-            <td>{{ row.user_id }}</td>
-            <td>
-                {% if row.pipeline_mode == 'lite' %}
-                <span class="sk-pill">Lite</span>
-                {% elif row.pipeline_mode == 'premium' %}
-                <span class="sk-pill sk-pill-published">Advanced</span>
-                {% else %}
-                <span class="sk-pill sk-pill-draft">{{ row.pipeline_mode }}</span>
-                {% endif %}
-            </td>
-            <td>{{ "{:,}".format(row.session_count) }}</td>
-            <td>{{ "{:,}".format(row.total_input or 0) }}</td>
-            <td>{{ "{:,}".format(row.total_output or 0) }}</td>
-            <td>{{ "{:,}".format((row.total_input or 0) + (row.total_output or 0)) }}</td>
-            <td>{% if row.total_cost is not none %}${{ "{:.4f}".format(row.total_cost) }}{% else %}--{% endif %}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p class="sk-no-items">
-    {% if days or pipeline_mode %}
-    No usage data matches your filters.
-    {% else %}
-    No research sessions have been recorded yet.
-    {% endif %}
-</p>
-{% endif %}
+{# ── Cost chart ──────────────────────────────────────────────────── #}
+<div class="sk-panel" style="margin-top: 1.5rem;">
+    <div class="sk-panel-head">Cost Over Time</div>
+    <div class="sk-panel-body" style="padding: 1rem;">
+        <canvas id="costChart" height="80"></canvas>
+    </div>
+</div>
+
+{# ── Tabs ────────────────────────────────────────────────────────── #}
+<div style="margin-top: 1.5rem;">
+    <div class="sk-usage-tabs" style="display:flex; gap:0; border-bottom: 2px solid var(--sk-border, #dee2e6);">
+        <button class="sk-usage-tab active" data-tab="runs"
+                style="padding:.5rem 1.25rem; border:none; background:none; cursor:pointer; font-weight:600; border-bottom:2px solid transparent; margin-bottom:-2px;">
+            Individual Runs
+        </button>
+        <button class="sk-usage-tab" data-tab="users"
+                style="padding:.5rem 1.25rem; border:none; background:none; cursor:pointer; font-weight:600; border-bottom:2px solid transparent; margin-bottom:-2px;">
+            By User
+        </button>
+    </div>
+
+    {# ── Tab: Individual Runs ────────────────────────────────────── #}
+    <div id="tab-runs" class="sk-usage-tab-content">
+        {% if runs %}
+        <table class="sk-admin-table">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>User</th>
+                    <th>Query</th>
+                    <th>Product</th>
+                    <th>Status</th>
+                    <th>Input</th>
+                    <th>Output</th>
+                    <th>Model</th>
+                    <th>Cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in runs %}
+                <tr>
+                    <td style="white-space:nowrap;">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>{{ r.user_id }}</td>
+                    <td style="max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ r.query }}">{{ r.query[:80] }}</td>
+                    <td>
+                        {% if r.pipeline_mode == 'lite' %}
+                        <span class="sk-pill">Lite</span>
+                        {% elif r.pipeline_mode == 'premium' %}
+                        <span class="sk-pill sk-pill-published">Advanced</span>
+                        {% else %}
+                        <span class="sk-pill sk-pill-draft">{{ r.pipeline_mode }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if r.status == 'complete' %}
+                        <span class="sk-pill sk-pill-published">complete</span>
+                        {% elif r.status == 'error' %}
+                        <span class="sk-pill sk-pill-draft" style="color:#da3633;">error</span>
+                        {% else %}
+                        <span class="sk-pill">{{ r.status }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ "{:,}".format(r.input_tokens or 0) }}</td>
+                    <td>{{ "{:,}".format(r.output_tokens or 0) }}</td>
+                    <td style="font-size:.85em;" title="{{ r.model_name or '' }}">{{ (r.model_name or '--').split(':')[-1][:25] }}</td>
+                    <td>{% if r.cost_usd is not none %}${{ "{:.4f}".format(r.cost_usd) }}{% else %}--{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="sk-no-items">No sessions found for the selected filters.</p>
+        {% endif %}
+    </div>
+
+    {# ── Tab: By User ────────────────────────────────────────────── #}
+    <div id="tab-users" class="sk-usage-tab-content" style="display:none;">
+        {% if agg_rows %}
+        <table class="sk-admin-table">
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Product</th>
+                    <th>Sessions</th>
+                    <th>Input Tokens</th>
+                    <th>Output Tokens</th>
+                    <th>Total Tokens</th>
+                    <th>Cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in agg_rows %}
+                <tr>
+                    <td>{{ row.user_id }}</td>
+                    <td>
+                        {% if row.pipeline_mode == 'lite' %}
+                        <span class="sk-pill">Lite</span>
+                        {% elif row.pipeline_mode == 'premium' %}
+                        <span class="sk-pill sk-pill-published">Advanced</span>
+                        {% else %}
+                        <span class="sk-pill sk-pill-draft">{{ row.pipeline_mode }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ "{:,}".format(row.session_count) }}</td>
+                    <td>{{ "{:,}".format(row.total_input or 0) }}</td>
+                    <td>{{ "{:,}".format(row.total_output or 0) }}</td>
+                    <td>{{ "{:,}".format((row.total_input or 0) + (row.total_output or 0)) }}</td>
+                    <td>{% if row.total_cost is not none %}${{ "{:.4f}".format(row.total_cost) }}{% else %}--{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="sk-no-items">No usage data matches your filters.</p>
+        {% endif %}
+    </div>
+</div>
+
+{# ── Chart.js + tab switching ────────────────────────────────────── #}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+    /* ── Tabs ──────────────────────────────────────────────────── */
+    const tabs = document.querySelectorAll('.sk-usage-tab');
+    const panels = document.querySelectorAll('.sk-usage-tab-content');
+    tabs.forEach(btn => {
+        btn.addEventListener('click', () => {
+            tabs.forEach(t => {
+                t.classList.remove('active');
+                t.style.borderBottomColor = 'transparent';
+            });
+            panels.forEach(p => p.style.display = 'none');
+            btn.classList.add('active');
+            btn.style.borderBottomColor = 'var(--sk-accent, #206bc4)';
+            document.getElementById('tab-' + btn.dataset.tab).style.display = '';
+        });
+    });
+    /* highlight initial active tab */
+    document.querySelector('.sk-usage-tab.active').style.borderBottomColor = 'var(--sk-accent, #206bc4)';
+
+    /* ── Chart ─────────────────────────────────────────────────── */
+    const ctx = document.getElementById('costChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: {{ chart_labels|safe }},
+            datasets: {{ chart_datasets|safe }},
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: 'Cost (USD)' },
+                    ticks: { callback: v => '$' + v.toFixed(4) },
+                },
+                x: {
+                    title: { display: true, text: '{{ granularity|capitalize }}' },
+                },
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: item => item.dataset.label + ': $' + item.parsed.y.toFixed(4),
+                    },
+                },
+            },
+        },
+    });
+})();
+</script>
 {% endblock %}
