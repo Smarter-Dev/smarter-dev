@@ -131,6 +131,37 @@ class ResearchSessionOperations:
         )
         await session.commit()
 
+    async def add_usage(
+        self,
+        session: AsyncSession,
+        session_id: UUID,
+        input_tokens: int,
+        output_tokens: int,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        cost_usd: object = None,
+    ) -> None:
+        """Atomically increment token counts and cost on a session."""
+        research = await self.get_session(session, session_id)
+        if not research:
+            return
+        values: dict = {
+            "input_tokens": (research.input_tokens or 0) + input_tokens,
+            "output_tokens": (research.output_tokens or 0) + output_tokens,
+            "cache_read_tokens": (research.cache_read_tokens or 0) + cache_read_tokens,
+            "cache_write_tokens": (research.cache_write_tokens or 0) + cache_write_tokens,
+        }
+        if cost_usd is not None:
+            from decimal import Decimal
+            current = research.cost_usd or Decimal(0)
+            values["cost_usd"] = current + cost_usd
+        await session.execute(
+            update(ResearchSession)
+            .where(ResearchSession.id == session_id)
+            .values(**values)
+        )
+        await session.commit()
+
     async def add_followup(
         self,
         session: AsyncSession,

@@ -54,6 +54,26 @@ def _usage_to_dict(usage: RunUsage) -> dict:
     return {k: v for k, v in d.items() if v}
 
 
+async def _persist_aux_usage(session_id: UUID, usage: RunUsage) -> None:
+    """Persist auxiliary agent usage (meta, YouTube, code examples) to the session."""
+    in_tok = usage.input_tokens or 0
+    out_tok = usage.output_tokens or 0
+    cache_read = usage.cache_read_tokens or 0
+    cache_write = usage.cache_write_tokens or 0
+    if not (in_tok or out_tok):
+        return
+    cost = calc_session_cost(in_tok, out_tok, cache_read, cache_write, MODEL)
+    async with get_skrift_db_session_context() as db_session:
+        await ops.add_usage(
+            db_session, session_id,
+            input_tokens=in_tok,
+            output_tokens=out_tok,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+            cost_usd=cost,
+        )
+
+
 async def _emit(user_id: str, session_id: str, event_type: str, **payload: object) -> None:
     """Emit a research notification to the user via Skrift's notification system."""
     await notify_user(
@@ -380,7 +400,8 @@ async def run_session_meta(
     """
     sid = str(session_id)
     try:
-        meta = await generate_session_meta(query)
+        meta, meta_usage = await generate_session_meta(query)
+        await _persist_aux_usage(session_id, meta_usage)
 
         # Persist name + classification to DB
         async with get_skrift_db_session_context() as db_session:
@@ -433,7 +454,8 @@ async def run_youtube_search(
     """
     sid = str(session_id)
     try:
-        yt_query = await generate_youtube_query(query, skill_level, topic)
+        yt_query, query_usage = await generate_youtube_query(query, skill_level, topic)
+        await _persist_aux_usage(session_id, query_usage)
         logger.info("YouTube query for %s: %r", sid, yt_query)
         if not yt_query:
             return  # non-tech topic, skip
@@ -450,7 +472,8 @@ async def run_youtube_search(
 
         # Stage 2: LLM ranks and selects the most relevant videos
         logger.info("YouTube: ranking %d candidates for %s", len(videos), sid)
-        ranked = await rank_youtube_results(query, skill_level, videos)
+        ranked, rank_usage = await rank_youtube_results(query, skill_level, videos)
+        await _persist_aux_usage(session_id, rank_usage)
 
         if not ranked:
             logger.info("YouTube: LLM selected no videos for %s", sid)
@@ -486,7 +509,8 @@ async def run_code_examples(
     """
     sid = str(session_id)
     try:
-        result = await generate_code_examples(query, response, skill_level)
+        result, code_usage = await generate_code_examples(query, response, skill_level)
+        await _persist_aux_usage(session_id, code_usage)
 
         if not result.examples:
             logger.info("No code examples generated for %s", sid)

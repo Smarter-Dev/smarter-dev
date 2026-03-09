@@ -651,19 +651,19 @@ _meta_agent = Agent(
 )
 
 
-async def generate_session_meta(query: str) -> SessionMeta:
+async def generate_session_meta(query: str) -> tuple[SessionMeta, RunUsage]:
     """Generate name and classification metadata for a research session."""
     try:
         result = await _meta_agent.run(query, model=MODEL)
         meta = result.output
         meta.name = meta.name[:200]
-        return meta
+        return meta, result.usage()
     except Exception:
         return SessionMeta(
             name=query[:200],
             skill_level="intermediate",
             topic="other",
-        )
+        ), RunUsage()
 
 
 _youtube_query_agent = Agent(
@@ -767,7 +767,7 @@ _code_examples_agent = Agent(
 
 async def generate_code_examples(
     query: str, response: str, skill_level: str,
-) -> CodeExamplesResult:
+) -> tuple[CodeExamplesResult, RunUsage]:
     """Generate code examples that complement a research response."""
     try:
         prompt = (
@@ -776,10 +776,10 @@ async def generate_code_examples(
             f"## Research Response\n{response}"
         )
         result = await _code_examples_agent.run(prompt, model=MODEL)
-        return result.output
+        return result.output, result.usage()
     except Exception:
         logger.exception("Failed to generate code examples")
-        return CodeExamplesResult(examples=[])
+        return CodeExamplesResult(examples=[]), RunUsage()
 
 
 class YouTubeRanking(BaseModel):
@@ -826,10 +826,10 @@ _youtube_ranking_agent = Agent(
 
 async def generate_youtube_query(
     query: str, skill_level: str, topic: str,
-) -> str | None:
+) -> tuple[str | None, RunUsage]:
     """Generate a YouTube search query, or None if not suited for video."""
     if topic == "other":
-        return None
+        return None, RunUsage()
     try:
         prompt = (
             f"User query: {query}\n"
@@ -839,23 +839,23 @@ async def generate_youtube_query(
         result = await _youtube_query_agent.run(prompt, model=MODEL)
         output = result.output.strip().strip('"')
         if output.upper() == "NONE":
-            return None
-        return output[:80] if output else None
+            return None, result.usage()
+        return (output[:80] if output else None), result.usage()
     except Exception:
         logger.exception("Failed to generate YouTube query")
-        return None
+        return None, RunUsage()
 
 
 async def rank_youtube_results(
     query: str, skill_level: str, videos: list[dict],
-) -> list[dict]:
+) -> tuple[list[dict], RunUsage]:
     """Rank YouTube search results and return the top 1-3 most relevant.
 
     Uses Flash Lite to evaluate relevance, quality, and skill-level match.
     Returns the selected videos in ranked order.
     """
     if not videos:
-        return []
+        return [], RunUsage()
 
     try:
         # Build a numbered list for the LLM
@@ -881,8 +881,8 @@ async def rank_youtube_results(
             if vid in id_to_video:
                 ranked.append(id_to_video[vid])
 
-        return ranked
+        return ranked, result.usage()
     except Exception:
         logger.exception("Failed to rank YouTube results")
         # Fallback: return first 3 unranked
-        return videos[:3]
+        return videos[:3], RunUsage()
