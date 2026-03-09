@@ -52,6 +52,7 @@ async def create_research(
         guild_id=body.guild_id,
         channel_id=body.channel_id,
         context=body.context,
+        pipeline_mode="lite",
     )
     await db.commit()
 
@@ -183,6 +184,7 @@ async def create_followup(
         guild_id=parent.guild_id,
         channel_id=parent.channel_id,
         context=context,
+        pipeline_mode="lite",
     )
     await db.commit()
 
