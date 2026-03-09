@@ -114,13 +114,18 @@ class LiteQueryPlan(BaseModel):
 _lite_query_agent = Agent(
     output_type=LiteQueryPlan,
     instructions=(
-        "You are a search query planner. Given the user's question, produce:\n"
+        "You are a search query planner. You will be given the current date "
+        "and the user's question.\n\n"
+        "Produce:\n"
         "1. Exactly 2 web search queries that directly address their question "
-        "from different angles.\n"
+        "from different angles. Include the current year (or 'latest') in "
+        "queries unless the user is specifically asking about a different time "
+        "period. This ensures search results are current.\n"
         "2. A list of 0-3 additional queries for anything that may have changed "
         "since your training data cutoff — recent releases, breaking changes, "
-        "new tools, newly relevant information, etc. Only include these if the "
-        "topic is likely to have evolved.\n\n"
+        "new tools, newly relevant information, etc. Include the current year "
+        "in these queries. Only include these if the topic is likely to have "
+        "evolved.\n\n"
         "Return structured output only."
     ),
 )
@@ -191,7 +196,9 @@ async def run_lite_pipeline(
     # ------------------------------------------------------------------
     await emit("status", stage="planning", message="Generating search queries...")
 
-    query_result = await _lite_query_agent.run(query, model=MODEL)
+    query_result = await _lite_query_agent.run(
+        f"{date_context}\n\n{query}", model=MODEL,
+    )
     plan = query_result.output
     total_usage.incr(query_result.usage())
 
