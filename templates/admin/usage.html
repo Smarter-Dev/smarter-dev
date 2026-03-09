@@ -8,18 +8,31 @@
 .usage-chart-panel { margin-top: 1.5rem; }
 .usage-chart-body { padding: 1rem; }
 .usage-tabs-wrap { margin-top: 1.5rem; }
-.usage-tab-bar { display: flex; gap: 0; border-bottom: 2px solid var(--sk-border, #dee2e6); }
-.usage-tab {
-    padding: .5rem 1.25rem; border: none; background: none; cursor: pointer;
-    font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -2px;
-    color: inherit;
+.usage-tab-bar {
+    display: flex; gap: 0;
+    border-bottom: 2px solid rgba(255,255,255,.12);
 }
-.usage-tab.active { border-bottom-color: var(--sk-accent, #206bc4); }
+.usage-tab {
+    padding: .6rem 1.5rem;
+    border: none; background: transparent; cursor: pointer;
+    font-weight: 600; font-size: .9rem;
+    color: rgba(255,255,255,.5);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    border-radius: 0;
+    outline: none;
+    transition: color .15s, border-color .15s;
+}
+.usage-tab:hover { color: rgba(255,255,255,.8); }
+.usage-tab.active {
+    color: #fff;
+    border-bottom-color: var(--sk-accent, #3b82f6);
+}
+.usage-tab-content.hidden { display: none; }
 .usage-td-time { white-space: nowrap; }
 .usage-td-query { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-td-model { font-size: .85em; }
 .usage-status-error { color: #da3633; }
-#tab-users { display: none; }
 </style>
 
 <hgroup>
@@ -139,7 +152,7 @@
     </div>
 
     {# ── Tab: By User ────────────────────────────────────────────── #}
-    <div id="tab-users" class="usage-tab-content">
+    <div id="tab-users" class="usage-tab-content hidden">
         {% if agg_rows %}
         <table class="sk-admin-table">
             <thead>
@@ -187,19 +200,13 @@
 (function() {
     /* ── Tabs ──────────────────────────────────────────────────── */
     var tabs = document.querySelectorAll('.usage-tab');
-    var tabRuns = document.getElementById('tab-runs');
-    var tabUsers = document.getElementById('tab-users');
+    var panels = document.querySelectorAll('.usage-tab-content');
     tabs.forEach(function(btn) {
         btn.addEventListener('click', function() {
             tabs.forEach(function(t) { t.classList.remove('active'); });
+            panels.forEach(function(p) { p.classList.add('hidden'); });
             btn.classList.add('active');
-            if (btn.dataset.tab === 'runs') {
-                tabRuns.style.display = '';
-                tabUsers.style.display = 'none';
-            } else {
-                tabRuns.style.display = 'none';
-                tabUsers.style.display = '';
-            }
+            document.getElementById('tab-' + btn.dataset.tab).classList.remove('hidden');
         });
     });
 
