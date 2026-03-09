@@ -237,20 +237,6 @@ async def run_lite_pipeline(
 
     all_queries = plan.search_queries + plan.gap_queries
 
-    tool_log.append({
-        "tool": "query_plan",
-        "input": {"user_query": query},
-        "content": f"Search queries: {plan.search_queries}\nGap queries: {plan.gap_queries}",
-        "status": "complete",
-    })
-    await emit("tool_use", tool="query_plan", input={"user_query": query}, status="running")
-    await emit(
-        "tool_result",
-        tool="query_plan",
-        status="complete",
-        content=f"Search queries: {plan.search_queries}\nGap queries: {plan.gap_queries}",
-    )
-
     # ------------------------------------------------------------------
     # Stage 2 — Parallel Brave searches
     # ------------------------------------------------------------------
@@ -372,16 +358,34 @@ async def run_lite_pipeline(
         synthesis_input, deps=deps, model=MODEL,
     ):
         if isinstance(event, FunctionToolCallEvent):
-            await emit("tool_use", tool=event.part.tool_name, input={"url": event.part.args}, status="running")
-            tool_log.append({"tool": event.part.tool_name, "input": event.part.args, "status": "running"})
+            # Extract a clean input dict from the tool args
+            args = event.part.args
+            if isinstance(args, dict):
+                tool_input = args
+            else:
+                tool_input = {"url": str(args)}
+            await emit("tool_use", tool=event.part.tool_name, input=tool_input, status="running")
+            tool_log.append({"tool": event.part.tool_name, "input": tool_input, "status": "running"})
 
         elif isinstance(event, FunctionToolResultEvent):
-            content = str(event.result.content)[:5120]
-            await emit("tool_result", tool=event.result.tool_name, status="complete", content=content)
+            raw_content = str(event.result.content)[:5120]
+            # Summarize the content for human-readable display
+            url = ""
+            for entry in reversed(tool_log):
+                if entry.get("tool") == event.result.tool_name and entry.get("status") == "running":
+                    url = entry.get("input", {}).get("url", "")
+                    break
+            if raw_content.startswith("Error reading"):
+                display_content = raw_content
+            elif raw_content == "Page had no readable content.":
+                display_content = raw_content
+            else:
+                display_content = f"Read {len(raw_content)} chars from {url}" if url else f"Read {len(raw_content)} chars"
+            await emit("tool_result", tool=event.result.tool_name, status="complete", content=display_content)
             for entry in reversed(tool_log):
                 if entry.get("tool") == event.result.tool_name and entry.get("status") == "running":
                     entry["status"] = "complete"
-                    entry["content"] = content
+                    entry["content"] = display_content
                     break
 
         elif isinstance(event, PartDeltaEvent):

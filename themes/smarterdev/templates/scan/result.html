@@ -106,13 +106,13 @@
                 {% if entry.tool is defined %}
                 <li class="scan-tool-entry scan-tool-done">
                     <span class="scan-tool-name">{{ entry.tool }}</span>
-                    <span class="scan-tool-args">{% if entry.tool == 'research' and entry.input is defined and entry.input.question is defined %}{{ entry.input.question|truncate(80) }}{% else %}{{ (entry.input if entry.input is defined else '')|string|truncate(80) }}{% endif %}</span>
+                    <span class="scan-tool-args">{% if entry.tool == 'research' and entry.input is defined and entry.input.question is defined %}{{ entry.input.question|truncate(80) }}{% elif entry.tool == 'search' and entry.input is defined and entry.input.query is defined %}{{ entry.input.query|truncate(80) }}{% elif (entry.tool == 'read' or entry.tool == 'read_url') and entry.input is defined and entry.input.url is defined %}{{ entry.input.url|truncate(80) }}{% else %}{{ (entry.input if entry.input is defined else '')|string|truncate(80) }}{% endif %}</span>
                 </li>
                 {% if entry.sub_tools is defined and entry.sub_tools -%}
                 <div class="scan-tool-content">
                 <ul class="scan-sub-tools">
                 {%- for st in entry.sub_tools %}
-                <li class="scan-sub-tool"><span class="scan-sub-tool-name">{{ st.tool }}</span> <span class="scan-sub-tool-args">{% if st.tool == 'search' and st.input is defined and st.input.query is defined %}{{ st.input.query|truncate(70) }}{% elif st.tool == 'read' and st.input is defined and st.input.url is defined %}{{ st.input.url|truncate(70) }}{% else %}{{ (st.input if st.input is defined else '')|string|truncate(70) }}{% endif %}</span></li>
+                <li class="scan-sub-tool"><span class="scan-sub-tool-name">{{ st.tool }}</span> <span class="scan-sub-tool-args">{% if st.tool == 'search' and st.input is defined and st.input.query is defined %}{{ st.input.query|truncate(70) }}{% elif (st.tool == 'read' or st.tool == 'read_url') and st.input is defined and st.input.url is defined %}{{ st.input.url|truncate(70) }}{% else %}{{ (st.input if st.input is defined else '')|string|truncate(70) }}{% endif %}</span></li>
                 <div class="scan-sub-tool-content">{{ st.content if st.content is defined else '' }}</div>
                 {%- endfor %}
                 </ul>
@@ -268,8 +268,9 @@ if (window.__skriftNotifications) {
                             for (var st of data.sub_tools) {
                                 var argText = "";
                                 if (st.tool === "search" && st.input && st.input.query) argText = st.input.query;
-                                else if (st.tool === "read" && st.input && st.input.url) argText = st.input.url;
-                                else argText = JSON.stringify(st.input || {});
+                                else if ((st.tool === "read" || st.tool === "read_url") && st.input && st.input.url) argText = st.input.url;
+                                else if (typeof st.input === "string") argText = st.input;
+                                else argText = Object.entries(st.input || {}).map(function(e) { return e[0] + "=" + e[1]; }).join(", ");
                                 if (argText.length > 70) argText = argText.slice(0, 70) + "...";
                                 html += '<li class="scan-sub-tool">' +
                                     '<span class="scan-sub-tool-name">' + escapeHtml(st.tool) + '</span>' +
@@ -388,6 +389,16 @@ if (window.__skriftNotifications) {
         if (toolName === "research" && input.question) {
             const q = input.question;
             return q.length > 80 ? q.slice(0, 80) + "..." : q;
+        }
+        // For search, show the query text
+        if (toolName === "search" && input.query) {
+            const q = input.query;
+            return q.length > 80 ? q.slice(0, 80) + "..." : q;
+        }
+        // For read/read_url, show the URL
+        if ((toolName === "read" || toolName === "read_url") && input.url) {
+            const u = input.url;
+            return u.length > 80 ? u.slice(0, 80) + "..." : u;
         }
         const parts = [];
         for (const [k, v] of Object.entries(input)) {
