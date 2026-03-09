@@ -80,8 +80,10 @@ comparing parallel items. Keep it tight — say what needs saying and stop.
 ## Citations
 
 Cite sources INLINE by placing the full URL inside double square brackets \
-immediately after the claim. Example: \
-The framework now supports streaming responses [[https://docs.example.com/streaming]].
+immediately after the claim — one URL per pair of brackets. Example: \
+The framework now supports streaming responses [[https://docs.example.com/streaming]]. \
+For multiple citations, use separate brackets: \
+This feature was added in v3 [[https://blog.example.com/v3]] [[https://github.com/example/repo/pull/42]].
 
 Do NOT number sources. Do NOT add a Sources section at the end. \
 Every citation must be a real URL from your research — never fabricate URLs. \

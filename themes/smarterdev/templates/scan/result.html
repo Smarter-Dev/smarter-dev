@@ -364,11 +364,15 @@ if (window.__skriftNotifications) {
     });
 
     function processCitations(html) {
-        return html.replace(/\[\[(https?:\/\/[^\]\s]+)\]\]/g, function(_, url) {
-            var a = document.createElement("a");
-            a.href = url;
-            var domain = a.hostname.replace(/^www\./, "");
-            return '<sup><a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" class="scan-cite">' + escapeHtml(domain) + '</a></sup>';
+        return html.replace(/\[\[(https?:\/\/[^\]\s]+(?:\],\s*\[https?:\/\/[^\]\s]+)*)\]\]/g, function(_, inner) {
+            var urls = inner.match(/https?:\/\/[^\s,\]\[]+/g);
+            if (!urls) return "[[" + inner + "]]";
+            return urls.map(function(url) {
+                var a = document.createElement("a");
+                a.href = url;
+                var domain = a.hostname.replace(/^www\./, "");
+                return '<sup><a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" class="scan-cite">' + escapeHtml(domain) + '</a></sup>';
+            }).join("");
         });
     }
 
