@@ -437,6 +437,8 @@ async def run_youtube_search(
             headers={"User-Agent": "Smarter Dev Scan Agent - admin@smarter.dev"},
         ) as http_client:
             videos = await youtube_search(http_client, yt_query, num_results=3)
+            # Hard cap — never store more than 3 videos regardless of API response
+            videos = videos[:3]
 
         if not videos or (len(videos) == 1 and "error" in videos[0]):
             logger.warning("YouTube search returned no/error results for %s: %r", sid, videos)
