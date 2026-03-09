@@ -535,6 +535,7 @@ async def run_code_examples(
 
         if not result.examples:
             logger.info("No code examples generated for %s", sid)
+            await _emit(user_id, sid, "code_examples_status", status="done")
             return
 
         examples_data = [ex.model_dump() for ex in result.examples]
@@ -550,8 +551,9 @@ async def run_code_examples(
             user_id, sid, "code_examples",
             examples=examples_data,
         )
-    except Exception:
-        logger.exception("Code examples generation failed for session %s", sid)
+    except Exception as exc:
+        logger.exception("Code examples generation failed for session %s: %s: %s", sid, type(exc).__name__, exc)
+        await _emit(user_id, sid, "code_examples_status", status="done")
 
 
 def start_meta_task(

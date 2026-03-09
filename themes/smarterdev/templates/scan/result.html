@@ -331,13 +331,14 @@ if (window.__skriftNotifications) {
         }
 
         else if (eventType === "code_examples_status") {
-            if (data.status === "generating") {
-                var section = document.getElementById("scan-examples-section");
-                var list = document.getElementById("scan-examples-list");
-                if (section && list) {
-                    section.classList.remove("scan-hidden");
-                    list.innerHTML = '<p class="scan-sidebar-empty" style="animation:scan-pulse 2s ease-in-out infinite">Generating code examples...</p>';
-                }
+            var section = document.getElementById("scan-examples-section");
+            var list = document.getElementById("scan-examples-list");
+            if (data.status === "generating" && section && list) {
+                section.classList.remove("scan-hidden");
+                list.innerHTML = '<p class="scan-sidebar-empty" style="animation:scan-pulse 2s ease-in-out infinite">Generating code examples...</p>';
+            } else if (data.status === "done" && section) {
+                // No examples generated or error — hide the section
+                section.classList.add("scan-hidden");
             }
         }
 

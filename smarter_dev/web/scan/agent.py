@@ -797,8 +797,8 @@ async def generate_code_examples(
             },
         )
         return result.output, result.usage()
-    except Exception:
-        logger.exception("Failed to generate code examples")
+    except Exception as exc:
+        logger.exception("Failed to generate code examples: %s: %s", type(exc).__name__, exc)
         return CodeExamplesResult(examples=[]), RunUsage()
 
 
