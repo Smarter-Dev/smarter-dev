@@ -38,12 +38,12 @@ _patch_provider(
     ),
 )
 
-# Gemini 3.0 Flash — not yet in genai-prices
+# Gemini 3 Flash Preview — not yet in genai-prices
 _patch_provider(
     "google",
     types.ModelInfo(
-        id="gemini-3.0-flash-001",
-        match=types.ClauseStartsWith(starts_with="gemini-3.0-flash"),
+        id="gemini-3-flash-preview",
+        match=types.ClauseStartsWith(starts_with="gemini-3-flash"),
         prices=types.ModelPrice(
             input_mtok=Decimal("0.15"),
             output_mtok=Decimal("0.60"),

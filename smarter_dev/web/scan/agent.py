@@ -25,7 +25,7 @@ from smarter_dev.web.scan.tools import RateLimiter, URLRateLimiter
 logger = logging.getLogger(__name__)
 
 MODEL = "google-gla:gemini-3.1-flash-lite-preview"
-CODE_EXAMPLES_MODEL = "google-gla:gemini-3.0-flash-001"
+CODE_EXAMPLES_MODEL = "google-gla:gemini-3-flash-preview"
 
 
 @dataclass
