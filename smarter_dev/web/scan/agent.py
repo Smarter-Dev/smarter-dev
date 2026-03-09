@@ -604,19 +604,58 @@ async def research(ctx: RunContext[ResearchDeps], question: str) -> str:
 
 
 # ============================================================================
-# Naming agent (shared)
+# Session metadata agent (naming + classification)
 # ============================================================================
 
-_naming_agent = Agent(
-    output_type=str,
-    instructions="Generate a short title (3-8 words) for this research query. Return only the title, no quotes.",
+
+class SessionMeta(BaseModel):
+    """Metadata generated for a research session."""
+
+    name: str = Field(
+        description="A short, descriptive title (3-8 words) for the research query.",
+    )
+    skill_level: str = Field(
+        description=(
+            "The skill level assumed by the query. One of: "
+            "beginner, intermediate, advanced, expert."
+        ),
+    )
+    topic: str = Field(
+        description=(
+            "The primary topic category. One of: "
+            "web-dev, app-dev, backend, full-stack, ai-llm, "
+            "machine-learning, devops, data-engineering, "
+            "security, gamedev, systems, other."
+        ),
+    )
+
+
+_meta_agent = Agent(
+    output_type=SessionMeta,
+    instructions=(
+        "Analyze the research query and return structured metadata.\n\n"
+        "1. **name**: A short title (3-8 words) that captures the essence "
+        "of the query. No quotes, no punctuation at the end.\n"
+        "2. **skill_level**: Infer from the terminology and depth of the "
+        "question — beginner, intermediate, advanced, or expert.\n"
+        "3. **topic**: Classify into exactly one of: web-dev, app-dev, "
+        "backend, full-stack, ai-llm, machine-learning, devops, "
+        "data-engineering, security, gamedev, systems, other.\n\n"
+        "Return structured output only."
+    ),
 )
 
 
-async def generate_session_name(query: str) -> str:
-    """Generate a short descriptive name for a research session."""
+async def generate_session_meta(query: str) -> SessionMeta:
+    """Generate name and classification metadata for a research session."""
     try:
-        result = await _naming_agent.run(query, model=MODEL)
-        return result.output[:200]
+        result = await _meta_agent.run(query, model=MODEL)
+        meta = result.output
+        meta.name = meta.name[:200]
+        return meta
     except Exception:
-        return query[:200]
+        return SessionMeta(
+            name=query[:200],
+            skill_level="intermediate",
+            topic="other",
+        )

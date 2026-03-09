@@ -32,6 +32,7 @@ from smarter_dev.web.scan.agent import (
     SYSTEM_PROMPT,
     ResearchDeps,
     ResearchResult,
+    generate_session_meta,
     research_agent,
     run_lite_pipeline,
 )
@@ -332,6 +333,55 @@ async def run_lite_research(
             logger.exception("Failed to persist error for session %s", sid)
 
         await _emit(user_id, sid, "error", error=error_msg, recoverable=False)
+
+
+async def run_session_meta(
+    session_id: UUID,
+    query: str,
+    user_id: str,
+) -> None:
+    """Generate session name and classification in the background.
+
+    Emits a ``research:session_meta`` TIMESERIES notification so the result
+    page can stream in the title even if it loads before this completes.
+    """
+    sid = str(session_id)
+    try:
+        meta = await generate_session_meta(query)
+
+        # Persist name + classification to DB
+        async with get_skrift_db_session_context() as db_session:
+            await ops.update_session_meta(
+                db_session,
+                session_id,
+                name=meta.name,
+                context={
+                    "skill_level": meta.skill_level,
+                    "topic": meta.topic,
+                },
+            )
+
+        # Emit so the result page can update the title live
+        await _emit(
+            user_id, sid, "session_meta",
+            name=meta.name,
+            skill_level=meta.skill_level,
+            topic=meta.topic,
+        )
+    except Exception:
+        logger.exception("Failed to generate session meta for %s", sid)
+
+
+def start_meta_task(
+    session_id: UUID,
+    query: str,
+    user_id: str,
+) -> asyncio.Task:
+    """Create and return an asyncio.Task for session naming/classification."""
+    return asyncio.create_task(
+        run_session_meta(session_id, query, user_id),
+        name=f"meta:{session_id}",
+    )
 
 
 def start_research_task(

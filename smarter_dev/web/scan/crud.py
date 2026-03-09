@@ -83,6 +83,23 @@ class ResearchSessionOperations:
         )
         await session.commit()
 
+    async def update_session_meta(
+        self,
+        session: AsyncSession,
+        session_id: UUID,
+        name: str,
+        context: dict | None = None,
+    ) -> None:
+        values: dict = {"name": name}
+        if context is not None:
+            values["context"] = context
+        await session.execute(
+            update(ResearchSession)
+            .where(ResearchSession.id == session_id)
+            .values(**values)
+        )
+        await session.commit()
+
     async def update_session_error(
         self,
         session: AsyncSession,

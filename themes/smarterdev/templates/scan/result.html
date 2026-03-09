@@ -78,7 +78,7 @@
 
 {% block content %}
 <div class="report-header">
-    <div class="report-query">{% if session and session.name %}{{ session.name }}{% else %}Research Result{% endif %}</div>
+    <div class="report-query" id="scan-title">{% if session and session.name %}{{ session.name }}{% elif session %}{{ session.query|truncate(80) }}{% else %}Research Result{% endif %}</div>
     <div class="report-meta">
         {% if session %}
         <span class="meta-item"><strong>QUERY</strong> {{ session.query }}</span>
@@ -226,7 +226,15 @@ if (window.__skriftNotifications) {
 
         var eventType = data.type.replace("research:", "");
 
-        if (eventType === "status") {
+        if (eventType === "session_meta") {
+            var titleEl = document.getElementById("scan-title");
+            if (titleEl && data.name) {
+                titleEl.textContent = data.name;
+                document.title = data.name;
+            }
+        }
+
+        else if (eventType === "status") {
             if (placeholder) {
                 placeholder.textContent = data.message || "Processing...";
             }

@@ -11,10 +11,9 @@ from skrift.auth.guards import Permission, auth_guard
 from skrift.lib.markdown import render_markdown
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from smarter_dev.web.scan.agent import generate_session_name
 from smarter_dev.web.scan.citations import process_citations
 from smarter_dev.web.scan.crud import ResearchSessionOperations
-from smarter_dev.web.scan.runner import start_research_task
+from smarter_dev.web.scan.runner import start_meta_task, start_research_task
 
 logger = logging.getLogger(__name__)
 ops = ResearchSessionOperations()
@@ -48,14 +47,15 @@ class ScanController(Controller):
 
         user_id = request.session.get("user_id", "")
         tz = data.get("tz", "").strip() or None
-        name = await generate_session_name(query)
 
         research = await ops.create_session(
-            db_session, query=query, user_id=user_id, name=name,
+            db_session, query=query, user_id=user_id,
             pipeline_mode="lite",
         )
         await db_session.commit()
 
+        # Start naming/classification and research in parallel as background tasks
+        start_meta_task(research.id, query, user_id)
         start_research_task(research.id, query, user_id, tz=tz)
 
         return Redirect(path=f"/r/{research.id}")
