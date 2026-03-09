@@ -27,7 +27,14 @@ from pydantic_ai.usage import RunUsage
 from skrift.lib.notifications import NotificationMode, notify_user
 
 from smarter_dev.shared.database import get_skrift_db_session_context
-from smarter_dev.web.scan.agent import MODEL, SYSTEM_PROMPT, ResearchDeps, ResearchResult, research_agent
+from smarter_dev.web.scan.agent import (
+    MODEL,
+    SYSTEM_PROMPT,
+    ResearchDeps,
+    ResearchResult,
+    research_agent,
+    run_lite_pipeline,
+)
 from smarter_dev.web.scan.crud import ResearchSessionOperations
 from smarter_dev.web.scan.tools import RateLimiter, URLRateLimiter
 
@@ -210,14 +217,101 @@ async def run_research(
         await _emit(user_id, sid, "error", error=error_msg, recoverable=False)
 
 
+async def run_lite_research(
+    session_id: UUID,
+    query: str,
+    user_id: str,
+    tz: str | None = None,
+) -> None:
+    """Run the two-stage lite research pipeline as a background task.
+
+    Same contract as run_research() — emits SSE events via Skrift
+    notifications and persists results to the database.
+    """
+    sid = str(session_id)
+    start_time = time.monotonic()
+
+    # Build current date string in user's timezone for the system prompt
+    try:
+        user_tz = zoneinfo.ZoneInfo(tz) if tz else None
+    except (KeyError, ValueError):
+        user_tz = None
+    now = datetime.now(user_tz)
+    date_context = f"Today is {now.strftime('%A, %B %-d, %Y')}."
+
+    async def emit(event_type: str, **payload: object) -> None:
+        await _emit(user_id, sid, event_type, **payload)
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=30.0,
+            headers={"User-Agent": "Smarter Dev Scan Agent - admin@smarter.dev"},
+        ) as http_client:
+            deps = ResearchDeps(
+                session_id=sid,
+                http_client=http_client,
+                search_rate_limiter=RateLimiter(min_delay=1.5),
+                read_rate_limiter=URLRateLimiter(min_delay=0.0),
+            )
+
+            result_data, tool_log, total_usage = await run_lite_pipeline(
+                query, deps, date_context, emit,
+            )
+
+            duration = time.monotonic() - start_time
+            usage_summary = {"lite_pipeline": _usage_to_dict(total_usage)}
+            tool_log.append({"type": "usage", **usage_summary})
+
+            # Persist to DB
+            async with get_skrift_db_session_context() as db_session:
+                await ops.update_session_result(
+                    db_session,
+                    session_id,
+                    response=result_data.response,
+                    summary=result_data.summary,
+                    sources=[s.model_dump() for s in result_data.sources],
+                    tool_log=tool_log,
+                )
+
+            # Emit completion
+            await _emit(
+                user_id, sid, "complete",
+                result_id=sid,
+                result_url=f"https://scan.smarter.dev/r/{sid}",
+                summary=result_data.summary,
+                response=result_data.response,
+                duration=round(duration, 2),
+                usage=usage_summary,
+            )
+
+    except Exception as e:
+        logger.exception("Lite research session %s failed", sid)
+        error_msg = f"{type(e).__name__}: {e}"
+
+        try:
+            async with get_skrift_db_session_context() as db_session:
+                await ops.update_session_error(db_session, session_id, error_msg)
+        except Exception:
+            logger.exception("Failed to persist error for session %s", sid)
+
+        await _emit(user_id, sid, "error", error=error_msg, recoverable=False)
+
+
 def start_research_task(
     session_id: UUID,
     query: str,
     user_id: str,
     tz: str | None = None,
+    mode: str = "lite",
+    **kwargs: object,
 ) -> asyncio.Task:
-    """Create and return an asyncio.Task for the research agent."""
+    """Create and return an asyncio.Task for the research agent.
+
+    Args:
+        mode: "lite" (default, two-stage Flash Lite) or "premium" (multi-turn agentic).
+    """
+    runner = run_lite_research if mode == "lite" else run_research
     return asyncio.create_task(
-        run_research(session_id, query, user_id, tz=tz),
+        runner(session_id, query, user_id, tz=tz),
         name=f"research:{session_id}",
     )
