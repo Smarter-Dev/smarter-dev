@@ -131,6 +131,52 @@ async def jina_search(
         return [{"error": f"Search failed: {e}"}]
 
 
+async def youtube_search(
+    client: httpx.AsyncClient,
+    query: str,
+    num_results: int = 3,
+) -> list[dict]:
+    """Search YouTube via the Data API v3.
+
+    Returns a list of dicts with keys: title, url, channel, thumbnail, video_id.
+    """
+    api_key = os.environ.get("YOUTUBE_API_KEY", "")
+    if not api_key:
+        return [{"error": "YOUTUBE_API_KEY not configured"}]
+
+    try:
+        resp = await client.get(
+            "https://www.googleapis.com/youtube/v3/search",
+            params={
+                "part": "snippet",
+                "q": query,
+                "type": "video",
+                "maxResults": min(num_results, 10),
+                "relevanceLanguage": "en",
+                "key": api_key,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        results = []
+        for item in data.get("items", []):
+            snippet = item.get("snippet", {})
+            video_id = item.get("id", {}).get("videoId", "")
+            results.append({
+                "title": snippet.get("title", ""),
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+                "channel": snippet.get("channelTitle", ""),
+                "thumbnail": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                "video_id": video_id,
+            })
+        return results
+
+    except Exception as e:
+        logger.error("YouTube search failed: %s", e)
+        return [{"error": f"YouTube search failed: {e}"}]
+
+
 async def jina_read(client: httpx.AsyncClient, url: str) -> dict:
     """Read the full content of a URL via the Jina Reader API.
 

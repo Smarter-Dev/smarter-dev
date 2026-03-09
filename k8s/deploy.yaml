@@ -134,6 +134,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: brave-search-api-key
+                  - name: YOUTUBE_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: youtube-api-key
                   - name: GITHUB_CLIENT_ID
                     valueFrom:
                       secretKeyRef:

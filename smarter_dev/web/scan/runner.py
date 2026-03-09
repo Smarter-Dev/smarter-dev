@@ -33,9 +33,11 @@ from smarter_dev.web.scan.agent import (
     ResearchDeps,
     ResearchResult,
     generate_session_meta,
+    generate_youtube_query,
     research_agent,
     run_lite_pipeline,
 )
+from smarter_dev.web.scan.tools import youtube_search
 from smarter_dev.web.scan.crud import ResearchSessionOperations
 from smarter_dev.web.scan.pricing import calc_session_cost
 from smarter_dev.web.scan.tools import RateLimiter, URLRateLimiter
@@ -344,6 +346,7 @@ async def run_session_meta(
 
     Emits a ``research:session_meta`` TIMESERIES notification so the result
     page can stream in the title even if it loads before this completes.
+    Then fires off a YouTube video search for tech topics.
     """
     sid = str(session_id)
     try:
@@ -368,8 +371,56 @@ async def run_session_meta(
             skill_level=meta.skill_level,
             topic=meta.topic,
         )
+
+        # Fire off YouTube search for tech topics
+        asyncio.create_task(
+            run_youtube_search(session_id, query, user_id, meta.skill_level, meta.topic),
+            name=f"youtube:{session_id}",
+        )
     except Exception:
         logger.exception("Failed to generate session meta for %s", sid)
+
+
+async def run_youtube_search(
+    session_id: UUID,
+    query: str,
+    user_id: str,
+    skill_level: str,
+    topic: str,
+) -> None:
+    """Generate a YouTube search query via Flash Lite and fetch 3 videos.
+
+    Emits a ``research:youtube_videos`` TIMESERIES notification with the
+    results so the sidebar can render them.
+    """
+    sid = str(session_id)
+    try:
+        yt_query = await generate_youtube_query(query, skill_level, topic)
+        if not yt_query:
+            return  # non-tech topic, skip
+
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            headers={"User-Agent": "Smarter Dev Scan Agent - admin@smarter.dev"},
+        ) as http_client:
+            videos = await youtube_search(http_client, yt_query, num_results=3)
+
+        if not videos or (len(videos) == 1 and "error" in videos[0]):
+            logger.warning("YouTube search returned no results for %s", sid)
+            return
+
+        # Persist videos to session context
+        async with get_skrift_db_session_context() as db_session:
+            await ops.merge_session_context(
+                db_session, session_id, {"youtube_videos": videos},
+            )
+
+        await _emit(
+            user_id, sid, "youtube_videos",
+            videos=videos,
+        )
+    except Exception:
+        logger.exception("YouTube search failed for session %s", sid)
 
 
 def start_meta_task(

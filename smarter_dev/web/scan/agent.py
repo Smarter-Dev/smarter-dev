@@ -659,3 +659,59 @@ async def generate_session_meta(query: str) -> SessionMeta:
             skill_level="intermediate",
             topic="other",
         )
+
+
+_youtube_query_agent = Agent(
+    output_type=str,
+    instructions=(
+        "You decide whether a research query would benefit from YouTube "
+        "video results, and if so, generate a search query.\n\n"
+        "Return NONE (literally the word NONE) if:\n"
+        "- The question is too broad or vague to find a useful video\n"
+        "- The topic is highly specific to a niche library/tool with "
+        "unlikely YouTube coverage\n"
+        "- The question is about current events, news, or time-sensitive "
+        "information that videos won't cover well\n"
+        "- The question is about comparing options, making decisions, or "
+        "asking for opinions rather than learning a concept\n"
+        "- The topic is non-technical (not software development)\n\n"
+        "Return a YouTube search query if:\n"
+        "- The question involves a concept, pattern, or technique that is "
+        "well-explained visually or in video format\n"
+        "- There are likely quality tutorials, conference talks, or "
+        "deep-dive videos on the topic\n"
+        "- The topic is a popular framework, language, tool, or concept "
+        "with strong YouTube coverage\n\n"
+        "When generating a query:\n"
+        "- IMPORTANT: Over-index on the skill level. A beginner needs "
+        "'intro', 'tutorial', 'for beginners', 'explained simply'. An "
+        "expert needs 'deep dive', 'advanced', 'internals', 'under the "
+        "hood'.\n"
+        "- Anchor the query on the classified topic while tailoring to the "
+        "specific question.\n"
+        "- Keep it under 80 characters.\n"
+        "- Return only the search query string or NONE, nothing else."
+    ),
+)
+
+
+async def generate_youtube_query(
+    query: str, skill_level: str, topic: str,
+) -> str | None:
+    """Generate a YouTube search query, or None if not suited for video."""
+    if topic == "other":
+        return None
+    try:
+        prompt = (
+            f"User query: {query}\n"
+            f"Skill level: {skill_level}\n"
+            f"Topic: {topic}"
+        )
+        result = await _youtube_query_agent.run(prompt, model=MODEL)
+        output = result.output.strip().strip('"')
+        if output.upper() == "NONE":
+            return None
+        return output[:80] if output else None
+    except Exception:
+        logger.exception("Failed to generate YouTube query")
+        return None

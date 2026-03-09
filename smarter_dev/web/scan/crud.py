@@ -100,6 +100,24 @@ class ResearchSessionOperations:
         )
         await session.commit()
 
+    async def merge_session_context(
+        self,
+        session: AsyncSession,
+        session_id: UUID,
+        extra: dict,
+    ) -> None:
+        """Merge extra keys into the session's existing context JSON."""
+        research = await self.get_session(session, session_id)
+        if research:
+            ctx = dict(research.context or {})
+            ctx.update(extra)
+            await session.execute(
+                update(ResearchSession)
+                .where(ResearchSession.id == session_id)
+                .values(context=ctx)
+            )
+            await session.commit()
+
     async def update_session_error(
         self,
         session: AsyncSession,

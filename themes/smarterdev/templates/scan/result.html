@@ -71,6 +71,16 @@
     .scan-cite:hover{background:rgba(0,212,255,.18);border-color:var(--cyan)}
     sup .scan-cite{vertical-align:baseline}
 
+    /* YouTube sidebar */
+    .scan-youtube-list{list-style:none;padding:0;margin:0 0 1.5rem}
+    .scan-youtube-item{margin-bottom:.8rem}
+    .scan-youtube-link{display:flex;gap:.6rem;text-decoration:none;color:var(--light);transition:opacity .2s}
+    .scan-youtube-link:hover{opacity:.8}
+    .scan-youtube-thumb{width:80px;height:45px;object-fit:cover;border:1px solid rgba(0,212,255,.08);flex-shrink:0}
+    .scan-youtube-info{min-width:0}
+    .scan-youtube-title{font-size:.72rem;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .scan-youtube-channel{font-size:.6rem;color:var(--gray);margin-top:2px}
+
     /* Hidden state */
     .scan-hidden{display:none}
     </style>
@@ -149,6 +159,30 @@
     </div>
 
     <aside>
+        {% if session.context and session.context.youtube_videos is defined and session.context.youtube_videos %}
+        <div id="scan-youtube-section">
+            <h3 class="scan-sidebar-heading">RELATED ON YOUTUBE</h3>
+            <ul class="scan-youtube-list" id="scan-youtube-list">
+                {% for v in session.context.youtube_videos %}
+                <li class="scan-youtube-item">
+                    <a href="{{ v.url }}" target="_blank" rel="noopener" class="scan-youtube-link">
+                        {% if v.thumbnail %}<img src="{{ v.thumbnail }}" class="scan-youtube-thumb" alt="" loading="lazy">{% endif %}
+                        <div class="scan-youtube-info">
+                            <div class="scan-youtube-title">{{ v.title }}</div>
+                            <div class="scan-youtube-channel">{{ v.channel }}</div>
+                        </div>
+                    </a>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% else %}
+        <div id="scan-youtube-section" class="scan-hidden">
+            <h3 class="scan-sidebar-heading">RELATED ON YOUTUBE</h3>
+            <ul class="scan-youtube-list" id="scan-youtube-list"></ul>
+        </div>
+        {% endif %}
+
         <h3 class="scan-sidebar-heading">SOURCES</h3>
         {% if session.status == 'complete' and session.sources %}
         <ul class="scan-sources-list">
@@ -231,6 +265,27 @@ if (window.__skriftNotifications) {
             if (titleEl && data.name) {
                 titleEl.textContent = data.name;
                 document.title = data.name;
+            }
+        }
+
+        else if (eventType === "youtube_videos") {
+            if (data.videos && data.videos.length > 0) {
+                var section = document.getElementById("scan-youtube-section");
+                var list = document.getElementById("scan-youtube-list");
+                if (section && list) {
+                    section.classList.remove("scan-hidden");
+                    var html = "";
+                    for (var v of data.videos) {
+                        html += '<li class="scan-youtube-item">' +
+                            '<a href="' + escapeHtml(v.url) + '" target="_blank" rel="noopener" class="scan-youtube-link">' +
+                            (v.thumbnail ? '<img src="' + escapeHtml(v.thumbnail) + '" class="scan-youtube-thumb" alt="" loading="lazy">' : '') +
+                            '<div class="scan-youtube-info">' +
+                            '<div class="scan-youtube-title">' + escapeHtml(v.title) + '</div>' +
+                            '<div class="scan-youtube-channel">' + escapeHtml(v.channel) + '</div>' +
+                            '</div></a></li>';
+                    }
+                    list.innerHTML = html;
+                }
             }
         }
 
