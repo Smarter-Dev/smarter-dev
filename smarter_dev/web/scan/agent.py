@@ -1,15 +1,21 @@
-"""Pydantic AI research agent for Scan."""
+"""Pydantic AI research agent for Scan.
+
+Two implementations:
+- **Lite** (default): Two-stage Flash Lite pipeline — fast and cheap.
+- **Premium**: Multi-turn agentic pipeline — deeper research, more expensive.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import dataclasses
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.usage import RunUsage
 
@@ -43,33 +49,17 @@ class ResearchResult(BaseModel):
     summary: str
 
 
-SYSTEM_PROMPT = """\
-You are a research agent. You answer questions by delegating research \
-to your `research` tool and writing a clear response the user can \
-immediately act on.
+def _usage_to_dict(usage: RunUsage) -> dict:
+    """Convert RunUsage to a serializable dict, omitting zero values."""
+    d = dataclasses.asdict(usage)
+    return {k: v for k, v in d.items() if v}
 
-## How to research
 
-You have one tool: `research(question)`. It searches the web and reads \
-pages to answer a specific question. You can call it multiple times per \
-turn and they run in parallel.
+# ============================================================================
+# LITE IMPLEMENTATION — Two-stage Flash Lite pipeline (default)
+# ============================================================================
 
-### Phase 1 — Survey and orient
-
-Start with 2-3 parallel `research` calls to explore different angles \
-of the query. Always include a recency question — if something has \
-recently changed that affects the answer, the user needs to know.
-
-After the survey, identify the real question the user is trying to answer. \
-It may not be exactly what they asked — understand what they actually need.
-
-### Phase 2 — Deep research
-
-Use additional `research` calls to fill gaps and verify facts. \
-Prioritize practical, actionable information over background context.
-
-Stop when you have enough to give the user a clear, confident answer.
-
+WRITING_INSTRUCTIONS = """\
 ## How to write the answer
 
 Your answer IS the final output — there is no post-processing. Use \
@@ -96,7 +86,309 @@ End with ## Sources as [n] Title — URL
 
 Also return structured source data: classify each source as docs, repo, \
 article, video, forum, or other. Mark sources you cited as cited=True. \
-Include a 2-3 sentence summary suitable for a short notification.
+Include a 2-3 sentence summary suitable for a short notification."""
+
+
+# --- Stage 1: Query generation ---
+
+
+class LiteQueryPlan(BaseModel):
+    """Output of the lite Stage 1 query-generation call."""
+
+    search_queries: list[str] = Field(
+        description="Exactly 2 web search queries that directly address the user's question.",
+        min_length=2,
+        max_length=2,
+    )
+    gap_queries: list[str] = Field(
+        default_factory=list,
+        description=(
+            "0-3 additional search queries for things that may have changed "
+            "since your training cutoff — recent releases, breaking changes, "
+            "new APIs, newly relevant projects, etc. Leave empty if the topic "
+            "is unlikely to have changed."
+        ),
+    )
+
+
+_lite_query_agent = Agent(
+    output_type=LiteQueryPlan,
+    instructions=(
+        "You are a search query planner. Given the user's question, produce:\n"
+        "1. Exactly 2 web search queries that directly address their question "
+        "from different angles.\n"
+        "2. A list of 0-3 additional queries for anything that may have changed "
+        "since your training data cutoff — recent releases, breaking changes, "
+        "new tools, newly relevant information, etc. Only include these if the "
+        "topic is likely to have evolved.\n\n"
+        "Return structured output only."
+    ),
+)
+
+
+# --- Stage 3: Synthesis with read_url tool ---
+
+_LITE_SYNTHESIS_PROMPT = f"""\
+You are a research synthesis agent. You have been given web search results \
+and page contents from reading key results.
+
+## Your task
+
+1. **Evaluate** the search results and page reads provided below.
+2. **Identify gaps** — if you need to read additional pages to fully \
+   understand something new, surprising, or to verify important claims, \
+   use the `read_url` tool. Focus on filling gaps in your knowledge, \
+   especially for things that may have changed since your training cutoff.
+3. **Write** your response following the writing instructions below.
+
+{WRITING_INSTRUCTIONS}
+"""
+
+_lite_synthesis_agent = Agent(
+    deps_type=ResearchDeps,
+    output_type=ResearchResult,
+    instructions=_LITE_SYNTHESIS_PROMPT,
+)
+
+
+@_lite_synthesis_agent.tool
+async def read_url(ctx: RunContext[ResearchDeps], url: str) -> str:
+    """Read the full content of a web page. Use this to fill gaps in the
+    provided search results or to get details from a page that looks relevant."""
+    await ctx.deps.read_rate_limiter.wait_if_needed(url)
+    page = await tools.jina_read(ctx.deps.http_client, url)
+    if "error" in page:
+        return f"Error reading {url}: {page['error']}"
+    content = page.get("content", "")[:8000]
+    return content if content else "Page had no readable content."
+
+
+# --- Lite pipeline orchestrator ---
+
+# Type alias for the emit callback used by the lite pipeline.
+EmitFn = Callable[..., Any]
+
+
+async def run_lite_pipeline(
+    query: str,
+    deps: ResearchDeps,
+    date_context: str,
+    emit: EmitFn,
+) -> tuple[ResearchResult, list[dict], RunUsage]:
+    """Two-stage Flash Lite research pipeline.
+
+    Stage 1: Generate search queries (Flash Lite call 1).
+    Stage 2: Parallel Brave searches + Jina reads (no LLM).
+    Stage 3: Synthesis with read_url tool (Flash Lite call 2).
+
+    Returns (result, tool_log, total_usage).
+    """
+    tool_log: list[dict] = []
+    total_usage = RunUsage()
+
+    # ------------------------------------------------------------------
+    # Stage 1 — Query generation
+    # ------------------------------------------------------------------
+    await emit("status", stage="planning", message="Generating search queries...")
+
+    query_result = await _lite_query_agent.run(query, model=MODEL)
+    plan = query_result.output
+    total_usage.incr(query_result.usage())
+
+    all_queries = plan.search_queries + plan.gap_queries
+
+    tool_log.append({
+        "tool": "query_plan",
+        "input": {"user_query": query},
+        "content": f"Search queries: {plan.search_queries}\nGap queries: {plan.gap_queries}",
+        "status": "complete",
+    })
+    await emit(
+        "tool_result",
+        tool="query_plan",
+        status="complete",
+        content=f"Search queries: {plan.search_queries}\nGap queries: {plan.gap_queries}",
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 2 — Parallel Brave searches
+    # ------------------------------------------------------------------
+    await emit("status", stage="researching", message=f"Running {len(all_queries)} searches...")
+
+    async def _search(q: str) -> tuple[str, list[dict]]:
+        await deps.search_rate_limiter.wait()
+        return q, await tools.brave_search(deps.http_client, q, num_results=15)
+
+    search_tasks = [_search(q) for q in all_queries]
+    search_results_by_query: list[tuple[str, list[dict]]] = await asyncio.gather(*search_tasks)
+
+    # Emit search results and collect all results + first URLs to read
+    all_search_results: list[dict] = []
+    first_urls: list[tuple[str, str]] = []  # (url, title)
+
+    for q, results in search_results_by_query:
+        has_results = results and not (len(results) == 1 and "error" in results[0])
+        display = (
+            "\n".join(f"{i}. {r.get('title', 'Untitled')} — {r.get('url', '')}" for i, r in enumerate(results, 1))
+            if has_results
+            else "No results found."
+        )
+        tool_log.append({
+            "tool": "search",
+            "input": {"query": q},
+            "content": display,
+            "status": "complete",
+        })
+        await emit("tool_result", tool="search", status="complete", content=display)
+
+        if has_results:
+            all_search_results.extend(results)
+            # First valid result URL for reading
+            for r in results:
+                if "error" not in r and r.get("url"):
+                    first_urls.append((r["url"], r.get("title", "Untitled")))
+                    break
+
+    # Deduplicate first_urls by URL
+    seen_urls: set[str] = set()
+    unique_first_urls: list[tuple[str, str]] = []
+    for url, title in first_urls:
+        if url not in seen_urls:
+            seen_urls.add(url)
+            unique_first_urls.append((url, title))
+
+    # ------------------------------------------------------------------
+    # Stage 2b — Parallel Jina reads of first result from each search
+    # ------------------------------------------------------------------
+    await emit("status", stage="reading", message=f"Reading {len(unique_first_urls)} pages...")
+
+    reads: list[dict] = []
+
+    async def _read(url: str, title: str) -> None:
+        await deps.read_rate_limiter.wait_if_needed(url)
+        page = await tools.jina_read(deps.http_client, url)
+        if "error" in page:
+            tool_log.append({
+                "tool": "read",
+                "input": {"url": url},
+                "content": f"Could not read: {page['error']}",
+                "status": "error",
+            })
+            await emit("tool_result", tool="read", status="error", content=f"Could not read: {page['error']}")
+            return
+        content = page.get("content", "")[:8000]
+        reads.append({"url": url, "title": title, "content": content})
+        tool_log.append({
+            "tool": "read",
+            "input": {"url": url},
+            "content": f"Read {len(content)} chars from {title}",
+            "status": "complete",
+        })
+        await emit("tool_result", tool="read", status="complete", content=f"Read {len(content)} chars from {title}")
+
+    await asyncio.gather(*(_read(url, title) for url, title in unique_first_urls))
+
+    # ------------------------------------------------------------------
+    # Stage 3 — Synthesis (Flash Lite call 2, with read_url tool)
+    # ------------------------------------------------------------------
+    await emit("status", stage="synthesizing", message="Analyzing and writing...")
+
+    # Build the context message for the synthesis agent
+    search_section = "\n\n".join(
+        f"### Search: {q}\n" + "\n".join(
+            f"- [{r.get('title', 'Untitled')}]({r.get('url', '')}) — {r.get('description', '')}"
+            for r in results
+            if "error" not in r
+        )
+        for q, results in search_results_by_query
+    )
+
+    read_section = "\n\n".join(
+        f"### Page: [{rd['title']}]({rd['url']})\n{rd['content']}"
+        for rd in reads
+    ) if reads else "No pages could be read."
+
+    synthesis_input = (
+        f"## User's Question\n{query}\n\n"
+        f"## Date\n{date_context}\n\n"
+        f"## Search Results\n{search_section}\n\n"
+        f"## Page Contents\n{read_section}"
+    )
+
+    result_data: ResearchResult | None = None
+
+    from pydantic_ai.messages import (
+        FunctionToolCallEvent,
+        FunctionToolResultEvent,
+        PartDeltaEvent,
+        TextPartDelta,
+    )
+    from pydantic_ai import AgentRunResultEvent
+
+    async for event in _lite_synthesis_agent.run_stream_events(
+        synthesis_input, deps=deps, model=MODEL,
+    ):
+        if isinstance(event, FunctionToolCallEvent):
+            await emit("tool_use", tool=event.part.tool_name, input={"url": event.part.args}, status="running")
+            tool_log.append({"tool": event.part.tool_name, "input": event.part.args, "status": "running"})
+
+        elif isinstance(event, FunctionToolResultEvent):
+            content = str(event.result.content)[:5120]
+            await emit("tool_result", tool=event.result.tool_name, status="complete", content=content)
+            for entry in reversed(tool_log):
+                if entry.get("tool") == event.result.tool_name and entry.get("status") == "running":
+                    entry["status"] = "complete"
+                    entry["content"] = content
+                    break
+
+        elif isinstance(event, PartDeltaEvent):
+            if isinstance(event.delta, TextPartDelta):
+                await emit("response_chunk", delta=event.delta.content_delta)
+
+        elif isinstance(event, AgentRunResultEvent):
+            result_data = event.result.output
+            total_usage.incr(event.result.usage())
+
+    if result_data is None:
+        raise RuntimeError("Synthesis agent completed without producing a result")
+
+    return result_data, tool_log, total_usage
+
+
+# ============================================================================
+# PREMIUM IMPLEMENTATION — Multi-turn agentic pipeline
+# (This is the deeper, more expensive research path. Will be used for
+#  premium tier users in the future.)
+# ============================================================================
+
+SYSTEM_PROMPT = f"""\
+You are a research agent. You answer questions by delegating research \
+to your `research` tool and writing a clear response the user can \
+immediately act on.
+
+## How to research
+
+You have one tool: `research(question)`. It searches the web and reads \
+pages to answer a specific question. You can call it multiple times per \
+turn and they run in parallel.
+
+### Phase 1 — Survey and orient
+
+Start with 2-3 parallel `research` calls to explore different angles \
+of the query. Always include a recency question — if something has \
+recently changed that affects the answer, the user needs to know.
+
+After the survey, identify the real question the user is trying to answer. \
+It may not be exactly what they asked — understand what they actually need.
+
+### Phase 2 — Deep research
+
+Use additional `research` calls to fill gaps and verify facts. \
+Prioritize practical, actionable information over background context.
+
+Stop when you have enough to give the user a clear, confident answer.
+
+{WRITING_INSTRUCTIONS}
 """
 
 # Defer model resolution by not passing it at construction time.
@@ -108,7 +400,7 @@ research_agent = Agent(
 )
 
 
-# --- Flash Lite pipeline helpers ---
+# --- Premium pipeline helpers ---
 
 _query_agent = Agent(
     output_type=str,
@@ -132,17 +424,11 @@ _summarize_agent = Agent(
 )
 
 
-def _usage_to_dict(usage: RunUsage) -> dict:
-    """Convert RunUsage to a serializable dict, omitting zero values."""
-    d = dataclasses.asdict(usage)
-    return {k: v for k, v in d.items() if v}
-
-
 async def _run_research_pipeline(
     question: str,
     deps: ResearchDeps,
 ) -> tuple[str, list[dict]]:
-    """Run the research pipeline: query generation → search → read → summarize.
+    """Run the premium research pipeline: query generation → search → read → summarize.
 
     Returns (formatted_result, sub_tools_for_ui).
     """
@@ -269,7 +555,9 @@ async def research(ctx: RunContext[ResearchDeps], question: str) -> str:
         return f"Research failed: {e}"
 
 
-# --- Naming agent ---
+# ============================================================================
+# Naming agent (shared)
+# ============================================================================
 
 _naming_agent = Agent(
     output_type=str,
