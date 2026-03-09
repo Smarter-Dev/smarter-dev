@@ -166,7 +166,12 @@ and page contents from reading key results.
    understand something new, surprising, or to verify important claims, \
    use the `read_url` tool. Focus on filling gaps in your knowledge, \
    especially for things that may have changed since your training cutoff.
-4. **Write** your response following the writing instructions below. \
+4. **Verify numbers** — double-check any math, statistics, prices, dates, \
+   or numerical comparisons. Re-read the source to confirm you have the \
+   right figures before comparing them. When comparing two numbers, \
+   pause and reconsider which is larger/smaller/better before stating \
+   a conclusion.
+5. **Write** your response following the writing instructions below. \
    Answer the query first, then mention interesting alternatives or \
    related findings only if they add real value.
 
