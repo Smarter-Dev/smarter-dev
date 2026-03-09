@@ -77,6 +77,31 @@ async def _persist_aux_usage(
         )
 
 
+async def _wait_for_topic(
+    session_id: UUID,
+    timeout: float = 10.0,
+    interval: float = 0.5,
+) -> tuple[str, str]:
+    """Poll the DB for the session's topic/skill_level set by the meta task.
+
+    Returns (topic, skill_level).  Falls back to ("other", "intermediate")
+    if the meta task hasn't written context within *timeout* seconds.
+    """
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        async with get_skrift_db_session_context() as db_session:
+            row = await ops.get_session(db_session, session_id)
+        ctx = (row.context if row else None) or {}
+        if "topic" in ctx:
+            return ctx["topic"], ctx.get("skill_level", "intermediate")
+        await asyncio.sleep(interval)
+
+    logger.warning("Timed out waiting for meta context on session %s", session_id)
+    return "other", "intermediate"
+
+
 async def _emit(user_id: str, session_id: str, event_type: str, **payload: object) -> None:
     """Emit a research notification to the user via Skrift's notification system."""
     await notify_user(
@@ -254,13 +279,9 @@ async def run_research(
                 usage=usage_summary,
             )
 
-            # Spawn code examples task if topic is coding-related
-            async with get_skrift_db_session_context() as db_session:
-                session_row = await ops.get_session(db_session, session_id)
-                ctx = session_row.context if session_row else None
-
-            topic = (ctx or {}).get("topic", "other")
-            skill_level = (ctx or {}).get("skill_level", "intermediate")
+            # Spawn code examples task if topic is coding-related.
+            # The meta task runs concurrently, so poll briefly for context.
+            topic, skill_level = await _wait_for_topic(session_id)
             if topic != "other":
                 task = asyncio.create_task(
                     run_code_examples(session_id, query, result_data.response, user_id, skill_level),
@@ -363,13 +384,9 @@ async def run_lite_research(
                 usage=usage_summary,
             )
 
-            # Spawn code examples task if topic is coding-related
-            async with get_skrift_db_session_context() as db_session:
-                session_row = await ops.get_session(db_session, session_id)
-                ctx = session_row.context if session_row else None
-
-            topic = (ctx or {}).get("topic", "other")
-            skill_level = (ctx or {}).get("skill_level", "intermediate")
+            # Spawn code examples task if topic is coding-related.
+            # The meta task runs concurrently, so poll briefly for context.
+            topic, skill_level = await _wait_for_topic(session_id)
             if topic != "other":
                 task = asyncio.create_task(
                     run_code_examples(session_id, query, result_data.response, user_id, skill_level),
@@ -512,6 +529,7 @@ async def run_code_examples(
     """
     sid = str(session_id)
     try:
+        await _emit(user_id, sid, "code_examples_status", status="generating")
         result, code_usage = await generate_code_examples(query, response, skill_level)
         await _persist_aux_usage(session_id, code_usage, model=CODE_EXAMPLES_MODEL)
 
