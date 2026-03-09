@@ -66,6 +66,11 @@
     /* Error text */
     .scan-error-text{color:#f44}
 
+    /* Inline citation pills */
+    .scan-cite{font-size:.6em;letter-spacing:.02em;padding:1px 5px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.18);border-radius:8px;color:var(--cyan);text-decoration:none;white-space:nowrap;vertical-align:super;font-family:var(--heading)}
+    .scan-cite:hover{background:rgba(0,212,255,.18);border-color:var(--cyan)}
+    sup .scan-cite{vertical-align:baseline}
+
     /* Hidden state */
     .scan-hidden{display:none}
     </style>
@@ -125,8 +130,8 @@
 
         <!-- Response -->
         <div class="scan-response" id="scan-response">
-            {% if session.status == 'complete' and session.response %}
-            {{ session.response|markdown|safe }}
+            {% if session.status == 'complete' and rendered_response %}
+            {{ rendered_response|safe }}
             {% elif session.status == 'error' %}
             <p class="scan-error-text">{{ session.error_message }}</p>
             {% elif session.status == 'running' %}
@@ -175,7 +180,7 @@
 
 {% block page_scripts %}
 {% if session and session.status == 'running' %}
-<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script nonce="{{ csp_nonce() }}" src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script nonce="{{ csp_nonce() }}">
 if (window.__skriftNotifications) {
     window.__skriftNotifications.configure({ persistConnection: true });
@@ -221,7 +226,13 @@ if (window.__skriftNotifications) {
 
         var eventType = data.type.replace("research:", "");
 
-        if (eventType === "tool_use") {
+        if (eventType === "status") {
+            if (placeholder) {
+                placeholder.textContent = data.message || "Processing...";
+            }
+        }
+
+        else if (eventType === "tool_use") {
             toolEntryCount++;
             toolCount.textContent = "(" + toolEntryCount + ")";
             const li = document.createElement("li");
@@ -237,8 +248,9 @@ if (window.__skriftNotifications) {
         }
 
         else if (eventType === "tool_result") {
-            const entries = toolsList.querySelectorAll(".scan-tool-entry.scan-tool-running");
-            for (const entry of entries) {
+            const entries = Array.from(toolsList.querySelectorAll(".scan-tool-entry.scan-tool-running"));
+            for (let i = entries.length - 1; i >= 0; i--) {
+                const entry = entries[i];
                 if (entry.dataset.tool === data.tool) {
                     entry.classList.remove("scan-tool-running");
                     entry.classList.add("scan-tool-done");
@@ -289,7 +301,8 @@ if (window.__skriftNotifications) {
         else if (eventType === "response_chunk") {
             if (placeholder) placeholder.remove();
             responseText += (data.delta || "");
-            responseEl.innerHTML = typeof marked !== "undefined" ? marked.parse(responseText) : responseText;
+            var rendered = typeof marked !== "undefined" ? marked.parse(responseText) : responseText;
+            responseEl.innerHTML = processCitations(rendered);
         }
 
         else if (eventType === "complete") {
@@ -305,7 +318,8 @@ if (window.__skriftNotifications) {
 
             if (data.response) {
                 responseText = data.response;
-                responseEl.innerHTML = typeof marked !== "undefined" ? marked.parse(responseText) : responseText;
+                var rendered = typeof marked !== "undefined" ? marked.parse(responseText) : responseText;
+                responseEl.innerHTML = processCitations(rendered);
             }
 
             if (placeholder) placeholder.remove();
@@ -348,6 +362,15 @@ if (window.__skriftNotifications) {
         a.click();
         URL.revokeObjectURL(url);
     });
+
+    function processCitations(html) {
+        return html.replace(/\[\[(https?:\/\/[^\]\s]+)\]\]/g, function(_, url) {
+            var a = document.createElement("a");
+            a.href = url;
+            var domain = a.hostname.replace(/^www\./, "");
+            return '<sup><a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" class="scan-cite">' + escapeHtml(domain) + '</a></sup>';
+        });
+    }
 
     function escapeHtml(str) {
         const div = document.createElement("div");

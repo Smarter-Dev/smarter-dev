@@ -8,9 +8,11 @@ from litestar.enums import RequestEncodingType
 from litestar.params import Body
 from litestar.response import Redirect, Template
 from skrift.auth.guards import Permission, auth_guard
+from skrift.lib.markdown import render_markdown
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.scan.agent import generate_session_name
+from smarter_dev.web.scan.citations import process_citations
 from smarter_dev.web.scan.crud import ResearchSessionOperations
 from smarter_dev.web.scan.runner import start_research_task
 
@@ -65,10 +67,18 @@ class ScanController(Controller):
         """Research result detail page with live updates for running sessions."""
         session_data = await ops.get_session(db_session, result_id)
 
+        # Pre-render response with citation processing for completed sessions
+        rendered_response = ""
+        if session_data and session_data.status == "complete" and session_data.response:
+            rendered_response = process_citations(
+                render_markdown(session_data.response)
+            )
+
         return Template(
             "scan/result.html",
             context={
                 "result_id": result_id,
                 "session": session_data,
+                "rendered_response": rendered_response,
             },
         )

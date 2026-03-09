@@ -62,8 +62,7 @@ def _usage_to_dict(usage: RunUsage) -> dict:
 WRITING_INSTRUCTIONS = """\
 ## How to write the answer
 
-Your answer IS the final output — there is no post-processing. Use \
-markdown formatting.
+Your answer IS the final output. Use markdown formatting.
 
 Before writing, plan the piece. Decide:
 1. **The lead** — what directly answers the user's question? Open with it.
@@ -75,15 +74,18 @@ serve the answer — irrelevant results should not appear at all.
 Then write. Don't summarize what you found — pull out the most important \
 details and supporting information, and build a compelling, original \
 narrative that informs the user and answers their query. Natural prose, \
-not a listicle. Cite every factual claim with [n]. Use tables when \
+not a listicle. Cite every factual claim inline. Use tables when \
 comparing parallel items. Keep it tight — say what needs saying and stop.
 
 ## Citations
 
-Renumber sources sequentially as [1], [2], [3]. Every [n] in the text \
-must appear in ## Sources, and every source must be cited at least once.
+Cite sources INLINE by placing the full URL inside double square brackets \
+immediately after the claim. Example: \
+The framework now supports streaming responses [[https://docs.example.com/streaming]].
 
-End with ## Sources as [n] Title — URL
+Do NOT number sources. Do NOT add a Sources section at the end. \
+Every citation must be a real URL from your research — never fabricate URLs. \
+Cite the specific page you found the information on, not a homepage.
 
 Also return structured source data: classify each source as docs, repo, \
 article, video, forum, or other. Mark sources you cited as cited=True. \
@@ -239,6 +241,7 @@ async def run_lite_pipeline(
         "content": f"Search queries: {plan.search_queries}\nGap queries: {plan.gap_queries}",
         "status": "complete",
     })
+    await emit("tool_use", tool="query_plan", input={"user_query": query}, status="running")
     await emit(
         "tool_result",
         tool="query_plan",
@@ -275,6 +278,7 @@ async def run_lite_pipeline(
             "content": display,
             "status": "complete",
         })
+        await emit("tool_use", tool="search", input={"query": q}, status="running")
         await emit("tool_result", tool="search", status="complete", content=display)
 
         if has_results:
@@ -302,6 +306,7 @@ async def run_lite_pipeline(
 
     async def _read(url: str, title: str) -> None:
         await deps.read_rate_limiter.wait_if_needed(url)
+        await emit("tool_use", tool="read", input={"url": url}, status="running")
         page = await tools.jina_read(deps.http_client, url)
         if "error" in page:
             tool_log.append({
