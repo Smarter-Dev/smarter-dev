@@ -3,6 +3,25 @@
 {% block title %}Usage - Admin - {{ site_name() }}{% endblock %}
 
 {% block admin_content %}
+<style nonce="{{ csp_nonce() }}">
+.usage-filter-form { display: flex; gap: 1rem; align-items: end; flex-wrap: wrap; }
+.usage-chart-panel { margin-top: 1.5rem; }
+.usage-chart-body { padding: 1rem; }
+.usage-tabs-wrap { margin-top: 1.5rem; }
+.usage-tab-bar { display: flex; gap: 0; border-bottom: 2px solid var(--sk-border, #dee2e6); }
+.usage-tab {
+    padding: .5rem 1.25rem; border: none; background: none; cursor: pointer;
+    font-weight: 600; border-bottom: 2px solid transparent; margin-bottom: -2px;
+    color: inherit;
+}
+.usage-tab.active { border-bottom-color: var(--sk-accent, #206bc4); }
+.usage-td-time { white-space: nowrap; }
+.usage-td-query { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-td-model { font-size: .85em; }
+.usage-status-error { color: #da3633; }
+#tab-users { display: none; }
+</style>
+
 <hgroup>
     <h1>Token Usage</h1>
     <p>{{ "{:,}".format(total_sessions) }} session{{ 's' if total_sessions != 1 else '' }} &middot;
@@ -15,7 +34,7 @@
 <div class="sk-panel">
     <div class="sk-panel-head">Filters</div>
     <div class="sk-panel-body">
-        <form method="get" action="/admin/usage" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
+        <form method="get" action="/admin/usage" class="usage-filter-form">
             <div>
                 <label for="days"><strong>Period</strong></label><br>
                 <select name="days" id="days">
@@ -51,28 +70,22 @@
 </div>
 
 {# ── Cost chart ──────────────────────────────────────────────────── #}
-<div class="sk-panel" style="margin-top: 1.5rem;">
+<div class="sk-panel usage-chart-panel">
     <div class="sk-panel-head">Cost Over Time</div>
-    <div class="sk-panel-body" style="padding: 1rem;">
+    <div class="sk-panel-body usage-chart-body">
         <canvas id="costChart" height="80"></canvas>
     </div>
 </div>
 
 {# ── Tabs ────────────────────────────────────────────────────────── #}
-<div style="margin-top: 1.5rem;">
-    <div class="sk-usage-tabs" style="display:flex; gap:0; border-bottom: 2px solid var(--sk-border, #dee2e6);">
-        <button class="sk-usage-tab active" data-tab="runs"
-                style="padding:.5rem 1.25rem; border:none; background:none; cursor:pointer; font-weight:600; border-bottom:2px solid transparent; margin-bottom:-2px;">
-            Individual Runs
-        </button>
-        <button class="sk-usage-tab" data-tab="users"
-                style="padding:.5rem 1.25rem; border:none; background:none; cursor:pointer; font-weight:600; border-bottom:2px solid transparent; margin-bottom:-2px;">
-            By User
-        </button>
+<div class="usage-tabs-wrap">
+    <div class="usage-tab-bar">
+        <button class="usage-tab active" data-tab="runs">Individual Runs</button>
+        <button class="usage-tab" data-tab="users">By User</button>
     </div>
 
     {# ── Tab: Individual Runs ────────────────────────────────────── #}
-    <div id="tab-runs" class="sk-usage-tab-content">
+    <div id="tab-runs" class="usage-tab-content">
         {% if runs %}
         <table class="sk-admin-table">
             <thead>
@@ -91,9 +104,9 @@
             <tbody>
                 {% for r in runs %}
                 <tr>
-                    <td style="white-space:nowrap;">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td class="usage-td-time">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                     <td>{{ r.user_id }}</td>
-                    <td style="max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ r.query }}">{{ r.query[:80] }}</td>
+                    <td class="usage-td-query" title="{{ r.query }}">{{ r.query[:80] }}</td>
                     <td>
                         {% if r.pipeline_mode == 'lite' %}
                         <span class="sk-pill">Lite</span>
@@ -107,14 +120,14 @@
                         {% if r.status == 'complete' %}
                         <span class="sk-pill sk-pill-published">complete</span>
                         {% elif r.status == 'error' %}
-                        <span class="sk-pill sk-pill-draft" style="color:#da3633;">error</span>
+                        <span class="sk-pill sk-pill-draft usage-status-error">error</span>
                         {% else %}
                         <span class="sk-pill">{{ r.status }}</span>
                         {% endif %}
                     </td>
                     <td>{{ "{:,}".format(r.input_tokens or 0) }}</td>
                     <td>{{ "{:,}".format(r.output_tokens or 0) }}</td>
-                    <td style="font-size:.85em;" title="{{ r.model_name or '' }}">{{ (r.model_name or '--').split(':')[-1][:25] }}</td>
+                    <td class="usage-td-model" title="{{ r.model_name or '' }}">{{ (r.model_name or '--').split(':')[-1][:25] }}</td>
                     <td>{% if r.cost_usd is not none %}${{ "{:.4f}".format(r.cost_usd) }}{% else %}--{% endif %}</td>
                 </tr>
                 {% endfor %}
@@ -126,7 +139,7 @@
     </div>
 
     {# ── Tab: By User ────────────────────────────────────────────── #}
-    <div id="tab-users" class="sk-usage-tab-content" style="display:none;">
+    <div id="tab-users" class="usage-tab-content">
         {% if agg_rows %}
         <table class="sk-admin-table">
             <thead>
@@ -169,29 +182,29 @@
 </div>
 
 {# ── Chart.js + tab switching ────────────────────────────────────── #}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-<script>
+<script nonce="{{ csp_nonce() }}" src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script nonce="{{ csp_nonce() }}">
 (function() {
     /* ── Tabs ──────────────────────────────────────────────────── */
-    const tabs = document.querySelectorAll('.sk-usage-tab');
-    const panels = document.querySelectorAll('.sk-usage-tab-content');
-    tabs.forEach(btn => {
-        btn.addEventListener('click', () => {
-            tabs.forEach(t => {
-                t.classList.remove('active');
-                t.style.borderBottomColor = 'transparent';
-            });
-            panels.forEach(p => p.style.display = 'none');
+    var tabs = document.querySelectorAll('.usage-tab');
+    var tabRuns = document.getElementById('tab-runs');
+    var tabUsers = document.getElementById('tab-users');
+    tabs.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            tabs.forEach(function(t) { t.classList.remove('active'); });
             btn.classList.add('active');
-            btn.style.borderBottomColor = 'var(--sk-accent, #206bc4)';
-            document.getElementById('tab-' + btn.dataset.tab).style.display = '';
+            if (btn.dataset.tab === 'runs') {
+                tabRuns.style.display = '';
+                tabUsers.style.display = 'none';
+            } else {
+                tabRuns.style.display = 'none';
+                tabUsers.style.display = '';
+            }
         });
     });
-    /* highlight initial active tab */
-    document.querySelector('.sk-usage-tab.active').style.borderBottomColor = 'var(--sk-accent, #206bc4)';
 
     /* ── Chart ─────────────────────────────────────────────────── */
-    const ctx = document.getElementById('costChart').getContext('2d');
+    var ctx = document.getElementById('costChart').getContext('2d');
     new Chart(ctx, {
         type: 'line',
         data: {
@@ -205,7 +218,7 @@
                 y: {
                     beginAtZero: true,
                     title: { display: true, text: 'Cost (USD)' },
-                    ticks: { callback: v => '$' + v.toFixed(4) },
+                    ticks: { callback: function(v) { return '$' + v.toFixed(4); } },
                 },
                 x: {
                     title: { display: true, text: '{{ granularity|capitalize }}' },
@@ -214,7 +227,7 @@
             plugins: {
                 tooltip: {
                     callbacks: {
-                        label: item => item.dataset.label + ': $' + item.parsed.y.toFixed(4),
+                        label: function(item) { return item.dataset.label + ': $' + item.parsed.y.toFixed(4); },
                     },
                 },
             },
