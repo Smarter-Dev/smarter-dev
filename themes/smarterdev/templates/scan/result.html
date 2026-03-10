@@ -161,6 +161,7 @@
 <span id="scan-status" class="scan-hidden scan-status scan-status-{{ session.status if session else 'error' }}">{{ session.status|upper if session else 'NOT FOUND' }}</span>
 
 {% if session %}
+{% set tool_labels = {"research": "Research", "search": "Web Search", "read": "Read URL", "read_url": "Read URL", "youtube_search": "Search YouTube", "exp_youtube_search": "Search YouTube", "exp_web_search": "Web Search", "exp_planner_read_url": "Read URL", "exp_answer_read_url": "Read URL"} %}
 <!-- Tool activity -->
 <div class="scan-tools-wrap">
     <details class="scan-tools" id="scan-tools" {% if session.status == 'running' %}open{% endif %}>
@@ -170,14 +171,14 @@
             {% for entry in session.tool_log %}
             {% if entry.tool is defined %}
             <li class="scan-tool-entry scan-tool-done">
-                <span class="scan-tool-name">{{ entry.tool }}</span>
-                <span class="scan-tool-args">{% if entry.tool == 'research' and entry.input is defined and entry.input.question is defined %}{{ entry.input.question|truncate(80) }}{% elif entry.tool == 'search' and entry.input is defined and entry.input.query is defined %}{{ entry.input.query|truncate(80) }}{% elif (entry.tool == 'read' or entry.tool == 'read_url') and entry.input is defined and entry.input.url is defined %}{{ entry.input.url|truncate(80) }}{% else %}{{ (entry.input if entry.input is defined else '')|string|truncate(80) }}{% endif %}</span>
+                <span class="scan-tool-name">{{ tool_labels.get(entry.tool, entry.tool) }}</span>
+                <span class="scan-tool-args">{% if entry.input is defined and entry.input.question is defined %}{{ entry.input.question|truncate(80) }}{% elif entry.input is defined and entry.input.query is defined %}{{ entry.input.query|truncate(80) }}{% elif entry.input is defined and entry.input.url is defined %}{{ entry.input.url|truncate(80) }}{% else %}{{ (entry.input if entry.input is defined else '')|string|truncate(80) }}{% endif %}</span>
             </li>
             {% if entry.sub_tools is defined and entry.sub_tools -%}
             <div class="scan-tool-content">
             <ul class="scan-sub-tools">
             {%- for st in entry.sub_tools %}
-            <li class="scan-sub-tool"><span class="scan-sub-tool-name">{{ st.tool }}</span> <span class="scan-sub-tool-args">{% if st.tool == 'search' and st.input is defined and st.input.query is defined %}{{ st.input.query|truncate(70) }}{% elif (st.tool == 'read' or st.tool == 'read_url') and st.input is defined and st.input.url is defined %}{{ st.input.url|truncate(70) }}{% else %}{{ (st.input if st.input is defined else '')|string|truncate(70) }}{% endif %}</span></li>
+            <li class="scan-sub-tool"><span class="scan-sub-tool-name">{{ tool_labels.get(st.tool, st.tool) }}</span> <span class="scan-sub-tool-args">{% if st.input is defined and st.input.query is defined %}{{ st.input.query|truncate(70) }}{% elif st.input is defined and st.input.url is defined %}{{ st.input.url|truncate(70) }}{% else %}{{ (st.input if st.input is defined else '')|string|truncate(70) }}{% endif %}</span></li>
             <div class="scan-sub-tool-content">{{ st.content if st.content is defined else '' }}</div>
             {%- endfor %}
             </ul>
@@ -461,7 +462,7 @@ if (window.__skriftNotifications) {
             li.className = "scan-tool-entry scan-tool-running";
             li.dataset.tool = data.tool || "";
             li.innerHTML =
-                '<span class="scan-tool-name">' + (data.tool || "tool") + '</span>' +
+                '<span class="scan-tool-name">' + escapeHtml(humanToolName(data.tool || "tool")) + '</span>' +
                 '<span class="scan-tool-args">' + escapeHtml(summarizeArgs(data.input, data.tool)) + '</span>';
             const contentDiv = document.createElement("div");
             contentDiv.className = "scan-tool-content";
@@ -495,7 +496,7 @@ if (window.__skriftNotifications) {
                                 else argText = Object.entries(st.input || {}).map(function(e) { return e[0] + "=" + e[1]; }).join(", ");
                                 if (argText.length > 70) argText = argText.slice(0, 70) + "...";
                                 html += '<li class="scan-sub-tool">' +
-                                    '<span class="scan-sub-tool-name">' + escapeHtml(st.tool) + '</span>' +
+                                    '<span class="scan-sub-tool-name">' + escapeHtml(humanToolName(st.tool)) + '</span>' +
                                     '<span class="scan-sub-tool-args">' + escapeHtml(argText) + '</span></li>' +
                                     '<div class="scan-sub-tool-content">' + escapeHtml(st.content || "") + '</div>';
                             }
@@ -727,27 +728,39 @@ if (window.__skriftNotifications) {
         }
     }
 
+    var TOOL_NAMES = {
+        "research": "Research",
+        "search": "Web Search",
+        "read": "Read URL",
+        "read_url": "Read URL",
+        "youtube_search": "Search YouTube",
+        "exp_youtube_search": "Search YouTube",
+        "exp_web_search": "Web Search",
+        "exp_planner_read_url": "Read URL",
+        "exp_answer_read_url": "Read URL"
+    };
+    function humanToolName(name) {
+        return TOOL_NAMES[name] || name.replace(/(^exp_|_)/g, function(m) { return m === "_" ? " " : ""; }).replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    }
+
     function summarizeArgs(input, toolName) {
         if (!input || typeof input !== "object") return "";
-        // For the research tool, just show the question directly
-        if (toolName === "research" && input.question) {
-            const q = input.question;
+        if (input.question) {
+            var q = input.question;
             return q.length > 80 ? q.slice(0, 80) + "..." : q;
         }
-        // For search, show the query text
-        if (toolName === "search" && input.query) {
-            const q = input.query;
+        if (input.query) {
+            var q = input.query;
             return q.length > 80 ? q.slice(0, 80) + "..." : q;
         }
-        // For read/read_url, show the URL
-        if ((toolName === "read" || toolName === "read_url") && input.url) {
-            const u = input.url;
+        if (input.url) {
+            var u = input.url;
             return u.length > 80 ? u.slice(0, 80) + "..." : u;
         }
-        const parts = [];
-        for (const [k, v] of Object.entries(input)) {
-            const val = typeof v === "string" ? v : JSON.stringify(v);
-            parts.push(k + "=" + (val.length > 60 ? val.slice(0, 60) + "..." : val));
+        var parts = [];
+        for (var key in input) {
+            var val = typeof input[key] === "string" ? input[key] : JSON.stringify(input[key]);
+            parts.push(val.length > 60 ? val.slice(0, 60) + "..." : val);
         }
         return parts.join(", ");
     }
