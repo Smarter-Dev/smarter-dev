@@ -111,11 +111,11 @@
     @keyframes scan-yt-fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
     .scan-yt-animate{opacity:0;animation:scan-yt-fade .5s ease forwards}
 
-    /* Code examples — masonry layout */
-    .scan-examples-section{margin-top:2.5rem;border-top:1px solid rgba(0,212,255,.06);padding-top:2rem}
+    /* Code examples — full-width masonry below the main layout */
+    .scan-examples-section{max-width:960px;margin:0 auto;padding:0 2rem;border-top:1px solid rgba(0,212,255,.06);padding-top:2rem;margin-top:0}
     .scan-examples-heading{font-family:var(--heading);font-size:.58rem;color:var(--mid);letter-spacing:.1em;margin-bottom:1.25rem}
     #scan-examples-list{column-count:2;column-gap:1rem}
-    {% raw %}@media(max-width:900px){#scan-examples-list{column-count:1}}{% endraw %}
+    {% raw %}@media(max-width:900px){#scan-examples-list{column-count:1}.scan-examples-section{padding:0 1rem;padding-top:2rem}}{% endraw %}
     .scan-example{margin-bottom:1rem;break-inside:avoid;border:1px solid rgba(0,212,255,.08);background:var(--surface)}
     .scan-example-header{display:flex;justify-content:space-between;align-items:center;padding:.6rem 1rem;border-bottom:1px solid rgba(0,212,255,.06)}
     .scan-example-title{font-family:var(--heading);font-size:.6rem;letter-spacing:.06em;color:var(--light)}
@@ -198,30 +198,6 @@
             {% endif %}
         </div>
 
-        <!-- Code examples -->
-        {% if session.status == 'complete' and session.context and session.context.code_examples is defined and session.context.code_examples %}
-        <div class="scan-examples-section" id="scan-examples-section">
-            <h3 class="scan-examples-heading">CODE EXAMPLES</h3>
-            <div id="scan-examples-list">
-                {% for ex in session.context.code_examples %}
-                <div class="scan-example">
-                    <div class="scan-example-header">
-                        <span class="scan-example-title">{{ ex.title }}</span>
-                        <span class="scan-example-lang">{{ ex.language }}</span>
-                    </div>
-                    <pre class="scan-example-code"><code class="language-{{ ex.language }}">{{ ex.code }}</code></pre>
-                    {% if ex.explanation %}<div class="scan-example-explanation">{{ ex.explanation }}</div>{% endif %}
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-        {% else %}
-        <div class="scan-examples-section scan-hidden" id="scan-examples-section">
-            <h3 class="scan-examples-heading">CODE EXAMPLES</h3>
-            <div id="scan-examples-list"></div>
-        </div>
-        {% endif %}
-
         <!-- Action bar (visible after completion) -->
         <div class="scan-actions{% if session.status != 'complete' %} scan-hidden{% endif %}" id="scan-actions">
             <button class="scan-action-btn" id="scan-copy-btn" type="button">COPY</button>
@@ -298,6 +274,31 @@
         {% endif %}
     </aside>
 </div>
+
+<!-- Code examples — full-width below main layout -->
+{% if session.status == 'complete' and session.context and session.context.code_examples is defined and session.context.code_examples %}
+<div class="scan-examples-section" id="scan-examples-section">
+    <h3 class="scan-examples-heading">CODE EXAMPLES</h3>
+    <div id="scan-examples-list">
+        {% for ex in session.context.code_examples %}
+        <div class="scan-example">
+            <div class="scan-example-header">
+                <span class="scan-example-title">{{ ex.title }}</span>
+                <span class="scan-example-lang">{{ ex.language }}</span>
+            </div>
+            <pre class="scan-example-code"><code class="language-{{ ex.language }}">{{ ex.code }}</code></pre>
+            {% if ex.explanation %}<div class="scan-example-explanation">{{ ex.explanation }}</div>{% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% else %}
+<div class="scan-examples-section scan-hidden" id="scan-examples-section">
+    <h3 class="scan-examples-heading">CODE EXAMPLES</h3>
+    <div id="scan-examples-list"></div>
+</div>
+{% endif %}
+
 {% else %}
 <div class="report-layout">
     <div class="report-content">
@@ -480,8 +481,9 @@ if (window.__skriftNotifications) {
         else if (eventType === "response_chunk") {
             if (placeholder) placeholder.remove();
             responseText += (data.delta || "");
-            var rendered = typeof marked !== "undefined" ? marked.parse(responseText) : responseText;
-            responseEl.innerHTML = processCitations(rendered);
+            var withCitations = processCitations(responseText);
+            var rendered = typeof marked !== "undefined" ? marked.parse(withCitations) : withCitations;
+            responseEl.innerHTML = rendered;
         }
 
         else if (eventType === "complete") {
@@ -497,8 +499,9 @@ if (window.__skriftNotifications) {
 
             if (data.response) {
                 responseText = data.response;
-                var rendered = typeof marked !== "undefined" ? marked.parse(responseText) : responseText;
-                responseEl.innerHTML = processCitations(rendered);
+                var withCitations = processCitations(responseText);
+                var rendered = typeof marked !== "undefined" ? marked.parse(withCitations) : withCitations;
+                responseEl.innerHTML = rendered;
                 animateResponseChars(responseEl);
             }
 
