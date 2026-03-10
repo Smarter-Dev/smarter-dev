@@ -161,7 +161,7 @@
 <span id="scan-status" class="scan-hidden scan-status scan-status-{{ session.status if session else 'error' }}">{{ session.status|upper if session else 'NOT FOUND' }}</span>
 
 {% if session %}
-{% set tool_labels = {"research": "Research", "search": "Web Search", "read": "Read URL", "read_url": "Read URL", "youtube_search": "Search YouTube", "exp_youtube_search": "Search YouTube", "exp_web_search": "Web Search", "exp_planner_read_url": "Read URL", "exp_answer_read_url": "Read URL"} %}
+{% set tool_labels = {"research": "Research", "search": "Web Search", "read": "Read URL", "read_url": "Read URL", "youtube_search": "YouTube Search", "exp_youtube_search": "YouTube Search", "exp_web_search": "Web Search", "exp_planner_read_url": "Read URL", "exp_answer_read_url": "Read URL"} %}
 <!-- Tool activity -->
 <div class="scan-tools-wrap">
     <details class="scan-tools" id="scan-tools" {% if session.status == 'running' %}open{% endif %}>
@@ -733,8 +733,8 @@ if (window.__skriftNotifications) {
         "search": "Web Search",
         "read": "Read URL",
         "read_url": "Read URL",
-        "youtube_search": "Search YouTube",
-        "exp_youtube_search": "Search YouTube",
+        "youtube_search": "YouTube Search",
+        "exp_youtube_search": "YouTube Search",
         "exp_web_search": "Web Search",
         "exp_planner_read_url": "Read URL",
         "exp_answer_read_url": "Read URL"
