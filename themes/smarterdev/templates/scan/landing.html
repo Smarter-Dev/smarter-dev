@@ -18,7 +18,7 @@
     .scan-signin{font-family:var(--heading);font-size:.5rem;color:var(--gray);letter-spacing:.08em;margin-top:.75rem}
     .scan-signin a{color:var(--cyan);text-decoration:none}
     .scan-signin a:hover{text-decoration:underline}
-    .scan-mode{display:flex;gap:1.25rem;justify-content:center;margin-bottom:1.25rem}
+    .scan-mode{display:flex;gap:1.25rem;justify-content:center;margin-top:.75rem}
     .scan-mode label{font-family:var(--heading);font-size:.55rem;letter-spacing:.1em;color:var(--gray);cursor:pointer;display:flex;align-items:center;gap:.4rem;transition:color .2s}
     .scan-mode input[type="radio"]{appearance:none;-webkit-appearance:none;width:10px;height:10px;border:1px solid rgba(0,212,255,.3);border-radius:50%;cursor:pointer;transition:all .2s;margin:0}
     .scan-mode input[type="radio"]:checked{background:var(--cyan);border-color:var(--cyan);box-shadow:0 0 8px rgba(0,212,255,.3)}
@@ -35,12 +35,12 @@
     <form class="scan-form" method="post" action="/">
         {{ csrf_field() }}
         <input type="hidden" name="tz" id="scan-tz">
+        <textarea name="query" placeholder="What do you want to research?" class="scan-input" required maxlength="2000" autofocus rows="1"></textarea>
+        <button type="submit" class="scan-submit">SCAN</button>
         <div class="scan-mode">
             <label><input type="radio" name="mode" value="lite" checked><span>LITE</span></label>
             <label><input type="radio" name="mode" value="experimental"><span>EXPERIMENTAL</span></label>
         </div>
-        <textarea name="query" placeholder="What do you want to research?" class="scan-input" required maxlength="2000" autofocus rows="1"></textarea>
-        <button type="submit" class="scan-submit">SCAN</button>
     </form>
     {% else %}
     <form class="scan-form">
