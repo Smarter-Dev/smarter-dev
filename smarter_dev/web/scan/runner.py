@@ -59,6 +59,7 @@ from smarter_dev.web.scan.tools import (
     brave_search,
     fetch_og_metadata,
     youtube_search,
+    youtube_video_details,
 )
 
 logger = logging.getLogger(__name__)
@@ -296,6 +297,15 @@ async def run_session_pipeline(
         all_usage.append((rank_usage, MODEL))
 
         if ranked:
+            # Fetch full metadata (including duration) via the videos API
+            video_ids = [v.get("video_id", "") for v in ranked if v.get("video_id")]
+            if video_ids:
+                async with httpx.AsyncClient(
+                    timeout=15.0, headers={"User-Agent": _USER_AGENT},
+                ) as yt_client:
+                    detailed = await youtube_video_details(yt_client, video_ids)
+                if detailed:
+                    ranked = detailed
             youtube_videos = ranked
             logger.info("YouTube: selected %d videos for %s", len(ranked), sid)
             await emit("youtube_videos", videos=ranked)

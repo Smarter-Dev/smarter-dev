@@ -178,6 +178,79 @@ async def youtube_search(
         return [{"error": f"YouTube search failed: {e}"}]
 
 
+async def youtube_video_details(
+    client: httpx.AsyncClient,
+    video_ids: list[str],
+) -> list[dict]:
+    """Fetch metadata for YouTube videos by ID via the Data API v3.
+
+    Uses the `videos` endpoint with `snippet` and `contentDetails` parts to get
+    title, channel, thumbnail, and duration for each video.
+
+    Returns a list of dicts with keys: video_id, title, url, channel, thumbnail, duration.
+    Duration is formatted as a human-readable string (e.g. "12:34").
+    """
+    if not video_ids:
+        return []
+
+    api_key = os.environ.get("YOUTUBE_API_KEY", "")
+    if not api_key:
+        return []
+
+    try:
+        resp = await client.get(
+            "https://www.googleapis.com/youtube/v3/videos",
+            params={
+                "part": "snippet,contentDetails",
+                "id": ",".join(video_ids[:10]),
+                "key": api_key,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        results = []
+        for item in data.get("items", []):
+            video_id = item.get("id", "")
+            snippet = item.get("snippet", {})
+            content = item.get("contentDetails", {})
+            duration = _parse_iso8601_duration(content.get("duration", ""))
+            results.append({
+                "video_id": video_id,
+                "title": snippet.get("title", ""),
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+                "channel": snippet.get("channelTitle", ""),
+                "thumbnail": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
+                "duration": duration,
+            })
+        return results
+    except Exception as e:
+        logger.error("YouTube video details failed: %s", e)
+        return []
+
+
+def _parse_iso8601_duration(iso: str) -> str:
+    """Convert ISO 8601 duration (e.g. PT1H2M34S) to human-readable (1:02:34)."""
+    if not iso or not iso.startswith("PT"):
+        return ""
+    iso = iso[2:]  # Strip "PT"
+    hours = minutes = seconds = 0
+
+    for unit, setter in [("H", "h"), ("M", "m"), ("S", "s")]:
+        if unit in iso:
+            val, iso = iso.split(unit, 1)
+            if setter == "h":
+                hours = int(val)
+            elif setter == "m":
+                minutes = int(val)
+            elif setter == "s":
+                seconds = int(val)
+
+    if hours:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
+
+
 async def jina_read(client: httpx.AsyncClient, url: str) -> dict:
     """Read the full content of a URL via the Jina Reader API.
 

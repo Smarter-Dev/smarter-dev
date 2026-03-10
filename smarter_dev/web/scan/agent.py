@@ -810,7 +810,7 @@ class YouTubeRanking(BaseModel):
 
     selected_ids: list[str] = Field(
         description=(
-            "Ordered list of exactly 3 video IDs to recommend, most relevant first."
+            "Ordered list of exactly 4 video IDs to recommend, most relevant first."
         ),
     )
 
@@ -839,8 +839,8 @@ _youtube_ranking_agent = Agent(
         "slop, or low-effort content based on their title.\n"
         "5. **Diversity** — If selecting multiple videos, prefer different "
         "angles or channels over redundant content.\n\n"
-        "Return exactly 3 video IDs ordered by relevance (best first). "
-        "Always pick 3 — choose the best available even if they're not perfect.\n\n"
+        "Return exactly 4 video IDs ordered by relevance (best first). "
+        "Always pick 4 — choose the best available even if they're not perfect.\n\n"
         "Return structured output only."
     ),
 )
@@ -899,15 +899,15 @@ async def rank_youtube_results(
         # Map selected IDs back to full video dicts, preserving rank order
         id_to_video = {v.get("video_id", ""): v for v in videos}
         ranked = []
-        for vid in result.output.selected_ids[:3]:
+        for vid in result.output.selected_ids[:4]:
             if vid in id_to_video:
                 ranked.append(id_to_video[vid])
 
         return ranked, result.usage()
     except Exception:
         logger.exception("Failed to rank YouTube results")
-        # Fallback: return first 3 unranked
-        return videos[:3], RunUsage()
+        # Fallback: return first 4 unranked
+        return videos[:4], RunUsage()
 
 
 # ---------------------------------------------------------------------------
@@ -1087,17 +1087,70 @@ _exp_meta_query_agent = Agent(
 )
 
 
+# --- Source quality ranking for post-processing ---
+
+# Domains/channels in tier 3 (low quality) — matched as substrings
+_LOW_QUALITY_DOMAINS = {
+    "geeksforgeeks.org", "w3schools.com", "tutorialspoint.com",
+    "javatpoint.com", "programiz.com", "stackoverflow.com",
+    "quora.com", "medium.com", "dev.to",
+}
+
+# Domains in tier 1 (authoritative) — matched as substrings
+_HIGH_QUALITY_DOMAINS = {
+    "python.org", "docs.python.org", "developer.mozilla.org", "mdn.mozilla.org",
+    "react.dev", "rust-lang.org", "doc.rust-lang.org", "go.dev", "golang.org",
+    "nodejs.org", "typescriptlang.org", "kotlinlang.org", "swift.org",
+    "docs.oracle.com", "learn.microsoft.com", "developer.apple.com",
+    "developer.android.com", "cloud.google.com", "aws.amazon.com",
+    "docs.github.com", "wikipedia.org", "arxiv.org",
+    "w3.org", "rfc-editor.org", "ietf.org",
+    "kernel.org", "linuxfoundation.org",
+}
+
+# YouTube channels considered authoritative (lowercase)
+_HIGH_QUALITY_CHANNELS = {
+    "google", "microsoft", "amazon web services", "aws",
+    "github", "mozilla", "linux foundation",
+    "python", "pycon", "jsconf", "gophercon", "rustconf",
+    "computerphile", "mit opencourseware",
+}
+
+# YouTube channels considered mid-tier educators
+_MID_QUALITY_CHANNELS = {
+    "fireship", "traversy media", "corey schafer", "arjan codes",
+    "tech with tim", "the coding train", "sentdex", "ben awad",
+    "web dev simplified", "net ninja", "academind",
+    "freecodecamp", "freecodecamp.org",
+}
+
+
+def _resource_sort_key(resource: dict) -> int:
+    """Return sort tier for a resource: 1 (best) to 3 (worst)."""
+    url = resource.get("url", "").lower()
+    site = resource.get("site_name", "").lower()
+    for domain in _HIGH_QUALITY_DOMAINS:
+        if domain in url or domain in site:
+            return 1
+    for domain in _LOW_QUALITY_DOMAINS:
+        if domain in url or domain in site:
+            return 3
+    return 2
+
+
+def _video_sort_key(video: dict) -> int:
+    """Return sort tier for a YouTube video: 1 (best) to 3 (worst)."""
+    channel = video.get("channel", "").lower()
+    for ch in _HIGH_QUALITY_CHANNELS:
+        if ch in channel:
+            return 1
+    for ch in _MID_QUALITY_CHANNELS:
+        if ch in channel:
+            return 2
+    return 2  # Unknown channels default to mid-tier
+
+
 # --- Experimental planner agent ---
-
-
-class PlannerYouTubeVideo(BaseModel):
-    """A selected YouTube video."""
-
-    video_id: str
-    title: str
-    channel: str
-    url: str
-    thumbnail: str = ""
 
 
 class PlannerResource(BaseModel):
@@ -1112,9 +1165,9 @@ class PlannerResource(BaseModel):
 class PlannerOutput(BaseModel):
     """Output of the experimental planner agent."""
 
-    youtube_videos: list[PlannerYouTubeVideo] = Field(
+    youtube_video_ids: list[str] = Field(
         default_factory=list,
-        description="Exactly 3 YouTube videos to recommend, most relevant first.",
+        description="Exactly 4 YouTube video IDs to recommend, most relevant first. IDs only — metadata is fetched programmatically.",
     )
     resources: list[PlannerResource] = Field(
         default_factory=list,
@@ -1137,8 +1190,8 @@ _exp_planner_agent = Agent(
         "## Your task\n\n"
         "Use your tools to find the best resources for the user:\n\n"
         "1. **YouTube videos** — Use the `youtube_search` tool to find "
-        "relevant videos. Select exactly 3 high-quality, relevant videos "
-        "from the results.\n"
+        "relevant videos. Return exactly 4 video IDs (just the IDs, not "
+        "full metadata — we fetch that programmatically).\n"
         "2. **Web resources** — Use the `web_search` tool to find tutorials, "
         "guides, and documentation. You may also use `read_url` to verify "
         "quality. Select exactly 5 resources.\n"
@@ -1153,6 +1206,26 @@ _exp_planner_agent = Agent(
         "guides. Diversity of source types. No SEO spam.\n"
         "- **Article points**: Focus on what directly answers the user's "
         "question, then supporting context. Drop anything tangential.\n\n"
+        "## Source ordering (CRITICAL)\n\n"
+        "Both `youtube_video_ids` and `resources` MUST be sorted by source "
+        "authority — highest quality first, lowest quality last.\n\n"
+        "**Tier 1 — place first**: Official sources, foundations, and "
+        "primary authorities. Examples: python.org, docs.python.org, "
+        "Mozilla (MDN), Linux Foundation, React.dev, Rust-lang.org, "
+        "official GitHub repos, IETF RFCs, W3C specs, academic papers, "
+        "conference talks (PyCon, JSConf, GopherCon, etc.), and channels "
+        "run by core maintainers or project leads.\n\n"
+        "**Tier 2 — place in the middle**: High-quality independent "
+        "content. Examples: reputable tech blogs (Martin Fowler, Julia "
+        "Evans, Dan Abramov), well-known educators (Fireship, Traversy "
+        "Media, Corey Schafer, Arjan Codes), thoughtful long-form articles, "
+        "and curated community resources.\n\n"
+        "**Tier 3 — place last (or exclude)**: Low-quality SEO content "
+        "farms and Q&A aggregators. Examples: GeeksForGeeks, W3Schools, "
+        "TutorialsPoint, JavaTPoint, Programiz, StackOverflow, Quora, "
+        "Medium listicles, and generic 'top 10' clickbait.\n\n"
+        "When in doubt, prefer the source that is closest to the people "
+        "who actually build or maintain the technology.\n\n"
         "You MUST call `youtube_search` at least once and `web_search` at "
         "least once. Return structured output only."
     ),
@@ -1164,8 +1237,7 @@ async def exp_youtube_search(
     ctx: RunContext[ResearchDeps], query: str,
 ) -> str:
     """Search YouTube for videos matching the query. Returns a list of videos
-    with title, channel, video_id, url, and thumbnail.
-    You may only call this tool ONCE per session."""
+    with video_id, title, and channel. You may only call this tool ONCE per session."""
     if ctx.deps.youtube_searched:
         return "ERROR: YouTube search already performed. Only one search is allowed per session."
     ctx.deps.youtube_searched = True
@@ -1176,9 +1248,7 @@ async def exp_youtube_search(
     for v in results:
         lines.append(
             f"- [{v.get('video_id', '')}] \"{v.get('title', 'Untitled')}\" "
-            f"by {v.get('channel', 'Unknown')} "
-            f"| url: {v.get('url', '')} "
-            f"| thumbnail: {v.get('thumbnail', '')}"
+            f"by {v.get('channel', 'Unknown')}"
         )
     return "\n".join(lines)
 
@@ -1545,12 +1615,37 @@ async def run_experimental_pipeline(
     # ------------------------------------------------------------------
     # Step 4 — Immediate render of videos and resources
     # ------------------------------------------------------------------
-    if planner_result_data.youtube_videos:
-        youtube_videos = [v.model_dump() for v in planner_result_data.youtube_videos]
+
+    # Fetch full video metadata (title, channel, thumbnail, duration) from YouTube API
+    if planner_result_data.youtube_video_ids:
+        video_ids = planner_result_data.youtube_video_ids[:4]
+        youtube_videos = await tools.youtube_video_details(deps.http_client, video_ids)
+        youtube_videos.sort(key=_video_sort_key)
         await emit("youtube_videos", videos=youtube_videos)
 
+    # Enrich resources with OG metadata (images, site names, etc.)
     if planner_result_data.resources:
         resources = [r.model_dump() for r in planner_result_data.resources]
+        try:
+            og_tasks = [
+                tools.fetch_og_metadata(deps.http_client, r["url"])
+                for r in resources
+            ]
+            og_results = await asyncio.gather(*og_tasks, return_exceptions=True)
+            for r, og in zip(resources, og_results):
+                if isinstance(og, dict):
+                    if og.get("og_image"):
+                        r["og_image"] = og["og_image"]
+                    if og.get("og_site_name") and not r.get("site_name"):
+                        r["site_name"] = og["og_site_name"]
+                    if og.get("favicon"):
+                        r["favicon"] = og["favicon"]
+                if not r.get("site_name"):
+                    from urllib.parse import urlparse
+                    r["site_name"] = urlparse(r.get("url", "")).netloc.replace("www.", "")
+        except Exception:
+            logger.exception("Failed to fetch OG metadata for resources")
+        resources.sort(key=_resource_sort_key)
         await emit("resources", resources=resources)
 
     # ------------------------------------------------------------------

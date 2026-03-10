@@ -97,6 +97,8 @@
     .scan-youtube-info{min-width:0}
     .scan-youtube-title{font-size:.68rem;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     .scan-youtube-channel{font-size:.55rem;color:var(--gray);margin-top:2px}
+    .scan-youtube-thumb-wrap{position:relative;width:180px;height:101px;flex-shrink:0}
+    .scan-youtube-duration{position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,.8);color:#fff;font-family:var(--mono);font-size:.55rem;padding:1px 4px;letter-spacing:.02em}
 
     /* Resource cards — independently scrollable row */
     .scan-resources-list{list-style:none;padding:0;margin:0;display:flex;gap:.75rem;overflow-x:auto;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;scrollbar-width:none;padding-bottom:.25rem}
@@ -210,7 +212,7 @@
         {% for v in session.context.youtube_videos %}
         <li class="scan-youtube-item">
             <a href="{{ v.url }}" target="_blank" rel="noopener" class="scan-youtube-link">
-                {% if v.thumbnail %}<img src="{{ v.thumbnail }}" class="scan-youtube-thumb" alt="" loading="lazy">{% endif %}
+                {% if v.thumbnail %}<div class="scan-youtube-thumb-wrap"><img src="{{ v.thumbnail }}" class="scan-youtube-thumb" alt="" loading="lazy">{% if v.duration is defined and v.duration %}<span class="scan-youtube-duration">{{ v.duration }}</span>{% endif %}</div>{% endif %}
                 <div class="scan-youtube-info">
                     <div class="scan-youtube-title">{{ v.title }}</div>
                     <div class="scan-youtube-channel">{{ v.channel }}</div>
@@ -629,9 +631,15 @@ if (window.__skriftNotifications) {
         var html = "";
         for (var i = 0; i < videos.length; i++) {
             var v = videos[i];
+            var thumbHtml = '';
+            if (v.thumbnail) {
+                thumbHtml = '<div class="scan-youtube-thumb-wrap"><img src="' + escapeHtml(v.thumbnail) + '" class="scan-youtube-thumb" alt="" loading="lazy">' +
+                    (v.duration ? '<span class="scan-youtube-duration">' + escapeHtml(v.duration) + '</span>' : '') +
+                    '</div>';
+            }
             html += '<li class="scan-youtube-item scan-yt-animate" style="animation-delay:' + (i * 200) + 'ms">' +
                 '<a href="' + escapeHtml(v.url) + '" target="_blank" rel="noopener" class="scan-youtube-link">' +
-                (v.thumbnail ? '<img src="' + escapeHtml(v.thumbnail) + '" class="scan-youtube-thumb" alt="" loading="lazy">' : '') +
+                thumbHtml +
                 '<div class="scan-youtube-info">' +
                 '<div class="scan-youtube-title">' + escapeHtml(v.title) + '</div>' +
                 '<div class="scan-youtube-channel">' + escapeHtml(v.channel) + '</div>' +
