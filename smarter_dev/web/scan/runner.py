@@ -282,6 +282,7 @@ async def run_research(
                 result_url=f"https://scan.smarter.dev/r/{sid}",
                 summary=result_data.summary,
                 response=result_data.response,
+                sources=[s.model_dump() for s in result_data.sources],
                 duration=round(duration, 2),
                 usage=usage_summary,
             )
@@ -387,6 +388,7 @@ async def run_lite_research(
                 result_url=f"https://scan.smarter.dev/r/{sid}",
                 summary=result_data.summary,
                 response=result_data.response,
+                sources=[s.model_dump() for s in result_data.sources],
                 duration=round(duration, 2),
                 usage=usage_summary,
             )

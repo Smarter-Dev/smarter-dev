@@ -52,6 +52,8 @@
 
     /* Response area */
     .scan-response{min-height:100px}
+    .scan-response a{color:var(--cyan);text-decoration:none;border-bottom:1px solid rgba(0,212,255,.2);transition:border-color .2s}
+    .scan-response a:hover{border-color:var(--cyan)}
     .scan-response-empty{color:var(--gray);font-size:.85rem;font-style:italic}
 
     /* Action bar */
@@ -109,10 +111,12 @@
     @keyframes scan-yt-fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
     .scan-yt-animate{opacity:0;animation:scan-yt-fade .5s ease forwards}
 
-    /* Code examples */
+    /* Code examples — masonry layout */
     .scan-examples-section{margin-top:2.5rem;border-top:1px solid rgba(0,212,255,.06);padding-top:2rem}
     .scan-examples-heading{font-family:var(--heading);font-size:.58rem;color:var(--mid);letter-spacing:.1em;margin-bottom:1.25rem}
-    .scan-example{margin-bottom:1.5rem;border:1px solid rgba(0,212,255,.08);background:var(--surface)}
+    #scan-examples-list{column-count:2;column-gap:1rem}
+    @media(max-width:900px){#scan-examples-list{column-count:1}}
+    .scan-example{margin-bottom:1rem;break-inside:avoid;border:1px solid rgba(0,212,255,.08);background:var(--surface)}
     .scan-example-header{display:flex;justify-content:space-between;align-items:center;padding:.6rem 1rem;border-bottom:1px solid rgba(0,212,255,.06)}
     .scan-example-title{font-family:var(--heading);font-size:.6rem;letter-spacing:.06em;color:var(--light)}
     .scan-example-lang{font-family:var(--mono);font-size:.6rem;color:var(--cyan);opacity:.7}
@@ -509,6 +513,11 @@ if (window.__skriftNotifications) {
             // Render buffered sidebar content
             if (bufferedVideos) renderYouTubeVideos(bufferedVideos);
             if (bufferedResources) renderResources(bufferedResources);
+
+            // Render sources
+            if (data.sources && data.sources.length > 0) {
+                renderSources(data.sources);
+            }
         }
 
         else if (eventType === "error") {
@@ -579,6 +588,32 @@ if (window.__skriftNotifications) {
                 '</div></a></li>';
         }
         list.innerHTML = html;
+    }
+
+    function renderSources(sources) {
+        var emptyEl = document.getElementById("scan-sources-empty");
+        if (emptyEl) emptyEl.remove();
+        // Find or create the sources list
+        var existing = document.querySelector(".scan-sources-list");
+        if (!existing) {
+            // Find the SOURCES heading and insert after it
+            var headings = document.querySelectorAll(".scan-sidebar-heading");
+            var sourcesHeading = null;
+            for (var h = 0; h < headings.length; h++) {
+                if (headings[h].textContent.trim() === "SOURCES") { sourcesHeading = headings[h]; break; }
+            }
+            if (!sourcesHeading) return;
+            existing = document.createElement("ul");
+            existing.className = "scan-sources-list";
+            sourcesHeading.parentNode.insertBefore(existing, sourcesHeading.nextSibling);
+        }
+        var html = "";
+        for (var i = 0; i < sources.length; i++) {
+            var s = sources[i];
+            html += '<li><a href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener" class="scan-source-link">' +
+                escapeHtml(s.title) + '</a></li>';
+        }
+        existing.innerHTML = html;
     }
 
     function renderResources(resources) {
