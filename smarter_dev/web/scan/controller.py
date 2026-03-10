@@ -10,6 +10,7 @@ from litestar.params import Body
 from litestar.response import Redirect, Template
 from litestar.status_codes import HTTP_429_TOO_MANY_REQUESTS
 from skrift.auth.guards import auth_guard
+from skrift.auth.services import get_user_permissions
 from skrift.lib.markdown import render_markdown
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,7 +33,14 @@ class ScanController(Controller):
     async def landing(self, request: Request) -> Template:
         """Scan landing page with search input and topic grid."""
         user_id = request.session.get("user_id") if request.session else None
-        return Template("scan/landing.html", context={"user_id": user_id})
+        og_meta = {
+            "title": "Scan — AI Research Assistant",
+            "description": "Get comprehensive, AI-powered research on any topic in seconds. Scan finds sources, analyzes content, and delivers structured insights.",
+            "url": "https://scan.smarter.dev/",
+            "site_name": "Scan by Smarter Dev",
+            "type": "website",
+        }
+        return Template("scan/landing.html", context={"user_id": user_id, "og_meta": og_meta})
 
     @post(
         "/",
@@ -53,7 +61,8 @@ class ScanController(Controller):
         tz = data.get("tz", "").strip() or None
 
         # Rate limit: 25 lite researches per week per user (admins exempt)
-        is_admin = request.session.get("is_admin", False)
+        user_perms = await get_user_permissions(db_session, user_id)
+        is_admin = "administrator" in user_perms.permissions
         recent_count = await ops.count_recent_sessions(db_session, user_id)
         if not is_admin and recent_count >= WEEKLY_RESEARCH_LIMIT:
             raise ClientException(
@@ -91,11 +100,25 @@ class ScanController(Controller):
                 render_markdown(session_data.response)
             )
 
+        # Open Graph metadata for social previews
+        og_meta = {
+            "url": f"https://scan.smarter.dev/r/{result_id}",
+            "site_name": "Scan by Smarter Dev",
+            "type": "article",
+        }
+        if session_data:
+            og_meta["title"] = session_data.name or session_data.query or "Research Result"
+            og_meta["description"] = session_data.summary or session_data.query or ""
+        else:
+            og_meta["title"] = "Research Result"
+            og_meta["description"] = "AI-powered research result on Scan by Smarter Dev."
+
         return Template(
             "scan/result.html",
             context={
                 "result_id": result_id,
                 "session": session_data,
                 "rendered_response": rendered_response,
+                "og_meta": og_meta,
             },
         )
