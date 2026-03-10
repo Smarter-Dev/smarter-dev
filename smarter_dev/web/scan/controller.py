@@ -52,9 +52,10 @@ class ScanController(Controller):
         user_id = request.session.get("user_id", "")
         tz = data.get("tz", "").strip() or None
 
-        # Rate limit: 25 lite researches per week per user
+        # Rate limit: 25 lite researches per week per user (admins exempt)
+        is_admin = request.session.get("is_admin", False)
         recent_count = await ops.count_recent_sessions(db_session, user_id)
-        if recent_count >= WEEKLY_RESEARCH_LIMIT:
+        if not is_admin and recent_count >= WEEKLY_RESEARCH_LIMIT:
             raise ClientException(
                 detail=f"Weekly research limit reached ({WEEKLY_RESEARCH_LIMIT}/week). Try again next week.",
                 status_code=HTTP_429_TOO_MANY_REQUESTS,
