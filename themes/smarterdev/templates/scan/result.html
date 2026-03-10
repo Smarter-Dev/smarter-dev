@@ -77,26 +77,31 @@
     .scan-cite:hover{background:rgba(0,212,255,.18);border-color:var(--cyan)}
     sup .scan-cite{vertical-align:baseline}
 
-    /* YouTube sidebar */
-    .scan-youtube-list{list-style:none;padding:0;margin:0 0 1.5rem}
-    .scan-youtube-item{margin-bottom:.8rem}
-    .scan-youtube-link{display:flex;gap:.6rem;text-decoration:none;color:var(--light);transition:opacity .2s}
+    /* Discovery row — horizontal scrollable above the answer */
+    .scan-discovery{max-width:960px;margin:0 auto;padding:0 2rem 1.5rem;overflow:hidden}
+    .scan-discovery-row{display:flex;gap:1rem;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:.5rem}
+    .scan-discovery-row::-webkit-scrollbar{display:none}
+
+    /* YouTube cards */
+    .scan-youtube-list{list-style:none;padding:0;margin:0;display:flex;gap:.75rem;flex-shrink:0}
+    .scan-youtube-item{flex-shrink:0;width:180px}
+    .scan-youtube-link{display:flex;flex-direction:column;gap:.4rem;text-decoration:none;color:var(--light);transition:opacity .2s}
     .scan-youtube-link:hover{opacity:.8}
-    .scan-youtube-thumb{width:80px;height:45px;object-fit:cover;border:1px solid rgba(0,212,255,.08);flex-shrink:0}
+    .scan-youtube-thumb{width:180px;height:101px;object-fit:cover;border:1px solid rgba(0,212,255,.08)}
     .scan-youtube-info{min-width:0}
-    .scan-youtube-title{font-size:.72rem;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-    .scan-youtube-channel{font-size:.6rem;color:var(--gray);margin-top:2px}
+    .scan-youtube-title{font-size:.68rem;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .scan-youtube-channel{font-size:.55rem;color:var(--gray);margin-top:2px}
 
     /* Resource cards */
-    .scan-resources-list{list-style:none;padding:0;margin:0 0 1.5rem}
-    .scan-resource-item{margin-bottom:.6rem}
-    .scan-resource-link{display:flex;gap:.6rem;text-decoration:none;color:var(--light);transition:all .2s;padding:.5rem;border:1px solid rgba(0,212,255,.06);background:var(--surface)}
+    .scan-resources-list{list-style:none;padding:0;margin:0;display:flex;gap:.75rem;flex-shrink:0}
+    .scan-resource-item{flex-shrink:0;width:200px}
+    .scan-resource-link{display:flex;flex-direction:column;gap:.4rem;text-decoration:none;color:var(--light);transition:all .2s;padding:.5rem;border:1px solid rgba(0,212,255,.06);background:var(--surface);height:100%}
     .scan-resource-link:hover{border-color:rgba(0,212,255,.18);background:rgba(0,212,255,.03)}
-    .scan-resource-img{width:60px;height:60px;object-fit:cover;border:1px solid rgba(0,212,255,.08);flex-shrink:0;background:rgba(0,0,0,.2)}
+    .scan-resource-img{width:100%;height:80px;object-fit:cover;border:1px solid rgba(0,212,255,.08);background:rgba(0,0,0,.2)}
     .scan-resource-info{min-width:0;flex:1}
-    .scan-resource-title{font-size:.72rem;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-    .scan-resource-desc{font-size:.62rem;color:var(--gray);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4}
-    .scan-resource-site{display:flex;align-items:center;gap:4px;font-size:.55rem;color:var(--mid);margin-top:3px}
+    .scan-resource-title{font-size:.68rem;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .scan-resource-desc{font-size:.58rem;color:var(--gray);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4}
+    .scan-resource-site{display:flex;align-items:center;gap:4px;font-size:.5rem;color:var(--mid);margin-top:3px}
     .scan-resource-favicon{width:12px;height:12px}
 
     /* Resource card fade animation */
@@ -152,6 +157,59 @@
 </div>
 
 {% if session %}
+<!-- Discovery row — videos + resources, horizontal scrollable -->
+{% if session.context and (session.context.youtube_videos is defined and session.context.youtube_videos or session.context.resources is defined and session.context.resources) %}
+<div class="scan-discovery" id="scan-discovery">
+    <div class="scan-discovery-row">
+        {% if session.context.youtube_videos is defined and session.context.youtube_videos %}
+        <ul class="scan-youtube-list" id="scan-youtube-list">
+            {% for v in session.context.youtube_videos %}
+            <li class="scan-youtube-item">
+                <a href="{{ v.url }}" target="_blank" rel="noopener" class="scan-youtube-link">
+                    {% if v.thumbnail %}<img src="{{ v.thumbnail }}" class="scan-youtube-thumb" alt="" loading="lazy">{% endif %}
+                    <div class="scan-youtube-info">
+                        <div class="scan-youtube-title">{{ v.title }}</div>
+                        <div class="scan-youtube-channel">{{ v.channel }}</div>
+                    </div>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <ul class="scan-youtube-list" id="scan-youtube-list"></ul>
+        {% endif %}
+        {% if session.context.resources is defined and session.context.resources %}
+        <ul class="scan-resources-list" id="scan-resources-list">
+            {% for r in session.context.resources %}
+            <li class="scan-resource-item">
+                <a href="{{ r.url }}" target="_blank" rel="noopener" class="scan-resource-link">
+                    {% if r.og_image is defined and r.og_image %}<img src="{{ r.og_image }}" class="scan-resource-img" alt="" loading="lazy">{% endif %}
+                    <div class="scan-resource-info">
+                        <div class="scan-resource-title">{{ r.title }}</div>
+                        <div class="scan-resource-desc">{{ r.description }}</div>
+                        <div class="scan-resource-site">
+                            {% if r.favicon is defined and r.favicon %}<img src="{{ r.favicon }}" class="scan-resource-favicon" alt="">{% endif %}
+                            {{ r.site_name if r.site_name is defined else '' }}
+                        </div>
+                    </div>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <ul class="scan-resources-list" id="scan-resources-list"></ul>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="scan-discovery scan-hidden" id="scan-discovery">
+    <div class="scan-discovery-row">
+        <ul class="scan-youtube-list" id="scan-youtube-list"></ul>
+        <ul class="scan-resources-list" id="scan-resources-list"></ul>
+    </div>
+</div>
+{% endif %}
+
 <div class="report-layout">
     <div class="report-content">
         <!-- Tool activity -->
@@ -206,58 +264,6 @@
     </div>
 
     <aside>
-        {% if session.context and session.context.youtube_videos is defined and session.context.youtube_videos %}
-        <div id="scan-youtube-section">
-            <h3 class="scan-sidebar-heading">RELATED ON YOUTUBE</h3>
-            <ul class="scan-youtube-list" id="scan-youtube-list">
-                {% for v in session.context.youtube_videos %}
-                <li class="scan-youtube-item">
-                    <a href="{{ v.url }}" target="_blank" rel="noopener" class="scan-youtube-link">
-                        {% if v.thumbnail %}<img src="{{ v.thumbnail }}" class="scan-youtube-thumb" alt="" loading="lazy">{% endif %}
-                        <div class="scan-youtube-info">
-                            <div class="scan-youtube-title">{{ v.title }}</div>
-                            <div class="scan-youtube-channel">{{ v.channel }}</div>
-                        </div>
-                    </a>
-                </li>
-                {% endfor %}
-            </ul>
-        </div>
-        {% else %}
-        <div id="scan-youtube-section" class="scan-hidden">
-            <h3 class="scan-sidebar-heading">RELATED ON YOUTUBE</h3>
-            <ul class="scan-youtube-list" id="scan-youtube-list"></ul>
-        </div>
-        {% endif %}
-
-        {% if session.context and session.context.resources is defined and session.context.resources %}
-        <div id="scan-resources-section">
-            <h3 class="scan-sidebar-heading">RESOURCES</h3>
-            <ul class="scan-resources-list" id="scan-resources-list">
-                {% for r in session.context.resources %}
-                <li class="scan-resource-item">
-                    <a href="{{ r.url }}" target="_blank" rel="noopener" class="scan-resource-link">
-                        {% if r.og_image is defined and r.og_image %}<img src="{{ r.og_image }}" class="scan-resource-img" alt="" loading="lazy">{% endif %}
-                        <div class="scan-resource-info">
-                            <div class="scan-resource-title">{{ r.title }}</div>
-                            <div class="scan-resource-desc">{{ r.description }}</div>
-                            <div class="scan-resource-site">
-                                {% if r.favicon is defined and r.favicon %}<img src="{{ r.favicon }}" class="scan-resource-favicon" alt="">{% endif %}
-                                {{ r.site_name if r.site_name is defined else '' }}
-                            </div>
-                        </div>
-                    </a>
-                </li>
-                {% endfor %}
-            </ul>
-        </div>
-        {% else %}
-        <div id="scan-resources-section" class="scan-hidden">
-            <h3 class="scan-sidebar-heading">RESOURCES</h3>
-            <ul class="scan-resources-list" id="scan-resources-list"></ul>
-        </div>
-        {% endif %}
-
         <h3 class="scan-sidebar-heading">SOURCES</h3>
         {% if session.status == 'complete' and session.sources %}
         <ul class="scan-sources-list">
@@ -335,8 +341,6 @@ if (window.__skriftNotifications) {
     let toolEntryCount = 0;
     let timerInterval;
     let completed = false;
-    let bufferedVideos = null;
-    let bufferedResources = null;
 
     function formatDuration(ms) {
         const s = Math.floor(ms / 1000);
@@ -374,16 +378,13 @@ if (window.__skriftNotifications) {
 
         else if (eventType === "youtube_videos") {
             if (data.videos && data.videos.length > 0) {
-                bufferedVideos = data.videos;
-                // If already completed, render now
-                if (completed) renderYouTubeVideos(bufferedVideos);
+                renderYouTubeVideos(data.videos);
             }
         }
 
         else if (eventType === "resources") {
             if (data.resources && data.resources.length > 0) {
-                bufferedResources = data.resources;
-                if (completed) renderResources(bufferedResources);
+                renderResources(data.resources);
             }
         }
 
@@ -404,6 +405,56 @@ if (window.__skriftNotifications) {
         else if (eventType === "code_examples") {
             if (data.examples && data.examples.length > 0) {
                 renderCodeExamples(data.examples);
+            }
+        }
+
+        else if (eventType === "code_example_chunk") {
+            var section = document.getElementById("scan-examples-section");
+            var list = document.getElementById("scan-examples-list");
+            if (!section || !list) return;
+            section.classList.remove("scan-hidden");
+            // Remove the "generating" placeholder if present
+            var placeholder = list.querySelector(".scan-sidebar-empty");
+            if (placeholder) placeholder.remove();
+            // Find or create the container for this example index
+            var exId = "scan-example-stream-" + data.index;
+            var exEl = document.getElementById(exId);
+            if (!exEl) {
+                exEl = document.createElement("div");
+                exEl.id = exId;
+                exEl.className = "scan-example scan-ex-animate";
+                exEl.innerHTML =
+                    '<div class="scan-example-header"><span class="scan-example-title">Example ' + (data.index + 1) + '</span><span class="scan-example-lang scan-example-streaming">streaming...</span></div>' +
+                    '<pre class="scan-example-code"><code></code></pre>';
+                list.appendChild(exEl);
+            }
+            var codeEl = exEl.querySelector("code");
+            if (codeEl) {
+                codeEl.textContent += (data.delta || "");
+            }
+        }
+
+        else if (eventType === "code_example_complete") {
+            var exId = "scan-example-stream-" + data.index;
+            var exEl = document.getElementById(exId);
+            var list = document.getElementById("scan-examples-list");
+            if (data.example) {
+                var ex = data.example;
+                var newEl = document.createElement("div");
+                newEl.className = "scan-example";
+                newEl.innerHTML =
+                    '<div class="scan-example-header">' +
+                    '<span class="scan-example-title">' + escapeHtml(ex.title) + '</span>' +
+                    '<span class="scan-example-lang">' + escapeHtml(ex.language) + '</span>' +
+                    '</div>' +
+                    '<pre class="scan-example-code"><code class="language-' + escapeHtml(ex.language) + '">' + escapeHtml(ex.code) + '</code></pre>' +
+                    (ex.explanation ? '<div class="scan-example-explanation">' + escapeHtml(ex.explanation) + '</div>' : '');
+                if (exEl) {
+                    exEl.replaceWith(newEl);
+                } else if (list) {
+                    list.appendChild(newEl);
+                }
+                if (typeof Prism !== "undefined") Prism.highlightAllUnder(newEl);
             }
         }
 
@@ -515,10 +566,6 @@ if (window.__skriftNotifications) {
             // Show actions
             actionsEl.classList.remove("scan-hidden");
 
-            // Render buffered sidebar content
-            if (bufferedVideos) renderYouTubeVideos(bufferedVideos);
-            if (bufferedResources) renderResources(bufferedResources);
-
             // Render sources
             if (data.sources && data.sources.length > 0) {
                 renderSources(data.sources);
@@ -577,10 +624,10 @@ if (window.__skriftNotifications) {
     }
 
     function renderYouTubeVideos(videos) {
-        var section = document.getElementById("scan-youtube-section");
+        var discovery = document.getElementById("scan-discovery");
         var list = document.getElementById("scan-youtube-list");
-        if (!section || !list) return;
-        section.classList.remove("scan-hidden");
+        if (!list) return;
+        if (discovery) discovery.classList.remove("scan-hidden");
         var html = "";
         for (var i = 0; i < videos.length; i++) {
             var v = videos[i];
@@ -622,10 +669,10 @@ if (window.__skriftNotifications) {
     }
 
     function renderResources(resources) {
-        var section = document.getElementById("scan-resources-section");
+        var discovery = document.getElementById("scan-discovery");
         var list = document.getElementById("scan-resources-list");
-        if (!section || !list) return;
-        section.classList.remove("scan-hidden");
+        if (!list) return;
+        if (discovery) discovery.classList.remove("scan-hidden");
         var html = "";
         for (var i = 0; i < resources.length; i++) {
             var r = resources[i];
@@ -748,20 +795,6 @@ if (window.__skriftNotifications) {
     var responseText = responseEl ? responseEl.textContent : "";
     if (responseEl && responseEl.children.length > 0) {
         animateResponseChars(responseEl);
-    }
-
-    // Animate YouTube videos on page load
-    var ytItems = document.querySelectorAll(".scan-youtube-item");
-    for (var i = 0; i < ytItems.length; i++) {
-        ytItems[i].classList.add("scan-yt-animate");
-        ytItems[i].style.animationDelay = (i * 200) + "ms";
-    }
-
-    // Animate resource cards on page load
-    var resItems = document.querySelectorAll(".scan-resource-item");
-    for (var i = 0; i < resItems.length; i++) {
-        resItems[i].classList.add("scan-res-animate");
-        resItems[i].style.animationDelay = (i * 150) + "ms";
     }
 
     // Animate code examples on page load

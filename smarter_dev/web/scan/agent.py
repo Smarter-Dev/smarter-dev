@@ -36,6 +36,7 @@ class ResearchDeps:
     http_client: httpx.AsyncClient
     search_rate_limiter: RateLimiter
     read_rate_limiter: URLRateLimiter
+    youtube_searched: bool = False
 
 
 class Source(BaseModel):
@@ -1163,7 +1164,11 @@ async def exp_youtube_search(
     ctx: RunContext[ResearchDeps], query: str,
 ) -> str:
     """Search YouTube for videos matching the query. Returns a list of videos
-    with title, channel, video_id, url, and thumbnail."""
+    with title, channel, video_id, url, and thumbnail.
+    You may only call this tool ONCE per session."""
+    if ctx.deps.youtube_searched:
+        return "ERROR: YouTube search already performed. Only one search is allowed per session."
+    ctx.deps.youtube_searched = True
     results = await tools.youtube_search(ctx.deps.http_client, query, num_results=10)
     if not results or (len(results) == 1 and "error" in results[0]):
         return "No YouTube results found."
