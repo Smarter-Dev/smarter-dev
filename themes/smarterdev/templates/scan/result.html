@@ -23,7 +23,7 @@
     @keyframes scan-pulse{0%,100%{opacity:1}50%{opacity:.5}}
 
     /* Tool activity */
-    .scan-tools-wrap{max-width:960px;margin:0 auto;padding:0 2rem}
+    .scan-tools-wrap{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 2rem}
     .scan-tools{margin:0 0 1.5rem;border:1px solid rgba(0,212,255,.06);background:var(--surface)}
     .scan-tools-header{font-family:var(--heading);font-size:.55rem;letter-spacing:.1em;color:var(--mid);padding:.75rem 1rem;border-bottom:1px solid rgba(0,212,255,.06);cursor:pointer;display:flex;align-items:center;gap:.5rem;user-select:none}
     .scan-tools-header::before{content:'';display:inline-block;width:0;height:0;border-left:5px solid var(--mid);border-top:4px solid transparent;border-bottom:4px solid transparent;transition:transform .2s}
@@ -85,7 +85,7 @@
     sup .scan-cite{vertical-align:baseline}
 
     /* Discovery section — two rows above the answer */
-    .scan-discovery{max-width:960px;margin:0 auto;padding:0 2rem 1.5rem}
+    .scan-discovery{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 2rem 1.5rem}
 
     /* YouTube cards — independently scrollable row */
     .scan-youtube-list{list-style:none;padding:0;margin:0 0 1rem;display:flex;gap:.75rem;overflow-x:auto;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;scrollbar-width:none;padding-bottom:.25rem}
@@ -124,7 +124,7 @@
     .scan-yt-animate{opacity:0;animation:scan-yt-fade .5s ease forwards}
 
     /* Code examples — full-width masonry below the main layout */
-    .scan-examples-section{max-width:960px;margin:0 auto;padding:0 2rem;border-top:1px solid rgba(0,212,255,.06);padding-top:2rem;margin-top:0}
+    .scan-examples-section{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 2rem;border-top:1px solid rgba(0,212,255,.06);padding-top:2rem;margin-top:0}
     .scan-examples-heading{font-family:var(--heading);font-size:.58rem;color:var(--mid);letter-spacing:.1em;margin-bottom:1.25rem}
     #scan-examples-list{column-count:2;column-gap:1rem}
     {% raw %}@media(max-width:900px){#scan-examples-list{column-count:1}.scan-examples-section{padding:0 1rem;padding-top:2rem}}{% endraw %}
