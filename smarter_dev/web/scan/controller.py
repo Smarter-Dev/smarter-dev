@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.scan.citations import process_citations
 from smarter_dev.web.scan.crud import ResearchSessionOperations
-from smarter_dev.web.scan.runner import start_meta_task, start_research_task
+from smarter_dev.web.scan.runner import start_pipeline_task
 
 logger = logging.getLogger(__name__)
 ops = ResearchSessionOperations()
@@ -54,9 +54,8 @@ class ScanController(Controller):
         )
         await db_session.commit()
 
-        # Start naming/classification and research in parallel as background tasks
-        start_meta_task(research.id, query, user_id)
-        start_research_task(research.id, query, user_id, tz=tz)
+        # Start the unified pipeline — one task handles everything
+        start_pipeline_task(research.id, query, user_id, tz=tz)
 
         return Redirect(path=f"/r/{research.id}")
 
