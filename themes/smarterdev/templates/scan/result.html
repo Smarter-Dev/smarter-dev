@@ -10,7 +10,6 @@
     /* Override Prism theme to blend with site */
     code[class*="language-"],pre[class*="language-"]{background:none;font-family:var(--mono);font-size:.78rem;line-height:1.6;text-shadow:none}
     .scan-example-code{background:rgba(0,0,0,.15)!important}
-    .scan-sidebar-heading{font-family:var(--heading);font-size:.58rem;color:var(--mid);letter-spacing:.1em;margin-bottom:1rem}
     .scan-sidebar-empty{font-size:.75rem;color:var(--gray)}
 
     /* Status badge */
@@ -21,6 +20,10 @@
 
     /* Pulse animation */
     @keyframes scan-pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+    /* Blinking insert cursor */
+    .scan-cursor{display:inline-block;width:2px;height:1.1em;background:var(--cyan);vertical-align:text-bottom;animation:scan-blink 1s step-end infinite}
+    @keyframes scan-blink{0%,100%{opacity:1}50%{opacity:0}}
 
     /* Tool activity */
     .scan-tools-wrap{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 2rem}
@@ -66,8 +69,6 @@
     .scan-timer{font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.04em}
 
     /* Sources list */
-    .scan-sources-list{list-style:none;padding:0;margin:0}
-    .scan-sources-list li{margin-bottom:.6rem}
     .scan-source-link{font-size:.72rem;color:var(--cyan);text-decoration:none}
 
     /* "X asked" label */
@@ -125,18 +126,26 @@
     @keyframes scan-yt-fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
     .scan-yt-animate{opacity:0;animation:scan-yt-fade .5s ease forwards}
 
-    /* Code examples — full-width masonry below the main layout */
+    /* Code examples — stacked below the main layout */
     .scan-examples-section{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 2rem;border-top:1px solid rgba(0,212,255,.06);padding-top:2rem;margin-top:0}
     .scan-examples-heading{font-family:var(--heading);font-size:.58rem;color:var(--mid);letter-spacing:.1em;margin-bottom:1.25rem}
-    #scan-examples-list{column-count:2;column-gap:1rem}
-    {% raw %}@media(max-width:900px){#scan-examples-list{column-count:1}.scan-examples-section{padding:0 1rem;padding-top:2rem}}{% endraw %}
-    .scan-example{margin-bottom:1rem;break-inside:avoid;border:1px solid rgba(0,212,255,.08);background:var(--surface)}
+    #scan-examples-list{display:flex;flex-direction:column;gap:1rem}
+    {% raw %}@media(max-width:900px){.scan-examples-section{padding:0 1rem;padding-top:2rem}}{% endraw %}
+    .scan-example{border:1px solid rgba(0,212,255,.08);background:var(--surface)}
     .scan-example-header{display:flex;justify-content:space-between;align-items:center;padding:.6rem 1rem;border-bottom:1px solid rgba(0,212,255,.06)}
     .scan-example-title{font-family:var(--heading);font-size:.6rem;letter-spacing:.06em;color:var(--light)}
     .scan-example-lang{font-family:var(--mono);font-size:.6rem;color:var(--cyan);opacity:.7}
     .scan-example-code{margin:0;padding:1rem;font-size:.78rem;line-height:1.6;overflow-x:auto;background:rgba(0,0,0,.15)}
     .scan-example-code code{font-family:var(--mono);color:var(--light);white-space:pre}
     .scan-example-explanation{padding:.5rem 1rem .6rem;font-size:.72rem;color:var(--gray);line-height:1.5;border-top:1px solid rgba(0,212,255,.04)}
+
+    /* Collapsible long examples */
+    .scan-example-code-wrap{position:relative}
+    .scan-example-code-wrap.collapsed .scan-example-code{max-height:calc(12 * 1.6 * .78rem + 2rem);overflow:hidden}
+    .scan-example-code-wrap.collapsed .scan-example-expand{display:flex}
+    .scan-example-expand{display:none;position:absolute;bottom:0;left:0;right:0;height:4rem;align-items:flex-end;justify-content:center;padding-bottom:.75rem;background:linear-gradient(transparent,rgba(0,0,0,.5) 60%,rgba(0,0,0,.7));cursor:pointer;z-index:1}
+    .scan-example-expand span{font-family:var(--heading);font-size:.55rem;letter-spacing:.08em;color:var(--cyan);border:1px solid rgba(0,212,255,.25);padding:3px 12px;background:rgba(0,0,0,.6);transition:background .2s}
+    .scan-example-expand:hover span{background:rgba(0,212,255,.1)}
 
     /* Code example fade animation */
     @keyframes scan-ex-fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
@@ -253,7 +262,7 @@
 </div>
 {% endif %}
 
-<!-- Answer + sources -->
+<!-- Answer -->
 <div class="report-layout">
     <div class="report-content">
         <div class="scan-response" id="scan-response">
@@ -262,7 +271,7 @@
             {% elif session.status == 'error' %}
             <p class="scan-error-text">{{ session.error_message }}</p>
             {% elif session.status == 'running' %}
-            <p class="scan-response-empty" id="scan-response-placeholder">Researching...</p>
+            <span class="scan-cursor" id="scan-response-placeholder"></span>
             {% else %}
             <p class="scan-response-empty">No response available.</p>
             {% endif %}
@@ -279,26 +288,9 @@
             {% if session.status == 'complete' %}Generated in <span id="scan-timer">{{ ((session.updated_at - session.created_at).total_seconds()|round(0)|int) }}s</span>{% else %}<span id="scan-timer"></span>{% endif %}
         </div>
     </div>
-
-    <aside>
-        <h3 class="scan-sidebar-heading">SOURCES</h3>
-        {% if session.status == 'complete' and session.sources %}
-        <ul class="scan-sources-list">
-            {% for src in session.sources %}
-            <li>
-                <a href="{{ src.url if src.url is defined else src['url'] }}" target="_blank" rel="noopener" class="scan-source-link">
-                    {{ src.title if src.title is defined else src['title'] }}
-                </a>
-            </li>
-            {% endfor %}
-        </ul>
-        {% else %}
-        <p class="scan-sidebar-empty" id="scan-sources-empty">No sources yet</p>
-        {% endif %}
-    </aside>
 </div>
 
-<!-- Code examples — full-width below main layout -->
+<!-- Code examples — stacked below main layout -->
 {% if session.status == 'complete' and session.context and session.context.code_examples is defined and session.context.code_examples %}
 <div class="scan-examples-section" id="scan-examples-section">
     <h3 class="scan-examples-heading">CODE EXAMPLES</h3>
@@ -309,7 +301,10 @@
                 <span class="scan-example-title">{{ ex.title }}</span>
                 <span class="scan-example-lang">{{ ex.language }}</span>
             </div>
-            <pre class="scan-example-code"><code class="language-{{ ex.language }}">{{ ex.code }}</code></pre>
+            <div class="scan-example-code-wrap{% if ex.code.split('\n')|length > 15 %} collapsed{% endif %}">
+                <pre class="scan-example-code"><code class="language-{{ ex.language }}">{{ ex.code }}</code></pre>
+                <div class="scan-example-expand" onclick="this.parentElement.classList.remove('collapsed')"><span>VIEW FULL EXAMPLE</span></div>
+            </div>
             {% if ex.explanation %}<div class="scan-example-explanation">{{ ex.explanation }}</div>{% endif %}
         </div>
         {% endfor %}
@@ -327,10 +322,6 @@
     <div class="report-content">
         <p>This research session was not found.</p>
     </div>
-    <aside>
-        <h3 class="scan-sidebar-heading">SOURCES</h3>
-        <p class="scan-sidebar-empty">Not found</p>
-    </aside>
 </div>
 {% endif %}
 {% endblock %}
@@ -440,6 +431,8 @@ if (window.__skriftNotifications) {
             var list = document.getElementById("scan-examples-list");
             if (data.example) {
                 var ex = data.example;
+                var lineCount = (ex.code || "").split("\n").length;
+                var collapsed = lineCount > 15 ? " collapsed" : "";
                 var newEl = document.createElement("div");
                 newEl.className = "scan-example";
                 newEl.innerHTML =
@@ -447,7 +440,10 @@ if (window.__skriftNotifications) {
                     '<span class="scan-example-title">' + escapeHtml(ex.title) + '</span>' +
                     '<span class="scan-example-lang">' + escapeHtml(ex.language) + '</span>' +
                     '</div>' +
+                    '<div class="scan-example-code-wrap' + collapsed + '">' +
                     '<pre class="scan-example-code"><code class="language-' + escapeHtml(ex.language) + '">' + escapeHtml(ex.code) + '</code></pre>' +
+                    '<div class="scan-example-expand" onclick="this.parentElement.classList.remove(\'collapsed\')"><span>VIEW FULL EXAMPLE</span></div>' +
+                    '</div>' +
                     (ex.explanation ? '<div class="scan-example-explanation">' + escapeHtml(ex.explanation) + '</div>' : '');
                 if (exEl) {
                     exEl.replaceWith(newEl);
@@ -566,10 +562,6 @@ if (window.__skriftNotifications) {
             // Show actions
             actionsEl.classList.remove("scan-hidden");
 
-            // Render sources
-            if (data.sources && data.sources.length > 0) {
-                renderSources(data.sources);
-            }
         }
 
         else if (eventType === "error") {
@@ -648,32 +640,6 @@ if (window.__skriftNotifications) {
         list.innerHTML = html;
     }
 
-    function renderSources(sources) {
-        var emptyEl = document.getElementById("scan-sources-empty");
-        if (emptyEl) emptyEl.remove();
-        // Find or create the sources list
-        var existing = document.querySelector(".scan-sources-list");
-        if (!existing) {
-            // Find the SOURCES heading and insert after it
-            var headings = document.querySelectorAll(".scan-sidebar-heading");
-            var sourcesHeading = null;
-            for (var h = 0; h < headings.length; h++) {
-                if (headings[h].textContent.trim() === "SOURCES") { sourcesHeading = headings[h]; break; }
-            }
-            if (!sourcesHeading) return;
-            existing = document.createElement("ul");
-            existing.className = "scan-sources-list";
-            sourcesHeading.parentNode.insertBefore(existing, sourcesHeading.nextSibling);
-        }
-        var html = "";
-        for (var i = 0; i < sources.length; i++) {
-            var s = sources[i];
-            html += '<li><a href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener" class="scan-source-link">' +
-                escapeHtml(s.title) + '</a></li>';
-        }
-        existing.innerHTML = html;
-    }
-
     function renderResources(resources) {
         var discovery = document.getElementById("scan-discovery");
         var list = document.getElementById("scan-resources-list");
@@ -704,12 +670,17 @@ if (window.__skriftNotifications) {
         var html = "";
         for (var i = 0; i < examples.length; i++) {
             var ex = examples[i];
+            var lineCount = (ex.code || "").split("\n").length;
+            var collapsed = lineCount > 15 ? " collapsed" : "";
             html += '<div class="scan-example scan-ex-animate" style="animation-delay:' + (i * 200) + 'ms">' +
                 '<div class="scan-example-header">' +
                 '<span class="scan-example-title">' + escapeHtml(ex.title) + '</span>' +
                 '<span class="scan-example-lang">' + escapeHtml(ex.language) + '</span>' +
                 '</div>' +
+                '<div class="scan-example-code-wrap' + collapsed + '">' +
                 '<pre class="scan-example-code"><code class="language-' + escapeHtml(ex.language) + '">' + escapeHtml(ex.code) + '</code></pre>' +
+                '<div class="scan-example-expand" onclick="this.parentElement.classList.remove(\'collapsed\')"><span>VIEW FULL EXAMPLE</span></div>' +
+                '</div>' +
                 (ex.explanation ? '<div class="scan-example-explanation">' + escapeHtml(ex.explanation) + '</div>' : '') +
                 '</div>';
         }
