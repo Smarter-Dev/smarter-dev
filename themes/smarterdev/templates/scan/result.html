@@ -119,8 +119,6 @@
     .scan-res-animate{opacity:0;animation:scan-res-fade .5s ease forwards}
 
     /* Character fade animation */
-    @keyframes scan-char-fade{from{opacity:0}to{opacity:1}}
-    .scan-char{opacity:0;animation:scan-char-fade .4s forwards}
 
     /* YouTube item fade animation */
     @keyframes scan-yt-fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
@@ -303,7 +301,7 @@
             </div>
             <div class="scan-example-code-wrap{% if ex.code.split('\n')|length > 15 %} collapsed{% endif %}">
                 <pre class="scan-example-code"><code class="language-{{ ex.language }}">{{ ex.code }}</code></pre>
-                <div class="scan-example-expand" onclick="this.parentElement.classList.remove('collapsed')"><span>VIEW FULL EXAMPLE</span></div>
+                <div class="scan-example-expand" data-expand><span>VIEW FULL EXAMPLE</span></div>
             </div>
             {% if ex.explanation %}<div class="scan-example-explanation">{{ ex.explanation }}</div>{% endif %}
         </div>
@@ -442,7 +440,7 @@ if (window.__skriftNotifications) {
                     '</div>' +
                     '<div class="scan-example-code-wrap' + collapsed + '">' +
                     '<pre class="scan-example-code"><code class="language-' + escapeHtml(ex.language) + '">' + escapeHtml(ex.code) + '</code></pre>' +
-                    '<div class="scan-example-expand" onclick="this.parentElement.classList.remove(\'collapsed\')"><span>VIEW FULL EXAMPLE</span></div>' +
+                    '<div class="scan-example-expand" data-expand><span>VIEW FULL EXAMPLE</span></div>' +
                     '</div>' +
                     (ex.explanation ? '<div class="scan-example-explanation">' + escapeHtml(ex.explanation) + '</div>' : '');
                 if (exEl) {
@@ -551,7 +549,6 @@ if (window.__skriftNotifications) {
                 var withCitations = processCitations(responseText);
                 var rendered = typeof marked !== "undefined" ? marked.parse(withCitations) : withCitations;
                 responseEl.innerHTML = rendered;
-                animateResponseChars(responseEl);
             }
 
             if (placeholder) placeholder.remove();
@@ -679,39 +676,13 @@ if (window.__skriftNotifications) {
                 '</div>' +
                 '<div class="scan-example-code-wrap' + collapsed + '">' +
                 '<pre class="scan-example-code"><code class="language-' + escapeHtml(ex.language) + '">' + escapeHtml(ex.code) + '</code></pre>' +
-                '<div class="scan-example-expand" onclick="this.parentElement.classList.remove(\'collapsed\')"><span>VIEW FULL EXAMPLE</span></div>' +
+                '<div class="scan-example-expand" data-expand><span>VIEW FULL EXAMPLE</span></div>' +
                 '</div>' +
                 (ex.explanation ? '<div class="scan-example-explanation">' + escapeHtml(ex.explanation) + '</div>' : '') +
                 '</div>';
         }
         list.innerHTML = html;
         if (typeof Prism !== "undefined") Prism.highlightAllUnder(list);
-    }
-
-    function animateResponseChars(container) {
-        var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-        var textNodes = [];
-        while (walker.nextNode()) textNodes.push(walker.currentNode);
-        var totalChars = 0;
-        for (var i = 0; i < textNodes.length; i++) totalChars += textNodes[i].textContent.length;
-        // Scale delay so total animation stays ~1.5s regardless of length
-        var delay = Math.min(50, Math.max(1, Math.floor(1500 / totalChars)));
-        var charIdx = 0;
-        for (var i = 0; i < textNodes.length; i++) {
-            var node = textNodes[i];
-            var text = node.textContent;
-            if (!text) continue;
-            var frag = document.createDocumentFragment();
-            for (var j = 0; j < text.length; j++) {
-                var span = document.createElement("span");
-                span.textContent = text[j];
-                span.className = "scan-char";
-                span.style.animationDelay = (charIdx * delay) + "ms";
-                frag.appendChild(span);
-                charIdx++;
-            }
-            node.parentNode.replaceChild(frag, node);
-        }
     }
 
     var TOOL_NAMES = {
@@ -779,44 +750,14 @@ if (window.__skriftNotifications) {
         });
     }
 
-    // Animate response characters on page load
     var responseEl = document.getElementById("scan-response");
     var responseText = responseEl ? responseEl.textContent : "";
-    if (responseEl && responseEl.children.length > 0) {
-        animateResponseChars(responseEl);
-    }
 
-    // Animate code examples on page load
-    var exItems = document.querySelectorAll(".scan-example");
-    for (var i = 0; i < exItems.length; i++) {
-        exItems[i].classList.add("scan-ex-animate");
-        exItems[i].style.animationDelay = (i * 200) + "ms";
-    }
-
-    function animateResponseChars(container) {
-        var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-        var textNodes = [];
-        while (walker.nextNode()) textNodes.push(walker.currentNode);
-        var totalChars = 0;
-        for (var i = 0; i < textNodes.length; i++) totalChars += textNodes[i].textContent.length;
-        var delay = Math.min(50, Math.max(1, Math.floor(1500 / totalChars)));
-        var charIdx = 0;
-        for (var i = 0; i < textNodes.length; i++) {
-            var node = textNodes[i];
-            var text = node.textContent;
-            if (!text) continue;
-            var frag = document.createDocumentFragment();
-            for (var j = 0; j < text.length; j++) {
-                var span = document.createElement("span");
-                span.textContent = text[j];
-                span.className = "scan-char";
-                span.style.animationDelay = (charIdx * delay) + "ms";
-                frag.appendChild(span);
-                charIdx++;
-            }
-            node.parentNode.replaceChild(frag, node);
-        }
-    }
+    // Event delegation for expand buttons (CSP-safe, no inline handlers)
+    document.addEventListener("click", function(e) {
+        var expand = e.target.closest("[data-expand]");
+        if (expand) expand.parentElement.classList.remove("collapsed");
+    });
 
     document.getElementById("scan-copy-btn").addEventListener("click", function() {
         navigator.clipboard.writeText(responseText).then(function() {
