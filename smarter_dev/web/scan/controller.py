@@ -9,7 +9,7 @@ from litestar.exceptions import ClientException
 from litestar.params import Body
 from litestar.response import Redirect, Template
 from litestar.status_codes import HTTP_429_TOO_MANY_REQUESTS
-from skrift.auth.guards import Permission, auth_guard
+from skrift.auth.guards import auth_guard
 from skrift.lib.markdown import render_markdown
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,7 +36,7 @@ class ScanController(Controller):
 
     @post(
         "/",
-        guards=[auth_guard, Permission("use-scan")],
+        guards=[auth_guard],
     )
     async def submit(
         self,
