@@ -23,7 +23,8 @@
     @keyframes scan-pulse{0%,100%{opacity:1}50%{opacity:.5}}
 
     /* Tool activity */
-    .scan-tools{margin:1.5rem 0;border:1px solid rgba(0,212,255,.06);background:var(--surface)}
+    .scan-tools-wrap{max-width:960px;margin:0 auto;padding:0 2rem}
+    .scan-tools{margin:0 0 1.5rem;border:1px solid rgba(0,212,255,.06);background:var(--surface)}
     .scan-tools-header{font-family:var(--heading);font-size:.55rem;letter-spacing:.1em;color:var(--mid);padding:.75rem 1rem;border-bottom:1px solid rgba(0,212,255,.06);cursor:pointer;display:flex;align-items:center;gap:.5rem;user-select:none}
     .scan-tools-header::before{content:'';display:inline-block;width:0;height:0;border-left:5px solid var(--mid);border-top:4px solid transparent;border-bottom:4px solid transparent;transition:transform .2s}
     .scan-tools[open] .scan-tools-header::before{transform:rotate(90deg)}
@@ -68,6 +69,12 @@
     .scan-sources-list{list-style:none;padding:0;margin:0}
     .scan-sources-list li{margin-bottom:.6rem}
     .scan-source-link{font-size:.72rem;color:var(--cyan);text-decoration:none}
+
+    /* "X asked" label */
+    .scan-asked{font-family:var(--heading);font-size:.58rem;color:var(--mid);letter-spacing:.08em;margin-bottom:.5rem}
+
+    /* Generation time */
+    .scan-duration{font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.04em;margin-top:1.5rem;padding-top:1rem;border-top:1px solid rgba(0,212,255,.06)}
 
     /* Error text */
     .scan-error-text{color:#f44}
@@ -140,24 +147,54 @@
 
 {% block content %}
 <div class="report-header">
-    <div class="report-query" id="scan-title">{% if session and session.name %}{{ session.name }}{% elif session %}{{ session.query|truncate(80) }}{% else %}Research Result{% endif %}</div>
+    {% if session %}
+    <div class="scan-asked">{% if viewer_id and viewer_id == session.user_id and viewer_name %}{{ viewer_name }}{% else %}Someone{% endif %} asked</div>
+    <div class="report-query">{{ session.query }}</div>
+    {% else %}
+    <div class="report-query">Research Result</div>
     <div class="report-meta">
-        {% if session %}
-        <span class="meta-item"><strong>QUERY</strong> {{ session.query }}</span>
-        <span class="meta-item">
-            <strong>STATUS</strong>
-            <span id="scan-status" class="scan-status scan-status-{{ session.status }}">{{ session.status|upper }}</span>
-        </span>
-        <span class="meta-item"><strong>TIME</strong> <span id="scan-timer" class="scan-timer">{% if session.status == 'complete' %}{{ ((session.updated_at - session.created_at).total_seconds()|round(0)|int) }}s{% else %}--{% endif %}</span></span>
-        {% else %}
         <span class="meta-item"><strong>ID</strong> {{ result_id }}</span>
         <span class="meta-item"><strong>STATUS</strong> Not found</span>
-        {% endif %}
     </div>
+    {% endif %}
 </div>
+<span id="scan-status" class="scan-hidden scan-status scan-status-{{ session.status if session else 'error' }}">{{ session.status|upper if session else 'NOT FOUND' }}</span>
 
 {% if session %}
-<!-- Discovery row — videos + resources, horizontal scrollable -->
+<!-- Tool activity -->
+<div class="scan-tools-wrap">
+    <details class="scan-tools" id="scan-tools" {% if session.status == 'running' %}open{% endif %}>
+        <summary class="scan-tools-header">TOOL ACTIVITY <span id="scan-tool-count">({% if session.tool_log %}{{ session.tool_log|selectattr('tool', 'defined')|list|length }}{% else %}0{% endif %})</span></summary>
+        <ul class="scan-tools-list" id="scan-tools-list">
+            {% if session.status != 'running' and session.tool_log %}
+            {% for entry in session.tool_log %}
+            {% if entry.tool is defined %}
+            <li class="scan-tool-entry scan-tool-done">
+                <span class="scan-tool-name">{{ entry.tool }}</span>
+                <span class="scan-tool-args">{% if entry.tool == 'research' and entry.input is defined and entry.input.question is defined %}{{ entry.input.question|truncate(80) }}{% elif entry.tool == 'search' and entry.input is defined and entry.input.query is defined %}{{ entry.input.query|truncate(80) }}{% elif (entry.tool == 'read' or entry.tool == 'read_url') and entry.input is defined and entry.input.url is defined %}{{ entry.input.url|truncate(80) }}{% else %}{{ (entry.input if entry.input is defined else '')|string|truncate(80) }}{% endif %}</span>
+            </li>
+            {% if entry.sub_tools is defined and entry.sub_tools -%}
+            <div class="scan-tool-content">
+            <ul class="scan-sub-tools">
+            {%- for st in entry.sub_tools %}
+            <li class="scan-sub-tool"><span class="scan-sub-tool-name">{{ st.tool }}</span> <span class="scan-sub-tool-args">{% if st.tool == 'search' and st.input is defined and st.input.query is defined %}{{ st.input.query|truncate(70) }}{% elif (st.tool == 'read' or st.tool == 'read_url') and st.input is defined and st.input.url is defined %}{{ st.input.url|truncate(70) }}{% else %}{{ (st.input if st.input is defined else '')|string|truncate(70) }}{% endif %}</span></li>
+            <div class="scan-sub-tool-content">{{ st.content if st.content is defined else '' }}</div>
+            {%- endfor %}
+            </ul>
+            </div>
+            {% elif entry.content is defined -%}
+            <div class="scan-tool-content scan-tool-content--text">{{ entry.content }}</div>
+            {% else -%}
+            <div class="scan-tool-content"></div>
+            {% endif -%}
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+        </ul>
+    </details>
+</div>
+
+<!-- Discovery — YouTube videos + resources -->
 {% if session.context and (session.context.youtube_videos is defined and session.context.youtube_videos or session.context.resources is defined and session.context.resources) %}
 <div class="scan-discovery" id="scan-discovery">
     {% if session.context.youtube_videos is defined and session.context.youtube_videos %}
@@ -206,40 +243,9 @@
 </div>
 {% endif %}
 
+<!-- Answer + sources -->
 <div class="report-layout">
     <div class="report-content">
-        <!-- Tool activity -->
-        <details class="scan-tools" id="scan-tools" {% if session.status == 'running' %}open{% endif %}>
-            <summary class="scan-tools-header">TOOL ACTIVITY <span id="scan-tool-count">({% if session.tool_log %}{{ session.tool_log|selectattr('tool', 'defined')|list|length }}{% else %}0{% endif %})</span></summary>
-            <ul class="scan-tools-list" id="scan-tools-list">
-                {% if session.status != 'running' and session.tool_log %}
-                {% for entry in session.tool_log %}
-                {% if entry.tool is defined %}
-                <li class="scan-tool-entry scan-tool-done">
-                    <span class="scan-tool-name">{{ entry.tool }}</span>
-                    <span class="scan-tool-args">{% if entry.tool == 'research' and entry.input is defined and entry.input.question is defined %}{{ entry.input.question|truncate(80) }}{% elif entry.tool == 'search' and entry.input is defined and entry.input.query is defined %}{{ entry.input.query|truncate(80) }}{% elif (entry.tool == 'read' or entry.tool == 'read_url') and entry.input is defined and entry.input.url is defined %}{{ entry.input.url|truncate(80) }}{% else %}{{ (entry.input if entry.input is defined else '')|string|truncate(80) }}{% endif %}</span>
-                </li>
-                {% if entry.sub_tools is defined and entry.sub_tools -%}
-                <div class="scan-tool-content">
-                <ul class="scan-sub-tools">
-                {%- for st in entry.sub_tools %}
-                <li class="scan-sub-tool"><span class="scan-sub-tool-name">{{ st.tool }}</span> <span class="scan-sub-tool-args">{% if st.tool == 'search' and st.input is defined and st.input.query is defined %}{{ st.input.query|truncate(70) }}{% elif (st.tool == 'read' or st.tool == 'read_url') and st.input is defined and st.input.url is defined %}{{ st.input.url|truncate(70) }}{% else %}{{ (st.input if st.input is defined else '')|string|truncate(70) }}{% endif %}</span></li>
-                <div class="scan-sub-tool-content">{{ st.content if st.content is defined else '' }}</div>
-                {%- endfor %}
-                </ul>
-                </div>
-                {% elif entry.content is defined -%}
-                <div class="scan-tool-content scan-tool-content--text">{{ entry.content }}</div>
-                {% else -%}
-                <div class="scan-tool-content"></div>
-                {% endif -%}
-                {% endif %}
-                {% endfor %}
-                {% endif %}
-            </ul>
-        </details>
-
-        <!-- Response -->
         <div class="scan-response" id="scan-response">
             {% if session.status == 'complete' and rendered_response %}
             {{ rendered_response|safe }}
@@ -256,6 +262,11 @@
         <div class="scan-actions{% if session.status != 'complete' %} scan-hidden{% endif %}" id="scan-actions">
             <button class="scan-action-btn" id="scan-copy-btn" type="button">COPY</button>
             <button class="scan-action-btn" id="scan-download-btn" type="button">DOWNLOAD</button>
+        </div>
+
+        <!-- Generation time -->
+        <div class="scan-duration{% if session.status != 'complete' %} scan-hidden{% endif %}" id="scan-duration">
+            {% if session.status == 'complete' %}Generated in <span id="scan-timer">{{ ((session.updated_at - session.created_at).total_seconds()|round(0)|int) }}s</span>{% else %}<span id="scan-timer"></span>{% endif %}
         </div>
     </div>
 
@@ -324,9 +335,6 @@ if (window.__skriftNotifications) {
     window.__skriftNotifications.configure({ persistConnection: true });
 }
 (function() {
-    const startedAt = new Date("{{ session.created_at.isoformat() }}Z");
-    const timerEl = document.getElementById("scan-timer");
-    const statusEl = document.getElementById("scan-status");
     const toolsList = document.getElementById("scan-tools-list");
     const toolsDetail = document.getElementById("scan-tools");
     const toolCount = document.getElementById("scan-tool-count");
@@ -335,21 +343,7 @@ if (window.__skriftNotifications) {
     const actionsEl = document.getElementById("scan-actions");
     let responseText = "";
     let toolEntryCount = 0;
-    let timerInterval;
     let completed = false;
-
-    function formatDuration(ms) {
-        const s = Math.floor(ms / 1000);
-        const m = Math.floor(s / 60);
-        const rem = s % 60;
-        return m > 0 ? m + "m " + rem + "s" : rem + "s";
-    }
-
-    timerInterval = setInterval(function() {
-        if (completed) return;
-        timerEl.textContent = formatDuration(Date.now() - startedAt.getTime());
-    }, 1000);
-    timerEl.textContent = formatDuration(Date.now() - startedAt.getTime());
 
     document.addEventListener("sk:notification", function(e) {
         const data = e.detail;
@@ -365,9 +359,7 @@ if (window.__skriftNotifications) {
         var eventType = data.type.replace("research:", "");
 
         if (eventType === "session_meta") {
-            var titleEl = document.getElementById("scan-title");
-            if (titleEl && data.name) {
-                titleEl.textContent = data.name;
+            if (data.name) {
                 document.title = data.name;
             }
         }
@@ -375,12 +367,14 @@ if (window.__skriftNotifications) {
         else if (eventType === "youtube_videos") {
             if (data.videos && data.videos.length > 0) {
                 renderYouTubeVideos(data.videos);
+                if (toolsDetail) toolsDetail.removeAttribute("open");
             }
         }
 
         else if (eventType === "resources") {
             if (data.resources && data.resources.length > 0) {
                 renderResources(data.resources);
+                if (toolsDetail) toolsDetail.removeAttribute("open");
             }
         }
 
@@ -537,13 +531,13 @@ if (window.__skriftNotifications) {
 
         else if (eventType === "complete") {
             completed = true;
-            clearInterval(timerInterval);
 
-            statusEl.textContent = "COMPLETE";
-            statusEl.className = "scan-status scan-status-complete";
 
-            if (data.duration) {
-                timerEl.textContent = data.duration + "s";
+            // Show generation time
+            var durationEl = document.getElementById("scan-duration");
+            if (durationEl && data.duration) {
+                durationEl.classList.remove("scan-hidden");
+                durationEl.innerHTML = "Generated in <span id=\"scan-timer\">" + data.duration + "s</span>";
             }
 
             if (data.response) {
@@ -570,7 +564,7 @@ if (window.__skriftNotifications) {
 
         else if (eventType === "error") {
             completed = true;
-            clearInterval(timerInterval);
+
 
             statusEl.textContent = "ERROR";
             statusEl.className = "scan-status scan-status-error";

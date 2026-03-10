@@ -616,7 +616,7 @@ class SessionMeta(BaseModel):
     """Metadata generated for a research session."""
 
     name: str = Field(
-        description="A short, descriptive title (3-8 words) for the research query.",
+        description="A brief title (2-5 words) for the research query.",
     )
     skill_level: str = Field(
         description=(
@@ -640,7 +640,7 @@ _meta_agent = Agent(
     output_type=SessionMeta,
     instructions=(
         "Analyze the research query and return structured metadata.\n\n"
-        "1. **name**: A short title (3-8 words) that captures the essence "
+        "1. **name**: A brief title (2-5 words) that captures the essence "
         "of the query. No quotes, no punctuation at the end.\n"
         "2. **skill_level**: Infer from the terminology and depth of the "
         "question — beginner, intermediate, advanced, or expert.\n"
@@ -1004,7 +1004,7 @@ class ExpMetaQueryPlan(BaseModel):
     """Combined metadata + query plan for the experimental pipeline."""
 
     name: str = Field(
-        description="A short, descriptive title (3-8 words) for the research query.",
+        description="A brief title (2-5 words) for the research query.",
     )
     skill_level: str = Field(
         description=(
@@ -1044,7 +1044,7 @@ _exp_meta_query_agent = Agent(
         "You are a research planner. You will be given the current date "
         "and the user's question.\n\n"
         "## Metadata\n\n"
-        "1. **name**: A short title (3-8 words) that captures the essence "
+        "1. **name**: A brief title (2-5 words) that captures the essence "
         "of the query. No quotes, no punctuation at the end.\n"
         "2. **skill_level**: Infer from the terminology and depth of the "
         "question — beginner, intermediate, advanced, or expert.\n"

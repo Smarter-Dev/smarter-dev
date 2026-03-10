@@ -116,6 +116,11 @@ class ScanController(Controller):
             og_meta["title"] = "Research Result"
             og_meta["description"] = "AI-powered research result on Scan by Smarter Dev."
 
+        # Get viewer's display name for "X asked" header
+        viewer_name = ""
+        if request.session:
+            viewer_name = request.session.get("user_name", "")
+
         return Template(
             "scan/result.html",
             context={
@@ -123,5 +128,7 @@ class ScanController(Controller):
                 "session": session_data,
                 "rendered_response": rendered_response,
                 "og_meta": og_meta,
+                "viewer_name": viewer_name,
+                "viewer_id": request.session.get("user_id", "") if request.session else "",
             },
         )
