@@ -1,8 +1,10 @@
 """Pydantic AI research agent for Scan.
 
-Two implementations:
+Three implementations:
 - **Lite** (default): Two-stage Flash Lite pipeline — fast and cheap.
 - **Premium**: Multi-turn agentic pipeline — deeper research, more expensive.
+- **Experimental**: History-threaded pipeline — shares conversation context
+  across meta, planning, writing, and example generation stages.
 """
 
 from __future__ import annotations
@@ -990,3 +992,730 @@ async def rank_resource_results(
     except Exception:
         logger.exception("Failed to rank resource results")
         return results[:5], RunUsage()
+
+
+# ============================================================================
+# EXPERIMENTAL IMPLEMENTATION — History-threaded pipeline
+# ============================================================================
+
+
+class ExpMetaQueryPlan(BaseModel):
+    """Combined metadata + query plan for the experimental pipeline."""
+
+    name: str = Field(
+        description="A short, descriptive title (3-8 words) for the research query.",
+    )
+    skill_level: str = Field(
+        description=(
+            "The skill level assumed by the query. One of: "
+            "beginner, intermediate, advanced, expert."
+        ),
+    )
+    topic: str = Field(
+        description=(
+            "The primary topic category. One of: "
+            "programming, software-engineering, web-dev, app-dev, backend, "
+            "full-stack, ai-llm, machine-learning, devops, data-engineering, "
+            "security, gamedev, systems, other. Use 'programming' for general "
+            "CS concepts (OOP, algorithms, data structures, design patterns). "
+            "Use 'other' ONLY for non-software topics."
+        ),
+    )
+    search_queries: list[str] = Field(
+        description="Exactly 2 web search queries that directly address the user's question.",
+        min_length=2,
+        max_length=2,
+    )
+    gap_queries: list[str] = Field(
+        default_factory=list,
+        description=(
+            "0-3 additional search queries for things that may have changed "
+            "since your training cutoff — recent releases, breaking changes, "
+            "new APIs, newly relevant projects, etc. Leave empty if the topic "
+            "is unlikely to have changed."
+        ),
+    )
+
+
+_exp_meta_query_agent = Agent(
+    output_type=ExpMetaQueryPlan,
+    instructions=(
+        "You are a research planner. You will be given the current date "
+        "and the user's question.\n\n"
+        "## Metadata\n\n"
+        "1. **name**: A short title (3-8 words) that captures the essence "
+        "of the query. No quotes, no punctuation at the end.\n"
+        "2. **skill_level**: Infer from the terminology and depth of the "
+        "question — beginner, intermediate, advanced, or expert.\n"
+        "3. **topic**: Classify into exactly one of: programming, "
+        "software-engineering, web-dev, app-dev, backend, full-stack, "
+        "ai-llm, machine-learning, devops, data-engineering, security, "
+        "gamedev, systems, other. Use 'programming' for general CS concepts "
+        "(OOP, algorithms, data structures, design patterns, language features). "
+        "Use 'other' ONLY for non-software topics.\n\n"
+        "## Query quality guidelines\n\n"
+        "Your queries must dig deep. The goal is to find PRIMARY SOURCES — "
+        "official documentation, GitHub issues/discussions, RFCs, benchmarks, "
+        "technical blog posts from maintainers, and detailed teardowns.\n\n"
+        "AVOID queries that will surface:\n"
+        "- PR/marketing announcements and press releases\n"
+        "- 'Top 5/10/N' listicles and roundup articles\n"
+        "- Generic tutorials that repeat the same surface-level information\n"
+        "- SEO-optimized filler content\n\n"
+        "INSTEAD, craft queries that find:\n"
+        "- Official docs, changelogs, and migration guides\n"
+        "- GitHub issues, discussions, and commit messages with real details\n"
+        "- Technical deep-dives, benchmarks, and architecture discussions\n"
+        "- Stack Overflow answers with actual solutions\n"
+        "- Author/maintainer blog posts with insider knowledge\n\n"
+        "Use specific technical terms, library names, function/API names, "
+        "and error messages when relevant. Add site: filters (e.g. "
+        "site:github.com, site:docs.X.com) when a primary source is obvious.\n\n"
+        "## What to produce\n\n"
+        "1. Exactly 2 web search queries that directly address their question "
+        "from different angles. Include the current year (or 'latest') in "
+        "queries unless the user is specifically asking about a different time "
+        "period. This ensures search results are current.\n"
+        "2. A list of 0-3 additional queries for anything that may have changed "
+        "since your training data cutoff — recent releases, breaking changes, "
+        "new tools, newly relevant information, etc. Include the current year "
+        "in these queries. Only include these if the topic is likely to have "
+        "evolved.\n\n"
+        "Return structured output only."
+    ),
+)
+
+
+# --- Experimental planner agent ---
+
+
+class PlannerYouTubeVideo(BaseModel):
+    """A selected YouTube video."""
+
+    video_id: str
+    title: str
+    channel: str
+    url: str
+    thumbnail: str = ""
+
+
+class PlannerResource(BaseModel):
+    """A selected related resource."""
+
+    title: str
+    url: str
+    description: str = ""
+    site_name: str = ""
+
+
+class PlannerOutput(BaseModel):
+    """Output of the experimental planner agent."""
+
+    youtube_videos: list[PlannerYouTubeVideo] = Field(
+        default_factory=list,
+        description="Exactly 3 YouTube videos to recommend, most relevant first.",
+    )
+    resources: list[PlannerResource] = Field(
+        default_factory=list,
+        description="Exactly 5 related web resources (tutorials, docs, guides).",
+    )
+    article_points: list[str] = Field(
+        description=(
+            "Ordered list of key points the article should cover. "
+            "Each point is a concise sentence describing what to address."
+        ),
+    )
+
+
+_exp_planner_agent = Agent(
+    deps_type=ResearchDeps,
+    output_type=PlannerOutput,
+    instructions=(
+        "You are a research planner. You have the user's question, search "
+        "results, and page contents from earlier in this conversation.\n\n"
+        "## Your task\n\n"
+        "Use your tools to find the best resources for the user:\n\n"
+        "1. **YouTube videos** — Use the `youtube_search` tool to find "
+        "relevant videos. Select exactly 3 high-quality, relevant videos "
+        "from the results.\n"
+        "2. **Web resources** — Use the `web_search` tool to find tutorials, "
+        "guides, and documentation. You may also use `read_url` to verify "
+        "quality. Select exactly 5 resources.\n"
+        "3. **Article points** — Based on everything you've seen (the search "
+        "results, page reads, and your own research), produce an ordered "
+        "list of key points the article should cover. These should be "
+        "specific, actionable, and ordered from most to least important.\n\n"
+        "## Selection criteria\n\n"
+        "- **YouTube**: Prefer established channels, conference talks, and "
+        "well-known educators. Match skill level. Reject clickbait.\n"
+        "- **Resources**: Official docs first, then quality tutorials and "
+        "guides. Diversity of source types. No SEO spam.\n"
+        "- **Article points**: Focus on what directly answers the user's "
+        "question, then supporting context. Drop anything tangential.\n\n"
+        "You MUST call `youtube_search` at least once and `web_search` at "
+        "least once. Return structured output only."
+    ),
+)
+
+
+@_exp_planner_agent.tool
+async def exp_youtube_search(
+    ctx: RunContext[ResearchDeps], query: str,
+) -> str:
+    """Search YouTube for videos matching the query. Returns a list of videos
+    with title, channel, video_id, url, and thumbnail."""
+    results = await tools.youtube_search(ctx.deps.http_client, query, num_results=10)
+    if not results or (len(results) == 1 and "error" in results[0]):
+        return "No YouTube results found."
+    lines = []
+    for v in results:
+        lines.append(
+            f"- [{v.get('video_id', '')}] \"{v.get('title', 'Untitled')}\" "
+            f"by {v.get('channel', 'Unknown')} "
+            f"| url: {v.get('url', '')} "
+            f"| thumbnail: {v.get('thumbnail', '')}"
+        )
+    return "\n".join(lines)
+
+
+@_exp_planner_agent.tool
+async def exp_web_search(
+    ctx: RunContext[ResearchDeps], query: str,
+) -> str:
+    """Search the web for pages matching the query. Returns titles, URLs, and descriptions."""
+    await ctx.deps.search_rate_limiter.wait()
+    results = await tools.brave_search(ctx.deps.http_client, query, num_results=15)
+    if not results or (len(results) == 1 and "error" in results[0]):
+        return "No results found."
+    lines = []
+    for i, r in enumerate(results, 1):
+        lines.append(
+            f"{i}. [{r.get('title', 'Untitled')}]({r.get('url', '')}) "
+            f"— {r.get('description', '')}"
+        )
+    return "\n".join(lines)
+
+
+@_exp_planner_agent.tool
+async def exp_planner_read_url(
+    ctx: RunContext[ResearchDeps], url: str,
+) -> str:
+    """Read the full content of a web page to evaluate its quality or extract details."""
+    await ctx.deps.read_rate_limiter.wait_if_needed(url)
+    page = await tools.jina_read(ctx.deps.http_client, url)
+    if "error" in page:
+        return f"Error reading {url}: {page['error']}"
+    content = page.get("content", "")[:4000]
+    return content if content else "Page had no readable content."
+
+
+# --- Experimental answer writer ---
+
+_EXP_ANSWER_PROMPT = f"""\
+You are a research writer. You have the full context of the research so far — \
+the user's question, search results, page reads, and a plan with key article \
+points from the planner.
+
+## Your task
+
+Write the article following the article points from the plan. Cover each \
+point in order, but use your judgment to merge, expand, or reorder where \
+it makes the piece flow better.
+
+If you need to read additional pages to fill gaps or verify claims, use \
+the `read_url` tool.
+
+{WRITING_INSTRUCTIONS}
+"""
+
+_exp_answer_agent = Agent(
+    deps_type=ResearchDeps,
+    output_type=ResearchResult,
+    instructions=_EXP_ANSWER_PROMPT,
+)
+
+
+@_exp_answer_agent.tool
+async def exp_answer_read_url(
+    ctx: RunContext[ResearchDeps], url: str,
+) -> str:
+    """Read the full content of a web page. Use this to fill gaps in the
+    provided search results or to get details from a page that looks relevant."""
+    await ctx.deps.read_rate_limiter.wait_if_needed(url)
+    page = await tools.jina_read(ctx.deps.http_client, url)
+    if "error" in page:
+        return f"Error reading {url}: {page['error']}"
+    content = page.get("content", "")[:4000]
+    return content if content else "Page had no readable content."
+
+
+# --- Experimental example planner ---
+
+
+class ExampleDescription(BaseModel):
+    """Description of a single code example to generate."""
+
+    title: str = Field(description="Short descriptive title (3-10 words)")
+    language: str = Field(
+        description="Programming language (e.g. python, javascript, go, rust, sql)"
+    )
+    description: str = Field(
+        description="What the example should demonstrate and how (2-4 sentences)"
+    )
+    scale: str = Field(
+        description="Expected size: 'short' (5-15 lines), 'medium' (15-40 lines), or 'large' (40-100 lines)"
+    )
+
+
+class ExamplePlan(BaseModel):
+    """Plan for code examples to generate."""
+
+    examples: list[ExampleDescription] = Field(
+        default_factory=list,
+        description=(
+            "Descriptions of examples to generate. Up to 5 short, 2-3 medium, "
+            "or 1 large. Empty if the topic doesn't benefit from code examples."
+        ),
+    )
+
+
+_exp_example_plan_agent = Agent(
+    output_type=ExamplePlan,
+    instructions=(
+        "You plan code examples that complement a research response. You have "
+        "the full conversation history including the research response.\n\n"
+        "## Rules\n\n"
+        "1. **Tailor to skill level.** Beginners need simple, well-commented "
+        "examples. Experts want concise, idiomatic code showing advanced patterns.\n"
+        "2. **Choose the right scale:**\n"
+        "   - Up to 5 SHORT examples (5-15 lines each) for topics with many "
+        "small concepts\n"
+        "   - 2-3 MEDIUM examples (15-40 lines each) for topics that need "
+        "more context\n"
+        "   - 1 LARGE example (40-100 lines) for topics best shown as a "
+        "complete program\n"
+        "   - Mix scales if appropriate.\n"
+        "3. **Don't repeat the response.** Examples should ADD value beyond "
+        "what the written response already covers.\n"
+        "4. **Return an empty list** if the topic doesn't benefit from code "
+        "examples.\n"
+        "5. **Pick the right language.** Use the language most relevant to "
+        "the query. If language-agnostic, prefer Python.\n\n"
+        "Describe each example clearly enough that another model can write "
+        "the code without needing the conversation history.\n\n"
+        "Return structured output only."
+    ),
+)
+
+
+# --- Experimental single example writer ---
+
+_exp_single_example_agent = Agent(
+    output_type=str,
+    instructions=(
+        "You write a single, practical code example. You will receive a "
+        "description of what to write.\n\n"
+        "## Output format\n\n"
+        "Write your output in this exact format:\n\n"
+        "```<language>\n<code>\n```\n\n"
+        "<explanation>\n\n"
+        "Rules:\n"
+        "- The code must be complete and runnable\n"
+        "- Use realistic variable names and scenarios\n"
+        "- Include comments where helpful for understanding\n"
+        "- The explanation should be 1-2 sentences\n"
+        "- Return ONLY the code block and explanation, nothing else"
+    ),
+)
+
+
+# --- Experimental pipeline orchestrator ---
+
+
+async def run_experimental_pipeline(
+    query: str,
+    deps: ResearchDeps,
+    date_context: str,
+    emit: EmitFn,
+) -> tuple[ResearchResult, list[dict], RunUsage, list[dict], list[dict], list[dict], ExpMetaQueryPlan]:
+    """History-threaded experimental research pipeline.
+
+    Threads conversation history through sequential stages:
+    1. Meta + query generation
+    2. Parallel searches + reads (no LLM)
+    3. Planner with YouTube/web search/read tools
+    4. Answer writer (streaming)
+    5. Example plan
+    6. Parallel example generation (streaming)
+
+    Returns (result, tool_log, total_usage, youtube_videos, resources, code_examples, meta_plan).
+    """
+    from pydantic_ai import AgentRunResultEvent
+    from pydantic_ai.messages import (
+        FunctionToolCallEvent,
+        FunctionToolResultEvent,
+        ModelRequest,
+        PartDeltaEvent,
+        TextPartDelta,
+        UserPromptPart,
+    )
+
+    tool_log: list[dict] = []
+    total_usage = RunUsage()
+    youtube_videos: list[dict] = []
+    resources: list[dict] = []
+    code_examples: list[dict] = []
+
+    # ------------------------------------------------------------------
+    # Step 1 — Combined meta + query generation
+    # ------------------------------------------------------------------
+    await emit("status", stage="planning", message="Analyzing query...")
+
+    meta_query_result = await _exp_meta_query_agent.run(
+        f"{date_context}\n\n{query}", model=MODEL,
+    )
+    plan = meta_query_result.output
+    plan.name = plan.name[:200]
+    total_usage.incr(meta_query_result.usage())
+
+    # Emit session meta immediately
+    await emit(
+        "session_meta",
+        name=plan.name,
+        skill_level=plan.skill_level,
+        topic=plan.topic,
+    )
+
+    all_queries = plan.search_queries + plan.gap_queries
+
+    # ------------------------------------------------------------------
+    # Step 2 — Parallel Brave searches + Jina reads (no LLM)
+    # ------------------------------------------------------------------
+    await emit("status", stage="researching", message=f"Running {len(all_queries)} searches...")
+
+    async def _search(q: str) -> tuple[str, list[dict]]:
+        await deps.search_rate_limiter.wait()
+        return q, await tools.brave_search(deps.http_client, q, num_results=15)
+
+    search_tasks = [_search(q) for q in all_queries]
+    search_results_by_query: list[tuple[str, list[dict]]] = await asyncio.gather(*search_tasks)
+
+    # Emit search results and collect first URLs to read
+    all_search_results: list[dict] = []
+    first_urls: list[tuple[str, str]] = []
+
+    for q, results in search_results_by_query:
+        has_results = results and not (len(results) == 1 and "error" in results[0])
+        display = (
+            "\n".join(f"{i}. {r.get('title', 'Untitled')} — {r.get('url', '')}" for i, r in enumerate(results, 1))
+            if has_results
+            else "No results found."
+        )
+        tool_log.append({
+            "tool": "search",
+            "input": {"query": q},
+            "content": display,
+            "status": "complete",
+        })
+        await emit("tool_use", tool="search", input={"query": q}, status="running")
+        await emit("tool_result", tool="search", status="complete", content=display)
+
+        if has_results:
+            all_search_results.extend(results)
+            for r in results:
+                if "error" not in r and r.get("url"):
+                    first_urls.append((r["url"], r.get("title", "Untitled")))
+                    break
+
+    # Deduplicate first_urls
+    seen_urls: set[str] = set()
+    unique_first_urls: list[tuple[str, str]] = []
+    for url, title in first_urls:
+        if url not in seen_urls:
+            seen_urls.add(url)
+            unique_first_urls.append((url, title))
+
+    # Parallel Jina reads
+    await emit("status", stage="reading", message=f"Reading {len(unique_first_urls)} pages...")
+
+    reads: list[dict] = []
+
+    async def _read(url: str, title: str) -> None:
+        await deps.read_rate_limiter.wait_if_needed(url)
+        await emit("tool_use", tool="read", input={"url": url}, status="running")
+        page = await tools.jina_read(deps.http_client, url)
+        if "error" in page:
+            tool_log.append({
+                "tool": "read", "input": {"url": url},
+                "content": f"Could not read: {page['error']}", "status": "error",
+            })
+            await emit("tool_result", tool="read", status="error", content=f"Could not read: {page['error']}")
+            return
+        content = page.get("content", "")[:4000]
+        reads.append({"url": url, "title": title, "content": content})
+        tool_log.append({
+            "tool": "read", "input": {"url": url},
+            "content": f"Read {len(content)} chars from {title}", "status": "complete",
+        })
+        await emit("tool_result", tool="read", status="complete", content=f"Read {len(content)} chars from {title}")
+
+    await asyncio.gather(*(_read(url, title) for url, title in unique_first_urls))
+
+    # Build context string for injection into history
+    search_section = "\n\n".join(
+        f"### Search: {q}\n" + "\n".join(
+            f"- [{r.get('title', 'Untitled')}]({r.get('url', '')}) — {r.get('description', '')}"
+            for r in results
+            if "error" not in r
+        )
+        for q, results in search_results_by_query
+    )
+
+    read_section = "\n\n".join(
+        f"### Page: [{rd['title']}]({rd['url']})\n{rd['content']}"
+        for rd in reads
+    ) if reads else "No pages could be read."
+
+    search_context = (
+        f"## Search Results\n{search_section}\n\n"
+        f"## Page Contents\n{read_section}"
+    )
+
+    # Inject search/read results into conversation history
+    history = list(meta_query_result.all_messages())
+    history.append(ModelRequest(parts=[UserPromptPart(content=search_context)]))
+
+    # ------------------------------------------------------------------
+    # Step 3 — Planner (with YouTube search, web search, read tools)
+    # ------------------------------------------------------------------
+    await emit("status", stage="planning_resources", message="Planning article and finding resources...")
+
+    planner_result_data: PlannerOutput | None = None
+
+    async for event in _exp_planner_agent.run_stream_events(
+        "Using the search results and page contents above, find the best "
+        "YouTube videos and web resources for this query. Then plan the "
+        "key points the article should cover.",
+        message_history=history,
+        deps=deps,
+        model=MODEL,
+    ):
+        if isinstance(event, FunctionToolCallEvent):
+            args = event.part.args
+            tool_input = args if isinstance(args, dict) else {"query": str(args)}
+            await emit("tool_use", tool=event.part.tool_name, input=tool_input, status="running")
+            tool_log.append({"tool": event.part.tool_name, "input": tool_input, "status": "running"})
+
+        elif isinstance(event, FunctionToolResultEvent):
+            raw_content = str(event.result.content)[:5120]
+            tool_name = event.result.tool_name
+            # Summarize for display
+            if tool_name in ("exp_youtube_search", "youtube_search"):
+                display_content = raw_content
+            elif tool_name in ("exp_planner_read_url", "read_url"):
+                url = ""
+                for entry in reversed(tool_log):
+                    if entry.get("tool") == tool_name and entry.get("status") == "running":
+                        url = entry.get("input", {}).get("url", "")
+                        break
+                display_content = f"Read {len(raw_content)} chars from {url}" if url else f"Read {len(raw_content)} chars"
+            else:
+                display_content = raw_content
+            await emit("tool_result", tool=tool_name, status="complete", content=display_content)
+            for entry in reversed(tool_log):
+                if entry.get("tool") == tool_name and entry.get("status") == "running":
+                    entry["status"] = "complete"
+                    entry["content"] = display_content
+                    break
+
+        elif isinstance(event, AgentRunResultEvent):
+            planner_result_data = event.result.output
+            total_usage.incr(event.result.usage())
+
+    if planner_result_data is None:
+        raise RuntimeError("Planner agent completed without producing a result")
+
+    planner_messages = list(event.result.all_messages())  # type: ignore[union-attr]
+
+    # ------------------------------------------------------------------
+    # Step 4 — Immediate render of videos and resources
+    # ------------------------------------------------------------------
+    if planner_result_data.youtube_videos:
+        youtube_videos = [v.model_dump() for v in planner_result_data.youtube_videos]
+        await emit("youtube_videos", videos=youtube_videos)
+
+    if planner_result_data.resources:
+        resources = [r.model_dump() for r in planner_result_data.resources]
+        await emit("resources", resources=resources)
+
+    # ------------------------------------------------------------------
+    # Step 5 — Answer writer (streaming)
+    # ------------------------------------------------------------------
+    await emit("status", stage="synthesizing", message="Writing answer...")
+
+    result_data: ResearchResult | None = None
+    answer_messages = None
+
+    async for event in _exp_answer_agent.run_stream_events(
+        "Write the article based on the planned points. Use the research "
+        "context from the conversation history.",
+        message_history=planner_messages,
+        deps=deps,
+        model=MODEL,
+    ):
+        if isinstance(event, FunctionToolCallEvent):
+            args = event.part.args
+            tool_input = args if isinstance(args, dict) else {"url": str(args)}
+            await emit("tool_use", tool=event.part.tool_name, input=tool_input, status="running")
+            tool_log.append({"tool": event.part.tool_name, "input": tool_input, "status": "running"})
+
+        elif isinstance(event, FunctionToolResultEvent):
+            raw_content = str(event.result.content)[:5120]
+            url = ""
+            for entry in reversed(tool_log):
+                if entry.get("tool") == event.result.tool_name and entry.get("status") == "running":
+                    url = entry.get("input", {}).get("url", "")
+                    break
+            if raw_content.startswith("Error reading"):
+                display_content = raw_content
+            elif raw_content == "Page had no readable content.":
+                display_content = raw_content
+            else:
+                display_content = f"Read {len(raw_content)} chars from {url}" if url else f"Read {len(raw_content)} chars"
+            await emit("tool_result", tool=event.result.tool_name, status="complete", content=display_content)
+            for entry in reversed(tool_log):
+                if entry.get("tool") == event.result.tool_name and entry.get("status") == "running":
+                    entry["status"] = "complete"
+                    entry["content"] = display_content
+                    break
+
+        elif isinstance(event, PartDeltaEvent):
+            if isinstance(event.delta, TextPartDelta):
+                await emit("response_chunk", delta=event.delta.content_delta)
+
+        elif isinstance(event, AgentRunResultEvent):
+            result_data = event.result.output
+            answer_messages = list(event.result.all_messages())
+            total_usage.incr(event.result.usage())
+
+    if result_data is None:
+        raise RuntimeError("Answer writer completed without producing a result")
+
+    # ------------------------------------------------------------------
+    # Step 6 — Example plan
+    # ------------------------------------------------------------------
+    if plan.topic != "other" and answer_messages:
+        try:
+            example_plan_result = await _exp_example_plan_agent.run(
+                "Plan code examples for this response.",
+                message_history=answer_messages,
+                model=MODEL,
+            )
+            total_usage.incr(example_plan_result.usage())
+            example_descriptions = example_plan_result.output.examples
+
+            # ------------------------------------------------------------------
+            # Step 7 — Parallel example generation (streaming)
+            # ------------------------------------------------------------------
+            if example_descriptions:
+                await emit("code_examples_status", status="generating")
+
+                async def _gen_example(idx: int, desc: ExampleDescription) -> dict | None:
+                    from google.genai.types import ThinkingLevel
+
+                    try:
+                        prompt = (
+                            f"## Example to Write\n"
+                            f"Title: {desc.title}\n"
+                            f"Language: {desc.language}\n"
+                            f"Scale: {desc.scale}\n\n"
+                            f"## Description\n{desc.description}"
+                        )
+                        text_chunks: list[str] = []
+
+                        async for ev in _exp_single_example_agent.run_stream_events(
+                            prompt,
+                            model=CODE_EXAMPLES_MODEL,
+                            model_settings={
+                                "google_thinking_config": {
+                                    "thinking_level": ThinkingLevel.MEDIUM,
+                                },
+                            },
+                        ):
+                            if isinstance(ev, PartDeltaEvent):
+                                if isinstance(ev.delta, TextPartDelta):
+                                    text_chunks.append(ev.delta.content_delta)
+                                    await emit(
+                                        "code_example_chunk",
+                                        index=idx,
+                                        delta=ev.delta.content_delta,
+                                    )
+                            elif isinstance(ev, AgentRunResultEvent):
+                                total_usage.incr(ev.result.usage())
+
+                        full_text = "".join(text_chunks)
+                        # Parse the streamed text into structured example data
+                        example_data = _parse_example_text(
+                            full_text, desc.title, desc.language,
+                        )
+                        await emit(
+                            "code_example_complete",
+                            index=idx,
+                            example=example_data,
+                        )
+                        return example_data
+                    except Exception as exc:
+                        logger.exception(
+                            "Failed to generate example %d: %s", idx, exc,
+                        )
+                        return None
+
+                example_results = await asyncio.gather(
+                    *[_gen_example(i, desc) for i, desc in enumerate(example_descriptions)],
+                )
+                code_examples = [ex for ex in example_results if ex is not None]
+                await emit("code_examples_status", status="done")
+
+        except Exception as exc:
+            logger.exception("Example planning/generation failed: %s", exc)
+            await emit("code_examples_status", status="done")
+
+    return result_data, tool_log, total_usage, youtube_videos, resources, code_examples, plan
+
+
+def _parse_example_text(text: str, fallback_title: str, fallback_lang: str) -> dict:
+    """Parse streamed example text into structured example data.
+
+    Expected format:
+    ```language
+    code
+    ```
+
+    explanation
+    """
+    import re
+
+    code = ""
+    language = fallback_lang
+    explanation = ""
+
+    # Extract code block
+    code_match = re.search(r"```(\w*)\n(.*?)```", text, re.DOTALL)
+    if code_match:
+        if code_match.group(1):
+            language = code_match.group(1)
+        code = code_match.group(2).strip()
+        # Everything after the code block is the explanation
+        after_code = text[code_match.end():].strip()
+        if after_code:
+            explanation = after_code
+    else:
+        # No code block found — treat the whole text as code
+        code = text.strip()
+
+    return {
+        "title": fallback_title,
+        "language": language,
+        "code": code,
+        "explanation": explanation,
+    }

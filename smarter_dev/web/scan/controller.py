@@ -59,6 +59,9 @@ class ScanController(Controller):
 
         user_id = request.session.get("user_id", "")
         tz = data.get("tz", "").strip() or None
+        pipeline_mode = data.get("mode", "lite").strip()
+        if pipeline_mode not in ("lite", "experimental"):
+            pipeline_mode = "lite"
 
         # Rate limit: 25 lite researches per week per user (admins exempt)
         user_perms = await get_user_permissions(db_session, user_id)
@@ -72,12 +75,12 @@ class ScanController(Controller):
 
         research = await ops.create_session(
             db_session, query=query, user_id=user_id,
-            pipeline_mode="lite",
+            pipeline_mode=pipeline_mode,
         )
         await db_session.commit()
 
         # Start the unified pipeline — one task handles everything
-        start_pipeline_task(research.id, query, user_id, tz=tz)
+        start_pipeline_task(research.id, query, user_id, tz=tz, mode=pipeline_mode)
 
         return Redirect(path=f"/r/{research.id}")
 

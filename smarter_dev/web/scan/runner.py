@@ -48,6 +48,7 @@ from smarter_dev.web.scan.agent import (
     rank_resource_results,
     rank_youtube_results,
     research_agent,
+    run_experimental_pipeline,
     run_lite_pipeline,
 )
 from smarter_dev.web.scan.crud import ResearchSessionOperations
@@ -378,21 +379,74 @@ async def run_session_pipeline(
         finally:
             await emit("code_examples_status", status="done")
 
+    async def _do_experimental_research() -> None:
+        nonlocal meta_name, meta_topic, meta_skill
+        nonlocal research_result, research_tool_log
+        nonlocal youtube_videos, resources, code_examples_data
+
+        async with httpx.AsyncClient(
+            timeout=30.0, headers={"User-Agent": _USER_AGENT},
+        ) as http_client:
+            deps = ResearchDeps(
+                session_id=sid,
+                http_client=http_client,
+                search_rate_limiter=RateLimiter(min_delay=1.5),
+                read_rate_limiter=URLRateLimiter(min_delay=0.0),
+            )
+            (
+                result_data, tool_log, total_usage,
+                exp_youtube, exp_resources, exp_examples, meta_plan,
+            ) = await run_experimental_pipeline(
+                query, deps, date_context, emit,
+            )
+
+        research_result = result_data
+        research_tool_log = tool_log
+        all_usage.append((total_usage, MODEL))
+
+        # Capture meta from the experimental pipeline's combined output
+        meta_name = meta_plan.name
+        meta_topic = meta_plan.topic
+        meta_skill = meta_plan.skill_level
+        youtube_videos = exp_youtube
+        resources = exp_resources
+        code_examples_data = exp_examples
+
+        duration = time.monotonic() - start_time
+        await emit(
+            "complete",
+            result_id=sid,
+            result_url=f"https://scan.smarter.dev/r/{sid}",
+            summary=result_data.summary,
+            response=result_data.response,
+            sources=[s.model_dump() for s in result_data.sources],
+            duration=round(duration, 2),
+        )
+        research_done.set()
+
     # -- Run all phases concurrently --
     try:
-        research_fn = _do_lite_research if mode == "lite" else _do_premium_research
+        if mode == "experimental":
+            # Experimental pipeline handles everything sequentially
+            results = await asyncio.gather(
+                _do_experimental_research(),
+                return_exceptions=True,
+            )
+            phase_names = ["experimental"]
+        else:
+            research_fn = _do_lite_research if mode == "lite" else _do_premium_research
 
-        results = await asyncio.gather(
-            _do_meta(),
-            research_fn(),
-            _do_youtube(),
-            _do_resources(),
-            _do_code_examples(),
-            return_exceptions=True,
-        )
+            results = await asyncio.gather(
+                _do_meta(),
+                research_fn(),
+                _do_youtube(),
+                _do_resources(),
+                _do_code_examples(),
+                return_exceptions=True,
+            )
+            phase_names = ["meta", "research", "youtube", "resources", "code_examples"]
 
         # Log any phase failures
-        phase_names = ["meta", "research", "youtube", "resources", "code_examples"]
         for name, result in zip(phase_names, results):
             if isinstance(result, Exception):
                 logger.error(
@@ -401,8 +455,9 @@ async def run_session_pipeline(
                 )
 
         # Check if research itself failed
-        if isinstance(results[1], Exception):
-            raise results[1]
+        research_idx = 0 if mode == "experimental" else 1
+        if isinstance(results[research_idx], Exception):
+            raise results[research_idx]
 
         if research_result is None:
             raise RuntimeError("Research pipeline completed without producing a result")
