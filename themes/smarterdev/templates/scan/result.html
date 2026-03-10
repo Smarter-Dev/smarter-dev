@@ -393,9 +393,11 @@ if (window.__skriftNotifications) {
             if (data.status === "generating" && section && list) {
                 section.classList.remove("scan-hidden");
                 list.innerHTML = '<p class="scan-sidebar-empty" style="animation:scan-pulse 2s ease-in-out infinite">Generating code examples...</p>';
-            } else if (data.status === "done" && section) {
-                // No examples generated or error — hide the section
-                section.classList.add("scan-hidden");
+            } else if (data.status === "done" && section && list) {
+                // Only hide if no examples were actually rendered
+                if (!list.querySelector(".scan-example")) {
+                    section.classList.add("scan-hidden");
+                }
             }
         }
 
