@@ -3,7 +3,7 @@
 import logging
 from typing import Annotated
 
-from litestar import Controller, Request, get, post
+from litestar import Controller, MediaType, Request, get, post
 from litestar.enums import RequestEncodingType
 from litestar.params import Body
 from litestar.response import Redirect, Template
@@ -58,6 +58,11 @@ class ScanController(Controller):
         start_pipeline_task(research.id, query, user_id, tz=tz)
 
         return Redirect(path=f"/r/{research.id}")
+
+    @get("/robots.txt", media_type=MediaType.TEXT)
+    async def robots_txt(self) -> str:
+        """Serve robots.txt for scan.smarter.dev."""
+        return "User-agent: *\nAllow: /\n\nSitemap: https://scan.smarter.dev/sitemap.xml\n"
 
     @get("/r/{result_id:str}")
     async def result(
