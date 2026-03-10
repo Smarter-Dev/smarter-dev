@@ -5,8 +5,10 @@ from typing import Annotated
 
 from litestar import Controller, MediaType, Request, get, post
 from litestar.enums import RequestEncodingType
+from litestar.exceptions import ClientException
 from litestar.params import Body
 from litestar.response import Redirect, Template
+from litestar.status_codes import HTTP_429_TOO_MANY_REQUESTS
 from skrift.auth.guards import Permission, auth_guard
 from skrift.lib.markdown import render_markdown
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +19,8 @@ from smarter_dev.web.scan.runner import start_pipeline_task
 
 logger = logging.getLogger(__name__)
 ops = ResearchSessionOperations()
+
+WEEKLY_RESEARCH_LIMIT = 25
 
 
 class ScanController(Controller):
@@ -47,6 +51,14 @@ class ScanController(Controller):
 
         user_id = request.session.get("user_id", "")
         tz = data.get("tz", "").strip() or None
+
+        # Rate limit: 25 lite researches per week per user
+        recent_count = await ops.count_recent_sessions(db_session, user_id)
+        if recent_count >= WEEKLY_RESEARCH_LIMIT:
+            raise ClientException(
+                detail=f"Weekly research limit reached ({WEEKLY_RESEARCH_LIMIT}/week). Try again next week.",
+                status_code=HTTP_429_TOO_MANY_REQUESTS,
+            )
 
         research = await ops.create_session(
             db_session, query=query, user_id=user_id,

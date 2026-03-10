@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.models import ResearchSession
@@ -199,6 +200,25 @@ class ResearchSessionOperations:
                 .values(tool_log=tool_log)
             )
             await session.commit()
+
+    async def count_recent_sessions(
+        self,
+        session: AsyncSession,
+        user_id: str,
+        since: datetime | None = None,
+    ) -> int:
+        """Count sessions created by a user since the given datetime."""
+        if since is None:
+            since = datetime.now(timezone.utc) - timedelta(weeks=1)
+        result = await session.execute(
+            select(func.count())
+            .select_from(ResearchSession)
+            .where(
+                ResearchSession.user_id == user_id,
+                ResearchSession.created_at >= since,
+            )
+        )
+        return result.scalar_one()
 
     async def list_sessions(
         self,
