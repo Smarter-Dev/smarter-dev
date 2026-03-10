@@ -11,7 +11,9 @@ from litestar.response import Redirect, Template
 from litestar.status_codes import HTTP_429_TOO_MANY_REQUESTS
 from skrift.auth.guards import auth_guard
 from skrift.auth.services import get_user_permissions
+from skrift.db.models.user import User
 from skrift.lib.markdown import render_markdown
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.scan.citations import process_citations
@@ -116,10 +118,13 @@ class ScanController(Controller):
             og_meta["title"] = "Research Result"
             og_meta["description"] = "AI-powered research result on Scan by Smarter Dev."
 
-        # Get viewer's display name for "X asked" header
-        viewer_name = ""
-        if request.session:
-            viewer_name = request.session.get("user_name", "")
+        # Look up the creator's display name from the DB
+        creator_name = ""
+        if session_data:
+            result = await db_session.execute(
+                select(User.name).where(User.id == session_data.user_id)
+            )
+            creator_name = result.scalar_one_or_none() or ""
 
         return Template(
             "scan/result.html",
@@ -128,7 +133,6 @@ class ScanController(Controller):
                 "session": session_data,
                 "rendered_response": rendered_response,
                 "og_meta": og_meta,
-                "viewer_name": viewer_name,
-                "viewer_id": request.session.get("user_id", "") if request.session else "",
+                "creator_name": creator_name,
             },
         )

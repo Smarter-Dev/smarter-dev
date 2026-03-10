@@ -148,7 +148,7 @@
 {% block content %}
 <div class="report-header">
     {% if session %}
-    <div class="scan-asked">{% if viewer_id and viewer_id == session.user_id and viewer_name %}{{ viewer_name }}{% else %}Someone{% endif %} asked</div>
+    <div class="scan-asked">{% if creator_name %}{{ creator_name }}{% else %}Someone{% endif %} asked</div>
     <div class="report-query">{{ session.query }}</div>
     {% else %}
     <div class="report-query">Research Result</div>
