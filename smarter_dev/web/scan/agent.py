@@ -1268,7 +1268,7 @@ async def youtube_search(
     ctx.deps.youtube_search_count += 1
     await ctx.deps.search_rate_limiter.wait()
     results = await tools.brave_search(
-        ctx.deps.http_client, f"site:youtube.com {query}", num_results=5,
+        ctx.deps.http_client, f"site:youtube.com {query}", num_results=10,
     )
     if not results or (len(results) == 1 and "error" in results[0]):
         return "No results found."
@@ -1399,6 +1399,9 @@ _example_plan_agent = Agent(
         "research response would benefit from concrete code. Think about "
         "their skill level — what do they already understand vs. what do "
         "they need demonstrated?\n\n"
+        "The examples should cover the same scope as the answer — if the "
+        "answer covers multiple concepts or techniques, plan examples that "
+        "demonstrate each of them, not just one narrow slice.\n\n"
         "## Rules\n\n"
         "1. **Tailor to skill level.** Beginners need simple, well-commented "
         "examples. Experts want concise, idiomatic code showing advanced patterns.\n"
@@ -1479,7 +1482,7 @@ async def run_experimental_pipeline(
 
     Threads conversation history through sequential stages:
     1. Meta analysis (name, skill level, topic)
-    2. Agentic planner with search + source_readable tools (Gemini 3 Flash)
+    2. Agentic planner with search + source_readable tools
     3. Post-planner content gathering (video metadata, uncached source reads)
     4. Answer writer (streaming)
     5. Example plan
@@ -1541,7 +1544,7 @@ async def run_experimental_pipeline(
         "key points the article should cover.",
         message_history=history,
         deps=deps,
-        model=CODE_EXAMPLES_MODEL,
+        model=MODEL,
     ):
         if isinstance(event, FunctionToolCallEvent):
             args = event.part.args
