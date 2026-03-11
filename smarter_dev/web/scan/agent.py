@@ -1544,7 +1544,7 @@ async def run_experimental_pipeline(
         "key points the article should cover.",
         message_history=history,
         deps=deps,
-        model=MODEL,
+        model=CODE_EXAMPLES_MODEL,
     ):
         if isinstance(event, FunctionToolCallEvent):
             args = event.part.args
