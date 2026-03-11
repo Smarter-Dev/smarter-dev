@@ -37,6 +37,7 @@ class ResearchDeps:
     search_rate_limiter: RateLimiter
     read_rate_limiter: URLRateLimiter
     source_cache: dict[str, dict] = dataclasses.field(default_factory=dict)
+    search_count: int = 0
 
 
 class Source(BaseModel):
@@ -1184,9 +1185,9 @@ _planner_agent = Agent(
         "## Your task\n\n"
         "Think about what the user is looking for and plan how best to "
         "answer their query. Then use your tools to find the best sources:\n\n"
-        "1. **Search** — Use the `search` tool as many times as you need "
-        "to find high-quality sources. Each search returns titles, URLs, "
-        "and descriptions from the web.\n"
+        "1. **Search** — Use the `search` tool up to 5 times to find "
+        "high-quality sources. Each search returns titles, URLs, and "
+        "descriptions from the web. Make each search count.\n"
         "2. **Verify sources** — Many sites block automated readers, so "
         "you MUST use `source_readable` on each web page you want to "
         "recommend to confirm it's actually accessible. It returns only "
@@ -1235,9 +1236,13 @@ async def search(
     ctx: RunContext[ResearchDeps], query: str,
 ) -> str:
     """Search the web. Returns titles, URLs, and descriptions. To find
-    YouTube videos, include 'site:youtube.com' in your query."""
+    YouTube videos, include 'site:youtube.com' in your query.
+    You have a maximum of 5 searches per session."""
+    if ctx.deps.search_count >= 5:
+        return "ERROR: Search limit reached (5/5). Work with the results you have."
+    ctx.deps.search_count += 1
     await ctx.deps.search_rate_limiter.wait()
-    results = await tools.brave_search(ctx.deps.http_client, query, num_results=15)
+    results = await tools.brave_search(ctx.deps.http_client, query, num_results=5)
     if not results or (len(results) == 1 and "error" in results[0]):
         return "No results found."
     lines = []
