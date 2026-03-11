@@ -132,49 +132,63 @@ async def jina_search(
         return [{"error": f"Search failed: {e}"}]
 
 
+_YT_VIDEO_ID_RE = re.compile(
+    r"(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/shorts/)"
+    r"([a-zA-Z0-9_-]{11})"
+)
+
+
 async def youtube_search(
     client: httpx.AsyncClient,
     query: str,
-    num_results: int = 3,
+    num_results: int = 10,
 ) -> list[dict]:
-    """Search YouTube via the Data API v3.
+    """Search for YouTube videos using Brave Search (site:youtube.com).
 
-    Returns a list of dicts with keys: title, url, channel, thumbnail, video_id.
+    Uses Brave Search instead of the YouTube Data API to avoid quota costs.
+    Returns a list of dicts with keys: title, url, video_id.
+    Channel and thumbnail info will be filled in by youtube_video_details().
     """
-    api_key = os.environ.get("YOUTUBE_API_KEY", "")
-    if not api_key:
-        return [{"error": "YOUTUBE_API_KEY not configured"}]
+    brave_key = os.environ.get("BRAVE_SEARCH_API_KEY", "")
+    if not brave_key:
+        return [{"error": "BRAVE_SEARCH_API_KEY not configured"}]
 
     try:
         resp = await client.get(
-            "https://www.googleapis.com/youtube/v3/search",
+            "https://api.search.brave.com/res/v1/web/search",
             params={
-                "part": "snippet",
-                "q": query,
-                "type": "video",
-                "maxResults": min(num_results, 10),
-                "relevanceLanguage": "en",
-                "key": api_key,
+                "q": f"site:youtube.com {query}",
+                "count": min(num_results, 20),
+            },
+            headers={
+                "Accept": "application/json",
+                "Accept-Encoding": "gzip",
+                "X-Subscription-Token": brave_key,
             },
         )
         resp.raise_for_status()
         data = resp.json()
 
         results = []
-        for item in data.get("items", []):
-            snippet = item.get("snippet", {})
-            video_id = item.get("id", {}).get("videoId", "")
+        seen_ids: set[str] = set()
+        for item in data.get("web", {}).get("results", []):
+            url = item.get("url", "")
+            match = _YT_VIDEO_ID_RE.search(url)
+            if not match:
+                continue
+            video_id = match.group(1)
+            if video_id in seen_ids:
+                continue
+            seen_ids.add(video_id)
             results.append({
-                "title": snippet.get("title", ""),
+                "title": item.get("title", ""),
                 "url": f"https://www.youtube.com/watch?v={video_id}",
-                "channel": snippet.get("channelTitle", ""),
-                "thumbnail": snippet.get("thumbnails", {}).get("medium", {}).get("url", ""),
                 "video_id": video_id,
             })
         return results
 
     except Exception as e:
-        logger.error("YouTube search failed: %s", e)
+        logger.error("YouTube search (Brave) failed: %s", e)
         return [{"error": f"YouTube search failed: {e}"}]
 
 
@@ -227,6 +241,21 @@ async def youtube_video_details(
     except Exception as e:
         logger.error("YouTube video details failed: %s", e)
         return []
+
+
+def _duration_to_seconds(duration_str: str) -> int:
+    """Convert a human-readable duration (e.g. '12:34' or '1:02:34') to total seconds."""
+    if not duration_str:
+        return 0
+    parts = duration_str.split(":")
+    try:
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+        return 0
+    except ValueError:
+        return 0
 
 
 def _parse_iso8601_duration(iso: str) -> str:

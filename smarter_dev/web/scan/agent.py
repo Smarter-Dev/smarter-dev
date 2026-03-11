@@ -1251,6 +1251,12 @@ async def youtube_search(
     results = await tools.youtube_search(ctx.deps.http_client, query, num_results=10)
     if not results or (len(results) == 1 and "error" in results[0]):
         return "No YouTube results found."
+    # Fetch video details to get channel names
+    video_ids = [v.get("video_id", "") for v in results if v.get("video_id")]
+    if video_ids:
+        detailed = await tools.youtube_video_details(ctx.deps.http_client, video_ids)
+        if detailed:
+            results = detailed
     lines = []
     for v in results:
         lines.append(

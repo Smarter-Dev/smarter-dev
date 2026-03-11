@@ -56,6 +56,7 @@ from smarter_dev.web.scan.pricing import calc_session_cost
 from smarter_dev.web.scan.tools import (
     RateLimiter,
     URLRateLimiter,
+    _duration_to_seconds,
     brave_search,
     fetch_og_metadata,
     youtube_search,
@@ -286,10 +287,32 @@ async def run_session_pipeline(
         async with httpx.AsyncClient(
             timeout=15.0, headers={"User-Agent": _USER_AGENT},
         ) as http_client:
-            videos = await youtube_search(http_client, yt_query, num_results=10)
+            videos = await youtube_search(http_client, yt_query, num_results=20)
 
         if not videos or (len(videos) == 1 and "error" in videos[0]):
             logger.warning("YouTube search returned no/error results for %s", sid)
+            return
+
+        # Fetch full metadata (including duration) before ranking so we can
+        # filter out shorts and videos under 5 minutes.
+        video_ids = [v.get("video_id", "") for v in videos if v.get("video_id")]
+        if video_ids:
+            async with httpx.AsyncClient(
+                timeout=15.0, headers={"User-Agent": _USER_AGENT},
+            ) as yt_client:
+                detailed = await youtube_video_details(yt_client, video_ids)
+            if detailed:
+                videos = detailed
+
+        # Filter out videos shorter than 5 minutes
+        min_duration_secs = 5 * 60
+        videos = [
+            v for v in videos
+            if _duration_to_seconds(v.get("duration", "")) >= min_duration_secs
+        ]
+
+        if not videos:
+            logger.warning("YouTube: no videos >= 5 min for %s", sid)
             return
 
         logger.info("YouTube: ranking %d candidates for %s", len(videos), sid)
@@ -297,15 +320,6 @@ async def run_session_pipeline(
         all_usage.append((rank_usage, MODEL))
 
         if ranked:
-            # Fetch full metadata (including duration) via the videos API
-            video_ids = [v.get("video_id", "") for v in ranked if v.get("video_id")]
-            if video_ids:
-                async with httpx.AsyncClient(
-                    timeout=15.0, headers={"User-Agent": _USER_AGENT},
-                ) as yt_client:
-                    detailed = await youtube_video_details(yt_client, video_ids)
-                if detailed:
-                    ranked = detailed
             youtube_videos = ranked
             logger.info("YouTube: selected %d videos for %s", len(ranked), sid)
             await emit("youtube_videos", videos=ranked)
