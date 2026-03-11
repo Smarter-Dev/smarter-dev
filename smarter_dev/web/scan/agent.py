@@ -1045,7 +1045,7 @@ class ExpMetaQueryPlan(BaseModel):
     )
 
 
-_exp_meta_query_agent = Agent(
+_meta_query_agent = Agent(
     output_type=ExpMetaQueryPlan,
     instructions=(
         "You are a research planner. You will be given the current date "
@@ -1188,7 +1188,7 @@ class PlannerOutput(BaseModel):
     )
 
 
-_exp_planner_agent = Agent(
+_planner_agent = Agent(
     deps_type=ResearchDeps,
     output_type=PlannerOutput,
     instructions=(
@@ -1239,8 +1239,8 @@ _exp_planner_agent = Agent(
 )
 
 
-@_exp_planner_agent.tool
-async def exp_youtube_search(
+@_planner_agent.tool
+async def youtube_search(
     ctx: RunContext[ResearchDeps], query: str,
 ) -> str:
     """Search YouTube for videos matching the query. Returns a list of videos
@@ -1260,8 +1260,8 @@ async def exp_youtube_search(
     return "\n".join(lines)
 
 
-@_exp_planner_agent.tool
-async def exp_web_search(
+@_planner_agent.tool
+async def web_search(
     ctx: RunContext[ResearchDeps], query: str,
 ) -> str:
     """Search the web for pages matching the query. Returns titles, URLs, and descriptions."""
@@ -1278,8 +1278,8 @@ async def exp_web_search(
     return "\n".join(lines)
 
 
-@_exp_planner_agent.tool
-async def exp_planner_read_url(
+@_planner_agent.tool
+async def planner_read_url(
     ctx: RunContext[ResearchDeps], url: str,
 ) -> str:
     """Read the full content of a web page to evaluate its quality or extract details."""
@@ -1310,15 +1310,15 @@ the `read_url` tool.
 {WRITING_INSTRUCTIONS}
 """
 
-_exp_answer_agent = Agent(
+_answer_agent = Agent(
     deps_type=ResearchDeps,
     output_type=ResearchResult,
     instructions=_EXP_ANSWER_PROMPT,
 )
 
 
-@_exp_answer_agent.tool
-async def exp_answer_read_url(
+@_answer_agent.tool
+async def answer_read_url(
     ctx: RunContext[ResearchDeps], url: str,
 ) -> str:
     """Read the full content of a web page. Use this to fill gaps in the
@@ -1361,7 +1361,7 @@ class ExamplePlan(BaseModel):
     )
 
 
-_exp_example_plan_agent = Agent(
+_example_plan_agent = Agent(
     output_type=ExamplePlan,
     instructions=(
         "You plan code examples that complement a research response. You have "
@@ -1401,7 +1401,7 @@ _exp_example_plan_agent = Agent(
 
 # --- Experimental single example writer ---
 
-_exp_single_example_agent = Agent(
+_single_example_agent = Agent(
     output_type=str,
     instructions=(
         "You write a single, practical code example. You will receive a "
@@ -1462,7 +1462,7 @@ async def run_experimental_pipeline(
     # ------------------------------------------------------------------
     await emit("status", stage="planning", message="Analyzing query...")
 
-    meta_query_result = await _exp_meta_query_agent.run(
+    meta_query_result = await _meta_query_agent.run(
         f"{date_context}\n\n{query}", model=MODEL,
     )
     plan = meta_query_result.output
@@ -1583,7 +1583,7 @@ async def run_experimental_pipeline(
 
     planner_result_data: PlannerOutput | None = None
 
-    async for event in _exp_planner_agent.run_stream_events(
+    async for event in _planner_agent.run_stream_events(
         "Using the search results and page contents above, find the best "
         "YouTube videos and web resources for this query. Then plan the "
         "key points the article should cover.",
@@ -1601,9 +1601,9 @@ async def run_experimental_pipeline(
             raw_content = str(event.result.content)[:5120]
             tool_name = event.result.tool_name
             # Summarize for display
-            if tool_name in ("exp_youtube_search", "youtube_search"):
+            if tool_name == "youtube_search":
                 display_content = raw_content
-            elif tool_name in ("exp_planner_read_url", "read_url"):
+            elif tool_name in ("planner_read_url", "read_url"):
                 url = ""
                 for entry in reversed(tool_log):
                     if entry.get("tool") == tool_name and entry.get("status") == "running":
@@ -1672,7 +1672,7 @@ async def run_experimental_pipeline(
     result_data: ResearchResult | None = None
     answer_messages = None
 
-    async for event in _exp_answer_agent.run_stream_events(
+    async for event in _answer_agent.run_stream_events(
         "Write the article based on the planned points. Use the research "
         "context from the conversation history.",
         message_history=planner_messages,
@@ -1722,7 +1722,7 @@ async def run_experimental_pipeline(
     # ------------------------------------------------------------------
     if plan.topic != "other" and answer_messages:
         try:
-            example_plan_result = await _exp_example_plan_agent.run(
+            example_plan_result = await _example_plan_agent.run(
                 "Plan code examples for this response.",
                 message_history=answer_messages,
                 model=MODEL,
@@ -1749,7 +1749,7 @@ async def run_experimental_pipeline(
                         )
                         text_chunks: list[str] = []
 
-                        async for ev in _exp_single_example_agent.run_stream_events(
+                        async for ev in _single_example_agent.run_stream_events(
                             prompt,
                             model=CODE_EXAMPLES_MODEL,
                             model_settings={
