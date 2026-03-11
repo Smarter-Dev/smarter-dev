@@ -82,10 +82,10 @@ spec:
                         key: jina-api-key
                 resources:
                     requests:
-                        cpu: 100m
-                        memory: 256Mi
+                        cpu: 50m
+                        memory: 384Mi
                     limits:
-                        cpu: 500m
+                        cpu: 200m
                         memory: 512Mi
                 startupProbe:
                     exec:
