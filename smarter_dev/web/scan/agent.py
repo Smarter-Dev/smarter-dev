@@ -354,6 +354,8 @@ async def run_lite_pipeline(
         FunctionToolCallEvent,
         FunctionToolResultEvent,
         PartDeltaEvent,
+        PartStartEvent,
+        TextPart,
         TextPartDelta,
     )
     from pydantic_ai import AgentRunResultEvent
@@ -391,6 +393,10 @@ async def run_lite_pipeline(
                     entry["status"] = "complete"
                     entry["content"] = display_content
                     break
+
+        elif isinstance(event, PartStartEvent):
+            if isinstance(event.part, TextPart) and event.part.content:
+                await emit("response_chunk", delta=event.part.content)
 
         elif isinstance(event, PartDeltaEvent):
             if isinstance(event.delta, TextPartDelta):
@@ -1453,6 +1459,8 @@ async def run_experimental_pipeline(
         FunctionToolResultEvent,
         ModelRequest,
         PartDeltaEvent,
+        PartStartEvent,
+        TextPart,
         TextPartDelta,
         UserPromptPart,
     )
@@ -1711,6 +1719,10 @@ async def run_experimental_pipeline(
                     entry["content"] = display_content
                     break
 
+        elif isinstance(event, PartStartEvent):
+            if isinstance(event.part, TextPart) and event.part.content:
+                await emit("response_chunk", delta=event.part.content)
+
         elif isinstance(event, PartDeltaEvent):
             if isinstance(event.delta, TextPartDelta):
                 await emit("response_chunk", delta=event.delta.content_delta)
@@ -1764,7 +1776,15 @@ async def run_experimental_pipeline(
                                 },
                             },
                         ):
-                            if isinstance(ev, PartDeltaEvent):
+                            if isinstance(ev, PartStartEvent):
+                                if isinstance(ev.part, TextPart) and ev.part.content:
+                                    text_chunks.append(ev.part.content)
+                                    await emit(
+                                        "code_example_chunk",
+                                        index=idx,
+                                        delta=ev.part.content,
+                                    )
+                            elif isinstance(ev, PartDeltaEvent):
                                 if isinstance(ev.delta, TextPartDelta):
                                     text_chunks.append(ev.delta.content_delta)
                                     await emit(
