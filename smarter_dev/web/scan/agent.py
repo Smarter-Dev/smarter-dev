@@ -81,6 +81,20 @@ narrative that informs the user and answers their query. Natural prose, \
 not a listicle. Cite every factual claim inline. Use tables when \
 comparing parallel items. Keep it tight — say what needs saying and stop.
 
+## Source quality
+
+Evaluate every source before citing it. Prefer primary and authoritative \
+sources — official documentation, specs, RFCs, maintainer blogs, and \
+project repos carry the most weight. Community Q&A (Stack Overflow, \
+Quora) is mid-tier — useful for practical solutions but not authoritative. \
+Social/anecdotal sources (Reddit, forums, personal blogs with "I tried X") \
+are the weakest — use them only when stronger sources aren't available.
+
+When citing weaker sources, frame the evidence appropriately: \
+"community reports suggest…", "anecdotal experience indicates…", etc. \
+Never present anecdotal evidence with the same confidence as documented \
+facts. If a claim is only supported by anecdotal sources, say so.
+
 ## Citations
 
 Cite sources INLINE by placing the full URL inside double square brackets \
@@ -92,6 +106,10 @@ This feature was added in v3 [[https://blog.example.com/v3]] [[https://github.co
 Do NOT number sources. Do NOT add a Sources section at the end. \
 Every citation must be a real URL from your research — never fabricate URLs. \
 Cite the specific page you found the information on, not a homepage.
+
+Avoid unnecessary date anchoring ("as of 2026", "the latest version") \
+unless the user asked about recency or the information is specifically \
+time-sensitive. Let the content speak for itself.
 
 Also return structured source data: classify each source as docs, repo, \
 article, video, forum, or other. Mark sources you cited as cited=True. \
@@ -145,9 +163,11 @@ _lite_query_agent = Agent(
         "site:github.com, site:docs.X.com) when a primary source is obvious.\n\n"
         "## What to produce\n\n"
         "1. Exactly 2 web search queries that directly address their question "
-        "from different angles. Include the current year (or 'latest') in "
-        "queries unless the user is specifically asking about a different time "
-        "period. This ensures search results are current.\n"
+        "from different angles. Only include the current year or 'latest' if "
+        "the topic is likely to have meaningful recent changes (new releases, "
+        "evolving APIs, recent events). For stable/evergreen topics (core CS "
+        "concepts, well-established patterns, mature standards), omit date "
+        "qualifiers — they filter out authoritative older content.\n"
         "2. A list of 0-3 additional queries for anything that may have changed "
         "since your training data cutoff — recent releases, breaking changes, "
         "new tools, newly relevant information, etc. Include the current year "
@@ -169,7 +189,11 @@ and page contents from reading key results.
 1. **Triage** — discard any search results or page contents that do NOT \
    help answer the user's question. Off-topic results, tangential mentions, \
    and marketing fluff should be ignored entirely. Do not cite them.
-2. **Evaluate** the remaining results and page reads.
+2. **Evaluate** the remaining results and page reads. Assess source \
+   authority: official docs and primary sources are strongest, community \
+   Q&A (Stack Overflow, Quora) is mid-tier, and social/anecdotal sources \
+   (Reddit, forums, personal anecdotes) are weakest. Note which claims \
+   are only supported by anecdotal evidence.
 3. **Identify gaps** — if you need to read additional pages to fully \
    understand something new, surprising, or to verify important claims, \
    use the `read_url` tool. Focus on filling gaps in your knowledge, \
@@ -1087,9 +1111,11 @@ _meta_query_agent = Agent(
         "site:github.com, site:docs.X.com) when a primary source is obvious.\n\n"
         "## What to produce\n\n"
         "1. Exactly 2 web search queries that directly address their question "
-        "from different angles. Include the current year (or 'latest') in "
-        "queries unless the user is specifically asking about a different time "
-        "period. This ensures search results are current.\n"
+        "from different angles. Only include the current year or 'latest' if "
+        "the topic is likely to have meaningful recent changes (new releases, "
+        "evolving APIs, recent events). For stable/evergreen topics (core CS "
+        "concepts, well-established patterns, mature standards), omit date "
+        "qualifiers — they filter out authoritative older content.\n"
         "2. A list of 0-3 additional queries for anything that may have changed "
         "since your training data cutoff — recent releases, breaking changes, "
         "new tools, newly relevant information, etc. Include the current year "
@@ -1239,6 +1265,13 @@ _planner_agent = Agent(
         "Medium listicles, and generic 'top 10' clickbait.\n\n"
         "When in doubt, prefer the source that is closest to the people "
         "who actually build or maintain the technology.\n\n"
+        "**Anecdotal content**: Reddit threads, forum posts, and personal "
+        "blogs with 'I tried X' narratives are anecdotal — not primary "
+        "sources. Avoid selecting them as resources unless no authoritative "
+        "alternative exists.\n\n"
+        "Do NOT add date or year qualifiers to your search queries unless "
+        "the user's question specifically requires recent information. The "
+        "initial research already included recency checks.\n\n"
         "You MUST call `youtube_search` at least once and `web_search` at "
         "least once. Return structured output only."
     ),
@@ -1315,6 +1348,17 @@ points from the planner.
 Write the article following the article points from the plan. Cover each \
 point in order, but use your judgment to merge, expand, or reorder where \
 it makes the piece flow better.
+
+Don't emphasize dates, recency, or "as of [year]" framing unless the user \
+specifically asked about recent changes or the topic genuinely requires it. \
+Focus on what's true and useful, not when it became true.
+
+Before writing, evaluate the authority of each source in the research. \
+Official docs, specs, and maintainer content are strongest. Community Q&A \
+is mid-tier. Reddit posts, forum threads, and personal anecdotes are the \
+weakest — if you must use them, frame the evidence as anecdotal \
+("users report…", "anecdotal experience suggests…"). Build your core \
+argument on the strongest available sources.
 
 If you need to read additional pages to fill gaps or verify claims, use \
 the `read_url` tool.
