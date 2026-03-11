@@ -1183,11 +1183,17 @@ _planner_agent = Agent(
     instructions=(
         "You are a research planner. You have the user's question and "
         "metadata from earlier in this conversation.\n\n"
-        "## Your task\n\n"
-        "Think about what the user is looking for and plan how best to "
-        "answer their query. Then use your tools to find the best sources:\n\n"
+        "## Step 1 — Understand the user\n\n"
+        "Before searching, evaluate the user's query and their likely "
+        "skill level. What are they trying to do — learn a concept, "
+        "understand how something works, fix a bug, compare options, "
+        "build something? Decide what approach will help them most and "
+        "let that guide your searches and article plan.\n\n"
+        "## Step 2 — Research\n\n"
+        "Use your tools to find the best sources. Do as many searches "
+        "as you need to get the best results:\n\n"
         "1. **Search** — Use the `search` tool to find high-quality web "
-        "sources. Hard limit: 4 calls per session. Make each count.\n"
+        "sources.\n"
         "2. **Verify sources** — Many sites block automated readers, so "
         "you MUST use `source_readable` on each web page you want to "
         "recommend to confirm it's actually accessible. It returns only "
@@ -1195,10 +1201,10 @@ _planner_agent = Agent(
         "gets cached for the next stage. Do not include a resource you "
         "haven't verified.\n"
         "3. **Find YouTube videos** — Use the `youtube_search` tool to "
-        "find relevant videos. Hard limit: 2 calls per session. Video "
-        "metadata is fetched programmatically via the YouTube API, so "
-        "any video that shows up in search is accessible. Do NOT use "
-        "`source_readable` on YouTube video pages.\n\n"
+        "find relevant videos. Video metadata is fetched programmatically "
+        "via the YouTube API, so any video that shows up in search is "
+        "accessible. Do NOT use `source_readable` on YouTube video "
+        "pages.\n\n"
         "## What to return\n\n"
         "1. **youtube_video_ids** — Exactly 4 YouTube video IDs, most "
         "relevant first. Extract the video ID from YouTube URLs.\n"
@@ -1206,8 +1212,8 @@ _planner_agent = Agent(
         "guides). Use `source_readable` to verify your top picks are "
         "accessible before including them.\n"
         "3. **article_points** — An ordered list of key points the "
-        "article should cover. Specific, actionable, most important "
-        "first.\n\n"
+        "article should cover, tailored to what the user is trying to "
+        "accomplish. Specific, actionable, most important first.\n\n"
         "## Source selection criteria\n\n"
         "Your goal is to find REPUTABLE, AUTHORITATIVE sources — not "
         "listicles, anecdotes, or unreliable user-generated answers.\n\n"
@@ -1234,8 +1240,7 @@ _planner_agent = Agent(
 async def search(
     ctx: RunContext[ResearchDeps], query: str,
 ) -> str:
-    """Search the web for pages. Returns titles, URLs, and descriptions.
-    Hard limit: 4 calls per session."""
+    """Search the web for pages. Returns titles, URLs, and descriptions."""
     if ctx.deps.search_count >= 4:
         return "ERROR: Search limit reached (4/4). Work with the results you have."
     ctx.deps.search_count += 1
@@ -1256,8 +1261,7 @@ async def search(
 async def youtube_search(
     ctx: RunContext[ResearchDeps], query: str,
 ) -> str:
-    """Search YouTube for videos. Returns titles, URLs, and descriptions.
-    Hard limit: 2 calls per session."""
+    """Search YouTube for videos. Returns titles, URLs, and descriptions."""
     if ctx.deps.youtube_search_count >= 2:
         return "ERROR: YouTube search limit reached (2/2). Work with the results you have."
     ctx.deps.youtube_search_count += 1
@@ -1361,6 +1365,15 @@ class ExampleDescription(BaseModel):
     scale: str = Field(
         description="Expected size: 'short' (5-15 lines), 'medium' (15-40 lines), or 'large' (40-100 lines)"
     )
+    instructions: str = Field(
+        description=(
+            "Detailed instructions for the code writer. Include: the goal "
+            "of the example, what concepts it must cover, the expected "
+            "skill level of the reader, and any specific patterns or "
+            "approaches to use. This is the primary input for the code "
+            "generation model — be specific and thorough."
+        ),
+    )
 
 
 class ExamplePlan(BaseModel):
@@ -1380,6 +1393,11 @@ _example_plan_agent = Agent(
     instructions=(
         "You plan code examples that complement a research response. You have "
         "the full conversation history including the research response.\n\n"
+        "## Step 1 — Think about what's needed\n\n"
+        "Consider what the user is trying to do and what concepts from the "
+        "research response would benefit from concrete code. Think about "
+        "their skill level — what do they already understand vs. what do "
+        "they need demonstrated?\n\n"
         "## Rules\n\n"
         "1. **Tailor to skill level.** Beginners need simple, well-commented "
         "examples. Experts want concise, idiomatic code showing advanced patterns.\n"
@@ -1406,8 +1424,16 @@ _example_plan_agent = Agent(
         "represent the most complete or sophisticated application of the "
         "concept. Think of it as a mini-tutorial where each example is a "
         "stepping stone.\n\n"
-        "Describe each example clearly enough that another model can write "
-        "the code without needing the conversation history.\n\n"
+        "## Instructions field (CRITICAL)\n\n"
+        "The `instructions` field is the primary input for the code writer "
+        "model, which has NO access to the conversation history. It must "
+        "be self-contained and include:\n"
+        "- The goal of the example and what it should accomplish\n"
+        "- What concepts it needs to cover and demonstrate\n"
+        "- The skill level of the reader\n"
+        "- The language to use and any specific patterns or approaches\n"
+        "- Enough context that the code writer can produce correct, "
+        "relevant code without any other information\n\n"
         "Return structured output only."
     ),
 )
@@ -1418,8 +1444,13 @@ _example_plan_agent = Agent(
 _single_example_agent = Agent(
     output_type=str,
     instructions=(
-        "You write a single, practical code example. You will receive a "
-        "description of what to write.\n\n"
+        "You write a single, practical code example. You will receive "
+        "instructions describing what to write.\n\n"
+        "## Before writing\n\n"
+        "Consider what you're being asked to do. Think carefully about "
+        "what concepts need to be covered and write code that actually "
+        "does what's asked — not a toy stub, but a real example that "
+        "demonstrates the concept in action.\n\n"
         "## Output format\n\n"
         "Write your output in this exact format:\n\n"
         "```<language>\n<code>\n```\n\n"
@@ -1700,7 +1731,7 @@ async def run_experimental_pipeline(
                             f"Title: {desc.title}\n"
                             f"Language: {desc.language}\n"
                             f"Scale: {desc.scale}\n\n"
-                            f"## Description\n{desc.description}"
+                            f"## Instructions\n{desc.instructions}"
                         )
                         text_chunks: list[str] = []
 
