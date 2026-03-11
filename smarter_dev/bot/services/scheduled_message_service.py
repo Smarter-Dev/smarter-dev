@@ -103,6 +103,8 @@ class ScheduledMessageService(BaseService):
 
     async def _message_loop(self) -> None:
         """Main loop for checking and sending scheduled messages."""
+        # Stagger start by 20s to avoid contention with other polling services
+        await asyncio.sleep(20)
         while self._running:
             try:
                 # Check every 30 seconds for upcoming messages
@@ -194,7 +196,7 @@ class ScheduledMessageService(BaseService):
         """
         try:
             # Get messages scheduled for the next 45 seconds
-            response = await self._api_client.get("/scheduled-messages/upcoming?seconds=45")
+            response = await self._api_client.get("/scheduled-messages/upcoming?seconds=45", timeout=5.0)
             data = response.json()
             return data.get("scheduled_messages", [])
         except Exception as e:

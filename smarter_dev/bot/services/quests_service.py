@@ -83,6 +83,8 @@ class QuestService(BaseService):
         logger.info("Stopped quest announcement scheduler")
 
     async def _announcement_loop(self) -> None:
+        # Stagger start by 10s to avoid contention with other polling services
+        await asyncio.sleep(10)
         while self._running:
             try:
                 await self._check_and_queue_quests()
@@ -98,7 +100,7 @@ class QuestService(BaseService):
 
     async def _check_and_queue_quests(self) -> None:
         try:
-            response = await self._api_client.get("/quests/upcoming-announcements?seconds=45")
+            response = await self._api_client.get("/quests/upcoming-announcements?seconds=45", timeout=5.0)
             quests = response.json().get("quests", [])
 
             for quest in quests:

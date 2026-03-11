@@ -133,13 +133,9 @@ def create_engine(settings: Settings, *, use_legacy_db: bool = True) -> AsyncEng
             "connect_args": {"check_same_thread": False},
         })
     else:
-        # Production/development pool configuration
-        # Keep pool small — pgbouncer handles connection pooling
+        # Production/development: use NullPool — pgbouncer handles connection pooling
         engine_kwargs.update({
-            "pool_size": 5,
-            "max_overflow": 10,
-            "pool_pre_ping": True,
-            "pool_recycle": 3600,  # 1 hour
+            "poolclass": NullPool,
         })
 
     engine = create_async_engine(cleaned_url, **engine_kwargs)

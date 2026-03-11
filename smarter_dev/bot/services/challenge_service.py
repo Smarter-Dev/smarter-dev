@@ -194,7 +194,7 @@ class ChallengeService(BaseService):
         """
         try:
             # Get challenges scheduled for the next 45 seconds
-            response = await self._api_client.get("/challenges/upcoming-announcements?seconds=45")
+            response = await self._api_client.get("/challenges/upcoming-announcements?seconds=45", timeout=5.0)
             data = response.json()
             return data.get("challenges", [])
         except Exception as e:

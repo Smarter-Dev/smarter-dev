@@ -3474,40 +3474,35 @@ class CampaignOperations:
     
     async def get_upcoming_announcements(self, upcoming_time: datetime) -> List[Challenge]:
         """Get challenges that will be announced soon.
-        
+
         Args:
             upcoming_time: Time limit to check up to
-            
+
         Returns:
             List of challenges that will be announced soon
         """
         try:
-            # Find challenges that:
-            # 1. Haven't been announced yet (is_announced = False)
-            # 2. Are part of active campaigns
-            # Then filter by release time in Python
-            
             now = datetime.now(timezone.utc)
-            
+
+            # Calculate release_time in SQL to avoid loading all challenges:
+            # release_time = campaign.start_time + (order_position - 1) * cadence_hours (in seconds)
+            release_time_expr = Campaign.start_time + func.make_interval(
+                0, 0, 0, 0,  # years, months, weeks, days
+                (Challenge.order_position - 1) * Campaign.release_cadence_hours,  # hours
+                0, 0  # minutes, seconds
+            )
+
             query = select(Challenge).join(Campaign).where(
                 and_(
                     Challenge.is_announced == False,
-                    Campaign.is_active == True
+                    Campaign.is_active == True,
+                    release_time_expr > now,
+                    release_time_expr <= upcoming_time,
                 )
             ).options(selectinload(Challenge.campaign))
-            
+
             result = await self.session.execute(query)
-            all_pending = list(result.scalars().all())
-            
-            # Filter by release time in Python for upcoming window
-            upcoming_challenges = []
-            for challenge in all_pending:
-                campaign = challenge.campaign
-                release_time = challenge.calculate_release_time(campaign.start_time, campaign.release_cadence_hours)
-                if now < release_time <= upcoming_time:
-                    upcoming_challenges.append(challenge)
-            
-            return upcoming_challenges
+            return list(result.scalars().all())
             
         except Exception as e:
             raise DatabaseOperationError(f"Failed to get upcoming announcements: {e}") from e
