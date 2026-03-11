@@ -36,7 +36,7 @@ class ResearchDeps:
     http_client: httpx.AsyncClient
     search_rate_limiter: RateLimiter
     read_rate_limiter: URLRateLimiter
-    youtube_searched: bool = False
+    source_cache: dict[str, dict] = dataclasses.field(default_factory=dict)
 
 
 class Source(BaseModel):
@@ -1038,7 +1038,7 @@ async def rank_resource_results(
 
 
 class ExpMetaQueryPlan(BaseModel):
-    """Combined metadata + query plan for the experimental pipeline."""
+    """Metadata for the experimental pipeline."""
 
     name: str = Field(
         description="A brief title (2-5 words) for the research query.",
@@ -1059,28 +1059,13 @@ class ExpMetaQueryPlan(BaseModel):
             "Use 'other' ONLY for non-software topics."
         ),
     )
-    search_queries: list[str] = Field(
-        description="Exactly 2 web search queries that directly address the user's question.",
-        min_length=2,
-        max_length=2,
-    )
-    gap_queries: list[str] = Field(
-        default_factory=list,
-        description=(
-            "0-3 additional search queries for things that may have changed "
-            "since your training cutoff — recent releases, breaking changes, "
-            "new APIs, newly relevant projects, etc. Leave empty if the topic "
-            "is unlikely to have changed."
-        ),
-    )
 
 
 _meta_query_agent = Agent(
     output_type=ExpMetaQueryPlan,
     instructions=(
-        "You are a research planner. You will be given the current date "
-        "and the user's question.\n\n"
-        "## Metadata\n\n"
+        "You are a research classifier. You will be given the current date "
+        "and the user's question. Produce metadata about the query.\n\n"
         "1. **name**: A brief title (2-5 words) that captures the essence "
         "of the query. No quotes, no punctuation at the end.\n"
         "2. **skill_level**: Infer from the terminology and depth of the "
@@ -1091,36 +1076,6 @@ _meta_query_agent = Agent(
         "gamedev, systems, other. Use 'programming' for general CS concepts "
         "(OOP, algorithms, data structures, design patterns, language features). "
         "Use 'other' ONLY for non-software topics.\n\n"
-        "## Query quality guidelines\n\n"
-        "Your queries must dig deep. The goal is to find PRIMARY SOURCES — "
-        "official documentation, GitHub issues/discussions, RFCs, benchmarks, "
-        "technical blog posts from maintainers, and detailed teardowns.\n\n"
-        "AVOID queries that will surface:\n"
-        "- PR/marketing announcements and press releases\n"
-        "- 'Top 5/10/N' listicles and roundup articles\n"
-        "- Generic tutorials that repeat the same surface-level information\n"
-        "- SEO-optimized filler content\n\n"
-        "INSTEAD, craft queries that find:\n"
-        "- Official docs, changelogs, and migration guides\n"
-        "- GitHub issues, discussions, and commit messages with real details\n"
-        "- Technical deep-dives, benchmarks, and architecture discussions\n"
-        "- Stack Overflow answers with actual solutions\n"
-        "- Author/maintainer blog posts with insider knowledge\n\n"
-        "Use specific technical terms, library names, function/API names, "
-        "and error messages when relevant. Add site: filters (e.g. "
-        "site:github.com, site:docs.X.com) when a primary source is obvious.\n\n"
-        "## What to produce\n\n"
-        "1. Exactly 2 web search queries that directly address their question "
-        "from different angles. Only include the current year or 'latest' if "
-        "the topic is likely to have meaningful recent changes (new releases, "
-        "evolving APIs, recent events). For stable/evergreen topics (core CS "
-        "concepts, well-established patterns, mature standards), omit date "
-        "qualifiers — they filter out authoritative older content.\n"
-        "2. A list of 0-3 additional queries for anything that may have changed "
-        "since your training data cutoff — recent releases, breaking changes, "
-        "new tools, newly relevant information, etc. Include the current year "
-        "in these queries. Only include these if the topic is likely to have "
-        "evolved.\n\n"
         "Return structured output only."
     ),
 )
@@ -1224,92 +1179,63 @@ _planner_agent = Agent(
     deps_type=ResearchDeps,
     output_type=PlannerOutput,
     instructions=(
-        "You are a research planner. You have the user's question, search "
-        "results, and page contents from earlier in this conversation.\n\n"
+        "You are a research planner. You have the user's question and "
+        "metadata from earlier in this conversation.\n\n"
         "## Your task\n\n"
-        "Use your tools to find the best resources for the user:\n\n"
-        "1. **YouTube videos** — Use the `youtube_search` tool to find "
-        "relevant videos. Return exactly 4 video IDs (just the IDs, not "
-        "full metadata — we fetch that programmatically).\n"
-        "2. **Web resources** — Use the `web_search` tool to find tutorials, "
-        "guides, and documentation. You may also use `read_url` to verify "
-        "quality. Select exactly 5 resources.\n"
-        "3. **Article points** — Based on everything you've seen (the search "
-        "results, page reads, and your own research), produce an ordered "
-        "list of key points the article should cover. These should be "
-        "specific, actionable, and ordered from most to least important.\n\n"
-        "## Selection criteria\n\n"
-        "- **YouTube**: Prefer established channels, conference talks, and "
-        "well-known educators. Match skill level. Reject clickbait.\n"
-        "- **Resources**: Official docs first, then quality tutorials and "
-        "guides. Diversity of source types. No SEO spam.\n"
-        "- **Article points**: Focus on what directly answers the user's "
-        "question, then supporting context. Drop anything tangential.\n\n"
-        "## Source ordering (CRITICAL)\n\n"
-        "Both `youtube_video_ids` and `resources` MUST be sorted by source "
-        "authority — highest quality first, lowest quality last.\n\n"
-        "**Tier 1 — place first**: Official sources, foundations, and "
-        "primary authorities. Examples: python.org, docs.python.org, "
-        "Mozilla (MDN), Linux Foundation, React.dev, Rust-lang.org, "
-        "official GitHub repos, IETF RFCs, W3C specs, academic papers, "
-        "conference talks (PyCon, JSConf, GopherCon, etc.), and channels "
-        "run by core maintainers or project leads.\n\n"
-        "**Tier 2 — place in the middle**: High-quality independent "
-        "content. Examples: reputable tech blogs (Martin Fowler, Julia "
-        "Evans, Dan Abramov), well-known educators (Fireship, Traversy "
-        "Media, Corey Schafer, Arjan Codes), thoughtful long-form articles, "
-        "and curated community resources.\n\n"
-        "**Tier 3 — place last (or exclude)**: Low-quality SEO content "
-        "farms and Q&A aggregators. Examples: GeeksForGeeks, W3Schools, "
+        "Think about what the user is looking for and plan how best to "
+        "answer their query. Then use your tools to find the best sources:\n\n"
+        "1. **Search** — Use the `search` tool as many times as you need "
+        "to find high-quality sources. Each search returns titles, URLs, "
+        "and descriptions from the web.\n"
+        "2. **Verify sources** — Many sites block automated readers, so "
+        "you MUST use `source_readable` on each web page you want to "
+        "recommend to confirm it's actually accessible. It returns only "
+        "a status (readable or not) — you won't see the content, but it "
+        "gets cached for the next stage. Do not include a resource you "
+        "haven't verified.\n"
+        "3. **Find YouTube videos** — Search for YouTube videos by "
+        "including `site:youtube.com` in your search query. You only "
+        "have access to search results — video metadata is fetched "
+        "programmatically via the YouTube API, so any video that shows "
+        "up in search is accessible. Do NOT use `source_readable` on "
+        "YouTube video pages.\n\n"
+        "## What to return\n\n"
+        "1. **youtube_video_ids** — Exactly 4 YouTube video IDs, most "
+        "relevant first. Extract the video ID from YouTube URLs.\n"
+        "2. **resources** — Exactly 5 web resources (tutorials, docs, "
+        "guides). Use `source_readable` to verify your top picks are "
+        "accessible before including them.\n"
+        "3. **article_points** — An ordered list of key points the "
+        "article should cover. Specific, actionable, most important "
+        "first.\n\n"
+        "## Source selection criteria\n\n"
+        "Your goal is to find REPUTABLE, AUTHORITATIVE sources — not "
+        "listicles, anecdotes, or unreliable user-generated answers.\n\n"
+        "**Tier 1 — prefer these**: Official docs, specs, RFCs, "
+        "maintainer blogs, project repos, conference talks (PyCon, "
+        "JSConf, GopherCon, etc.), channels run by core maintainers.\n\n"
+        "**Tier 2 — acceptable**: Reputable tech blogs (Martin Fowler, "
+        "Julia Evans), well-known educators (Fireship, Traversy Media, "
+        "Corey Schafer, Arjan Codes), thoughtful long-form articles.\n\n"
+        "**Tier 3 — avoid or place last**: GeeksForGeeks, W3Schools, "
         "TutorialsPoint, JavaTPoint, Programiz, StackOverflow, Quora, "
-        "Medium listicles, and generic 'top 10' clickbait.\n\n"
-        "When in doubt, prefer the source that is closest to the people "
-        "who actually build or maintain the technology.\n\n"
-        "**Anecdotal content**: Reddit threads, forum posts, and personal "
-        "blogs with 'I tried X' narratives are anecdotal — not primary "
-        "sources. Avoid selecting them as resources unless no authoritative "
-        "alternative exists.\n\n"
-        "Do NOT add date or year qualifiers to your search queries unless "
-        "the user's question specifically requires recent information. The "
-        "initial research already included recency checks.\n\n"
-        "You MUST call `youtube_search` at least once and `web_search` at "
-        "least once. Return structured output only."
+        "Medium listicles, generic 'top 10' clickbait, Reddit threads, "
+        "forum posts, personal anecdotes.\n\n"
+        "When in doubt, prefer the source closest to the people who "
+        "actually build or maintain the technology.\n\n"
+        "Order both `youtube_video_ids` and `resources` by source "
+        "authority — highest quality first.\n\n"
+        "Return structured output only."
     ),
 )
 
 
 @_planner_agent.tool
-async def youtube_search(
+async def search(
     ctx: RunContext[ResearchDeps], query: str,
 ) -> str:
-    """Search YouTube for videos matching the query. Returns a list of videos
-    with video_id, title, and channel. You may only call this tool ONCE per session."""
-    if ctx.deps.youtube_searched:
-        return "ERROR: YouTube search already performed. Only one search is allowed per session."
-    ctx.deps.youtube_searched = True
-    results = await tools.youtube_search(ctx.deps.http_client, query, num_results=10)
-    if not results or (len(results) == 1 and "error" in results[0]):
-        return "No YouTube results found."
-    # Fetch video details to get channel names
-    video_ids = [v.get("video_id", "") for v in results if v.get("video_id")]
-    if video_ids:
-        detailed = await tools.youtube_video_details(ctx.deps.http_client, video_ids)
-        if detailed:
-            results = detailed
-    lines = []
-    for v in results:
-        lines.append(
-            f"- [{v.get('video_id', '')}] \"{v.get('title', 'Untitled')}\" "
-            f"by {v.get('channel', 'Unknown')}"
-        )
-    return "\n".join(lines)
-
-
-@_planner_agent.tool
-async def web_search(
-    ctx: RunContext[ResearchDeps], query: str,
-) -> str:
-    """Search the web for pages matching the query. Returns titles, URLs, and descriptions."""
+    """Search the web. Returns titles, URLs, and descriptions. To find
+    YouTube videos, include 'site:youtube.com' in your query."""
     await ctx.deps.search_rate_limiter.wait()
     results = await tools.brave_search(ctx.deps.http_client, query, num_results=15)
     if not results or (len(results) == 1 and "error" in results[0]):
@@ -1324,16 +1250,21 @@ async def web_search(
 
 
 @_planner_agent.tool
-async def planner_read_url(
+async def source_readable(
     ctx: RunContext[ResearchDeps], url: str,
 ) -> str:
-    """Read the full content of a web page to evaluate its quality or extract details."""
+    """Check if a web page is readable and cache its content for later use.
+    Returns only a status — you will NOT see the page content.
+    Do NOT use this on YouTube video pages."""
     await ctx.deps.read_rate_limiter.wait_if_needed(url)
     page = await tools.jina_read(ctx.deps.http_client, url)
     if "error" in page:
-        return f"Error reading {url}: {page['error']}"
-    content = page.get("content", "")[:4000]
-    return content if content else "Page had no readable content."
+        return f"Not readable: {page['error']}"
+    content = page.get("content", "")
+    if not content:
+        return "Not readable: page had no content."
+    ctx.deps.source_cache[url] = page
+    return f"Readable ({len(content)} chars)"
 
 
 # --- Experimental answer writer ---
@@ -1488,9 +1419,9 @@ async def run_experimental_pipeline(
     """History-threaded experimental research pipeline.
 
     Threads conversation history through sequential stages:
-    1. Meta + query generation
-    2. Parallel searches + reads (no LLM)
-    3. Planner with YouTube/web search/read tools
+    1. Meta analysis (name, skill level, topic)
+    2. Agentic planner with search + source_readable tools (Gemini 3 Flash)
+    3. Post-planner content gathering (video metadata, uncached source reads)
     4. Answer writer (streaming)
     5. Example plan
     6. Parallel example generation (streaming)
@@ -1516,7 +1447,7 @@ async def run_experimental_pipeline(
     code_examples: list[dict] = []
 
     # ------------------------------------------------------------------
-    # Step 1 — Combined meta + query generation
+    # Step 1 — Meta analysis
     # ------------------------------------------------------------------
     await emit("status", stage="planning", message="Analyzing query...")
 
@@ -1535,119 +1466,23 @@ async def run_experimental_pipeline(
         topic=plan.topic,
     )
 
-    all_queries = plan.search_queries + plan.gap_queries
-
     # ------------------------------------------------------------------
-    # Step 2 — Parallel Brave searches + Jina reads (no LLM)
+    # Step 2 — Agentic planner (search + source_readable tools)
     # ------------------------------------------------------------------
-    await emit("status", stage="researching", message=f"Running {len(all_queries)} searches...")
+    await emit("status", stage="planning_resources", message="Researching and planning article...")
 
-    async def _search(q: str) -> tuple[str, list[dict]]:
-        await deps.search_rate_limiter.wait()
-        return q, await tools.brave_search(deps.http_client, q, num_results=15)
-
-    search_tasks = [_search(q) for q in all_queries]
-    search_results_by_query: list[tuple[str, list[dict]]] = await asyncio.gather(*search_tasks)
-
-    # Emit search results and collect first URLs to read
-    all_search_results: list[dict] = []
-    first_urls: list[tuple[str, str]] = []
-
-    for q, results in search_results_by_query:
-        has_results = results and not (len(results) == 1 and "error" in results[0])
-        display = (
-            "\n".join(f"{i}. {r.get('title', 'Untitled')} — {r.get('url', '')}" for i, r in enumerate(results, 1))
-            if has_results
-            else "No results found."
-        )
-        tool_log.append({
-            "tool": "search",
-            "input": {"query": q},
-            "content": display,
-            "status": "complete",
-        })
-        await emit("tool_use", tool="search", input={"query": q}, status="running")
-        await emit("tool_result", tool="search", status="complete", content=display)
-
-        if has_results:
-            all_search_results.extend(results)
-            for r in results:
-                if "error" not in r and r.get("url"):
-                    first_urls.append((r["url"], r.get("title", "Untitled")))
-                    break
-
-    # Deduplicate first_urls
-    seen_urls: set[str] = set()
-    unique_first_urls: list[tuple[str, str]] = []
-    for url, title in first_urls:
-        if url not in seen_urls:
-            seen_urls.add(url)
-            unique_first_urls.append((url, title))
-
-    # Parallel Jina reads
-    await emit("status", stage="reading", message=f"Reading {len(unique_first_urls)} pages...")
-
-    reads: list[dict] = []
-
-    async def _read(url: str, title: str) -> None:
-        await deps.read_rate_limiter.wait_if_needed(url)
-        await emit("tool_use", tool="read", input={"url": url}, status="running")
-        page = await tools.jina_read(deps.http_client, url)
-        if "error" in page:
-            tool_log.append({
-                "tool": "read", "input": {"url": url},
-                "content": f"Could not read: {page['error']}", "status": "error",
-            })
-            await emit("tool_result", tool="read", status="error", content=f"Could not read: {page['error']}")
-            return
-        content = page.get("content", "")[:4000]
-        reads.append({"url": url, "title": title, "content": content})
-        tool_log.append({
-            "tool": "read", "input": {"url": url},
-            "content": f"Read {len(content)} chars from {title}", "status": "complete",
-        })
-        await emit("tool_result", tool="read", status="complete", content=f"Read {len(content)} chars from {title}")
-
-    await asyncio.gather(*(_read(url, title) for url, title in unique_first_urls))
-
-    # Build context string for injection into history
-    search_section = "\n\n".join(
-        f"### Search: {q}\n" + "\n".join(
-            f"- [{r.get('title', 'Untitled')}]({r.get('url', '')}) — {r.get('description', '')}"
-            for r in results
-            if "error" not in r
-        )
-        for q, results in search_results_by_query
-    )
-
-    read_section = "\n\n".join(
-        f"### Page: [{rd['title']}]({rd['url']})\n{rd['content']}"
-        for rd in reads
-    ) if reads else "No pages could be read."
-
-    search_context = (
-        f"## Search Results\n{search_section}\n\n"
-        f"## Page Contents\n{read_section}"
-    )
-
-    # Inject search/read results into conversation history
     history = list(meta_query_result.all_messages())
-    history.append(ModelRequest(parts=[UserPromptPart(content=search_context)]))
-
-    # ------------------------------------------------------------------
-    # Step 3 — Planner (with YouTube search, web search, read tools)
-    # ------------------------------------------------------------------
-    await emit("status", stage="planning_resources", message="Planning article and finding resources...")
+    history.append(ModelRequest(parts=[UserPromptPart(content=date_context)]))
 
     planner_result_data: PlannerOutput | None = None
 
     async for event in _planner_agent.run_stream_events(
-        "Using the search results and page contents above, find the best "
-        "YouTube videos and web resources for this query. Then plan the "
+        "Research the user's question. Search for the best sources, verify "
+        "them with source_readable, find YouTube videos, and plan the "
         "key points the article should cover.",
         message_history=history,
         deps=deps,
-        model=MODEL,
+        model=CODE_EXAMPLES_MODEL,
     ):
         if isinstance(event, FunctionToolCallEvent):
             args = event.part.args
@@ -1658,18 +1493,7 @@ async def run_experimental_pipeline(
         elif isinstance(event, FunctionToolResultEvent):
             raw_content = str(event.result.content)[:5120]
             tool_name = event.result.tool_name
-            # Summarize for display
-            if tool_name == "youtube_search":
-                display_content = raw_content
-            elif tool_name in ("planner_read_url", "read_url"):
-                url = ""
-                for entry in reversed(tool_log):
-                    if entry.get("tool") == tool_name and entry.get("status") == "running":
-                        url = entry.get("input", {}).get("url", "")
-                        break
-                display_content = f"Read {len(raw_content)} chars from {url}" if url else f"Read {len(raw_content)} chars"
-            else:
-                display_content = raw_content
+            display_content = raw_content
             await emit("tool_result", tool=tool_name, status="complete", content=display_content)
             for entry in reversed(tool_log):
                 if entry.get("tool") == tool_name and entry.get("status") == "running":
@@ -1687,7 +1511,7 @@ async def run_experimental_pipeline(
     planner_messages = list(event.result.all_messages())  # type: ignore[union-attr]
 
     # ------------------------------------------------------------------
-    # Step 4 — Immediate render of videos and resources
+    # Step 3 — Post-planner: gather content for the answer writer
     # ------------------------------------------------------------------
 
     # Fetch full video metadata (title, channel, thumbnail, duration) from YouTube API
@@ -1722,8 +1546,50 @@ async def run_experimental_pipeline(
         resources.sort(key=_resource_sort_key)
         await emit("resources", resources=resources)
 
+    # Read any resource URLs not already in the source cache
+    uncached_urls = [
+        (r.url, r.title)
+        for r in planner_result_data.resources
+        if r.url not in deps.source_cache
+    ]
+    if uncached_urls:
+        await emit("status", stage="reading", message=f"Reading {len(uncached_urls)} uncached sources...")
+
+        async def _read_uncached(url: str, title: str) -> None:
+            await deps.read_rate_limiter.wait_if_needed(url)
+            page = await tools.jina_read(deps.http_client, url)
+            if "error" not in page and page.get("content"):
+                deps.source_cache[url] = page
+
+        await asyncio.gather(*(_read_uncached(url, title) for url, title in uncached_urls))
+
+    # Build source content for injection into answer writer history
+    source_content_parts = []
+    for r in planner_result_data.resources:
+        cached = deps.source_cache.get(r.url)
+        if cached:
+            content = cached.get("content", "")[:4000]
+            source_content_parts.append(
+                f"### Source: [{r.title}]({r.url})\n{content}"
+            )
+
+    video_summary = ""
+    if youtube_videos:
+        video_lines = [
+            f"- [{v.get('title', '')}](https://youtube.com/watch?v={v.get('video_id', '')}) "
+            f"by {v.get('channel', '')}"
+            for v in youtube_videos
+        ]
+        video_summary = "### YouTube Videos\n" + "\n".join(video_lines)
+
+    source_context = "## Source Contents\n\n" + "\n\n".join(source_content_parts)
+    if video_summary:
+        source_context += "\n\n" + video_summary
+
+    planner_messages.append(ModelRequest(parts=[UserPromptPart(content=source_context)]))
+
     # ------------------------------------------------------------------
-    # Step 5 — Answer writer (streaming)
+    # Step 4 — Answer writer (streaming)
     # ------------------------------------------------------------------
     await emit("status", stage="synthesizing", message="Writing answer...")
 
