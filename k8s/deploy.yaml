@@ -16,7 +16,7 @@ spec:
         matchLabels:
             app: smarter-dev-website
             tier: frontend
-    replicas: 2
+    replicas: 1
     template:
         metadata:
             labels:
@@ -163,11 +163,11 @@ spec:
                     value: "production"
                 resources:
                     requests:
-                        cpu: 100m
-                        memory: 256Mi
+                        cpu: 75m
+                        memory: 192Mi
                     limits:
-                        cpu: 500m
-                        memory: 512Mi
+                        cpu: 300m
+                        memory: 384Mi
                 livenessProbe:
                     httpGet:
                         path: /api/health
