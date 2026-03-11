@@ -38,6 +38,7 @@ class ResearchDeps:
     read_rate_limiter: URLRateLimiter
     source_cache: dict[str, dict] = dataclasses.field(default_factory=dict)
     search_count: int = 0
+    youtube_search_count: int = 0
 
 
 class Source(BaseModel):
@@ -1185,21 +1186,19 @@ _planner_agent = Agent(
         "## Your task\n\n"
         "Think about what the user is looking for and plan how best to "
         "answer their query. Then use your tools to find the best sources:\n\n"
-        "1. **Search** — Use the `search` tool up to 5 times to find "
-        "high-quality sources. Each search returns titles, URLs, and "
-        "descriptions from the web. Make each search count.\n"
+        "1. **Search** — Use the `search` tool to find high-quality web "
+        "sources. Hard limit: 4 calls per session. Make each count.\n"
         "2. **Verify sources** — Many sites block automated readers, so "
         "you MUST use `source_readable` on each web page you want to "
         "recommend to confirm it's actually accessible. It returns only "
         "a status (readable or not) — you won't see the content, but it "
         "gets cached for the next stage. Do not include a resource you "
         "haven't verified.\n"
-        "3. **Find YouTube videos** — Search for YouTube videos by "
-        "including `site:youtube.com` in your search query. You only "
-        "have access to search results — video metadata is fetched "
-        "programmatically via the YouTube API, so any video that shows "
-        "up in search is accessible. Do NOT use `source_readable` on "
-        "YouTube video pages.\n\n"
+        "3. **Find YouTube videos** — Use the `youtube_search` tool to "
+        "find relevant videos. Hard limit: 2 calls per session. Video "
+        "metadata is fetched programmatically via the YouTube API, so "
+        "any video that shows up in search is accessible. Do NOT use "
+        "`source_readable` on YouTube video pages.\n\n"
         "## What to return\n\n"
         "1. **youtube_video_ids** — Exactly 4 YouTube video IDs, most "
         "relevant first. Extract the video ID from YouTube URLs.\n"
@@ -1235,14 +1234,37 @@ _planner_agent = Agent(
 async def search(
     ctx: RunContext[ResearchDeps], query: str,
 ) -> str:
-    """Search the web. Returns titles, URLs, and descriptions. To find
-    YouTube videos, include 'site:youtube.com' in your query.
-    You have a maximum of 5 searches per session."""
-    if ctx.deps.search_count >= 5:
-        return "ERROR: Search limit reached (5/5). Work with the results you have."
+    """Search the web for pages. Returns titles, URLs, and descriptions.
+    Hard limit: 4 calls per session."""
+    if ctx.deps.search_count >= 4:
+        return "ERROR: Search limit reached (4/4). Work with the results you have."
     ctx.deps.search_count += 1
     await ctx.deps.search_rate_limiter.wait()
     results = await tools.brave_search(ctx.deps.http_client, query, num_results=5)
+    if not results or (len(results) == 1 and "error" in results[0]):
+        return "No results found."
+    lines = []
+    for i, r in enumerate(results, 1):
+        lines.append(
+            f"{i}. [{r.get('title', 'Untitled')}]({r.get('url', '')}) "
+            f"— {r.get('description', '')}"
+        )
+    return "\n".join(lines)
+
+
+@_planner_agent.tool
+async def youtube_search(
+    ctx: RunContext[ResearchDeps], query: str,
+) -> str:
+    """Search YouTube for videos. Returns titles, URLs, and descriptions.
+    Hard limit: 2 calls per session."""
+    if ctx.deps.youtube_search_count >= 2:
+        return "ERROR: YouTube search limit reached (2/2). Work with the results you have."
+    ctx.deps.youtube_search_count += 1
+    await ctx.deps.search_rate_limiter.wait()
+    results = await tools.brave_search(
+        ctx.deps.http_client, f"site:youtube.com {query}", num_results=5,
+    )
     if not results or (len(results) == 1 and "error" in results[0]):
         return "No results found."
     lines = []
