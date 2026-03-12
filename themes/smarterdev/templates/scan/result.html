@@ -374,10 +374,10 @@ function buildTOC() {
     window._tocRefresh();
 
     function updateActive() {
-        var scrollY = window.scrollY + 100;
         var active = null;
         for (var k = 0; k < window._tocTargets.length; k++) {
-            if (window._tocTargets[k].el.offsetTop <= scrollY) active = window._tocTargets[k];
+            var rect = window._tocTargets[k].el.getBoundingClientRect();
+            if (rect.top <= 120) active = window._tocTargets[k];
         }
         for (var k = 0; k < window._tocTargets.length; k++) {
             window._tocTargets[k].link.classList.toggle("toc-active", window._tocTargets[k] === active);
