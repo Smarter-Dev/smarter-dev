@@ -89,8 +89,7 @@
 .toc-link.toc-h3 { padding-left: 1.25rem; font-size: .6rem }
 .toc-divider { height: 1px; background: rgba(0,212,255,.12); margin: .75rem 0 .5rem .75rem }
 .toc-examples-label { font-family: var(--heading); font-size: .42rem; letter-spacing: .1em; color: var(--mid); margin: .4rem 0 .3rem .75rem }
-.toc-examples-group { opacity: 0; transform: translateY(6px); transition: opacity .4s ease, transform .4s ease }
-.toc-examples-group.toc-visible { opacity: 1; transform: translateY(0) }
+.toc-examples-group { }
 .report-content h2 {
   font-family: var(--heading);
   font-size: clamp(.9rem, 1.8vw, 1.15rem);

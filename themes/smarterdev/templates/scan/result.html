@@ -376,10 +376,12 @@ function buildTOC() {
     // Animate in
     setTimeout(function() { tocNav.classList.add("toc-visible"); }, 100);
 
-    // Scroll spy
+    // Scroll spy — query from document to catch dynamically added example links
     window._tocTargets = [];
     window._tocRefresh = function() {
-        var allLinks = tocList.querySelectorAll(".toc-link");
+        var tl = document.getElementById("toc-list");
+        if (!tl) return;
+        var allLinks = tl.querySelectorAll(".toc-link");
         window._tocTargets = [];
         for (var j = 0; j < allLinks.length; j++) {
             var t = document.getElementById(allLinks[j].dataset.target);
@@ -425,20 +427,20 @@ function buildTOCExamples() {
     if (examples.length === 0) return;
 
     // Remove any existing examples group
-    var existing = tocList.querySelector(".toc-examples-group");
-    if (existing) existing.remove();
+    var existing = tocList.querySelectorAll(".toc-examples-divider, .toc-examples-label-item, .toc-example-item");
+    for (var r = 0; r < existing.length; r++) existing[r].remove();
 
-    var group = document.createElement("div");
-    group.className = "toc-examples-group";
+    // Divider
+    var dividerLi = document.createElement("li");
+    dividerLi.className = "toc-item toc-examples-divider";
+    dividerLi.innerHTML = '<div class="toc-divider"></div>';
+    tocList.appendChild(dividerLi);
 
-    var divider = document.createElement("div");
-    divider.className = "toc-divider";
-    group.appendChild(divider);
-
-    var label = document.createElement("div");
-    label.className = "toc-examples-label";
-    label.textContent = "EXAMPLES";
-    group.appendChild(label);
+    // Label
+    var labelLi = document.createElement("li");
+    labelLi.className = "toc-item toc-examples-label-item";
+    labelLi.innerHTML = '<div class="toc-examples-label">EXAMPLES</div>';
+    tocList.appendChild(labelLi);
 
     for (var i = 0; i < examples.length; i++) {
         var ex = examples[i];
@@ -447,26 +449,12 @@ function buildTOCExamples() {
         var titleEl = ex.querySelector(".scan-example-title");
         var title = titleEl ? titleEl.textContent.trim() : "Example " + (i + 1);
         var li = document.createElement("li");
-        li.className = "toc-item";
+        li.className = "toc-item toc-example-item";
         li.innerHTML = '<a href="#' + ex.id + '" class="toc-link toc-h3" data-target="' + ex.id + '">' + title + '</a>';
-        group.appendChild(li);
+        tocList.appendChild(li);
     }
-
-    tocList.appendChild(group);
-    // Animate examples group in
-    setTimeout(function() { group.classList.add("toc-visible"); }, 200);
-
     // Refresh scroll spy targets to include examples
     if (window._tocRefresh) window._tocRefresh();
-
-    // Re-bind smooth scroll for new links
-    group.addEventListener("click", function(e) {
-        var link = e.target.closest(".toc-link");
-        if (!link) return;
-        e.preventDefault();
-        var target = document.getElementById(link.dataset.target);
-        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
 }
 </script>
 {% if session and session.status == 'running' %}
