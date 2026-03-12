@@ -202,7 +202,16 @@ async def run_session_pipeline(
             )
             profile_row = profile_result.scalar_one_or_none()
             if profile_row and profile_row.profile:
-                user_profile_text = profile_row.profile
+                parts = [profile_row.profile]
+                if profile_row.technologies:
+                    tech_lines = []
+                    for t in profile_row.technologies:
+                        tech_lines.append(f"- {t['name']} ({t['relationship']})")
+                    parts.append("Technologies:\n" + "\n".join(tech_lines))
+                if profile_row.recent_queries:
+                    rq_lines = [f"{i}. {q}" for i, q in enumerate(profile_row.recent_queries, 1)]
+                    parts.append("Recent searches:\n" + "\n".join(rq_lines))
+                user_profile_text = "\n\n".join(parts)
     except Exception:
         logger.warning("Failed to fetch user profile for %s, continuing without it", user_id)
 
