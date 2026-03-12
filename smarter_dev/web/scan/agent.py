@@ -51,6 +51,7 @@ class ResearchDeps:
     search_rate_limiter: RateLimiter
     read_rate_limiter: URLRateLimiter
     source_cache: dict[str, dict] = dataclasses.field(default_factory=dict)
+    seen_urls: set[str] = dataclasses.field(default_factory=set)
     search_count: int = 0
     youtube_search_count: int = 0
 
@@ -1184,7 +1185,7 @@ class PlannerOutput(BaseModel):
     )
     resources: list[PlannerResource] = Field(
         default_factory=list,
-        description="Exactly 5 related web resources (tutorials, docs, guides).",
+        description="Exactly 5 related web resources (tutorials, docs, guides). Every URL MUST come from search results — never make up URLs.",
     )
     article_points: list[str] = Field(
         description=(
@@ -1210,11 +1211,16 @@ _planner_agent = Agent(
         "Use your tools to find the best possible sources. Keep searching "
         "until you have high-quality results — you can use `search` up to "
         "4 times and `youtube_search` up to 2 times (hard limits).\n\n"
+        "**CRITICAL: Every URL you return MUST come from your search "
+        "results. NEVER make up, guess, or hallucinate URLs. If you "
+        "didn't find it via `search` or `youtube_search`, don't include "
+        "it.**\n\n"
         "1. **Search** — Use the `search` tool to find high-quality web "
         "sources.\n"
         "2. **Verify sources** — Many sites block automated readers, so "
         "you MUST use `source_readable` on each web page you want to "
-        "recommend to confirm it's actually accessible. It returns only "
+        "recommend to confirm it's actually accessible. Only pass URLs "
+        "that appeared in your search results. It returns only "
         "a status (readable or not) — you won't see the content, but it "
         "gets cached for the next stage. Do not include a resource you "
         "haven't verified.\n"
@@ -1227,7 +1233,8 @@ _planner_agent = Agent(
         "1. **youtube_video_ids** — Exactly 4 YouTube video IDs, most "
         "relevant first. Extract the video ID from YouTube URLs.\n"
         "2. **resources** — Exactly 5 web resources (tutorials, docs, "
-        "guides). Use `source_readable` to verify your top picks are "
+        "guides). Every URL MUST come from your search results — never "
+        "invent URLs. Use `source_readable` to verify your top picks are "
         "accessible before including them.\n"
         "3. **article_points** — An ordered list of key points the "
         "article should cover, tailored to what the user is trying to "
@@ -1284,8 +1291,11 @@ async def search(
         return "No results found."
     lines = []
     for i, r in enumerate(results, 1):
+        url = r.get("url", "")
+        if url:
+            ctx.deps.seen_urls.add(url)
         lines.append(
-            f"{i}. [{r.get('title', 'Untitled')}]({r.get('url', '')}) "
+            f"{i}. [{r.get('title', 'Untitled')}]({url}) "
             f"— {r.get('description', '')}"
         )
     return "\n".join(lines)
@@ -1307,8 +1317,11 @@ async def youtube_search(
         return "No results found."
     lines = []
     for i, r in enumerate(results, 1):
+        url = r.get("url", "")
+        if url:
+            ctx.deps.seen_urls.add(url)
         lines.append(
-            f"{i}. [{r.get('title', 'Untitled')}]({r.get('url', '')}) "
+            f"{i}. [{r.get('title', 'Untitled')}]({url}) "
             f"— {r.get('description', '')}"
         )
     return "\n".join(lines)
@@ -1320,7 +1333,14 @@ async def source_readable(
 ) -> str:
     """Check if a web page is readable and cache its content for later use.
     Returns only a status — you will NOT see the page content.
-    Do NOT use this on YouTube video pages."""
+    Do NOT use this on YouTube video pages.
+    IMPORTANT: Only pass URLs from your search results."""
+    if url not in ctx.deps.seen_urls:
+        return (
+            "ERROR: This URL did not come from your search results. "
+            "Only pass URLs that appeared in search or youtube_search results. "
+            "Do NOT make up or guess URLs."
+        )
     await ctx.deps.read_rate_limiter.wait_if_needed(url)
     page = await tools.jina_read(ctx.deps.http_client, url)
     if "error" in page:
@@ -1642,6 +1662,75 @@ async def run_experimental_pipeline(
         raise RuntimeError("Planner agent completed without producing a result")
 
     planner_messages = list(event.result.all_messages())  # type: ignore[union-attr]
+
+    # ------------------------------------------------------------------
+    # Step 2b — Validate planner URLs, retry for any hallucinated ones
+    # ------------------------------------------------------------------
+    invalid_resource_urls = [
+        r for r in planner_result_data.resources
+        if r.url not in deps.seen_urls
+    ]
+    if invalid_resource_urls:
+        # Remove invalid resources from the result
+        valid_resources = [
+            r for r in planner_result_data.resources
+            if r.url in deps.seen_urls
+        ]
+        invalid_labels = [f"- {r.title} ({r.url})" for r in invalid_resource_urls]
+        retry_prompt = (
+            f"The following {len(invalid_resource_urls)} resource URL(s) were "
+            "NOT from your search results and have been removed:\n"
+            + "\n".join(invalid_labels)
+            + f"\n\nYou need to find {len(invalid_resource_urls)} replacement(s) "
+            "using `search` and `source_readable`. Only return URLs that come "
+            "from search results."
+        )
+        await emit("status", stage="planning", message="Replacing invalid URLs...")
+
+        # Reset search limits for the retry turn
+        deps.search_count = max(0, deps.search_count - 1)
+
+        retry_result_data: PlannerOutput | None = None
+        async for event in _planner_agent.run_stream_events(
+            retry_prompt,
+            message_history=planner_messages,
+            deps=deps,
+            model=CODE_EXAMPLES_MODEL,
+        ):
+            if isinstance(event, FunctionToolCallEvent):
+                args = event.part.args
+                tool_input = args if isinstance(args, dict) else {"query": str(args)}
+                await emit("tool_use", tool=event.part.tool_name, input=tool_input, status="running")
+                tool_log.append({"tool": event.part.tool_name, "input": tool_input, "status": "running"})
+            elif isinstance(event, FunctionToolResultEvent):
+                raw_content = str(event.result.content)[:5120]
+                tool_name = event.result.tool_name
+                await emit("tool_result", tool=tool_name, status="complete", content=raw_content)
+                for entry in reversed(tool_log):
+                    if entry.get("tool") == tool_name and entry.get("status") == "running":
+                        entry["status"] = "complete"
+                        entry["content"] = raw_content
+                        break
+            elif isinstance(event, AgentRunResultEvent):
+                retry_result_data = event.result.output
+                total_usage.incr(event.result.usage())
+
+        if retry_result_data and retry_result_data.resources:
+            # Only take replacement resources that are actually from search results
+            new_valid = [r for r in retry_result_data.resources if r.url in deps.seen_urls]
+            valid_resources.extend(new_valid[:len(invalid_resource_urls)])
+
+        planner_result_data.resources = valid_resources[:5]
+        planner_messages = list(event.result.all_messages())  # type: ignore[union-attr]
+
+    # Also filter YouTube video IDs from non-search URLs
+    if planner_result_data.youtube_video_ids:
+        # YouTube IDs are extracted from URLs — validate by checking if any seen URL contains the ID
+        valid_video_ids = []
+        for vid_id in planner_result_data.youtube_video_ids:
+            if any(vid_id in url for url in deps.seen_urls):
+                valid_video_ids.append(vid_id)
+        planner_result_data.youtube_video_ids = valid_video_ids[:4]
 
     # ------------------------------------------------------------------
     # Step 3 — Post-planner: gather content for the answer writer
