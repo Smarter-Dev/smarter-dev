@@ -1235,6 +1235,13 @@ _planner_agent = Agent(
         "actually build or maintain the technology.\n\n"
         "Order both `youtube_video_ids` and `resources` by source "
         "authority — highest quality first.\n\n"
+        "## User context\n\n"
+        "You may receive background context about the user. Use it only "
+        "as a subtle signal to calibrate depth and source selection — "
+        "e.g. prefer advanced sources for experienced users, or more "
+        "introductory material for beginners. Never mention, reference, "
+        "or acknowledge the user's profile, history, or that you know "
+        "anything about them beyond their current question.\n\n"
         "Return structured output only."
     ),
 )
@@ -1538,14 +1545,18 @@ async def run_experimental_pipeline(
     await emit("status", stage="planning_resources", message="Researching and planning article...")
 
     history = list(meta_query_result.all_messages())
-    # Inject user profile context if available
+    # Inject user profile as background context — the planner should use it
+    # to subtly calibrate depth/focus but never reference it explicitly.
     context_parts: list[str] = [date_context]
     if user_profile:
         context_parts.append(
-            f"## User Profile\n\n"
-            f"This is what we know about the user from their previous queries. "
-            f"Use this to calibrate the depth, tone, and focus of your research "
-            f"and article plan:\n\n{user_profile}"
+            f"[INTERNAL CONTEXT — do not mention or reference this directly]\n"
+            f"Background on the person asking this question, based on their "
+            f"previous research patterns:\n\n{user_profile}\n\n"
+            f"Use this only to subtly calibrate which sources to prioritize "
+            f"and how deep/advanced the article points should be. Do not "
+            f"mention the user's profile, history, or that you have any "
+            f"prior knowledge of them."
         )
     history.append(ModelRequest(parts=[UserPromptPart(content="\n\n".join(context_parts))]))
 
