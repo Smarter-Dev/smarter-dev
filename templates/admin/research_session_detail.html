@@ -13,7 +13,7 @@
         <span class="sk-pill" style="{% if session.status == 'complete' %}background: rgba(0,200,83,.12); color: #0c5;{% elif session.status == 'error' %}background: rgba(255,50,50,.12); color: #f55;{% else %}background: rgba(200,150,0,.12); color: #ca0;{% endif %}">{{ session.status }}</span>
         <span class="sk-pill">{{ session.pipeline_mode }}</span>
         {% if session.status == 'complete' %}
-        <a href="https://scan.smarter.dev/r/{{ session.id }}" target="_blank" class="sk-pill" style="background: rgba(0,150,255,.12); color: #09f; text-decoration: none;">View Output &#8599;</a>
+        <a href="https://scan.smarter.dev/r/{{ session.slug or session.id }}" target="_blank" class="sk-pill" style="background: rgba(0,150,255,.12); color: #09f; text-decoration: none;">View Output &#8599;</a>
         {% endif %}
     </p>
 </hgroup>

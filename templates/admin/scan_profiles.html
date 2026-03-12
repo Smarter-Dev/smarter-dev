@@ -20,9 +20,43 @@
     </div>
     {% if profile.technologies %}
     <div class="sk-panel-body" style="padding-bottom: 0;">
-        {% for tech in profile.technologies %}
-        <span class="sk-pill" style="margin-right: .25rem; margin-bottom: .25rem; {% if tech.relationship == 'uses' %}background: rgba(0,200,83,.12); color: #0c5;{% elif tech.relationship == 'both' %}background: rgba(0,150,255,.12); color: #09f;{% else %}background: rgba(200,150,0,.12); color: #ca0;{% endif %}">{{ tech.name }} <small style="opacity:.6;">{{ tech.relationship }}</small></span>
-        {% endfor %}
+        {% set uses_techs = profile.technologies | selectattr('relationship', 'equalto', 'uses') | list %}
+        {% set research_techs = profile.technologies | selectattr('relationship', 'equalto', 'researching') | list %}
+        {% set both_techs = profile.technologies | selectattr('relationship', 'equalto', 'both') | list %}
+        {% if uses_techs %}
+        <div style="margin-bottom: .5rem;">
+            <small style="opacity: .5; margin-right: .5rem;">Uses</small>
+            {% for tech in uses_techs %}
+            <span class="sk-pill" style="margin-right: .25rem; margin-bottom: .25rem; background: rgba(0,200,83,.12); color: #0c5;">{{ tech.name }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if research_techs %}
+        <div style="margin-bottom: .5rem;">
+            <small style="opacity: .5; margin-right: .5rem;">Researching</small>
+            {% for tech in research_techs %}
+            <span class="sk-pill" style="margin-right: .25rem; margin-bottom: .25rem; background: rgba(200,150,0,.12); color: #ca0;">{{ tech.name }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if both_techs %}
+        <div style="margin-bottom: .5rem;">
+            <small style="opacity: .5; margin-right: .5rem;">Uses & Researching</small>
+            {% for tech in both_techs %}
+            <span class="sk-pill" style="margin-right: .25rem; margin-bottom: .25rem; background: rgba(0,150,255,.12); color: #09f;">{{ tech.name }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+    {% if profile.recent_queries %}
+    <div class="sk-panel-body" style="padding-top: 0; padding-bottom: .5rem;">
+        <small style="opacity: .5;">Recent searches</small>
+        <ol style="margin: .25rem 0 0 1.25rem; padding: 0; opacity: .7; font-size: .9em;">
+            {% for q in profile.recent_queries %}
+            <li>{{ q }}</li>
+            {% endfor %}
+        </ol>
     </div>
     {% endif %}
     <div class="sk-panel-body" style="white-space: pre-wrap; line-height: 1.7;">{{ profile.profile }}</div>

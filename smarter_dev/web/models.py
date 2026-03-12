@@ -3256,6 +3256,9 @@ class ResearchSession(Base):
     )
     query: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    slug: Mapped[Optional[str]] = mapped_column(
+        String(250), nullable=True, unique=True, index=True,
+    )
     user_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     guild_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     channel_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
@@ -3301,7 +3304,40 @@ class ScanUserProfile(Base):
     )
     profile: Mapped[str] = mapped_column(Text, nullable=False, default="")
     technologies: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
+    recent_queries: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     query_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     def __repr__(self) -> str:
         return f"<ScanUserProfile(user_id='{self.user_id}', queries={self.query_count})>"
+
+
+class ScanServiceUsage(Base):
+    """Internal service usage tracking for Scan background tasks.
+
+    Tracks costs that are not user-facing (e.g. profiler LLM calls) separately
+    from per-session costs.  Each row is a single invocation of an internal agent.
+    """
+
+    __tablename__ = "scan_service_usage"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    task_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True,
+    )
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    input_tokens: Mapped[int] = mapped_column(default=0)
+    output_tokens: Mapped[int] = mapped_column(default=0)
+    cache_read_tokens: Mapped[int] = mapped_column(default=0)
+    cache_write_tokens: Mapped[int] = mapped_column(default=0)
+    cost_usd: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6), nullable=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    session_id: Mapped[Optional[UUID]] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<ScanServiceUsage(task='{self.task_type}', cost={self.cost_usd})>"

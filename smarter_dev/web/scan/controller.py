@@ -106,8 +106,9 @@ class ScanController(Controller):
             )
 
         # Open Graph metadata for social previews
+        canonical_path = (session_data.slug or result_id) if session_data else result_id
         og_meta = {
-            "url": f"https://scan.smarter.dev/r/{result_id}",
+            "url": f"https://scan.smarter.dev/r/{canonical_path}",
             "site_name": "Scan by Smarter Dev",
             "type": "article",
         }

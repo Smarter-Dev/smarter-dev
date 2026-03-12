@@ -51,7 +51,7 @@
             </td>
             <td>
                 {% if session.status == 'complete' %}
-                <a href="https://scan.smarter.dev/r/{{ session.id }}" target="_blank" title="View output" style="opacity: .6;">&#8599;</a>
+                <a href="https://scan.smarter.dev/r/{{ session.slug or session.id }}" target="_blank" title="View output" style="opacity: .6;">&#8599;</a>
                 {% endif %}
             </td>
         </tr>

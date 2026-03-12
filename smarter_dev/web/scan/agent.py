@@ -1950,6 +1950,7 @@ async def generate_user_profile(
     existing_profile: str,
     query_count: int,
     existing_technologies: list[dict] | None = None,
+    recent_queries: list[str] | None = None,
 ) -> tuple[UserProfileOutput, RunUsage]:
     """Generate/update a user profile based on their latest query.
 
@@ -1965,6 +1966,11 @@ async def generate_user_profile(
         prompt += "\n\nExisting technologies:\n"
         for tech in existing_technologies:
             prompt += f"- {tech['name']} ({tech['relationship']})\n"
+
+    if recent_queries:
+        prompt += "\n\nRecent searches (most recent first):\n"
+        for i, q in enumerate(recent_queries, 1):
+            prompt += f"{i}. {q}\n"
 
     prompt += f"\n\nLatest query:\n{query}"
 

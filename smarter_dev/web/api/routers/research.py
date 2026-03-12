@@ -98,7 +98,7 @@ async def stream_research(
         if session.status == "complete":
             data = {
                 "result_id": str(session.id),
-                "result_url": f"https://scan.smarter.dev/r/{session.id}",
+                "result_url": f"https://scan.smarter.dev/r/{session.slug or session.id}",
                 "summary": session.summary or "",
             }
         else:

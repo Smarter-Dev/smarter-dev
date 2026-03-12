@@ -43,10 +43,24 @@ class ResearchSessionOperations:
         return research
 
     async def get_session(
-        self, session: AsyncSession, session_id: UUID
+        self, session: AsyncSession, session_id: UUID | str
     ) -> ResearchSession | None:
+        """Look up a session by UUID or slug."""
+        # Try UUID first
+        try:
+            from uuid import UUID as _UUID
+            uid = session_id if isinstance(session_id, _UUID) else _UUID(str(session_id))
+            result = await session.execute(
+                select(ResearchSession).where(ResearchSession.id == uid)
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                return row
+        except (ValueError, AttributeError):
+            pass
+        # Fall back to slug lookup
         result = await session.execute(
-            select(ResearchSession).where(ResearchSession.id == session_id)
+            select(ResearchSession).where(ResearchSession.slug == str(session_id))
         )
         return result.scalar_one_or_none()
 

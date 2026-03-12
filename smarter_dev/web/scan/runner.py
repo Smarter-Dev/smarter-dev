@@ -35,7 +35,7 @@ from skrift.lib.notifications import NotificationMode, notify_user
 from sqlalchemy import select, update
 
 from smarter_dev.shared.database import get_skrift_db_session_context
-from smarter_dev.web.models import ResearchSession, ScanUserProfile
+from smarter_dev.web.models import ResearchSession, ScanServiceUsage, ScanUserProfile
 from smarter_dev.web.scan.agent import (
     CODE_EXAMPLES_MODEL,
     MODEL,
@@ -68,6 +68,20 @@ logger = logging.getLogger(__name__)
 ops = ResearchSessionOperations()
 
 _USER_AGENT = "Smarter Dev Scan Agent - admin@smarter.dev"
+
+
+def _make_slug(name: str) -> str:
+    """Generate a URL slug from a session name with a timestamp suffix for uniqueness."""
+    import re
+
+    slug = name.lower().strip()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = re.sub(r"[\s_]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    # Truncate to keep room for timestamp
+    slug = slug[:200]
+    timestamp = str(int(time.time()))
+    return f"{slug}-{timestamp}"
 
 
 def _usage_to_dict(usage: RunUsage) -> dict:
@@ -107,12 +121,19 @@ async def _update_user_profile(user_id: str, query: str, session_id: UUID | None
             profile = result.scalar_one_or_none()
             existing_text = profile.profile if profile else ""
             existing_techs = profile.technologies if profile else None
+            recent_queries = list(profile.recent_queries or []) if profile else []
             query_count = profile.query_count if profile else 0
 
         profile_output, usage = await generate_user_profile(
-            query, existing_text, query_count, existing_technologies=existing_techs,
+            query, existing_text, query_count,
+            existing_technologies=existing_techs,
+            recent_queries=recent_queries,
         )
         technologies = [t.model_dump() for t in profile_output.technologies]
+
+        # Keep last 5 queries (most recent first)
+        updated_queries = [query] + [q for q in recent_queries if q != query]
+        updated_queries = updated_queries[:5]
 
         async with get_skrift_db_session_context() as db_session:
             result = await db_session.execute(
@@ -122,6 +143,7 @@ async def _update_user_profile(user_id: str, query: str, session_id: UUID | None
             if profile:
                 profile.profile = profile_output.profile
                 profile.technologies = technologies
+                profile.recent_queries = updated_queries
                 profile.query_count = profile.query_count + 1
                 db_session.add(profile)
             else:
@@ -129,13 +151,31 @@ async def _update_user_profile(user_id: str, query: str, session_id: UUID | None
                     user_id=user_id,
                     profile=profile_output.profile,
                     technologies=technologies,
+                    recent_queries=updated_queries,
                     query_count=1,
                 ))
             await db_session.commit()
 
-        # Track usage against the session if available
-        if session_id and usage:
-            await _persist_aux_usage(session_id, usage, CODE_EXAMPLES_MODEL)
+        # Track profiler usage separately as an internal service cost
+        if usage and (usage.input_tokens or usage.output_tokens):
+            in_tok = usage.input_tokens or 0
+            out_tok = usage.output_tokens or 0
+            cache_read = usage.cache_read_tokens or 0
+            cache_write = usage.cache_write_tokens or 0
+            cost = calc_session_cost(in_tok, out_tok, cache_read, cache_write, CODE_EXAMPLES_MODEL)
+            async with get_skrift_db_session_context() as db_session:
+                db_session.add(ScanServiceUsage(
+                    task_type="user_profiler",
+                    model_name=CODE_EXAMPLES_MODEL,
+                    input_tokens=in_tok,
+                    output_tokens=out_tok,
+                    cache_read_tokens=cache_read,
+                    cache_write_tokens=cache_write,
+                    cost_usd=cost,
+                    user_id=user_id,
+                    session_id=session_id,
+                ))
+                await db_session.commit()
 
         logger.info("User profile updated for %s", user_id)
     except Exception:
@@ -184,6 +224,7 @@ async def run_session_pipeline(
 
     # Results collected in memory — written to DB once at the end.
     meta_name: str | None = None
+    session_slug: str | None = None
     meta_topic: str = "other"
     meta_skill: str = "intermediate"
     research_result: ResearchResult | None = None
@@ -199,9 +240,10 @@ async def run_session_pipeline(
     # -- Phase functions (do work + emit SSE, no DB) --
 
     async def _do_meta() -> None:
-        nonlocal meta_name, meta_topic, meta_skill
+        nonlocal meta_name, meta_topic, meta_skill, session_slug
         meta, usage = await generate_session_meta(query)
         meta_name = meta.name
+        session_slug = _make_slug(meta.name) if meta.name else None
         meta_topic = meta.topic
         meta_skill = meta.skill_level
         all_usage.append((usage, MODEL))
@@ -227,10 +269,11 @@ async def run_session_pipeline(
         all_usage.append((total_usage, MODEL))
 
         duration = time.monotonic() - start_time
+        result_path = session_slug or sid
         await emit(
             "complete",
             result_id=sid,
-            result_url=f"https://scan.smarter.dev/r/{sid}",
+            result_url=f"https://scan.smarter.dev/r/{result_path}",
             summary=result_data.summary,
             response=result_data.response,
             sources=[s.model_dump() for s in result_data.sources],
@@ -321,10 +364,11 @@ async def run_session_pipeline(
         all_usage.append((combined, MODEL))
 
         duration = time.monotonic() - start_time
+        result_path = session_slug or sid
         await emit(
             "complete",
             result_id=sid,
-            result_url=f"https://scan.smarter.dev/r/{sid}",
+            result_url=f"https://scan.smarter.dev/r/{result_path}",
             summary=result_data.summary,
             response=result_data.response,
             sources=[s.model_dump() for s in result_data.sources],
@@ -464,7 +508,7 @@ async def run_session_pipeline(
             await emit("code_examples_status", status="done")
 
     async def _do_experimental_research() -> None:
-        nonlocal meta_name, meta_topic, meta_skill
+        nonlocal meta_name, meta_topic, meta_skill, session_slug
         nonlocal research_result, research_tool_log
         nonlocal youtube_videos, resources, code_examples_data
         nonlocal planner_reasoning
@@ -494,6 +538,7 @@ async def run_session_pipeline(
 
         # Capture meta from the experimental pipeline's combined output
         meta_name = meta_plan.name
+        session_slug = _make_slug(meta_plan.name) if meta_plan.name else None
         meta_topic = meta_plan.topic
         meta_skill = meta_plan.skill_level
         youtube_videos = exp_youtube
@@ -501,10 +546,11 @@ async def run_session_pipeline(
         code_examples_data = exp_examples
 
         duration = time.monotonic() - start_time
+        result_path = session_slug or sid
         await emit(
             "complete",
             result_id=sid,
-            result_url=f"https://scan.smarter.dev/r/{sid}",
+            result_url=f"https://scan.smarter.dev/r/{result_path}",
             summary=result_data.summary,
             response=result_data.response,
             sources=[s.model_dump() for s in result_data.sources],
@@ -591,6 +637,8 @@ async def run_session_pipeline(
             }
             if meta_name:
                 values["name"] = meta_name
+            if session_slug:
+                values["slug"] = session_slug
             await db_session.execute(
                 update(ResearchSession)
                 .where(ResearchSession.id == session_id)
