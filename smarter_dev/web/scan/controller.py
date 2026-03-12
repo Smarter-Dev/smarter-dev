@@ -58,12 +58,19 @@ class ScanController(Controller):
             "type": "website",
         }
         recent_searches: list = []
+        suggested_queries: list = []
         if user_id:
             recent_searches = await ops.list_sessions(db_session, user_id, limit=3)
+            profile_result = await db_session.execute(
+                select(ScanUserProfile.suggested_queries)
+                .where(ScanUserProfile.user_id == user_id)
+            )
+            suggested_queries = profile_result.scalar_one_or_none() or []
         return Template("scan/landing.html", context={
             "user_id": user_id,
             "og_meta": og_meta,
             "recent_searches": recent_searches,
+            "suggested_queries": suggested_queries,
         })
 
     @post(

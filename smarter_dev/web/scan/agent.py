@@ -1955,6 +1955,14 @@ class UserProfileOutput(BaseModel):
             "Order by relevance — most central to their work first."
         ),
     )
+    suggested_queries: list[str] = Field(
+        description=(
+            "Exactly 3 research queries the user might want to explore next. "
+            "Base these on their profile, recent queries, and current interests. "
+            "Make them specific, actionable, and varied — not just rephrasing "
+            "their last search. Each should be a natural search query, not a title."
+        ),
+    )
 
 
 _user_profile_agent = Agent(
@@ -1987,6 +1995,15 @@ latest query. Update the relationship if evidence changes (e.g. a user who was
 Be specific with technology names — "FastAPI" not "Python web framework",
 "PostgreSQL" not "SQL database". Include languages, frameworks, libraries,
 platforms, and tools.
+
+## Suggested queries
+
+Generate exactly 3 research queries the user might want to explore next:
+- Base them on their profile, tech stack, recent queries, and apparent interests
+- Make them specific and actionable (e.g. "How to set up database migrations with Alembic and async SQLAlchemy" not "database stuff")
+- Vary them — cover different aspects of their interests, don't cluster around one topic
+- Don't repeat or rephrase their recent queries — suggest genuinely new directions
+- Write them as natural search queries, not titles or descriptions
 
 ## Rules
 - Write the narrative in third person ("This user...")

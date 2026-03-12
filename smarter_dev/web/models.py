@@ -3306,6 +3306,7 @@ class ScanUserProfile(Base):
     technologies: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     recent_queries: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     query_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    suggested_queries: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
 
     def __repr__(self) -> str:
         return f"<ScanUserProfile(user_id='{self.user_id}', queries={self.query_count})>"

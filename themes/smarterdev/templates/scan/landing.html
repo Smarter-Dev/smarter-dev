@@ -23,6 +23,11 @@
     .scan-mode input[type="radio"]{appearance:none;-webkit-appearance:none;width:10px;height:10px;border:1px solid rgba(0,212,255,.3);border-radius:50%;cursor:pointer;transition:all .2s;margin:0}
     .scan-mode input[type="radio"]:checked{background:var(--cyan);border-color:var(--cyan);box-shadow:0 0 8px rgba(0,212,255,.3)}
     .scan-mode input[type="radio"]:checked+span{color:var(--cyan)}
+    .scan-suggestions{max-width:600px;margin:1rem auto 0;text-align:left}
+    .scan-suggestions-label{font-family:var(--heading);font-size:.42rem;letter-spacing:.12em;color:var(--mid);margin-bottom:.5rem}
+    .scan-suggestions-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1px}
+    .scan-suggestion{display:block;padding:.55rem .75rem;font-size:.78rem;font-family:var(--body);background:var(--surface);border:1px solid rgba(0,212,255,.06);color:var(--light);text-decoration:none;cursor:pointer;transition:all .2s}
+    .scan-suggestion:hover{border-color:rgba(0,212,255,.18);background:rgba(0,212,255,.03);color:var(--cyan)}
     .scan-recent{max-width:600px;margin:2rem auto 0;text-align:left}
     .scan-recent-label{font-family:var(--heading);font-size:.42rem;letter-spacing:.12em;color:var(--mid);margin-bottom:.5rem}
     .scan-recent-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1px}
@@ -53,6 +58,16 @@
         <input type="hidden" name="mode" value="experimental">
         <button type="submit" class="scan-submit">SCAN</button>
     </form>
+    {% if suggested_queries %}
+    <div class="scan-suggestions">
+        <div class="scan-suggestions-label">SUGGESTED SEARCHES</div>
+        <ul class="scan-suggestions-list">
+            {% for sq in suggested_queries %}
+            <li><a class="scan-suggestion" data-query="{{ sq }}">{{ sq }}</a></li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
     {% if recent_searches %}
     <div class="scan-recent">
         <div class="scan-recent-label">RECENT SEARCHES</div>
@@ -92,6 +107,14 @@
     ta.addEventListener('input', grow);
     ta.addEventListener('keydown', function(e){
         if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();ta.form.requestSubmit();}
+    });
+    document.querySelectorAll('.scan-suggestion').forEach(function(el){
+        el.addEventListener('click', function(e){
+            e.preventDefault();
+            ta.value = el.dataset.query;
+            grow();
+            ta.form.requestSubmit();
+        });
     });
 })();
 </script>

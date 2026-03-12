@@ -129,10 +129,12 @@ async def _update_user_profile(user_id: str, query: str, session_id: UUID | None
                 select(ScanUserProfile).where(ScanUserProfile.user_id == user_id)
             )
             profile = result.scalar_one_or_none()
+            suggested = profile_output.suggested_queries[:3] if profile_output.suggested_queries else None
             if profile:
                 profile.profile = profile_output.profile
                 profile.technologies = technologies
                 profile.recent_queries = updated_queries
+                profile.suggested_queries = suggested
                 profile.query_count = profile.query_count + 1
                 db_session.add(profile)
             else:
@@ -141,6 +143,7 @@ async def _update_user_profile(user_id: str, query: str, session_id: UUID | None
                     profile=profile_output.profile,
                     technologies=technologies,
                     recent_queries=updated_queries,
+                    suggested_queries=suggested,
                     query_count=1,
                 ))
             await db_session.commit()

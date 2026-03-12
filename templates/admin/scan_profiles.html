@@ -49,6 +49,16 @@
         {% endif %}
     </div>
     {% endif %}
+    {% if profile.suggested_queries %}
+    <div class="sk-panel-body" style="padding-top: 0; padding-bottom: .5rem;">
+        <small style="opacity: .5;">Suggested next searches</small>
+        <ul style="margin: .25rem 0 0 1.25rem; padding: 0; opacity: .7; font-size: .9em; list-style: disc;">
+            {% for q in profile.suggested_queries %}
+            <li>{{ q }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
     {% if profile.recent_queries %}
     <div class="sk-panel-body" style="padding-top: 0; padding-bottom: .5rem;">
         <small style="opacity: .5;">Recent searches</small>
