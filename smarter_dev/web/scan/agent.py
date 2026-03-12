@@ -1488,7 +1488,7 @@ async def run_experimental_pipeline(
     date_context: str,
     emit: EmitFn,
     user_profile: str = "",
-) -> tuple[ResearchResult, list[dict], RunUsage, list[dict], list[dict], list[dict], ExpMetaQueryPlan]:
+) -> tuple[ResearchResult, list[dict], RunUsage, list[dict], list[dict], list[dict], ExpMetaQueryPlan, str]:
     """History-threaded experimental research pipeline.
 
     Threads conversation history through sequential stages:
@@ -1499,7 +1499,7 @@ async def run_experimental_pipeline(
     5. Example plan
     6. Parallel example generation (streaming)
 
-    Returns (result, tool_log, total_usage, youtube_videos, resources, code_examples, meta_plan).
+    Returns (result, tool_log, total_usage, youtube_videos, resources, code_examples, meta_plan, planner_reasoning).
     """
     from pydantic_ai import AgentRunResultEvent
     from pydantic_ai.messages import (
@@ -1561,6 +1561,7 @@ async def run_experimental_pipeline(
     history.append(ModelRequest(parts=[UserPromptPart(content="\n\n".join(context_parts))]))
 
     planner_result_data: PlannerOutput | None = None
+    planner_reasoning_chunks: list[str] = []
 
     async for event in _planner_agent.run_stream_events(
         "Research the user's question. Search for the best sources, verify "
@@ -1586,6 +1587,14 @@ async def run_experimental_pipeline(
                     entry["status"] = "complete"
                     entry["content"] = display_content
                     break
+
+        elif isinstance(event, PartDeltaEvent):
+            if isinstance(event.delta, TextPartDelta):
+                planner_reasoning_chunks.append(event.delta.content_delta)
+
+        elif isinstance(event, PartStartEvent):
+            if isinstance(event.part, TextPart) and event.part.content:
+                planner_reasoning_chunks.append(event.part.content)
 
         elif isinstance(event, AgentRunResultEvent):
             planner_result_data = event.result.output
@@ -1818,7 +1827,8 @@ async def run_experimental_pipeline(
             logger.exception("Example planning/generation failed: %s", exc)
             await emit("code_examples_status", status="done")
 
-    return result_data, tool_log, total_usage, youtube_videos, resources, code_examples, plan
+    planner_reasoning = "".join(planner_reasoning_chunks)
+    return result_data, tool_log, total_usage, youtube_videos, resources, code_examples, plan, planner_reasoning
 
 
 def _parse_example_text(text: str, fallback_title: str, fallback_lang: str) -> dict:

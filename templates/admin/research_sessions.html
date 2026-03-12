@@ -1,0 +1,66 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Research Sessions - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Research Sessions</h1>
+    <p>{{ total }} session{{ 's' if total != 1 else '' }}</p>
+</hgroup>
+
+{% if sessions %}
+<table class="sk-table">
+    <thead>
+        <tr>
+            <th>Query</th>
+            <th>User</th>
+            <th>Mode</th>
+            <th>Status</th>
+            <th>Cost</th>
+            <th>Created</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for session in sessions %}
+        <tr>
+            <td>
+                <a href="/admin/research-sessions/{{ session.id }}">
+                    <strong>{{ session.name or session.query[:60] }}</strong>
+                </a>
+                {% if session.name %}
+                <br><small style="opacity: .6;">{{ session.query[:80] }}{% if session.query|length > 80 %}&hellip;{% endif %}</small>
+                {% endif %}
+            </td>
+            <td><code style="font-size: .85em;">{{ session.user_id }}</code></td>
+            <td>
+                <span class="sk-pill">{{ session.pipeline_mode }}</span>
+            </td>
+            <td>
+                <span class="sk-pill" style="{% if session.status == 'complete' %}background: rgba(0,200,83,.12); color: #0c5;{% elif session.status == 'error' %}background: rgba(255,50,50,.12); color: #f55;{% else %}background: rgba(200,150,0,.12); color: #ca0;{% endif %}">{{ session.status }}</span>
+            </td>
+            <td>
+                {% if session.cost_usd %}
+                    ${{ "%.4f"|format(session.cost_usd) }}
+                {% else %}
+                    &mdash;
+                {% endif %}
+            </td>
+            <td>
+                <small>{{ session.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+            </td>
+            <td>
+                {% if session.status == 'complete' %}
+                <a href="https://scan.smarter.dev/r/{{ session.id }}" target="_blank" title="View output" style="opacity: .6;">&#8599;</a>
+                {% endif %}
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="sk-no-items">
+    No research sessions found.
+</p>
+{% endif %}
+{% endblock %}

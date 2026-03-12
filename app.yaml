@@ -47,6 +47,7 @@ controllers:
   - smarter_dev.web.api_keys_admin:APIKeyAdminController
   - smarter_dev.web.usage_admin:UsageAdminController
   - smarter_dev.web.scan_profiles_admin:ScanProfilesAdminController
+  - smarter_dev.web.research_sessions_admin:ResearchSessionsAdminController
 
 # Partials system (SPA navigation)
 partials:

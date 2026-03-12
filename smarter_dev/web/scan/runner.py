@@ -180,6 +180,7 @@ async def run_session_pipeline(
     # -- Shared mutable state filled by phases --
     meta_ready = asyncio.Event()
     research_done = asyncio.Event()
+    planner_reasoning: str = ""
 
     # Results collected in memory — written to DB once at the end.
     meta_name: str | None = None
@@ -466,6 +467,7 @@ async def run_session_pipeline(
         nonlocal meta_name, meta_topic, meta_skill
         nonlocal research_result, research_tool_log
         nonlocal youtube_videos, resources, code_examples_data
+        nonlocal planner_reasoning
 
         async with httpx.AsyncClient(
             timeout=30.0, headers={"User-Agent": _USER_AGENT},
@@ -479,6 +481,7 @@ async def run_session_pipeline(
             (
                 result_data, tool_log, total_usage,
                 exp_youtube, exp_resources, exp_examples, meta_plan,
+                exp_planner_reasoning,
             ) = await run_experimental_pipeline(
                 query, deps, date_context, emit,
                 user_profile=user_profile_text,
@@ -486,6 +489,7 @@ async def run_session_pipeline(
 
         research_result = result_data
         research_tool_log = tool_log
+        planner_reasoning = exp_planner_reasoning
         all_usage.append((total_usage, MODEL))
 
         # Capture meta from the experimental pipeline's combined output
@@ -564,6 +568,10 @@ async def run_session_pipeline(
             context["resources"] = resources
         if code_examples_data:
             context["code_examples"] = code_examples_data
+        if planner_reasoning:
+            context["planner_reasoning"] = planner_reasoning
+        if user_profile_text:
+            context["user_profile_snapshot"] = user_profile_text
 
         # -- Single DB write --
         async with get_skrift_db_session_context() as db_session:
