@@ -1043,7 +1043,7 @@ class ExpMetaQueryPlan(BaseModel):
     """Metadata for the experimental pipeline."""
 
     name: str = Field(
-        description="A brief title (2-5 words) for the research query.",
+        description="A concise action phrase (2-4 words) describing what the user and researcher are doing. E.g. 'Finding Notion Alternatives', 'Debugging Docker Memory'.",
     )
     skill_level: str = Field(
         description=(
@@ -1068,8 +1068,11 @@ _meta_query_agent = Agent(
     instructions=(
         "You are a research classifier. You will be given the current date "
         "and the user's question. Produce metadata about the query.\n\n"
-        "1. **name**: A brief title (2-5 words) that captures the essence "
-        "of the query. No quotes, no punctuation at the end.\n"
+        "1. **name**: A concise action phrase (2-4 words) describing what "
+        "the user and researcher are doing. Examples: 'Finding Notion "
+        "Alternatives', 'Debugging Docker Memory', 'Comparing API "
+        "Frameworks'. Keep it short and punchy — no filler words. "
+        "No quotes, no punctuation at the end.\n"
         "2. **skill_level**: Infer from the terminology and depth of the "
         "question — beginner, intermediate, advanced, or expert.\n"
         "3. **topic**: Classify into exactly one of: programming, "
@@ -1457,8 +1460,8 @@ _single_example_agent = Agent(
         "demonstrates the concept in action.\n\n"
         "## Output format\n\n"
         "Write your output in this exact format:\n\n"
-        "```<language>\n<code>\n```\n\n"
-        "<explanation>\n\n"
+        "```language\ncode here\n```\n\n"
+        "A 1-2 sentence explanation of what the code does.\n\n"
         "Rules:\n"
         "- The code must be complete and runnable\n"
         "- Use realistic variable names and scenarios\n"
@@ -1822,7 +1825,8 @@ def _parse_example_text(text: str, fallback_title: str, fallback_lang: str) -> d
         # Everything after the code block is the explanation
         after_code = text[code_match.end():].strip()
         if after_code:
-            explanation = after_code
+            # Strip any <explanation> tags the model may have output
+            explanation = re.sub(r"</?explanation>", "", after_code).strip()
     else:
         # No code block found — treat the whole text as code
         code = text.strip()

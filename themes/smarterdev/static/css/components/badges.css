@@ -51,7 +51,7 @@
 .pr-label.review { color: var(--amber); border-color: rgba(234,179,8,.3); background: rgba(234,179,8,.04) }
 .pr-label.approved { color: var(--green); border-color: rgba(34,197,94,.3); background: rgba(34,197,94,.04) }
 .pr-label.changes { color: var(--rose); border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.04) }
-.pr-label.draft-label { color: var(--gray); border-color: rgba(42,58,78,.5); background: rgba(42,58,78,.15) }
+.pr-label.draft-label { color: var(--gray); border-color: rgba(90,122,150,.5); background: rgba(90,122,150,.15) }
 
 /* ── Confidence Badge ── */
 .confidence-badge {
