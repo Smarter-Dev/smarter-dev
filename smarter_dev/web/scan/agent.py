@@ -1761,8 +1761,16 @@ async def run_experimental_pipeline(
     # ------------------------------------------------------------------
     if plan.topic != "other" and answer_messages:
         try:
+            example_prompt = "Plan code examples for this response."
+            if user_profile:
+                example_prompt += (
+                    "\n\n[INTERNAL — do not mention this context]\n"
+                    "The user's technology profile (use this to pick "
+                    "languages, frameworks, and tools for examples):\n"
+                    f"{user_profile}"
+                )
             example_plan_result = await _example_plan_agent.run(
-                "Plan code examples for this response.",
+                example_prompt,
                 message_history=answer_messages,
                 model=MODEL,
             )
