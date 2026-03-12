@@ -106,9 +106,13 @@ async def _update_user_profile(user_id: str, query: str, session_id: UUID | None
             )
             profile = result.scalar_one_or_none()
             existing_text = profile.profile if profile else ""
+            existing_techs = profile.technologies if profile else None
             query_count = profile.query_count if profile else 0
 
-        updated_text, usage = await generate_user_profile(query, existing_text, query_count)
+        profile_output, usage = await generate_user_profile(
+            query, existing_text, query_count, existing_technologies=existing_techs,
+        )
+        technologies = [t.model_dump() for t in profile_output.technologies]
 
         async with get_skrift_db_session_context() as db_session:
             result = await db_session.execute(
@@ -116,13 +120,15 @@ async def _update_user_profile(user_id: str, query: str, session_id: UUID | None
             )
             profile = result.scalar_one_or_none()
             if profile:
-                profile.profile = updated_text
+                profile.profile = profile_output.profile
+                profile.technologies = technologies
                 profile.query_count = profile.query_count + 1
                 db_session.add(profile)
             else:
                 db_session.add(ScanUserProfile(
                     user_id=user_id,
-                    profile=updated_text,
+                    profile=profile_output.profile,
+                    technologies=technologies,
                     query_count=1,
                 ))
             await db_session.commit()

@@ -3300,6 +3300,7 @@ class ScanUserProfile(Base):
         String(100), nullable=False, unique=True, index=True,
     )
     profile: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    technologies: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     query_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     def __repr__(self) -> str:

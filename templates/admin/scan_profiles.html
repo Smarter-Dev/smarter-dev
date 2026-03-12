@@ -18,6 +18,13 @@
         </span>
         <small style="opacity: .6;">Updated {{ profile.updated_at.strftime('%Y-%m-%d %H:%M') }}</small>
     </div>
+    {% if profile.technologies %}
+    <div class="sk-panel-body" style="padding-bottom: 0;">
+        {% for tech in profile.technologies %}
+        <span class="sk-pill" style="margin-right: .25rem; margin-bottom: .25rem; {% if tech.relationship == 'uses' %}background: rgba(0,200,83,.12); color: #0c5;{% elif tech.relationship == 'both' %}background: rgba(0,150,255,.12); color: #09f;{% else %}background: rgba(200,150,0,.12); color: #ca0;{% endif %}">{{ tech.name }} <small style="opacity:.6;">{{ tech.relationship }}</small></span>
+        {% endfor %}
+    </div>
+    {% endif %}
     <div class="sk-panel-body" style="white-space: pre-wrap; line-height: 1.7;">{{ profile.profile }}</div>
 </div>
 {% endfor %}

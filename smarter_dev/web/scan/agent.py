@@ -1853,26 +1853,72 @@ def _parse_example_text(text: str, fallback_title: str, fallback_lang: str) -> d
 # User profiling — background task after each query
 # ============================================================================
 
+
+class UserProfileTechnology(BaseModel):
+    """A technology the user works with or is researching."""
+
+    name: str = Field(description="Technology name, e.g. 'Python', 'React', 'PostgreSQL', 'Docker'")
+    relationship: Literal["uses", "researching", "both"] = Field(
+        description=(
+            "'uses' = actively works with it (evidenced by debugging, building, integration queries). "
+            "'researching' = exploring or learning about it (conceptual, comparison, getting-started queries). "
+            "'both' = actively uses AND currently deepening knowledge."
+        ),
+    )
+
+
+class UserProfileOutput(BaseModel):
+    """Structured user profile produced by the profiler agent."""
+
+    profile: str = Field(
+        description="2-5 paragraph narrative profile of the user in third person.",
+    )
+    technologies: list[UserProfileTechnology] = Field(
+        description=(
+            "Technologies the user uses or is researching, extracted from ALL "
+            "queries (not just the latest). Carry forward technologies from the "
+            "existing profile and add/update based on the new query. "
+            "Order by relevance — most central to their work first."
+        ),
+    )
+
+
 _user_profile_agent = Agent(
-    output_type=str,
+    output_type=UserProfileOutput,
     instructions="""\
 You are a user profiler for a developer research tool called Scan.
 
 You will be given a user's existing profile (may be empty for new users) and
-their latest research query. Write an updated profile of the user in 2-5
-paragraphs.
+their latest research query. Produce an updated structured profile.
 
-The profile should cover:
+## Profile narrative (2-5 paragraphs)
+
+Cover:
 - Their apparent technical interests and domains (e.g. web dev, DevOps, ML)
 - Their estimated skill level and how it's evolving
 - Patterns in their research (e.g. always debugging, learning new frameworks, comparing tools)
 - Any notable traits (e.g. prefers self-hosted solutions, works with specific languages)
 
-Rules:
-- Write in third person ("This user...")
+## Technologies list
+
+Track every technology the user works with or is researching:
+- **uses**: they actively build with it (debugging, integration, deployment queries)
+- **researching**: they're exploring or learning about it (conceptual, comparison, intro queries)
+- **both**: they use it AND are currently deepening their knowledge of it
+
+Carry forward all technologies from the existing profile. Add new ones from the
+latest query. Update the relationship if evidence changes (e.g. a user who was
+"researching" React and now asks about debugging a React component → "both").
+
+Be specific with technology names — "FastAPI" not "Python web framework",
+"PostgreSQL" not "SQL database". Include languages, frameworks, libraries,
+platforms, and tools.
+
+## Rules
+- Write the narrative in third person ("This user...")
 - Be concise but insightful
-- Update the profile based on the new query — don't just append, synthesize
-- If the existing profile is empty, create a new one from scratch based on the query
+- Synthesize — don't just append the new query to the existing profile
+- If the existing profile is empty, create everything from scratch
 - Don't speculate wildly — stick to what the queries reveal
 """,
 )
@@ -1882,16 +1928,23 @@ async def generate_user_profile(
     query: str,
     existing_profile: str,
     query_count: int,
-) -> tuple[str, RunUsage]:
+    existing_technologies: list[dict] | None = None,
+) -> tuple[UserProfileOutput, RunUsage]:
     """Generate/update a user profile based on their latest query.
 
-    Returns (updated_profile_text, usage).
+    Returns (UserProfileOutput, usage).
     """
     prompt = f"Existing profile ({query_count} previous queries):\n"
     if existing_profile:
         prompt += existing_profile
     else:
         prompt += "(New user — no existing profile)"
+
+    if existing_technologies:
+        prompt += "\n\nExisting technologies:\n"
+        for tech in existing_technologies:
+            prompt += f"- {tech['name']} ({tech['relationship']})\n"
+
     prompt += f"\n\nLatest query:\n{query}"
 
     result = await _user_profile_agent.run(prompt, model=CODE_EXAMPLES_MODEL)
