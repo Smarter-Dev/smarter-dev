@@ -362,21 +362,25 @@ function buildTOC() {
     setTimeout(function() { tocNav.classList.add("toc-visible"); }, 100);
 
     // Scroll spy
-    var links = tocList.querySelectorAll(".toc-link");
-    var targets = [];
-    for (var j = 0; j < links.length; j++) {
-        var target = document.getElementById(links[j].dataset.target);
-        if (target) targets.push({ el: target, link: links[j] });
-    }
+    window._tocTargets = [];
+    window._tocRefresh = function() {
+        var allLinks = tocList.querySelectorAll(".toc-link");
+        window._tocTargets = [];
+        for (var j = 0; j < allLinks.length; j++) {
+            var t = document.getElementById(allLinks[j].dataset.target);
+            if (t) window._tocTargets.push({ el: t, link: allLinks[j] });
+        }
+    };
+    window._tocRefresh();
 
     function updateActive() {
         var scrollY = window.scrollY + 100;
         var active = null;
-        for (var k = 0; k < targets.length; k++) {
-            if (targets[k].el.offsetTop <= scrollY) active = targets[k];
+        for (var k = 0; k < window._tocTargets.length; k++) {
+            if (window._tocTargets[k].el.offsetTop <= scrollY) active = window._tocTargets[k];
         }
-        for (var k = 0; k < targets.length; k++) {
-            targets[k].link.classList.toggle("toc-active", targets[k] === active);
+        for (var k = 0; k < window._tocTargets.length; k++) {
+            window._tocTargets[k].link.classList.toggle("toc-active", window._tocTargets[k] === active);
         }
     }
 
@@ -416,6 +420,11 @@ function buildTOCExamples() {
     divider.className = "toc-divider";
     group.appendChild(divider);
 
+    var label = document.createElement("div");
+    label.className = "toc-examples-label";
+    label.textContent = "EXAMPLES";
+    group.appendChild(label);
+
     for (var i = 0; i < examples.length; i++) {
         var ex = examples[i];
         // Set ID on example for linking
@@ -431,6 +440,9 @@ function buildTOCExamples() {
     tocList.appendChild(group);
     // Animate examples group in
     setTimeout(function() { group.classList.add("toc-visible"); }, 200);
+
+    // Refresh scroll spy targets to include examples
+    if (window._tocRefresh) window._tocRefresh();
 
     // Re-bind smooth scroll for new links
     group.addEventListener("click", function(e) {

@@ -76,7 +76,7 @@
 .report-content { min-width: 0 }
 
 /* ── Table of Contents ── */
-.report-toc { position: absolute; right: -180px; top: 0; width: 160px; opacity: 0; transform: translateY(10px); transition: opacity .5s ease, transform .5s ease }
+.report-toc { position: absolute; right: -180px; top: 0; bottom: 0; width: 160px; opacity: 0; transform: translateY(10px); transition: opacity .5s ease, transform .5s ease }
 .report-toc-inner { position: sticky; top: 70px; max-height: calc(100vh - 90px); overflow-y: auto; scrollbar-width: none }
 .report-toc-inner::-webkit-scrollbar { display: none }
 .report-toc.toc-visible { opacity: 1; transform: translateY(0) }
@@ -87,7 +87,8 @@
 .toc-link:hover { color: var(--light) }
 .toc-link.toc-active { color: var(--cyan); border-left-color: var(--cyan) }
 .toc-link.toc-h3 { padding-left: 1.25rem; font-size: .6rem }
-.toc-divider { height: 1px; background: rgba(0,212,255,.06); margin: .5rem 0 .5rem .75rem }
+.toc-divider { height: 1px; background: rgba(0,212,255,.12); margin: .75rem 0 .5rem .75rem }
+.toc-examples-label { font-family: var(--heading); font-size: .42rem; letter-spacing: .1em; color: var(--mid); margin: .4rem 0 .3rem .75rem }
 .toc-examples-group { opacity: 0; transform: translateY(6px); transition: opacity .4s ease, transform .4s ease }
 .toc-examples-group.toc-visible { opacity: 1; transform: translateY(0) }
 .report-content h2 {
