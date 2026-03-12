@@ -1502,7 +1502,7 @@ async def run_experimental_pipeline(
     date_context: str,
     emit: EmitFn,
     user_profile: str = "",
-) -> tuple[ResearchResult, list[dict], RunUsage, list[dict], list[dict], list[dict], ExpMetaQueryPlan, str, str]:
+) -> tuple[ResearchResult, list[dict], RunUsage, list[dict], list[dict], list[dict], ExpMetaQueryPlan, str, str, dict]:
     """History-threaded experimental research pipeline.
 
     Threads conversation history through sequential stages:
@@ -1513,7 +1513,7 @@ async def run_experimental_pipeline(
     5. Example plan
     6. Parallel example generation (streaming)
 
-    Returns (result, tool_log, total_usage, youtube_videos, resources, code_examples, meta_plan, planner_reasoning, meta_slug).
+    Returns (result, tool_log, total_usage, youtube_videos, resources, code_examples, meta_plan, planner_reasoning, meta_slug, planner_output).
     """
     from pydantic_ai import AgentRunResultEvent
     from pydantic_ai.messages import (
@@ -1844,7 +1844,8 @@ async def run_experimental_pipeline(
             await emit("code_examples_status", status="done")
 
     planner_reasoning = "".join(planner_reasoning_chunks)
-    return result_data, tool_log, total_usage, youtube_videos, resources, code_examples, plan, planner_reasoning, meta_slug
+    planner_output = planner_result_data.model_dump() if planner_result_data else {}
+    return result_data, tool_log, total_usage, youtube_videos, resources, code_examples, plan, planner_reasoning, meta_slug, planner_output
 
 
 def _parse_example_text(text: str, fallback_title: str, fallback_lang: str) -> dict:

@@ -51,6 +51,12 @@
                     {% if session.cache_read_tokens %}/ {{ "{:,}".format(session.cache_read_tokens) }} cache read{% endif %}
                 </td>
             </tr>
+            {% if session.slug %}
+            <tr>
+                <td style="padding: .4rem 1rem .4rem 0; opacity: .6; white-space: nowrap;">Slug</td>
+                <td style="padding: .4rem 0;"><code style="font-size: .85em;">{{ session.slug }}</code></td>
+            </tr>
+            {% endif %}
         </table>
     </div>
 </div>
@@ -69,10 +75,61 @@
 </div>
 {% endif %}
 
+{# ── Planner Output ─────────────────────────────────────────────── #}
+{% if planner_output %}
+<div class="sk-panel" style="margin-bottom: 1.5rem;">
+    <div class="sk-panel-head"><strong>Planner Output</strong></div>
+    <div class="sk-panel-body">
+        {% if planner_output.article_points %}
+        <div style="margin-bottom: 1rem;">
+            <strong style="font-size: .85em; opacity: .6;">Article Points</strong>
+            <ol style="margin: .5rem 0 0 1.25rem; padding: 0; line-height: 1.8;">
+                {% for point in planner_output.article_points %}
+                <li>{{ point }}</li>
+                {% endfor %}
+            </ol>
+        </div>
+        {% endif %}
+
+        {% if planner_output.resources %}
+        <div style="margin-bottom: 1rem;">
+            <strong style="font-size: .85em; opacity: .6;">Selected Resources</strong>
+            <div style="margin-top: .5rem;">
+                {% for resource in planner_output.resources %}
+                <div style="margin-bottom: .5rem; padding: .5rem; background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.06); border-radius: 4px;">
+                    <div>
+                        <a href="{{ resource.url }}" target="_blank" style="color: #09f; text-decoration: none;">{{ resource.title }}</a>
+                        {% if resource.site_name %}
+                        <small style="opacity: .5; margin-left: .5rem;">{{ resource.site_name }}</small>
+                        {% endif %}
+                    </div>
+                    {% if resource.description %}
+                    <div style="font-size: .85em; opacity: .6; margin-top: .2rem;">{{ resource.description[:200] }}{% if resource.description|length > 200 %}&hellip;{% endif %}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if planner_output.youtube_video_ids %}
+        <div>
+            <strong style="font-size: .85em; opacity: .6;">YouTube Video IDs</strong>
+            <div style="margin-top: .5rem;">
+                {% for vid_id in planner_output.youtube_video_ids %}
+                <a href="https://youtube.com/watch?v={{ vid_id }}" target="_blank" class="sk-pill" style="margin-right: .25rem; margin-bottom: .25rem; background: rgba(255,0,0,.08); color: #f44; text-decoration: none;">{{ vid_id }}</a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
 {# ── Planner Reasoning ──────────────────────────────────────────── #}
 {% if planner_reasoning %}
 <div class="sk-panel" style="margin-bottom: 1.5rem;">
-    <div class="sk-panel-head"><strong>Planner Reasoning</strong></div>
+    <div class="sk-panel-head"><strong>Planner Reasoning</strong> <small style="opacity: .5;">(model's internal text between tool calls)</small></div>
     <div class="sk-panel-body" style="white-space: pre-wrap; line-height: 1.7; font-family: monospace; font-size: .9em;">{{ planner_reasoning }}</div>
 </div>
 {% endif %}
@@ -81,19 +138,25 @@
 {% if session.tool_log %}
 <div class="sk-panel" style="margin-bottom: 1.5rem;">
     <div class="sk-panel-head"><strong>Tool Log</strong> <small style="opacity: .6;">({{ session.tool_log|length }} call{{ 's' if session.tool_log|length != 1 else '' }})</small></div>
-    <div class="sk-panel-body" style="max-height: 400px; overflow-y: auto;">
+    <div class="sk-panel-body" style="padding: 0;">
         {% for entry in session.tool_log %}
-        <div style="margin-bottom: .75rem; padding-bottom: .75rem; border-bottom: 1px solid rgba(255,255,255,.06);">
-            <div>
+        <div style="padding: .75rem 1rem; border-bottom: 1px solid rgba(255,255,255,.06);">
+            <div style="display: flex; align-items: center; gap: .5rem;">
                 <span class="sk-pill" style="font-size: .8em;">{{ entry.tool }}</span>
                 <span class="sk-pill" style="font-size: .8em; {% if entry.status == 'complete' %}background: rgba(0,200,83,.12); color: #0c5;{% else %}background: rgba(200,150,0,.12); color: #ca0;{% endif %}">{{ entry.status }}</span>
             </div>
             {% if entry.input %}
-            <div style="margin-top: .3rem; font-family: monospace; font-size: .85em; opacity: .7;">
+            <div style="margin-top: .4rem; font-family: monospace; font-size: .82em; opacity: .7;">
                 {% for key, val in entry.input.items() %}
-                {{ key }}: {{ val[:120] }}{% if val|string|length > 120 %}&hellip;{% endif %}<br>
+                <span style="color: #09f;">{{ key }}</span>: {{ val|string|truncate(200) }}<br>
                 {% endfor %}
             </div>
+            {% endif %}
+            {% if entry.content %}
+            <details style="margin-top: .4rem;">
+                <summary style="font-size: .8em; opacity: .5; cursor: pointer;">Result</summary>
+                <div style="margin-top: .3rem; font-family: monospace; font-size: .78em; opacity: .6; white-space: pre-wrap; max-height: 200px; overflow-y: auto; background: rgba(0,0,0,.15); padding: .5rem; border-radius: 4px;">{{ entry.content }}</div>
+            </details>
             {% endif %}
         </div>
         {% endfor %}

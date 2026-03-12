@@ -74,9 +74,10 @@ class ResearchSessionsAdminController(Controller):
             from litestar.exceptions import NotFoundException
             raise NotFoundException(f"Session {session_id} not found")
 
-        # Extract planner reasoning and user profile snapshot from context
+        # Extract planner reasoning, output, and user profile snapshot from context
         context = session.context or {}
         planner_reasoning = context.get("planner_reasoning", "")
+        planner_output = context.get("planner_output", {})
         user_profile_snapshot = context.get("user_profile_snapshot", "")
 
         return TemplateResponse(
@@ -84,6 +85,7 @@ class ResearchSessionsAdminController(Controller):
             context={
                 "session": session,
                 "planner_reasoning": planner_reasoning,
+                "planner_output": planner_output,
                 "user_profile_snapshot": user_profile_snapshot,
                 **ctx,
             },
