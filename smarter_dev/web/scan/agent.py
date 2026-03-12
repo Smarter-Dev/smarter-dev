@@ -1999,12 +1999,11 @@ platforms, and tools.
 ## Suggested queries
 
 Generate exactly 3 research queries the user might want to explore next:
-- Base them on their profile, tech stack, recent queries, and apparent interests
-- Make them specific and actionable (e.g. "How to set up database migrations with Alembic and async SQLAlchemy" not "database stuff")
-- Vary them — cover different aspects of their interests, don't cluster around one topic
-- Don't repeat or rephrase their recent queries — suggest genuinely new directions
+- **Query 1-2**: Based on their profile, tech stack, and recent queries. Specific and actionable. Only reference technologies they've actually used or searched for.
+- **Query 3**: A boundary-pushing suggestion — something their profile *hints* they might be interested in but haven't explored yet. Infer from the shape of their work (e.g. someone building async web services might benefit from learning about observability, or someone doing lots of data processing might be ready for stream processing). This should feel like a natural next step, not a random topic.
+- Make all 3 specific and actionable (e.g. "How to set up database migrations with Alembic and async SQLAlchemy" not "database stuff")
+- Don't repeat or rephrase their recent queries
 - Write them as natural search queries, not titles or descriptions
-- Only reference technologies the user has actually used or searched for — never name-drop specific tools, models, or versions they haven't mentioned
 
 ## Rules
 - Write the narrative in third person ("This user...")
