@@ -97,7 +97,7 @@ def _build_date_context(tz: str | None) -> str:
     return f"Today is {now.strftime('%A, %B %-d, %Y')}."
 
 
-async def _update_user_profile(user_id: str, query: str) -> None:
+async def _update_user_profile(user_id: str, query: str, session_id: UUID | None = None) -> None:
     """Background task: update the user's Scan profile based on their query."""
     try:
         async with get_skrift_db_session_context() as db_session:
@@ -108,7 +108,7 @@ async def _update_user_profile(user_id: str, query: str) -> None:
             existing_text = profile.profile if profile else ""
             query_count = profile.query_count if profile else 0
 
-        updated_text = await generate_user_profile(query, existing_text, query_count)
+        updated_text, usage = await generate_user_profile(query, existing_text, query_count)
 
         async with get_skrift_db_session_context() as db_session:
             result = await db_session.execute(
@@ -126,6 +126,10 @@ async def _update_user_profile(user_id: str, query: str) -> None:
                     query_count=1,
                 ))
             await db_session.commit()
+
+        # Track usage against the session if available
+        if session_id and usage:
+            await _persist_aux_usage(session_id, usage, CODE_EXAMPLES_MODEL)
 
         logger.info("User profile updated for %s", user_id)
     except Exception:
@@ -153,6 +157,19 @@ async def run_session_pipeline(
     sid = str(session_id)
     start_time = time.monotonic()
     date_context = _build_date_context(tz)
+
+    # -- Fetch existing user profile for planner context --
+    user_profile_text: str = ""
+    try:
+        async with get_skrift_db_session_context() as db_session:
+            profile_result = await db_session.execute(
+                select(ScanUserProfile).where(ScanUserProfile.user_id == user_id)
+            )
+            profile_row = profile_result.scalar_one_or_none()
+            if profile_row and profile_row.profile:
+                user_profile_text = profile_row.profile
+    except Exception:
+        logger.warning("Failed to fetch user profile for %s, continuing without it", user_id)
 
     # -- Shared mutable state filled by phases --
     meta_ready = asyncio.Event()
@@ -458,6 +475,7 @@ async def run_session_pipeline(
                 exp_youtube, exp_resources, exp_examples, meta_plan,
             ) = await run_experimental_pipeline(
                 query, deps, date_context, emit,
+                user_profile=user_profile_text,
             )
 
         research_result = result_data
@@ -570,7 +588,7 @@ async def run_session_pipeline(
 
         # Fire-and-forget: update user profile in the background
         asyncio.create_task(
-            _update_user_profile(user_id, query),
+            _update_user_profile(user_id, query, session_id=session_id),
             name=f"profile:{sid}",
         )
 

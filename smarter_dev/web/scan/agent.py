@@ -1480,6 +1480,7 @@ async def run_experimental_pipeline(
     deps: ResearchDeps,
     date_context: str,
     emit: EmitFn,
+    user_profile: str = "",
 ) -> tuple[ResearchResult, list[dict], RunUsage, list[dict], list[dict], list[dict], ExpMetaQueryPlan]:
     """History-threaded experimental research pipeline.
 
@@ -1537,7 +1538,16 @@ async def run_experimental_pipeline(
     await emit("status", stage="planning_resources", message="Researching and planning article...")
 
     history = list(meta_query_result.all_messages())
-    history.append(ModelRequest(parts=[UserPromptPart(content=date_context)]))
+    # Inject user profile context if available
+    context_parts: list[str] = [date_context]
+    if user_profile:
+        context_parts.append(
+            f"## User Profile\n\n"
+            f"This is what we know about the user from their previous queries. "
+            f"Use this to calibrate the depth, tone, and focus of your research "
+            f"and article plan:\n\n{user_profile}"
+        )
+    history.append(ModelRequest(parts=[UserPromptPart(content="\n\n".join(context_parts))]))
 
     planner_result_data: PlannerOutput | None = None
 
@@ -1872,10 +1882,10 @@ async def generate_user_profile(
     query: str,
     existing_profile: str,
     query_count: int,
-) -> str:
+) -> tuple[str, RunUsage]:
     """Generate/update a user profile based on their latest query.
 
-    Returns the updated profile text (2-5 paragraphs).
+    Returns (updated_profile_text, usage).
     """
     prompt = f"Existing profile ({query_count} previous queries):\n"
     if existing_profile:
@@ -1885,4 +1895,4 @@ async def generate_user_profile(
     prompt += f"\n\nLatest query:\n{query}"
 
     result = await _user_profile_agent.run(prompt, model=CODE_EXAMPLES_MODEL)
-    return result.output
+    return result.output, result.usage()

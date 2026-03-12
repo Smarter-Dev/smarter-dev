@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block page_type %}scan-result{% endblock %}
-{% block page_title %}{% if session and session.name %}{{ session.name }}{% else %}Research Result{% endif %}{% endblock %}
+{% block title %}{% if session and session.name %}{{ session.name }} - Scan - Smarter.Dev{% else %}Research Result - Scan - Smarter.Dev{% endif %}{% endblock %}
 
 {% block page_css %}
     <link rel="stylesheet" href="{{ theme_url('css/pages/research.css') }}">
@@ -492,7 +492,7 @@ if (window.__skriftNotifications) {
 
         if (eventType === "session_meta") {
             if (data.name) {
-                document.title = data.name;
+                document.title = data.name + " - Scan - Smarter.Dev";
             }
         }
 
