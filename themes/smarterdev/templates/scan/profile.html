@@ -32,6 +32,7 @@
     .profile-stat-value{font-family:var(--display);font-size:1.4rem;color:var(--white);letter-spacing:.02em}
     .profile-stat-label{font-family:var(--heading);font-size:.42rem;letter-spacing:.1em;color:var(--gray);margin-top:.25rem}
 
+    .profile-note{font-size:.78rem;color:var(--gray);line-height:1.7;margin-bottom:2rem;padding:1rem 1.25rem;border-left:2px solid rgba(0,212,255,.15);background:rgba(0,212,255,.02)}
     .profile-empty{text-align:center;padding:3rem 1rem;color:var(--gray);font-size:.85rem;background:var(--surface);border:1px solid rgba(0,212,255,.06)}
     .profile-empty a{color:var(--cyan);text-decoration:none}
 
@@ -51,6 +52,7 @@
         <a href="/profile" class="active">PROFILE</a>
     </div>
     <h1 class="profile-page-title">Your Profile</h1>
+    <div class="profile-note">Scan builds this profile from your research queries to improve the quality and depth of your results. It helps the agent tailor answers to your skill level, tech stack, and interests — so the more you search, the better your results get.</div>
 
     {% if user %}
     <div class="profile-user">
@@ -78,12 +80,24 @@
 
     {% if profile.technologies %}
     <div class="profile-section">
-        <div class="profile-section-label">TECHNOLOGIES</div>
+        <div class="profile-section-label">USES</div>
         <ul class="profile-tech-list">
             {% for tech in profile.technologies %}
-            <li class="profile-tech">
-                {{ tech.name if tech is mapping else tech }}{% if tech is mapping and tech.relationship %}<span class="profile-tech-rel">({{ tech.relationship }})</span>{% endif %}
-            </li>
+            {% set rel = tech.relationship|lower if tech is mapping and tech.relationship else '' %}
+            {% if rel in ('uses', 'both') or (not rel and tech is not mapping) %}
+            <li class="profile-tech">{{ tech.name if tech is mapping else tech }}</li>
+            {% endif %}
+            {% endfor %}
+        </ul>
+    </div>
+    <div class="profile-section">
+        <div class="profile-section-label">RESEARCHING</div>
+        <ul class="profile-tech-list">
+            {% for tech in profile.technologies %}
+            {% set rel = tech.relationship|lower if tech is mapping and tech.relationship else '' %}
+            {% if rel in ('researching', 'both') %}
+            <li class="profile-tech">{{ tech.name if tech is mapping else tech }}</li>
+            {% endif %}
             {% endfor %}
         </ul>
     </div>
