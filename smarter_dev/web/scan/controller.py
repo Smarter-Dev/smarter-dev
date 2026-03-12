@@ -2,10 +2,11 @@
 
 import logging
 from typing import Annotated
+from urllib.parse import quote
 
-from litestar import Controller, MediaType, Request, get, post
+from litestar import Controller, MediaType, Request, Response, get, post
 from litestar.enums import RequestEncodingType
-from litestar.exceptions import ClientException
+from litestar.exceptions import ClientException, NotAuthorizedException
 from litestar.params import Body
 from litestar.response import Redirect, Template
 from litestar.status_codes import HTTP_429_TOO_MANY_REQUESTS
@@ -21,6 +22,16 @@ from smarter_dev.web.scan.crud import ResearchSessionOperations
 from smarter_dev.web.scan.runner import start_pipeline_task
 
 logger = logging.getLogger(__name__)
+
+
+def _scan_auth_redirect(request: Request, exc: NotAuthorizedException) -> Response:
+    """Redirect unauthenticated scan users to login with next= back to scan."""
+    current_url = str(request.url)
+    # Ensure the next URL points to scan.smarter.dev, not the main domain
+    if not current_url.startswith("http"):
+        current_url = f"https://scan.smarter.dev{request.url.path}"
+    login_url = f"https://smarter.dev/auth/login?next={quote(current_url, safe='')}"
+    return Redirect(path=login_url)
 ops = ResearchSessionOperations()
 
 WEEKLY_RESEARCH_LIMIT = 25
@@ -30,6 +41,7 @@ class ScanController(Controller):
     """Landing and result pages for the Scan research service."""
 
     path = "/"
+    exception_handlers = {NotAuthorizedException: _scan_auth_redirect}
 
     @get("/")
     async def landing(self, request: Request) -> Template:
