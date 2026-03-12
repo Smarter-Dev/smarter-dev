@@ -126,11 +126,10 @@
     @keyframes scan-yt-fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
     .scan-yt-animate{opacity:0;animation:scan-yt-fade .5s ease forwards}
 
-    /* Code examples — stacked below the main layout */
-    .scan-examples-section{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 2rem;border-top:1px solid rgba(0,212,255,.06);padding-top:2rem;margin-top:0}
+    /* Code examples — inside report-content */
+    .scan-examples-section{border-top:1px solid rgba(0,212,255,.06);padding-top:2rem;margin-top:2rem}
     .scan-examples-heading{font-family:var(--heading);font-size:.58rem;color:var(--mid);letter-spacing:.1em;margin-bottom:1.25rem}
     #scan-examples-list{display:flex;flex-direction:column;gap:1rem}
-    {% raw %}@media(max-width:900px){.scan-examples-section{padding:0 1rem;padding-top:2rem}}{% endraw %}
     .scan-example{border:1px solid rgba(0,212,255,.08);background:var(--surface);scroll-margin-top:70px}
     .scan-example-header{display:flex;justify-content:space-between;align-items:center;padding:.6rem 1rem;border-bottom:1px solid rgba(0,212,255,.06)}
     .scan-example-title{font-family:var(--heading);font-size:.6rem;letter-spacing:.06em;color:var(--light)}
@@ -290,6 +289,32 @@
         <div class="scan-duration{% if session.status != 'complete' %} scan-hidden{% endif %}" id="scan-duration">
             {% if session.status == 'complete' %}Generated in <span id="scan-timer">{{ ((session.updated_at - session.created_at).total_seconds()|round(0)|int) }}s</span>{% else %}<span id="scan-timer"></span>{% endif %}
         </div>
+        <!-- Code examples — inside report-content so TOC stays sticky alongside -->
+        {% if session.status == 'complete' and session.context and session.context.code_examples is defined and session.context.code_examples %}
+        <div class="scan-examples-section" id="scan-examples-section">
+            <h3 class="scan-examples-heading">CODE EXAMPLES</h3>
+            <div id="scan-examples-list">
+                {% for ex in session.context.code_examples %}
+                <div class="scan-example">
+                    <div class="scan-example-header">
+                        <span class="scan-example-title">{{ ex.title }}</span>
+                        <span class="scan-example-lang">{{ ex.language }}</span>
+                    </div>
+                    <div class="scan-example-code-wrap{% if ex.code.split('\n')|length > 15 %} collapsed{% endif %}">
+                        <pre class="scan-example-code"><code class="language-{{ ex.language }}">{{ ex.code }}</code></pre>
+                        <div class="scan-example-expand" data-expand><span>VIEW FULL EXAMPLE</span></div>
+                    </div>
+                    {% if ex.explanation %}<div class="scan-example-explanation">{{ ex.explanation }}</div>{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="scan-examples-section scan-hidden" id="scan-examples-section">
+            <h3 class="scan-examples-heading">CODE EXAMPLES</h3>
+            <div id="scan-examples-list"></div>
+        </div>
+        {% endif %}
     </div>
     <!-- Table of Contents sidebar -->
     <nav class="report-toc" id="report-toc">
@@ -299,33 +324,6 @@
         </div>
     </nav>
 </div>
-
-<!-- Code examples — stacked below main layout -->
-{% if session.status == 'complete' and session.context and session.context.code_examples is defined and session.context.code_examples %}
-<div class="scan-examples-section" id="scan-examples-section">
-    <h3 class="scan-examples-heading">CODE EXAMPLES</h3>
-    <div id="scan-examples-list">
-        {% for ex in session.context.code_examples %}
-        <div class="scan-example">
-            <div class="scan-example-header">
-                <span class="scan-example-title">{{ ex.title }}</span>
-                <span class="scan-example-lang">{{ ex.language }}</span>
-            </div>
-            <div class="scan-example-code-wrap{% if ex.code.split('\n')|length > 15 %} collapsed{% endif %}">
-                <pre class="scan-example-code"><code class="language-{{ ex.language }}">{{ ex.code }}</code></pre>
-                <div class="scan-example-expand" data-expand><span>VIEW FULL EXAMPLE</span></div>
-            </div>
-            {% if ex.explanation %}<div class="scan-example-explanation">{{ ex.explanation }}</div>{% endif %}
-        </div>
-        {% endfor %}
-    </div>
-</div>
-{% else %}
-<div class="scan-examples-section scan-hidden" id="scan-examples-section">
-    <h3 class="scan-examples-heading">CODE EXAMPLES</h3>
-    <div id="scan-examples-list"></div>
-</div>
-{% endif %}
 
 {% else %}
 <div class="report-layout">
