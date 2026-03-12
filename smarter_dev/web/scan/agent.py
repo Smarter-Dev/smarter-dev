@@ -1837,3 +1837,52 @@ def _parse_example_text(text: str, fallback_title: str, fallback_lang: str) -> d
         "code": code,
         "explanation": explanation,
     }
+
+
+# ============================================================================
+# User profiling — background task after each query
+# ============================================================================
+
+_user_profile_agent = Agent(
+    output_type=str,
+    instructions="""\
+You are a user profiler for a developer research tool called Scan.
+
+You will be given a user's existing profile (may be empty for new users) and
+their latest research query. Write an updated profile of the user in 2-5
+paragraphs.
+
+The profile should cover:
+- Their apparent technical interests and domains (e.g. web dev, DevOps, ML)
+- Their estimated skill level and how it's evolving
+- Patterns in their research (e.g. always debugging, learning new frameworks, comparing tools)
+- Any notable traits (e.g. prefers self-hosted solutions, works with specific languages)
+
+Rules:
+- Write in third person ("This user...")
+- Be concise but insightful
+- Update the profile based on the new query — don't just append, synthesize
+- If the existing profile is empty, create a new one from scratch based on the query
+- Don't speculate wildly — stick to what the queries reveal
+""",
+)
+
+
+async def generate_user_profile(
+    query: str,
+    existing_profile: str,
+    query_count: int,
+) -> str:
+    """Generate/update a user profile based on their latest query.
+
+    Returns the updated profile text (2-5 paragraphs).
+    """
+    prompt = f"Existing profile ({query_count} previous queries):\n"
+    if existing_profile:
+        prompt += existing_profile
+    else:
+        prompt += "(New user — no existing profile)"
+    prompt += f"\n\nLatest query:\n{query}"
+
+    result = await _user_profile_agent.run(prompt, model=CODE_EXAMPLES_MODEL)
+    return result.output

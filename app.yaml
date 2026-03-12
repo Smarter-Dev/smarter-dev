@@ -46,6 +46,7 @@ controllers:
   - smarter_dev.web.campaign_signups_api:CampaignSignupsApiController
   - smarter_dev.web.api_keys_admin:APIKeyAdminController
   - smarter_dev.web.usage_admin:UsageAdminController
+  - smarter_dev.web.scan_profiles_admin:ScanProfilesAdminController
 
 # Partials system (SPA navigation)
 partials:

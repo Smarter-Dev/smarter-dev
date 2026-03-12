@@ -72,8 +72,24 @@
 .meta-item strong { color: var(--light) }
 
 /* ── Report Layout ── */
-.report-layout { position: relative; z-index: 1; max-width: 960px; margin: 0 auto; padding: 2rem 2rem 4rem }
+.report-layout { position: relative; z-index: 1; max-width: 960px; margin: 0 auto; padding: 2rem 2rem 4rem; overflow: visible }
 .report-content { min-width: 0 }
+
+/* ── Table of Contents ── */
+.report-toc { position: absolute; right: -180px; top: 0; width: 160px; opacity: 0; transform: translateY(10px); transition: opacity .5s ease, transform .5s ease }
+.report-toc-inner { position: sticky; top: 70px; max-height: calc(100vh - 90px); overflow-y: auto; scrollbar-width: none }
+.report-toc-inner::-webkit-scrollbar { display: none }
+.report-toc.toc-visible { opacity: 1; transform: translateY(0) }
+.toc-label { font-family: var(--heading); font-size: .48rem; letter-spacing: .12em; color: var(--mid); margin-bottom: .75rem }
+.toc-list { list-style: none; padding: 0; margin: 0; border-left: 1px solid rgba(0,212,255,.08) }
+.toc-item { margin: 0 }
+.toc-link { display: block; padding: .3rem 0 .3rem .75rem; font-size: .65rem; color: var(--gray); text-decoration: none; line-height: 1.4; transition: color .2s, border-color .2s; border-left: 1px solid transparent; margin-left: -1px }
+.toc-link:hover { color: var(--light) }
+.toc-link.toc-active { color: var(--cyan); border-left-color: var(--cyan) }
+.toc-link.toc-h3 { padding-left: 1.25rem; font-size: .6rem }
+.toc-divider { height: 1px; background: rgba(0,212,255,.06); margin: .5rem 0 .5rem .75rem }
+.toc-examples-group { opacity: 0; transform: translateY(6px); transition: opacity .4s ease, transform .4s ease }
+.toc-examples-group.toc-visible { opacity: 1; transform: translateY(0) }
 .report-content h2 {
   font-family: var(--heading);
   font-size: clamp(.9rem, 1.8vw, 1.15rem);
@@ -111,6 +127,9 @@
 .sources-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; margin: 1.5rem 0 2rem }
 
 /* ── Responsive ── */
+@media (max-width: 1200px) {
+  .report-toc { display: none }
+}
 @media (max-width: 900px) {
   .history-grid, .topics-grid { grid-template-columns: 1fr }
   .stat-row { grid-template-columns: 1fr }

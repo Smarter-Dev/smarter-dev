@@ -3279,3 +3279,28 @@ class ResearchSession(Base):
 
     def __repr__(self) -> str:
         return f"<ResearchSession(id='{self.id}', status='{self.status}')>"
+
+
+class ScanUserProfile(Base):
+    """Evolving profile of a Scan user built from their research queries.
+
+    Each time a user submits a query, Gemini 3 Flash evaluates it against the
+    existing profile and writes an updated 2-5 paragraph summary describing
+    the user's interests, skill level, and research patterns.
+    """
+
+    __tablename__ = "scan_user_profiles"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(100), nullable=False, unique=True, index=True,
+    )
+    profile: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    query_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    def __repr__(self) -> str:
+        return f"<ScanUserProfile(user_id='{self.user_id}', queries={self.query_count})>"

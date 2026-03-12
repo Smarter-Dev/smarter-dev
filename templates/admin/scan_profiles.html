@@ -1,0 +1,29 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Scan User Profiles - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Scan User Profiles</h1>
+    <p>{{ total }} user profile{{ 's' if total != 1 else '' }}</p>
+</hgroup>
+
+{% if profiles %}
+{% for profile in profiles %}
+<div class="sk-panel" style="margin-bottom: 1.5rem;">
+    <div class="sk-panel-head" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>
+            <strong>{{ profile.user_id }}</strong>
+            <span class="sk-pill" style="margin-left: .5rem;">{{ profile.query_count }} quer{{ 'ies' if profile.query_count != 1 else 'y' }}</span>
+        </span>
+        <small style="opacity: .6;">Updated {{ profile.updated_at.strftime('%Y-%m-%d %H:%M') }}</small>
+    </div>
+    <div class="sk-panel-body" style="white-space: pre-wrap; line-height: 1.7;">{{ profile.profile }}</div>
+</div>
+{% endfor %}
+{% else %}
+<p class="sk-no-items">
+    User profiles are generated automatically when users submit research queries.
+</p>
+{% endif %}
+{% endblock %}

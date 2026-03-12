@@ -32,10 +32,10 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.usage import RunUsage
 from skrift.lib.notifications import NotificationMode, notify_user
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from smarter_dev.shared.database import get_skrift_db_session_context
-from smarter_dev.web.models import ResearchSession
+from smarter_dev.web.models import ResearchSession, ScanUserProfile
 from smarter_dev.web.scan.agent import (
     CODE_EXAMPLES_MODEL,
     MODEL,
@@ -44,6 +44,7 @@ from smarter_dev.web.scan.agent import (
     ResearchResult,
     generate_code_examples,
     generate_session_meta,
+    generate_user_profile,
     generate_youtube_query,
     rank_resource_results,
     rank_youtube_results,
@@ -94,6 +95,41 @@ def _build_date_context(tz: str | None) -> str:
         user_tz = None
     now = datetime.now(user_tz)
     return f"Today is {now.strftime('%A, %B %-d, %Y')}."
+
+
+async def _update_user_profile(user_id: str, query: str) -> None:
+    """Background task: update the user's Scan profile based on their query."""
+    try:
+        async with get_skrift_db_session_context() as db_session:
+            result = await db_session.execute(
+                select(ScanUserProfile).where(ScanUserProfile.user_id == user_id)
+            )
+            profile = result.scalar_one_or_none()
+            existing_text = profile.profile if profile else ""
+            query_count = profile.query_count if profile else 0
+
+        updated_text = await generate_user_profile(query, existing_text, query_count)
+
+        async with get_skrift_db_session_context() as db_session:
+            result = await db_session.execute(
+                select(ScanUserProfile).where(ScanUserProfile.user_id == user_id)
+            )
+            profile = result.scalar_one_or_none()
+            if profile:
+                profile.profile = updated_text
+                profile.query_count = profile.query_count + 1
+                db_session.add(profile)
+            else:
+                db_session.add(ScanUserProfile(
+                    user_id=user_id,
+                    profile=updated_text,
+                    query_count=1,
+                ))
+            await db_session.commit()
+
+        logger.info("User profile updated for %s", user_id)
+    except Exception:
+        logger.exception("Failed to update user profile for %s", user_id)
 
 
 # ============================================================================
@@ -531,6 +567,12 @@ async def run_session_pipeline(
             await db_session.commit()
 
         logger.info("Pipeline complete for %s — persisted in single DB write", sid)
+
+        # Fire-and-forget: update user profile in the background
+        asyncio.create_task(
+            _update_user_profile(user_id, query),
+            name=f"profile:{sid}",
+        )
 
     except Exception as e:
         logger.exception("Research pipeline %s failed", sid)
