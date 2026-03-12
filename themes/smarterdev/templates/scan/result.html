@@ -334,6 +334,12 @@ if (window.__skriftNotifications) {
     window.__skriftNotifications.configure({ persistConnection: true });
 }
 (function() {
+    // Event delegation for expand buttons (must be in running block too)
+    document.addEventListener("click", function(e) {
+        var expand = e.target.closest("[data-expand]");
+        if (expand) expand.parentElement.classList.remove("collapsed");
+    });
+
     const toolsList = document.getElementById("scan-tools-list");
     const toolsDetail = document.getElementById("scan-tools");
     const toolCount = document.getElementById("scan-tool-count");

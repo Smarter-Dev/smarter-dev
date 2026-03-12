@@ -13,7 +13,7 @@
     .scan-input:focus{border-color:var(--cyan);box-shadow:0 0 20px rgba(0,212,255,.06)}
     .scan-input::placeholder{color:var(--gray)}
     .scan-input:disabled{opacity:.5;cursor:not-allowed;padding-right:1.25rem}
-    .scan-submit{position:absolute;right:8px;top:1rem;font-family:var(--heading);font-size:.55rem;letter-spacing:.1em;padding:.5rem 1rem;background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.2);color:var(--cyan);cursor:pointer;transition:all .2s}
+    .scan-submit{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-family:var(--heading);font-size:.55rem;letter-spacing:.1em;padding:.5rem 1rem;background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.2);color:var(--cyan);cursor:pointer;transition:all .2s}
     .scan-submit:hover{background:rgba(0,212,255,.18);border-color:var(--cyan)}
     .scan-signin{font-family:var(--heading);font-size:.5rem;color:var(--gray);letter-spacing:.08em;margin-top:.75rem}
     .scan-signin a{color:var(--cyan);text-decoration:none}
@@ -36,11 +36,8 @@
         {{ csrf_field() }}
         <input type="hidden" name="tz" id="scan-tz">
         <textarea name="query" placeholder="What do you want to research?" class="scan-input" required maxlength="2000" autofocus rows="1"></textarea>
+        <input type="hidden" name="mode" value="experimental">
         <button type="submit" class="scan-submit">SCAN</button>
-        <div class="scan-mode">
-            <label><input type="radio" name="mode" value="lite" checked><span>LITE</span></label>
-            <label><input type="radio" name="mode" value="experimental"><span>EXPERIMENTAL</span></label>
-        </div>
     </form>
     {% else %}
     <form class="scan-form">
