@@ -13,6 +13,7 @@ from litestar.status_codes import HTTP_429_TOO_MANY_REQUESTS
 from skrift.auth.guards import auth_guard
 from skrift.auth.services import get_user_permissions
 from skrift.db.models.user import User
+from sqlalchemy import delete
 from skrift.lib.markdown import render_markdown
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -311,3 +312,128 @@ class ScanController(Controller):
             "profile": user_profile,
             "user": user,
         })
+
+    @post("/profile/reset", guards=[auth_guard])
+    async def profile_reset(
+        self,
+        request: Request,
+        db_session: AsyncSession,
+        data: Annotated[dict, Body(media_type=RequestEncodingType.URL_ENCODED)],
+    ) -> Redirect:
+        """Reset the user's profile narrative, technologies, or both."""
+        user_id = request.session.get("user_id", "")
+        reset_type = data.get("reset_type", "").strip()
+        if reset_type not in ("narrative", "technologies", "both"):
+            return Redirect(path="/profile")
+
+        result = await db_session.execute(
+            select(ScanUserProfile).where(ScanUserProfile.user_id == user_id)
+        )
+        profile = result.scalar_one_or_none()
+        if profile:
+            if reset_type in ("narrative", "both"):
+                profile.profile = ""
+                profile.suggested_queries = None
+            if reset_type in ("technologies", "both"):
+                profile.technologies = None
+            db_session.add(profile)
+            await db_session.commit()
+
+        return Redirect(path="/profile")
+
+    @post("/profile/technologies", guards=[auth_guard])
+    async def profile_add_tech(
+        self,
+        request: Request,
+        db_session: AsyncSession,
+        data: Annotated[dict, Body(media_type=RequestEncodingType.URL_ENCODED)],
+    ) -> Redirect:
+        """Add a technology to the user's profile."""
+        user_id = request.session.get("user_id", "")
+        name = data.get("name", "").strip()
+        relationship = data.get("relationship", "").strip()
+        if not name or relationship not in ("uses", "researching", "both"):
+            return Redirect(path="/profile")
+
+        result = await db_session.execute(
+            select(ScanUserProfile).where(ScanUserProfile.user_id == user_id)
+        )
+        profile = result.scalar_one_or_none()
+        if not profile:
+            return Redirect(path="/profile")
+
+        techs = list(profile.technologies or [])
+        # Check for case-insensitive duplicate
+        if any(t.get("name", "").lower() == name.lower() for t in techs if isinstance(t, dict)):
+            return Redirect(path="/profile")
+
+        techs.append({"name": name, "relationship": relationship})
+        profile.technologies = techs
+        db_session.add(profile)
+        await db_session.commit()
+
+        return Redirect(path="/profile")
+
+    @post("/profile/technologies/remove", guards=[auth_guard])
+    async def profile_remove_tech(
+        self,
+        request: Request,
+        db_session: AsyncSession,
+        data: Annotated[dict, Body(media_type=RequestEncodingType.URL_ENCODED)],
+    ) -> Redirect:
+        """Remove a technology from the user's profile."""
+        user_id = request.session.get("user_id", "")
+        name = data.get("name", "").strip()
+        if not name:
+            return Redirect(path="/profile")
+
+        result = await db_session.execute(
+            select(ScanUserProfile).where(ScanUserProfile.user_id == user_id)
+        )
+        profile = result.scalar_one_or_none()
+        if profile and profile.technologies:
+            profile.technologies = [
+                t for t in profile.technologies
+                if not (isinstance(t, dict) and t.get("name", "").lower() == name.lower())
+            ]
+            db_session.add(profile)
+            await db_session.commit()
+
+        return Redirect(path="/profile")
+
+    @post("/profile/delete-account", guards=[auth_guard])
+    async def profile_delete_account(
+        self,
+        request: Request,
+        db_session: AsyncSession,
+        data: Annotated[dict, Body(media_type=RequestEncodingType.URL_ENCODED)],
+    ) -> Redirect:
+        """Soft-delete the user's account and wipe PII."""
+        user_id = request.session.get("user_id", "")
+        confirm = data.get("confirm", "").strip()
+        if confirm != "DELETE":
+            return Redirect(path="/profile")
+
+        # Soft-delete user: wipe PII and deactivate
+        user_result = await db_session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = user_result.scalar_one_or_none()
+        if user:
+            user.name = None
+            user.email = None
+            user.picture_url = None
+            user.is_active = False
+            db_session.add(user)
+
+        # Delete profile entirely
+        await db_session.execute(
+            delete(ScanUserProfile).where(ScanUserProfile.user_id == user_id)
+        )
+
+        await db_session.commit()
+
+        # Log them out
+        request.session.clear()
+
+        return Redirect(path="/")

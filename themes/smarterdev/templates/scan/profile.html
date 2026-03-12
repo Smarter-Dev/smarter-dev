@@ -24,8 +24,17 @@
     .profile-text p:last-child{margin-bottom:0}
 
     .profile-tech-list{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.5rem}
-    .profile-tech{font-family:var(--heading);font-size:.55rem;letter-spacing:.04em;padding:.35rem .75rem;border:1px solid rgba(0,212,255,.15);color:var(--light);background:var(--surface)}
-    .profile-tech-rel{font-size:.45rem;color:var(--gray);margin-left:.3rem;letter-spacing:.02em}
+    .profile-tech{font-family:var(--heading);font-size:.55rem;letter-spacing:.04em;padding:.35rem .75rem;border:1px solid rgba(0,212,255,.15);color:var(--light);background:var(--surface);display:inline-flex;align-items:center;gap:.4rem}
+    .profile-tech-remove{background:none;border:none;color:var(--gray);cursor:pointer;font-size:.7rem;padding:0 0 0 .2rem;line-height:1;transition:color .2s}
+    .profile-tech-remove:hover{color:#f44}
+
+    .profile-tech-add{display:flex;gap:.5rem;margin-top:.75rem;align-items:center}
+    .profile-tech-add input[type="text"]{font-family:var(--body);font-size:.75rem;padding:.35rem .6rem;background:var(--surface);border:1px solid rgba(0,212,255,.12);color:var(--white);outline:none;width:160px}
+    .profile-tech-add input[type="text"]:focus{border-color:var(--cyan)}
+    .profile-tech-add input[type="text"]::placeholder{color:var(--gray)}
+    .profile-tech-add select{font-family:var(--heading);font-size:.45rem;letter-spacing:.06em;padding:.35rem .5rem;background:var(--surface);border:1px solid rgba(0,212,255,.12);color:var(--light);outline:none;cursor:pointer}
+    .profile-tech-add button{font-family:var(--heading);font-size:.45rem;letter-spacing:.1em;padding:.35rem .75rem;background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.2);color:var(--cyan);cursor:pointer;transition:all .2s}
+    .profile-tech-add button:hover{background:rgba(0,212,255,.18);border-color:var(--cyan)}
 
     .profile-stats{display:flex;gap:1px;margin-bottom:2rem}
     .profile-stat{flex:1;padding:1rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);text-align:center}
@@ -41,6 +50,22 @@
     .profile-nav a:hover,.profile-nav a.active{color:var(--cyan)}
 
     .profile-updated{font-size:.6rem;color:var(--gray);margin-top:.5rem}
+
+    .profile-manage{margin-top:3rem;padding-top:2rem;border-top:1px solid rgba(0,212,255,.06)}
+    .profile-manage-title{font-family:var(--heading);font-size:.48rem;letter-spacing:.12em;color:var(--mid);margin-bottom:1rem}
+    .profile-manage-actions{display:flex;gap:.75rem;flex-wrap:wrap}
+    .profile-btn{font-family:var(--heading);font-size:.48rem;letter-spacing:.08em;padding:.45rem 1rem;background:transparent;border:1px solid rgba(0,212,255,.2);color:var(--cyan);cursor:pointer;transition:all .2s}
+    .profile-btn:hover{background:rgba(0,212,255,.1);border-color:var(--cyan)}
+
+    .profile-danger{margin-top:2.5rem;padding:1.25rem;border:1px solid rgba(255,68,68,.15);background:rgba(255,68,68,.02)}
+    .profile-danger-title{font-family:var(--heading);font-size:.48rem;letter-spacing:.12em;color:#f44;margin-bottom:.75rem}
+    .profile-danger-text{font-size:.78rem;color:var(--gray);line-height:1.7;margin-bottom:1rem}
+    .profile-danger-form{display:flex;gap:.5rem;align-items:center}
+    .profile-danger-form input[type="text"]{font-family:var(--body);font-size:.75rem;padding:.4rem .6rem;background:var(--surface);border:1px solid rgba(255,68,68,.15);color:var(--white);outline:none;width:120px}
+    .profile-danger-form input[type="text"]:focus{border-color:#f44}
+    .profile-danger-form input[type="text"]::placeholder{color:var(--gray)}
+    .profile-btn-danger{font-family:var(--heading);font-size:.48rem;letter-spacing:.08em;padding:.45rem 1rem;background:transparent;border:1px solid rgba(255,68,68,.25);color:#f44;cursor:pointer;transition:all .2s}
+    .profile-btn-danger:hover{background:rgba(255,68,68,.1);border-color:#f44}
     </style>
 {% endblock %}
 
@@ -78,14 +103,20 @@
         {% endif %}
     </div>
 
-    {% if profile.technologies %}
     <div class="profile-section">
         <div class="profile-section-label">USES</div>
         <ul class="profile-tech-list">
-            {% for tech in profile.technologies %}
+            {% for tech in profile.technologies or [] %}
             {% set rel = tech.relationship|lower if tech is mapping and tech.relationship else '' %}
             {% if rel in ('uses', 'both') or (not rel and tech is not mapping) %}
-            <li class="profile-tech">{{ tech.name if tech is mapping else tech }}</li>
+            <li class="profile-tech">
+                {{ tech.name if tech is mapping else tech }}
+                <form method="post" action="/profile/technologies/remove" style="display:inline;margin:0">
+                    {{ csrf_field() }}
+                    <input type="hidden" name="name" value="{{ tech.name if tech is mapping else tech }}">
+                    <button type="submit" class="profile-tech-remove" title="Remove">&times;</button>
+                </form>
+            </li>
             {% endif %}
             {% endfor %}
         </ul>
@@ -93,17 +124,35 @@
     <div class="profile-section">
         <div class="profile-section-label">RESEARCHING</div>
         <ul class="profile-tech-list">
-            {% for tech in profile.technologies %}
+            {% for tech in profile.technologies or [] %}
             {% set rel = tech.relationship|lower if tech is mapping and tech.relationship else '' %}
             {% if rel in ('researching', 'both') %}
-            <li class="profile-tech">{{ tech.name if tech is mapping else tech }}</li>
+            <li class="profile-tech">
+                {{ tech.name if tech is mapping else tech }}
+                <form method="post" action="/profile/technologies/remove" style="display:inline;margin:0">
+                    {{ csrf_field() }}
+                    <input type="hidden" name="name" value="{{ tech.name if tech is mapping else tech }}">
+                    <button type="submit" class="profile-tech-remove" title="Remove">&times;</button>
+                </form>
+            </li>
             {% endif %}
             {% endfor %}
         </ul>
     </div>
-    {% endif %}
 
-    <div class="profile-section">
+    <form method="post" action="/profile/technologies" class="profile-tech-add">
+        {{ csrf_field() }}
+        <input type="text" name="name" placeholder="Technology name" required maxlength="50">
+        <select name="relationship">
+            <option value="uses">USES</option>
+            <option value="researching">RESEARCHING</option>
+            <option value="both">BOTH</option>
+        </select>
+        <button type="submit">ADD</button>
+    </form>
+
+    {% if profile.profile %}
+    <div class="profile-section" style="margin-top:2rem">
         <div class="profile-section-label">AGENT PROFILE</div>
         <div class="profile-text">
             {% for paragraph in profile.profile.split('\n\n') %}
@@ -112,12 +161,46 @@
         </div>
         <div class="profile-updated">Last updated {{ profile.updated_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
     </div>
+    {% endif %}
+
+    <div class="profile-manage">
+        <div class="profile-manage-title">RESET PROFILE</div>
+        <div class="profile-manage-actions">
+            <form method="post" action="/profile/reset" style="margin:0">
+                {{ csrf_field() }}
+                <input type="hidden" name="reset_type" value="narrative">
+                <button type="submit" class="profile-btn" onclick="return confirm('Reset your profile narrative? It will be rebuilt from your next scan.')">RESET NARRATIVE</button>
+            </form>
+            <form method="post" action="/profile/reset" style="margin:0">
+                {{ csrf_field() }}
+                <input type="hidden" name="reset_type" value="technologies">
+                <button type="submit" class="profile-btn" onclick="return confirm('Reset your technology list? It will be rebuilt from your next scan.')">RESET TECHNOLOGIES</button>
+            </form>
+            <form method="post" action="/profile/reset" style="margin:0">
+                {{ csrf_field() }}
+                <input type="hidden" name="reset_type" value="both">
+                <button type="submit" class="profile-btn" onclick="return confirm('Reset your entire profile? It will be rebuilt from your next scan.')">RESET ALL</button>
+            </form>
+        </div>
+    </div>
 
     {% else %}
     <div class="profile-empty">
         <p>Your profile hasn't been created yet.</p>
         <p>It will be generated after your first research scan.</p>
         <p><a href="/">Start your first scan &rarr;</a></p>
+    </div>
+    {% endif %}
+
+    {% if user %}
+    <div class="profile-danger">
+        <div class="profile-danger-title">DELETE ACCOUNT</div>
+        <div class="profile-danger-text">This will permanently deactivate your account and remove your name from all research sessions. Your past research will remain public but will show "A user asked" instead of your name. This cannot be undone.</div>
+        <form method="post" action="/profile/delete-account" class="profile-danger-form">
+            {{ csrf_field() }}
+            <input type="text" name="confirm" placeholder="Type DELETE" required autocomplete="off">
+            <button type="submit" class="profile-btn-danger" onclick="return confirm('Are you sure? This cannot be undone.')">DELETE ACCOUNT</button>
+        </form>
     </div>
     {% endif %}
 </div>
