@@ -95,6 +95,7 @@
     <div class="usage-tab-bar">
         <button class="usage-tab active" data-tab="runs">Individual Runs</button>
         <button class="usage-tab" data-tab="users">By User</button>
+        <button class="usage-tab" data-tab="service">Service Costs</button>
     </div>
 
     {# ── Tab: Individual Runs ────────────────────────────────────── #}
@@ -190,6 +191,81 @@
         </table>
         {% else %}
         <p class="sk-no-items">No usage data matches your filters.</p>
+        {% endif %}
+    </div>
+
+    {# ── Tab: Service Costs ──────────────────────────────────────── #}
+    <div id="tab-service" class="usage-tab-content hidden">
+        <p style="margin: 1rem 0; opacity: .7;">
+            Internal service costs (profiler, etc.) &mdash;
+            {{ "{:,}".format(svc_total_invocations) }} invocation{{ 's' if svc_total_invocations != 1 else '' }},
+            ${{ "{:.4f}".format(svc_total_cost) }} total
+        </p>
+
+        {% if svc_agg_rows %}
+        <div class="sk-panel" style="margin-bottom: 1.5rem;">
+            <div class="sk-panel-head"><strong>By Task Type</strong></div>
+            <div class="sk-panel-body" style="padding: 0;">
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Task</th>
+                            <th>Invocations</th>
+                            <th>Input Tokens</th>
+                            <th>Output Tokens</th>
+                            <th>Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in svc_agg_rows %}
+                        <tr>
+                            <td><span class="sk-pill">{{ row.task_type }}</span></td>
+                            <td>{{ "{:,}".format(row.invocations) }}</td>
+                            <td>{{ "{:,}".format(row.total_input or 0) }}</td>
+                            <td>{{ "{:,}".format(row.total_output or 0) }}</td>
+                            <td>{% if row.total_cost is not none %}${{ "{:.4f}".format(row.total_cost) }}{% else %}--{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if svc_runs %}
+        <div class="sk-panel">
+            <div class="sk-panel-head"><strong>Recent Invocations</strong> <small style="opacity: .6;">(last 200)</small></div>
+            <div class="sk-panel-body" style="padding: 0;">
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Task</th>
+                            <th>User</th>
+                            <th>Model</th>
+                            <th>Input</th>
+                            <th>Output</th>
+                            <th>Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in svc_runs %}
+                        <tr>
+                            <td class="usage-td-time">{{ s.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td><span class="sk-pill">{{ s.task_type }}</span></td>
+                            <td>{{ s.user_id or '--' }}</td>
+                            <td class="usage-td-model" title="{{ s.model_name }}">{{ s.model_name.split(':')[-1][:25] }}</td>
+                            <td>{{ "{:,}".format(s.input_tokens or 0) }}</td>
+                            <td>{{ "{:,}".format(s.output_tokens or 0) }}</td>
+                            <td>{% if s.cost_usd is not none %}${{ "{:.6f}".format(s.cost_usd) }}{% else %}--{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% else %}
+        <p class="sk-no-items">No service usage recorded yet.</p>
         {% endif %}
     </div>
 </div>

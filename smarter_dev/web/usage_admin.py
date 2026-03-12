@@ -16,7 +16,7 @@ from skrift.admin.helpers import get_admin_context
 from skrift.admin.navigation import ADMIN_NAV_TAG
 from skrift.auth.guards import Permission, auth_guard
 
-from smarter_dev.web.models import ResearchSession
+from smarter_dev.web.models import ResearchSession, ScanServiceUsage
 
 # Bucket expressions keyed by granularity name.
 # Each returns a string label suitable for Chart.js x-axis.
@@ -170,6 +170,39 @@ class UsageAdminController(Controller):
         total_output = sum(r.total_output or 0 for r in agg_rows)
         total_cost = sum(r.total_cost or 0 for r in agg_rows)
 
+        # ------------------------------------------------------------------
+        # Service usage (profiler, etc.) — internal costs
+        # ------------------------------------------------------------------
+        svc_filters: list = []
+        if days:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            svc_filters.append(ScanServiceUsage.created_at >= cutoff)
+
+        svc_runs_stmt = (
+            select(ScanServiceUsage)
+            .where(*svc_filters)
+            .order_by(ScanServiceUsage.created_at.desc())
+            .limit(200)
+        )
+        svc_runs = list((await db_session.execute(svc_runs_stmt)).scalars().all())
+
+        svc_agg_stmt = (
+            select(
+                ScanServiceUsage.task_type,
+                func.count().label("invocations"),
+                func.sum(ScanServiceUsage.input_tokens).label("total_input"),
+                func.sum(ScanServiceUsage.output_tokens).label("total_output"),
+                func.sum(ScanServiceUsage.cost_usd).label("total_cost"),
+            )
+            .where(*svc_filters)
+            .group_by(ScanServiceUsage.task_type)
+            .order_by(func.sum(ScanServiceUsage.cost_usd).desc().nulls_last())
+        )
+        svc_agg_rows = (await db_session.execute(svc_agg_stmt)).all()
+
+        svc_total_cost = sum(r.total_cost or 0 for r in svc_agg_rows)
+        svc_total_invocations = sum(r.invocations for r in svc_agg_rows)
+
         return TemplateResponse(
             "admin/usage.html",
             context={
@@ -184,6 +217,10 @@ class UsageAdminController(Controller):
                 "granularity": granularity,
                 "chart_labels": json.dumps(labels_ordered),
                 "chart_datasets": json.dumps(chart_datasets, cls=_DecimalEncoder),
+                "svc_runs": svc_runs,
+                "svc_agg_rows": svc_agg_rows,
+                "svc_total_cost": svc_total_cost,
+                "svc_total_invocations": svc_total_invocations,
                 **ctx,
             },
         )
