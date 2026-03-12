@@ -2004,10 +2004,11 @@ Generate exactly 3 research queries the user might want to explore next:
 - Vary them — cover different aspects of their interests, don't cluster around one topic
 - Don't repeat or rephrase their recent queries — suggest genuinely new directions
 - Write them as natural search queries, not titles or descriptions
+- Only reference technologies the user has actually used or searched for — never name-drop specific tools, models, or versions they haven't mentioned
 
 ## Rules
 - Write the narrative in third person ("This user...")
-- Be concise but insightful
+- Be concise but insightful — factual, not flattering. Don't hype or glaze the user. State what they do and research, not how impressive they are.
 - Synthesize — don't just append the new query to the existing profile
 - If the existing profile is empty, create everything from scratch
 - Don't speculate wildly — stick to what the queries reveal
