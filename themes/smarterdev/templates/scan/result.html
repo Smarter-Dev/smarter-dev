@@ -107,7 +107,9 @@
     .scan-resource-item{flex-shrink:0;width:200px;scroll-snap-align:start}
     .scan-resource-link{display:flex;flex-direction:column;gap:.4rem;text-decoration:none;color:var(--light);transition:all .2s;padding:.5rem;border:1px solid rgba(0,212,255,.06);background:var(--surface);height:100%}
     .scan-resource-link:hover{border-color:rgba(0,212,255,.18);background:rgba(0,212,255,.03)}
-    .scan-resource-img{width:100%;height:80px;object-fit:cover;border:1px solid rgba(0,212,255,.08);background:rgba(0,0,0,.2)}
+    .scan-resource-og{position:relative;width:100%;height:80px;border:1px solid rgba(0,212,255,.08);background:rgba(0,0,0,.2);overflow:hidden;display:flex;align-items:center;justify-content:center}
+    .scan-resource-og svg{width:24px;height:24px;opacity:.18}
+    .scan-resource-og img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
     .scan-resource-info{min-width:0;flex:1}
     .scan-resource-title{font-size:.68rem;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     .scan-resource-desc{font-size:.58rem;color:var(--gray);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4}
@@ -236,7 +238,10 @@
         {% for r in session.context.resources %}
         <li class="scan-resource-item">
             <a href="{{ r.url }}" target="_blank" rel="noopener" class="scan-resource-link">
-                {% if r.og_image is defined and r.og_image %}<img src="{{ r.og_image }}" class="scan-resource-img" alt="" loading="lazy">{% endif %}
+                <div class="scan-resource-og">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                    {% if r.og_image is defined and r.og_image %}<img src="{{ r.og_image }}" alt="" loading="lazy">{% endif %}
+                </div>
                 <div class="scan-resource-info">
                     <div class="scan-resource-title">{{ r.title }}</div>
                     <div class="scan-resource-desc">{{ r.description }}</div>
@@ -334,6 +339,16 @@
 {% block page_scripts %}
 <script nonce="{{ csp_nonce() }}" src="https://cdn.jsdelivr.net/npm/prismjs@1/prism.min.js"></script>
 <script nonce="{{ csp_nonce() }}" src="https://cdn.jsdelivr.net/npm/prismjs@1/plugins/autoloader/prism-autoloader.min.js"></script>
+<script nonce="{{ csp_nonce() }}">
+// Hide broken resource images (OG images reveal placeholder, favicons hide)
+document.addEventListener("error", function(e) {
+    var t = e.target;
+    if (t.tagName !== "IMG") return;
+    if (t.closest(".scan-resource-og") || t.classList.contains("scan-resource-favicon")) {
+        t.style.display = "none";
+    }
+}, true);
+</script>
 <script nonce="{{ csp_nonce() }}">
 // Shared TOC builder — used by both running and complete states
 function buildTOC() {
@@ -790,9 +805,12 @@ if (window.__skriftNotifications) {
         var html = "";
         for (var i = 0; i < resources.length; i++) {
             var r = resources[i];
+            var ogPlaceholder = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>';
             html += '<li class="scan-resource-item scan-res-animate" style="animation-delay:' + (i * 150) + 'ms">' +
                 '<a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener" class="scan-resource-link">' +
-                (r.og_image ? '<img src="' + escapeHtml(r.og_image) + '" class="scan-resource-img" alt="" loading="lazy">' : '') +
+                '<div class="scan-resource-og">' + ogPlaceholder +
+                (r.og_image ? '<img src="' + escapeHtml(r.og_image) + '" alt="" loading="lazy">' : '') +
+                '</div>' +
                 '<div class="scan-resource-info">' +
                 '<div class="scan-resource-title">' + escapeHtml(r.title) + '</div>' +
                 '<div class="scan-resource-desc">' + escapeHtml(r.description || '') + '</div>' +

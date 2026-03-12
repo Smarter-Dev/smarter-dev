@@ -10,6 +10,7 @@ import logging
 import os
 import re
 from datetime import datetime
+from posixpath import normpath as _posix_normpath
 from urllib.parse import urlparse
 
 import httpx
@@ -340,6 +341,27 @@ _OG_RE = re.compile(
 )
 
 
+def _resolve_url(href: str, base_url: str) -> str:
+    """Resolve a potentially relative URL against a base URL.
+
+    Handles protocol-relative (//), absolute (/path), and relative (path,
+    ../path) URLs.
+    """
+    if href.startswith(("http://", "https://")):
+        return href
+    if href.startswith("//"):
+        return "https:" + href
+    if href.startswith("/"):
+        parsed = urlparse(base_url)
+        return f"{parsed.scheme}://{parsed.netloc}{href}"
+    # Relative path (e.g. "../../image.png" or "image.png")
+    # Strip the last path segment from the base URL, then resolve
+    parsed = urlparse(base_url)
+    base_path = parsed.path.rsplit("/", 1)[0] if "/" in parsed.path else ""
+    resolved = _posix_normpath(f"{base_path}/{href}")
+    return f"{parsed.scheme}://{parsed.netloc}{resolved}"
+
+
 async def fetch_og_metadata(
     client: httpx.AsyncClient,
     url: str,
@@ -359,6 +381,9 @@ async def fetch_og_metadata(
         if resp.status_code != 200:
             return {}
 
+        # Use final URL after redirects as base for relative URL resolution
+        base_url = str(resp.url)
+
         # Only parse the <head> to save time
         text = resp.text[:16_000]
         result: dict[str, str] = {}
@@ -371,6 +396,10 @@ async def fetch_og_metadata(
                 mapped = f"og_{key}"
                 if mapped in ("og_title", "og_description", "og_image", "og_site_name"):
                     result[mapped] = value
+
+        # Resolve og_image relative URLs
+        if "og_image" in result:
+            result["og_image"] = _resolve_url(result["og_image"], base_url)
 
         # Fallback: try <title> tag if no og:title
         if "og_title" not in result:
@@ -385,13 +414,7 @@ async def fetch_og_metadata(
             re.IGNORECASE,
         )
         if fav_m:
-            href = fav_m.group(1)
-            if href.startswith("//"):
-                href = "https:" + href
-            elif href.startswith("/"):
-                parsed = urlparse(url)
-                href = f"{parsed.scheme}://{parsed.netloc}{href}"
-            result["favicon"] = href
+            result["favicon"] = _resolve_url(fav_m.group(1), base_url)
 
         return result
 
