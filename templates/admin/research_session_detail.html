@@ -126,6 +126,37 @@
 </div>
 {% endif %}
 
+{# ── Example Plan ──────────────────────────────────────────────── #}
+{% if example_plan %}
+<div class="sk-panel" style="margin-bottom: 1.5rem;">
+    <div class="sk-panel-head"><strong>Example Plan</strong> <small style="opacity: .6;">({{ example_plan|length }} example{{ 's' if example_plan|length != 1 else '' }})</small></div>
+    <div class="sk-panel-body" style="padding: 0;">
+        {% for ex in example_plan %}
+        <div style="padding: .75rem 1rem; border-bottom: 1px solid rgba(255,255,255,.06);">
+            <div style="display: flex; align-items: center; gap: .5rem; margin-bottom: .4rem;">
+                <strong>{{ ex.title }}</strong>
+                {% if ex.language %}
+                <span class="sk-pill" style="font-size: .8em;">{{ ex.language }}</span>
+                {% endif %}
+                {% if ex.scale %}
+                <span class="sk-pill" style="font-size: .8em; background: rgba(200,150,0,.12); color: #ca0;">{{ ex.scale }}</span>
+                {% endif %}
+            </div>
+            {% if ex.description %}
+            <div style="font-size: .9em; opacity: .75; margin-bottom: .4rem;">{{ ex.description }}</div>
+            {% endif %}
+            {% if ex.instructions %}
+            <details>
+                <summary style="font-size: .8em; opacity: .5; cursor: pointer;">Instructions</summary>
+                <div style="margin-top: .3rem; font-family: monospace; font-size: .82em; opacity: .6; white-space: pre-wrap; background: rgba(0,0,0,.15); padding: .5rem; border-radius: 4px;">{{ ex.instructions }}</div>
+            </details>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
 {# ── Planner Reasoning ──────────────────────────────────────────── #}
 {% if planner_reasoning %}
 <div class="sk-panel" style="margin-bottom: 1.5rem;">

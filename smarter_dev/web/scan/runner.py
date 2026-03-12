@@ -231,6 +231,7 @@ async def run_session_pipeline(
     resources: list[dict] = []
     code_examples_data: list[dict] = []
     planner_output_data: dict | None = None
+    example_plan_data: list[dict] = []
     all_usage: list[tuple[RunUsage, str]] = []  # (usage, model_name)
 
     async def emit(event_type: str, **payload: object) -> None:
@@ -510,7 +511,7 @@ async def run_session_pipeline(
         nonlocal meta_name, meta_topic, meta_skill, session_slug
         nonlocal research_result, research_tool_log
         nonlocal youtube_videos, resources, code_examples_data
-        nonlocal planner_reasoning, planner_output_data
+        nonlocal planner_reasoning, planner_output_data, example_plan_data
 
         async with httpx.AsyncClient(
             timeout=30.0, headers={"User-Agent": _USER_AGENT},
@@ -525,6 +526,7 @@ async def run_session_pipeline(
                 result_data, tool_log, total_usage,
                 exp_youtube, exp_resources, exp_examples, meta_plan,
                 exp_planner_reasoning, exp_slug, exp_planner_output,
+                exp_example_plan,
             ) = await run_experimental_pipeline(
                 query, deps, date_context, emit,
                 user_profile=user_profile_text,
@@ -534,6 +536,7 @@ async def run_session_pipeline(
         research_tool_log = tool_log
         planner_reasoning = exp_planner_reasoning
         planner_output_data = exp_planner_output
+        example_plan_data = exp_example_plan
         all_usage.append((total_usage, MODEL))
 
         # Capture meta from the experimental pipeline's combined output
@@ -618,6 +621,8 @@ async def run_session_pipeline(
             context["planner_reasoning"] = planner_reasoning
         if planner_output_data:
             context["planner_output"] = planner_output_data
+        if example_plan_data:
+            context["example_plan"] = example_plan_data
         if user_profile_text:
             context["user_profile_snapshot"] = user_profile_text
 

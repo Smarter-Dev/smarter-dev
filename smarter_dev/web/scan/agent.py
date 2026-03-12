@@ -1250,12 +1250,21 @@ _planner_agent = Agent(
         "Order both `youtube_video_ids` and `resources` by source "
         "authority — highest quality first.\n\n"
         "## User context\n\n"
-        "You may receive background context about the user. Use it only "
-        "as a subtle signal to calibrate depth and source selection — "
-        "e.g. prefer advanced sources for experienced users, or more "
-        "introductory material for beginners. Never mention, reference, "
-        "or acknowledge the user's profile, history, or that you know "
-        "anything about them beyond their current question.\n\n"
+        "You may receive background context about the user's technology "
+        "stack and skill level. Use it to:\n\n"
+        "1. **Tailor resources to their stack.** If they use Python, find "
+        "Python-focused resources — don't return .NET, Java, or C# "
+        "tutorials unless the query specifically asks about those. Match "
+        "the ecosystem: pytest docs for a pytest user, React docs for a "
+        "React developer, etc.\n"
+        "2. **Tailor videos to their stack.** Same principle — a Python "
+        "developer should get Python-oriented video content, not generic "
+        "or wrong-language videos.\n"
+        "3. **Calibrate depth.** Prefer advanced sources for experienced "
+        "users, introductory material for beginners.\n\n"
+        "Never mention, reference, or acknowledge the user's profile, "
+        "history, or that you know anything about them beyond their "
+        "current question.\n\n"
         "Return structured output only."
     ),
 )
@@ -1427,9 +1436,16 @@ _example_plan_agent = Agent(
         "answer covers multiple concepts or techniques, plan examples that "
         "demonstrate each of them, not just one narrow slice.\n\n"
         "## Rules\n\n"
-        "1. **Tailor to skill level.** Beginners need simple, well-commented "
+        "1. **Match the user's technology stack (CRITICAL).** If you receive "
+        "context about the user's technologies, you MUST use those to pick "
+        "languages, frameworks, and libraries for examples. A Python user "
+        "should see Python examples, a React developer should see React "
+        "examples. If they use pytest, write tests with pytest. If they use "
+        "FastAPI, show FastAPI patterns. The user should feel like the "
+        "examples were written specifically for their workflow.\n"
+        "2. **Tailor to skill level.** Beginners need simple, well-commented "
         "examples. Experts want concise, idiomatic code showing advanced patterns.\n"
-        "2. **Choose the right scale:**\n"
+        "3. **Choose the right scale:**\n"
         "   - Up to 5 SHORT examples (5-15 lines each) for topics with many "
         "small concepts\n"
         "   - 2-3 MEDIUM examples (15-40 lines each) for topics that need "
@@ -1437,12 +1453,13 @@ _example_plan_agent = Agent(
         "   - 1 LARGE example (40-100 lines) for topics best shown as a "
         "complete program\n"
         "   - Mix scales if appropriate.\n"
-        "3. **Don't repeat the response.** Examples should ADD value beyond "
+        "4. **Don't repeat the response.** Examples should ADD value beyond "
         "what the written response already covers.\n"
-        "4. **Return an empty list** if the topic doesn't benefit from code "
+        "5. **Return an empty list** if the topic doesn't benefit from code "
         "examples.\n"
-        "5. **Pick the right language.** Use the language most relevant to "
-        "the query. If language-agnostic, prefer Python.\n\n"
+        "6. **Pick the right language.** Use the language most relevant to "
+        "the query AND the user's stack. Only fall back to Python if "
+        "language-agnostic and no user tech context is available.\n\n"
         "## Ordering (CRITICAL)\n\n"
         "Order examples to progressively develop the reader's understanding "
         "of the concept. Start with the simplest, most foundational example "
@@ -1502,7 +1519,7 @@ async def run_experimental_pipeline(
     date_context: str,
     emit: EmitFn,
     user_profile: str = "",
-) -> tuple[ResearchResult, list[dict], RunUsage, list[dict], list[dict], list[dict], ExpMetaQueryPlan, str, str, dict]:
+) -> tuple[ResearchResult, list[dict], RunUsage, list[dict], list[dict], list[dict], ExpMetaQueryPlan, str, str, dict, list[dict]]:
     """History-threaded experimental research pipeline.
 
     Threads conversation history through sequential stages:
@@ -1513,7 +1530,7 @@ async def run_experimental_pipeline(
     5. Example plan
     6. Parallel example generation (streaming)
 
-    Returns (result, tool_log, total_usage, youtube_videos, resources, code_examples, meta_plan, planner_reasoning, meta_slug, planner_output).
+    Returns (result, tool_log, total_usage, youtube_videos, resources, code_examples, meta_plan, planner_reasoning, meta_slug, planner_output, example_plan).
     """
     from pydantic_ai import AgentRunResultEvent
     from pydantic_ai.messages import (
@@ -1532,6 +1549,7 @@ async def run_experimental_pipeline(
     youtube_videos: list[dict] = []
     resources: list[dict] = []
     code_examples: list[dict] = []
+    example_descriptions: list = []
 
     # ------------------------------------------------------------------
     # Step 1 — Meta analysis
@@ -1567,12 +1585,16 @@ async def run_experimental_pipeline(
     if user_profile:
         context_parts.append(
             f"[INTERNAL CONTEXT — do not mention or reference this directly]\n"
-            f"Background on the person asking this question, based on their "
-            f"previous research patterns:\n\n{user_profile}\n\n"
-            f"Use this only to subtly calibrate which sources to prioritize "
-            f"and how deep/advanced the article points should be. Do not "
-            f"mention the user's profile, history, or that you have any "
-            f"prior knowledge of them."
+            f"The user's technology stack and background:\n\n{user_profile}\n\n"
+            f"Use this to:\n"
+            f"- Search for resources in their ecosystem (Python docs, not "
+            f".NET docs; React tutorials, not Angular tutorials)\n"
+            f"- Find videos that use their stack (Python videos for Python "
+            f"developers, etc.)\n"
+            f"- Calibrate depth — advanced sources for experienced users, "
+            f"beginner-friendly for newcomers\n\n"
+            f"Do not mention the user's profile, history, or that you have "
+            f"any prior knowledge of them."
         )
     history.append(ModelRequest(parts=[UserPromptPart(content="\n\n".join(context_parts))]))
 
@@ -1765,8 +1787,13 @@ async def run_experimental_pipeline(
             if user_profile:
                 example_prompt += (
                     "\n\n[INTERNAL — do not mention this context]\n"
-                    "The user's technology profile (use this to pick "
-                    "languages, frameworks, and tools for examples):\n"
+                    "The user's technology profile. You MUST use this to "
+                    "pick languages, frameworks, and libraries for your "
+                    "examples. The examples should feel familiar to the "
+                    "user — use their tools, their patterns, their stack. "
+                    "For example: if they use Python + pytest, write Python "
+                    "examples with pytest tests. If they use TypeScript + "
+                    "React, write TypeScript/React examples.\n\n"
                     f"{user_profile}"
                 )
             example_plan_result = await _example_plan_agent.run(
@@ -1853,7 +1880,8 @@ async def run_experimental_pipeline(
 
     planner_reasoning = "".join(planner_reasoning_chunks)
     planner_output = planner_result_data.model_dump() if planner_result_data else {}
-    return result_data, tool_log, total_usage, youtube_videos, resources, code_examples, plan, planner_reasoning, meta_slug, planner_output
+    example_plan_output = [desc.model_dump() for desc in example_descriptions] if example_descriptions else []
+    return result_data, tool_log, total_usage, youtube_videos, resources, code_examples, plan, planner_reasoning, meta_slug, planner_output, example_plan_output
 
 
 def _parse_example_text(text: str, fallback_title: str, fallback_lang: str) -> dict:

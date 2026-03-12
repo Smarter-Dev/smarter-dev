@@ -78,6 +78,7 @@ class ResearchSessionsAdminController(Controller):
         context = session.context or {}
         planner_reasoning = context.get("planner_reasoning", "")
         planner_output = context.get("planner_output", {})
+        example_plan = context.get("example_plan", [])
         user_profile_snapshot = context.get("user_profile_snapshot", "")
 
         return TemplateResponse(
@@ -86,6 +87,7 @@ class ResearchSessionsAdminController(Controller):
                 "session": session,
                 "planner_reasoning": planner_reasoning,
                 "planner_output": planner_output,
+                "example_plan": example_plan,
                 "user_profile_snapshot": user_profile_snapshot,
                 **ctx,
             },
