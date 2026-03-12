@@ -23,6 +23,20 @@
     .scan-mode input[type="radio"]{appearance:none;-webkit-appearance:none;width:10px;height:10px;border:1px solid rgba(0,212,255,.3);border-radius:50%;cursor:pointer;transition:all .2s;margin:0}
     .scan-mode input[type="radio"]:checked{background:var(--cyan);border-color:var(--cyan);box-shadow:0 0 8px rgba(0,212,255,.3)}
     .scan-mode input[type="radio"]:checked+span{color:var(--cyan)}
+    .scan-recent{max-width:600px;margin:2rem auto 0;text-align:left}
+    .scan-recent-label{font-family:var(--heading);font-size:.42rem;letter-spacing:.12em;color:var(--mid);margin-bottom:.5rem}
+    .scan-recent-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1px}
+    .scan-recent-item{display:flex;align-items:center;gap:.75rem;padding:.6rem .75rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);text-decoration:none;color:var(--light);transition:all .2s}
+    .scan-recent-item:hover{border-color:rgba(0,212,255,.18);background:rgba(0,212,255,.03)}
+    .scan-recent-query{font-size:.78rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .scan-recent-status{font-family:var(--heading);font-size:.42rem;letter-spacing:.06em;padding:2px 6px;flex-shrink:0}
+    .scan-recent-status.complete{color:var(--cyan);border:1px solid rgba(0,212,255,.2)}
+    .scan-recent-status.running{color:var(--amber);border:1px solid rgba(255,191,0,.2)}
+    .scan-recent-status.error{color:var(--red, #f44);border:1px solid rgba(255,68,68,.2)}
+    .scan-recent-time{font-size:.6rem;color:var(--gray);flex-shrink:0}
+    .scan-recent-footer{margin-top:.5rem;text-align:right}
+    .scan-recent-footer a{font-family:var(--heading);font-size:.48rem;letter-spacing:.08em;color:var(--cyan);text-decoration:none;opacity:.7;transition:opacity .2s}
+    .scan-recent-footer a:hover{opacity:1}
     </style>
 {% endblock %}
 
@@ -39,6 +53,24 @@
         <input type="hidden" name="mode" value="experimental">
         <button type="submit" class="scan-submit">SCAN</button>
     </form>
+    {% if recent_searches %}
+    <div class="scan-recent">
+        <div class="scan-recent-label">RECENT SEARCHES</div>
+        <ul class="scan-recent-list">
+            {% for s in recent_searches %}
+            <li>
+                <a href="/r/{{ s.slug or s.id }}" class="scan-recent-item">
+                    <span class="scan-recent-query">{{ s.name or s.query }}</span>
+                    <span class="scan-recent-status {{ s.status }}">{{ s.status|upper }}</span>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+        <div class="scan-recent-footer">
+            <a href="/history">VIEW ALL HISTORY &rarr;</a>
+        </div>
+    </div>
+    {% endif %}
     {% else %}
     <form class="scan-form">
         <textarea disabled placeholder="What do you want to research?" class="scan-input" rows="1"></textarea>

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block page_type %}scan{% endblock %}
+{% block seo_meta %}<meta name="robots" content="noindex">{% endblock %}
+{% block page_title %}Search History — Scan{% endblock %}
+
+{% block page_css %}
+    <link rel="stylesheet" href="{{ theme_url('css/pages/research.css') }}">
+    <style nonce="{{ csp_nonce() }}">
+    .history-page{position:relative;z-index:1;max-width:720px;margin:0 auto;padding:6rem 2rem 4rem}
+    .history-page-title{font-family:var(--display);font-size:clamp(1.2rem,3vw,1.8rem);color:var(--white);letter-spacing:.04em;margin-bottom:.25rem}
+    .history-page-meta{font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.06em;margin-bottom:2rem}
+    .history-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1px}
+    .history-entry{display:flex;align-items:center;gap:1rem;padding:1rem 1.25rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);text-decoration:none;color:var(--light);transition:all .2s}
+    .history-entry:hover{border-color:rgba(0,212,255,.18);background:rgba(0,212,255,.03)}
+    .history-entry-body{flex:1;min-width:0}
+    .history-entry-name{font-size:.85rem;color:var(--white);margin-bottom:.2rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .history-entry-query{font-size:.7rem;color:var(--gray);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .history-entry-right{display:flex;flex-direction:column;align-items:flex-end;gap:.3rem;flex-shrink:0}
+    .history-entry-status{font-family:var(--heading);font-size:.42rem;letter-spacing:.06em;padding:2px 6px}
+    .history-entry-status.complete{color:var(--cyan);border:1px solid rgba(0,212,255,.2)}
+    .history-entry-status.running{color:var(--amber);border:1px solid rgba(255,191,0,.2)}
+    .history-entry-status.error{color:var(--red, #f44);border:1px solid rgba(255,68,68,.2)}
+    .history-entry-time{font-size:.58rem;color:var(--gray)}
+    .history-empty{text-align:center;padding:3rem 1rem;color:var(--gray);font-size:.85rem}
+    .history-empty a{color:var(--cyan);text-decoration:none}
+    .history-pagination{display:flex;justify-content:center;gap:1rem;margin-top:2rem}
+    .history-pagination a{font-family:var(--heading);font-size:.55rem;letter-spacing:.08em;color:var(--cyan);text-decoration:none;padding:.4rem 1rem;border:1px solid rgba(0,212,255,.2);transition:all .2s}
+    .history-pagination a:hover{background:rgba(0,212,255,.1);border-color:var(--cyan)}
+    .history-nav{display:flex;gap:1.5rem;margin-bottom:1.5rem}
+    .history-nav a{font-family:var(--heading);font-size:.5rem;letter-spacing:.1em;color:var(--gray);text-decoration:none;transition:color .2s}
+    .history-nav a:hover,.history-nav a.active{color:var(--cyan)}
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="history-page">
+    <div class="history-nav">
+        <a href="/">SCAN</a>
+        <a href="/history" class="active">HISTORY</a>
+        <a href="/profile">PROFILE</a>
+    </div>
+    <h1 class="history-page-title">Search History</h1>
+    <p class="history-page-meta">{{ total }} RESEARCH SESSION{{ 'S' if total != 1 else '' }}</p>
+
+    {% if sessions %}
+    <ul class="history-list">
+        {% for s in sessions %}
+        <li>
+            <a href="/r/{{ s.slug or s.id }}" class="history-entry">
+                <div class="history-entry-body">
+                    <div class="history-entry-name">{{ s.name or s.query }}</div>
+                    {% if s.name %}<div class="history-entry-query">{{ s.query }}</div>{% endif %}
+                </div>
+                <div class="history-entry-right">
+                    <span class="history-entry-status {{ s.status }}">{{ s.status|upper }}</span>
+                    <span class="history-entry-time">{{ s.created_at.strftime('%b %d, %Y') }}</span>
+                </div>
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+
+    {% if has_prev or has_next %}
+    <div class="history-pagination">
+        {% if has_prev %}<a href="/history?page={{ page - 1 }}">&larr; NEWER</a>{% endif %}
+        {% if has_next %}<a href="/history?page={{ page + 1 }}">OLDER &rarr;</a>{% endif %}
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="history-empty">
+        <p>No research sessions yet.</p>
+        <p><a href="/">Start your first scan &rarr;</a></p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

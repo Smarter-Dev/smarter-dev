@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block page_type %}scan{% endblock %}
+{% block seo_meta %}<meta name="robots" content="noindex">{% endblock %}
+{% block page_title %}Your Profile — Scan{% endblock %}
+
+{% block page_css %}
+    <link rel="stylesheet" href="{{ theme_url('css/pages/research.css') }}">
+    <style nonce="{{ csp_nonce() }}">
+    .profile-page{position:relative;z-index:1;max-width:720px;margin:0 auto;padding:6rem 2rem 4rem}
+    .profile-page-title{font-family:var(--display);font-size:clamp(1.2rem,3vw,1.8rem);color:var(--white);letter-spacing:.04em;margin-bottom:2rem}
+
+    .profile-user{display:flex;align-items:center;gap:1rem;margin-bottom:2rem;padding:1.25rem;background:var(--surface);border:1px solid rgba(0,212,255,.06)}
+    .profile-avatar{width:48px;height:48px;border-radius:50%;border:1px solid rgba(0,212,255,.12);flex-shrink:0}
+    .profile-user-info{min-width:0}
+    .profile-user-name{font-size:.95rem;color:var(--white);font-weight:500}
+    .profile-user-email{font-size:.7rem;color:var(--gray);margin-top:.15rem}
+
+    .profile-section{margin-bottom:2rem}
+    .profile-section-label{font-family:var(--heading);font-size:.48rem;letter-spacing:.12em;color:var(--mid);margin-bottom:.75rem}
+
+    .profile-text{font-size:.88rem;color:var(--light);line-height:1.8;background:var(--surface);border:1px solid rgba(0,212,255,.06);padding:1.25rem 1.5rem}
+    .profile-text p{margin:0 0 .75rem}
+    .profile-text p:last-child{margin-bottom:0}
+
+    .profile-tech-list{list-style:none;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:.5rem}
+    .profile-tech{font-family:var(--heading);font-size:.55rem;letter-spacing:.04em;padding:.35rem .75rem;border:1px solid rgba(0,212,255,.15);color:var(--light);background:var(--surface)}
+    .profile-tech-rel{font-size:.45rem;color:var(--gray);margin-left:.3rem;letter-spacing:.02em}
+
+    .profile-stats{display:flex;gap:1px;margin-bottom:2rem}
+    .profile-stat{flex:1;padding:1rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);text-align:center}
+    .profile-stat-value{font-family:var(--display);font-size:1.4rem;color:var(--white);letter-spacing:.02em}
+    .profile-stat-label{font-family:var(--heading);font-size:.42rem;letter-spacing:.1em;color:var(--gray);margin-top:.25rem}
+
+    .profile-empty{text-align:center;padding:3rem 1rem;color:var(--gray);font-size:.85rem;background:var(--surface);border:1px solid rgba(0,212,255,.06)}
+    .profile-empty a{color:var(--cyan);text-decoration:none}
+
+    .profile-nav{display:flex;gap:1.5rem;margin-bottom:1.5rem}
+    .profile-nav a{font-family:var(--heading);font-size:.5rem;letter-spacing:.1em;color:var(--gray);text-decoration:none;transition:color .2s}
+    .profile-nav a:hover,.profile-nav a.active{color:var(--cyan)}
+
+    .profile-updated{font-size:.6rem;color:var(--gray);margin-top:.5rem}
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="profile-page">
+    <div class="profile-nav">
+        <a href="/">SCAN</a>
+        <a href="/history">HISTORY</a>
+        <a href="/profile" class="active">PROFILE</a>
+    </div>
+    <h1 class="profile-page-title">Your Profile</h1>
+
+    {% if user %}
+    <div class="profile-user">
+        {% if user.picture_url %}<img src="{{ user.picture_url }}" class="profile-avatar" alt="">{% endif %}
+        <div class="profile-user-info">
+            <div class="profile-user-name">{{ user.name }}</div>
+            <div class="profile-user-email">{{ user.email }}</div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if profile %}
+    <div class="profile-stats">
+        <div class="profile-stat">
+            <div class="profile-stat-value">{{ profile.query_count }}</div>
+            <div class="profile-stat-label">TOTAL SCANS</div>
+        </div>
+        {% if profile.technologies %}
+        <div class="profile-stat">
+            <div class="profile-stat-value">{{ profile.technologies|length }}</div>
+            <div class="profile-stat-label">TECHNOLOGIES</div>
+        </div>
+        {% endif %}
+    </div>
+
+    {% if profile.technologies %}
+    <div class="profile-section">
+        <div class="profile-section-label">TECHNOLOGIES</div>
+        <ul class="profile-tech-list">
+            {% for tech in profile.technologies %}
+            <li class="profile-tech">
+                {{ tech.name if tech is mapping else tech }}{% if tech is mapping and tech.relationship %}<span class="profile-tech-rel">({{ tech.relationship }})</span>{% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    <div class="profile-section">
+        <div class="profile-section-label">AGENT PROFILE</div>
+        <div class="profile-text">
+            {% for paragraph in profile.profile.split('\n\n') %}
+            {% if paragraph.strip() %}<p>{{ paragraph.strip() }}</p>{% endif %}
+            {% endfor %}
+        </div>
+        <div class="profile-updated">Last updated {{ profile.updated_at.strftime('%B %d, %Y at %I:%M %p') }}</div>
+    </div>
+
+    {% else %}
+    <div class="profile-empty">
+        <p>Your profile hasn't been created yet.</p>
+        <p>It will be generated after your first research scan.</p>
+        <p><a href="/">Start your first scan &rarr;</a></p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

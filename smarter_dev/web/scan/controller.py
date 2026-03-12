@@ -7,18 +7,19 @@ from urllib.parse import quote
 from litestar import Controller, MediaType, Request, Response, get, post
 from litestar.enums import RequestEncodingType
 from litestar.exceptions import ClientException, NotAuthorizedException
-from litestar.params import Body
+from litestar.params import Body, Parameter
 from litestar.response import Redirect, Template
 from litestar.status_codes import HTTP_429_TOO_MANY_REQUESTS
 from skrift.auth.guards import auth_guard
 from skrift.auth.services import get_user_permissions
 from skrift.db.models.user import User
 from skrift.lib.markdown import render_markdown
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.scan.citations import process_citations
 from smarter_dev.web.scan.crud import ResearchSessionOperations
+from smarter_dev.web.models import ScanUserProfile, ResearchSession
 from smarter_dev.web.scan.runner import start_pipeline_task
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,8 @@ def _scan_auth_redirect(request: Request, exc: NotAuthorizedException) -> Respon
         current_url = f"https://scan.smarter.dev{request.url.path}"
     login_url = f"https://smarter.dev/auth/login?next={quote(current_url, safe='')}"
     return Redirect(path=login_url)
+
+
 ops = ResearchSessionOperations()
 
 WEEKLY_RESEARCH_LIMIT = 25
@@ -44,7 +47,7 @@ class ScanController(Controller):
     exception_handlers = {NotAuthorizedException: _scan_auth_redirect}
 
     @get("/")
-    async def landing(self, request: Request) -> Template:
+    async def landing(self, request: Request, db_session: AsyncSession) -> Template:
         """Scan landing page with search input and topic grid."""
         user_id = request.session.get("user_id") if request.session else None
         og_meta = {
@@ -54,7 +57,14 @@ class ScanController(Controller):
             "site_name": "Scan by Smarter Dev",
             "type": "website",
         }
-        return Template("scan/landing.html", context={"user_id": user_id, "og_meta": og_meta})
+        recent_searches: list = []
+        if user_id:
+            recent_searches = await ops.list_sessions(db_session, user_id, limit=3)
+        return Template("scan/landing.html", context={
+            "user_id": user_id,
+            "og_meta": og_meta,
+            "recent_searches": recent_searches,
+        })
 
     @post(
         "/",
@@ -137,8 +147,59 @@ class ScanController(Controller):
 
     @get("/robots.txt", media_type=MediaType.TEXT)
     async def robots_txt(self) -> str:
-        """Serve robots.txt for scan.smarter.dev."""
-        return "User-agent: *\nAllow: /\n\nSitemap: https://scan.smarter.dev/sitemap.xml\n"
+        """Serve robots.txt for scan.smarter.dev.
+
+        - Search engines can index the landing and about pages only
+        - AI training crawlers are fully blocked
+        - LLM retrieval agents (browsing, not training) are allowed
+        """
+        return (
+            "# Search engine crawlers — index landing + about only\n"
+            "User-agent: *\n"
+            "Allow: /$\n"
+            "Allow: /about\n"
+            "Disallow: /\n"
+            "\n"
+            "# Block AI training crawlers\n"
+            "User-agent: GPTBot\n"
+            "Disallow: /\n"
+            "\n"
+            "User-agent: ChatGPT-User\n"
+            "Allow: /\n"
+            "\n"
+            "User-agent: Google-Extended\n"
+            "Disallow: /\n"
+            "\n"
+            "User-agent: CCBot\n"
+            "Disallow: /\n"
+            "\n"
+            "User-agent: anthropic-ai\n"
+            "Disallow: /\n"
+            "\n"
+            "User-agent: ClaudeBot\n"
+            "Disallow: /\n"
+            "\n"
+            "User-agent: Claude-Web\n"
+            "Allow: /\n"
+            "\n"
+            "User-agent: cohere-ai\n"
+            "Disallow: /\n"
+            "\n"
+            "User-agent: Bytespider\n"
+            "Disallow: /\n"
+            "\n"
+            "User-agent: Amazonbot\n"
+            "Disallow: /\n"
+            "\n"
+            "User-agent: FacebookBot\n"
+            "Disallow: /\n"
+            "\n"
+            "User-agent: Applebot-Extended\n"
+            "Disallow: /\n"
+            "\n"
+            "User-agent: PerplexityBot\n"
+            "Allow: /\n"
+        )
 
     @get("/r/{result_id:str}")
     async def result(
@@ -186,3 +247,60 @@ class ScanController(Controller):
                 "creator_name": creator_name,
             },
         )
+
+    @get("/history", guards=[auth_guard])
+    async def history(
+        self,
+        request: Request,
+        db_session: AsyncSession,
+        page: Annotated[int, Parameter(query="page", ge=1)] = 1,
+    ) -> Template:
+        """User's research history with pagination."""
+        user_id = request.session.get("user_id", "")
+        per_page = 20
+        offset = (page - 1) * per_page
+
+        sessions = await ops.list_sessions(db_session, user_id, limit=per_page + 1, offset=offset)
+        has_next = len(sessions) > per_page
+        sessions = sessions[:per_page]
+
+        # Total count for display
+        total_result = await db_session.execute(
+            select(func.count()).select_from(ResearchSession)
+            .where(ResearchSession.user_id == user_id)
+        )
+        total = total_result.scalar_one()
+
+        return Template("scan/history.html", context={
+            "sessions": sessions,
+            "page": page,
+            "has_next": has_next,
+            "has_prev": page > 1,
+            "total": total,
+        })
+
+    @get("/profile", guards=[auth_guard])
+    async def profile(
+        self,
+        request: Request,
+        db_session: AsyncSession,
+    ) -> Template:
+        """User's agent profile page."""
+        user_id = request.session.get("user_id", "")
+
+        # Fetch profile
+        result = await db_session.execute(
+            select(ScanUserProfile).where(ScanUserProfile.user_id == user_id)
+        )
+        user_profile = result.scalar_one_or_none()
+
+        # Fetch user info
+        user_result = await db_session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = user_result.scalar_one_or_none()
+
+        return Template("scan/profile.html", context={
+            "profile": user_profile,
+            "user": user,
+        })

@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block page_type %}scan-result{% endblock %}
+{% block seo_meta %}<meta name="robots" content="noindex">{% endblock %}
 {% block title %}{% if session and session.name %}{{ session.name }} - Scan - Smarter.Dev{% else %}Research Result - Scan - Smarter.Dev{% endif %}{% endblock %}
 
 {% block page_css %}
