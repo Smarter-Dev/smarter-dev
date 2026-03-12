@@ -84,7 +84,44 @@ class ScanController(Controller):
         # Start the unified pipeline — one task handles everything
         start_pipeline_task(research.id, query, user_id, tz=tz, mode=pipeline_mode)
 
-        return Redirect(path=f"/r/{research.id}")
+        return Redirect(path=f"/research?s={research.id}")
+
+    @get("/research", guards=[auth_guard])
+    async def research_pending(
+        self, request: Request, db_session: AsyncSession, s: str = "",
+    ) -> Template:
+        """In-progress research page — redirected here after submitting a query.
+
+        The session ID is passed as ?s=<uuid>.  Once the meta agent names the
+        session, the client pushes /r/{slug} into the URL bar.
+        """
+        session_data = await ops.get_session(db_session, s) if s else None
+
+        creator_name = ""
+        if session_data:
+            result = await db_session.execute(
+                select(User.name).where(User.id == session_data.user_id)
+            )
+            creator_name = result.scalar_one_or_none() or ""
+
+        og_meta = {
+            "url": "https://scan.smarter.dev/research",
+            "site_name": "Scan by Smarter Dev",
+            "type": "article",
+            "title": "Researching…",
+            "description": session_data.query if session_data else "",
+        }
+
+        return Template(
+            "scan/result.html",
+            context={
+                "result_id": s,
+                "session": session_data,
+                "rendered_response": "",
+                "og_meta": og_meta,
+                "creator_name": creator_name,
+            },
+        )
 
     @get("/robots.txt", media_type=MediaType.TEXT)
     async def robots_txt(self) -> str:

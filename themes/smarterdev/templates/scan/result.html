@@ -494,6 +494,9 @@ if (window.__skriftNotifications) {
             if (data.name) {
                 document.title = data.name + " - Scan - Smarter.Dev";
             }
+            if (data.slug) {
+                history.pushState(null, "", "/r/" + data.slug);
+            }
         }
 
         else if (eventType === "youtube_videos") {

@@ -46,6 +46,7 @@ from smarter_dev.web.scan.agent import (
     generate_session_meta,
     generate_user_profile,
     generate_youtube_query,
+    make_slug,
     rank_resource_results,
     rank_youtube_results,
     research_agent,
@@ -70,18 +71,6 @@ ops = ResearchSessionOperations()
 _USER_AGENT = "Smarter Dev Scan Agent - admin@smarter.dev"
 
 
-def _make_slug(name: str) -> str:
-    """Generate a URL slug from a session name with a timestamp suffix for uniqueness."""
-    import re
-
-    slug = name.lower().strip()
-    slug = re.sub(r"[^\w\s-]", "", slug)
-    slug = re.sub(r"[\s_]+", "-", slug)
-    slug = re.sub(r"-+", "-", slug).strip("-")
-    # Truncate to keep room for timestamp
-    slug = slug[:200]
-    timestamp = str(int(time.time()))
-    return f"{slug}-{timestamp}"
 
 
 def _usage_to_dict(usage: RunUsage) -> dict:
@@ -243,11 +232,11 @@ async def run_session_pipeline(
         nonlocal meta_name, meta_topic, meta_skill, session_slug
         meta, usage = await generate_session_meta(query)
         meta_name = meta.name
-        session_slug = _make_slug(meta.name) if meta.name else None
+        session_slug = make_slug(meta.name) if meta.name else None
         meta_topic = meta.topic
         meta_skill = meta.skill_level
         all_usage.append((usage, MODEL))
-        await emit("session_meta", name=meta.name, skill_level=meta.skill_level, topic=meta.topic)
+        await emit("session_meta", name=meta.name, slug=session_slug, skill_level=meta.skill_level, topic=meta.topic)
         meta_ready.set()
 
     async def _do_lite_research() -> None:
@@ -525,7 +514,7 @@ async def run_session_pipeline(
             (
                 result_data, tool_log, total_usage,
                 exp_youtube, exp_resources, exp_examples, meta_plan,
-                exp_planner_reasoning,
+                exp_planner_reasoning, exp_slug,
             ) = await run_experimental_pipeline(
                 query, deps, date_context, emit,
                 user_profile=user_profile_text,
@@ -538,7 +527,7 @@ async def run_session_pipeline(
 
         # Capture meta from the experimental pipeline's combined output
         meta_name = meta_plan.name
-        session_slug = _make_slug(meta_plan.name) if meta_plan.name else None
+        session_slug = exp_slug or None
         meta_topic = meta_plan.topic
         meta_skill = meta_plan.skill_level
         youtube_videos = exp_youtube

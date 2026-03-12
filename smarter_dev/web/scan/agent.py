@@ -30,6 +30,20 @@ MODEL = "google-gla:gemini-3.1-flash-lite-preview"
 CODE_EXAMPLES_MODEL = "google-gla:gemini-3-flash-preview"
 
 
+def make_slug(name: str) -> str:
+    """Generate a URL slug from a session name with a timestamp suffix for uniqueness."""
+    import re
+    import time
+
+    slug = name.lower().strip()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = re.sub(r"[\s_]+", "-", slug)
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    slug = slug[:200]
+    timestamp = str(int(time.time()))
+    return f"{slug}-{timestamp}"
+
+
 @dataclass
 class ResearchDeps:
     session_id: str
@@ -1488,7 +1502,7 @@ async def run_experimental_pipeline(
     date_context: str,
     emit: EmitFn,
     user_profile: str = "",
-) -> tuple[ResearchResult, list[dict], RunUsage, list[dict], list[dict], list[dict], ExpMetaQueryPlan, str]:
+) -> tuple[ResearchResult, list[dict], RunUsage, list[dict], list[dict], list[dict], ExpMetaQueryPlan, str, str]:
     """History-threaded experimental research pipeline.
 
     Threads conversation history through sequential stages:
@@ -1499,7 +1513,7 @@ async def run_experimental_pipeline(
     5. Example plan
     6. Parallel example generation (streaming)
 
-    Returns (result, tool_log, total_usage, youtube_videos, resources, code_examples, meta_plan, planner_reasoning).
+    Returns (result, tool_log, total_usage, youtube_videos, resources, code_examples, meta_plan, planner_reasoning, meta_slug).
     """
     from pydantic_ai import AgentRunResultEvent
     from pydantic_ai.messages import (
@@ -1531,10 +1545,12 @@ async def run_experimental_pipeline(
     plan.name = plan.name[:200]
     total_usage.incr(meta_query_result.usage())
 
-    # Emit session meta immediately
+    # Generate slug for URL and emit session meta immediately
+    meta_slug = make_slug(plan.name) if plan.name else ""
     await emit(
         "session_meta",
         name=plan.name,
+        slug=meta_slug,
         skill_level=plan.skill_level,
         topic=plan.topic,
     )
@@ -1828,7 +1844,7 @@ async def run_experimental_pipeline(
             await emit("code_examples_status", status="done")
 
     planner_reasoning = "".join(planner_reasoning_chunks)
-    return result_data, tool_log, total_usage, youtube_videos, resources, code_examples, plan, planner_reasoning
+    return result_data, tool_log, total_usage, youtube_videos, resources, code_examples, plan, planner_reasoning, meta_slug
 
 
 def _parse_example_text(text: str, fallback_title: str, fallback_lang: str) -> dict:
