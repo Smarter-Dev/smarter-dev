@@ -108,10 +108,37 @@ async def _update_user_profile(user_id: str, query: str, session_id: UUID | None
                 select(ScanUserProfile).where(ScanUserProfile.user_id == user_id)
             )
             profile = result.scalar_one_or_none()
+            opt_out_narrative = profile.opt_out_narrative if profile else False
+            opt_out_technologies = profile.opt_out_technologies if profile else False
             existing_text = profile.profile if profile else ""
             existing_techs = profile.technologies if profile else None
             recent_queries = list(profile.recent_queries or []) if profile else []
             query_count = profile.query_count if profile else 0
+
+        # If fully opted out, only update query tracking
+        if opt_out_narrative and opt_out_technologies:
+            async with get_skrift_db_session_context() as db_session:
+                result = await db_session.execute(
+                    select(ScanUserProfile).where(ScanUserProfile.user_id == user_id)
+                )
+                profile = result.scalar_one_or_none()
+                updated_queries = [query] + [q for q in recent_queries if q != query]
+                updated_queries = updated_queries[:5]
+                if profile:
+                    profile.recent_queries = updated_queries
+                    profile.query_count = profile.query_count + 1
+                    db_session.add(profile)
+                else:
+                    db_session.add(ScanUserProfile(
+                        user_id=user_id,
+                        recent_queries=updated_queries,
+                        query_count=1,
+                        opt_out_narrative=True,
+                        opt_out_technologies=True,
+                    ))
+                await db_session.commit()
+            logger.info("User profile update skipped for %s (fully opted out), query tracked", user_id)
+            return
 
         profile_output, usage = await generate_user_profile(
             query, existing_text, query_count,
@@ -131,19 +158,21 @@ async def _update_user_profile(user_id: str, query: str, session_id: UUID | None
             profile = result.scalar_one_or_none()
             suggested = profile_output.suggested_queries[:3] if profile_output.suggested_queries else None
             if profile:
-                profile.profile = profile_output.profile
-                profile.technologies = technologies
+                if not opt_out_narrative:
+                    profile.profile = profile_output.profile
+                    profile.suggested_queries = suggested
+                if not opt_out_technologies:
+                    profile.technologies = technologies
                 profile.recent_queries = updated_queries
-                profile.suggested_queries = suggested
                 profile.query_count = profile.query_count + 1
                 db_session.add(profile)
             else:
                 db_session.add(ScanUserProfile(
                     user_id=user_id,
-                    profile=profile_output.profile,
-                    technologies=technologies,
+                    profile="" if opt_out_narrative else profile_output.profile,
+                    technologies=None if opt_out_technologies else technologies,
                     recent_queries=updated_queries,
-                    suggested_queries=suggested,
+                    suggested_queries=None if opt_out_narrative else suggested,
                     query_count=1,
                 ))
             await db_session.commit()
@@ -204,9 +233,11 @@ async def run_session_pipeline(
                 select(ScanUserProfile).where(ScanUserProfile.user_id == user_id)
             )
             profile_row = profile_result.scalar_one_or_none()
-            if profile_row and profile_row.profile:
-                parts = [profile_row.profile]
-                if profile_row.technologies:
+            if profile_row:
+                parts = []
+                if profile_row.profile and not profile_row.opt_out_narrative:
+                    parts.append(profile_row.profile)
+                if profile_row.technologies and not profile_row.opt_out_technologies:
                     tech_lines = []
                     for t in profile_row.technologies:
                         tech_lines.append(f"- {t['name']} ({t['relationship']})")
@@ -214,7 +245,8 @@ async def run_session_pipeline(
                 if profile_row.recent_queries:
                     rq_lines = [f"{i}. {q}" for i, q in enumerate(profile_row.recent_queries, 1)]
                     parts.append("Recent searches:\n" + "\n".join(rq_lines))
-                user_profile_text = "\n\n".join(parts)
+                if parts:
+                    user_profile_text = "\n\n".join(parts)
     except Exception:
         logger.warning("Failed to fetch user profile for %s, continuing without it", user_id)
 

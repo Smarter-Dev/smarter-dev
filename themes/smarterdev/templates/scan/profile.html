@@ -184,6 +184,58 @@
         </div>
     </div>
 
+    <div class="profile-manage" style="margin-top:2rem">
+        <div class="profile-manage-title">PROFILING OPT-OUT</div>
+        <div style="font-size:.78rem;color:var(--gray);line-height:1.7;margin-bottom:1rem">Stop Scan from automatically building parts of your profile. Opting out clears existing data for that category.</div>
+        <div class="profile-manage-actions">
+            {% if profile and profile.opt_out_narrative %}
+            <form method="post" action="/profile/opt-out" style="margin:0">
+                {{ csrf_field() }}
+                <input type="hidden" name="opt_out_type" value="narrative">
+                <input type="hidden" name="enable" value="false">
+                <button type="submit" class="profile-btn" style="border-color:rgba(0,212,255,.4);color:var(--cyan)">OPT IN: NARRATIVE</button>
+            </form>
+            {% else %}
+            <form method="post" action="/profile/opt-out" style="margin:0">
+                {{ csrf_field() }}
+                <input type="hidden" name="opt_out_type" value="narrative">
+                <input type="hidden" name="enable" value="true">
+                <button type="submit" class="profile-btn" onclick="return confirm('Opt out of narrative profiling? Your existing narrative will be cleared.')">OPT OUT: NARRATIVE</button>
+            </form>
+            {% endif %}
+            {% if profile and profile.opt_out_technologies %}
+            <form method="post" action="/profile/opt-out" style="margin:0">
+                {{ csrf_field() }}
+                <input type="hidden" name="opt_out_type" value="technologies">
+                <input type="hidden" name="enable" value="false">
+                <button type="submit" class="profile-btn" style="border-color:rgba(0,212,255,.4);color:var(--cyan)">OPT IN: TECHNOLOGIES</button>
+            </form>
+            {% else %}
+            <form method="post" action="/profile/opt-out" style="margin:0">
+                {{ csrf_field() }}
+                <input type="hidden" name="opt_out_type" value="technologies">
+                <input type="hidden" name="enable" value="true">
+                <button type="submit" class="profile-btn" onclick="return confirm('Opt out of technology profiling? Your technology list will be cleared.')">OPT OUT: TECHNOLOGIES</button>
+            </form>
+            {% endif %}
+            {% if profile and profile.opt_out_narrative and profile.opt_out_technologies %}
+            <form method="post" action="/profile/opt-out" style="margin:0">
+                {{ csrf_field() }}
+                <input type="hidden" name="opt_out_type" value="both">
+                <input type="hidden" name="enable" value="false">
+                <button type="submit" class="profile-btn" style="border-color:rgba(0,212,255,.4);color:var(--cyan)">OPT IN: ALL</button>
+            </form>
+            {% else %}
+            <form method="post" action="/profile/opt-out" style="margin:0">
+                {{ csrf_field() }}
+                <input type="hidden" name="opt_out_type" value="both">
+                <input type="hidden" name="enable" value="true">
+                <button type="submit" class="profile-btn" onclick="return confirm('Opt out of all profiling? Your narrative and technology list will be cleared.')">OPT OUT: ALL</button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
     {% else %}
     <div class="profile-empty">
         <p>Your profile hasn't been created yet.</p>

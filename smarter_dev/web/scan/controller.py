@@ -341,6 +341,45 @@ class ScanController(Controller):
 
         return Redirect(path="/profile")
 
+    @post("/profile/opt-out", guards=[auth_guard])
+    async def profile_opt_out(
+        self,
+        request: Request,
+        db_session: AsyncSession,
+        data: Annotated[dict, Body(media_type=RequestEncodingType.URL_ENCODED)],
+    ) -> Redirect:
+        """Toggle profiling opt-out for narrative, technologies, or both."""
+        user_id = request.session.get("user_id", "")
+        opt_out_type = data.get("opt_out_type", "").strip()
+        enable = data.get("enable", "true") == "true"
+
+        if opt_out_type not in ("narrative", "technologies", "both"):
+            return Redirect(path="/profile")
+
+        result = await db_session.execute(
+            select(ScanUserProfile).where(ScanUserProfile.user_id == user_id)
+        )
+        profile = result.scalar_one_or_none()
+        if not profile:
+            # Create a profile with opt-out flags set
+            profile = ScanUserProfile(user_id=user_id)
+            db_session.add(profile)
+
+        if opt_out_type in ("narrative", "both"):
+            profile.opt_out_narrative = enable
+            if enable:
+                profile.profile = ""
+                profile.suggested_queries = None
+        if opt_out_type in ("technologies", "both"):
+            profile.opt_out_technologies = enable
+            if enable:
+                profile.technologies = None
+
+        db_session.add(profile)
+        await db_session.commit()
+
+        return Redirect(path="/profile")
+
     @post("/profile/technologies", guards=[auth_guard])
     async def profile_add_tech(
         self,
