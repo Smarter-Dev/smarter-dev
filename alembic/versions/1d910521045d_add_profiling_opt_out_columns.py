@@ -1,6 +1,6 @@
 """Add profiling opt-out columns to scan_user_profiles
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: 1d910521045d
 Revises: 14fccf6b9b7b
 Create Date: 2026-03-13 00:00:00.000000
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = 'a1b2c3d4e5f6'
+revision = '1d910521045d'
 down_revision = '14fccf6b9b7b'
 branch_labels = None
 depends_on = None
