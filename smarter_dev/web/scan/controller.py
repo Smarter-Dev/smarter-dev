@@ -245,12 +245,21 @@ class ScanController(Controller):
             )
             creator_name = result.scalar_one_or_none() or ""
 
+        # Query display format — default to header for older sessions
+        ctx = session_data.context if session_data and session_data.context else {}
+        query_format = ctx.get("query_format", "header")
+        rendered_query = ""
+        if query_format == "markdown" and session_data and session_data.query:
+            rendered_query = render_markdown(session_data.query)
+
         return Template(
             "scan/result.html",
             context={
                 "result_id": result_id,
                 "session": session_data,
                 "rendered_response": rendered_response,
+                "query_format": query_format,
+                "rendered_query": rendered_query,
                 "og_meta": og_meta,
                 "creator_name": creator_name,
             },

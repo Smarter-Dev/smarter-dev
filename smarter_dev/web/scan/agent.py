@@ -681,6 +681,15 @@ class SessionMeta(BaseModel):
             "Use 'other' ONLY for non-software topics."
         ),
     )
+    query_format: str = Field(
+        default="header",
+        description=(
+            "How the query should be displayed. One of: header, markdown. "
+            "Use 'header' for short single-sentence queries with no markdown. "
+            "Use 'markdown' if the query contains markdown syntax, is multiline, "
+            "is multi-sentence, or is very long."
+        ),
+    )
 
 
 _meta_agent = Agent(
@@ -696,7 +705,11 @@ _meta_agent = Agent(
         "ai-llm, machine-learning, devops, data-engineering, security, "
         "gamedev, systems, other. Use 'programming' for general CS concepts "
         "(OOP, algorithms, data structures, design patterns, language features). "
-        "Use 'other' ONLY for non-software topics.\n\n"
+        "Use 'other' ONLY for non-software topics.\n"
+        "4. **query_format**: 'header' if the query is a short single sentence "
+        "with no markdown formatting. 'markdown' if the query contains markdown "
+        "syntax (code blocks, lists, bold), is multiline, has multiple sentences, "
+        "or is very long.\n\n"
         "Return structured output only."
     ),
 )
@@ -1076,6 +1089,15 @@ class ExpMetaQueryPlan(BaseModel):
             "Use 'other' ONLY for non-software topics."
         ),
     )
+    query_format: str = Field(
+        default="header",
+        description=(
+            "How the query should be displayed. One of: header, markdown. "
+            "Use 'header' for short single-sentence queries with no markdown. "
+            "Use 'markdown' if the query contains markdown syntax, is multiline, "
+            "is multi-sentence, or is very long."
+        ),
+    )
 
 
 _meta_query_agent = Agent(
@@ -1095,7 +1117,11 @@ _meta_query_agent = Agent(
         "ai-llm, machine-learning, devops, data-engineering, security, "
         "gamedev, systems, other. Use 'programming' for general CS concepts "
         "(OOP, algorithms, data structures, design patterns, language features). "
-        "Use 'other' ONLY for non-software topics.\n\n"
+        "Use 'other' ONLY for non-software topics.\n"
+        "4. **query_format**: 'header' if the query is a short single sentence "
+        "with no markdown formatting. 'markdown' if the query contains markdown "
+        "syntax (code blocks, lists, bold), is multiline, has multiple sentences, "
+        "or is very long.\n\n"
         "Return structured output only."
     ),
 )

@@ -60,6 +60,23 @@
   margin-bottom: 1.5rem;
   text-shadow: 0 0 30px rgba(0,212,255,.08);
 }
+.report-query-md {
+  font-size: .95rem;
+  color: var(--light);
+  line-height: 1.75;
+  margin-bottom: 1.5rem;
+  padding: 1.25rem 1.5rem;
+  background: rgba(0,212,255,.02);
+  border-left: 3px solid rgba(0,212,255,.15);
+  border-radius: 0 4px 4px 0;
+}
+.report-query-md p { margin: 0 0 .75rem; color: var(--light) }
+.report-query-md p:last-child { margin-bottom: 0 }
+.report-query-md code { font-size: .85em; padding: .15em .4em; background: rgba(0,212,255,.06); border-radius: 3px }
+.report-query-md pre { margin: .75rem 0; padding: 1rem; background: var(--surface); border-radius: 4px; overflow-x: auto }
+.report-query-md pre code { padding: 0; background: none }
+.report-query-md ul, .report-query-md ol { margin: .5rem 0 .75rem 1.25rem; color: var(--light) }
+.report-query-md strong { color: var(--white) }
 .report-meta {
   display: flex;
   align-items: center;

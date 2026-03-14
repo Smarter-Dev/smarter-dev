@@ -260,6 +260,7 @@ async def run_session_pipeline(
     session_slug: str | None = None
     meta_topic: str = "other"
     meta_skill: str = "intermediate"
+    meta_query_format: str = "header"
     research_result: ResearchResult | None = None
     research_tool_log: list[dict] = []
     youtube_videos: list[dict] = []
@@ -275,12 +276,13 @@ async def run_session_pipeline(
     # -- Phase functions (do work + emit SSE, no DB) --
 
     async def _do_meta() -> None:
-        nonlocal meta_name, meta_topic, meta_skill, session_slug
+        nonlocal meta_name, meta_topic, meta_skill, meta_query_format, session_slug
         meta, usage = await generate_session_meta(query)
         meta_name = meta.name
         session_slug = make_slug(meta.name) if meta.name else None
         meta_topic = meta.topic
         meta_skill = meta.skill_level
+        meta_query_format = meta.query_format
         all_usage.append((usage, MODEL))
         await emit("session_meta", name=meta.name, slug=session_slug, skill_level=meta.skill_level, topic=meta.topic)
         meta_ready.set()
@@ -579,6 +581,7 @@ async def run_session_pipeline(
         session_slug = exp_slug or None
         meta_topic = meta_plan.topic
         meta_skill = meta_plan.skill_level
+        meta_query_format = meta_plan.query_format
         youtube_videos = exp_youtube
         resources = exp_resources
         code_examples_data = exp_examples
@@ -643,6 +646,8 @@ async def run_session_pipeline(
 
         # -- Build context --
         context: dict = {}
+        if meta_query_format != "header":
+            context["query_format"] = meta_query_format
         if meta_topic != "other":
             context["topic"] = meta_topic
             context["skill_level"] = meta_skill
