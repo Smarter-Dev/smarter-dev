@@ -247,9 +247,9 @@ class ScanController(Controller):
 
         # Query display format — default to header for older sessions
         ctx = session_data.context if session_data and session_data.context else {}
-        query_format = ctx.get("query_format", "header")
+        query_format = ctx.get("query_format", "simple")
         rendered_query = ""
-        if query_format == "markdown" and session_data and session_data.query:
+        if query_format == "complex" and session_data and session_data.query:
             rendered_query = render_markdown(session_data.query)
 
         return Template(

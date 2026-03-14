@@ -260,7 +260,7 @@ async def run_session_pipeline(
     session_slug: str | None = None
     meta_topic: str = "other"
     meta_skill: str = "intermediate"
-    meta_query_format: str = "header"
+    meta_query_format: str = "simple"
     research_result: ResearchResult | None = None
     research_tool_log: list[dict] = []
     youtube_videos: list[dict] = []
@@ -646,7 +646,7 @@ async def run_session_pipeline(
 
         # -- Build context --
         context: dict = {}
-        if meta_query_format != "header":
+        if meta_query_format != "simple":
             context["query_format"] = meta_query_format
         if meta_topic != "other":
             context["topic"] = meta_topic

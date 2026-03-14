@@ -683,10 +683,10 @@ class SessionMeta(BaseModel):
     )
     query_format: str = Field(
         description=(
-            "How the query should be displayed. One of: header, markdown. "
-            "Use 'header' for short single-sentence queries with no markdown. "
-            "Use 'markdown' if the query contains markdown syntax, is multiline, "
-            "is multi-sentence, or is very long."
+            "Query complexity. One of: simple, complex. "
+            "Classify as 'complex' if the query contains markdown syntax "
+            "(code blocks, lists, bold/italic), spans multiple lines, has "
+            "multiple sentences, or is notably long. Otherwise 'simple'."
         ),
     )
 
@@ -705,10 +705,9 @@ _meta_agent = Agent(
         "gamedev, systems, other. Use 'programming' for general CS concepts "
         "(OOP, algorithms, data structures, design patterns, language features). "
         "Use 'other' ONLY for non-software topics.\n"
-        "4. **query_format**: 'header' if the query is a short single sentence "
-        "with no markdown formatting. 'markdown' if the query contains markdown "
-        "syntax (code blocks, lists, bold), is multiline, has multiple sentences, "
-        "or is very long.\n\n"
+        "4. **query_format**: Classify as 'complex' if the query contains "
+        "markdown syntax (code blocks, lists, bold/italic), spans multiple lines, "
+        "has multiple sentences, or is notably long. Otherwise 'simple'.\n\n"
         "Return structured output only."
     ),
 )
@@ -726,7 +725,7 @@ async def generate_session_meta(query: str) -> tuple[SessionMeta, RunUsage]:
             name=query[:200],
             skill_level="intermediate",
             topic="other",
-            query_format="header",
+            query_format="simple",
         ), RunUsage()
 
 
@@ -1091,10 +1090,10 @@ class ExpMetaQueryPlan(BaseModel):
     )
     query_format: str = Field(
         description=(
-            "How the query should be displayed. One of: header, markdown. "
-            "Use 'header' for short single-sentence queries with no markdown. "
-            "Use 'markdown' if the query contains markdown syntax, is multiline, "
-            "is multi-sentence, or is very long."
+            "Query complexity. One of: simple, complex. "
+            "Classify as 'complex' if the query contains markdown syntax "
+            "(code blocks, lists, bold/italic), spans multiple lines, has "
+            "multiple sentences, or is notably long. Otherwise 'simple'."
         ),
     )
 
@@ -1117,10 +1116,9 @@ _meta_query_agent = Agent(
         "gamedev, systems, other. Use 'programming' for general CS concepts "
         "(OOP, algorithms, data structures, design patterns, language features). "
         "Use 'other' ONLY for non-software topics.\n"
-        "4. **query_format**: 'header' if the query is a short single sentence "
-        "with no markdown formatting. 'markdown' if the query contains markdown "
-        "syntax (code blocks, lists, bold), is multiline, has multiple sentences, "
-        "or is very long.\n\n"
+        "4. **query_format**: Classify as 'complex' if the query contains "
+        "markdown syntax (code blocks, lists, bold/italic), spans multiple lines, "
+        "has multiple sentences, or is notably long. Otherwise 'simple'.\n\n"
         "Return structured output only."
     ),
 )

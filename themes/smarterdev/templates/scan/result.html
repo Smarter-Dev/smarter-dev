@@ -167,7 +167,7 @@
 <div class="report-header">
     {% if session %}
     <div class="scan-asked">{% if creator_name %}{{ creator_name }}{% else %}A user{% endif %} asked</div>
-    {% if query_format == "markdown" %}
+    {% if query_format == "complex" %}
     <div class="report-query-md">{{ rendered_query }}</div>
     {% else %}
     <div class="report-query">{{ session.query }}</div>
