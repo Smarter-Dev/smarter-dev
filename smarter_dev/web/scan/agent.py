@@ -682,7 +682,6 @@ class SessionMeta(BaseModel):
         ),
     )
     query_format: str = Field(
-        default="header",
         description=(
             "How the query should be displayed. One of: header, markdown. "
             "Use 'header' for short single-sentence queries with no markdown. "
@@ -727,6 +726,7 @@ async def generate_session_meta(query: str) -> tuple[SessionMeta, RunUsage]:
             name=query[:200],
             skill_level="intermediate",
             topic="other",
+            query_format="header",
         ), RunUsage()
 
 
@@ -1090,7 +1090,6 @@ class ExpMetaQueryPlan(BaseModel):
         ),
     )
     query_format: str = Field(
-        default="header",
         description=(
             "How the query should be displayed. One of: header, markdown. "
             "Use 'header' for short single-sentence queries with no markdown. "
