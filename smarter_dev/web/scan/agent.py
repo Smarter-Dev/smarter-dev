@@ -547,9 +547,12 @@ async def run_research(
 
         elif isinstance(event, FunctionToolResultEvent):
             import re
+            tool_name = event.result.tool_name
+            # Skip the final structured output result — it's not a tool call
+            if tool_name == "final_result":
+                continue
             raw_content = str(event.result.content)[:5120]
             clean_content = re.sub(r"<[^>]+>", "", raw_content)
-            tool_name = event.result.tool_name
 
             # Find the matching tool_log entry and extract context
             query_or_url = ""
