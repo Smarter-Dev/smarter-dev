@@ -179,14 +179,14 @@
             {% if entry.input %}
             <div style="margin-top: .4rem; font-family: monospace; font-size: .82em; opacity: .7;">
                 {% for key, val in entry.input.items() %}
-                <span style="color: #09f;">{{ key }}</span>: {{ val|string|truncate(200) }}<br>
+                <span style="color: #09f;">{{ key }}</span>: {{ val|string }}<br>
                 {% endfor %}
             </div>
             {% endif %}
             {% if entry.content %}
             <details style="margin-top: .4rem;">
-                <summary style="font-size: .8em; opacity: .5; cursor: pointer;">Result</summary>
-                <div style="margin-top: .3rem; font-family: monospace; font-size: .78em; opacity: .6; white-space: pre-wrap; max-height: 200px; overflow-y: auto; background: rgba(0,0,0,.15); padding: .5rem; border-radius: 4px;">{{ entry.content }}</div>
+                <summary style="font-size: .8em; opacity: .5; cursor: pointer;">Result ({{ entry.content|length }} chars)</summary>
+                <div style="margin-top: .3rem; font-family: monospace; font-size: .78em; opacity: .6; white-space: pre-wrap; max-height: 600px; overflow-y: auto; background: rgba(0,0,0,.15); padding: .5rem; border-radius: 4px;">{{ entry.content }}</div>
             </details>
             {% endif %}
         </div>
