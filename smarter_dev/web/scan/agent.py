@@ -502,41 +502,42 @@ async def run_research(
         )
     system_prompt = "".join(system_parts)
 
+    from pydantic_ai import AgentRunResultEvent
+
     tool_log: list[dict] = []
+    result_data: ResearchOutput | None = None
+    usage = RunUsage()
     await emit("status", stage="researching")
 
-    async with _research_agent.run_stream(
+    async for event in _research_agent.run_stream_events(
         f"Research this query:\n\n{query}",
         deps=deps,
         model=mode_config.research_model,
         instructions=system_prompt,
-    ) as stream:
-        async for event in stream:
-            if isinstance(event, FunctionToolCallEvent):
-                tool_entry = {
-                    "tool": event.part.tool_name,
-                    "input": str(event.part.args)[:500],
-                    "status": "running",
-                }
-                tool_log.append(tool_entry)
-                await emit("tool_use", tool=event.part.tool_name, input=event.part.args, status="running")
-            elif isinstance(event, FunctionToolResultEvent):
-                # Update the last tool log entry
-                if tool_log:
-                    tool_log[-1]["status"] = "complete"
-                    tool_log[-1]["content"] = str(event.result.content)[:512]
-                await emit(
-                    "tool_result",
-                    tool=event.tool_name,
-                    status="complete",
-                    content=str(event.result.content)[:5120],
-                )
+    ):
+        if isinstance(event, FunctionToolCallEvent):
+            args = event.part.args
+            tool_input = args if isinstance(args, dict) else {"query": str(args)}
+            tool_log.append({"tool": event.part.tool_name, "input": tool_input, "status": "running"})
+            await emit("tool_use", tool=event.part.tool_name, input=tool_input, status="running")
 
-        result = stream.result
-    output = result.output
-    usage = result.usage()
+        elif isinstance(event, FunctionToolResultEvent):
+            raw_content = str(event.result.content)[:5120]
+            for entry in reversed(tool_log):
+                if entry.get("tool") == event.result.tool_name and entry.get("status") == "running":
+                    entry["status"] = "complete"
+                    entry["content"] = raw_content[:512]
+                    break
+            await emit("tool_result", tool=event.result.tool_name, status="complete", content=raw_content)
 
-    return output, tool_log, usage
+        elif isinstance(event, AgentRunResultEvent):
+            result_data = event.result.output
+            usage = event.result.usage()
+
+    if result_data is None:
+        raise RuntimeError("Research agent completed without producing a result")
+
+    return result_data, tool_log, usage
 
 
 # ---------------------------------------------------------------------------
@@ -610,21 +611,30 @@ async def run_synthesis(
 
     synthesis_input = "\n".join(input_parts)
 
-    await emit("status", stage="synthesizing") if emit else None
+    from pydantic_ai import AgentRunResultEvent
 
-    async with _synthesis_agent.run_stream(
+    if emit:
+        await emit("status", stage="synthesizing")
+
+    result_data: ResearchResult | None = None
+    usage = RunUsage()
+
+    async for event in _synthesis_agent.run_stream_events(
         synthesis_input,
         model=mode_config.synthesis_model,
         instructions=system_prompt,
-    ) as stream:
-        async for event in stream:
-            if emit and isinstance(event, (PartStartEvent, PartDeltaEvent)):
-                if isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
-                    await emit("response_chunk", delta=event.delta.content_delta)
+    ):
+        if isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+            if emit:
+                await emit("response_chunk", delta=event.delta.content_delta)
+        elif isinstance(event, AgentRunResultEvent):
+            result_data = event.result.output
+            usage = event.result.usage()
 
-        result = stream.result
+    if result_data is None:
+        raise RuntimeError("Synthesis agent completed without producing a result")
 
-    return result.output, result.usage()
+    return result_data, usage
 
 
 # ---------------------------------------------------------------------------
