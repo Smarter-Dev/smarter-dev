@@ -1,37 +1,99 @@
 """Pydantic AI research agent for Scan.
 
-Three implementations:
-- **Lite** (default): Two-stage Flash Lite pipeline — fast and cheap.
-- **Premium**: Multi-turn agentic pipeline — deeper research, more expensive.
-- **Experimental**: History-threaded pipeline — shares conversation context
-  across meta, planning, writing, and example generation stages.
+Skill-driven 4-mode system:
+- **Quick Answer**: Fast retrieval via GPT 5.4 Nano + Flash Lite synthesis.
+- **Quick Research**: Contextual retrieval with related context.
+- **Standard**: Exploration mode via Gemini Flash + Flash synthesis.
+- **Deep**: Investigation mode with comprehensive research.
+
+Each mode loads a research skill and a synthesis skill (markdown documents)
+that govern agent behavior.  Tools (Search, Read, YouTubeSearch) are
+identical across all modes — what changes is the skill.
 """
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any, Literal
 
 import httpx
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.messages import (
+    FunctionToolCallEvent,
+    FunctionToolResultEvent,
+    PartDeltaEvent,
+    PartStartEvent,
+    TextPartDelta,
+)
 from pydantic_ai.usage import RunUsage
 
 from smarter_dev.web.scan import tools
+from smarter_dev.web.scan.skills import load_research_skill, load_synthesis_skill
 from smarter_dev.web.scan.tools import RateLimiter, URLRateLimiter
 
 logger = logging.getLogger(__name__)
 
-MODEL = "google-gla:gemini-3.1-flash-lite-preview"
-CODE_EXAMPLES_MODEL = "google-gla:gemini-3-flash-preview"
+# Type alias for the SSE emit callback used throughout the pipeline.
+EmitFn = Callable[..., Coroutine[Any, Any, None]]
+
+# ---------------------------------------------------------------------------
+# Model configuration per mode
+# ---------------------------------------------------------------------------
+
+FLASH_LITE = "google-gla:gemini-3.1-flash-lite-preview"
+FLASH = "google-gla:gemini-3-flash-preview"
+NANO = "openai:gpt-5.4-nano"
+
+
+@dataclass(frozen=True)
+class ModeConfig:
+    """Model selection and budget for a research mode."""
+
+    mode: str
+    research_model: str
+    synthesis_model: str
+    examples_model: str = FLASH
+
+
+MODES: dict[str, ModeConfig] = {
+    "quick_answer": ModeConfig(
+        mode="quick_answer",
+        research_model=NANO,
+        synthesis_model=FLASH_LITE,
+    ),
+    "quick_research": ModeConfig(
+        mode="quick_research",
+        research_model=NANO,
+        synthesis_model=FLASH_LITE,
+    ),
+    "standard": ModeConfig(
+        mode="standard",
+        research_model=FLASH,
+        synthesis_model=FLASH,
+    ),
+    "deep": ModeConfig(
+        mode="deep",
+        research_model=FLASH,
+        synthesis_model=FLASH,
+    ),
+}
+
+# Kept for backward compatibility with runner imports.
+MODEL = FLASH_LITE
+CODE_EXAMPLES_MODEL = FLASH
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
 
 
 def make_slug(name: str) -> str:
-    """Generate a URL slug from a session name with a timestamp suffix for uniqueness."""
+    """Generate a URL slug from a session name with a timestamp suffix."""
     import re
     import time
 
@@ -42,6 +104,17 @@ def make_slug(name: str) -> str:
     slug = slug[:200]
     timestamp = str(int(time.time()))
     return f"{slug}-{timestamp}"
+
+
+def _usage_to_dict(usage: RunUsage) -> dict:
+    """Convert RunUsage to a serializable dict, omitting zero values."""
+    d = dataclasses.asdict(usage)
+    return {k: v for k, v in d.items() if v}
+
+
+# ---------------------------------------------------------------------------
+# Shared dependencies
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -56,6 +129,73 @@ class ResearchDeps:
     youtube_search_count: int = 0
 
 
+# ---------------------------------------------------------------------------
+# Domain / channel quality tiers (used for post-research enrichment sorting)
+# ---------------------------------------------------------------------------
+
+_LOW_QUALITY_DOMAINS = {
+    "geeksforgeeks.org", "w3schools.com", "tutorialspoint.com",
+    "javatpoint.com", "programiz.com", "stackoverflow.com",
+    "quora.com", "medium.com", "dev.to",
+}
+
+_HIGH_QUALITY_DOMAINS = {
+    "python.org", "docs.python.org", "developer.mozilla.org", "mdn.mozilla.org",
+    "react.dev", "rust-lang.org", "doc.rust-lang.org", "go.dev", "golang.org",
+    "nodejs.org", "typescriptlang.org", "kotlinlang.org", "swift.org",
+    "docs.oracle.com", "learn.microsoft.com", "developer.apple.com",
+    "developer.android.com", "cloud.google.com", "aws.amazon.com",
+    "docs.github.com", "wikipedia.org", "arxiv.org",
+    "w3.org", "rfc-editor.org", "ietf.org",
+    "kernel.org", "linuxfoundation.org",
+}
+
+_HIGH_QUALITY_CHANNELS = {
+    "google", "microsoft", "amazon web services", "aws",
+    "github", "mozilla", "linux foundation",
+    "python", "pycon", "jsconf", "gophercon", "rustconf",
+    "computerphile", "mit opencourseware",
+}
+
+_MID_QUALITY_CHANNELS = {
+    "fireship", "traversy media", "corey schafer", "arjan codes",
+    "tech with tim", "the coding train", "sentdex", "ben awad",
+    "web dev simplified", "net ninja", "academind",
+    "freecodecamp", "freecodecamp.org",
+}
+
+
+def _resource_sort_key(resource: dict) -> int:
+    """Return sort tier for a resource: 1 (best) to 3 (worst)."""
+    url = resource.get("url", "").lower()
+    site = resource.get("site_name", "").lower()
+    for domain in _HIGH_QUALITY_DOMAINS:
+        if domain in url or domain in site:
+            return 1
+    for domain in _LOW_QUALITY_DOMAINS:
+        if domain in url or domain in site:
+            return 3
+    return 2
+
+
+def _video_sort_key(video: dict) -> int:
+    """Return sort tier for a YouTube video: 1 (best) to 3 (worst)."""
+    channel = video.get("channel", "").lower()
+    for ch in _HIGH_QUALITY_CHANNELS:
+        if ch in channel:
+            return 1
+    for ch in _MID_QUALITY_CHANNELS:
+        if ch in channel:
+            return 2
+    return 2
+
+
+# ---------------------------------------------------------------------------
+# Output models
+# ---------------------------------------------------------------------------
+
+# -- Final output (consumed by runner for DB persistence) --
+
 class Source(BaseModel):
     url: str
     title: str
@@ -65,20 +205,144 @@ class Source(BaseModel):
 
 
 class ResearchResult(BaseModel):
+    """Final synthesis output persisted to the database."""
     response: str
     sources: list[Source]
     summary: str
 
 
-def _usage_to_dict(usage: RunUsage) -> dict:
-    """Convert RunUsage to a serializable dict, omitting zero values."""
-    d = dataclasses.asdict(usage)
-    return {k: v for k, v in d.items() if v}
+# -- Structured research output contract (research → synthesis handoff) --
+
+class ResearchSource(BaseModel):
+    """A source discovered during research."""
+    url: str
+    title: str
+    type: str = Field(
+        default="other",
+        description="docs, tutorial, blog, comparison, video, reference, case-study, research, or benchmark",
+    )
+    content: str = Field(description="Extracted or summarized content from this source")
+    relevance: str = Field(default="", description="One-sentence relevance note")
+    credibility_note: str = Field(default="", description="Author authority or currency note")
 
 
-# ============================================================================
-# LITE IMPLEMENTATION — Two-stage Flash Lite pipeline (default)
-# ============================================================================
+class YouTubeResult(BaseModel):
+    """A YouTube video found during research."""
+    url: str
+    title: str
+    relevance: str = Field(default="", description="Why this video is relevant")
+
+
+class ResourceLink(BaseModel):
+    """A curated link for sidebar display."""
+    url: str
+    title: str
+    description: str = ""
+
+
+class ResearchOutput(BaseModel):
+    """Structured contract between the research and synthesis stages.
+
+    The research agent returns this as structured output.  Synthesis receives
+    it as clean, curated context — no raw conversation history.
+    """
+    sources: list[ResearchSource] = Field(description="Researched sources with extracted content")
+    key_insights: list[str] = Field(description="Critical findings and conclusions")
+    outline: list[str] = Field(description="Structural plan for the synthesis response")
+    youtube_urls: list[YouTubeResult] = Field(default_factory=list, description="YouTube videos found during research")
+    resources: list[ResourceLink] = Field(default_factory=list, description="Curated links for sidebar display")
+
+
+# ---------------------------------------------------------------------------
+# Meta analysis — mode detection
+# ---------------------------------------------------------------------------
+
+class SessionMeta(BaseModel):
+    """Metadata produced by the meta analysis stage."""
+    name: str = Field(description="Brief session title, 2-5 words")
+    skill_level: str = Field(description="beginner, intermediate, advanced, or expert")
+    topic: str = Field(
+        description=(
+            "One of: programming, software-engineering, web-dev, app-dev, "
+            "backend, full-stack, ai-llm, machine-learning, devops, "
+            "data-engineering, security, gamedev, systems, other"
+        ),
+    )
+    query_format: str = Field(description="simple or complex")
+    research_mode: str = Field(
+        description="quick_answer, quick_research, standard, or deep",
+    )
+
+
+_META_PROMPT = """\
+Analyze this user query and produce structured metadata.
+
+## Mode Detection
+
+Select the research mode based on query characteristics:
+
+| Mode | Triggers |
+|------|----------|
+| quick_answer | Short queries (<15 words), "what is," "how to," "syntax for," single-concept lookups, questions with a single obvious answer, error messages |
+| quick_research | "How to" with context, "best way to," "explain," simple comparisons, "what should I use for," questions that benefit from 1-2 related angles |
+| standard | Complex comparisons ("X vs Y in context of Z"), "how should I architect," multi-part questions, requests for examples with alternatives, "recommend" with constraints |
+| deep | "Tradeoffs," "architecture," "current state of," "help me understand," "evaluate," complex/multi-concept queries, follow-up depth requests |
+
+The boundary between quick_answer and quick_research is thin — lean toward \
+quick_research when ambiguous since the cost difference is negligible and the \
+quality bump is noticeable.
+
+## Query Format
+
+- **simple**: Direct questions with clear answers, single-concept lookups
+- **complex**: Multi-part questions, comparisons, architectural decisions
+
+## Skill Level
+
+Infer from query language and complexity:
+- **beginner**: Basic syntax, "how do I," simple setup questions
+- **intermediate**: Framework usage, best practices, debugging
+- **advanced**: Architecture, performance, complex patterns
+- **expert**: Low-level systems, advanced optimization, niche topics
+
+## Name
+
+Generate a brief, descriptive title (2-5 words) for this research session. \
+Use action phrases: "Set Up CORS FastAPI", "Compare ORM Options".
+"""
+
+_meta_agent = Agent(
+    output_type=SessionMeta,
+    instructions=_META_PROMPT,
+)
+
+
+async def generate_session_meta(query: str) -> tuple[SessionMeta, RunUsage]:
+    """Classify query and auto-detect research mode."""
+    try:
+        result = await _meta_agent.run(
+            f"Query: {query}",
+            model=FLASH_LITE,
+        )
+        meta = result.output
+        # Validate research_mode
+        if meta.research_mode not in MODES:
+            meta.research_mode = "quick_research"
+        return meta, result.usage()
+    except Exception:
+        logger.exception("Meta analysis failed, defaulting to quick_research")
+        return SessionMeta(
+            name="Research",
+            skill_level="intermediate",
+            topic="other",
+            query_format="simple",
+            research_mode="quick_research",
+        ), RunUsage()
+
+
+# ---------------------------------------------------------------------------
+# Writing instructions (shared by synthesis)
+# ---------------------------------------------------------------------------
 
 WRITING_INSTRUCTIONS = """\
 ## How to write the answer
@@ -133,639 +397,239 @@ article, video, forum, or other. Mark sources you cited as cited=True. \
 Include a 2-3 sentence summary suitable for a short notification."""
 
 
-# --- Stage 1: Query generation ---
+# ---------------------------------------------------------------------------
+# Research agent — skill-driven
+# ---------------------------------------------------------------------------
 
-
-class LiteQueryPlan(BaseModel):
-    """Output of the lite Stage 1 query-generation call."""
-
-    search_queries: list[str] = Field(
-        description="Exactly 2 web search queries that directly address the user's question.",
-        min_length=2,
-        max_length=2,
-    )
-    gap_queries: list[str] = Field(
-        default_factory=list,
-        description=(
-            "0-3 additional search queries for things that may have changed "
-            "since your training cutoff — recent releases, breaking changes, "
-            "new APIs, newly relevant projects, etc. Leave empty if the topic "
-            "is unlikely to have changed."
-        ),
-    )
-
-
-_lite_query_agent = Agent(
-    output_type=LiteQueryPlan,
-    instructions=(
-        "You are a search query planner. You will be given the current date "
-        "and the user's question.\n\n"
-        "## Query quality guidelines\n\n"
-        "Your queries must dig deep. The goal is to find PRIMARY SOURCES — "
-        "official documentation, GitHub issues/discussions, RFCs, benchmarks, "
-        "technical blog posts from maintainers, and detailed teardowns.\n\n"
-        "AVOID queries that will surface:\n"
-        "- PR/marketing announcements and press releases\n"
-        "- 'Top 5/10/N' listicles and roundup articles\n"
-        "- Generic tutorials that repeat the same surface-level information\n"
-        "- SEO-optimized filler content\n\n"
-        "INSTEAD, craft queries that find:\n"
-        "- Official docs, changelogs, and migration guides\n"
-        "- GitHub issues, discussions, and commit messages with real details\n"
-        "- Technical deep-dives, benchmarks, and architecture discussions\n"
-        "- Stack Overflow answers with actual solutions\n"
-        "- Author/maintainer blog posts with insider knowledge\n\n"
-        "Use specific technical terms, library names, function/API names, "
-        "and error messages when relevant. Add site: filters (e.g. "
-        "site:github.com, site:docs.X.com) when a primary source is obvious.\n\n"
-        "## What to produce\n\n"
-        "1. Exactly 2 web search queries that directly address their question "
-        "from different angles. Only include the current year or 'latest' if "
-        "the topic is likely to have meaningful recent changes (new releases, "
-        "evolving APIs, recent events). For stable/evergreen topics (core CS "
-        "concepts, well-established patterns, mature standards), omit date "
-        "qualifiers — they filter out authoritative older content.\n"
-        "2. A list of 0-3 additional queries for anything that may have changed "
-        "since your training data cutoff — recent releases, breaking changes, "
-        "new tools, newly relevant information, etc. Include the current year "
-        "in these queries. Only include these if the topic is likely to have "
-        "evolved.\n\n"
-        "Return structured output only."
-    ),
-)
-
-
-# --- Stage 3: Synthesis with read_url tool ---
-
-_LITE_SYNTHESIS_PROMPT = f"""\
-You are a research synthesis agent. You have been given web search results \
-and page contents from reading key results.
-
-## Your task
-
-1. **Triage** — discard any search results or page contents that do NOT \
-   help answer the user's question. Off-topic results, tangential mentions, \
-   and marketing fluff should be ignored entirely. Do not cite them.
-2. **Evaluate** the remaining results and page reads. Assess source \
-   authority: official docs and primary sources are strongest, community \
-   Q&A (Stack Overflow, Quora) is mid-tier, and social/anecdotal sources \
-   (Reddit, forums, personal anecdotes) are weakest. Note which claims \
-   are only supported by anecdotal evidence.
-3. **Identify gaps** — if you need to read additional pages to fully \
-   understand something new, surprising, or to verify important claims, \
-   use the `read_url` tool. Focus on filling gaps in your knowledge, \
-   especially for things that may have changed since your training cutoff.
-4. **Verify numbers** — double-check any math, statistics, prices, dates, \
-   or numerical comparisons. Re-read the source to confirm you have the \
-   right figures before comparing them. When comparing two numbers, \
-   pause and reconsider which is larger/smaller/better before stating \
-   a conclusion.
-5. **Write** your response following the writing instructions below. \
-   Answer the query first, then mention interesting alternatives or \
-   related findings only if they add real value.
-
-{WRITING_INSTRUCTIONS}
-"""
-
-_lite_synthesis_agent = Agent(
+# A single generic agent whose behavior is controlled by the loaded skill.
+# Tools are registered once; the system prompt is set at call time.
+_research_agent = Agent(
     deps_type=ResearchDeps,
-    output_type=ResearchResult,
-    instructions=_LITE_SYNTHESIS_PROMPT,
+    output_type=ResearchOutput,
 )
 
 
-@_lite_synthesis_agent.tool
-async def read_url(ctx: RunContext[ResearchDeps], url: str) -> str:
-    """Read the full content of a web page. Use this to fill gaps in the
-    provided search results or to get details from a page that looks relevant."""
-    await ctx.deps.read_rate_limiter.wait_if_needed(url)
-    page = await tools.jina_read(ctx.deps.http_client, url)
-    if "error" in page:
-        return f"Error reading {url}: {page['error']}"
-    content = page.get("content", "")[:8000]
-    return content if content else "Page had no readable content."
+@_research_agent.tool
+async def search(ctx: RunContext[ResearchDeps], query: str) -> str:
+    """Search the web. Returns ranked results with titles, URLs, and snippets."""
+    deps = ctx.deps
+    await deps.search_rate_limiter.wait()
+    deps.search_count += 1
+
+    results = await tools.brave_search(deps.http_client, query, num_results=15)
+    if not results:
+        return "No results found."
+
+    # Track seen URLs for validation
+    for r in results:
+        deps.seen_urls.add(r["url"])
+
+    # Format as markdown list
+    lines = []
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. [{r['title']}]({r['url']})")
+        if r.get("description"):
+            lines.append(f"   {r['description'][:200]}")
+    return "\n".join(lines)
 
 
-# --- Lite pipeline orchestrator ---
+@_research_agent.tool
+async def read(
+    ctx: RunContext[ResearchDeps],
+    url: str,
+    summarization_instructions: str = "",
+) -> str:
+    """Read a web page. Optionally provide summarization instructions to control depth."""
+    deps = ctx.deps
+    await deps.read_rate_limiter.wait_if_needed(url)
 
-# Type alias for the emit callback used by the lite pipeline.
-EmitFn = Callable[..., Any]
+    # Check cache
+    if url in deps.source_cache:
+        content = deps.source_cache[url].get("content", "")
+        if content:
+            return content[:8000]
+
+    result = await tools.jina_read(deps.http_client, url)
+    content = result.get("content", "") if isinstance(result, dict) else str(result)
+    if content:
+        deps.source_cache[url] = {"content": content, "url": url, "title": result.get("title", "") if isinstance(result, dict) else ""}
+        deps.seen_urls.add(url)
+    return (content or "Failed to read page.")[:8000]
 
 
-async def run_lite_pipeline(
+@_research_agent.tool
+async def youtube_search(ctx: RunContext[ResearchDeps], query: str) -> str:
+    """Search YouTube for relevant videos. Returns video titles, URLs, and descriptions."""
+    deps = ctx.deps
+    await deps.search_rate_limiter.wait()
+    deps.youtube_search_count += 1
+
+    results = await tools.youtube_search(deps.http_client, query, num_results=10)
+    if not results:
+        return "No YouTube results found."
+
+    for r in results:
+        deps.seen_urls.add(r["url"])
+
+    lines = []
+    for r in results:
+        lines.append(f"- [{r['title']}]({r['url']})")
+    return "\n".join(lines)
+
+
+async def run_research(
     query: str,
     deps: ResearchDeps,
+    mode_config: ModeConfig,
     date_context: str,
     emit: EmitFn,
-) -> tuple[ResearchResult, list[dict], RunUsage]:
-    """Two-stage Flash Lite research pipeline.
+    user_profile: str = "",
+) -> tuple[ResearchOutput, list[dict], RunUsage]:
+    """Run the skill-driven research agent.
 
-    Stage 1: Generate search queries (Flash Lite call 1).
-    Stage 2: Parallel Brave searches + Jina reads (no LLM).
-    Stage 3: Synthesis with read_url tool (Flash Lite call 2).
-
-    Returns (result, tool_log, total_usage).
+    Returns (ResearchOutput, tool_log, usage).
     """
+    skill_text = load_research_skill(mode_config.mode)
+
+    # Build system prompt: skill + date context + user profile
+    system_parts = [skill_text, f"\n\n## Current Date\n{date_context}"]
+    if user_profile:
+        system_parts.append(
+            f"\n\n## User Profile\n"
+            f"Use this to tailor your research — match their stack, skill level, "
+            f"and interests. Do not mention the profile explicitly in output.\n\n"
+            f"{user_profile}"
+        )
+    system_prompt = "".join(system_parts)
+
     tool_log: list[dict] = []
-    total_usage = RunUsage()
+    await emit("status", stage="researching")
 
-    # ------------------------------------------------------------------
-    # Stage 1 — Query generation
-    # ------------------------------------------------------------------
-    await emit("status", stage="planning", message="Generating search queries...")
+    async with _research_agent.run_stream(
+        f"Research this query:\n\n{query}",
+        deps=deps,
+        model=mode_config.research_model,
+        instructions=system_prompt,
+    ) as stream:
+        async for event in stream:
+            if isinstance(event, FunctionToolCallEvent):
+                tool_entry = {
+                    "tool": event.part.tool_name,
+                    "input": str(event.part.args)[:500],
+                    "status": "running",
+                }
+                tool_log.append(tool_entry)
+                await emit("tool_use", tool=event.part.tool_name, input=event.part.args, status="running")
+            elif isinstance(event, FunctionToolResultEvent):
+                # Update the last tool log entry
+                if tool_log:
+                    tool_log[-1]["status"] = "complete"
+                    tool_log[-1]["content"] = str(event.result.content)[:512]
+                await emit(
+                    "tool_result",
+                    tool=event.tool_name,
+                    status="complete",
+                    content=str(event.result.content)[:5120],
+                )
 
-    query_result = await _lite_query_agent.run(
-        f"{date_context}\n\n{query}", model=MODEL,
-    )
-    plan = query_result.output
-    total_usage.incr(query_result.usage())
+        result = stream.result
+    output = result.output
+    usage = result.usage()
 
-    all_queries = plan.search_queries + plan.gap_queries
-
-    # ------------------------------------------------------------------
-    # Stage 2 — Parallel Brave searches
-    # ------------------------------------------------------------------
-    await emit("status", stage="researching", message=f"Running {len(all_queries)} searches...")
-
-    async def _search(q: str) -> tuple[str, list[dict]]:
-        await deps.search_rate_limiter.wait()
-        return q, await tools.brave_search(deps.http_client, q, num_results=15)
-
-    search_tasks = [_search(q) for q in all_queries]
-    search_results_by_query: list[tuple[str, list[dict]]] = await asyncio.gather(*search_tasks)
-
-    # Emit search results and collect all results + first URLs to read
-    all_search_results: list[dict] = []
-    first_urls: list[tuple[str, str]] = []  # (url, title)
-
-    for q, results in search_results_by_query:
-        has_results = results and not (len(results) == 1 and "error" in results[0])
-        display = (
-            "\n".join(f"{i}. {r.get('title', 'Untitled')} — {r.get('url', '')}" for i, r in enumerate(results, 1))
-            if has_results
-            else "No results found."
-        )
-        tool_log.append({
-            "tool": "search",
-            "input": {"query": q},
-            "content": display,
-            "status": "complete",
-        })
-        await emit("tool_use", tool="search", input={"query": q}, status="running")
-        await emit("tool_result", tool="search", status="complete", content=display)
-
-        if has_results:
-            all_search_results.extend(results)
-            # First valid result URL for reading
-            for r in results:
-                if "error" not in r and r.get("url"):
-                    first_urls.append((r["url"], r.get("title", "Untitled")))
-                    break
-
-    # Deduplicate first_urls by URL
-    seen_urls: set[str] = set()
-    unique_first_urls: list[tuple[str, str]] = []
-    for url, title in first_urls:
-        if url not in seen_urls:
-            seen_urls.add(url)
-            unique_first_urls.append((url, title))
-
-    # ------------------------------------------------------------------
-    # Stage 2b — Parallel Jina reads of first result from each search
-    # ------------------------------------------------------------------
-    await emit("status", stage="reading", message=f"Reading {len(unique_first_urls)} pages...")
-
-    reads: list[dict] = []
-
-    async def _read(url: str, title: str) -> None:
-        await deps.read_rate_limiter.wait_if_needed(url)
-        await emit("tool_use", tool="read", input={"url": url}, status="running")
-        page = await tools.jina_read(deps.http_client, url)
-        if "error" in page:
-            tool_log.append({
-                "tool": "read",
-                "input": {"url": url},
-                "content": f"Could not read: {page['error']}",
-                "status": "error",
-            })
-            await emit("tool_result", tool="read", status="error", content=f"Could not read: {page['error']}")
-            return
-        content = page.get("content", "")[:8000]
-        reads.append({"url": url, "title": title, "content": content})
-        tool_log.append({
-            "tool": "read",
-            "input": {"url": url},
-            "content": f"Read {len(content)} chars from {title}",
-            "status": "complete",
-        })
-        await emit("tool_result", tool="read", status="complete", content=f"Read {len(content)} chars from {title}")
-
-    await asyncio.gather(*(_read(url, title) for url, title in unique_first_urls))
-
-    # ------------------------------------------------------------------
-    # Stage 3 — Synthesis (Flash Lite call 2, with read_url tool)
-    # ------------------------------------------------------------------
-    await emit("status", stage="synthesizing", message="Analyzing and writing...")
-
-    # Build the context message for the synthesis agent
-    search_section = "\n\n".join(
-        f"### Search: {q}\n" + "\n".join(
-            f"- [{r.get('title', 'Untitled')}]({r.get('url', '')}) — {r.get('description', '')}"
-            for r in results
-            if "error" not in r
-        )
-        for q, results in search_results_by_query
-    )
-
-    read_section = "\n\n".join(
-        f"### Page: [{rd['title']}]({rd['url']})\n{rd['content']}"
-        for rd in reads
-    ) if reads else "No pages could be read."
-
-    synthesis_input = (
-        f"## User's Question\n{query}\n\n"
-        f"## Date\n{date_context}\n\n"
-        f"## Search Results\n{search_section}\n\n"
-        f"## Page Contents\n{read_section}"
-    )
-
-    result_data: ResearchResult | None = None
-
-    from pydantic_ai.messages import (
-        FunctionToolCallEvent,
-        FunctionToolResultEvent,
-        PartDeltaEvent,
-        PartStartEvent,
-        TextPart,
-        TextPartDelta,
-    )
-    from pydantic_ai import AgentRunResultEvent
-
-    async for event in _lite_synthesis_agent.run_stream_events(
-        synthesis_input, deps=deps, model=MODEL,
-    ):
-        if isinstance(event, FunctionToolCallEvent):
-            # Extract a clean input dict from the tool args
-            args = event.part.args
-            if isinstance(args, dict):
-                tool_input = args
-            else:
-                tool_input = {"url": str(args)}
-            await emit("tool_use", tool=event.part.tool_name, input=tool_input, status="running")
-            tool_log.append({"tool": event.part.tool_name, "input": tool_input, "status": "running"})
-
-        elif isinstance(event, FunctionToolResultEvent):
-            raw_content = str(event.result.content)[:5120]
-            # Summarize the content for human-readable display
-            url = ""
-            for entry in reversed(tool_log):
-                if entry.get("tool") == event.result.tool_name and entry.get("status") == "running":
-                    url = entry.get("input", {}).get("url", "")
-                    break
-            if raw_content.startswith("Error reading"):
-                display_content = raw_content
-            elif raw_content == "Page had no readable content.":
-                display_content = raw_content
-            else:
-                display_content = f"Read {len(raw_content)} chars from {url}" if url else f"Read {len(raw_content)} chars"
-            await emit("tool_result", tool=event.result.tool_name, status="complete", content=display_content)
-            for entry in reversed(tool_log):
-                if entry.get("tool") == event.result.tool_name and entry.get("status") == "running":
-                    entry["status"] = "complete"
-                    entry["content"] = display_content
-                    break
-
-        elif isinstance(event, PartStartEvent):
-            if isinstance(event.part, TextPart) and event.part.content:
-                await emit("response_chunk", delta=event.part.content)
-
-        elif isinstance(event, PartDeltaEvent):
-            if isinstance(event.delta, TextPartDelta):
-                await emit("response_chunk", delta=event.delta.content_delta)
-
-        elif isinstance(event, AgentRunResultEvent):
-            result_data = event.result.output
-            total_usage.incr(event.result.usage())
-
-    if result_data is None:
-        raise RuntimeError("Synthesis agent completed without producing a result")
-
-    return result_data, tool_log, total_usage
+    return output, tool_log, usage
 
 
-# ============================================================================
-# PREMIUM IMPLEMENTATION — Multi-turn agentic pipeline
-# (This is the deeper, more expensive research path. Will be used for
-#  premium tier users in the future.)
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Synthesis agent — clean context, single-shot
+# ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = f"""\
-You are a research agent. You answer questions by delegating research \
-to your `research` tool and writing a clear response the user can \
-immediately act on.
-
-## How to research
-
-You have one tool: `research(question)`. It searches the web and reads \
-pages to answer a specific question. You can call it multiple times per \
-turn and they run in parallel.
-
-### Phase 1 — Survey and orient
-
-Start with 2-3 parallel `research` calls to explore different angles \
-of the query. Always include a recency question — if something has \
-recently changed that affects the answer, the user needs to know.
-
-After the survey, identify the real question the user is trying to answer. \
-It may not be exactly what they asked — understand what they actually need.
-
-### Phase 2 — Deep research
-
-Use additional `research` calls to fill gaps and verify facts. \
-Prioritize practical, actionable information over background context.
-
-Stop when you have enough to give the user a clear, confident answer.
-
-{WRITING_INSTRUCTIONS}
-"""
-
-# Defer model resolution by not passing it at construction time.
-# The model is specified at run time via `model=MODEL`.
-research_agent = Agent(
-    deps_type=ResearchDeps,
+_synthesis_agent = Agent(
     output_type=ResearchResult,
-    instructions=SYSTEM_PROMPT,
 )
 
 
-# --- Premium pipeline helpers ---
+async def run_synthesis(
+    query: str,
+    research_output: ResearchOutput,
+    mode_config: ModeConfig,
+    user_profile: str = "",
+    emit: EmitFn | None = None,
+) -> tuple[ResearchResult, RunUsage]:
+    """Run the synthesis agent with clean, curated context.
 
-_query_agent = Agent(
-    output_type=str,
-    instructions=(
-        "Generate a single, effective web search query for the given question. "
-        "Return only the search query string, nothing else."
-    ),
-)
-
-_summarize_agent = Agent(
-    output_type=str,
-    instructions=(
-        "Analyze the provided web page content in relation to the user's question. "
-        "Provide:\n"
-        "1. A brief summary (2-3 sentences) of what this page covers\n"
-        "2. All relevant facts, data points, and specifics that relate to the question\n"
-        "3. Any caveats, limitations, edge cases, or important details that qualify those facts\n\n"
-        "Be thorough — extract everything useful. The reader needs enough detail to make decisions "
-        "without visiting the page themselves."
-    ),
-)
-
-
-async def _run_research_pipeline(
-    question: str,
-    deps: ResearchDeps,
-) -> tuple[str, list[dict], dict]:
-    """Run the premium research pipeline: query generation → search → read → summarize.
-
-    Returns (formatted_result, sub_tools_for_ui).
+    Receives the structured ResearchOutput — no raw conversation history.
+    Streams response_chunk events via emit callback.
     """
-    total_usage = RunUsage()
-    sub_tools: list[dict] = []
+    skill_text = load_synthesis_skill(mode_config.mode)
+    system_prompt = f"{skill_text}\n\n{WRITING_INSTRUCTIONS}"
 
-    # Step 1: Generate search query from question
-    query_result = await _query_agent.run(question, model=MODEL)
-    search_query = query_result.output.strip().strip('"\'')
-    total_usage.incr(query_result.usage())
+    # Format the research output as the synthesis input
+    input_parts = [f"## User Query\n{query}"]
 
-    # Step 2: Brave Search
-    await deps.search_rate_limiter.wait()
-    search_results = await tools.brave_search(
-        deps.http_client, search_query, num_results=5,
-    )
+    if user_profile:
+        input_parts.append(f"\n## User Profile\n{user_profile}")
 
-    # Format search results for UI
-    if search_results and not (len(search_results) == 1 and "error" in search_results[0]):
-        search_display = "\n".join(
-            f"{i}. {r.get('title', 'Untitled')} — {r.get('url', '')}"
-            for i, r in enumerate(search_results, 1)
-        )
-    else:
-        search_display = "No results found."
+    # Sources
+    if research_output.sources:
+        input_parts.append("\n## Sources")
+        for s in research_output.sources:
+            input_parts.append(f"\n### {s.title}\n**URL:** {s.url}\n**Type:** {s.type}")
+            if s.relevance:
+                input_parts.append(f"**Relevance:** {s.relevance}")
+            if s.credibility_note:
+                input_parts.append(f"**Credibility:** {s.credibility_note}")
+            input_parts.append(f"\n{s.content}")
 
-    sub_tools.append({
-        "tool": "search",
-        "input": {"query": search_query},
-        "content": search_display,
-        "status": "complete",
-    })
+    # Key insights
+    if research_output.key_insights:
+        input_parts.append("\n## Key Insights")
+        for insight in research_output.key_insights:
+            input_parts.append(f"- {insight}")
 
-    # Step 3: Jina Read top 3 results + Step 4: Summarize each
-    top_results = [
-        r for r in search_results
-        if "error" not in r and r.get("url")
-    ][:3]
+    # Outline
+    if research_output.outline:
+        input_parts.append("\n## Outline")
+        for item in research_output.outline:
+            input_parts.append(f"- {item}")
 
-    parts: list[str] = []
+    # YouTube
+    if research_output.youtube_urls:
+        input_parts.append("\n## YouTube Videos")
+        for yt in research_output.youtube_urls:
+            input_parts.append(f"- [{yt.title}]({yt.url})")
+            if yt.relevance:
+                input_parts.append(f"  {yt.relevance}")
 
-    async def read_and_summarize(result: dict) -> None:
-        url = result["url"]
-        title = result.get("title", "Untitled")
+    # Resources
+    if research_output.resources:
+        input_parts.append("\n## Resources")
+        for r in research_output.resources:
+            input_parts.append(f"- [{r.title}]({r.url})")
+            if r.description:
+                input_parts.append(f"  {r.description}")
 
-        await deps.read_rate_limiter.wait_if_needed(url)
-        page = await tools.jina_read(deps.http_client, url)
+    synthesis_input = "\n".join(input_parts)
 
-        if "error" in page:
-            summary = f"Could not read: {page['error']}"
-            sub_tools.append({
-                "tool": "read",
-                "input": {"url": url},
-                "content": summary,
-                "status": "error",
-            })
-            return
+    await emit("status", stage="synthesizing") if emit else None
 
-        page_content = page.get("content", "")[:6000]
-        if not page_content:
-            summary = "Page had no readable content."
-            sub_tools.append({
-                "tool": "read",
-                "input": {"url": url},
-                "content": summary,
-                "status": "complete",
-            })
-            parts.append(f"[{title}]({url}): {summary}")
-            return
+    async with _synthesis_agent.run_stream(
+        synthesis_input,
+        model=mode_config.synthesis_model,
+        instructions=system_prompt,
+    ) as stream:
+        async for event in stream:
+            if emit and isinstance(event, (PartStartEvent, PartDeltaEvent)):
+                if isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
+                    await emit("response_chunk", delta=event.delta.content_delta)
 
-        # Summarize with Flash Lite
-        summarize_result = await _summarize_agent.run(
-            f"Question: {question}\n\nPage ({url}):\n{page_content}",
-            model=MODEL,
-        )
-        summary = summarize_result.output
-        total_usage.incr(summarize_result.usage())
+        result = stream.result
 
-        sub_tools.append({
-            "tool": "read",
-            "input": {"url": url},
-            "content": summary,
-            "status": "complete",
-        })
-        parts.append(f"[{title}]({url}): {summary}")
-
-    # Run reads concurrently
-    await asyncio.gather(*(read_and_summarize(r) for r in top_results))
-
-    # Format result for main agent
-    result_text = "\n\n".join(parts) if parts else "No results could be read."
-    usage_dict = _usage_to_dict(total_usage)
-    if usage_dict:
-        result_text += f"\n\n[pipeline usage: {usage_dict}]"
-
-    return result_text, sub_tools, usage_dict
+    return result.output, result.usage()
 
 
-@research_agent.tool
-async def research(ctx: RunContext[ResearchDeps], question: str) -> str:
-    """Research a specific question by searching the web and reading pages.
-
-    Runs a pipeline: generates a search query, searches via Brave, reads
-    the top 3 results via Jina, and summarizes each with Flash Lite.
-    Returns summaries with links.
-    """
-    try:
-        result_text, sub_tools, usage_dict = await _run_research_pipeline(
-            question, ctx.deps,
-        )
-
-        # Store pipeline activity + token usage for the runner to pick up
-        if not hasattr(ctx.deps, "_sub_agent_usage"):
-            ctx.deps._sub_agent_usage = []  # type: ignore[attr-defined]
-        ctx.deps._sub_agent_usage.append({  # type: ignore[attr-defined]
-            "question": question,
-            "tools": sub_tools,
-            **usage_dict,
-        })
-
-        return result_text
-
-    except Exception as e:
-        logger.exception("Research pipeline failed for question: %s", question)
-        return f"Research failed: {e}"
-
-
-# ============================================================================
-# Session metadata agent (naming + classification)
-# ============================================================================
-
-
-class SessionMeta(BaseModel):
-    """Metadata generated for a research session."""
-
-    name: str = Field(
-        description="A brief title (2-5 words) for the research query.",
-    )
-    skill_level: str = Field(
-        description=(
-            "The skill level assumed by the query. One of: "
-            "beginner, intermediate, advanced, expert."
-        ),
-    )
-    topic: str = Field(
-        description=(
-            "The primary topic category. One of: "
-            "programming, software-engineering, web-dev, app-dev, backend, "
-            "full-stack, ai-llm, machine-learning, devops, data-engineering, "
-            "security, gamedev, systems, other. Use 'programming' for general "
-            "CS concepts (OOP, algorithms, data structures, design patterns). "
-            "Use 'other' ONLY for non-software topics."
-        ),
-    )
-    query_format: str = Field(
-        description=(
-            "Query complexity. One of: simple, complex. "
-            "Classify as 'complex' if the query contains markdown syntax "
-            "(code blocks, lists, bold/italic), spans multiple lines, has "
-            "multiple sentences, or is notably long. Otherwise 'simple'."
-        ),
-    )
-
-
-_meta_agent = Agent(
-    output_type=SessionMeta,
-    instructions=(
-        "Analyze the research query and return structured metadata.\n\n"
-        "1. **name**: A brief title (2-5 words) that captures the essence "
-        "of the query. No quotes, no punctuation at the end.\n"
-        "2. **skill_level**: Infer from the terminology and depth of the "
-        "question — beginner, intermediate, advanced, or expert.\n"
-        "3. **topic**: Classify into exactly one of: programming, "
-        "software-engineering, web-dev, app-dev, backend, full-stack, "
-        "ai-llm, machine-learning, devops, data-engineering, security, "
-        "gamedev, systems, other. Use 'programming' for general CS concepts "
-        "(OOP, algorithms, data structures, design patterns, language features). "
-        "Use 'other' ONLY for non-software topics.\n"
-        "4. **query_format**: Classify as 'complex' if the query contains "
-        "markdown syntax (code blocks, lists, bold/italic), spans multiple lines, "
-        "has multiple sentences, or is notably long. Otherwise 'simple'.\n\n"
-        "Return structured output only."
-    ),
-)
-
-
-async def generate_session_meta(query: str) -> tuple[SessionMeta, RunUsage]:
-    """Generate name and classification metadata for a research session."""
-    try:
-        result = await _meta_agent.run(query, model=MODEL)
-        meta = result.output
-        meta.name = meta.name[:200]
-        return meta, result.usage()
-    except Exception:
-        return SessionMeta(
-            name=query[:200],
-            skill_level="intermediate",
-            topic="other",
-            query_format="simple",
-        ), RunUsage()
-
-
-_youtube_query_agent = Agent(
-    output_type=str,
-    instructions=(
-        "You decide whether a research query would benefit from YouTube "
-        "video results, and if so, generate a search query.\n\n"
-        "Return NONE (literally the word NONE) if:\n"
-        "- The question is too broad or vague to find a useful video\n"
-        "- The topic is highly specific to a niche library/tool with "
-        "unlikely YouTube coverage\n"
-        "- The question is about current events, news, or time-sensitive "
-        "information that videos won't cover well\n"
-        "- The question is about comparing options, making decisions, or "
-        "asking for opinions rather than learning a concept\n"
-        "- The topic is non-technical (not software development)\n\n"
-        "Return a YouTube search query if:\n"
-        "- The question involves a concept, pattern, or technique that is "
-        "well-explained visually or in video format\n"
-        "- There are likely quality tutorials, conference talks, or "
-        "deep-dive videos on the topic\n"
-        "- The topic is a popular framework, language, tool, or concept "
-        "with strong YouTube coverage\n\n"
-        "When generating a query:\n"
-        "- IMPORTANT: Over-index on the skill level. A beginner needs "
-        "'intro', 'tutorial', 'for beginners', 'explained simply'. An "
-        "expert needs 'deep dive', 'advanced', 'internals', 'under the "
-        "hood'.\n"
-        "- Anchor the query on the classified topic while tailoring to the "
-        "specific question.\n"
-        "- Keep it under 80 characters.\n"
-        "- Return only the search query string or NONE, nothing else."
-    ),
-)
-
-
-# ============================================================================
-# Code examples agent (post-response)
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Code examples agent (post-synthesis)
+# ---------------------------------------------------------------------------
 
 
 class CodeExample(BaseModel):
@@ -844,7 +708,7 @@ _code_examples_agent = Agent(
 async def generate_code_examples(
     query: str, response: str, skill_level: str,
 ) -> tuple[CodeExamplesResult, RunUsage]:
-    """Generate code examples that complement a research response.
+    """Generate code examples that complement a synthesis response.
 
     Uses Gemini 3 Flash with MEDIUM thinking for higher-quality code.
     """
@@ -871,1173 +735,9 @@ async def generate_code_examples(
         return CodeExamplesResult(examples=[]), RunUsage()
 
 
-class YouTubeRanking(BaseModel):
-    """Output of the YouTube ranking agent."""
-
-    selected_ids: list[str] = Field(
-        description=(
-            "Ordered list of exactly 4 video IDs to recommend, most relevant first."
-        ),
-    )
-
-
-_youtube_ranking_agent = Agent(
-    output_type=YouTubeRanking,
-    instructions=(
-        "You evaluate YouTube search results and select the most relevant "
-        "videos for a user's research query.\n\n"
-        "You will receive:\n"
-        "- The user's original query\n"
-        "- Their skill level\n"
-        "- A numbered list of YouTube videos (title, channel, video_id)\n\n"
-        "## Selection criteria\n\n"
-        "1. **Relevance** — Does the video directly address the query? "
-        "Reject tangential or loosely related videos.\n"
-        "2. **Quality signals** — Prefer established channels, conference "
-        "talks, and well-known educators over random uploads. Channels "
-        "with names like 'Fireship', 'Traversy Media', 'The Coding Train', "
-        "'freeCodeCamp', 'ArjanCodes', 'Tech With Tim', 'ThePrimeagen', "
-        "etc. are strong signals.\n"
-        "3. **Skill match** — A beginner query should get beginner-friendly "
-        "tutorials, not advanced deep-dives. An expert query should get "
-        "advanced content, not intro tutorials.\n"
-        "4. **No spam** — Skip videos that look like clickbait, AI-generated "
-        "slop, or low-effort content based on their title.\n"
-        "5. **Diversity** — If selecting multiple videos, prefer different "
-        "angles or channels over redundant content.\n\n"
-        "Return exactly 4 video IDs ordered by relevance (best first). "
-        "Always pick 4 — choose the best available even if they're not perfect.\n\n"
-        "Return structured output only."
-    ),
-)
-
-
-async def generate_youtube_query(
-    query: str, skill_level: str, topic: str,
-) -> tuple[str | None, RunUsage]:
-    """Generate a YouTube search query, or None if not suited for video."""
-    if topic == "other":
-        return None, RunUsage()
-    try:
-        prompt = (
-            f"User query: {query}\n"
-            f"Skill level: {skill_level}\n"
-            f"Topic: {topic}"
-        )
-        result = await _youtube_query_agent.run(prompt, model=MODEL)
-        output = result.output.strip().strip('"')
-        if output.upper() == "NONE":
-            return None, result.usage()
-        return (output[:80] if output else None), result.usage()
-    except Exception:
-        logger.exception("Failed to generate YouTube query")
-        return None, RunUsage()
-
-
-async def rank_youtube_results(
-    query: str, skill_level: str, videos: list[dict],
-) -> tuple[list[dict], RunUsage]:
-    """Rank YouTube search results and return the top 1-3 most relevant.
-
-    Uses Flash Lite to evaluate relevance, quality, and skill-level match.
-    Returns the selected videos in ranked order.
-    """
-    if not videos:
-        return [], RunUsage()
-
-    try:
-        # Build a numbered list for the LLM
-        video_lines = []
-        for i, v in enumerate(videos, 1):
-            video_lines.append(
-                f"{i}. [{v.get('video_id', '')}] "
-                f"\"{v.get('title', 'Untitled')}\" "
-                f"by {v.get('channel', 'Unknown')}"
-            )
-
-        prompt = (
-            f"## User Query\n{query}\n\n"
-            f"## Skill Level\n{skill_level}\n\n"
-            f"## YouTube Search Results\n" + "\n".join(video_lines)
-        )
-        result = await _youtube_ranking_agent.run(prompt, model=MODEL)
-
-        # Map selected IDs back to full video dicts, preserving rank order
-        id_to_video = {v.get("video_id", ""): v for v in videos}
-        ranked = []
-        for vid in result.output.selected_ids[:4]:
-            if vid in id_to_video:
-                ranked.append(id_to_video[vid])
-
-        return ranked, result.usage()
-    except Exception:
-        logger.exception("Failed to rank YouTube results")
-        # Fallback: return first 4 unranked
-        return videos[:4], RunUsage()
-
-
 # ---------------------------------------------------------------------------
-# Resource ranking agent
+# User profile agent (unchanged from previous implementation)
 # ---------------------------------------------------------------------------
-
-
-class ResourceRanking(BaseModel):
-    """Output of the resource ranking agent."""
-
-    selected_indices: list[int] = Field(
-        description=(
-            "Ordered list of exactly 5 result indices (0-based) to recommend. "
-            "Rank by importance: official docs first, then tutorials, guides, "
-            "articles, forums."
-        ),
-    )
-
-
-_resource_ranking_agent = Agent(
-    output_type=ResourceRanking,
-    instructions=(
-        "You evaluate web search results and select the 5 most useful "
-        "resources for a user's research query.\n\n"
-        "You will receive:\n"
-        "- The user's original query\n"
-        "- Their skill level\n"
-        "- A numbered list of web results (title, url, description)\n\n"
-        "## Selection criteria\n\n"
-        "1. **Official documentation** — Always rank official docs highest "
-        "when available (e.g. docs.python.org, reactjs.org, MDN).\n"
-        "2. **Tutorials & guides** — High-quality tutorials from reputable "
-        "sources (Real Python, DigitalOcean, LogRocket, etc.).\n"
-        "3. **Skill match** — Match content depth to the user's level. "
-        "Beginners need introductions, experts need reference material.\n"
-        "4. **Authoritative sources** — Prefer well-known platforms "
-        "(GitHub repos, Stack Overflow answers, dev blogs from the "
-        "project maintainers) over random blogs.\n"
-        "5. **No spam** — Skip SEO-farm articles, AI-generated slop, "
-        "listicles with no substance, or paywalled content.\n"
-        "6. **Diversity** — Cover different angles: docs, tutorial, "
-        "example code, discussion thread, blog post.\n\n"
-        "Return exactly 5 indices ordered by importance (most useful first). "
-        "If fewer than 5 good results exist, still pick the best 5 available.\n\n"
-        "Return structured output only."
-    ),
-)
-
-
-async def rank_resource_results(
-    query: str, skill_level: str, results: list[dict],
-) -> tuple[list[dict], RunUsage]:
-    """Rank Brave search results and return the top 5 most useful resources.
-
-    Uses Flash Lite to evaluate relevance, authority, and skill-level match.
-    Returns the selected results in ranked order.
-    """
-    if not results:
-        return [], RunUsage()
-
-    try:
-        lines = []
-        for i, r in enumerate(results):
-            lines.append(
-                f"{i}. \"{r.get('title', 'Untitled')}\" "
-                f"— {r.get('url', '')}\n"
-                f"   {r.get('description', '')}"
-            )
-
-        prompt = (
-            f"## User Query\n{query}\n\n"
-            f"## Skill Level\n{skill_level}\n\n"
-            f"## Web Search Results\n" + "\n".join(lines)
-        )
-        result = await _resource_ranking_agent.run(prompt, model=MODEL)
-
-        ranked = []
-        for idx in result.output.selected_indices[:5]:
-            if 0 <= idx < len(results):
-                ranked.append(results[idx])
-
-        return ranked, result.usage()
-    except Exception:
-        logger.exception("Failed to rank resource results")
-        return results[:5], RunUsage()
-
-
-# ============================================================================
-# EXPERIMENTAL IMPLEMENTATION — History-threaded pipeline
-# ============================================================================
-
-
-class ExpMetaQueryPlan(BaseModel):
-    """Metadata for the experimental pipeline."""
-
-    name: str = Field(
-        description="A concise action phrase (2-4 words) describing what the user and researcher are doing. E.g. 'Finding Notion Alternatives', 'Debugging Docker Memory'.",
-    )
-    skill_level: str = Field(
-        description=(
-            "The skill level assumed by the query. One of: "
-            "beginner, intermediate, advanced, expert."
-        ),
-    )
-    topic: str = Field(
-        description=(
-            "The primary topic category. One of: "
-            "programming, software-engineering, web-dev, app-dev, backend, "
-            "full-stack, ai-llm, machine-learning, devops, data-engineering, "
-            "security, gamedev, systems, other. Use 'programming' for general "
-            "CS concepts (OOP, algorithms, data structures, design patterns). "
-            "Use 'other' ONLY for non-software topics."
-        ),
-    )
-    query_format: str = Field(
-        description=(
-            "Query complexity. One of: simple, complex. "
-            "Classify as 'complex' if the query contains markdown syntax "
-            "(code blocks, lists, bold/italic), spans multiple lines, has "
-            "multiple sentences, or is notably long. Otherwise 'simple'."
-        ),
-    )
-
-
-_meta_query_agent = Agent(
-    output_type=ExpMetaQueryPlan,
-    instructions=(
-        "You are a research classifier. You will be given the current date "
-        "and the user's question. Produce metadata about the query.\n\n"
-        "1. **name**: A concise action phrase (2-4 words) describing what "
-        "the user and researcher are doing. Examples: 'Finding Notion "
-        "Alternatives', 'Debugging Docker Memory', 'Comparing API "
-        "Frameworks'. Keep it short and punchy — no filler words. "
-        "No quotes, no punctuation at the end.\n"
-        "2. **skill_level**: Infer from the terminology and depth of the "
-        "question — beginner, intermediate, advanced, or expert.\n"
-        "3. **topic**: Classify into exactly one of: programming, "
-        "software-engineering, web-dev, app-dev, backend, full-stack, "
-        "ai-llm, machine-learning, devops, data-engineering, security, "
-        "gamedev, systems, other. Use 'programming' for general CS concepts "
-        "(OOP, algorithms, data structures, design patterns, language features). "
-        "Use 'other' ONLY for non-software topics.\n"
-        "4. **query_format**: Classify as 'complex' if the query contains "
-        "markdown syntax (code blocks, lists, bold/italic), spans multiple lines, "
-        "has multiple sentences, or is notably long. Otherwise 'simple'.\n\n"
-        "Return structured output only."
-    ),
-)
-
-
-# --- Source quality ranking for post-processing ---
-
-# Domains/channels in tier 3 (low quality) — matched as substrings
-_LOW_QUALITY_DOMAINS = {
-    "geeksforgeeks.org", "w3schools.com", "tutorialspoint.com",
-    "javatpoint.com", "programiz.com", "stackoverflow.com",
-    "quora.com", "medium.com", "dev.to",
-}
-
-# Domains in tier 1 (authoritative) — matched as substrings
-_HIGH_QUALITY_DOMAINS = {
-    "python.org", "docs.python.org", "developer.mozilla.org", "mdn.mozilla.org",
-    "react.dev", "rust-lang.org", "doc.rust-lang.org", "go.dev", "golang.org",
-    "nodejs.org", "typescriptlang.org", "kotlinlang.org", "swift.org",
-    "docs.oracle.com", "learn.microsoft.com", "developer.apple.com",
-    "developer.android.com", "cloud.google.com", "aws.amazon.com",
-    "docs.github.com", "wikipedia.org", "arxiv.org",
-    "w3.org", "rfc-editor.org", "ietf.org",
-    "kernel.org", "linuxfoundation.org",
-}
-
-# YouTube channels considered authoritative (lowercase)
-_HIGH_QUALITY_CHANNELS = {
-    "google", "microsoft", "amazon web services", "aws",
-    "github", "mozilla", "linux foundation",
-    "python", "pycon", "jsconf", "gophercon", "rustconf",
-    "computerphile", "mit opencourseware",
-}
-
-# YouTube channels considered mid-tier educators
-_MID_QUALITY_CHANNELS = {
-    "fireship", "traversy media", "corey schafer", "arjan codes",
-    "tech with tim", "the coding train", "sentdex", "ben awad",
-    "web dev simplified", "net ninja", "academind",
-    "freecodecamp", "freecodecamp.org",
-}
-
-
-def _resource_sort_key(resource: dict) -> int:
-    """Return sort tier for a resource: 1 (best) to 3 (worst)."""
-    url = resource.get("url", "").lower()
-    site = resource.get("site_name", "").lower()
-    for domain in _HIGH_QUALITY_DOMAINS:
-        if domain in url or domain in site:
-            return 1
-    for domain in _LOW_QUALITY_DOMAINS:
-        if domain in url or domain in site:
-            return 3
-    return 2
-
-
-def _video_sort_key(video: dict) -> int:
-    """Return sort tier for a YouTube video: 1 (best) to 3 (worst)."""
-    channel = video.get("channel", "").lower()
-    for ch in _HIGH_QUALITY_CHANNELS:
-        if ch in channel:
-            return 1
-    for ch in _MID_QUALITY_CHANNELS:
-        if ch in channel:
-            return 2
-    return 2  # Unknown channels default to mid-tier
-
-
-# --- Experimental planner agent ---
-
-
-class PlannerResource(BaseModel):
-    """A selected related resource."""
-
-    title: str
-    url: str
-    description: str = ""
-    site_name: str = ""
-
-
-class PlannerOutput(BaseModel):
-    """Output of the experimental planner agent."""
-
-    youtube_video_ids: list[str] = Field(
-        default_factory=list,
-        description="Exactly 4 YouTube video IDs to recommend, most relevant first. IDs only — metadata is fetched programmatically.",
-    )
-    resources: list[PlannerResource] = Field(
-        default_factory=list,
-        description="Exactly 5 related web resources (tutorials, docs, guides). Every URL MUST come from search results — never make up URLs.",
-    )
-    article_points: list[str] = Field(
-        description=(
-            "Ordered list of key points the article should cover. "
-            "Each point is a concise sentence describing what to address."
-        ),
-    )
-
-
-_planner_agent = Agent(
-    deps_type=ResearchDeps,
-    output_type=PlannerOutput,
-    instructions=(
-        "You are a research planner. You have the user's question and "
-        "metadata from earlier in this conversation.\n\n"
-        "## Step 1 — Understand the user\n\n"
-        "Before searching, evaluate the user's query and their likely "
-        "skill level. What are they trying to do — learn a concept, "
-        "understand how something works, fix a bug, compare options, "
-        "build something? Decide what approach will help them most and "
-        "let that guide your searches and article plan.\n\n"
-        "## Step 2 — Research\n\n"
-        "Use your tools to find the best possible sources. Keep searching "
-        "until you have high-quality results — you can use `search` up to "
-        "4 times and `youtube_search` up to 2 times (hard limits).\n\n"
-        "**CRITICAL: Every URL you return MUST come from your search "
-        "results. NEVER make up, guess, or hallucinate URLs. If you "
-        "didn't find it via `search` or `youtube_search`, don't include "
-        "it.**\n\n"
-        "1. **Search** — Use the `search` tool to find high-quality web "
-        "sources.\n"
-        "2. **Verify sources** — Many sites block automated readers, so "
-        "you MUST use `source_readable` on each web page you want to "
-        "recommend to confirm it's actually accessible. Only pass URLs "
-        "that appeared in your search results. It returns only "
-        "a status (readable or not) — you won't see the content, but it "
-        "gets cached for the next stage. Do not include a resource you "
-        "haven't verified.\n"
-        "3. **Find YouTube videos** — Use the `youtube_search` tool to "
-        "find relevant videos. Video metadata is fetched programmatically "
-        "via the YouTube API, so any video that shows up in search is "
-        "accessible. Do NOT use `source_readable` on YouTube video "
-        "pages.\n\n"
-        "## What to return\n\n"
-        "1. **youtube_video_ids** — Exactly 4 YouTube video IDs, most "
-        "relevant first. Extract the video ID from YouTube URLs.\n"
-        "2. **resources** — Exactly 5 web resources (tutorials, docs, "
-        "guides). Every URL MUST come from your search results — never "
-        "invent URLs. Use `source_readable` to verify your top picks are "
-        "accessible before including them.\n"
-        "3. **article_points** — An ordered list of key points the "
-        "article should cover, tailored to what the user is trying to "
-        "accomplish. Specific, actionable, most important first.\n\n"
-        "## Source selection criteria\n\n"
-        "Your goal is to find REPUTABLE, AUTHORITATIVE sources — not "
-        "listicles, anecdotes, or unreliable user-generated answers.\n\n"
-        "**Tier 1 — prefer these**: Official docs, specs, RFCs, "
-        "maintainer blogs, project repos, conference talks (PyCon, "
-        "JSConf, GopherCon, etc.), channels run by core maintainers.\n\n"
-        "**Tier 2 — acceptable**: Reputable tech blogs (Martin Fowler, "
-        "Julia Evans), well-known educators (Fireship, Traversy Media, "
-        "Corey Schafer, Arjan Codes), thoughtful long-form articles.\n\n"
-        "**Tier 3 — avoid or place last**: GeeksForGeeks, W3Schools, "
-        "TutorialsPoint, JavaTPoint, Programiz, StackOverflow, Quora, "
-        "Medium listicles, generic 'top 10' clickbait, Reddit threads, "
-        "forum posts, personal anecdotes.\n\n"
-        "When in doubt, prefer the source closest to the people who "
-        "actually build or maintain the technology.\n\n"
-        "Order both `youtube_video_ids` and `resources` by source "
-        "authority — highest quality first.\n\n"
-        "## User context\n\n"
-        "You may receive background context about the user's technology "
-        "stack and skill level. Use it to:\n\n"
-        "1. **Tailor resources to their stack.** If they use Python, find "
-        "Python-focused resources — don't return .NET, Java, or C# "
-        "tutorials unless the query specifically asks about those. Match "
-        "the ecosystem: pytest docs for a pytest user, React docs for a "
-        "React developer, etc.\n"
-        "2. **Tailor videos to their stack.** Same principle — a Python "
-        "developer should get Python-oriented video content, not generic "
-        "or wrong-language videos.\n"
-        "3. **Calibrate depth.** Prefer advanced sources for experienced "
-        "users, introductory material for beginners.\n\n"
-        "Never mention, reference, or acknowledge the user's profile, "
-        "history, or that you know anything about them beyond their "
-        "current question.\n\n"
-        "Return structured output only."
-    ),
-)
-
-
-@_planner_agent.tool
-async def search(
-    ctx: RunContext[ResearchDeps], query: str,
-) -> str:
-    """Search the web for pages. Returns titles, URLs, and descriptions."""
-    if ctx.deps.search_count >= 4:
-        return "ERROR: Search limit reached (4/4). Work with the results you have."
-    ctx.deps.search_count += 1
-    await ctx.deps.search_rate_limiter.wait()
-    results = await tools.brave_search(ctx.deps.http_client, query, num_results=5)
-    if not results or (len(results) == 1 and "error" in results[0]):
-        return "No results found."
-    lines = []
-    for i, r in enumerate(results, 1):
-        url = r.get("url", "")
-        if url:
-            ctx.deps.seen_urls.add(url)
-        lines.append(
-            f"{i}. [{r.get('title', 'Untitled')}]({url}) "
-            f"— {r.get('description', '')}"
-        )
-    return "\n".join(lines)
-
-
-@_planner_agent.tool
-async def youtube_search(
-    ctx: RunContext[ResearchDeps], query: str,
-) -> str:
-    """Search YouTube for videos. Returns titles, URLs, and descriptions."""
-    if ctx.deps.youtube_search_count >= 2:
-        return "ERROR: YouTube search limit reached (2/2). Work with the results you have."
-    ctx.deps.youtube_search_count += 1
-    await ctx.deps.search_rate_limiter.wait()
-    results = await tools.brave_search(
-        ctx.deps.http_client, f"site:youtube.com {query}", num_results=10,
-    )
-    if not results or (len(results) == 1 and "error" in results[0]):
-        return "No results found."
-    lines = []
-    for i, r in enumerate(results, 1):
-        url = r.get("url", "")
-        if url:
-            ctx.deps.seen_urls.add(url)
-        lines.append(
-            f"{i}. [{r.get('title', 'Untitled')}]({url}) "
-            f"— {r.get('description', '')}"
-        )
-    return "\n".join(lines)
-
-
-@_planner_agent.tool
-async def source_readable(
-    ctx: RunContext[ResearchDeps], url: str,
-) -> str:
-    """Check if a web page is readable and cache its content for later use.
-    Returns only a status — you will NOT see the page content.
-    Do NOT use this on YouTube video pages.
-    IMPORTANT: Only pass URLs from your search results."""
-    if url not in ctx.deps.seen_urls:
-        return (
-            "ERROR: This URL did not come from your search results. "
-            "Only pass URLs that appeared in search or youtube_search results. "
-            "Do NOT make up or guess URLs."
-        )
-    await ctx.deps.read_rate_limiter.wait_if_needed(url)
-    page = await tools.jina_read(ctx.deps.http_client, url)
-    if "error" in page:
-        return f"Not readable: {page['error']}"
-    content = page.get("content", "")
-    if not content:
-        return "Not readable: page had no content."
-    ctx.deps.source_cache[url] = page
-    return f"Readable ({len(content)} chars)"
-
-
-# --- Experimental answer writer ---
-
-_EXP_ANSWER_PROMPT = f"""\
-You are a research writer. You have the full context of the research so far — \
-the user's question, search results, page reads, and a plan with key article \
-points from the planner.
-
-## Your task
-
-Write the article following the article points from the plan. Cover each \
-point in order, but use your judgment to merge, expand, or reorder where \
-it makes the piece flow better.
-
-Don't emphasize dates, recency, or "as of [year]" framing unless the user \
-specifically asked about recent changes or the topic genuinely requires it. \
-Focus on what's true and useful, not when it became true.
-
-Before writing, evaluate the authority of each source in the research. \
-Official docs, specs, and maintainer content are strongest. Community Q&A \
-is mid-tier. Reddit posts, forum threads, and personal anecdotes are the \
-weakest — if you must use them, frame the evidence as anecdotal \
-("users report…", "anecdotal experience suggests…"). Build your core \
-argument on the strongest available sources.
-
-If you need to read additional pages to fill gaps or verify claims, use \
-the `read_url` tool.
-
-{WRITING_INSTRUCTIONS}
-"""
-
-_answer_agent = Agent(
-    deps_type=ResearchDeps,
-    output_type=ResearchResult,
-    instructions=_EXP_ANSWER_PROMPT,
-)
-
-
-@_answer_agent.tool
-async def answer_read_url(
-    ctx: RunContext[ResearchDeps], url: str,
-) -> str:
-    """Read the full content of a web page. Use this to fill gaps in the
-    provided search results or to get details from a page that looks relevant."""
-    await ctx.deps.read_rate_limiter.wait_if_needed(url)
-    page = await tools.jina_read(ctx.deps.http_client, url)
-    if "error" in page:
-        return f"Error reading {url}: {page['error']}"
-    content = page.get("content", "")[:4000]
-    return content if content else "Page had no readable content."
-
-
-# --- Experimental example planner ---
-
-
-class ExampleDescription(BaseModel):
-    """Description of a single code example to generate."""
-
-    title: str = Field(description="Short descriptive title (3-10 words)")
-    language: str = Field(
-        description="Programming language (e.g. python, javascript, go, rust, sql)"
-    )
-    description: str = Field(
-        description="What the example should demonstrate and how (2-4 sentences)"
-    )
-    scale: str = Field(
-        description="Expected size: 'short' (5-15 lines), 'medium' (15-40 lines), or 'large' (40-100 lines)"
-    )
-    instructions: str = Field(
-        description=(
-            "Detailed instructions for the code writer. Include: the goal "
-            "of the example, what concepts it must cover, the expected "
-            "skill level of the reader, and any specific patterns or "
-            "approaches to use. This is the primary input for the code "
-            "generation model — be specific and thorough."
-        ),
-    )
-
-
-class ExamplePlan(BaseModel):
-    """Plan for code examples to generate."""
-
-    examples: list[ExampleDescription] = Field(
-        default_factory=list,
-        description=(
-            "Descriptions of examples to generate. Up to 5 short, 2-3 medium, "
-            "or 1 large. Empty if the topic doesn't benefit from code examples."
-        ),
-    )
-
-
-_example_plan_agent = Agent(
-    output_type=ExamplePlan,
-    instructions=(
-        "You plan code examples that complement a research response. You have "
-        "the full conversation history including the research response.\n\n"
-        "## Step 1 — Think about what's needed\n\n"
-        "Consider what the user is trying to do and what concepts from the "
-        "research response would benefit from concrete code. Think about "
-        "their skill level — what do they already understand vs. what do "
-        "they need demonstrated?\n\n"
-        "The examples should cover the same scope as the answer — if the "
-        "answer covers multiple concepts or techniques, plan examples that "
-        "demonstrate each of them, not just one narrow slice.\n\n"
-        "## Rules\n\n"
-        "1. **Match the user's technology stack (CRITICAL).** If you receive "
-        "context about the user's technologies, you MUST use those to pick "
-        "languages, frameworks, and libraries for examples. A Python user "
-        "should see Python examples, a React developer should see React "
-        "examples. If they use pytest, write tests with pytest. If they use "
-        "FastAPI, show FastAPI patterns. The user should feel like the "
-        "examples were written specifically for their workflow.\n"
-        "2. **Tailor to skill level.** Beginners need simple, well-commented "
-        "examples. Experts want concise, idiomatic code showing advanced patterns.\n"
-        "3. **Choose the right scale:**\n"
-        "   - Up to 5 SHORT examples (5-15 lines each) for topics with many "
-        "small concepts\n"
-        "   - 2-3 MEDIUM examples (15-40 lines each) for topics that need "
-        "more context\n"
-        "   - 1 LARGE example (40-100 lines) for topics best shown as a "
-        "complete program\n"
-        "   - Mix scales if appropriate.\n"
-        "4. **Don't repeat the response.** Examples should ADD value beyond "
-        "what the written response already covers.\n"
-        "5. **Return an empty list** if the topic doesn't benefit from code "
-        "examples.\n"
-        "6. **Pick the right language.** Use the language most relevant to "
-        "the query AND the user's stack. Only fall back to Python if "
-        "language-agnostic and no user tech context is available.\n\n"
-        "## Ordering (CRITICAL)\n\n"
-        "Order examples to progressively develop the reader's understanding "
-        "of the concept. Start with the simplest, most foundational example "
-        "that establishes core concepts. Each subsequent example should build "
-        "on the previous ones — introducing new complexity, combining ideas, "
-        "or showing more advanced usage patterns. The final example should "
-        "represent the most complete or sophisticated application of the "
-        "concept. Think of it as a mini-tutorial where each example is a "
-        "stepping stone.\n\n"
-        "## Instructions field (CRITICAL)\n\n"
-        "The `instructions` field is the primary input for the code writer "
-        "model, which has NO access to the conversation history. It must "
-        "be self-contained and include:\n"
-        "- The goal of the example and what it should accomplish\n"
-        "- What concepts it needs to cover and demonstrate\n"
-        "- The skill level of the reader\n"
-        "- The language to use and any specific patterns or approaches\n"
-        "- Enough context that the code writer can produce correct, "
-        "relevant code without any other information\n\n"
-        "Return structured output only."
-    ),
-)
-
-
-# --- Experimental single example writer ---
-
-_single_example_agent = Agent(
-    output_type=str,
-    instructions=(
-        "You write a single, practical code example. You will receive "
-        "instructions describing what to write.\n\n"
-        "## Before writing\n\n"
-        "Consider what you're being asked to do. Think carefully about "
-        "what concepts need to be covered and write code that actually "
-        "does what's asked — not a toy stub, but a real example that "
-        "demonstrates the concept in action.\n\n"
-        "## Output format\n\n"
-        "Write your output in this exact format:\n\n"
-        "```language\ncode here\n```\n\n"
-        "A 1-2 sentence explanation of what the code does.\n\n"
-        "Rules:\n"
-        "- The code must be complete and runnable\n"
-        "- Use realistic variable names and scenarios\n"
-        "- Include comments where helpful for understanding\n"
-        "- The explanation should be 1-2 sentences\n"
-        "- Return ONLY the code block and explanation, nothing else"
-    ),
-)
-
-
-# --- Experimental pipeline orchestrator ---
-
-
-async def run_experimental_pipeline(
-    query: str,
-    deps: ResearchDeps,
-    date_context: str,
-    emit: EmitFn,
-    user_profile: str = "",
-) -> tuple[ResearchResult, list[dict], RunUsage, list[dict], list[dict], list[dict], ExpMetaQueryPlan, str, str, dict, list[dict]]:
-    """History-threaded experimental research pipeline.
-
-    Threads conversation history through sequential stages:
-    1. Meta analysis (name, skill level, topic)
-    2. Agentic planner with search + source_readable tools
-    3. Post-planner content gathering (video metadata, uncached source reads)
-    4. Answer writer (streaming)
-    5. Example plan
-    6. Parallel example generation (streaming)
-
-    Returns (result, tool_log, total_usage, youtube_videos, resources, code_examples, meta_plan, planner_reasoning, meta_slug, planner_output, example_plan).
-    """
-    from pydantic_ai import AgentRunResultEvent
-    from pydantic_ai.messages import (
-        FunctionToolCallEvent,
-        FunctionToolResultEvent,
-        ModelRequest,
-        PartDeltaEvent,
-        PartStartEvent,
-        TextPart,
-        TextPartDelta,
-        UserPromptPart,
-    )
-
-    tool_log: list[dict] = []
-    total_usage = RunUsage()
-    youtube_videos: list[dict] = []
-    resources: list[dict] = []
-    code_examples: list[dict] = []
-    example_descriptions: list = []
-
-    # ------------------------------------------------------------------
-    # Step 1 — Meta analysis
-    # ------------------------------------------------------------------
-    await emit("status", stage="planning", message="Analyzing query...")
-
-    meta_query_result = await _meta_query_agent.run(
-        f"{date_context}\n\n{query}", model=MODEL,
-    )
-    plan = meta_query_result.output
-    plan.name = plan.name[:200]
-    total_usage.incr(meta_query_result.usage())
-
-    # Generate slug for URL and emit session meta immediately
-    meta_slug = make_slug(plan.name) if plan.name else ""
-    await emit(
-        "session_meta",
-        name=plan.name,
-        slug=meta_slug,
-        skill_level=plan.skill_level,
-        topic=plan.topic,
-    )
-
-    # ------------------------------------------------------------------
-    # Step 2 — Agentic planner (search + source_readable tools)
-    # ------------------------------------------------------------------
-    await emit("status", stage="planning_resources", message="Researching and planning article...")
-
-    history = list(meta_query_result.all_messages())
-    # Inject user profile as background context — the planner should use it
-    # to subtly calibrate depth/focus but never reference it explicitly.
-    context_parts: list[str] = [date_context]
-    if user_profile:
-        context_parts.append(
-            f"[INTERNAL CONTEXT — do not mention or reference this directly]\n"
-            f"The user's technology stack and background:\n\n{user_profile}\n\n"
-            f"Use this to:\n"
-            f"- Search for resources in their ecosystem (Python docs, not "
-            f".NET docs; React tutorials, not Angular tutorials)\n"
-            f"- Find videos that use their stack (Python videos for Python "
-            f"developers, etc.)\n"
-            f"- Calibrate depth — advanced sources for experienced users, "
-            f"beginner-friendly for newcomers\n\n"
-            f"Do not mention the user's profile, history, or that you have "
-            f"any prior knowledge of them."
-        )
-    history.append(ModelRequest(parts=[UserPromptPart(content="\n\n".join(context_parts))]))
-
-    planner_result_data: PlannerOutput | None = None
-    planner_reasoning_chunks: list[str] = []
-
-    async for event in _planner_agent.run_stream_events(
-        "Research the user's question. Search for the best sources, verify "
-        "them with source_readable, find YouTube videos, and plan the "
-        "key points the article should cover.",
-        message_history=history,
-        deps=deps,
-        model=CODE_EXAMPLES_MODEL,
-    ):
-        if isinstance(event, FunctionToolCallEvent):
-            args = event.part.args
-            tool_input = args if isinstance(args, dict) else {"query": str(args)}
-            await emit("tool_use", tool=event.part.tool_name, input=tool_input, status="running")
-            tool_log.append({"tool": event.part.tool_name, "input": tool_input, "status": "running"})
-
-        elif isinstance(event, FunctionToolResultEvent):
-            raw_content = str(event.result.content)[:5120]
-            tool_name = event.result.tool_name
-            display_content = raw_content
-            await emit("tool_result", tool=tool_name, status="complete", content=display_content)
-            for entry in reversed(tool_log):
-                if entry.get("tool") == tool_name and entry.get("status") == "running":
-                    entry["status"] = "complete"
-                    entry["content"] = display_content
-                    break
-
-        elif isinstance(event, PartDeltaEvent):
-            if isinstance(event.delta, TextPartDelta):
-                planner_reasoning_chunks.append(event.delta.content_delta)
-
-        elif isinstance(event, PartStartEvent):
-            if isinstance(event.part, TextPart) and event.part.content:
-                planner_reasoning_chunks.append(event.part.content)
-
-        elif isinstance(event, AgentRunResultEvent):
-            planner_result_data = event.result.output
-            total_usage.incr(event.result.usage())
-
-    if planner_result_data is None:
-        raise RuntimeError("Planner agent completed without producing a result")
-
-    planner_messages = list(event.result.all_messages())  # type: ignore[union-attr]
-
-    # ------------------------------------------------------------------
-    # Step 2b — Validate planner URLs, retry for any hallucinated ones
-    # ------------------------------------------------------------------
-    invalid_resource_urls = [
-        r for r in planner_result_data.resources
-        if r.url not in deps.seen_urls
-    ]
-    if invalid_resource_urls:
-        # Remove invalid resources from the result
-        valid_resources = [
-            r for r in planner_result_data.resources
-            if r.url in deps.seen_urls
-        ]
-        invalid_labels = [f"- {r.title} ({r.url})" for r in invalid_resource_urls]
-        retry_prompt = (
-            f"The following {len(invalid_resource_urls)} resource URL(s) were "
-            "NOT from your search results and have been removed:\n"
-            + "\n".join(invalid_labels)
-            + f"\n\nYou need to find {len(invalid_resource_urls)} replacement(s) "
-            "using `search` and `source_readable`. Only return URLs that come "
-            "from search results."
-        )
-        await emit("status", stage="planning", message="Replacing invalid URLs...")
-
-        # Reset search limits for the retry turn
-        deps.search_count = max(0, deps.search_count - 1)
-
-        retry_result_data: PlannerOutput | None = None
-        async for event in _planner_agent.run_stream_events(
-            retry_prompt,
-            message_history=planner_messages,
-            deps=deps,
-            model=CODE_EXAMPLES_MODEL,
-        ):
-            if isinstance(event, FunctionToolCallEvent):
-                args = event.part.args
-                tool_input = args if isinstance(args, dict) else {"query": str(args)}
-                await emit("tool_use", tool=event.part.tool_name, input=tool_input, status="running")
-                tool_log.append({"tool": event.part.tool_name, "input": tool_input, "status": "running"})
-            elif isinstance(event, FunctionToolResultEvent):
-                raw_content = str(event.result.content)[:5120]
-                tool_name = event.result.tool_name
-                await emit("tool_result", tool=tool_name, status="complete", content=raw_content)
-                for entry in reversed(tool_log):
-                    if entry.get("tool") == tool_name and entry.get("status") == "running":
-                        entry["status"] = "complete"
-                        entry["content"] = raw_content
-                        break
-            elif isinstance(event, AgentRunResultEvent):
-                retry_result_data = event.result.output
-                total_usage.incr(event.result.usage())
-
-        if retry_result_data and retry_result_data.resources:
-            # Only take replacement resources that are actually from search results
-            new_valid = [r for r in retry_result_data.resources if r.url in deps.seen_urls]
-            valid_resources.extend(new_valid[:len(invalid_resource_urls)])
-
-        planner_result_data.resources = valid_resources[:5]
-        planner_messages = list(event.result.all_messages())  # type: ignore[union-attr]
-
-    # Also filter YouTube video IDs from non-search URLs
-    if planner_result_data.youtube_video_ids:
-        # YouTube IDs are extracted from URLs — validate by checking if any seen URL contains the ID
-        valid_video_ids = []
-        for vid_id in planner_result_data.youtube_video_ids:
-            if any(vid_id in url for url in deps.seen_urls):
-                valid_video_ids.append(vid_id)
-        planner_result_data.youtube_video_ids = valid_video_ids[:4]
-
-    # ------------------------------------------------------------------
-    # Step 3 — Post-planner: gather content for the answer writer
-    # ------------------------------------------------------------------
-
-    # Fetch full video metadata (title, channel, thumbnail, duration) from YouTube API
-    if planner_result_data.youtube_video_ids:
-        video_ids = planner_result_data.youtube_video_ids[:4]
-        youtube_videos = await tools.youtube_video_details(deps.http_client, video_ids)
-        youtube_videos.sort(key=_video_sort_key)
-        await emit("youtube_videos", videos=youtube_videos)
-
-    # Enrich resources with OG metadata (images, site names, etc.)
-    if planner_result_data.resources:
-        resources = [r.model_dump() for r in planner_result_data.resources]
-        try:
-            og_tasks = [
-                tools.fetch_og_metadata(deps.http_client, r["url"])
-                for r in resources
-            ]
-            og_results = await asyncio.gather(*og_tasks, return_exceptions=True)
-            for r, og in zip(resources, og_results):
-                if isinstance(og, dict):
-                    if og.get("og_image"):
-                        r["og_image"] = og["og_image"]
-                    if og.get("og_site_name") and not r.get("site_name"):
-                        r["site_name"] = og["og_site_name"]
-                    if og.get("favicon"):
-                        r["favicon"] = og["favicon"]
-                if not r.get("site_name"):
-                    from urllib.parse import urlparse
-                    r["site_name"] = urlparse(r.get("url", "")).netloc.replace("www.", "")
-        except Exception:
-            logger.exception("Failed to fetch OG metadata for resources")
-        resources.sort(key=_resource_sort_key)
-        await emit("resources", resources=resources)
-
-    # Read any resource URLs not already in the source cache
-    uncached_urls = [
-        (r.url, r.title)
-        for r in planner_result_data.resources
-        if r.url not in deps.source_cache
-    ]
-    if uncached_urls:
-        await emit("status", stage="reading", message=f"Reading {len(uncached_urls)} uncached sources...")
-
-        async def _read_uncached(url: str, title: str) -> None:
-            await deps.read_rate_limiter.wait_if_needed(url)
-            page = await tools.jina_read(deps.http_client, url)
-            if "error" not in page and page.get("content"):
-                deps.source_cache[url] = page
-
-        await asyncio.gather(*(_read_uncached(url, title) for url, title in uncached_urls))
-
-    # Build source content for injection into answer writer history
-    source_content_parts = []
-    for r in planner_result_data.resources:
-        cached = deps.source_cache.get(r.url)
-        if cached:
-            content = cached.get("content", "")[:4000]
-            source_content_parts.append(
-                f"### Source: [{r.title}]({r.url})\n{content}"
-            )
-
-    video_summary = ""
-    if youtube_videos:
-        video_lines = [
-            f"- [{v.get('title', '')}](https://youtube.com/watch?v={v.get('video_id', '')}) "
-            f"by {v.get('channel', '')}"
-            for v in youtube_videos
-        ]
-        video_summary = "### YouTube Videos\n" + "\n".join(video_lines)
-
-    source_context = "## Source Contents\n\n" + "\n\n".join(source_content_parts)
-    if video_summary:
-        source_context += "\n\n" + video_summary
-
-    planner_messages.append(ModelRequest(parts=[UserPromptPart(content=source_context)]))
-
-    # ------------------------------------------------------------------
-    # Step 4 — Answer writer (streaming)
-    # ------------------------------------------------------------------
-    await emit("status", stage="synthesizing", message="Writing answer...")
-
-    result_data: ResearchResult | None = None
-    answer_messages = None
-
-    async for event in _answer_agent.run_stream_events(
-        "Write the article based on the planned points. Use the research "
-        "context from the conversation history.",
-        message_history=planner_messages,
-        deps=deps,
-        model=MODEL,
-    ):
-        if isinstance(event, FunctionToolCallEvent):
-            args = event.part.args
-            tool_input = args if isinstance(args, dict) else {"url": str(args)}
-            await emit("tool_use", tool=event.part.tool_name, input=tool_input, status="running")
-            tool_log.append({"tool": event.part.tool_name, "input": tool_input, "status": "running"})
-
-        elif isinstance(event, FunctionToolResultEvent):
-            raw_content = str(event.result.content)[:5120]
-            url = ""
-            for entry in reversed(tool_log):
-                if entry.get("tool") == event.result.tool_name and entry.get("status") == "running":
-                    url = entry.get("input", {}).get("url", "")
-                    break
-            if raw_content.startswith("Error reading"):
-                display_content = raw_content
-            elif raw_content == "Page had no readable content.":
-                display_content = raw_content
-            else:
-                display_content = f"Read {len(raw_content)} chars from {url}" if url else f"Read {len(raw_content)} chars"
-            await emit("tool_result", tool=event.result.tool_name, status="complete", content=display_content)
-            for entry in reversed(tool_log):
-                if entry.get("tool") == event.result.tool_name and entry.get("status") == "running":
-                    entry["status"] = "complete"
-                    entry["content"] = display_content
-                    break
-
-        elif isinstance(event, PartStartEvent):
-            if isinstance(event.part, TextPart) and event.part.content:
-                await emit("response_chunk", delta=event.part.content)
-
-        elif isinstance(event, PartDeltaEvent):
-            if isinstance(event.delta, TextPartDelta):
-                await emit("response_chunk", delta=event.delta.content_delta)
-
-        elif isinstance(event, AgentRunResultEvent):
-            result_data = event.result.output
-            answer_messages = list(event.result.all_messages())
-            total_usage.incr(event.result.usage())
-
-    if result_data is None:
-        raise RuntimeError("Answer writer completed without producing a result")
-
-    # ------------------------------------------------------------------
-    # Step 6 — Example plan
-    # ------------------------------------------------------------------
-    if plan.topic != "other" and answer_messages:
-        try:
-            example_prompt = "Plan code examples for this response."
-            if user_profile:
-                example_prompt += (
-                    "\n\n[INTERNAL — do not mention this context]\n"
-                    "The user's technology profile. You MUST use this to "
-                    "pick languages, frameworks, and libraries for your "
-                    "examples. The examples should feel familiar to the "
-                    "user — use their tools, their patterns, their stack. "
-                    "For example: if they use Python + pytest, write Python "
-                    "examples with pytest tests. If they use TypeScript + "
-                    "React, write TypeScript/React examples.\n\n"
-                    f"{user_profile}"
-                )
-            example_plan_result = await _example_plan_agent.run(
-                example_prompt,
-                message_history=answer_messages,
-                model=MODEL,
-            )
-            total_usage.incr(example_plan_result.usage())
-            example_descriptions = example_plan_result.output.examples
-
-            # ------------------------------------------------------------------
-            # Step 7 — Parallel example generation (streaming)
-            # ------------------------------------------------------------------
-            if example_descriptions:
-                await emit("code_examples_status", status="generating")
-
-                async def _gen_example(idx: int, desc: ExampleDescription) -> dict | None:
-                    from google.genai.types import ThinkingLevel
-
-                    try:
-                        prompt = (
-                            f"## Example to Write\n"
-                            f"Title: {desc.title}\n"
-                            f"Language: {desc.language}\n"
-                            f"Scale: {desc.scale}\n\n"
-                            f"## Instructions\n{desc.instructions}"
-                        )
-                        text_chunks: list[str] = []
-
-                        async for ev in _single_example_agent.run_stream_events(
-                            prompt,
-                            model=CODE_EXAMPLES_MODEL,
-                            model_settings={
-                                "google_thinking_config": {
-                                    "thinking_level": ThinkingLevel.MEDIUM,
-                                },
-                            },
-                        ):
-                            if isinstance(ev, PartStartEvent):
-                                if isinstance(ev.part, TextPart) and ev.part.content:
-                                    text_chunks.append(ev.part.content)
-                                    await emit(
-                                        "code_example_chunk",
-                                        index=idx,
-                                        delta=ev.part.content,
-                                    )
-                            elif isinstance(ev, PartDeltaEvent):
-                                if isinstance(ev.delta, TextPartDelta):
-                                    text_chunks.append(ev.delta.content_delta)
-                                    await emit(
-                                        "code_example_chunk",
-                                        index=idx,
-                                        delta=ev.delta.content_delta,
-                                    )
-                            elif isinstance(ev, AgentRunResultEvent):
-                                total_usage.incr(ev.result.usage())
-
-                        full_text = "".join(text_chunks)
-                        # Parse the streamed text into structured example data
-                        example_data = _parse_example_text(
-                            full_text, desc.title, desc.language,
-                        )
-                        await emit(
-                            "code_example_complete",
-                            index=idx,
-                            example=example_data,
-                        )
-                        return example_data
-                    except Exception as exc:
-                        logger.exception(
-                            "Failed to generate example %d: %s", idx, exc,
-                        )
-                        return None
-
-                example_results = await asyncio.gather(
-                    *[_gen_example(i, desc) for i, desc in enumerate(example_descriptions)],
-                )
-                code_examples = [ex for ex in example_results if ex is not None]
-                await emit("code_examples_status", status="done")
-
-        except Exception as exc:
-            logger.exception("Example planning/generation failed: %s", exc)
-            await emit("code_examples_status", status="done")
-
-    planner_reasoning = "".join(planner_reasoning_chunks)
-    planner_output = planner_result_data.model_dump() if planner_result_data else {}
-    example_plan_output = [desc.model_dump() for desc in example_descriptions] if example_descriptions else []
-    return result_data, tool_log, total_usage, youtube_videos, resources, code_examples, plan, planner_reasoning, meta_slug, planner_output, example_plan_output
-
-
-def _parse_example_text(text: str, fallback_title: str, fallback_lang: str) -> dict:
-    """Parse streamed example text into structured example data.
-
-    Expected format:
-    ```language
-    code
-    ```
-
-    explanation
-    """
-    import re
-
-    code = ""
-    language = fallback_lang
-    explanation = ""
-
-    # Extract code block
-    code_match = re.search(r"```(\w*)\n(.*?)```", text, re.DOTALL)
-    if code_match:
-        if code_match.group(1):
-            language = code_match.group(1)
-        code = code_match.group(2).strip()
-        # Everything after the code block is the explanation
-        after_code = text[code_match.end():].strip()
-        if after_code:
-            # Strip any <explanation> tags the model may have output
-            explanation = re.sub(r"</?explanation>", "", after_code).strip()
-    else:
-        # No code block found — treat the whole text as code
-        code = text.strip()
-
-    return {
-        "title": fallback_title,
-        "language": language,
-        "code": code,
-        "explanation": explanation,
-    }
-
-
-# ============================================================================
-# User profiling — background task after each query
-# ============================================================================
 
 
 class UserProfileTechnology(BaseModel):
@@ -2134,10 +834,7 @@ async def generate_user_profile(
     existing_technologies: list[dict] | None = None,
     recent_queries: list[str] | None = None,
 ) -> tuple[UserProfileOutput, RunUsage]:
-    """Generate/update a user profile based on their latest query.
-
-    Returns (UserProfileOutput, usage).
-    """
+    """Generate/update a user profile based on their latest query."""
     prompt = f"Existing profile ({query_count} previous queries):\n"
     if existing_profile:
         prompt += existing_profile

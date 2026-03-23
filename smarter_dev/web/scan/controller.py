@@ -91,9 +91,9 @@ class ScanController(Controller):
 
         user_id = request.session.get("user_id", "")
         tz = data.get("tz", "").strip() or None
-        pipeline_mode = data.get("mode", "lite").strip()
-        if pipeline_mode not in ("lite", "experimental"):
-            pipeline_mode = "lite"
+        pipeline_mode = data.get("mode", "auto").strip()
+        if pipeline_mode not in ("auto", "quick_answer", "quick_research", "standard", "deep"):
+            pipeline_mode = "auto"
 
         # Rate limit: 25 lite researches per week per user (admins exempt)
         user_perms = await get_user_permissions(db_session, user_id)

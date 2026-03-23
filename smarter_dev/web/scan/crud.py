@@ -26,7 +26,7 @@ class ResearchSessionOperations:
         guild_id: str | None = None,
         channel_id: str | None = None,
         context: dict | None = None,
-        pipeline_mode: str = "lite",
+        pipeline_mode: str = "auto",
     ) -> ResearchSession:
         research = ResearchSession(
             query=query,
