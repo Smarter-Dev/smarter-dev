@@ -34,21 +34,173 @@
         <option value="one_off">One-off</option>
     </select>
 
-    <label for="input_generator_script">Input Generator Script</label>
-    <input type="file" name="input_generator_script" id="input_generator_script" accept=".py" />
-    <small class="sk-text-muted">Python script that generates quest input and expected result.</small>
+    <div class="sk-drop-zone" data-input="input_generator_script">
+        <input type="file" name="input_generator_script" id="input_generator_script" accept=".py" />
+        <div class="sk-drop-zone-content">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span class="sk-drop-zone-label">Input Generator Script</span>
+            <small>Drop a .py file here or click to browse</small>
+        </div>
+        <div class="sk-drop-zone-file" hidden>
+            <code class="sk-drop-zone-filename"></code>
+            <button type="button" class="sk-drop-zone-remove" aria-label="Remove">&times;</button>
+        </div>
+    </div>
 
-    <label for="solution_validator_script">Solution Validator Script</label>
-    <input type="file" name="solution_validator_script" id="solution_validator_script" accept=".py" />
-    <small class="sk-text-muted">Optional custom validation logic for submissions.</small>
+    <div class="sk-drop-zone" data-input="solution_validator_script">
+        <input type="file" name="solution_validator_script" id="solution_validator_script" accept=".py" />
+        <div class="sk-drop-zone-content">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <span class="sk-drop-zone-label">Solution Validator Script</span>
+            <small>Optional &mdash; drop a .py file or click to browse</small>
+        </div>
+        <div class="sk-drop-zone-file" hidden>
+            <code class="sk-drop-zone-filename"></code>
+            <button type="button" class="sk-drop-zone-remove" aria-label="Remove">&times;</button>
+        </div>
+    </div>
 
-    <label for="python_script">Reference Python Script</label>
-    <input type="file" name="python_script" id="python_script" accept=".py" />
-    <small class="sk-text-muted">Optional reference implementation.</small>
+    <div class="sk-drop-zone" data-input="python_script">
+        <input type="file" name="python_script" id="python_script" accept=".py" />
+        <div class="sk-drop-zone-content">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            <span class="sk-drop-zone-label">Reference Python Script</span>
+            <small>Optional &mdash; drop a .py file or click to browse</small>
+        </div>
+        <div class="sk-drop-zone-file" hidden>
+            <code class="sk-drop-zone-filename"></code>
+            <button type="button" class="sk-drop-zone-remove" aria-label="Remove">&times;</button>
+        </div>
+    </div>
 
     <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
         <button type="submit">Create Quest</button>
         <a href="/admin/quests" role="button" class="sk-btn-outline">Cancel</a>
     </div>
 </form>
+
+<style nonce="{{ csp_nonce() }}">
+.sk-drop-zone {
+    position: relative;
+    border: 2px dashed var(--sk-color-border, rgba(255,255,255,.12));
+    border-radius: .5rem;
+    padding: 1.25rem;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+    margin-bottom: 1rem;
+}
+.sk-drop-zone:hover,
+.sk-drop-zone.dragover {
+    border-color: var(--sk-color-accent, #34d399);
+    background: rgba(52, 211, 153, .04);
+}
+.sk-drop-zone.has-file {
+    border-style: solid;
+    border-color: var(--sk-color-accent, #34d399);
+    background: rgba(52, 211, 153, .04);
+}
+.sk-drop-zone input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+}
+.sk-drop-zone-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: .35rem;
+    color: var(--sk-color-muted, rgba(255,255,255,.45));
+    pointer-events: none;
+}
+.sk-drop-zone-content svg {
+    opacity: .5;
+    margin-bottom: .25rem;
+}
+.sk-drop-zone-label {
+    font-weight: 500;
+    color: var(--sk-color-text, #fff);
+    font-size: .95rem;
+}
+.sk-drop-zone-content small {
+    font-size: .8rem;
+}
+.sk-drop-zone-file {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .75rem;
+    pointer-events: none;
+}
+.sk-drop-zone-file[hidden] { display: none; }
+.sk-drop-zone-filename {
+    font-size: .9rem;
+    color: var(--sk-color-accent, #34d399);
+}
+.sk-drop-zone-remove {
+    pointer-events: auto;
+    background: none;
+    border: none;
+    color: var(--sk-color-muted, rgba(255,255,255,.45));
+    font-size: 1.25rem;
+    cursor: pointer;
+    padding: 0 .25rem;
+    line-height: 1;
+}
+.sk-drop-zone-remove:hover {
+    color: var(--sk-color-danger, #f55);
+}
+</style>
+
+<script nonce="{{ csp_nonce() }}">
+document.querySelectorAll('.sk-drop-zone').forEach(zone => {
+    const input = zone.querySelector('input[type="file"]');
+    const content = zone.querySelector('.sk-drop-zone-content');
+    const fileDisplay = zone.querySelector('.sk-drop-zone-file');
+    const filename = zone.querySelector('.sk-drop-zone-filename');
+    const removeBtn = zone.querySelector('.sk-drop-zone-remove');
+
+    function showFile(name) {
+        content.hidden = true;
+        fileDisplay.hidden = false;
+        filename.textContent = name;
+        zone.classList.add('has-file');
+    }
+
+    function clearFile() {
+        input.value = '';
+        content.hidden = false;
+        fileDisplay.hidden = true;
+        filename.textContent = '';
+        zone.classList.remove('has-file');
+    }
+
+    input.addEventListener('change', () => {
+        if (input.files.length) showFile(input.files[0].name);
+        else clearFile();
+    });
+
+    removeBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        clearFile();
+    });
+
+    zone.addEventListener('dragover', e => {
+        e.preventDefault();
+        zone.classList.add('dragover');
+    });
+    zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+    zone.addEventListener('drop', e => {
+        e.preventDefault();
+        zone.classList.remove('dragover');
+        if (e.dataTransfer.files.length) {
+            input.files = e.dataTransfer.files;
+            showFile(e.dataTransfer.files[0].name);
+        }
+    });
+});
+</script>
 {% endblock %}
