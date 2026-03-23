@@ -202,12 +202,14 @@ async def _enrich_youtube(
     Filters out short videos (<5min), sorts by quality tier.
     """
     if not research_output.youtube_urls:
+        logger.info("YouTube enrichment: no youtube_urls in research output")
         return []
 
     try:
         # Extract video IDs from URLs
         video_ids = []
         for yt in research_output.youtube_urls:
+            logger.info("YouTube enrichment: processing URL %s", yt.url)
             parsed = urlparse(yt.url)
             if "youtube.com" in parsed.netloc:
                 from urllib.parse import parse_qs
@@ -220,6 +222,7 @@ async def _enrich_youtube(
                 if vid:
                     video_ids.append(vid)
 
+        logger.info("YouTube enrichment: extracted %d video IDs from %d URLs", len(video_ids), len(research_output.youtube_urls))
         if not video_ids:
             return []
 
