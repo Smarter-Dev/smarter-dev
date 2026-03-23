@@ -52,7 +52,22 @@ _patch_provider(
     ),
 )
 
-# GPT-5.4 — not yet in genai-prices
+# GPT-5.4 Nano — not yet in genai-prices
+_patch_provider(
+    "openai",
+    types.ModelInfo(
+        id="gpt-5.4-nano",
+        match=types.ClauseStartsWith(starts_with="gpt-5.4-nano"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("0.20"),
+            output_mtok=Decimal("1.25"),
+            cache_read_mtok=Decimal("0.02"),
+        ),
+    ),
+)
+
+# GPT-5.4 (standard) — not yet in genai-prices
+# NOTE: must come after gpt-5.4-nano so the more specific match wins
 _patch_provider(
     "openai",
     types.ModelInfo(

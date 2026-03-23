@@ -139,6 +139,16 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: youtube-api-key
+                  - name: GEMINI_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: gemini-api-key
+                  - name: OPENAI_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: openai-api-key
                   - name: GITHUB_CLIENT_ID
                     valueFrom:
                       secretKeyRef:
