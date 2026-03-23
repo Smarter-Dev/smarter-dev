@@ -249,7 +249,7 @@ class ResearchOutput(BaseModel):
     sources: list[ResearchSource] = Field(description="Researched sources with extracted content")
     key_insights: list[str] = Field(description="Critical findings and conclusions")
     outline: list[str] = Field(description="Structural plan for the synthesis response")
-    youtube_urls: list[YouTubeResult] = Field(default_factory=list, description="YouTube videos found during research")
+    youtube_urls: list[YouTubeResult] = Field(default_factory=list, description="YouTube videos found via youtube_search tool — you MUST include any relevant videos returned by the youtube_search tool here")
     resources: list[ResourceLink] = Field(default_factory=list, description="Curated links for sidebar display")
 
 
@@ -524,7 +524,10 @@ async def run_research(
         "2. You MUST use the `read` tool on your most relevant search results "
         "before producing output. Search snippets are not sufficient — read the "
         "actual pages to extract detailed, accurate information for your sources.\n"
-        "3. For Standard and Deep modes, read at least 3 sources."
+        "3. For Standard and Deep modes, read at least 3 sources.\n"
+        "4. If you use the `youtube_search` tool, you MUST include the relevant "
+        "videos in the `youtube_urls` field of your output. Copy the URL and title "
+        "from the search results into YouTubeResult objects."
     )
 
     async for event in _research_agent.run_stream_events(
