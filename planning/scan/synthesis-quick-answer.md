@@ -36,14 +36,9 @@ One focused, copy-pasteable code block. Requirements:
 
 If the query doesn't warrant code, skip this entirely. Don't manufacture a code example for questions like "what port does Redis use."
 
-### 3. Sources
-1–3 links at the end:
-- [Title](URL)
+## URL and Source Rules
 
-No descriptions. The link titles are enough. The user will click if they want more.
-
-### 4. YouTube (if present)
-If provided, include as one additional link in the sources list. No special formatting.
+**Do NOT fabricate URLs.** You may ONLY cite URLs that appear in the Sources section provided to you. Do not invent, guess, or recall URLs from memory. Cite sources inline using `[[url]]` format only. Do NOT add a Sources, Resources, or References section at the end — all citations go inline.
 
 ## Tailoring
 

@@ -385,7 +385,9 @@ For multiple citations, use separate brackets: \
 This feature was added in v3 [[https://blog.example.com/v3]] [[https://github.com/example/repo/pull/42]].
 
 Do NOT number sources. Do NOT add a Sources section at the end. \
-Every citation must be a real URL from your research — never fabricate URLs. \
+You may ONLY cite URLs that appear in the Sources section provided to you. \
+Never fabricate, guess, or recall URLs from memory — if a URL wasn't in \
+your research input, it doesn't exist. \
 Cite the specific page you found the information on, not a homepage.
 
 Avoid unnecessary date anchoring ("as of 2026", "the latest version") \
@@ -512,8 +514,16 @@ async def run_research(
     usage = RunUsage()
     await emit("status", stage="researching")
 
+    research_prompt = (
+        f"Research this query:\n\n{query}\n\n"
+        "IMPORTANT: You MUST use the `read` tool on your most relevant search results "
+        "before producing your final output. Search snippets alone are not sufficient — "
+        "you need to read the actual page content to extract detailed, accurate information "
+        "for your sources. For Standard and Deep modes, read at least 3 sources."
+    )
+
     async for event in _research_agent.run_stream_events(
-        f"Research this query:\n\n{query}",
+        research_prompt,
         deps=deps,
         model=mode_config.research_model,
         instructions=system_prompt,

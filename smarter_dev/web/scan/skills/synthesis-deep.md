@@ -112,20 +112,11 @@ Concrete, actionable guidance on what to do after reading this:
 - What questions to answer internally (team skills, infrastructure constraints)
 - What to read for deeper understanding of specific aspects
 
-### 9. Resources
+## URL and Source Rules
 
-Organized and annotated:
+**Do NOT fabricate URLs.** You may ONLY cite URLs that appear in the Sources section provided to you. Do not invent, guess, or recall URLs from memory. If a source wasn't provided by the researcher, it doesn't exist.
 
-**Essential Reading**
-- [Title](URL) — 2–3 sentence annotation explaining what it covers and why it's worth reading. Note the author's credibility where relevant.
-
-**Deep Dives**
-- [Title](URL) — 2–3 sentence annotation for sources that go deeper on specific aspects.
-
-**Video Resources**
-- [Title](URL) by Speaker/Channel (Duration) — What it covers and where to focus. Provide guidance like "The section starting around 15 minutes covers the operational challenges discussed above" or "Best overview of the CQRS pattern for developers new to the concept."
-
-**Total: 6–10 curated resources.** Every link should have a clear reason to be included and the annotation should tell the user whether it's worth their time.
+**Do NOT add a Resources, Sources, or References section.** Resources and YouTube videos are handled separately — your job is to write the analysis and cite sources inline using `[[url]]` format only.
 
 ## Tailoring to User Profile
 

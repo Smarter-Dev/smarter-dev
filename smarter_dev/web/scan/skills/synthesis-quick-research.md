@@ -48,14 +48,9 @@ This section is what makes Quick Research worth choosing over Quick Answer. It s
 
 **Do not use a header for this section.** It flows naturally after the answer and code. A line break or paragraph break is enough separation.
 
-### 4. Sources
-2–4 links:
-- [Title](URL) — One short phrase of relevance context (5–8 words)
+## URL and Source Rules
 
-The relevance context is the upgrade from Quick Answer's bare links. It tells the user what they'll find if they click: "Official docs on middleware configuration" or "Common gotchas with CORS in production."
-
-### 5. YouTube (if present)
-If provided, include as a link in the sources with the same brief relevance format.
+**Do NOT fabricate URLs.** You may ONLY cite URLs that appear in the Sources section provided to you. Do not invent, guess, or recall URLs from memory. Cite sources inline using `[[url]]` format only. Do NOT add a Sources, Resources, or References section at the end — all citations go inline.
 
 ## Tailoring
 
