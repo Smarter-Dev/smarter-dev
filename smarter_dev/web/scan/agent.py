@@ -424,12 +424,15 @@ async def search(ctx: RunContext[ResearchDeps], query: str) -> str:
     for r in results:
         deps.seen_urls.add(r["url"])
 
-    # Format as markdown list
+    # Format as markdown list, stripping any HTML from snippets
+    import re
     lines = []
     for i, r in enumerate(results, 1):
-        lines.append(f"{i}. [{r['title']}]({r['url']})")
+        title = re.sub(r"<[^>]+>", "", r.get("title", ""))
+        lines.append(f"{i}. [{title}]({r['url']})")
         if r.get("description"):
-            lines.append(f"   {r['description'][:200]}")
+            desc = re.sub(r"<[^>]+>", "", r["description"][:200])
+            lines.append(f"   {desc}")
     return "\n".join(lines)
 
 
@@ -517,18 +520,38 @@ async def run_research(
     ):
         if isinstance(event, FunctionToolCallEvent):
             args = event.part.args
-            tool_input = args if isinstance(args, dict) else {"query": str(args)}
+            # Normalize args to a clean dict for frontend display
+            if isinstance(args, str):
+                tool_input = {"query": args}
+            elif isinstance(args, dict):
+                tool_input = args
+            else:
+                tool_input = {"input": str(args)}
             tool_log.append({"tool": event.part.tool_name, "input": tool_input, "status": "running"})
             await emit("tool_use", tool=event.part.tool_name, input=tool_input, status="running")
 
         elif isinstance(event, FunctionToolResultEvent):
             raw_content = str(event.result.content)[:5120]
+            # Strip HTML tags from search result snippets
+            import re
+            clean_content = re.sub(r"<[^>]+>", "", raw_content)
+            # Build a human-readable summary for display
+            tool_name = event.result.tool_name
+            url = ""
             for entry in reversed(tool_log):
-                if entry.get("tool") == event.result.tool_name and entry.get("status") == "running":
+                if entry.get("tool") == tool_name and entry.get("status") == "running":
                     entry["status"] = "complete"
-                    entry["content"] = raw_content[:512]
+                    entry["content"] = clean_content[:512]
+                    url = entry.get("input", {}).get("url", "")
                     break
-            await emit("tool_result", tool=event.result.tool_name, status="complete", content=raw_content)
+            if tool_name in ("read", "read_url", "answer_read_url"):
+                if clean_content.startswith("Error") or clean_content.startswith("Failed"):
+                    display = clean_content[:200]
+                else:
+                    display = f"Read {len(clean_content)} chars" + (f" from {url}" if url else "")
+            else:
+                display = clean_content
+            await emit("tool_result", tool=tool_name, status="complete", content=display)
 
         elif isinstance(event, AgentRunResultEvent):
             result_data = event.result.output
