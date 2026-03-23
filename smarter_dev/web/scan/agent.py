@@ -562,7 +562,7 @@ async def run_research(
             for entry in reversed(tool_log):
                 if entry.get("tool") == tool_name and entry.get("status") == "running":
                     entry["status"] = "complete"
-                    entry["content"] = clean_content[:512]
+                    entry["content"] = clean_content
                     inp = entry.get("input", {})
                     query_or_url = inp.get("query", "") or inp.get("url", "")
                     break
