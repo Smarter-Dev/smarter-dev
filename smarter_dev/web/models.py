@@ -3344,3 +3344,161 @@ class ScanServiceUsage(Base):
 
     def __repr__(self) -> str:
         return f"<ScanServiceUsage(task='{self.task_type}', cost={self.cost_usd})>"
+
+
+class ModerationConfig(Base):
+    """Per-guild configuration for AI-powered moderation monitoring.
+
+    When a user mentions a monitored role, the bot reads chat history and uses
+    an AI agent with configured tools to respond according to the guild's
+    moderation instructions.
+    """
+
+    __tablename__ = "moderation_configs"
+
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        primary_key=True,
+        doc="Discord guild (server) snowflake ID",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Whether moderation monitoring is enabled",
+    )
+    monitored_role_ids: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        server_default="[]",
+        doc="List of Discord role ID strings to monitor for mentions",
+    )
+    instructions: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="System prompt / moderation instructions given to the AI agent",
+    )
+    enabled_tools: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=lambda: ["warn"],
+        server_default='["warn"]',
+        doc="List of tool names enabled: warn, timeout, kick, ban",
+    )
+    response_channel_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        doc="Optional channel to post mod summaries (null = respond in same channel)",
+    )
+    context_message_limit: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=25,
+        doc="Number of recent messages to fetch for context",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ModerationConfig(guild_id='{self.guild_id}', active={self.is_active})>"
+
+
+class ModerationAction(Base):
+    """Unified tracking table for all moderation actions.
+
+    Records warns, kicks, bans, unbans, and timeouts regardless of source
+    (AI agent, manual slash command, or Discord audit log detection).
+    """
+
+    __tablename__ = "moderation_actions"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        doc="Discord guild snowflake ID",
+    )
+    target_user_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        doc="Discord user ID of the actioned user",
+    )
+    target_username: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        doc="Username snapshot at action time",
+    )
+    moderator_user_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        doc="Discord user ID of moderator (null for AI actions)",
+    )
+    moderator_username: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        doc="Moderator username snapshot",
+    )
+    action_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        doc="Action type: warn, kick, ban, unban, timeout",
+    )
+    reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Reason for the moderation action",
+    )
+    duration_seconds: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Duration in seconds (for timeouts)",
+    )
+    source: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="ai",
+        server_default="ai",
+        doc="Action source: ai, manual, audit_log",
+    )
+    channel_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        doc="Channel where the trigger occurred",
+    )
+    trigger_message_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        doc="Message ID that triggered AI moderation",
+    )
+    ai_context_summary: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="AI's summary of the situation (AI-initiated actions only)",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        Index("ix_mod_actions_guild_user", "guild_id", "target_user_id"),
+        Index("ix_mod_actions_guild_type", "guild_id", "action_type"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ModerationAction(type='{self.action_type}', target='{self.target_username}', source='{self.source}')>"

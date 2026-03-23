@@ -1,0 +1,85 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Moderation Config - Guild {{ guild_id }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Moderation Config</h1>
+            <p>Guild: {{ guild_id }}</p>
+        </hgroup>
+
+        <form method="post" action="/admin/bot/moderation/{{ guild_id }}">
+            {{ csrf_field() }}
+
+            <div class="sk-panel">
+                <div class="sk-panel-head">General</div>
+                <div class="sk-panel-body" style="display:flex; flex-direction:column; gap:1rem;">
+                    <div>
+                        <label>
+                            <input type="checkbox" name="is_active" value="true" {% if config and config.is_active %}checked{% endif %}>
+                            <strong>Enable moderation monitoring</strong>
+                        </label>
+                    </div>
+
+                    <div>
+                        <label for="context_message_limit"><strong>Context message limit</strong></label><br>
+                        <input type="number" name="context_message_limit" id="context_message_limit"
+                               value="{{ config.context_message_limit if config else 25 }}"
+                               min="5" max="50" style="width:80px; padding:0.4rem 0.6rem;">
+                        <small style="color:var(--sk-text-muted, #888);">Messages to fetch for context (5-50)</small>
+                    </div>
+
+                    <div>
+                        <label for="response_channel_id"><strong>Response channel ID</strong> (optional)</label><br>
+                        <input type="text" name="response_channel_id" id="response_channel_id"
+                               value="{{ config.response_channel_id or '' if config else '' }}"
+                               placeholder="Leave empty to respond in same channel"
+                               style="width:300px; padding:0.4rem 0.6rem;">
+                    </div>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Monitored Roles</div>
+                <div class="sk-panel-body">
+                    <p style="margin-bottom:0.75rem; color:var(--sk-text-muted, #888); font-size:0.9rem;">
+                        Enter Discord role IDs to monitor (one per line). When a user mentions one of these roles, the bot will trigger moderation review.
+                    </p>
+                    <textarea name="monitored_role_ids" rows="4" style="width:100%; max-width:400px; padding:0.5rem; font-family:monospace; font-size:0.85rem;"
+                              placeholder="123456789012345678&#10;987654321098765432">{% if config and config.monitored_role_ids %}{% for role_id in config.monitored_role_ids %}{{ role_id }}{% if not loop.last %}
+{% endif %}{% endfor %}{% endif %}</textarea>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Enabled Tools</div>
+                <div class="sk-panel-body" style="display:flex; gap:1.5rem; flex-wrap:wrap;">
+                    {% set tools = config.enabled_tools if config and config.enabled_tools else ['warn'] %}
+                    <label><input type="checkbox" name="enabled_tools" value="warn" {% if 'warn' in tools %}checked{% endif %}> Warn</label>
+                    <label><input type="checkbox" name="enabled_tools" value="timeout" {% if 'timeout' in tools %}checked{% endif %}> Timeout</label>
+                    <label><input type="checkbox" name="enabled_tools" value="kick" {% if 'kick' in tools %}checked{% endif %}> Kick</label>
+                    <label><input type="checkbox" name="enabled_tools" value="ban" {% if 'ban' in tools %}checked{% endif %}> Ban</label>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Moderation Instructions</div>
+                <div class="sk-panel-body">
+                    <p style="margin-bottom:0.75rem; color:var(--sk-text-muted, #888); font-size:0.9rem;">
+                        These instructions are given to the AI agent as its system prompt. Tell it your server rules, escalation policy, and how to handle different situations.
+                    </p>
+                    <textarea name="instructions" rows="12" style="width:100%; padding:0.5rem; font-size:0.9rem; line-height:1.5;"
+                              placeholder="Example:&#10;- Warn users for mild rule violations (off-topic, minor spam)&#10;- Timeout for 10m on repeated warnings (3+ warns)&#10;- Kick for harassment or hate speech&#10;- Ban for extreme cases (threats, doxxing, NSFW)&#10;- Always explain your reasoning to the channel">{{ config.instructions or '' if config else '' }}</textarea>
+                </div>
+            </div>
+
+            <div style="margin-top:1.5rem;">
+                <button type="submit" class="sk-btn-outline">Save Configuration</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

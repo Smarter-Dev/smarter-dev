@@ -1,0 +1,10 @@
+<nav style="min-width:180px; border-right:1px solid var(--sk-border-color, #e0e0e0); padding-right:1.5rem; margin-right:1.5rem;">
+    <h3 style="font-size:0.85rem; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:1rem; color:var(--sk-text-muted, #888);">Bot Admin</h3>
+    <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:0.25rem;">
+        <li><a href="/admin/bot" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'overview' %} font-weight:bold;{% endif %}">Overview</a></li>
+        {% if guild_id %}
+        <li><a href="/admin/bot/moderation/{{ guild_id }}" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'moderation' %} font-weight:bold;{% endif %}">Moderation Config</a></li>
+        <li><a href="/admin/bot/mod-actions/{{ guild_id }}" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'mod_actions' %} font-weight:bold;{% endif %}">Mod Actions</a></li>
+        {% endif %}
+    </ul>
+</nav>
