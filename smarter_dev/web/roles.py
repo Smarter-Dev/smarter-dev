@@ -40,3 +40,12 @@ register_role(
     display_name="Member",
     description="Community member with basic Scan access",
 )
+
+# ── Quests ───────────────────────────────────────────────────
+
+register_role(
+    "quests-manager",
+    "manage-quests",
+    display_name="Quests Manager",
+    description="Can create, edit, schedule, and delete quests",
+)
