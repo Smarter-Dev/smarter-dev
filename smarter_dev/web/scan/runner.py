@@ -421,6 +421,7 @@ async def run_session_pipeline(
             summary=synthesis_result.summary,
             response=synthesis_result.response,
             sources=[s.model_dump() for s in synthesis_result.sources],
+            research_mode=research_mode,
             duration=round(duration, 2),
         )
 
