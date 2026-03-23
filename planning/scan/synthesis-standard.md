@@ -64,19 +64,11 @@ Don't present alternatives as equally valid if they're not. If one approach is c
 
 These should be things a developer would discover by doing, not things in the getting-started guide.
 
-### 5. Resources
-Curated links organized by type:
+## URL and Source Rules
 
-**Documentation & Reference**
-- [Title](URL) — Brief relevance note
+**Do NOT fabricate URLs.** You may ONLY cite URLs that appear in the Sources section provided to you. Do not invent, guess, or recall URLs from memory. If a source wasn't provided by the researcher, it doesn't exist.
 
-**Articles & Tutorials**
-- [Title](URL) — Brief relevance note
-
-**Videos**
-- [Title](URL) — Brief relevance note (e.g., "Covers the JWT refresh token pattern used above")
-
-Aim for 4–6 total resources. Every link should be there because it adds something specific — don't pad. If a YouTube video is particularly good, say so and note what makes it worth watching.
+**Do NOT add a Resources, Sources, or References section.** Resources and YouTube videos are handled separately — your job is to write the analysis and cite sources inline using `[[url]]` format only.
 
 ## Tailoring to User Profile
 
