@@ -524,33 +524,39 @@ async def run_research(
             if isinstance(args, str):
                 tool_input = {"query": args}
             elif isinstance(args, dict):
-                tool_input = args
+                tool_input = dict(args)
             else:
                 tool_input = {"input": str(args)}
             tool_log.append({"tool": event.part.tool_name, "input": tool_input, "status": "running"})
             await emit("tool_use", tool=event.part.tool_name, input=tool_input, status="running")
 
         elif isinstance(event, FunctionToolResultEvent):
-            raw_content = str(event.result.content)[:5120]
-            # Strip HTML tags from search result snippets
             import re
+            raw_content = str(event.result.content)[:5120]
             clean_content = re.sub(r"<[^>]+>", "", raw_content)
-            # Build a human-readable summary for display
             tool_name = event.result.tool_name
-            url = ""
+
+            # Find the matching tool_log entry and extract context
+            query_or_url = ""
             for entry in reversed(tool_log):
                 if entry.get("tool") == tool_name and entry.get("status") == "running":
                     entry["status"] = "complete"
                     entry["content"] = clean_content[:512]
-                    url = entry.get("input", {}).get("url", "")
+                    inp = entry.get("input", {})
+                    query_or_url = inp.get("query", "") or inp.get("url", "")
                     break
-            if tool_name in ("read", "read_url", "answer_read_url"):
+
+            # Build concise human-readable summary per tool type
+            if tool_name in ("search", "youtube_search"):
+                n_results = clean_content.count("\n[") + clean_content.count("1.")
+                display = f"Found {n_results} results" + (f" for \"{query_or_url[:60]}\"" if query_or_url else "")
+            elif tool_name in ("read", "read_url", "answer_read_url"):
                 if clean_content.startswith("Error") or clean_content.startswith("Failed"):
                     display = clean_content[:200]
                 else:
-                    display = f"Read {len(clean_content)} chars" + (f" from {url}" if url else "")
+                    display = f"Read {len(clean_content):,} chars" + (f" from {query_or_url}" if query_or_url else "")
             else:
-                display = clean_content
+                display = clean_content[:300]
             await emit("tool_result", tool=tool_name, status="complete", content=display)
 
         elif isinstance(event, AgentRunResultEvent):
