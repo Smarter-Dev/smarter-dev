@@ -1120,6 +1120,16 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         bot.load_extensions("smarter_dev.bot.plugins.timeout")
         logger.info("✓ Loaded timeout plugin")
 
+        # Load moderation monitor plugin
+        logger.info("Loading mod monitor plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.mod_monitor")
+        logger.info("✓ Loaded mod monitor plugin")
+
+        # Load warn command plugin
+        logger.info("Loading warn plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.warn")
+        logger.info("✓ Loaded warn plugin")
+
         logger.info("✓ All plugins loaded successfully")
     except Exception as e:
         logger.error(f"Failed to load plugins: {e}")

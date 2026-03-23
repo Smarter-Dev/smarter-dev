@@ -1,0 +1,66 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Bot Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Bot Admin</h1>
+            <p>Configure bot features per guild</p>
+        </hgroup>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Guilds</div>
+            <div class="sk-panel-body">
+                {% if guilds %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Guild ID</th>
+                            <th>Moderation</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for guild in guilds %}
+                        <tr>
+                            <td>{{ guild.guild_id }}</td>
+                            <td>
+                                {% if guild.is_active %}
+                                <span class="sk-pill sk-pill-published">Active</span>
+                                {% else %}
+                                <span class="sk-pill sk-pill-draft">Inactive</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <a href="/admin/bot/moderation/{{ guild.guild_id }}" class="sk-btn-outline sk-btn-small">Configure</a>
+                                <a href="/admin/bot/mod-actions/{{ guild.guild_id }}" class="sk-btn-outline sk-btn-small">Actions</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No guilds have moderation configured yet.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Add Guild</div>
+            <div class="sk-panel-body">
+                <form method="post" action="/admin/bot/add-guild" style="display:flex; gap:0.75rem; align-items:end;">
+                    {{ csrf_field() }}
+                    <div>
+                        <label for="guild_id"><strong>Guild ID</strong></label><br>
+                        <input type="text" name="guild_id" id="guild_id" placeholder="Discord guild snowflake ID" required style="padding:0.4rem 0.6rem;">
+                    </div>
+                    <button type="submit" class="sk-btn-outline sk-btn-small">Add Guild</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

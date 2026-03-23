@@ -36,7 +36,7 @@ services:
   web:
     build:
       context: .
-      dockerfile: Dockerfile.web.slim
+      dockerfile: Dockerfile.web
     container_name: smarter_dev_web
     depends_on:
       postgres:

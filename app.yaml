@@ -48,6 +48,8 @@ controllers:
   - smarter_dev.web.usage_admin:UsageAdminController
   - smarter_dev.web.scan_profiles_admin:ScanProfilesAdminController
   - smarter_dev.web.research_sessions_admin:ResearchSessionsAdminController
+  - smarter_dev.web.bot_admin_skrift:BotAdminController
+  - smarter_dev.web.mod_actions_admin:ModActionsAdminController
 
 # Partials system (SPA navigation)
 partials:

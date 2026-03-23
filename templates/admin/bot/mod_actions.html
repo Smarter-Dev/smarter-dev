@@ -1,0 +1,105 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Mod Actions - Guild {{ guild_id }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Moderation Actions</h1>
+            <p>Guild: {{ guild_id }} — {{ actions|length }} action{{ 's' if actions|length != 1 else '' }}</p>
+        </hgroup>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Filters</div>
+            <div class="sk-panel-body">
+                <form method="get" action="/admin/bot/mod-actions/{{ guild_id }}" style="display:flex; gap:1rem; align-items:end; flex-wrap:wrap;">
+                    <div>
+                        <label for="action_type"><strong>Action Type</strong></label><br>
+                        <select name="action_type" id="action_type">
+                            <option value="">All</option>
+                            <option value="warn" {% if filter_type == 'warn' %}selected{% endif %}>Warn</option>
+                            <option value="timeout" {% if filter_type == 'timeout' %}selected{% endif %}>Timeout</option>
+                            <option value="kick" {% if filter_type == 'kick' %}selected{% endif %}>Kick</option>
+                            <option value="ban" {% if filter_type == 'ban' %}selected{% endif %}>Ban</option>
+                            <option value="unban" {% if filter_type == 'unban' %}selected{% endif %}>Unban</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="user_search"><strong>User ID</strong></label><br>
+                        <input type="text" name="user_id" id="user_search" value="{{ filter_user or '' }}" placeholder="Discord user ID" style="padding:0.4rem 0.6rem;">
+                    </div>
+                    <div>
+                        <button type="submit" class="sk-btn-outline sk-btn-small">Filter</button>
+                        <a href="/admin/bot/mod-actions/{{ guild_id }}" class="sk-btn-outline sk-btn-small">Clear</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        {% if actions %}
+        <table class="sk-admin-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Target</th>
+                    <th>Reason</th>
+                    <th>Source</th>
+                    <th>Moderator</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for action in actions %}
+                <tr>
+                    <td style="white-space:nowrap;">{{ action.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>
+                        {% if action.action_type == 'warn' %}
+                        <span class="sk-pill" style="background:#fff3cd; color:#856404;">warn</span>
+                        {% elif action.action_type == 'timeout' %}
+                        <span class="sk-pill" style="background:#ffe0b2; color:#e65100;">timeout</span>
+                        {% elif action.action_type == 'kick' %}
+                        <span class="sk-pill" style="background:#ffcdd2; color:#c62828;">kick</span>
+                        {% elif action.action_type == 'ban' %}
+                        <span class="sk-pill" style="background:#d32f2f; color:#fff;">ban</span>
+                        {% elif action.action_type == 'unban' %}
+                        <span class="sk-pill" style="background:#c8e6c9; color:#2e7d32;">unban</span>
+                        {% else %}
+                        <span class="sk-pill">{{ action.action_type }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <a href="/admin/bot/mod-actions/{{ guild_id }}/user/{{ action.target_user_id }}">
+                            {{ action.target_username }}
+                        </a>
+                    </td>
+                    <td style="max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                        {{ action.reason or '—' }}
+                    </td>
+                    <td>
+                        {% if action.source == 'ai' %}
+                        <span class="sk-pill sk-pill-published">AI</span>
+                        {% elif action.source == 'manual' %}
+                        <span class="sk-pill sk-pill-draft">Manual</span>
+                        {% else %}
+                        <span class="sk-pill">{{ action.source }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ action.moderator_username or 'AI Agent' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="sk-no-items">
+            {% if filter_type or filter_user %}
+            No actions match your filters.
+            {% else %}
+            No moderation actions recorded for this guild yet.
+            {% endif %}
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

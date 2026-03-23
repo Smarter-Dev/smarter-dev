@@ -44,6 +44,8 @@ from smarter_dev.web.models import (
     AdventOfCodeConfig,
     AdventOfCodeThread,
     AttachmentFilterConfig,
+    ModerationConfig,
+    ModerationAction,
 )
 
 logger = logging.getLogger(__name__)
@@ -5703,3 +5705,206 @@ class AttachmentFilterConfigOperations:
             return result.rowcount > 0
         except Exception as e:
             raise DatabaseOperationError(f"Failed to delete attachment filter config: {e}") from e
+
+
+class ModerationConfigOperations:
+    """Database operations for moderation configuration management.
+
+    Handles CRUD operations for guild-specific AI moderation settings including
+    monitored roles, moderation instructions, and enabled tools.
+    """
+
+    async def get_config(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+    ) -> Optional[ModerationConfig]:
+        """Get moderation config for a guild."""
+        try:
+            stmt = select(ModerationConfig).where(ModerationConfig.guild_id == guild_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get moderation config: {e}") from e
+
+    async def get_or_create_config(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+    ) -> ModerationConfig:
+        """Get or create moderation config for a guild."""
+        try:
+            config = await self.get_config(session, guild_id)
+            if config is None:
+                config = ModerationConfig(guild_id=guild_id)
+                session.add(config)
+                await session.flush()
+            return config
+        except DatabaseOperationError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get or create moderation config: {e}") from e
+
+    async def update_config(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        **updates,
+    ) -> ModerationConfig:
+        """Update moderation config for a guild."""
+        try:
+            config = await self.get_or_create_config(session, guild_id)
+            for key, value in updates.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+            config.updated_at = datetime.now(timezone.utc)
+            await session.flush()
+            return config
+        except DatabaseOperationError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to update moderation config: {e}") from e
+
+    async def get_all_active_configs(
+        self,
+        session: AsyncSession,
+    ) -> list[ModerationConfig]:
+        """Get all active moderation configs (for bot startup cache)."""
+        try:
+            stmt = select(ModerationConfig).where(ModerationConfig.is_active == True)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get active moderation configs: {e}") from e
+
+
+class ModerationActionOperations:
+    """Database operations for moderation action tracking.
+
+    Records and queries warns, kicks, bans, unbans, and timeouts from
+    AI agents, manual commands, and Discord audit log detection.
+    """
+
+    async def create_action(
+        self,
+        session: AsyncSession,
+        *,
+        guild_id: str,
+        target_user_id: str,
+        target_username: str,
+        action_type: str,
+        reason: str | None = None,
+        moderator_user_id: str | None = None,
+        moderator_username: str | None = None,
+        duration_seconds: int | None = None,
+        source: str = "ai",
+        channel_id: str | None = None,
+        trigger_message_id: str | None = None,
+        ai_context_summary: str | None = None,
+    ) -> ModerationAction:
+        """Record a moderation action."""
+        try:
+            action = ModerationAction(
+                guild_id=guild_id,
+                target_user_id=target_user_id,
+                target_username=target_username,
+                action_type=action_type,
+                reason=reason,
+                moderator_user_id=moderator_user_id,
+                moderator_username=moderator_username,
+                duration_seconds=duration_seconds,
+                source=source,
+                channel_id=channel_id,
+                trigger_message_id=trigger_message_id,
+                ai_context_summary=ai_context_summary,
+            )
+            session.add(action)
+            await session.flush()
+            return action
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to create moderation action: {e}") from e
+
+    async def get_actions_for_user(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        target_user_id: str,
+        limit: int = 50,
+    ) -> list[ModerationAction]:
+        """Get moderation actions for a specific user in a guild."""
+        try:
+            stmt = (
+                select(ModerationAction)
+                .where(
+                    ModerationAction.guild_id == guild_id,
+                    ModerationAction.target_user_id == target_user_id,
+                )
+                .order_by(ModerationAction.created_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get user moderation actions: {e}") from e
+
+    async def get_actions_for_guild(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        action_type: str | None = None,
+        limit: int = 100,
+    ) -> list[ModerationAction]:
+        """Get moderation actions for a guild, optionally filtered by type."""
+        try:
+            stmt = (
+                select(ModerationAction)
+                .where(ModerationAction.guild_id == guild_id)
+            )
+            if action_type:
+                stmt = stmt.where(ModerationAction.action_type == action_type)
+            stmt = stmt.order_by(ModerationAction.created_at.desc()).limit(limit)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get guild moderation actions: {e}") from e
+
+    async def count_warns_for_user(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        target_user_id: str,
+    ) -> int:
+        """Count total warnings for a user in a guild."""
+        try:
+            stmt = (
+                select(func.count())
+                .select_from(ModerationAction)
+                .where(
+                    ModerationAction.guild_id == guild_id,
+                    ModerationAction.target_user_id == target_user_id,
+                    ModerationAction.action_type == "warn",
+                )
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one()
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to count user warnings: {e}") from e
+
+    async def get_recent_actions(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        limit: int = 50,
+    ) -> list[ModerationAction]:
+        """Get most recent moderation actions for a guild."""
+        try:
+            stmt = (
+                select(ModerationAction)
+                .where(ModerationAction.guild_id == guild_id)
+                .order_by(ModerationAction.created_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get recent moderation actions: {e}") from e

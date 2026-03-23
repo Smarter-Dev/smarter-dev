@@ -9,7 +9,12 @@ from datetime import timedelta
 import hikari
 import lightbulb
 
+from smarter_dev.shared.database import get_skrift_db_session_context
+from smarter_dev.web.crud import ModerationActionOperations
+
 logger = logging.getLogger(__name__)
+
+mod_action_ops = ModerationActionOperations()
 
 # Create the plugin
 plugin = lightbulb.Plugin("timeout")
@@ -224,6 +229,25 @@ async def timeout_user(ctx: lightbulb.Context) -> None:
             # User has DMs disabled or blocked the bot
             logger.info(f"Could not DM user {target_user.username} about timeout")
             # Optionally add a note to the public message that DM failed
+
+        # Record the timeout action in moderation actions table
+        try:
+            async with get_skrift_db_session_context() as session:
+                await mod_action_ops.create_action(
+                    session,
+                    guild_id=str(guild.id),
+                    target_user_id=str(target_user.id),
+                    target_username=target_user.username,
+                    moderator_user_id=str(ctx.author.id),
+                    moderator_username=ctx.author.username,
+                    action_type="timeout",
+                    reason=mod_reason,
+                    duration_seconds=int(timeout_duration.total_seconds()),
+                    source="manual",
+                    channel_id=str(ctx.channel_id),
+                )
+        except Exception:
+            logger.exception("Failed to record timeout action to moderation log")
 
         # Log the timeout action
         logger.info(f"User {target_user.username} ({target_user.id}) timed out by {ctx.author.username} "

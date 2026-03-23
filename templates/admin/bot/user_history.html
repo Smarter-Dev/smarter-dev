@@ -1,0 +1,91 @@
+{% extends "admin/base.html" %}
+
+{% block title %}User History - {{ user_id }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>User Moderation History</h1>
+            <p>User: {{ user_id }} — Guild: {{ guild_id }}</p>
+        </hgroup>
+
+        {% if actions %}
+        <div class="sk-panel" style="margin-bottom:1rem;">
+            <div class="sk-panel-head">Summary</div>
+            <div class="sk-panel-body" style="display:flex; gap:2rem; flex-wrap:wrap;">
+                <div><strong>{{ actions|length }}</strong> total action{{ 's' if actions|length != 1 else '' }}</div>
+                <div><strong>{{ actions|selectattr('action_type', 'equalto', 'warn')|list|length }}</strong> warning{{ 's' if actions|selectattr('action_type', 'equalto', 'warn')|list|length != 1 else '' }}</div>
+                <div><strong>{{ actions|selectattr('action_type', 'equalto', 'timeout')|list|length }}</strong> timeout{{ 's' if actions|selectattr('action_type', 'equalto', 'timeout')|list|length != 1 else '' }}</div>
+                <div><strong>{{ actions|selectattr('action_type', 'equalto', 'kick')|list|length }}</strong> kick{{ 's' if actions|selectattr('action_type', 'equalto', 'kick')|list|length != 1 else '' }}</div>
+                <div><strong>{{ actions|selectattr('action_type', 'equalto', 'ban')|list|length }}</strong> ban{{ 's' if actions|selectattr('action_type', 'equalto', 'ban')|list|length != 1 else '' }}</div>
+            </div>
+        </div>
+
+        <table class="sk-admin-table">
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Reason</th>
+                    <th>Source</th>
+                    <th>Duration</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for action in actions %}
+                <tr>
+                    <td style="white-space:nowrap;">{{ action.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                    <td>
+                        {% if action.action_type == 'warn' %}
+                        <span class="sk-pill" style="background:#fff3cd; color:#856404;">warn</span>
+                        {% elif action.action_type == 'timeout' %}
+                        <span class="sk-pill" style="background:#ffe0b2; color:#e65100;">timeout</span>
+                        {% elif action.action_type == 'kick' %}
+                        <span class="sk-pill" style="background:#ffcdd2; color:#c62828;">kick</span>
+                        {% elif action.action_type == 'ban' %}
+                        <span class="sk-pill" style="background:#d32f2f; color:#fff;">ban</span>
+                        {% elif action.action_type == 'unban' %}
+                        <span class="sk-pill" style="background:#c8e6c9; color:#2e7d32;">unban</span>
+                        {% else %}
+                        <span class="sk-pill">{{ action.action_type }}</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ action.reason or '—' }}</td>
+                    <td>
+                        {% if action.source == 'ai' %}
+                        <span class="sk-pill sk-pill-published">AI</span>
+                        {% elif action.source == 'manual' %}
+                        <span class="sk-pill sk-pill-draft">Manual</span>
+                        {% else %}
+                        <span class="sk-pill">{{ action.source }}</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if action.duration_seconds %}
+                            {% if action.duration_seconds < 3600 %}
+                                {{ action.duration_seconds // 60 }}m
+                            {% elif action.duration_seconds < 86400 %}
+                                {{ action.duration_seconds // 3600 }}h
+                            {% else %}
+                                {{ action.duration_seconds // 86400 }}d
+                            {% endif %}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="sk-no-items">No moderation actions recorded for this user.</p>
+        {% endif %}
+
+        <div style="margin-top:1rem;">
+            <a href="/admin/bot/mod-actions/{{ guild_id }}" class="sk-btn-outline sk-btn-small">&larr; Back to all actions</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
