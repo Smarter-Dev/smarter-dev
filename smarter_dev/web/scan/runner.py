@@ -379,6 +379,7 @@ async def run_session_pipeline(
         )
 
         # -- Stage 1: Research --
+        research_start = time.monotonic()
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(60.0),
             headers={"User-Agent": _USER_AGENT},
@@ -414,8 +415,8 @@ async def run_session_pipeline(
         )
         all_usage.append((synthesis_usage, mode_config.synthesis_model))
 
-        # Emit complete event
-        duration = time.monotonic() - start_time
+        # Emit complete event — duration measures research + synthesis only
+        duration = time.monotonic() - research_start
         result_url = f"https://scan.smarter.dev/r/{session_slug}"
         await emit(
             "complete",
