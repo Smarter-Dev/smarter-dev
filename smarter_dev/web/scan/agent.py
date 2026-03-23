@@ -438,13 +438,52 @@ async def search(ctx: RunContext[ResearchDeps], query: str) -> str:
     return "\n".join(lines)
 
 
+_MAX_READ_CHARS = 8000
+
+_summarize_agent = Agent(
+    output_type=str,
+    instructions=(
+        "You are a content summarizer. You will receive a long web page and "
+        "instructions on what to extract. Produce a thorough summary that "
+        "retains all key facts, data points, code examples, and specific "
+        "claims. Do NOT lose important details — the goal is to compress "
+        "without losing information that matters for technical research. "
+        "Return only the summary text, nothing else."
+    ),
+)
+
+
+async def _summarize_content(content: str, url: str, instructions: str = "") -> str:
+    """Summarize content that exceeds the read limit using a fast LLM."""
+    prompt_parts = [f"Summarize the following content from {url}.\n"]
+    if instructions:
+        prompt_parts.append(f"Focus on: {instructions}\n")
+    prompt_parts.append(
+        f"Compress to under {_MAX_READ_CHARS} characters while retaining "
+        "all key facts, data, code examples, and specific claims.\n\n"
+    )
+    prompt_parts.append(content[:32000])  # Cap input to avoid token limits
+
+    try:
+        result = await _summarize_agent.run(
+            "".join(prompt_parts),
+            model=FLASH_LITE,
+        )
+        return result.output
+    except Exception:
+        logger.exception("Summarization failed for %s, truncating", url)
+        return content[:_MAX_READ_CHARS]
+
+
 @_research_agent.tool
 async def read(
     ctx: RunContext[ResearchDeps],
     url: str,
     summarization_instructions: str = "",
 ) -> str:
-    """Read a web page. Optionally provide summarization instructions to control depth."""
+    """Read a web page. If the page exceeds 8000 characters, it will be
+    summarized using the provided instructions to retain key information.
+    Provide summarization_instructions to guide what's most important to extract."""
     deps = ctx.deps
     await deps.read_rate_limiter.wait_if_needed(url)
 
@@ -452,14 +491,20 @@ async def read(
     if url in deps.source_cache:
         content = deps.source_cache[url].get("content", "")
         if content:
-            return content[:8000]
+            if len(content) > _MAX_READ_CHARS:
+                return await _summarize_content(content, url, summarization_instructions)
+            return content
 
     result = await tools.jina_read(deps.http_client, url)
     content = result.get("content", "") if isinstance(result, dict) else str(result)
+    title = result.get("title", "") if isinstance(result, dict) else ""
     if content:
-        deps.source_cache[url] = {"content": content, "url": url, "title": result.get("title", "") if isinstance(result, dict) else ""}
+        deps.source_cache[url] = {"content": content, "url": url, "title": title}
         deps.seen_urls.add(url)
-    return (content or "Failed to read page.")[:8000]
+        if len(content) > _MAX_READ_CHARS:
+            return await _summarize_content(content, url, summarization_instructions)
+        return content
+    return "Failed to read page."
 
 
 @_research_agent.tool
