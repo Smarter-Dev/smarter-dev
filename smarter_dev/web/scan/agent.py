@@ -516,10 +516,15 @@ async def run_research(
 
     research_prompt = (
         f"Research this query:\n\n{query}\n\n"
-        "IMPORTANT: You MUST use the `read` tool on your most relevant search results "
-        "before producing your final output. Search snippets alone are not sufficient — "
-        "you need to read the actual page content to extract detailed, accurate information "
-        "for your sources. For Standard and Deep modes, read at least 3 sources."
+        "CRITICAL RULES:\n"
+        "1. Your training data is OUT OF DATE. Do NOT put specific product names, "
+        "version numbers, or model names from your memory into search queries. "
+        "Search using general terms first (e.g. 'best mid-tier LLMs 2026' not "
+        "'Claude 3.5 Sonnet vs GPT-4o'). Let search results tell you what's current.\n"
+        "2. You MUST use the `read` tool on your most relevant search results "
+        "before producing output. Search snippets are not sufficient — read the "
+        "actual pages to extract detailed, accurate information for your sources.\n"
+        "3. For Standard and Deep modes, read at least 3 sources."
     )
 
     async for event in _research_agent.run_stream_events(
