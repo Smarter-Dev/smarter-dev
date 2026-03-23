@@ -15,11 +15,6 @@ from smarter_dev.web.admin.views import (
     guild_list,
     guild_detail,
     bytes_config,
-    quest_create,
-    quest_edit,
-    quest_schedule,
-    quests_list,
-    quest_delete,
     squads_config,
     api_keys_list,
     api_keys_create,
@@ -232,35 +227,6 @@ admin_routes = [
         admin_required(blog_delete),
         methods=["POST"],
         name="admin_blog_delete",
-    ),
-    Route(
-        "/guilds/{guild_id}/quests",
-        admin_required(quests_list),
-        name="admin_quests",
-    ),
-    Route(
-        "/guilds/{guild_id}/quests/create",
-        admin_required(quest_create),
-        methods=["GET", "POST"],
-        name="admin_quest_create",
-    ),
-    Route(
-        "/guilds/{guild_id}/quests/{quest_id}/delete",
-        admin_required(quest_delete),
-        methods=["POST"],
-        name="admin_quest_delete"
-    ),
-    Route(
-        "/guilds/{guild_id}/quests/{quest_id}/edit",
-        admin_required(quest_edit),
-        methods=["GET", "POST"],
-        name="admin_quest_edit",
-    ),
-    Route(
-        "/guilds/{guild_id}/quests/{quest_id}/schedule",
-        admin_required(quest_schedule),
-        methods=["POST"],
-        name="admin_quest_schedule",
     ),
     # Campaign management
     Route(

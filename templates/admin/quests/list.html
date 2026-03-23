@@ -1,0 +1,79 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Quests - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Quests</h1>
+    <p>{{ total }} quest{{ 's' if total != 1 else '' }}</p>
+</hgroup>
+
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+    {% if guild_ids|length > 1 %}
+    <form method="get" action="/admin/quests" style="display: flex; gap: .5rem; align-items: center;">
+        <label for="guild_id" class="sk-text-muted" style="white-space: nowrap;">Guild:</label>
+        <select name="guild_id" id="guild_id" onchange="this.form.submit()" style="min-width: 12rem;">
+            <option value="">All guilds</option>
+            {% for gid in guild_ids %}
+            <option value="{{ gid }}" {{ 'selected' if gid == selected_guild_id else '' }}>{{ gid }}</option>
+            {% endfor %}
+        </select>
+    </form>
+    {% else %}
+    <div></div>
+    {% endif %}
+    <a href="/admin/quests/create" role="button" class="sk-btn-outline sk-btn-small">Create Quest</a>
+</div>
+
+{% if quests %}
+<table class="sk-admin-table">
+    <thead>
+        <tr>
+            <th>Title</th>
+            <th>Type</th>
+            <th>Day</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in quests %}
+        {% set quest = item.quest %}
+        {% set dq = item.daily_quest %}
+        <tr>
+            <td>
+                <div style="display: flex; align-items: center; gap: .5rem;">
+                    {% if dq %}
+                    <span style="
+                        width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+                        background: {{ '#2fb344' if dq.is_active and dq.active_date == today else '#adb5bd' }};
+                    "></span>
+                    {% endif %}
+                    <strong>{{ quest.title }}</strong>
+                </div>
+                <small class="sk-text-muted">{{ quest.prompt[:80] }}{% if quest.prompt|length > 80 %}&hellip;{% endif %}</small>
+            </td>
+            <td><span class="sk-pill">{{ quest.quest_type }}</span></td>
+            <td>
+                {% if dq %}
+                {{ dq.active_date.strftime("%Y-%m-%d") }}
+                {% else %}
+                <span class="sk-text-muted">Unscheduled</span>
+                {% endif %}
+            </td>
+            <td>
+                <div style="display: flex; gap: .25rem;">
+                    <a href="/admin/quests/{{ quest.id }}/edit" class="sk-btn-outline sk-btn-small">Edit</a>
+                    <form method="post" action="/admin/quests/{{ quest.id }}/delete" style="display: inline;" onsubmit="return confirm('Delete this quest?')">
+                        {{ csrf_field() }}
+                        <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete</button>
+                    </form>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="sk-no-items">No quests found.</p>
+{% endif %}
+{% endblock %}

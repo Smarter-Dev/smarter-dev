@@ -1,0 +1,68 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Edit Quest - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Edit Quest</h1>
+    <p>{{ quest.title }}</p>
+</hgroup>
+
+<div style="display: flex; flex-direction: column; gap: 2rem; max-width: 40rem;">
+
+    <!-- Edit quest fields -->
+    <form method="post">
+        {{ csrf_field() }}
+
+        <label for="title">Title</label>
+        <input type="text" name="title" id="title" value="{{ quest.title }}" required />
+
+        <label for="prompt">Prompt</label>
+        <textarea name="prompt" id="prompt" rows="6" required>{{ quest.prompt }}</textarea>
+
+        <label for="quest_type">Quest Type</label>
+        <select name="quest_type" id="quest_type">
+            <option value="daily" {{ 'selected' if quest.quest_type == 'daily' else '' }}>Daily</option>
+            <option value="weekly" {{ 'selected' if quest.quest_type == 'weekly' else '' }}>Weekly</option>
+            <option value="one_off" {{ 'selected' if quest.quest_type == 'one_off' else '' }}>One-off</option>
+        </select>
+
+        {% if daily_quest %}
+        <label style="display: flex; align-items: center; gap: .5rem; cursor: pointer;">
+            <input type="checkbox" name="is_active" value="1" {{ 'checked' if daily_quest.is_active else '' }} />
+            Quest is active
+        </label>
+        <small class="sk-text-muted">Disable to temporarily deactivate this daily quest without deleting it.</small>
+        {% endif %}
+
+        <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+            <button type="submit">Save Changes</button>
+            <a href="/admin/quests" role="button" class="sk-btn-outline">Cancel</a>
+        </div>
+    </form>
+
+    <!-- Schedule quest -->
+    <form method="post" action="/admin/quests/{{ quest.id }}/schedule">
+        {{ csrf_field() }}
+
+        <h2>Assign Date</h2>
+
+        <label for="active_date">Active Date</label>
+        <input
+            type="date"
+            name="active_date"
+            id="active_date"
+            {% if daily_quest %}value="{{ daily_quest.active_date.isoformat() }}"{% endif %}
+            required
+        />
+        <small class="sk-text-muted">Quest will be active for this calendar date.</small>
+
+        <div style="margin-top: 1rem;">
+            <button type="submit" class="sk-btn-outline">
+                {% if daily_quest %}Update Date{% else %}Assign Quest{% endif %}
+            </button>
+        </div>
+    </form>
+
+</div>
+{% endblock %}

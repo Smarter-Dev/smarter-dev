@@ -1,0 +1,54 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Create Quest - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Create Quest</h1>
+</hgroup>
+
+<form method="post" enctype="multipart/form-data" style="max-width: 40rem;">
+    {{ csrf_field() }}
+
+    <label for="guild_id">Guild</label>
+    {% if guild_ids %}
+    <select name="guild_id" id="guild_id" required>
+        {% for gid in guild_ids %}
+        <option value="{{ gid }}">{{ gid }}</option>
+        {% endfor %}
+    </select>
+    {% else %}
+    <input type="text" name="guild_id" id="guild_id" required placeholder="Discord guild ID" />
+    {% endif %}
+
+    <label for="title">Title</label>
+    <input type="text" name="title" id="title" required />
+
+    <label for="prompt">Prompt</label>
+    <textarea name="prompt" id="prompt" rows="6" required></textarea>
+
+    <label for="quest_type">Quest Type</label>
+    <select name="quest_type" id="quest_type">
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="one_off">One-off</option>
+    </select>
+
+    <label for="input_generator_script">Input Generator Script</label>
+    <input type="file" name="input_generator_script" id="input_generator_script" accept=".py" />
+    <small class="sk-text-muted">Python script that generates quest input and expected result.</small>
+
+    <label for="solution_validator_script">Solution Validator Script</label>
+    <input type="file" name="solution_validator_script" id="solution_validator_script" accept=".py" />
+    <small class="sk-text-muted">Optional custom validation logic for submissions.</small>
+
+    <label for="python_script">Reference Python Script</label>
+    <input type="file" name="python_script" id="python_script" accept=".py" />
+    <small class="sk-text-muted">Optional reference implementation.</small>
+
+    <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+        <button type="submit">Create Quest</button>
+        <a href="/admin/quests" role="button" class="sk-btn-outline">Cancel</a>
+    </div>
+</form>
+{% endblock %}
