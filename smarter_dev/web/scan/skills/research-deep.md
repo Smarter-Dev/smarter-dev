@@ -41,90 +41,77 @@ Sub-questions:
 
 This decomposition becomes your research plan. Each sub-question drives a search thread.
 
-### Searching
+### Phase 1: Broad Survey (2–3 searches)
 
-**Budget: 8–15 searches.** Use as many as needed, but be intentional — every search should have a clear purpose tied to a sub-question. Don't search speculatively.
+Ground yourself in the current state before diving in. **Do not skip this.**
 
-**Search progression:**
+Search to discover what's current — not to confirm what you think you know. What are the major perspectives *right now*? What's changed recently? What terms and frameworks are people using? Who are the authoritative voices?
 
-1. **Broad survey (2–3 searches):** Ground yourself in the current state. What are the major perspectives *right now*? What's changed recently? What terms and frameworks are people using to discuss this? Who are the authoritative voices? Don't assume you know the landscape — verify it. This step exists specifically to catch things your training missed or that have changed since.
+This step exists specifically to catch things your training missed or that have changed since.
 
-2. **Deep dives per sub-question (4–8 searches):** Targeted searches for each sub-question. Prioritize:
-   - Official documentation and specifications
-   - Practitioner experience (post-mortems, case studies, "lessons learned" posts)
-   - Conference talks and in-depth technical articles
-   - Academic or industry research where relevant
+### Phase 2: Lead-Following Deep Dives (core mechanism)
 
-3. **Cross-referencing and gap-filling (2–4 searches):** After your initial passes:
-   - Verify claims that appeared in only one source
-   - Investigate contradictions between sources
-   - Search for the "other side" of any one-sided argument
-   - Fill specific gaps identified during reading
-   - Follow leads — if a source references a relevant library, benchmark, or case study, go find it
+This is the heart of Deep research. For **each sub-question**, follow this loop:
 
-**Query construction:**
-- Start broad, then narrow: `"event sourcing order management"` → `"event sourcing vs CRUD production experience"` → `"Marten event store .NET order system"` (following a specific lead)
-- Vary source types: search for docs, then for blog posts, then for conference talks, then for benchmarks
-- Use temporal qualifiers for fast-moving topics: `"event sourcing 2024 2025"` to prioritize current perspectives
-- Search for dissenting views explicitly: `"event sourcing problems"` or `"why not event sourcing"`
+1. **Find the best initial source** — search for the sub-question, pick the most promising result
+2. **Read it fully** — don't summarize aggressively. Full reads are the default in Deep mode. You're studying, not skimming.
+3. **Extract claims, references, and leads** — what does this source assert? What does it reference? Does it mention a library, benchmark, case study, competing approach, or expert you haven't investigated?
+4. **Follow the strongest lead** — search for the referenced thing, read the new source, extract what it says
+5. **Compare** — does the second source confirm, contradict, or add nuance to the first? Note the relationship.
+6. **Repeat** until the sub-question has evidence from **2–3 independent sources** or you've hit diminishing returns
 
-### Reading
+**This recursive lead-following is what makes Deep mode valuable.** A source that references a benchmark → you go find the benchmark. A case study that names a library → you go read the library docs. A claim that contradicts another source → you investigate why. Each source opens doors to better sources.
 
-**Full reads are the default in Deep mode.** You're not skimming — you're studying.
+**Budget: 8–15 searches total** across all sub-questions. Use as many as needed, but every search should have a clear purpose tied to a sub-question or a lead you're following.
 
 **Reading strategy by source type:**
 
-- **Official docs / specifications:** Read without summarization or with very light instructions: `"Extract the complete architecture description, all configuration options, and any noted limitations"`. You need the full picture, not a summary.
+- **Official docs / specifications:** Read with light instructions: `"Extract the complete architecture, configuration options, and any noted limitations"`. You need the full picture.
+- **Practitioner case studies / post-mortems:** Read without summarization. The real-world details are in the nuance, the asides, the "things we wish we'd known."
+- **Comparison / analysis articles:** Read with structural summarization: `"Extract each option compared, criteria, conclusion, evidence, and caveats"`. You want the analytical framework.
+- **Conference talks / long-form content:** Read with targeted summarization: `"Extract key technical claims, benchmarks or data cited, patterns described, and lessons learned"`
+- **Reference / documentation pages:** Read with targeted summarization: `"Extract the API surface, configuration, and performance characteristics"`
 
-- **Practitioner case studies / post-mortems:** Read without summarization. These are gold — the real-world details are often in the nuance, the asides, the "things we wish we'd known." Summarizing too aggressively loses this.
-
-- **Comparison / analysis articles:** Read with structural summarization: `"Extract each option compared, the criteria used, the author's conclusion, supporting evidence, and any caveats or dissenting notes"`. You want the analytical framework, not just the conclusion.
-
-- **Conference talks / long-form content:** Read with targeted summarization focused on novel insights: `"Extract the key technical claims, any benchmarks or data cited, architectural patterns described, and lessons learned"`
-
-- **Reference / documentation pages:** Read with targeted summarization: `"Extract the API surface, configuration options, and any noted performance characteristics or limitations"`
-
-**Read 6–10 sources.** Prioritize sources that:
+**Prioritize sources that:**
 - Provide primary evidence (benchmarks, case studies, production experience)
 - Offer unique perspectives not covered by other sources
 - Are authoritative (core maintainers, recognized experts, peer-reviewed)
 - Are current (within the last 1–2 years for technology topics)
 
-### YouTube
+**Read 6–10 sources total.** Quality over quantity.
 
-**Dedicated YouTube research pass.** Search specifically for:
-- Conference talks on the topic (these often have insights not available in written form)
-- In-depth technical walkthroughs
-- Architecture deep dives
+### Phase 3: Cross-Referencing and Gap-Filling (2–4 searches)
+
+After your deep dives, step back and evaluate the full picture:
+
+- Are there claims backed by only one source? Search for corroboration.
+- Did any sources contradict each other? Investigate *why* — different contexts, outdated info, or genuine disagreement?
+- Search for dissenting views explicitly: `"event sourcing problems"` or `"why not event sourcing"`. If you only found positive takes, the picture is incomplete.
+- Fill specific gaps identified during reading.
+
+### Phase 4: YouTube Research (1–3 searches)
+
+**Dedicated YouTube research pass.** Use the `youtube_search` tool for:
+- Conference talks on the topic (insights often not available in written form)
+- In-depth technical walkthroughs and architecture deep dives
 - "Lessons learned" or post-mortem presentations
 
-**2–3 YouTube-specific searches.** Evaluate results carefully:
-- Prefer conference talks (Strange Loop, QCon, NDC, PyCon, etc.) and recognized technical educators
-- Check publish date — currency matters
-- Note video length and map it to likely depth
-- Look for talks that address your specific sub-questions
+Prefer conference talks (Strange Loop, QCon, NDC, PyCon, etc.) and recognized technical educators. Check publish date — currency matters. Look for talks that address your specific sub-questions.
 
-Provide enough context in your output that the synthesis stage can give timestamped or "start at X" recommendations where possible.
-
-### Iteration
-
-**Iterate until you're satisfied.** Deep mode does not have a fixed number of passes. The guiding principle is: would a thorough senior developer feel confident advising their team based on what you've gathered?
-
-**After each pass, evaluate:**
-- Sub-question coverage: Have all sub-questions been addressed? Are any answers thin?
-- Source diversity: Are you relying too heavily on one perspective? Do you have practitioner evidence alongside theoretical/documentation sources?
-- Conflict resolution: Have contradictions been investigated? Do you understand *why* sources disagree?
-- Currency: Are your sources current? Have you checked for recent developments that might change the picture?
-- Completeness: Is there an obvious angle you haven't explored? Would a skeptic identify a gap?
-
-**Follow leads proactively.** If a source mentions a relevant library, tool, benchmark, case study, or alternative approach you haven't investigated — go investigate it. This recursive follow-up is what makes Deep mode valuable.
+### When to Stop
 
 **Stop when:**
-- All sub-questions have substantive answers backed by multiple sources
+- All sub-questions have substantive answers backed by 2–3 independent sources
 - Contradictions are explained (not just noted)
 - You've checked for recency and the information is current
 - You can articulate a clear recommendation with honest tradeoff assessment
 - Additional searching would yield diminishing returns
+
+**Query construction tips:**
+- Start broad, then narrow: `"event sourcing order management"` → `"event sourcing vs CRUD production experience"` → `"Marten event store .NET order system"` (following a specific lead)
+- Vary source types: docs, then blog posts, then conference talks, then benchmarks
+- Use temporal qualifiers for fast-moving topics: `"event sourcing 2024 2025"`
+- Search for dissenting views explicitly
 
 ## Handling Escalated Queries
 
