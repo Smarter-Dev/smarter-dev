@@ -55,9 +55,15 @@
         {{ csrf_field() }}
         <input type="hidden" name="tz" id="scan-tz">
         <textarea name="query" placeholder="What do you want to research?" class="scan-input" required maxlength="2000" autofocus rows="1"></textarea>
-        <input type="hidden" name="mode" value="experimental">
+        <input type="hidden" name="mode" id="scan-mode-input" value="auto">
         <button type="submit" class="scan-submit">SCAN</button>
     </form>
+    <div class="scan-mode">
+        <label><input type="radio" name="scan-mode-select" value="auto" checked><span>AUTO</span></label>
+        <label><input type="radio" name="scan-mode-select" value="quick_answer"><span>QUICK</span></label>
+        <label><input type="radio" name="scan-mode-select" value="standard"><span>STANDARD</span></label>
+        <label><input type="radio" name="scan-mode-select" value="deep"><span>DEEP</span></label>
+    </div>
     {% if suggested_queries %}
     <div class="scan-suggestions">
         <div class="scan-suggestions-label">SUGGESTED SEARCHES</div>
@@ -107,6 +113,11 @@
     ta.addEventListener('input', grow);
     ta.addEventListener('keydown', function(e){
         if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();ta.form.requestSubmit();}
+    });
+    document.querySelectorAll('input[name="scan-mode-select"]').forEach(function(r){
+        r.addEventListener('change', function(){
+            document.getElementById('scan-mode-input').value = r.value;
+        });
     });
     document.querySelectorAll('.scan-suggestion').forEach(function(el){
         el.addEventListener('click', function(e){
