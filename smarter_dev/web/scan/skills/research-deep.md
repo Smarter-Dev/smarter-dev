@@ -58,11 +58,11 @@ This is the heart of Deep research. For **each sub-question**, follow this loop:
 3. **Extract claims, references, and leads** — what does this source assert? What does it reference? Does it mention a library, benchmark, case study, competing approach, or expert you haven't investigated?
 4. **Follow the strongest lead** — search for the referenced thing, read the new source, extract what it says
 5. **Compare** — does the second source confirm, contradict, or add nuance to the first? Note the relationship.
-6. **Repeat** until the sub-question has evidence from **2–3 independent sources** or you've hit diminishing returns
+6. **Repeat** until the sub-question has evidence from **3–4 independent sources** or you've hit diminishing returns
 
 **This recursive lead-following is what makes Deep mode valuable.** A source that references a benchmark → you go find the benchmark. A case study that names a library → you go read the library docs. A claim that contradicts another source → you investigate why. Each source opens doors to better sources.
 
-**Budget: 8–15 searches total** across all sub-questions. Use as many as needed, but every search should have a clear purpose tied to a sub-question or a lead you're following.
+**Budget: 12–25 searches total** across all sub-questions. Use as many as needed, but every search should have a clear purpose tied to a sub-question or a lead you're following.
 
 **Reading strategy by source type:**
 
@@ -78,18 +78,32 @@ This is the heart of Deep research. For **each sub-question**, follow this loop:
 - Are authoritative (core maintainers, recognized experts, peer-reviewed)
 - Are current (within the last 1–2 years for technology topics)
 
-**Read 6–10 sources total.** Quality over quantity.
+**Read 12–25 sources total.** Deep mode earns its name through depth and breadth of reading.
 
-### Phase 3: Cross-Referencing and Gap-Filling (2–4 searches)
+### Phase 3: Tertiary Investigation
 
-After your deep dives, step back and evaluate the full picture:
+After answering the core question, shift your focus to what surrounds it. The user isn't just getting an answer — they're making a decision they'll live with.
+
+Search specifically for:
+
+- **What goes wrong:** `"[topic] production issues"`, `"[topic] lessons learned"`, `"[topic] mistakes"`. Find practitioners who hit walls the documentation doesn't mention.
+- **What it forces:** Every significant choice creates downstream decisions. What else must the user now decide, configure, maintain, or give up?
+- **What it costs to operate:** Beyond the initial implementation — debugging, monitoring, upgrading, onboarding new team members, handling edge cases at scale.
+- **What it costs to leave:** If this choice doesn't work out, what does migration look like? Is the user locked in, or can they pivot?
+- **Where the consensus is wrong:** Search for dissenting views. If every source agrees, find the one that doesn't and understand why.
+
+This phase is what separates Deep from "Standard but longer." Standard answers the question. Deep maps the territory around the answer.
+
+### Phase 4: Cross-Referencing and Gap-Filling (2–4 searches)
+
+After your deep dives and tertiary investigation, step back and evaluate the full picture:
 
 - Are there claims backed by only one source? Search for corroboration.
 - Did any sources contradict each other? Investigate *why* — different contexts, outdated info, or genuine disagreement?
-- Search for dissenting views explicitly: `"event sourcing problems"` or `"why not event sourcing"`. If you only found positive takes, the picture is incomplete.
+- If you only found positive takes on an approach, the picture is incomplete — search harder for dissent.
 - Fill specific gaps identified during reading.
 
-### Phase 4: YouTube Research (1–3 searches)
+### Phase 5: YouTube Research (1–3 searches)
 
 **Dedicated YouTube research pass.** Use the `youtube_search` tool for:
 - Conference talks on the topic (insights often not available in written form)
@@ -101,7 +115,8 @@ Prefer conference talks (Strange Loop, QCon, NDC, PyCon, etc.) and recognized te
 ### When to Stop
 
 **Stop when:**
-- All sub-questions have substantive answers backed by 2–3 independent sources
+- All sub-questions have substantive answers backed by 3–4 independent sources
+- The tertiary investigation has surfaced real operational concerns, not just theory
 - Contradictions are explained (not just noted)
 - You've checked for recency and the information is current
 - You can articulate a clear recommendation with honest tradeoff assessment
