@@ -575,11 +575,22 @@ async def run_research(
         "from the search results into YouTubeResult objects."
     )
 
+    # Deep mode gets medium thinking for better reasoning
+    model_settings: dict = {}
+    if mode_config.mode == "deep":
+        from google.genai.types import ThinkingLevel
+        model_settings = {
+            "google_thinking_config": {
+                "thinking_level": ThinkingLevel.MEDIUM,
+            },
+        }
+
     async for event in _research_agent.run_stream_events(
         research_prompt,
         deps=deps,
         model=mode_config.research_model,
         instructions=system_prompt,
+        model_settings=model_settings,
     ):
         if isinstance(event, FunctionToolCallEvent):
             args = event.part.args
