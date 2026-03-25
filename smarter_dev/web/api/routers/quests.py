@@ -13,7 +13,7 @@ from smarter_dev.shared import date_provider
 from smarter_dev.shared.date_provider import get_date_provider
 
 from smarter_dev.shared.database import get_skrift_db_session
-from smarter_dev.web.api.dependencies import verify_api_key
+from smarter_dev.web.api.dependencies import verify_api_key, get_database_session
 from smarter_dev.web.crud import (
     QuestOperations,
     DatabaseOperationError, SquadOperations, QuestInputOperations, ScriptExecutionError, QuestSubmissionOperations,
@@ -81,6 +81,7 @@ async def submit_daily_quest(
     daily_quest_id: UUID,
     body: DailyQuestSubmitBody,
     session: AsyncSession = Depends(get_skrift_db_session),
+    legacy_session: AsyncSession = Depends(get_database_session),
     api_key=Depends(verify_api_key),
 ) -> dict[str, Any]:
     guild_id = body.guild_id
@@ -89,7 +90,7 @@ async def submit_daily_quest(
     submitted_solution = body.submitted_solution
 
     squad_ops = SquadOperations()
-    user_squad = await squad_ops.get_user_squad(session, guild_id, user_id)
+    user_squad = await squad_ops.get_user_squad(legacy_session, guild_id, user_id)
     if not user_squad:
         raise HTTPException(404, "User is not a member of any squad")
 
@@ -122,6 +123,7 @@ async def get_daily_quest_input(
     guild_id: str = Query(..., description="Discord guild ID"),
     user_id: str = Query(..., description="Discord user ID"),
     session: AsyncSession = Depends(get_skrift_db_session),
+    legacy_session: AsyncSession = Depends(get_database_session),
     api_key=Depends(verify_api_key),
 ) -> Dict[str, Any]:
     """Get daily quest input data.
@@ -132,7 +134,7 @@ async def get_daily_quest_input(
     try:
         # Get user's squad (still required for participation context)
         squad_ops = SquadOperations()
-        user_squad = await squad_ops.get_user_squad(session, guild_id, user_id)
+        user_squad = await squad_ops.get_user_squad(legacy_session, guild_id, user_id)
 
         if not user_squad:
             raise HTTPException(
@@ -380,4 +382,3 @@ async def mark_daily_quest_active(
             raise HTTPException(404, "Quest tables not yet created")
         logger.error(f"Failed to activate daily quest: {e}")
         raise HTTPException(500, "Failed to activate daily quest")
-
