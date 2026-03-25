@@ -226,6 +226,23 @@ def get_skrift_db_session_context():
     return _skrift_session_maker()
 
 
+async def get_skrift_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """FastAPI dependency for getting a Skrift-schema database session.
+
+    Provides a session against the primary DATABASE_URL with the
+    ``skrift`` schema translate map, matching what Litestar injects.
+    """
+    async with get_skrift_db_session_context() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
 async def init_database() -> None:
     """Initialize database connection and create tables if needed."""
     global _engine, _session_maker

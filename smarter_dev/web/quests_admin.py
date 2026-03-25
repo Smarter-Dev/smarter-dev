@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Annotated
 from uuid import UUID
 
@@ -20,6 +21,7 @@ from skrift.admin.navigation import ADMIN_NAV_TAG
 from skrift.auth.guards import Permission, auth_guard
 from skrift.lib.flash import flash_error, flash_success, get_flash_messages
 
+from smarter_dev.shared.config import get_settings
 from smarter_dev.web.models import DailyQuest, Quest
 
 
@@ -275,9 +277,10 @@ class QuestsAdminController(Controller):
             return Redirect(path=f"/admin/quests/{quest_id}/edit")
 
         active_date = date.fromisoformat(raw_date)
+        tz = ZoneInfo(get_settings().quest_timezone)
         expires_at = datetime.combine(
-            active_date, datetime.max.time(), tzinfo=timezone.utc
-        )
+            active_date, datetime.max.time(), tzinfo=tz
+        ).astimezone(timezone.utc)
 
         # Check for conflict with another quest on the same date
         conflict = await db_session.execute(

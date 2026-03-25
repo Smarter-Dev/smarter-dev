@@ -137,6 +137,12 @@ class Settings(BaseSettings):
         description="Google Analytics Measurement ID (G-XXXXXXXXXX)",
     )
 
+    # Quests
+    quest_timezone: str = Field(
+        default="UTC",
+        description="Timezone for quest date calculations (e.g., America/Chicago)",
+    )
+
     # Rate Limiting
     rate_limit_enabled: bool = Field(
         default=True,

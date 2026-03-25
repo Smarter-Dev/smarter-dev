@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from smarter_dev.shared import date_provider
 from smarter_dev.shared.date_provider import get_date_provider
 
-from smarter_dev.shared.database import get_db_session
+from smarter_dev.shared.database import get_skrift_db_session
 from smarter_dev.web.api.dependencies import verify_api_key
 from smarter_dev.web.crud import (
     QuestOperations,
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/quests", tags=["quests"])
 @router.get("/daily/current")
 async def get_current_daily_quest(
     guild_id: str = Query(..., description="Discord guild ID"),
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_skrift_db_session),
     api_key=Depends(verify_api_key),
 ) -> Dict[str, Dict[str, Any] | str | None]:
     date_provider = get_date_provider()
@@ -80,7 +80,7 @@ class DailyQuestSubmitBody(BaseModel):
 async def submit_daily_quest(
     daily_quest_id: UUID,
     body: DailyQuestSubmitBody,
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_skrift_db_session),
     api_key=Depends(verify_api_key),
 ) -> dict[str, Any]:
     guild_id = body.guild_id
@@ -121,7 +121,7 @@ async def get_daily_quest_input(
     daily_quest_id: UUID,
     guild_id: str = Query(..., description="Discord guild ID"),
     user_id: str = Query(..., description="Discord user ID"),
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_skrift_db_session),
     api_key=Depends(verify_api_key),
 ) -> Dict[str, Any]:
     """Get daily quest input data.
@@ -229,7 +229,7 @@ async def get_daily_quest_input(
 @router.get("/scoreboard")
 async def get_daily_quest_scoreboard(
     guild_id: str = Query(..., description="Discord guild ID"),
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_skrift_db_session),
     api_key=Depends(verify_api_key),
 ) -> Dict[str, Any]:
     date_provider = get_date_provider()
@@ -272,7 +272,7 @@ async def get_daily_quest_scoreboard(
 @router.get("/detailed-scoreboard")
 async def get_detailed_scoreboard(
         guild_id: str = Query(..., description="Discord guild ID"),
-        session: AsyncSession = Depends(get_db_session),
+        session: AsyncSession = Depends(get_skrift_db_session),
         api_key=Depends(verify_api_key)
 ) -> Dict[str, Any]:
     try:
@@ -306,7 +306,7 @@ async def get_detailed_scoreboard(
 @router.get("/upcoming-announcements")
 async def get_upcoming_quest_announcements(
     seconds: int = Query(default=45),
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_skrift_db_session),
     api_key=Depends(verify_api_key),
 ) -> Dict[str, list[dict[str, Any]]]:
     try:
@@ -342,7 +342,7 @@ async def get_upcoming_quest_announcements(
 @router.post("/{daily_quest_id}/mark-announced")
 async def mark_daily_quest_announced(
     daily_quest_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_skrift_db_session),
     api_key=Depends(verify_api_key),
 ) -> Dict[str, bool]:
     try:
@@ -363,7 +363,7 @@ async def mark_daily_quest_announced(
 @router.post("/{daily_quest_id}/mark-active")
 async def mark_daily_quest_active(
     daily_quest_id: UUID,
-    session: AsyncSession = Depends(get_db_session),
+    session: AsyncSession = Depends(get_skrift_db_session),
     api_key=Depends(verify_api_key),
 ) -> Dict[str, bool]:
     try:

@@ -584,12 +584,18 @@ async def real_api_client(admin_api_settings, real_db_engine) -> AsyncGenerator[
          patch('smarter_dev.shared.database.get_engine', side_effect=mock_get_engine), \
          patch('smarter_dev.shared.database.get_session_maker', side_effect=mock_get_session_maker), \
          patch('smarter_dev.shared.database.get_db_session', side_effect=mock_get_db_session), \
+         patch('smarter_dev.shared.database.get_skrift_db_session', side_effect=mock_get_db_session), \
          patch('smarter_dev.web.api.app.init_database'), \
          patch('smarter_dev.web.api.app.close_database'):
         
         # Override settings in the API app
         api.state.settings = admin_api_settings
-        
+
+        # Override FastAPI dependencies so Depends(get_skrift_db_session) uses the test DB
+        # Must use the exact function reference from the router module for identity match
+        from smarter_dev.web.api.routers import quests as quests_router_mod
+        api.dependency_overrides[quests_router_mod.get_skrift_db_session] = mock_get_db_session
+
         try:
             async with AsyncClient(
                 transport=ASGITransport(app=api),
@@ -599,6 +605,7 @@ async def real_api_client(admin_api_settings, real_db_engine) -> AsyncGenerator[
         finally:
             # Ensure API state cleanup
             try:
+                api.dependency_overrides.pop(quests_router_mod.get_skrift_db_session, None)
                 if hasattr(api, 'state'):
                     api.state.settings = None
             except Exception:

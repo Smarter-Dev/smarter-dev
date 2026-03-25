@@ -2650,14 +2650,15 @@ class QuestOperations:
         Daily quests that will become active soon and are not announced yet.
         """
         try:
-            now = datetime.now(timezone.utc)
+            from smarter_dev.shared.date_provider import get_date_provider
+            today = get_date_provider().today()
 
             query = (
                 select(DailyQuest)
                 .join(DailyQuest.quest)
                 .where(
                     DailyQuest.is_announced.is_(False),
-                    DailyQuest.active_date >= now.date(),
+                    DailyQuest.active_date >= today,
                     DailyQuest.active_date <= window_end.date(),
                 )
             )
@@ -2675,7 +2676,8 @@ class QuestOperations:
         Daily quests that should already be announced but aren't.
         """
         try:
-            today = datetime.now(timezone.utc).date()
+            from smarter_dev.shared.date_provider import get_date_provider
+            today = get_date_provider().today()
 
             query = (
                 select(DailyQuest)
