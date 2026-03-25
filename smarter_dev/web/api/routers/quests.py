@@ -101,7 +101,7 @@ async def submit_daily_quest(
     if not daily_quest.is_active:
         raise HTTPException(403, "Daily quest is not active")
 
-    submission_ops = QuestSubmissionOperations(session)
+    submission_ops = QuestSubmissionOperations(session, legacy_session=legacy_session)
     is_correct, is_first_success, points = await submission_ops.submit_solution(
         daily_quest_id=daily_quest_id,
         guild_id=guild_id,
@@ -232,6 +232,7 @@ async def get_daily_quest_input(
 async def get_daily_quest_scoreboard(
     guild_id: str = Query(..., description="Discord guild ID"),
     session: AsyncSession = Depends(get_skrift_db_session),
+    legacy_session: AsyncSession = Depends(get_database_session),
     api_key=Depends(verify_api_key),
 ) -> Dict[str, Any]:
     date_provider = get_date_provider()
@@ -250,7 +251,7 @@ async def get_daily_quest_scoreboard(
                 "scoreboard": [],
             }
 
-        submission_ops = QuestSubmissionOperations(session)
+        submission_ops = QuestSubmissionOperations(session, legacy_session=legacy_session)
         scoreboard = await submission_ops.get_daily_quest_scoreboard(daily.id)
 
         return {

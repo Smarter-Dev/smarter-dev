@@ -2920,8 +2920,13 @@ class QuestInputOperations:
 class QuestSubmissionOperations:
     """Competitive submission handling for daily quests."""
 
-    def __init__(self, session: AsyncSession):
+    def __init__(
+        self,
+        session: AsyncSession,
+        legacy_session: AsyncSession | None = None,
+    ):
         self.session = session
+        self.legacy_session = legacy_session or session
 
     async def submit_solution(
         self,
@@ -2964,13 +2969,16 @@ class QuestSubmissionOperations:
                     points_earned = self._calculate_points()
 
                 squad_ops = SquadOperations()
-                members = await squad_ops.get_squad_members(self.session, squad_id)
+                members = await squad_ops.get_squad_members(
+                    self.legacy_session,
+                    squad_id,
+                )
 
                 bytes_ops = BytesOperations()
 
                 for member in members:
                     await bytes_ops.create_system_reward(
-                        self.session,
+                        self.legacy_session,
                         guild_id=guild_id,
                         user_id=member.user_id,
                         username=member.user_id,  # or cached username if you have it
@@ -3039,14 +3047,12 @@ class QuestSubmissionOperations:
         try:
             query = (
                 select(
-                    Squad.id.label("squad_id"),
-                    Squad.name.label("squad_name"),
+                    QuestSubmission.squad_id.label("squad_id"),
                     QuestSubmission.points_earned.label("points"),
                     QuestSubmission.user_id.label("winner_user_id"),
                     QuestSubmission.username.label("winner_username"),
                 )
                 .select_from(QuestSubmission)
-                .join(Squad, QuestSubmission.squad_id == Squad.id)
                 .where(
                     QuestSubmission.daily_quest_id == daily_quest_id,
                     QuestSubmission.is_first_success.is_(True),
@@ -3057,16 +3063,21 @@ class QuestSubmissionOperations:
             result = await self.session.execute(query)
             rows = result.fetchall()
 
-            return [
-                {
-                    "squad_id": row.squad_id,
-                    "squad_name": row.squad_name,
-                    "points": row.points or 0,
-                    "winner_user_id": row.winner_user_id,
-                    "winner_username": row.winner_username,
-                }
-                for row in rows
-            ]
+            squad_ops = SquadOperations()
+            scoreboard = []
+            for row in rows:
+                squad = await squad_ops.get_squad(self.legacy_session, row.squad_id)
+                scoreboard.append(
+                    {
+                        "squad_id": row.squad_id,
+                        "squad_name": squad.name,
+                        "points": row.points or 0,
+                        "winner_user_id": row.winner_user_id,
+                        "winner_username": row.winner_username,
+                    }
+                )
+
+            return scoreboard
 
         except Exception as e:
             raise DatabaseOperationError(
