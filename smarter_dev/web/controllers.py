@@ -19,6 +19,30 @@ import smarter_dev.web.roles  # noqa: F401  — registers custom Skrift roles at
 logger = logging.getLogger(__name__)
 
 
+def _normalize_mounted_path(scope: Scope) -> None:
+    """Normalize mounted sub-app paths without breaking explicit trailing slashes.
+
+    Litestar can present the mounted path with a trailing slash even when the
+    client requested a non-slash route. Preserve paths that the client actually
+    requested with a trailing slash, since the mounted FastAPI app has
+    ``redirect_slashes=False`` for strict route matching.
+    """
+    path = scope.get("path", "/")
+    if path == "/" or not path.endswith("/"):
+        return
+
+    raw_path = scope.get("raw_path", b"")
+    if isinstance(raw_path, (bytes, bytearray)):
+        raw_path_text = raw_path.decode("latin-1")
+    else:
+        raw_path_text = str(raw_path or "")
+
+    if raw_path_text.endswith("/"):
+        return
+
+    scope["path"] = path.rstrip("/")
+
+
 class SudoController(Controller):
     """Handles sudo campaign routes."""
 
@@ -56,11 +80,7 @@ async def api_mount(scope: Scope, receive: Receive, send: Send) -> None:
     """Mount the FastAPI API as an ASGI sub-application."""
     from smarter_dev.web.api.app import api
 
-    # Litestar strips the /api prefix but adds a trailing slash.
-    # Normalize the path for FastAPI's routing.
-    path: str = scope.get("path", "/")
-    if path != "/" and path.endswith("/"):
-        scope["path"] = path.rstrip("/")
+    _normalize_mounted_path(scope)
     await api(scope, receive, send)
 
 
@@ -69,7 +89,5 @@ async def bot_admin_mount(scope: Scope, receive: Receive, send: Send) -> None:
     """Mount the legacy Starlette admin interface as an ASGI sub-application."""
     from smarter_dev.web.admin.app import create_admin_app
 
-    path: str = scope.get("path", "/")
-    if path != "/" and path.endswith("/"):
-        scope["path"] = path.rstrip("/")
+    _normalize_mounted_path(scope)
     await create_admin_app()(scope, receive, send)
