@@ -17,6 +17,7 @@ from smarter_dev.bot.services.squads_service import SquadsService
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.cache_manager import CacheManager
 from datetime import datetime, timedelta, date, timezone
+from smarter_dev.shared.date_provider import get_date_provider
 from smarter_dev.web.models import Quest, DailyQuest
 from uuid import uuid4
 
@@ -136,7 +137,7 @@ class TestE2EScenarios:
         Integration test: GET /quests/daily/current
         """
         # --- Arrange ---
-        today = date.today()
+        today = get_date_provider().today()
 
         quest = Quest(
             id=uuid4(),
