@@ -546,8 +546,11 @@ async def run_research(
     if user_profile:
         system_parts.append(
             f"\n\n## User Profile\n"
-            f"Use this to tailor your research — match their stack, skill level, "
-            f"and interests. Do not mention the profile explicitly in output.\n\n"
+            f"Use this to inform your search strategy — consider their stack and "
+            f"interests when choosing search terms and evaluating which technologies "
+            f"to explore. Do not narrow your research to only their stack; always "
+            f"explore the best options regardless of profile. Do not mention the "
+            f"profile explicitly in output.\n\n"
             f"{user_profile}"
         )
     system_prompt = "".join(system_parts)
@@ -672,9 +675,6 @@ async def run_synthesis(
 
     # Format the research output as the synthesis input
     input_parts = [f"## User Query\n{query}"]
-
-    if user_profile:
-        input_parts.append(f"\n## User Profile\n{user_profile}")
 
     # Sources
     if research_output.sources:
