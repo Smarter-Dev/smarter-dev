@@ -83,7 +83,7 @@ class ScanController(Controller):
         request: Request,
         db_session: AsyncSession,
         data: Annotated[dict, Body(media_type=RequestEncodingType.URL_ENCODED)],
-    ) -> Redirect:
+    ) -> Redirect | Response:
         """Submit a research query."""
         query = data.get("query", "").strip()
         if not query:
@@ -114,6 +114,12 @@ class ScanController(Controller):
         # Start the unified pipeline — one task handles everything
         start_pipeline_task(research.id, query, user_id, tz=tz, mode=pipeline_mode)
 
+        accept = request.headers.get("accept", "")
+        if "application/json" in accept:
+            return Response(
+                content={"url": f"/research?s={research.id}", "session_id": str(research.id)},
+                status_code=200,
+            )
         return Redirect(path=f"/research?s={research.id}")
 
     @get("/research", guards=[auth_guard])

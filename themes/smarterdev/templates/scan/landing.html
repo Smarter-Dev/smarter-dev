@@ -109,10 +109,14 @@
     if (tzEl) tzEl.value = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
     var ta = document.querySelector('.scan-input');
     if (!ta || ta.tagName !== 'TEXTAREA') return;
+    var form = ta.form;
+    var submitBtn = form ? form.querySelector('.scan-submit') : null;
+    var submitting = false;
+
     function grow(){ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';}
     ta.addEventListener('input', grow);
     ta.addEventListener('keydown', function(e){
-        if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();ta.form.requestSubmit();}
+        if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();form.requestSubmit();}
     });
     document.querySelectorAll('input[name="scan-mode-select"]').forEach(function(r){
         r.addEventListener('change', function(){
@@ -124,9 +128,55 @@
             e.preventDefault();
             ta.value = el.dataset.query;
             grow();
-            ta.form.requestSubmit();
+            form.requestSubmit();
         });
     });
+
+    // Intercept form submission — use fetch to avoid browser freeze
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            if (submitting) return;
+            submitting = true;
+
+            // Show loading state immediately
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'SCANNING...';
+            }
+            ta.disabled = true;
+
+            var formData = new URLSearchParams(new FormData(form));
+
+            fetch('/', {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: formData,
+                credentials: 'same-origin',
+            })
+            .then(function(r) {
+                if (!r.ok) throw new Error(r.status);
+                return r.json();
+            })
+            .then(function(data) {
+                if (data.url) {
+                    window.location.href = data.url;
+                }
+            })
+            .catch(function() {
+                // Re-enable on error
+                submitting = false;
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.textContent = 'SCAN';
+                }
+                ta.disabled = false;
+            });
+        });
+    }
 })();
 </script>
 {% endif %}

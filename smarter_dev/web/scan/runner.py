@@ -336,6 +336,8 @@ async def run_session_pipeline(
         await _emit(user_id, sid, event_type, **payload)
 
     try:
+        # Immediate notification so the result page gets instant feedback
+        await emit("started")
         # -- Fetch user profile --
         user_profile_text = ""
         async with get_skrift_db_session_context() as db_session:
