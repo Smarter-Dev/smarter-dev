@@ -114,11 +114,15 @@ class ScanController(Controller):
         # Start the unified pipeline — one task handles everything
         start_pipeline_task(research.id, query, user_id, tz=tz, mode=pipeline_mode)
 
-        accept = request.headers.get("accept", "")
-        if "application/json" in accept:
+        wants_json = (
+            request.headers.get("x-requested-with") == "fetch"
+            or "application/json" in request.headers.get("accept", "")
+        )
+        if wants_json:
             return Response(
                 content={"url": f"/research?s={research.id}", "session_id": str(research.id)},
                 status_code=200,
+                media_type=MediaType.JSON,
             )
         return Redirect(path=f"/research?s={research.id}")
 

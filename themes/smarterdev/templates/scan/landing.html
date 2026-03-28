@@ -153,16 +153,30 @@
                 headers: {
                     'Accept': 'application/json',
                     'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-Requested-With': 'fetch',
                 },
                 body: formData,
                 credentials: 'same-origin',
+                redirect: 'manual',
             })
             .then(function(r) {
+                // If server returned a redirect, follow the Location header
+                if (r.type === 'opaqueredirect') {
+                    // Can't read Location on opaque redirects — submit as regular form
+                    form.removeEventListener('submit', arguments.callee);
+                    form.submit();
+                    return;
+                }
+                if (r.status >= 300 && r.status < 400) {
+                    var loc = r.headers.get('location');
+                    window.location.href = loc || '/';
+                    return;
+                }
                 if (!r.ok) throw new Error(r.status);
                 return r.json();
             })
             .then(function(data) {
-                if (data.url) {
+                if (data && data.url) {
                     window.location.href = data.url;
                 }
             })
