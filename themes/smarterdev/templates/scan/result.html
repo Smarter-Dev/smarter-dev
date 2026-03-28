@@ -496,7 +496,13 @@ if (window.__skriftNotifications) {
 
         var eventType = data.type.replace("research:", "");
 
-        if (eventType === "session_meta") {
+        if (eventType === "started") {
+            if (placeholder) {
+                placeholder.textContent = "Analyzing query\u2026";
+            }
+        }
+
+        else if (eventType === "session_meta") {
             if (data.name) {
                 document.title = data.name + " - Scan - Smarter.Dev";
             }
