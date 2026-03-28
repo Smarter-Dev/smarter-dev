@@ -132,63 +132,15 @@
         });
     });
 
-    // Intercept form submission — use fetch to avoid browser freeze
+    // Show loading state on submit — form posts normally, browser follows redirect
     if (form) {
-        form.addEventListener('submit', function(e) {
-            e.preventDefault();
+        form.addEventListener('submit', function() {
             if (submitting) return;
             submitting = true;
-
-            // Show loading state immediately
             if (submitBtn) {
                 submitBtn.disabled = true;
                 submitBtn.textContent = 'SCANNING...';
             }
-            ta.disabled = true;
-
-            var formData = new URLSearchParams(new FormData(form));
-
-            fetch('/', {
-                method: 'POST',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'X-Requested-With': 'fetch',
-                },
-                body: formData,
-                credentials: 'same-origin',
-                redirect: 'manual',
-            })
-            .then(function(r) {
-                // If server returned a redirect, follow the Location header
-                if (r.type === 'opaqueredirect') {
-                    // Can't read Location on opaque redirects — submit as regular form
-                    form.removeEventListener('submit', arguments.callee);
-                    form.submit();
-                    return;
-                }
-                if (r.status >= 300 && r.status < 400) {
-                    var loc = r.headers.get('location');
-                    window.location.href = loc || '/';
-                    return;
-                }
-                if (!r.ok) throw new Error(r.status);
-                return r.json();
-            })
-            .then(function(data) {
-                if (data && data.url) {
-                    window.location.href = data.url;
-                }
-            })
-            .catch(function() {
-                // Re-enable on error
-                submitting = false;
-                if (submitBtn) {
-                    submitBtn.disabled = false;
-                    submitBtn.textContent = 'SCAN';
-                }
-                ta.disabled = false;
-            });
         });
     }
 })();
