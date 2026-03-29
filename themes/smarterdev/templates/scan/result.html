@@ -278,7 +278,7 @@
             {% elif session.status == 'error' %}
             <p class="scan-error-text">{{ session.error_message }}</p>
             {% elif session.status == 'running' %}
-            <span class="scan-cursor" id="scan-response-placeholder"></span>
+            <span id="scan-response-placeholder">Analyzing query… <span class="scan-cursor"></span></span>
             {% else %}
             <p class="scan-response-empty">No response available.</p>
             {% endif %}
