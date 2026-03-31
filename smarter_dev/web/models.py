@@ -3259,7 +3259,7 @@ class ResearchSession(Base):
     slug: Mapped[Optional[str]] = mapped_column(
         String(250), nullable=True, unique=True, index=True,
     )
-    user_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     guild_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     channel_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     status: Mapped[str] = mapped_column(

@@ -21,7 +21,7 @@ class ResearchSessionOperations:
         self,
         session: AsyncSession,
         query: str,
-        user_id: str,
+        user_id: str | None,
         name: str | None = None,
         guild_id: str | None = None,
         channel_id: str | None = None,

@@ -51,6 +51,7 @@ controllers:
   - smarter_dev.web.bot_admin_skrift:BotAdminController
   - smarter_dev.web.quests_admin:QuestsAdminController
   - smarter_dev.web.mod_actions_admin:ModActionsAdminController
+  - smarter_dev.web.scan.api_controller:ScanAPIController
 
 # Partials system (SPA navigation)
 partials:
