@@ -46,7 +46,6 @@ from smarter_dev.web.api.routers.repeating_messages import (
 )
 from smarter_dev.web.api.routers.members import router as members_router
 from smarter_dev.web.api.routers.advent_of_code import router as advent_of_code_router
-from smarter_dev.web.api.routers.research import router as research_router
 from smarter_dev.web.api.schemas import (
     ErrorResponse,
     ValidationErrorResponse,
@@ -410,7 +409,6 @@ api.include_router(members_router, tags=["Members"])
 
 api.include_router(advent_of_code_router, tags=["Advent of Code"])
 
-api.include_router(research_router, tags=["Research"])
 
 
 
