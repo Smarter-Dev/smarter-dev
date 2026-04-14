@@ -33,11 +33,12 @@
                     </div>
 
                     <div>
-                        <label for="response_channel_id"><strong>Response channel ID</strong> (optional)</label><br>
+                        <label for="response_channel_id"><strong>Mod report channel ID</strong> (optional)</label><br>
                         <input type="text" name="response_channel_id" id="response_channel_id"
                                value="{{ config.response_channel_id or '' if config else '' }}"
-                               placeholder="Leave empty to respond in same channel"
+                               placeholder="Leave empty to post reports in the incident channel"
                                style="width:300px; padding:0.4rem 0.6rem;">
+                        <small style="color:var(--sk-text-muted, #888);">Where triage reports are sent for human moderator review</small>
                     </div>
                 </div>
             </div>
@@ -56,12 +57,16 @@
 
             <div class="sk-panel" style="margin-top:1rem;">
                 <div class="sk-panel-head">Enabled Tools</div>
-                <div class="sk-panel-body" style="display:flex; gap:1.5rem; flex-wrap:wrap;">
-                    {% set tools = config.enabled_tools if config and config.enabled_tools else ['warn'] %}
-                    <label><input type="checkbox" name="enabled_tools" value="warn" {% if 'warn' in tools %}checked{% endif %}> Warn</label>
-                    <label><input type="checkbox" name="enabled_tools" value="timeout" {% if 'timeout' in tools %}checked{% endif %}> Timeout</label>
-                    <label><input type="checkbox" name="enabled_tools" value="kick" {% if 'kick' in tools %}checked{% endif %}> Kick</label>
-                    <label><input type="checkbox" name="enabled_tools" value="ban" {% if 'ban' in tools %}checked{% endif %}> Ban</label>
+                <div class="sk-panel-body">
+                    <p style="margin-bottom:0.75rem; color:var(--sk-text-muted, #888); font-size:0.9rem;">
+                        The agent always has access to flag users, send a channel message, and look up user info/history. These tools control what <em>actions</em> it can take.
+                    </p>
+                    <div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
+                        {% set tools = config.enabled_tools if config and config.enabled_tools else ['timeout', 'purge', 'delete'] %}
+                        <label><input type="checkbox" name="enabled_tools" value="timeout" {% if 'timeout' in tools %}checked{% endif %}> Timeout</label>
+                        <label><input type="checkbox" name="enabled_tools" value="purge" {% if 'purge' in tools %}checked{% endif %}> Purge Messages</label>
+                        <label><input type="checkbox" name="enabled_tools" value="delete" {% if 'delete' in tools %}checked{% endif %}> Delete Message</label>
+                    </div>
                 </div>
             </div>
 
@@ -69,10 +74,10 @@
                 <div class="sk-panel-head">Moderation Instructions</div>
                 <div class="sk-panel-body">
                     <p style="margin-bottom:0.75rem; color:var(--sk-text-muted, #888); font-size:0.9rem;">
-                        These instructions are given to the AI agent as its system prompt. Tell it your server rules, escalation policy, and how to handle different situations.
+                        These instructions guide the AI triage agent. The agent acts as a stopgap — it freezes dangerous situations with timeouts and message purges, then reports to human moderators. Tell it your server rules and when to escalate.
                     </p>
                     <textarea name="instructions" rows="12" style="width:100%; padding:0.5rem; font-size:0.9rem; line-height:1.5;"
-                              placeholder="Example:&#10;- Warn users for mild rule violations (off-topic, minor spam)&#10;- Timeout for 10m on repeated warnings (3+ warns)&#10;- Kick for harassment or hate speech&#10;- Ban for extreme cases (threats, doxxing, NSFW)&#10;- Always explain your reasoning to the channel">{{ config.instructions or '' if config else '' }}</textarea>
+                              placeholder="Example:&#10;- Timeout users who are actively causing harm (spam, hate speech, threats)&#10;- Purge messages containing slurs, threats, or NSFW content&#10;- Delete individual messages that violate rules but aren't part of a pattern&#10;- For heated arguments, send a warning message but don't timeout&#10;- New accounts (< 7 days) spamming are higher risk — prefer timeout&#10;- When in doubt, flag and message only — let the mods decide">{{ config.instructions or '' if config else '' }}</textarea>
                 </div>
             </div>
 
