@@ -133,6 +133,7 @@ addopts = [
     "--cov-report=html",
     "--cov-report=xml",
     "--cov-fail-under=20",  # Temporarily reduced while fixing tests
+    "-m", "not llm",  # Exclude LLM tests by default (expensive API calls)
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
