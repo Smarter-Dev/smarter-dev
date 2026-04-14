@@ -1,0 +1,1362 @@
+{
+  "timestamp": "2026-04-14T02:07:42.686017+00:00",
+  "label": "triage-v1",
+  "scenario_count": 10,
+  "models": {
+    "gpt-5.4-nano": {
+      "summary": {
+        "score": 22.2,
+        "max_score": 24,
+        "score_pct": 92.5,
+        "correct": 9,
+        "total": 10,
+        "over_reactions": 0,
+        "under_reactions": 1,
+        "errors": 0,
+        "avg_latency_ms": 10855.6
+      },
+      "scenarios": [
+        {
+          "scenario": "direct_insults",
+          "description": "User directly insults another user, mod role pinged",
+          "severity": "medium",
+          "expected_action": "timeout",
+          "expected_target_id": "1003",
+          "actual_action": "timeout",
+          "actual_target_id": "1003",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "1003"
+              }
+            },
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "1003"
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "1003",
+                "duration": "20m",
+                "reason": "Active harassment/insults directed at multiple members in the channel."
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "1003"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "An active harassment/insulting situation was reported in this channel. A timeout was applied to stop further harm while moderators review the case, and the user has been flagged for follow-up. Harassment and personal insults are not allowed\u2014any further behavior like this should cease immediately."
+              }
+            }
+          ],
+          "assessment": "- Timeout: Applied a 20-minute timeout to user id 1003 to halt active harassment.\n- Human review: Flagged user id 1003 for moderator follow-up.\n- Mod notice: Sent a concise moderation message instructing that harassment/personal insults must stop.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 13391.3,
+          "error": null
+        },
+        {
+          "scenario": "heated_but_civil",
+          "description": "Strong disagreement but no personal attacks",
+          "severity": "high",
+          "expected_action": "message_only",
+          "expected_target_id": null,
+          "actual_action": "message_only",
+          "actual_target_id": null,
+          "actions_taken": [
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "2001"
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "2001,2002"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "This thread appears to be a technical disagreement that has turned into nonstop arguing. Please keep the discussion focused on the merits of the arguments and avoid escalating tone or personal attacks. If the back-and-forth continues, moderators may intervene to pause the conversation."
+              }
+            }
+          ],
+          "assessment": "Flagged users 2001 and 2002 for human moderator review and sent a de-escalation message to the channel. No timeout/purge actions taken due to absence of threats/hate/personal attacks.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 9004.1,
+          "error": null
+        },
+        {
+          "scenario": "hate_speech",
+          "description": "User posts slurs and discriminatory content",
+          "severity": "high",
+          "expected_action": "timeout",
+          "expected_target_id": "3001",
+          "actual_action": "timeout",
+          "actual_target_id": "3001",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "3001"
+              }
+            },
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "3001"
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "3001",
+                "count": "10",
+                "reason": "Purge recent hate/discriminatory/slur content to limit exposure while moderators review."
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "3001",
+                "duration": "30m",
+                "reason": "Posted discriminatory hate/slur content in #general; timeout to freeze situation while moderators review."
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "3001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Hate/discriminatory language was posted in #general, including slurs and statements excluding protected people. Harmful messages were purged to limit further exposure, and the user was temporarily timed out to freeze the situation while human moderators review. Please investigate the context and apply the appropriate enforcement under the server\u2019s hate speech policy."
+              }
+            }
+          ],
+          "assessment": "Containment actions were completed (purge + 30m timeout) and the user was flagged for human moderation review. A concise moderator notification has been prepared and should be sent to alert human mods to investigate and enforce the appropriate policy.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 11727.1,
+          "error": null
+        },
+        {
+          "scenario": "link_spam",
+          "description": "User spamming promotional links",
+          "severity": "medium",
+          "expected_action": "timeout",
+          "expected_target_id": "4001",
+          "actual_action": "timeout",
+          "actual_target_id": "4001",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "4001"
+              }
+            },
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "4001"
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "4001",
+                "count": "10",
+                "reason": "Repeated crypto scam/spam link posting in the channel (e.g., FREE TOKENS / 1000x gains URLs). Purge to limit exposure while enforcement is applied."
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "4001",
+                "duration": "20m",
+                "reason": "Repeated crypto scam/spam link posting in this channel; purge already performed to limit exposure."
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "4001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Spam/scam link posting has been removed and the account has been temporarily timed out to stop further distribution. This behavior must stop immediately\u2014additional scam/phishing/promo spam will be escalated by moderators. A human moderator has been flagged to review the account and determine longer-term enforcement."
+              }
+            }
+          ],
+          "assessment": "Actions taken:\n- Purged 10 recent messages from user 4001 (crypto/scam link spam)\n- Timed out user 4001 for 20 minutes\n- Flagged user 4001 for human moderator review\n- Sent a mod notice (without naming users) instructing that scam/phishing/promo spam must stop and escalation will occur",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 13272.5,
+          "error": null
+        },
+        {
+          "scenario": "help_request_false_alarm",
+          "description": "User pings mod for help, not a moderation issue",
+          "severity": "medium",
+          "expected_action": "message_only",
+          "expected_target_id": null,
+          "actual_action": "message_only",
+          "actual_target_id": null,
+          "actions_taken": [
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "This looks like a programming/help request, not a policy violation. Please direct the user to the appropriate help/support channel (e.g., coding/programming support) and encourage them to include the relevant code snippet and environment details so others can troubleshoot."
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Please use the appropriate coding/programming support channel for help with JavaScript errors. Include the code snippet where the error occurs, expected vs actual behavior, and your environment (Node version / browser / framework) so others can troubleshoot quickly."
+              }
+            }
+          ],
+          "assessment": "No moderation enforcement actions were taken (no timeout/purge/flag). A moderator note was sent instructing the user to post in the correct coding/programming support channel and include the relevant code snippet plus environment details for troubleshooting.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 5176.8,
+          "error": null
+        },
+        {
+          "scenario": "threats",
+          "description": "User making threats against another user",
+          "severity": "high",
+          "expected_action": "timeout",
+          "expected_target_id": "6001",
+          "actual_action": "timeout",
+          "actual_target_id": "6001",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "6001"
+              }
+            },
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "6001"
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "6001",
+                "duration": "30m",
+                "reason": "Threatening another user and claiming to have their IP / doxxing-style statements"
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "6001",
+                "count": "10",
+                "reason": "Remove recent doxxing/threat messages claiming an IP address and warning the victim to watch their back"
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "6001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "A user made explicit threats and claimed to have another user\u2019s IP address, including warnings to \u201cwatch your back.\u201d To freeze the situation and reduce exposure, the account was timed out and the most recent threatening/doxxing-related messages were deleted. The user has also been flagged for human moderator review\u2014please investigate and determine appropriate longer-term action."
+              }
+            }
+          ],
+          "assessment": "- Timeout: Applied to user 6001 for 30 minutes due to active threats/doxxing claims.  \n- Purge: Deleted 10 recent messages from user 6001 containing threatening/doxxing-related content.  \n- Flag: User 6001 flagged for human moderator review.  \n- Mod notice: Sent a concise message to the moderation channel describing the containment actions and rationale.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 18694.9,
+          "error": null
+        },
+        {
+          "scenario": "mild_rudeness",
+          "description": "Slightly rude but not clearly rule-breaking",
+          "severity": "medium",
+          "expected_action": "message_only",
+          "expected_target_id": null,
+          "actual_action": "message_only",
+          "actual_target_id": null,
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "7001"
+              }
+            },
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "7001"
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "7001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Reminder: questions should be met with a helpful, respectful response. Dismissive or belittling replies are not appropriate\u2014please engage constructively, especially when someone says they didn\u2019t understand. Human moderators have been notified to review the reported behavior."
+              }
+            }
+          ],
+          "assessment": "- Timeout: No (not clearly actively abusive beyond dismissiveness in the provided snippet)\n- Purge: No (no clearly harmful/spam/NSFW/threat content to remove)\n- Flagged: Yes \u2014 flagged the dismissive user for moderator review\n- Mod message: Sent a concise reminder to keep responses helpful/respectful and noted that human moderators were alerted.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 12440.8,
+          "error": null
+        },
+        {
+          "scenario": "nsfw_content",
+          "description": "User posting inappropriate content in general channel",
+          "severity": "high",
+          "expected_action": "purge",
+          "expected_target_id": "8001",
+          "actual_action": "purge",
+          "actual_target_id": "8001",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "8001"
+              }
+            },
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "8001"
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "8001",
+                "count": "10",
+                "reason": "Explicit NSFW sexual content posted in #general where minors may be present; immediate removal required."
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "8001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Explicit NSFW content was posted in #general and has been removed immediately because this server includes minors. Further NSFW/explicit material in non-designated channels is not allowed and will be actioned. Human moderators have been notified to review the behavior."
+              }
+            }
+          ],
+          "assessment": "- Purged 10 messages from the NSFW poster in #general due to explicit sexual content in a channel where minors may be present.\n- Flagged the user for human moderator review.\n- Sent a concise mod notification stating that NSFW/explicit content in non-designated channels must stop and that humans have been notified.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 11534.2,
+          "error": null
+        },
+        {
+          "scenario": "positive_mention",
+          "description": "Mod role mentioned positively, no issue",
+          "severity": "low",
+          "expected_action": "message_only",
+          "expected_target_id": null,
+          "actual_action": "message_only",
+          "actual_target_id": null,
+          "actions_taken": [
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Thanks for the kind words\u2014glad you\u2019re enjoying the community. Please keep it respectful and report any issues you see so the team can help quickly."
+              }
+            }
+          ],
+          "assessment": "No enforcement action taken (no timeout, no purge). A moderator note was sent encouraging continued respectful conduct and reporting issues.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 4218.2,
+          "error": null
+        },
+        {
+          "scenario": "targeted_harassment",
+          "description": "User systematically targeting another user across messages",
+          "severity": "high",
+          "expected_action": "timeout",
+          "expected_target_id": "10001",
+          "actual_action": "message_only",
+          "actual_target_id": null,
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "10001"
+              }
+            },
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "10001"
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "10001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Targeted harassment and personal insults are not allowed here. The reported behavior has been escalated for human moderator review, and it must stop immediately. If you continue, you may face moderation action."
+              }
+            }
+          ],
+          "assessment": "- Took action: flagged the harassing user (id: 10001) for human moderator review.\n- Containment: sent a moderation message telling everyone to stop targeted harassment and warning of potential moderation action if it continues.\n- Not taken: no timeout or purge due to lack of clear threat/NSFW content and to avoid over-moderation based only on harassment text.\n- Hand-off: human moderators should decide whether to timeout and/or remove additional messages.",
+          "correct_action": false,
+          "correct_target": false,
+          "over_reaction": false,
+          "under_reaction": true,
+          "score": 0.4,
+          "latency_ms": 9095.8,
+          "error": null
+        }
+      ]
+    },
+    "gemini-flash-lite": {
+      "summary": {
+        "score": 24.0,
+        "max_score": 24,
+        "score_pct": 100.0,
+        "correct": 10,
+        "total": 10,
+        "over_reactions": 0,
+        "under_reactions": 0,
+        "errors": 0,
+        "avg_latency_ms": 10065.9
+      },
+      "scenarios": [
+        {
+          "scenario": "direct_insults",
+          "description": "User directly insults another user, mod role pinged",
+          "severity": "medium",
+          "expected_action": "timeout",
+          "expected_target_id": "1003",
+          "actual_action": "timeout",
+          "actual_target_id": "1003",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "1003"
+              }
+            },
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "1003"
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "1003",
+                "duration": "30m",
+                "reason": "Harassment and verbal abuse towards other members."
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "1003",
+                "count": "2",
+                "reason": "Removing abusive and harassing messages."
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "1003"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "The reported behavior has been addressed. Harassment and verbal abuse are not tolerated in this community. The user has been placed on a temporary timeout while the moderation team reviews the situation."
+              }
+            }
+          ],
+          "assessment": "I have successfully contained the situation by timing out the offending user for 30 minutes and removing their harmful messages. The user has been flagged for human moderator review to determine if further action is required. A professional message was posted to the channel to inform members that the behavior was addressed and that harassment is not tolerated.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 15161.2,
+          "error": null
+        },
+        {
+          "scenario": "heated_but_civil",
+          "description": "Strong disagreement but no personal attacks",
+          "severity": "high",
+          "expected_action": "message_only",
+          "expected_target_id": null,
+          "actual_action": "message_only",
+          "actual_target_id": null,
+          "actions_taken": [
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "This appears to be a standard technical discussion. As long as the conversation remains civil and free of personal attacks, it is permitted under our guidelines. Please keep the discussion focused on the technology."
+              }
+            }
+          ],
+          "assessment": "I have determined that this is a civil technical disagreement and does not violate server rules. I have sent a message to the channel clarifying that the discussion is permitted as long as it remains respectful and focused on the technology, and I have taken no further action.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 5610.8,
+          "error": null
+        },
+        {
+          "scenario": "hate_speech",
+          "description": "User posts slurs and discriminatory content",
+          "severity": "high",
+          "expected_action": "timeout",
+          "expected_target_id": "3001",
+          "actual_action": "timeout",
+          "actual_target_id": "3001",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "3001"
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "3001",
+                "count": "2",
+                "reason": "Use of hate speech and discriminatory language."
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "3001",
+                "duration": "30m",
+                "reason": "Violation of zero-tolerance policy regarding hate speech and discrimination."
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "3001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "This server has a zero-tolerance policy regarding hate speech and discriminatory language. The reported messages have been removed and the user has been placed under a temporary timeout while the moderation team reviews the situation."
+              }
+            }
+          ],
+          "assessment": "The situation has been contained. The harmful messages were removed, the user has been silenced, and the moderation team has been alerted to the incident for further action.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 12590.8,
+          "error": null
+        },
+        {
+          "scenario": "link_spam",
+          "description": "User spamming promotional links",
+          "severity": "medium",
+          "expected_action": "timeout",
+          "expected_target_id": "4001",
+          "actual_action": "timeout",
+          "actual_target_id": "4001",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "4001"
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "4001",
+                "count": "5",
+                "reason": "Spamming malicious links"
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "4001",
+                "duration": "30m",
+                "reason": "Spamming malicious links"
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "4001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "The reported spam messages have been removed and the account responsible has been placed under a temporary timeout. Please refrain from clicking any suspicious links and continue to report such behavior to the moderation team."
+              }
+            }
+          ],
+          "assessment": "The situation has been contained. The spam messages were removed, the offending account was restricted, and the incident has been escalated to human moderators for further investigation and permanent action if necessary.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 15290.4,
+          "error": null
+        },
+        {
+          "scenario": "help_request_false_alarm",
+          "description": "User pings mod for help, not a moderation issue",
+          "severity": "medium",
+          "expected_action": "message_only",
+          "expected_target_id": null,
+          "actual_action": "message_only",
+          "actual_target_id": null,
+          "actions_taken": [
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Please refrain from pinging moderators for technical support. This channel is not for help requests; please post your coding questions in the designated help channels to get assistance from the community."
+              }
+            }
+          ],
+          "assessment": "I have determined that no punitive action is required. I have sent a message to the channel to redirect the user to the correct support channels and to clarify that the moderator role should not be pinged for technical assistance. The situation is resolved.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 5772.0,
+          "error": null
+        },
+        {
+          "scenario": "threats",
+          "description": "User making threats against another user",
+          "severity": "high",
+          "expected_action": "timeout",
+          "expected_target_id": "6001",
+          "actual_action": "timeout",
+          "actual_target_id": "6001",
+          "actions_taken": [
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "6001",
+                "duration": "30m",
+                "reason": "Direct threats and claims of doxxing/IP tracking."
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "6001",
+                "count": "3",
+                "reason": "Removing direct threats and doxxing claims."
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "6001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "This situation is being addressed. Threats and claims of doxxing are strictly prohibited and will not be tolerated in this community. The user involved has been placed under a temporary timeout while the moderation team reviews the incident."
+              }
+            }
+          ],
+          "assessment": "The situation has been successfully frozen. The offending user is currently under a 30-minute timeout, the harmful content has been removed, and the incident has been escalated to the human moderation team for further investigation and permanent action.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 12918.1,
+          "error": null
+        },
+        {
+          "scenario": "mild_rudeness",
+          "description": "Slightly rude but not clearly rule-breaking",
+          "severity": "medium",
+          "expected_action": "message_only",
+          "expected_target_id": null,
+          "actual_action": "message_only",
+          "actual_target_id": null,
+          "actions_taken": [
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "7001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Please keep the conversation respectful and helpful. While being dismissive is discouraged, it does not currently violate our community guidelines. Let's keep the discussion focused on the topic at hand."
+              }
+            }
+          ],
+          "assessment": "No moderation action taken. The situation was assessed as a low-severity interpersonal conflict that does not violate current guild rules. A message was sent to the channel to de-escalate the tension and remind users of community expectations.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 7394.3,
+          "error": null
+        },
+        {
+          "scenario": "nsfw_content",
+          "description": "User posting inappropriate content in general channel",
+          "severity": "high",
+          "expected_action": "purge",
+          "expected_target_id": "8001",
+          "actual_action": "purge",
+          "actual_target_id": "8001",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "8001"
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "8001",
+                "count": "5",
+                "reason": "Posting NSFW content in #general"
+              }
+            }
+          ],
+          "assessment": null,
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 4993.5,
+          "error": null
+        },
+        {
+          "scenario": "positive_mention",
+          "description": "Mod role mentioned positively, no issue",
+          "severity": "low",
+          "expected_action": "message_only",
+          "expected_target_id": null,
+          "actual_action": "message_only",
+          "actual_target_id": null,
+          "actions_taken": [
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Thank you for the kind words! We appreciate the positive feedback and are glad to hear you're enjoying the community."
+              }
+            }
+          ],
+          "assessment": "The situation is benign and positive. No moderation intervention is required beyond acknowledging the user's feedback. The task is complete.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 3971.5,
+          "error": null
+        },
+        {
+          "scenario": "targeted_harassment",
+          "description": "User systematically targeting another user across messages",
+          "severity": "high",
+          "expected_action": "timeout",
+          "expected_target_id": "10001",
+          "actual_action": "timeout",
+          "actual_target_id": "10001",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "10001"
+              }
+            },
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "10001"
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "10001",
+                "duration": "30m",
+                "reason": "Targeted harassment of another member."
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "10001",
+                "count": "5",
+                "reason": "Targeted harassment."
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "10001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "This channel is for respectful discussion. Targeted harassment is a violation of our community guidelines and will not be tolerated. The situation has been addressed and flagged for further review by the moderation team."
+              }
+            }
+          ],
+          "assessment": "The situation has been contained. The harasser has been placed in a 30-minute timeout, their harassing messages have been purged, and they have been flagged for human moderator review. A message was sent to the channel to reinforce community guidelines and inform members that the situation is being addressed.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 16956.5,
+          "error": null
+        }
+      ]
+    },
+    "claude-haiku": {
+      "summary": {
+        "score": 21.9,
+        "max_score": 24,
+        "score_pct": 91.2,
+        "correct": 9,
+        "total": 10,
+        "over_reactions": 1,
+        "under_reactions": 0,
+        "errors": 0,
+        "avg_latency_ms": 15874.5
+      },
+      "scenarios": [
+        {
+          "scenario": "direct_insults",
+          "description": "User directly insults another user, mod role pinged",
+          "severity": "medium",
+          "expected_action": "timeout",
+          "expected_target_id": "1003",
+          "actual_action": "timeout",
+          "actual_target_id": "1003",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "1003"
+              }
+            },
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "1003"
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "1003",
+                "duration": "20m",
+                "reason": "Active harassment and personal insults directed at multiple users"
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "1003",
+                "count": "2",
+                "reason": "Removal of personal insults and harassment directed at other users"
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "1003"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "A user has been timed out for 20 minutes due to active harassment and personal insults directed at other members. This behavior violates our community standards. Please keep discussions respectful and constructive."
+              }
+            }
+          ],
+          "assessment": "I have taken the following actions to contain this situation:\n\n1. **Timeout Applied**: ToxicTom has been timed out for 20 minutes to immediately stop the active harassment and give human moderators time to arrive and review the incident.\n\n2. **Messages Purged**: The two insulting messages have been deleted from the channel to limit exposure and harm to other community members.\n\n3. **User Flagged**: ToxicTom has been flagged for human moderator review to ensure this incident is documented and reviewed by the full moderation team.\n\n4. **Channel Message Sent**: A professional moderation message has been posted explaining that a user was timed out for harassment and personal insults, reinforcing community standards around respectful discussion.\n\nThe situation has been frozen. ToxicTom cannot send further messages during the timeout period, harmful content has been removed, and human moderators have been alerted via the flag for follow-up action.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 21680.3,
+          "error": null
+        },
+        {
+          "scenario": "heated_but_civil",
+          "description": "Strong disagreement but no personal attacks",
+          "severity": "high",
+          "expected_action": "message_only",
+          "expected_target_id": null,
+          "actual_action": "message_only",
+          "actual_target_id": null,
+          "actions_taken": [
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Technical disagreements about programming languages are welcome in this community. The conversation between these users does not violate our moderation policy. Please keep discussions respectful, but differing opinions on tech stacks are encouraged."
+              }
+            }
+          ],
+          "assessment": "No moderation action was necessary. I sent a channel message clarifying that technical disagreements about programming languages are welcome and do not violate community policy. The conversation between Dave and Eve does not contain any policy violations \u2014 it is a respectful exchange of differing technical opinions. No users were flagged, no messages were purged, and no timeouts were issued. The situation is resolved by setting clear expectations for the community.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 9673.4,
+          "error": null
+        },
+        {
+          "scenario": "hate_speech",
+          "description": "User posts slurs and discriminatory content",
+          "severity": "high",
+          "expected_action": "timeout",
+          "expected_target_id": "3001",
+          "actual_action": "timeout",
+          "actual_target_id": "3001",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "3001"
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "3001",
+                "duration": "30m",
+                "reason": "Hate speech and discrimination - used slurs and made discriminatory statements about protected groups"
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "3001",
+                "count": "2",
+                "reason": "Removal of hate speech and discriminatory content"
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "3001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "This server has a zero-tolerance policy for hate speech, slurs, and discrimination. Hateful content has been removed and the user has been timed out. Such behavior will not be tolerated here. If you witness similar violations, please report them immediately."
+              }
+            }
+          ],
+          "assessment": "**Actions Taken:**\n- \u2713 Timed out user 3001 for 30 minutes (to freeze the situation)\n- \u2713 Purged 2 messages containing hate speech and discriminatory content\n- \u2713 Flagged user 3001 for human moderator review\n- \u2713 Sent channel message explaining zero-tolerance policy and actions taken\n\n**Situation Status:** CONTAINED\nThe user's ability to continue posting has been temporarily suspended. Harmful messages have been removed from the channel to limit exposure. The user is flagged for human moderators to conduct a full review and determine if permanent action (ban) is warranted. The community has been notified that such behavior violates server policy.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 18812.9,
+          "error": null
+        },
+        {
+          "scenario": "link_spam",
+          "description": "User spamming promotional links",
+          "severity": "medium",
+          "expected_action": "timeout",
+          "expected_target_id": "4001",
+          "actual_action": "timeout",
+          "actual_target_id": "4001",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "4001"
+              }
+            },
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "4001"
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "4001",
+                "duration": "30m",
+                "reason": "Spam: multiple messages with suspicious crypto/pump-and-dump links"
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "4001",
+                "count": "4",
+                "reason": "Spam: crypto/pump-and-dump scam links"
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "4001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Spam detected and removed. The user responsible has been timed out for 30 minutes pending human moderator review. We do not tolerate spam, scam links, or pump-and-dump schemes in this server. Please report suspicious activity immediately."
+              }
+            }
+          ],
+          "assessment": "I have taken the following actions to contain this spam situation:\n\n1. **Timeout (30 minutes)**: User_4001 has been timed out to immediately stop further spam messages.\n2. **Purge (4 messages)**: All visible spam messages containing scam links have been removed from the channel to limit exposure.\n3. **Flag for review**: User_4001 has been flagged for human moderator review to determine if further action (permanent ban, etc.) is warranted.\n4. **Channel message**: A professional moderator message has been posted explaining that spam was detected and removed, and that the responsible user has been timed out pending human review.\n\nThe situation has been frozen and contained. The spam is no longer visible in the channel, the user cannot post further messages during the timeout period, and human moderators have been alerted via the flag for final disposition.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 17967.7,
+          "error": null
+        },
+        {
+          "scenario": "help_request_false_alarm",
+          "description": "User pings mod for help, not a moderation issue",
+          "severity": "medium",
+          "expected_action": "message_only",
+          "expected_target_id": null,
+          "actual_action": "message_only",
+          "actual_target_id": null,
+          "actions_taken": [
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "I understand you're looking for help with a coding issue. Moderators handle rule violations, not technical support. Please post your question in the #help or #coding-questions channel where community members and experts can assist you. Thanks for your patience!"
+              }
+            }
+          ],
+          "assessment": "No moderation action taken. This situation requires only a helpful redirect, not enforcement. I sent a channel message directing the user to appropriate help channels (#help or #coding-questions) where their technical question can be properly addressed by community members and experts. The user's frustration is understandable but does not warrant timeout, message purge, or flagging. A friendly redirect resolves the situation appropriately.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 7912.4,
+          "error": null
+        },
+        {
+          "scenario": "threats",
+          "description": "User making threats against another user",
+          "severity": "high",
+          "expected_action": "timeout",
+          "expected_target_id": "6001",
+          "actual_action": "timeout",
+          "actual_target_id": "6001",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "6001"
+              }
+            },
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "6001"
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "6001",
+                "duration": "30m",
+                "reason": "Explicit threats of violence and doxxing claims against another user"
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "6001",
+                "count": "4",
+                "reason": "Removal of explicit threats and doxxing claims"
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "6001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "A user has been temporarily timed out for making explicit threats of violence and doxxing claims against another member. This behavior violates our community standards and will not be tolerated. The threatening messages have been removed. A human moderator will review this incident for further action."
+              }
+            }
+          ],
+          "assessment": "I have taken immediate action to freeze this dangerous situation:\n\n**Actions Taken:**\n- **Timeout (30 minutes):** User 6001 has been timed out to prevent further threats\n- **Message Purge:** 4 threatening messages have been removed to limit exposure\n- **Flagged for Review:** User 6001 has been flagged for human moderator review due to the severity of threats and doxxing claims\n- **Channel Message:** A mod message has been posted explaining the situation and actions taken\n\nThe situation has been contained. The victim is protected from further threats in the immediate term, and human moderators have been alerted to this serious incident for permanent action decisions. The 30-minute timeout provides a window for human mods to arrive and assess whether permanent removal is warranted.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 20060.8,
+          "error": null
+        },
+        {
+          "scenario": "mild_rudeness",
+          "description": "Slightly rude but not clearly rule-breaking",
+          "severity": "medium",
+          "expected_action": "message_only",
+          "expected_target_id": null,
+          "actual_action": "message_only",
+          "actual_target_id": null,
+          "actions_taken": [
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "We appreciate you reaching out. While we encourage helpful and respectful communication, the exchange here doesn't meet the threshold for moderation action. If you have questions, please feel free to ask \u2014 our community is here to help. Let's keep interactions constructive."
+              }
+            }
+          ],
+          "assessment": "No moderation action taken. This situation does not meet the threshold for timeout, message purging, or user flagging. Grumpy's responses were dismissive and unhelpful, but the guild explicitly permits such behavior unless it constitutes targeted harassment \u2014 which this does not. A professional channel message was sent to clarify community expectations around constructive communication without naming or penalizing either party. Human moderators can review if the behavior escalates.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 10314.7,
+          "error": null
+        },
+        {
+          "scenario": "nsfw_content",
+          "description": "User posting inappropriate content in general channel",
+          "severity": "high",
+          "expected_action": "purge",
+          "expected_target_id": "8001",
+          "actual_action": "timeout",
+          "actual_target_id": "8001",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "8001"
+              }
+            },
+            {
+              "tool": "get_user_history",
+              "args": {
+                "user_id": "8001"
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "8001",
+                "count": "2",
+                "reason": "Explicit sexual content posted in #general channel with minors present"
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "8001",
+                "duration": "20m",
+                "reason": "Posted explicit sexual content in #general channel with minors present"
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "8001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "NSFW content has been removed from this channel. We maintain a safe environment for all members, including minors. Explicit sexual content is only permitted in designated channels. This behavior will not be tolerated. A timeout has been issued while this matter is reviewed by moderators."
+              }
+            }
+          ],
+          "assessment": "I have taken the following actions to contain this situation:\n\n1. **Purged 2 NSFW messages** from EdgeLord (id:8001) to immediately remove the explicit sexual content from the channel and limit exposure to minors.\n\n2. **Issued a 20-minute timeout** to EdgeLord to prevent further harmful posts while human moderators review the situation. This is a proportionate response for a first offense from an established account.\n\n3. **Flagged the user for human moderator review** to ensure this violation is documented and reviewed by the full moderation team.\n\n4. **Sent a channel message** explaining that NSFW content has been removed, reinforcing that this community maintains a safe environment for all members including minors, and that explicit content is only permitted in designated channels.\n\nThe situation has been frozen and handed off to human moderators. The harmful content is no longer visible to channel members, and the user is temporarily unable to post further violations.",
+          "correct_action": false,
+          "correct_target": true,
+          "over_reaction": true,
+          "under_reaction": false,
+          "score": 0.3,
+          "latency_ms": 21346.1,
+          "error": null
+        },
+        {
+          "scenario": "positive_mention",
+          "description": "Mod role mentioned positively, no issue",
+          "severity": "low",
+          "expected_action": "message_only",
+          "expected_target_id": null,
+          "actual_action": "message_only",
+          "actual_target_id": null,
+          "actions_taken": [
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Thanks for the kind words! We appreciate the positive community here. Keep being awesome!"
+              }
+            }
+          ],
+          "assessment": "No action required. This is positive community feedback, not a moderation issue. I have sent a brief, professional channel message acknowledging the compliment and reinforcing the positive community culture. No users need to be timed out, no messages need to be purged, and no users need to be flagged for review. The situation is resolved.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 6778.3,
+          "error": null
+        },
+        {
+          "scenario": "targeted_harassment",
+          "description": "User systematically targeting another user across messages",
+          "severity": "high",
+          "expected_action": "timeout",
+          "expected_target_id": "10001",
+          "actual_action": "timeout",
+          "actual_target_id": "10001",
+          "actions_taken": [
+            {
+              "tool": "get_user_info",
+              "args": {
+                "user_id": "10001"
+              }
+            },
+            {
+              "tool": "timeout",
+              "args": {
+                "user_id": "10001",
+                "duration": "30m",
+                "reason": "Targeted harassment - repeated personal attacks and mockery despite victim asking to stop"
+              }
+            },
+            {
+              "tool": "purge",
+              "args": {
+                "user_id": "10001",
+                "count": "5",
+                "reason": "Targeted harassment - personal attacks and mockery"
+              }
+            },
+            {
+              "tool": "flag_users",
+              "args": {
+                "user_ids": "10001"
+              }
+            },
+            {
+              "tool": "send_mod_message",
+              "args": {
+                "message": "Targeted harassment will not be tolerated in this server. The user responsible has been timed out for 30 minutes, and their messages have been removed. If this behavior continues, further action will be taken. Please treat all members with respect."
+              }
+            }
+          ],
+          "assessment": "**Action taken**: Timeout user 10001 for 30 minutes, purged 5 harassing messages, flagged for human moderator review, and posted a channel message.\n\nThis was a straightforward case of targeted harassment that required immediate action to freeze the situation. The harasser repeatedly attacked the victim personally and professionally despite explicit requests to stop. The 30-minute timeout is sufficient to contain the immediate harm while human moderators review the flagged user and determine if further action (longer timeout, warning, or other measures) is warranted. The purged messages remove the harmful content from public view, and the channel message reinforces that this behavior is not acceptable in the community.",
+          "correct_action": true,
+          "correct_target": true,
+          "over_reaction": false,
+          "under_reaction": false,
+          "score": 1.0,
+          "latency_ms": 24198.3,
+          "error": null
+        }
+      ]
+    }
+  }
+}

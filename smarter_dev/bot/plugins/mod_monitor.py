@@ -1,9 +1,11 @@
-"""Moderation monitor plugin — watches for role mentions and triggers AI moderation.
+"""Moderation monitor plugin — watches for role mentions and triggers AI triage.
 
 When a user mentions a monitored role (configured per-guild), the bot:
 1. Fetches recent channel history for context
-2. Runs the moderation AI agent with guild-configured instructions
-3. The agent decides what action to take (warn, timeout, kick, ban, or just respond)
+2. Runs the moderation triage agent with guild-configured instructions
+3. The agent decides what action to take (timeout, purge, flag, or just message)
+4. A channel message is posted with appended user pings
+5. A summary report embed is sent to the configured mod channel
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import logging
 import hikari
 import lightbulb
 
+from smarter_dev.bot.agents.mod_tools import build_triage_report_embed
 from smarter_dev.bot.agents.moderation_agent import run_moderation_agent
 from smarter_dev.bot.utils.messages import gather_message_context
 from smarter_dev.shared.database import get_skrift_db_session_context
@@ -40,7 +43,7 @@ async def _load_configs() -> None:
                 _guild_configs[config.guild_id] = {
                     "monitored_role_ids": set(config.monitored_role_ids or []),
                     "instructions": config.instructions or "",
-                    "enabled_tools": config.enabled_tools or ["warn"],
+                    "enabled_tools": config.enabled_tools or ["timeout", "purge", "delete"],
                     "context_message_limit": config.context_message_limit or 25,
                     "response_channel_id": config.response_channel_id,
                 }
@@ -61,7 +64,7 @@ async def refresh_config(guild_id: str) -> None:
                 _guild_configs[guild_id] = {
                     "monitored_role_ids": set(config.monitored_role_ids or []),
                     "instructions": config.instructions or "",
-                    "enabled_tools": config.enabled_tools or ["warn"],
+                    "enabled_tools": config.enabled_tools or ["timeout", "purge", "delete"],
                     "context_message_limit": config.context_message_limit or 25,
                     "response_channel_id": config.response_channel_id,
                 }
@@ -106,11 +109,12 @@ async def _handle_moderation(
     event: hikari.GuildMessageCreateEvent,
     config: dict,
 ) -> None:
-    """Handle a moderation trigger by gathering context and running the agent."""
+    """Handle a moderation trigger by gathering context and running the triage agent."""
     try:
         guild_id = str(event.guild_id)
         channel_id = str(event.channel_id)
         bot = plugin.bot
+        trigger_message_id = str(event.message.id)
 
         # Gather channel history for context
         context_messages = await gather_message_context(
@@ -120,20 +124,49 @@ async def _handle_moderation(
             limit=config["context_message_limit"],
         )
 
-        # Run the moderation agent
-        assessment = await run_moderation_agent(
+        # Run the triage agent — always operate in the INCIDENT channel
+        assessment, tracker = await run_moderation_agent(
             bot=bot,
             guild_id=guild_id,
-            channel_id=config.get("response_channel_id") or channel_id,
+            channel_id=channel_id,  # incident channel, NOT response_channel_id
             trigger_message_content=event.message.content or "",
             trigger_author=event.message.author.username,
             context_messages=context_messages,
             guild_instructions=config["instructions"],
             enabled_tools=config["enabled_tools"],
-            trigger_message_id=str(event.message.id),
+            trigger_message_id=trigger_message_id,
         )
 
-        logger.info(f"Moderation assessment for guild {guild_id}: {assessment[:200]}")
+        # Post channel message with appended user pings
+        if tracker.channel_message:
+            impacted_ids = tracker.all_impacted_user_ids
+            message_parts = [tracker.channel_message]
+            if impacted_ids:
+                pings = " ".join(f"<@{uid}>" for uid in sorted(impacted_ids))
+                message_parts.append(f"-# {pings}")
+            message_parts.append("-# Moderators have been notified")
+            full_message = "\n".join(message_parts)
+
+            try:
+                await bot.rest.create_message(int(channel_id), full_message)
+            except Exception:
+                logger.exception(f"Failed to send channel message for guild {guild_id}")
+
+        # Post triage report to mod channel
+        report_channel = config.get("response_channel_id") or channel_id
+        report_embed = build_triage_report_embed(
+            tracker=tracker,
+            assessment=assessment,
+            trigger_author=event.message.author.username,
+            channel_id=channel_id,
+            trigger_message_id=trigger_message_id,
+        )
+        try:
+            await bot.rest.create_message(int(report_channel), embed=report_embed)
+        except Exception:
+            logger.exception(f"Failed to send triage report for guild {guild_id}")
+
+        logger.info(f"Moderation triage completed for guild {guild_id}: {assessment[:200]}")
 
     except Exception:
         logger.exception(
