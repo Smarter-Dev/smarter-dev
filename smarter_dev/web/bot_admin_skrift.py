@@ -143,7 +143,7 @@ class BotAdminController(Controller):
             enabled_tools = []
 
         # Filter to valid tool names
-        valid_tools = {"warn", "timeout", "kick", "ban"}
+        valid_tools = {"timeout", "purge", "delete"}
         enabled_tools = [t for t in enabled_tools if t in valid_tools]
 
         await mod_config_ops.update_config(

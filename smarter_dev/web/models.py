@@ -3347,11 +3347,11 @@ class ScanServiceUsage(Base):
 
 
 class ModerationConfig(Base):
-    """Per-guild configuration for AI-powered moderation monitoring.
+    """Per-guild configuration for AI moderation triage.
 
     When a user mentions a monitored role, the bot reads chat history and uses
-    an AI agent with configured tools to respond according to the guild's
-    moderation instructions.
+    an AI triage agent to freeze dangerous situations (timeout, purge, delete)
+    while waiting for human moderators to arrive.
     """
 
     __tablename__ = "moderation_configs"
@@ -3382,14 +3382,14 @@ class ModerationConfig(Base):
     enabled_tools: Mapped[list] = mapped_column(
         JSON,
         nullable=False,
-        default=lambda: ["warn"],
-        server_default='["warn"]',
-        doc="List of tool names enabled: warn, timeout, kick, ban",
+        default=lambda: ["timeout", "purge", "delete"],
+        server_default='["timeout", "purge", "delete"]',
+        doc="List of action tool names enabled: timeout, purge, delete",
     )
     response_channel_id: Mapped[Optional[str]] = mapped_column(
         String,
         nullable=True,
-        doc="Optional channel to post mod summaries (null = respond in same channel)",
+        doc="Channel where triage reports are posted for human moderator review",
     )
     context_message_limit: Mapped[int] = mapped_column(
         Integer,
