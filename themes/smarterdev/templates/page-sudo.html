@@ -1,7 +1,26 @@
 {% extends "base.html" %}
 
 {% block page_type %}sudo{% endblock %}
-{% block page_title %}sudo — Unlock more from Smarter Dev{% endblock %}
+{% block page_title %}sudo — Premium membership for Smarter Dev{% endblock %}
+
+{% block seo_meta %}
+<meta name="description" content="Smarter Dev stays open. sudo is for people who want deeper access to what we're building — private spaces, early tools, interactive challenges, hands-on courses, and sharper community infrastructure.">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://smarter.dev/sudo">
+{% endblock %}
+
+{% block og_meta %}
+<meta property="og:title" content="sudo — Premium membership for Smarter Dev">
+<meta property="og:description" content="Smarter Dev stays open. sudo is for people who want deeper access to what we're building — private spaces, early tools, interactive challenges, hands-on courses, and sharper community infrastructure.">
+<meta property="og:image" content="https://smarter.dev/static/resources/sudo-og-preview.png">
+<meta property="og:url" content="https://smarter.dev/sudo">
+<meta property="og:site_name" content="Smarter Dev">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="sudo — Premium membership for Smarter Dev">
+<meta name="twitter:description" content="Smarter Dev stays open. sudo is for people who want deeper access to what we're building — private spaces, early tools, interactive challenges, hands-on courses, and sharper community infrastructure.">
+<meta name="twitter:image" content="https://smarter.dev/static/resources/sudo-og-preview.png">
+{% endblock %}
 
 {% block page_css %}
     <link rel="stylesheet" href="{{ theme_url('css/pages/sudo.css') }}">
@@ -13,7 +32,7 @@
         <div class="sudo-logo" id="sudo-logo"><span>s</span><span>u</span><span>d</span><span>o</span></div>
         <div class="sudo-hero-rest" id="sudo-hero-rest">
             <div class="sudo-tagline">One membership. Elevated permissions.</div>
-            <p class="sudo-sub">sudo is the Smarter Dev premium membership. One membership, elevated access to everything premium across the ecosystem.</p>
+            <p class="sudo-sub">Smarter Dev stays open. sudo is for people who want deeper access to what we're building — private spaces, early tools, interactive challenges, hands-on courses, and sharper community infrastructure.</p>
             <div class="sudo-signup">
                 <form class="sudo-signup-form" id="sudo-signup-form-hero" data-sk-no-spa>
                     <input type="hidden" name="campaign_slug" value="sudo-launch">
@@ -46,7 +65,7 @@
             <div class="pillar reveal">
                 <div class="idx">01</div>
                 <h3>Community Perks</h3>
-                <p>Exclusive Discord channels, early access to new features, and priority access to AI-powered community features.</p>
+                <p>Private Discord channels, member-only spaces, and priority access to new community features as they ship.</p>
             </div>
             <div class="pillar reveal">
                 <div class="idx">02</div>
@@ -56,12 +75,12 @@
             <div class="pillar coming reveal">
                 <div class="idx">03</div>
                 <h3>Interactive Challenges</h3>
-                <p>Multi-stage, AI-powered scenarios that test adversarial thinking, security awareness, and real-world problem solving under pressure.</p>
+                <p>Open-world, AI-powered scenarios with characters that respond, adapt, and push back. Not on rails — adversarial thinking, security awareness, and problem solving under real pressure.</p>
             </div>
             <div class="pillar coming reveal">
                 <div class="idx">04</div>
                 <h3>Hands-on Courses</h3>
-                <p>Structured learning paths where you work with real AI-powered tools — coding agents, feedback systems, and interactive environments. Built around the skills that define the AI era.</p>
+                <p>Structured learning paths where you work with real coding agents, feedback loops, and interactive environments. Built around the skills that matter most right now.</p>
             </div>
             <div class="pillar coming reveal">
                 <div class="idx">05</div>
@@ -82,7 +101,7 @@
         <div class="reveal sudo-philosophy">
             <div class="code-label">// sudo.philosophy()</div>
             <div class="sec-h">One membership. Elevated permissions.</div>
-            <p class="sudo-sub sudo-philosophy-sub">You already have access to the community. sudo elevates your permissions — read everything, write with every tool, execute every challenge. One membership, your access unlocks. No subscription sprawl, no per-feature nickel-and-diming. Just elevated access to the Smarter Dev experience.</p>
+            <p class="sudo-sub sudo-philosophy-sub">Smarter Dev stays open. sudo gives supporters deeper access — private spaces, early tools, hands-on practice — and funds better stuff for the whole community. One membership, elevated permissions. No subscription sprawl, no per-feature nickel-and-diming.</p>
         </div>
     </div>
 </section>
