@@ -85,6 +85,9 @@
     .scan-cite{font-size:.6em;letter-spacing:.02em;padding:1px 5px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.18);border-radius:8px;color:var(--cyan);text-decoration:none;white-space:nowrap;vertical-align:super;font-family:var(--heading)}
     .scan-cite:hover{background:rgba(0,212,255,.18);border-color:var(--cyan)}
     sup .scan-cite{vertical-align:baseline}
+    .scan-mermaid{margin:1.25rem 0;padding:1rem;border:1px solid rgba(0,212,255,.08);background:rgba(0,0,0,.15);overflow-x:auto}
+    .scan-mermaid svg{max-width:100%;height:auto;display:block;margin:0 auto}
+    .scan-mermaid-error{border-color:rgba(255,68,68,.2)}
 
     /* Discovery section — two rows above the answer */
     .scan-discovery{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 2rem 1.5rem}
@@ -343,6 +346,57 @@
 <script nonce="{{ csp_nonce() }}" src="https://cdn.jsdelivr.net/npm/prismjs@1/prism.min.js"></script>
 <script nonce="{{ csp_nonce() }}" src="https://cdn.jsdelivr.net/npm/prismjs@1/plugins/autoloader/prism-autoloader.min.js"></script>
 <script nonce="{{ csp_nonce() }}">
+window.scheduleScanMermaidRender = function(root) {
+    clearTimeout(window.__scanMermaidTimer);
+    window.__scanMermaidTimer = setTimeout(function() {
+        if (window.renderScanMermaid) {
+            window.renderScanMermaid(root || document);
+        }
+    }, 180);
+};
+</script>
+<script nonce="{{ csp_nonce() }}" type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    theme: "dark",
+    htmlLabels: false,
+    flowchart: {
+        htmlLabels: false,
+        useMaxWidth: true
+    }
+});
+
+let scanMermaidSeq = 0;
+window.renderScanMermaid = async function(root) {
+    var scope = root || document;
+    var blocks = scope.querySelectorAll("pre > code.language-mermaid, pre > code.lang-mermaid");
+    for (var i = 0; i < blocks.length; i++) {
+        var code = blocks[i];
+        var source = code.textContent.trim();
+        if (!source || source.length > 10000) continue;
+        var pre = code.parentElement;
+        if (!pre || pre.dataset.mermaidSource === source) continue;
+        pre.dataset.mermaidSource = source;
+        try {
+            var id = "scan-mermaid-" + (++scanMermaidSeq);
+            var rendered = await mermaid.render(id, source);
+            var wrapper = document.createElement("div");
+            wrapper.className = "scan-mermaid";
+            wrapper.innerHTML = rendered.svg;
+            pre.replaceWith(wrapper);
+        } catch (err) {
+            pre.classList.add("scan-mermaid-error");
+            pre.dataset.mermaidSource = "";
+        }
+    }
+};
+
+window.scheduleScanMermaidRender(document);
+</script>
+<script nonce="{{ csp_nonce() }}">
 // Hide broken resource images (OG images reveal placeholder, favicons hide)
 document.addEventListener("error", function(e) {
     var t = e.target;
@@ -489,6 +543,7 @@ if (window.__skriftNotifications) {
         var withCitations = processCitations(responseText);
         var rendered = typeof marked !== "undefined" ? marked.parse(withCitations) : withCitations;
         responseEl.innerHTML = rendered;
+        if (window.scheduleScanMermaidRender) window.scheduleScanMermaidRender(responseEl);
     }
 
     document.addEventListener("sk:notification", function(e) {
@@ -968,6 +1023,7 @@ if (window.__skriftNotifications) {
     buildTOC();
     // Add examples to TOC
     buildTOCExamples();
+    if (window.scheduleScanMermaidRender) window.scheduleScanMermaidRender(responseEl || document);
 })();
 </script>
 {% endif %}
