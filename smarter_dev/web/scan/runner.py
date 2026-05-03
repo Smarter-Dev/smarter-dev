@@ -33,7 +33,6 @@ from smarter_dev.web.scan.agent import (
     ResearchDeps,
     ResearchOutput,
     ResourceLink,
-    _resource_sort_key,
     _usage_to_dict,
     _video_sort_key,
     generate_code_examples,
@@ -257,11 +256,34 @@ async def _enrich_resources(
     http_client: httpx.AsyncClient,
     emit,
 ) -> list[dict]:
-    """Fetch OG metadata for resource links found by the researcher.
+    """Fetch OG metadata for every researched source shown in the sidebar."""
+    sidebar_links: list[ResourceLink] = []
+    seen_urls: set[str] = set()
 
-    Sorts by domain quality tier.
-    """
-    if not research_output.resources:
+    def add_link(url: str, title: str, description: str = "") -> None:
+        normalized = url.strip()
+        if not normalized or normalized in seen_urls:
+            return
+        seen_urls.add(normalized)
+        sidebar_links.append(
+            ResourceLink(
+                url=normalized,
+                title=title.strip() or urlparse(normalized).netloc or normalized,
+                description=description.strip(),
+            )
+        )
+
+    for source in research_output.sources:
+        add_link(
+            source.url,
+            source.title,
+            source.relevance or source.credibility_note or source.type,
+        )
+
+    for resource in research_output.resources:
+        add_link(resource.url, resource.title, resource.description)
+
+    if not sidebar_links:
         return []
 
     try:
@@ -287,14 +309,10 @@ async def _enrich_resources(
                 base["favicon"] = ""
             return base
 
-        tasks = [_fetch_one(r) for r in research_output.resources]
+        tasks = [_fetch_one(r) for r in sidebar_links]
         enriched = await asyncio.gather(*tasks, return_exceptions=True)
 
         result = [r for r in enriched if isinstance(r, dict)]
-        result.sort(key=_resource_sort_key)
-
-        # Take top 5
-        result = result[:5]
 
         if result:
             await emit("resources", resources=result)
