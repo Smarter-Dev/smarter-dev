@@ -482,6 +482,14 @@ if (window.__skriftNotifications) {
     let responseText = "";
     let toolEntryCount = 0;
     let completed = false;
+    let lastChunkSeq = -1;
+    let chunkGapDetected = false;
+
+    function renderResponseMarkdown() {
+        var withCitations = processCitations(responseText);
+        var rendered = typeof marked !== "undefined" ? marked.parse(withCitations) : withCitations;
+        responseEl.innerHTML = rendered;
+    }
 
     document.addEventListener("sk:notification", function(e) {
         const data = e.detail;
@@ -679,11 +687,29 @@ if (window.__skriftNotifications) {
         }
 
         else if (eventType === "response_chunk") {
+            if (completed || chunkGapDetected) return;
             if (placeholder) placeholder.remove();
-            responseText += (data.delta || "");
-            var withCitations = processCitations(responseText);
-            var rendered = typeof marked !== "undefined" ? marked.parse(withCitations) : withCitations;
-            responseEl.innerHTML = rendered;
+            var delta = data.delta || "";
+            var seq = typeof data.seq === "number" ? data.seq : null;
+            var offset = typeof data.offset === "number" ? data.offset : null;
+
+            if (seq !== null) {
+                if (seq <= lastChunkSeq) return;
+                if (seq !== lastChunkSeq + 1 || offset !== responseText.length) {
+                    chunkGapDetected = true;
+                    return;
+                }
+                lastChunkSeq = seq;
+            } else if (offset !== null) {
+                if (offset < responseText.length) return;
+                if (offset !== responseText.length) {
+                    chunkGapDetected = true;
+                    return;
+                }
+            }
+
+            responseText += delta;
+            renderResponseMarkdown();
         }
 
         else if (eventType === "complete") {
@@ -701,9 +727,7 @@ if (window.__skriftNotifications) {
 
             if (data.response) {
                 responseText = data.response;
-                var withCitations = processCitations(responseText);
-                var rendered = typeof marked !== "undefined" ? marked.parse(withCitations) : withCitations;
-                responseEl.innerHTML = rendered;
+                renderResponseMarkdown();
             }
 
             if (placeholder) placeholder.remove();
