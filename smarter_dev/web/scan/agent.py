@@ -650,9 +650,49 @@ async def run_research(
 # Synthesis agent — clean context, single-shot
 # ---------------------------------------------------------------------------
 
-_synthesis_agent = Agent(
-    output_type=ResearchResult,
+_synthesis_text_agent = Agent(
+    output_type=str,
 )
+
+
+class SynthesisMetadata(BaseModel):
+    """Structured metadata for a streamed synthesis response."""
+
+    sources: list[Source]
+    summary: str
+
+
+_synthesis_metadata_agent = Agent(
+    output_type=SynthesisMetadata,
+    instructions=(
+        "You create structured metadata for a completed research response. "
+        "Given the original query, final markdown response, and available source "
+        "material, return the sources used by the response and a concise 2-3 "
+        "sentence summary suitable for a notification. Mark cited=True only for "
+        "URLs that appear as inline citations in the final response. Do not "
+        "rewrite or critique the response."
+    ),
+)
+
+
+def _combine_usage(*usages: RunUsage) -> RunUsage:
+    """Combine usage from multi-call synthesis into one usage object."""
+    details: dict[str, int] = {}
+    for usage in usages:
+        for key, value in (usage.details or {}).items():
+            details[key] = details.get(key, 0) + value
+    return RunUsage(
+        input_tokens=sum(u.input_tokens or 0 for u in usages),
+        cache_write_tokens=sum(u.cache_write_tokens or 0 for u in usages),
+        cache_read_tokens=sum(u.cache_read_tokens or 0 for u in usages),
+        output_tokens=sum(u.output_tokens or 0 for u in usages),
+        input_audio_tokens=sum(u.input_audio_tokens or 0 for u in usages),
+        cache_audio_read_tokens=sum(u.cache_audio_read_tokens or 0 for u in usages),
+        output_audio_tokens=sum(u.output_audio_tokens or 0 for u in usages),
+        requests=sum(u.requests or 0 for u in usages),
+        tool_calls=sum(u.tool_calls or 0 for u in usages),
+        details=details,
+    )
 
 
 async def run_synthesis(
@@ -668,7 +708,13 @@ async def run_synthesis(
     Streams response_chunk events via emit callback.
     """
     skill_text = load_synthesis_skill(mode_config.mode)
-    system_prompt = f"{skill_text}\n\n{WRITING_INSTRUCTIONS}"
+    streaming_system_prompt = (
+        f"{skill_text}\n\n{WRITING_INSTRUCTIONS}\n\n"
+        "Return only the final markdown response body. Do not wrap the answer "
+        "in JSON. Do not include a sources section. For this streaming call, "
+        "ignore any instruction to return structured source data; metadata is "
+        "handled separately after the response finishes."
+    )
 
     # Format the research output as the synthesis input
     input_parts = [f"## User Query\n{query}"]
@@ -717,38 +763,50 @@ async def run_synthesis(
     if emit:
         await emit("status", stage="synthesizing")
 
-    result_data: ResearchResult | None = None
-    usage = RunUsage()
-
-    emitted_response = ""
+    response_text = ""
     chunk_seq = 0
 
-    async with _synthesis_agent.run_stream(
+    async with _synthesis_text_agent.run_stream(
         synthesis_input,
         model=mode_config.synthesis_model,
-        instructions=system_prompt,
+        instructions=streaming_system_prompt,
     ) as stream:
-        async for partial in stream.stream_output(debounce_by=0.05):
-            result_data = partial
-            response = partial.response or ""
-            if emit and response.startswith(emitted_response) and len(response) > len(emitted_response):
-                delta = response[len(emitted_response):]
+        async for delta in stream.stream_text(delta=True, debounce_by=0.05):
+            if not delta:
+                continue
+            if emit:
                 await emit(
                     "response_chunk",
                     delta=delta,
                     seq=chunk_seq,
-                    offset=len(emitted_response),
+                    offset=len(response_text),
                 )
-                emitted_response = response
-                chunk_seq += 1
-            elif response:
-                emitted_response = response
-        usage = stream.usage()
+            response_text += delta
+            chunk_seq += 1
+        response_usage = stream.usage()
 
-    if result_data is None:
-        raise RuntimeError("Synthesis agent completed without producing a result")
+    if not response_text:
+        raise RuntimeError("Synthesis agent completed without producing a response")
 
-    return result_data, usage
+    metadata_input = (
+        f"{synthesis_input}\n\n"
+        f"## Final Response\n{response_text}\n\n"
+        "Return sources and summary metadata for this final response."
+    )
+    metadata_result = await _synthesis_metadata_agent.run(
+        metadata_input,
+        model=mode_config.synthesis_model,
+    )
+    metadata = metadata_result.output
+
+    return (
+        ResearchResult(
+            response=response_text,
+            sources=metadata.sources,
+            summary=metadata.summary,
+        ),
+        _combine_usage(response_usage, metadata_result.usage()),
+    )
 
 
 # ---------------------------------------------------------------------------
