@@ -126,6 +126,7 @@ Write for a competent developer. Use whatever stack the query implies. Do not as
 - **Use headers to create scannable structure.** Deep responses are long — headers help users find sections on re-read. Use ## for major sections and ### for subsections within the analysis.
 - **Prose-first for analysis.** The core analysis should be written in paragraphs that build an argument, not bullet lists that fragment it. Bullet lists are appropriate for: the gotchas section, practical tips, resource listings, and comparison criteria where brevity serves clarity.
 - **Code blocks are always fenced with language identifiers.** For multi-file examples, use separate blocks with filenames as context.
+- **Mermaid diagrams are supported.** Use fenced `mermaid` blocks when architecture, data flow, funding/decision paths, state machines, or dependency relationships are clearer as a graph than prose. Prefer compact diagrams that fit on screen; use plain labels and cite supporting claims in the surrounding prose, not inside the diagram. Do not use diagrams as decoration.
 - **Bold for key terms and critical warnings.** Use it to call out important names, commands, and "watch out" moments. Don't bold for emphasis in ordinary prose.
 - **Use inline code for technical terms** — library names, commands, configuration keys, API endpoints.
 - **No introductory fluff.** The executive summary IS the intro.
