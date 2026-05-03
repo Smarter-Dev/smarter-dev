@@ -18,6 +18,7 @@ import logging
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any, Literal
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 from pydantic import BaseModel, Field
@@ -122,6 +123,7 @@ class ResearchDeps:
     read_rate_limiter: URLRateLimiter
     source_cache: dict[str, dict] = dataclasses.field(default_factory=dict)
     seen_urls: set[str] = dataclasses.field(default_factory=set)
+    read_urls: set[str] = dataclasses.field(default_factory=set)
     search_count: int = 0
     youtube_search_count: int = 0
 
@@ -211,14 +213,19 @@ class ResearchResult(BaseModel):
 # -- Structured research output contract (research → synthesis handoff) --
 
 class ResearchSource(BaseModel):
-    """A source discovered during research."""
-    url: str
-    title: str
+    """A source that was fetched with the read tool and can support synthesis."""
+    url: str = Field(description="URL that was actually fetched with the read tool")
+    title: str = Field(description="Title of the fetched page")
     type: str = Field(
         default="other",
         description="docs, tutorial, blog, comparison, video, reference, case-study, research, or benchmark",
     )
-    content: str = Field(description="Extracted or summarized content from this source")
+    content: str = Field(
+        description=(
+            "Extracted or summarized content from the fetched page. Do not include "
+            "content from search snippets or pages that were not read."
+        )
+    )
     relevance: str = Field(default="", description="One-sentence relevance note")
     credibility_note: str = Field(default="", description="Author authority or currency note")
 
@@ -243,11 +250,52 @@ class ResearchOutput(BaseModel):
     The research agent returns this as structured output.  Synthesis receives
     it as clean, curated context — no raw conversation history.
     """
-    sources: list[ResearchSource] = Field(description="Researched sources with extracted content")
+    sources: list[ResearchSource] = Field(
+        description=(
+            "Sources that were actually fetched with the read tool. Do not include "
+            "search results, snippets, or URLs that were discovered but not read."
+        )
+    )
     key_insights: list[str] = Field(description="Critical findings and conclusions")
     outline: list[str] = Field(description="Structural plan for the synthesis response")
     youtube_urls: list[YouTubeResult] = Field(default_factory=list, description="YouTube videos found via youtube_search tool — you MUST include any relevant videos returned by the youtube_search tool here")
     resources: list[ResourceLink] = Field(default_factory=list, description="Curated links for sidebar display")
+
+
+def _normalize_source_url(url: str) -> str:
+    """Normalize URLs enough to compare read URLs with reported sources."""
+    parsed = urlparse(url.strip())
+    if not parsed.scheme or not parsed.netloc:
+        return url.strip().rstrip("/")
+    path = parsed.path.rstrip("/") or ""
+    return urlunparse(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc.lower(),
+            path,
+            "",
+            parsed.query,
+            "",
+        )
+    )
+
+
+def _filter_unread_sources(
+    research_output: ResearchOutput,
+    read_urls: set[str],
+) -> ResearchOutput:
+    """Drop source entries that were never fetched through the read tool."""
+    if not research_output.sources:
+        return research_output
+
+    normalized_read = {_normalize_source_url(url) for url in read_urls}
+    filtered = [
+        source for source in research_output.sources
+        if _normalize_source_url(source.url) in normalized_read
+    ]
+    if len(filtered) == len(research_output.sources):
+        return research_output
+    return research_output.model_copy(update={"sources": filtered})
 
 
 # ---------------------------------------------------------------------------
@@ -436,6 +484,7 @@ async def search(ctx: RunContext[ResearchDeps], query: str) -> str:
 
 
 _MAX_READ_CHARS = 8000
+_SUMMARY_INPUT_CHARS = 24000
 
 _summarize_agent = Agent(
     output_type=str,
@@ -451,15 +500,53 @@ _summarize_agent = Agent(
 
 
 async def _summarize_content(content: str, url: str, instructions: str = "") -> str:
-    """Summarize content that exceeds the read limit using a fast LLM."""
-    prompt_parts = [f"Summarize the following content from {url}.\n"]
+    """Summarize content that exceeds the read limit without dropping the tail."""
+    chunks = [
+        content[i:i + _SUMMARY_INPUT_CHARS]
+        for i in range(0, len(content), _SUMMARY_INPUT_CHARS)
+    ]
+    summaries: list[str] = []
+
+    async def summarize_chunk(chunk: str, index: int, total: int) -> str:
+        prompt_parts = [
+            f"Summarize part {index} of {total} from {url}.\n"
+        ]
+        if instructions:
+            prompt_parts.append(f"Focus on: {instructions}\n")
+        prompt_parts.append(
+            f"Compress this part while retaining all key facts, data, code "
+            f"examples, and specific claims. The combined summary should stay "
+            f"under {_MAX_READ_CHARS} characters if possible.\n\n"
+        )
+        prompt_parts.append(chunk)
+        result = await _summarize_agent.run(
+            "".join(prompt_parts),
+            model=FLASH_LITE,
+        )
+        return result.output
+
+    try:
+        for index, chunk in enumerate(chunks, 1):
+            summaries.append(await summarize_chunk(chunk, index, len(chunks)))
+    except Exception:
+        logger.exception("Summarization failed for %s", url)
+        return (
+            "Failed to summarize this page without truncating content. "
+            "Use a narrower source URL or another source for claims from this page."
+        )
+
+    combined = "\n\n".join(summaries)
+    if len(combined) <= _MAX_READ_CHARS or len(summaries) == 1:
+        return combined
+
+    prompt_parts = [f"Combine these partial summaries from {url}.\n"]
     if instructions:
         prompt_parts.append(f"Focus on: {instructions}\n")
     prompt_parts.append(
         f"Compress to under {_MAX_READ_CHARS} characters while retaining "
         "all key facts, data, code examples, and specific claims.\n\n"
     )
-    prompt_parts.append(content[:32000])  # Cap input to avoid token limits
+    prompt_parts.append(combined)
 
     try:
         result = await _summarize_agent.run(
@@ -468,8 +555,8 @@ async def _summarize_content(content: str, url: str, instructions: str = "") -> 
         )
         return result.output
     except Exception:
-        logger.exception("Summarization failed for %s, truncating", url)
-        return content[:_MAX_READ_CHARS]
+        logger.exception("Summary compression failed for %s", url)
+        return combined
 
 
 @_research_agent.tool
@@ -488,6 +575,7 @@ async def read(
     if url in deps.source_cache:
         content = deps.source_cache[url].get("content", "")
         if content:
+            deps.read_urls.add(url)
             if len(content) > _MAX_READ_CHARS:
                 return await _summarize_content(content, url, summarization_instructions)
             return content
@@ -498,6 +586,11 @@ async def read(
     if content:
         deps.source_cache[url] = {"content": content, "url": url, "title": title}
         deps.seen_urls.add(url)
+        deps.read_urls.add(url)
+        final_url = result.get("url", "") if isinstance(result, dict) else ""
+        if final_url:
+            deps.seen_urls.add(final_url)
+            deps.read_urls.add(final_url)
         if len(content) > _MAX_READ_CHARS:
             return await _summarize_content(content, url, summarization_instructions)
         return content
@@ -642,6 +735,8 @@ async def run_research(
 
     if result_data is None:
         raise RuntimeError("Research agent completed without producing a result")
+
+    result_data = _filter_unread_sources(result_data, deps.read_urls)
 
     return result_data, tool_log, usage
 

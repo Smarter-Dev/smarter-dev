@@ -57,9 +57,19 @@ A position is surveyed when you’ve reached primary sources on its load-bearing
 
 Look at what the answer touches: what goes wrong in practice, what downstream decisions a choice forces, what it costs to operate, what it costs to leave, what experienced practitioners flag that documentation doesn’t. This is what separates Deep from Standard. Standard answers the question. Deep maps the territory.
 
-### Step 5: Cross-reference
+### Step 5: Cross-reference and verify citations
 
 Important claims supported by only one source — drill for corroboration. Sources contradict — investigate why. Only positive takes — search harder for skeptics. Load-bearing claims not on Tier 1 or Tier 2 — drill until they are or weaken the claim.
+
+Then walk through every fact, statistic, attributed position, and concrete claim that would need to appear in the synthesis to support the outline. For each one, confirm you have a specific source for it — not “the research generally supports this” but a specific page you read that contains the specific claim. Things that need this check:
+
+- Specific numbers, percentages, dollar amounts, dates
+- Claims about what practitioners do or recommend
+- Attributed positions (“X argues that…”)
+- Factual claims about the world (companies, events, regulations, market behavior)
+- Conversion rates, benchmarks, thresholds, ratios
+
+If a claim has no specific source bound to it, that’s a research gap. Drill for the source. If you can’t find one, the claim isn’t grounded enough — drop it from the findings rather than passing it along unsupported. The synthesizer can only cite what you give it; an unbound claim becomes either a missing citation in the final response or a claim that gets dropped in writing. Catch this at the research stage.
 
 ### Step 6: Video pass (1–2 searches)
 
