@@ -85,8 +85,14 @@
     .scan-cite{font-size:.6em;letter-spacing:.02em;padding:1px 5px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.18);border-radius:8px;color:var(--cyan);text-decoration:none;white-space:nowrap;vertical-align:super;font-family:var(--heading)}
     .scan-cite:hover{background:rgba(0,212,255,.18);border-color:var(--cyan)}
     sup .scan-cite{vertical-align:baseline}
-    .scan-mermaid{margin:1.25rem 0;padding:1rem;border:1px solid rgba(0,212,255,.08);background:rgba(0,0,0,.15);overflow-x:auto}
+    .scan-mermaid{margin:1.25rem 0;padding:1rem;border:1px solid rgba(0,212,255,.16);background:rgba(1,12,18,.78);overflow-x:auto}
     .scan-mermaid svg{max-width:100%;height:auto;display:block;margin:0 auto}
+    .scan-mermaid .node rect,.scan-mermaid .node polygon,.scan-mermaid .node circle,.scan-mermaid .node ellipse,.scan-mermaid .cluster rect{fill:rgba(8,26,38,.96)!important;stroke:#00d4ff!important;stroke-width:1.5px!important}
+    .scan-mermaid .nodeLabel,.scan-mermaid .label,.scan-mermaid text{fill:#e9f7ff!important;color:#e9f7ff!important}
+    .scan-mermaid .edgeLabel,.scan-mermaid .edgeLabel p{background-color:rgba(1,12,18,.92)!important;color:#e9f7ff!important}
+    .scan-mermaid .edgeLabel rect{fill:rgba(1,12,18,.92)!important;opacity:1!important}
+    .scan-mermaid .flowchart-link,.scan-mermaid .edgePath .path{stroke:#7fdcff!important;stroke-width:1.4px!important}
+    .scan-mermaid marker path{fill:#7fdcff!important;stroke:#7fdcff!important}
     .scan-mermaid-error{border-color:rgba(255,68,68,.2)}
 
     /* Discovery section — two rows above the answer */
@@ -361,7 +367,29 @@ import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.mi
 mermaid.initialize({
     startOnLoad: false,
     securityLevel: "strict",
-    theme: "dark",
+    theme: "base",
+    themeVariables: {
+        background: "transparent",
+        mainBkg: "#081a26",
+        secondBkg: "#0d2534",
+        tertiaryBkg: "#102d3f",
+        primaryColor: "#081a26",
+        primaryTextColor: "#e9f7ff",
+        primaryBorderColor: "#00d4ff",
+        secondaryColor: "#0d2534",
+        secondaryTextColor: "#e9f7ff",
+        secondaryBorderColor: "#7fdcff",
+        tertiaryColor: "#102d3f",
+        tertiaryTextColor: "#e9f7ff",
+        tertiaryBorderColor: "#00d4ff",
+        lineColor: "#7fdcff",
+        textColor: "#e9f7ff",
+        edgeLabelBackground: "#010c12",
+        nodeTextColor: "#e9f7ff",
+        clusterBkg: "#07141d",
+        clusterBorder: "#00d4ff",
+        fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+    },
     htmlLabels: false,
     flowchart: {
         htmlLabels: false,
