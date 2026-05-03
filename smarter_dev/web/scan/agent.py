@@ -25,9 +25,6 @@ from pydantic_ai import Agent, RunContext
 from pydantic_ai.messages import (
     FunctionToolCallEvent,
     FunctionToolResultEvent,
-    PartDeltaEvent,
-    PartStartEvent,
-    TextPartDelta,
 )
 from pydantic_ai.usage import RunUsage
 
@@ -717,25 +714,36 @@ async def run_synthesis(
 
     synthesis_input = "\n".join(input_parts)
 
-    from pydantic_ai import AgentRunResultEvent
-
     if emit:
         await emit("status", stage="synthesizing")
 
     result_data: ResearchResult | None = None
     usage = RunUsage()
 
-    async for event in _synthesis_agent.run_stream_events(
+    emitted_response = ""
+    chunk_seq = 0
+
+    async with _synthesis_agent.run_stream(
         synthesis_input,
         model=mode_config.synthesis_model,
         instructions=system_prompt,
-    ):
-        if isinstance(event, PartDeltaEvent) and isinstance(event.delta, TextPartDelta):
-            if emit:
-                await emit("response_chunk", delta=event.delta.content_delta)
-        elif isinstance(event, AgentRunResultEvent):
-            result_data = event.result.output
-            usage = event.result.usage()
+    ) as stream:
+        async for partial in stream.stream_output(debounce_by=0.05):
+            result_data = partial
+            response = partial.response or ""
+            if emit and response.startswith(emitted_response) and len(response) > len(emitted_response):
+                delta = response[len(emitted_response):]
+                await emit(
+                    "response_chunk",
+                    delta=delta,
+                    seq=chunk_seq,
+                    offset=len(emitted_response),
+                )
+                emitted_response = response
+                chunk_seq += 1
+            elif response:
+                emitted_response = response
+        usage = stream.usage()
 
     if result_data is None:
         raise RuntimeError("Synthesis agent completed without producing a result")
