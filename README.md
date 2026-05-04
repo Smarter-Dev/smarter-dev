@@ -45,24 +45,12 @@ Each DB has its own alembic migration set:
 ```sh
 git clone git@github.com:Smarter-Dev/smarter-dev.git
 cd smarter-dev
-
-# Optional: copy the example env to start. Defaults work for local dev,
-# but you can fill in real Discord credentials etc. as needed.
 cp .env.example .env
 ```
 
-The minimum `.env` needed to stand up the stack locally:
+The defaults in `.env.example` are wired for the local compose stack — no edits required to get the stack standing up. `scripts/bootstrap.py` will append `BOT_API_KEY` automatically. Real Discord and LLM credentials are only needed for the features that use them (see [Optional secrets](#optional-secrets) below).
 
-```sh
-ENVIRONMENT=development
-SKRIFT_ENV=development
-DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@localhost:5434/smarter_dev
-LEGACY_DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@localhost:5434/bc_websites
-REDIS_URL=redis://:smarter_dev_redis_password@localhost:6380/0
-SECRET_KEY=any-non-empty-string-for-local-dev
-```
-
-`scripts/bootstrap.py` will append `BOT_API_KEY` automatically. Real Discord and LLM credentials are only needed for the features that use them (see [Optional secrets](#optional-secrets) below).
+> **Note for Colima / non-default Docker setups:** Postgres' init scripts (in `scripts/postgres-init/`) only run if the project lives somewhere your Docker engine can bind-mount. Colima shares your home directory by default, so cloning under `~` works; cloning under `/tmp` or other unshared paths will leave the `skrift` schema and `bc_websites` database uncreated and bootstrap will fail with `schema "skrift" does not exist`.
 
 ### Bring it up
 
