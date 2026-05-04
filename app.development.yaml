@@ -10,25 +10,11 @@ db:
 
 auth:
   redirect_base_url: "http://localhost:8000"
+  # Local dev uses Skrift's built-in dummy provider so contributors can stand
+  # the stack up with no OAuth credentials. Production (app.yaml) uses real
+  # OAuth providers; Skrift refuses to start with `dummy` configured in prod.
   providers:
-    discord:
-      client_id: $DISCORD_APPLICATION_ID
-      client_secret: $DISCORD_APPLICATION_SECRET
-      scopes:
-        - identify
-        - email
-    github:
-      client_id: $GITHUB_CLIENT_ID
-      client_secret: $GITHUB_CLIENT_SECRET
-      scopes:
-        - user:email
-    google:
-      client_id: $GOOGLE_CLIENT_ID
-      client_secret: $GOOGLE_CLIENT_SECRET
-      scopes:
-        - openid
-        - email
-        - profile
+    dummy: {}
 
 controllers:
   - skrift.admin.controller:AdminController
