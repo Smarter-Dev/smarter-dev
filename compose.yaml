@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: smarter_dev_password
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/postgres-init:/docker-entrypoint-initdb.d:ro
@@ -24,7 +24,7 @@ services:
     container_name: smarter_dev_redis
     command: redis-server --requirepass smarter_dev_redis_password
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -47,9 +47,10 @@ services:
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/smarter_dev
+      - LEGACY_DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/bc_websites
       - REDIS_URL=redis://:smarter_dev_redis_password@redis:6379/0
     ports:
-      - "8000:8000"
+      - "8001:8000"
     volumes:
       - .:/app
       - /app/.venv
@@ -70,6 +71,7 @@ services:
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/smarter_dev
+      - LEGACY_DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/bc_websites
       - REDIS_URL=redis://:smarter_dev_redis_password@redis:6379/0
       - API_BASE_URL=http://web:8000/api
     working_dir: /app
