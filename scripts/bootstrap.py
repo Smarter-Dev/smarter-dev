@@ -7,9 +7,12 @@ sequence yields a working stack.
 
 What this does:
   1. Apply migrations via `scripts/migrate.py` (Skrift + main + legacy).
-  2. Insert a `local-bot` row in `bc_websites.public.api_keys` with
+  2. Mark Skrift setup complete (sets `setup_completed_at` in
+     `skrift.settings`) so the dispatcher serves the real app instead
+     of redirecting `/api/*` to the setup wizard.
+  3. Insert a `local-bot` row in `bc_websites.public.api_keys` with
      scopes `bot:read,bot:write` (or rotate the existing one).
-  3. Write `BOT_API_KEY=<plaintext>` into `.env` so the bot service
+  4. Write `BOT_API_KEY=<plaintext>` into `.env` so the bot service
      picks it up on next start.
 
 Plaintext keys aren't recoverable from the DB hash, so any state where
@@ -73,6 +76,41 @@ def _write_env_bot_key(key: str) -> None:
             new_text += "\n"
         new_text += line + "\n"
     ENV_FILE.write_text(new_text)
+
+
+async def _mark_setup_complete() -> str:
+    """Set Skrift's `setup_completed_at` setting so the dispatcher serves
+    the real app instead of redirecting all routes (including `/api/*`)
+    to the setup wizard.
+
+    Returns the status: 'already_set' | 'marked'.
+    """
+    from skrift.db.services.setting_service import (
+        SETUP_COMPLETED_AT_KEY,
+        get_setting,
+        set_setting,
+    )
+    from skrift.setup.state import create_setup_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from smarter_dev.shared.config import get_settings
+    from smarter_dev.shared.database import convert_postgres_url_for_asyncpg
+
+    settings = get_settings()
+    db_url = convert_postgres_url_for_asyncpg(settings.effective_database_url)
+    engine = create_setup_engine(db_url)
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            existing = await get_setting(session, SETUP_COMPLETED_AT_KEY)
+            if existing:
+                return "already_set"
+
+            from datetime import UTC, datetime
+            await set_setting(session, SETUP_COMPLETED_AT_KEY, datetime.now(UTC).isoformat())
+            await session.commit()
+            return "marked"
+    finally:
+        await engine.dispose()
 
 
 async def _provision_bot_key(rotate: bool) -> tuple[str, str]:
@@ -171,20 +209,24 @@ def main() -> None:
     if not args.skip_migrations:
         _run_migrations()
 
+    print("==> marking Skrift setup complete")
+    setup_status = asyncio.run(_mark_setup_complete())
+    print(f"    setup: {setup_status}")
+
     print("==> provisioning bot API key")
-    full_key, status = asyncio.run(_provision_bot_key(rotate=args.rotate_key))
+    full_key, key_status = asyncio.run(_provision_bot_key(rotate=args.rotate_key))
     _write_env_bot_key(full_key)
 
     print(
         textwrap.dedent(
             f"""\
-            ==> bot API key {status} ({BOT_KEY_NAME})
+            ==> bot API key {key_status} ({BOT_KEY_NAME})
                 scopes:   {", ".join(BOT_KEY_SCOPES)}
                 prefix:   {full_key[:12]}...
                 .env:     BOT_API_KEY updated at {ENV_FILE}
 
-            Restart the bot to pick up the new key:
-                docker compose up -d --force-recreate bot
+            Restart web + bot to pick up the new state:
+                docker compose up -d --force-recreate web bot
             """
         )
     )
