@@ -152,6 +152,10 @@ async def handle_mention(event: hikari.MessageCreateEvent) -> None:
             user_question = user_question.replace(f"<@{user_id}>", "").replace(f"<@!{user_id}>", "")
     user_question = user_question.strip()
 
+    is_voice = "VOICE" in user_question
+    if is_voice:
+        user_question = user_question.replace("VOICE", "").strip()
+
     # Check for stop/dismissal request before anything else (zero LLM cost)
     if is_stop_request(event.content or ""):
         killed = await kill_channel_watchers(event.channel_id)
@@ -189,6 +193,11 @@ async def handle_mention(event: hikari.MessageCreateEvent) -> None:
             trigger_message_id=event.message.id,
             limit=CONTEXT_MESSAGE_LIMIT
         )
+        if is_voice:
+            context["conversation_timeline"] = context["conversation_timeline"].replace(
+                "VOICE",
+                "",
+            )
         logger.debug(f"[{request_id}] Context built: {len(context['conversation_timeline'])} chars timeline")
 
         # Step 1: Run classification agent
@@ -236,7 +245,8 @@ async def handle_mention(event: hikari.MessageCreateEvent) -> None:
                 event.guild_id,
                 classification.matched_watcher_id,
                 event.message.id,
-                classification
+                classification,
+                voice_requested=is_voice,
             )
             return
 
@@ -261,7 +271,8 @@ async def handle_mention(event: hikari.MessageCreateEvent) -> None:
             channel_info=context["channel"],
             users=context["users"],
             me_info=context["me"],
-            request_id=request_id
+            request_id=request_id,
+            voice_mode=is_voice,
         )
 
         # Cleanup: Ensure typing indicator is stopped after response agent completes
@@ -282,6 +293,35 @@ async def handle_mention(event: hikari.MessageCreateEvent) -> None:
         if not success:
             logger.warning(f"[{request_id}] Response agent failed - exiting pipeline")
             return
+
+        if is_voice:
+            voice_service = getattr(plugin.bot, "d", {}).get("voice_service")
+            if not voice_service:
+                voice_service = (
+                    getattr(plugin.bot, "d", {}).get("_services", {}).get("voice_service")
+                )
+            if not voice_service:
+                logger.error(f"[{request_id}] Voice service unavailable")
+                await plugin.bot.rest.create_message(
+                    event.channel_id,
+                    "Voice messages are not available right now.",
+                    reply=event.message,
+                )
+                return
+            try:
+                await voice_service.synthesize_and_send(
+                    bot=plugin.bot,
+                    channel_id=event.channel_id,
+                    text=output.response_text,
+                    reply_to_message_id=event.message.id,
+                )
+            except Exception:
+                logger.exception(f"[{request_id}] Voice synthesis failed")
+                await plugin.bot.rest.create_message(
+                    event.channel_id,
+                    output.response_text[:2000],
+                    reply=event.message,
+                )
 
         # Step 3: Create watcher if continuing
         if output.continue_watching:
@@ -358,7 +398,8 @@ async def trigger_watcher_immediately(
     guild_id: int,
     watcher_id: str,
     message_id: int,
-    classification
+    classification,
+    voice_requested: bool = False,
 ) -> None:
     """Trigger an existing watcher immediately with a new mention.
 
@@ -393,7 +434,8 @@ async def trigger_watcher_immediately(
         "author_id": "",  # Will be filled from context
         "content": classification.intent,
         "timestamp": datetime.now(UTC),
-        "is_mention": True
+        "is_mention": True,
+        "voice_requested": voice_requested,
     })
 
     logger.info(f"Triggered watcher {watcher_id} immediately with message {message_id}")

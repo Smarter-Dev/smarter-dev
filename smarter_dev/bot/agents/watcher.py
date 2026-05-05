@@ -126,6 +126,9 @@ class ResponseAgentOutput:
     tokens_used: int
     """Number of tokens consumed by the agent."""
 
+    response_text: str = ""
+    """Text response produced by the agent, used by voice message mode."""
+
     @classmethod
     def from_agent_result(cls, result: Any) -> "ResponseAgentOutput":
         """Parse response agent output from DSPy result.
@@ -168,5 +171,6 @@ class ResponseAgentOutput:
             watching_for=watching_for,
             wait_duration=wait_duration,
             update_frequency=update_frequency,
-            tokens_used=0  # Will be set by caller
+            tokens_used=0,  # Will be set by caller
+            response_text=str(getattr(result, "response", "")).strip(),
         )
