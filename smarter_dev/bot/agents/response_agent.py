@@ -159,7 +159,8 @@ class ResponseAgent(BaseAgent):
         users: list[dict],
         me_info: dict,
         request_id: str = "unknown",
-        personality_hint: str = ""
+        personality_hint: str = "",
+        voice_mode: bool = False,
     ) -> tuple[bool, ResponseAgentOutput]:
         """Generate a response using ReAct with tools.
 
@@ -175,6 +176,7 @@ class ResponseAgent(BaseAgent):
             me_info: Bot info dict
             request_id: Request ID for tracing
             personality_hint: Suggested personality/tone for casual conversations
+            voice_mode: Capture response text for voice synthesis instead of sending text
 
         Returns:
             Tuple of (success, ResponseAgentOutput)
@@ -189,12 +191,31 @@ class ResponseAgent(BaseAgent):
         )
 
         try:
+            if voice_mode:
+                from smarter_dev.shared.config import get_settings
+
+                settings = get_settings()
+                max_words = max(
+                    1,
+                    int(
+                        settings.voice_words_per_minute
+                        * settings.voice_max_duration_seconds
+                        / 60
+                    ),
+                )
+                personality_hint = (
+                    f"{personality_hint or 'friendly and helpful'} "
+                    f"For voice mode, keep the final response under {max_words} words."
+                )
+
             # Create context-bound tools for this response
             logger.debug(f"[{request_id}] Creating response tools...")
+            voice_response_parts: list[str] | None = [] if voice_mode else None
             tools, _channel_queries = create_response_tools(
                 bot=bot,
                 channel_id=str(channel_id),
-                guild_id=str(guild_id)
+                guild_id=str(guild_id),
+                voice_response_parts=voice_response_parts,
             )
             logger.debug(f"[{request_id}] Created {len(tools)} tools")
 
@@ -223,6 +244,8 @@ class ResponseAgent(BaseAgent):
 
             # Parse structured output
             output = ResponseAgentOutput.from_agent_result(result)
+            if voice_response_parts:
+                output.response_text = "\n\n".join(voice_response_parts).strip()
 
             # Extract token usage
             tokens_used = self._extract_token_usage(result)

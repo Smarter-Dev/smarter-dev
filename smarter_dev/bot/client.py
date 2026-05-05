@@ -522,6 +522,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         from smarter_dev.bot.services.advent_of_code_service import (
             AdventOfCodeService,
         )
+        from smarter_dev.bot.services.discord_voice import VoiceService
 
         bytes_service = BytesService(api_client, cache_manager)
         squads_service = SquadsService(api_client, cache_manager)
@@ -535,6 +536,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             api_client, cache_manager, bot
         )
         advent_of_code_service = AdventOfCodeService(api_client, cache_manager, bot)
+        voice_service = VoiceService(api_client, cache_manager, settings)
 
         # Initialize conversation participation services
         channel_state_manager = initialize_channel_state_manager()
@@ -572,6 +574,10 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         await advent_of_code_service.initialize()
         logger.info("✓ Advent of Code service initialized")
 
+        logger.info("Initializing voice service...")
+        await voice_service.initialize()
+        logger.info("✓ Voice service initialized")
+
         # Verify service health
         logger.info("Verifying service health...")
         try:
@@ -583,6 +589,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             scheduled_message_health = await scheduled_message_service.health_check()
             repeating_message_health = await repeating_message_service.health_check()
             advent_of_code_health = await advent_of_code_service.health_check()
+            voice_health = await voice_service.health_check()
 
             logger.info(
                 f"Bytes service health: {'healthy' if bytes_health.is_healthy else 'unhealthy'}"
@@ -607,6 +614,10 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             )
             logger.info(
                 f"Advent of Code service health: {'healthy' if advent_of_code_health.is_healthy else 'unhealthy'}"
+            )
+
+            logger.info(
+                f"Voice service health: {'healthy' if voice_health.is_healthy else 'unhealthy'}"
             )
 
             if not bytes_health.is_healthy:
@@ -639,6 +650,10 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
                 logger.warning(
                     f"Advent of Code service not healthy: {advent_of_code_health.details}"
                 )
+            if not voice_health.is_healthy:
+                logger.warning(
+                    f"Voice service not healthy: {voice_health.details}"
+                )
 
         except Exception as e:
             logger.error(f"Failed to check service health: {e}")
@@ -658,6 +673,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d["repeating_message_service"] = repeating_message_service
         bot.d["advent_of_code_service"] = advent_of_code_service
         bot.d["channel_state_manager"] = channel_state_manager
+        bot.d["voice_service"] = voice_service
 
         # Store services in d for plugin access (primary)
         bot.d["_services"] = {
@@ -670,6 +686,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             "repeating_message_service": repeating_message_service,
             "advent_of_code_service": advent_of_code_service,
             "channel_state_manager": channel_state_manager,
+            "voice_service": voice_service,
         }
 
         logger.info("✓ Bot services setup complete")

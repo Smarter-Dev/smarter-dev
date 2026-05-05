@@ -12,6 +12,17 @@ The project uses three model types for different purposes:
 | `medium` | `LLM_MEDIUM_MODEL` | `claude-haiku-4-5-20251001` | Higher quality reasoning (forum agent) |
 | `judge` | `LLM_JUDGE_MODEL` | `gemini/gemini-3.1-flash-lite-preview` | Evaluation/testing |
 
+Discord voice messages use Gemini TTS directly rather than DSPy:
+
+| Environment Variable | Default | Purpose |
+|----------------------|---------|---------|
+| `VOICE_TTS_MODEL` | `gemini-2.5-flash-preview-tts` | Gemini TTS model for voice messages |
+| `VOICE_TTS_VOICE` | `Kore` | Gemini prebuilt TTS voice |
+| `VOICE_MAX_INPUT_CHARS` | `800` | Maximum response text sent to TTS |
+| `VOICE_WORDS_PER_MINUTE` | `150` | Estimated speaking rate for voice response word budget |
+| `VOICE_MAX_DURATION_SECONDS` | `30` | Target maximum spoken duration for voice responses |
+| `VOICE_OPUS_BITRATE` | `48k` | Opus bitrate for the Discord voice attachment |
+
 ## API Keys Required
 
 Add the appropriate API key to your `.env` file:
@@ -73,6 +84,10 @@ Or create a `.env` file:
 LLM_FAST_MODEL=gemini/gemini-3.1-flash-lite-preview
 LLM_MEDIUM_MODEL=claude-haiku-4-5-20251001
 LLM_JUDGE_MODEL=gemini/gemini-3.1-flash-lite-preview
+VOICE_TTS_MODEL=gemini-2.5-flash-preview-tts
+VOICE_TTS_VOICE=Kore
+VOICE_WORDS_PER_MINUTE=150
+VOICE_MAX_DURATION_SECONDS=30
 GEMINI_API_KEY=your_gemini_key_here
 ANTHROPIC_API_KEY=your_anthropic_key_here
 ```
