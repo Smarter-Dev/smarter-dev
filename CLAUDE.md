@@ -1,27 +1,14 @@
-- Always restart the bot after making changes to it
-- The server restarts on file changes, the discord bot does not
-- **IMPORTANT**: Never run `podman system prune --volumes` as it will DELETE ALL DATABASE DATA. Use `podman system prune -af` (without --volumes) to preserve data.
+## Messaging Tools
 
-## Starting the Application
+### `aichat-send` — Send a message to Zech
+aichat-send "your message here"
 
-To start both the web server and Discord bot:
+Use this to announce startup, send status updates, and report issues.
 
-1. **Start the web server** (auto-restarts on file changes):
-   ```bash
-   uv run python main.py > logs/app.log 2>&1 &
-   ```
+### `aichat-unread` — Read unread messages
+aichat-unread
 
-2. **Start the Discord bot** (manual restart required):
-   ```bash
-   uv run python -m smarter_dev.bot.client > logs/bot.log 2>&1 &
-   ```
+Check for new instructions. Run on startup and periodically with `/loop 1m aichat-unread`.
 
-3. **Check status**:
-   - Web server logs: `tail -f logs/app.log`
-   - Bot logs: `tail -f logs/bot.log`
-
-4. **Stop processes**:
-   ```bash
-   pkill -f "main.py"
-   pkill -f "smarter_dev.bot.client"
-   ```
+### `aichat-read` — Read recent history
+aichat-read [limit]

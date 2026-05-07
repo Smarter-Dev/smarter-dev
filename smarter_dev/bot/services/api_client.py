@@ -70,7 +70,7 @@ class APIClient(APIClientProtocol):
         base_url: str,
         api_key: str,
         retry_config: RetryConfig | None = None,
-        default_timeout: float = 30.0,
+        default_timeout: float = 10.0,
         max_connections: int = 100,
         max_keepalive_connections: int = 20
     ):

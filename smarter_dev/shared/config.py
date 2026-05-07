@@ -32,6 +32,10 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://smarter_dev:smarter_dev_password@localhost:5432/smarter_dev",
         description="Database connection URL",
     )
+    legacy_database_url: Optional[str] = Field(
+        default=None,
+        description="Legacy bot-admin database URL (falls back to database_url)",
+    )
     
     # Redis
     redis_url: str = Field(
@@ -55,7 +59,7 @@ class Settings(BaseSettings):
         description="API secret key for authentication",
     )
     api_base_url: str = Field(
-        default="http://localhost:8888/api",
+        default="http://localhost:8000/api",
         description="Base URL for API endpoints",
     )
     
@@ -117,10 +121,26 @@ class Settings(BaseSettings):
         description="Log file path",
     )
     
+    # Email (Resend)
+    resend_api_key: Optional[str] = Field(
+        default=None,
+        description="Resend API key for transactional email",
+    )
+    site_base_url: str = Field(
+        default="http://localhost:8000",
+        description="Public base URL for the site (used in confirmation links)",
+    )
+
     # Analytics
     google_analytics_id: Optional[str] = Field(
         default=None,
         description="Google Analytics Measurement ID (G-XXXXXXXXXX)",
+    )
+
+    # Quests
+    quest_timezone: str = Field(
+        default="UTC",
+        description="Timezone for quest date calculations (e.g., America/Chicago)",
     )
 
     # Rate Limiting
@@ -215,6 +235,13 @@ class Settings(BaseSettings):
         return self.database_url
 
     @property
+    def effective_legacy_database_url(self) -> str:
+        """Get the legacy bot-admin database URL, falling back to database_url."""
+        if self.is_testing and self.test_database_url:
+            return self.test_database_url
+        return self.legacy_database_url or self.database_url
+
+    @property
     def effective_redis_url(self) -> str:
         """Get the effective Redis URL based on environment."""
         if self.is_testing and self.test_redis_url:
@@ -229,9 +256,9 @@ class Settings(BaseSettings):
         
         # Default redirect URIs based on environment
         if self.is_development:
-            return "http://localhost:8000/admin/auth/discord/callback"
+            return "http://localhost:8000/bot-admin/auth/discord/callback"
         else:
-            return "https://smarter.dev/admin/auth/discord/callback"
+            return "https://smarter.dev/bot-admin/auth/discord/callback"
 
 
 # Global settings instance

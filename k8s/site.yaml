@@ -30,9 +30,20 @@ spec:
     tls:
       - hosts:
         - smarter.dev
+        - scan.smarter.dev
         secretName: smarter-dev-website-cert
     rules:
       - host: smarter.dev
+        http:
+            paths:
+              - path: /
+                pathType: Prefix
+                backend:
+                  service:
+                    name: smarter-dev-website
+                    port:
+                      number: 8000
+      - host: scan.smarter.dev
         http:
             paths:
               - path: /

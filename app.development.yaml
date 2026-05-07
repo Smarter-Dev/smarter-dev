@@ -1,0 +1,62 @@
+site_name: Smarter Dev
+theme: smarterdev
+debug: true
+domain: localhost
+oauth2_enabled: true
+
+db:
+  url: $DATABASE_URL
+  schema: skrift
+
+auth:
+  redirect_base_url: "http://localhost:8000"
+  # Local dev uses Skrift's built-in dummy provider so contributors can stand
+  # the stack up with no OAuth credentials. Production (app.yaml) uses real
+  # OAuth providers; Skrift refuses to start with `dummy` configured in prod.
+  providers:
+    dummy: {}
+
+controllers:
+  - skrift.admin.controller:AdminController
+  - skrift.controllers.auth:AuthController
+  - skrift.controllers.web:WebController
+  - smarter_dev.web.controllers:SudoController
+  - smarter_dev.web.controllers:discord_redirect
+  - smarter_dev.web.controllers:api_mount
+  - smarter_dev.web.controllers:bot_admin_mount
+  - smarter_dev.web.campaign_signups_admin:CampaignSignupsAdminController
+  - smarter_dev.web.campaign_signups_api:CampaignSignupsApiController
+  - smarter_dev.web.usage_admin:UsageAdminController
+  - smarter_dev.web.scan_profiles_admin:ScanProfilesAdminController
+  - smarter_dev.web.research_sessions_admin:ResearchSessionsAdminController
+  - smarter_dev.web.bot_admin_skrift:BotAdminController
+  - smarter_dev.web.quests_admin:QuestsAdminController
+  - smarter_dev.web.mod_actions_admin:ModActionsAdminController
+  - smarter_dev.web.scan.api_controller:ScanAPIController
+
+page_types:
+  - name: post
+    plural: posts
+    icon: pen-tool
+
+middleware:
+  - smarter_dev.web.middleware.partial:create_partial_middleware
+
+security_headers:
+  enabled: false
+
+rate_limit:
+  enabled: false
+
+redis:
+  url: $REDIS_URL
+
+notifications:
+  backend: "skrift.lib.notification_backends:RedisBackend"
+
+sites:
+  scan:
+    subdomain: scan
+    controllers:
+      - skrift.controllers.notifications:NotificationsController
+      - smarter_dev.web.scan.controller:ScanController

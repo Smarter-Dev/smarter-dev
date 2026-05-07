@@ -1,0 +1,76 @@
+{% extends "admin/base.html" %}
+
+{% block title %}API Keys - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>API Keys</h1>
+    <p>Manage API keys for integrations</p>
+</hgroup>
+
+{% if api_keys %}
+<div style="display: flex; justify-content: flex-end; margin-bottom: 1rem;">
+    <a href="/admin/api-keys/create" role="button" class="sk-btn-outline sk-btn-small">Create Key</a>
+</div>
+<table class="sk-admin-table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Prefix</th>
+            <th>Scopes</th>
+            <th>Rate Limit</th>
+            <th>Status</th>
+            <th>Last Used</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for key in api_keys %}
+        <tr>
+            <td>
+                {{ key.name }}
+                {% if key.description %}
+                <br><small class="sk-text-muted">{{ key.description }}</small>
+                {% endif %}
+            </td>
+            <td><code>{{ key.key_prefix }}...</code></td>
+            <td>
+                {% for scope in key.scopes %}
+                <span class="sk-role-badge">{{ scope }}</span>
+                {% endfor %}
+            </td>
+            <td>{{ key.rate_limit_per_hour }}/hr</td>
+            <td>
+                {% if key.is_active %}
+                <span class="sk-pill sk-pill-published">Active</span>
+                {% else %}
+                <span class="sk-pill sk-pill-draft">Revoked</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if key.last_used_at %}
+                {{ key.last_used_at.strftime('%Y-%m-%d %H:%M') }}
+                {% else %}
+                <span class="sk-text-muted">Never</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if key.is_active %}
+                <form method="post" action="/admin/api-keys/{{ key.id }}/revoke" style="display: inline;">
+                    {{ csrf_field() }}
+                    <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger" onclick="return confirm('Revoke this API key? This cannot be undone.')">Revoke</button>
+                </form>
+                {% else %}
+                <span class="sk-text-muted">—</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div style="display: flex; justify-content: center; padding: 3rem 0;">
+    <a href="/admin/api-keys/create" role="button">Create Key</a>
+</div>
+{% endif %}
+{% endblock %}

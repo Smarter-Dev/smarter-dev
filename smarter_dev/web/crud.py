@@ -29,6 +29,11 @@ from smarter_dev.web.models import (
     ForumAgentResponse,
     ForumNotificationTopic,
     ForumUserSubscription,
+    Quest,
+    QuestProgress,
+    QuestSubmission,
+    QuestInput,
+    DailyQuest,
     Campaign,
     Challenge,
     ChallengeInput,
@@ -39,6 +44,8 @@ from smarter_dev.web.models import (
     AdventOfCodeConfig,
     AdventOfCodeThread,
     AttachmentFilterConfig,
+    ModerationConfig,
+    ModerationAction,
 )
 
 logger = logging.getLogger(__name__)
@@ -2594,6 +2601,494 @@ class ForumAgentOperations:
             raise DatabaseOperationError(f"Failed to sync notification topics: {e}") from e
 
 
+
+class QuestOperations:
+    """Database operations for quest management system."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_quest_by_id(
+            self,
+            quest_id: UUID,
+            guild_id: Optional[str] = None,
+    ) -> Optional[Quest]:
+        try:
+            query = select(Quest).where(Quest.id == quest_id)
+
+            if guild_id is not None:
+                query = query.where(Quest.guild_id == guild_id)
+
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get quest: {e}"
+            ) from e
+
+    async def get_daily_quest_by_id(self, daily_quest_id: UUID, guild_id: str) -> Optional[DailyQuest]:
+        try:
+            query = select(DailyQuest).where(DailyQuest.id == daily_quest_id)
+
+            if guild_id is not None:
+                query = query.where(DailyQuest.guild_id == guild_id)
+
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get daily quest: {e}"
+            ) from e
+
+    async def get_upcoming_daily_quests(
+            self,
+            window_end: datetime,
+    ) -> list[DailyQuest]:
+        """
+        Daily quests that will become active soon and are not announced yet.
+        """
+        try:
+            from smarter_dev.shared.date_provider import get_date_provider
+            today = get_date_provider().today()
+
+            query = (
+                select(DailyQuest)
+                .join(DailyQuest.quest)
+                .where(
+                    DailyQuest.is_announced.is_(False),
+                    DailyQuest.active_date >= today,
+                    DailyQuest.active_date <= window_end.date(),
+                )
+            )
+
+            result = await self.session.execute(query)
+            return list(result.scalars().all())
+
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get upcoming daily quests: {e}"
+            ) from e
+
+    async def get_pending_daily_quests(self) -> list[DailyQuest]:
+        """
+        Daily quests that should already be announced but aren't.
+        """
+        try:
+            from smarter_dev.shared.date_provider import get_date_provider
+            today = get_date_provider().today()
+
+            query = (
+                select(DailyQuest)
+                .where(
+                    DailyQuest.is_announced.is_(False),
+                    DailyQuest.active_date <= today,
+                )
+            )
+
+            result = await self.session.execute(query)
+            return list(result.scalars().all())
+
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get pending daily quests: {e}"
+            ) from e
+
+    async def mark_daily_quest_announced(self, daily_quest_id: UUID) -> bool:
+        try:
+            now = datetime.now(timezone.utc)
+
+            result = await self.session.execute(
+                update(DailyQuest)
+                .where(DailyQuest.id == daily_quest_id)
+                .values(
+                    is_announced=True,
+                    announced_at=now,
+                )
+            )
+
+            await self.session.commit()
+            return result.rowcount > 0
+
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(
+                f"Failed to mark daily quest announced: {e}"
+            ) from e
+
+    async def mark_daily_quest_active(self, daily_quest_id: UUID) -> bool:
+        try:
+            result = await self.session.execute(
+                update(DailyQuest)
+                .where(DailyQuest.id == daily_quest_id)
+                .values(is_active=True)
+            )
+
+            await self.session.commit()
+            return result.rowcount > 0
+
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(
+                f"Failed to activate daily quest: {e}"
+            ) from e
+
+    async def get_daily_quest(
+            self,
+            active_date: date,
+            guild_id: str,
+    ) -> Optional[DailyQuest]:
+        try:
+            now = datetime.now(timezone.utc)
+            logger.info("Now is=%s", now)
+
+            query = (
+                select(DailyQuest)
+                .join(DailyQuest.quest)
+                .where(
+                    DailyQuest.active_date == active_date,
+                    DailyQuest.guild_id == guild_id,
+                    DailyQuest.is_active.is_(True),
+                    DailyQuest.expires_at > now,
+                )
+            )
+
+            logger.info(
+                "DailyQuest query inputs | guild_id=%s active_date=%s now=%s",
+                guild_id,
+                active_date,
+                now,
+            )
+
+            result = await self.session.execute(query)
+            return result.scalar_one_or_none()
+
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get daily quest: {e}"
+            ) from e
+
+    async def create_quest(
+            self,
+            *,
+            guild_id: str,
+            title: str,
+            prompt: str,
+            quest_type: str = "daily",
+            python_script: Optional[str] = None,
+            input_generator_script: Optional[str] = None,
+            solution_validator_script: Optional[str] = None,
+    ) -> Quest:
+        try:
+            quest = Quest(
+                guild_id=guild_id,
+                title=title,
+                prompt=prompt,
+                quest_type=quest_type,
+                python_script=python_script,
+                input_generator_script=input_generator_script,
+                solution_validator_script=solution_validator_script,
+            )
+
+            self.session.add(quest)
+            await self.session.commit()
+            await self.session.refresh(quest)
+
+            return quest
+
+        except IntegrityError as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(
+                f"Quest integrity error: {e}"
+            ) from e
+
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(
+                f"Failed to create quest: {e}"
+            ) from e
+
+
+class QuestInputOperations:
+    """Database operations for daily quest input generation.
+    Exactly one input is generated per DailyQuest and shared by all users.
+    """
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_or_create_input(
+        self,
+        daily_quest_id: UUID,
+        script: Optional[str] = None,
+    ) -> tuple[str, str]:
+        """
+        Get existing input for a daily quest or generate it once.
+
+        Returns:
+            (input_data, result_data)
+        """
+        try:
+            # 1. Check if input already exists
+            existing = await self.get_input(daily_quest_id)
+            if existing:
+                return existing.input_data, existing.result_data
+
+            # 2. Generate input if missing
+            if not script:
+                raise DatabaseOperationError(
+                    "No input_generator_script provided for quest"
+                )
+
+            input_data, result_data = await self._execute_script(script)
+
+            quest_input = QuestInput(
+                daily_quest_id=daily_quest_id,
+                input_data=input_data,
+                result_data=result_data,
+            )
+
+            self.session.add(quest_input)
+            await self.session.commit()
+
+            return input_data, result_data
+
+        except Exception as e:
+            await self.session.rollback()
+            raise DatabaseOperationError(
+                f"Failed to get or create quest input: {e}"
+            ) from e
+
+    async def get_input(
+        self,
+        daily_quest_id: UUID,
+    ) -> Optional[QuestInput]:
+        """Fetch existing input without generating it."""
+        try:
+            result = await self.session.execute(
+                select(QuestInput).where(
+                    QuestInput.daily_quest_id == daily_quest_id
+                )
+            )
+            return result.scalar_one_or_none()
+
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get quest input: {e}"
+            ) from e
+
+    async def _execute_script(self, script: str) -> tuple[str, str]:
+        import json
+        import io
+        from contextlib import redirect_stdout
+
+        try:
+            buf = io.StringIO()
+            exec_globals = {"__builtins__": __builtins__}
+
+            with redirect_stdout(buf):
+                exec(script, exec_globals)
+
+            raw = buf.getvalue().strip()
+
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise ScriptExecutionError(
+                    f"Script output is not valid JSON: {e}"
+                )
+
+            if not isinstance(payload, dict):
+                raise ScriptExecutionError("Script output must be a JSON object")
+
+            if "input" not in payload or "result" not in payload:
+                raise ScriptExecutionError(
+                    "Script output must contain 'input' and 'result'"
+                )
+
+            return str(payload["input"]), str(payload["result"])
+
+        except ScriptExecutionError:
+            raise
+        except Exception as e:
+            raise ScriptExecutionError(
+                f"Script execution failed: {e}"
+            ) from e
+
+
+class QuestSubmissionOperations:
+    """Competitive submission handling for daily quests."""
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        legacy_session: AsyncSession | None = None,
+    ):
+        self.session = session
+        self.legacy_session = legacy_session or session
+
+    async def submit_solution(
+        self,
+        daily_quest_id: UUID,
+        guild_id: str,
+        squad_id: UUID,
+        user_id: str,
+        username: str,
+        submitted_solution: str,
+    ) -> tuple[bool, bool, Optional[int]]:
+        """
+        Returns:
+            (is_correct, is_first_success, points_earned)
+        """
+        try:
+            # 1. Fetch expected result
+            input_ops = QuestInputOperations(self.session)
+            quest_input = await input_ops.get_input(daily_quest_id)
+
+            if not quest_input:
+                raise ValueError("Quest input not generated")
+
+            expected = quest_input.result_data.strip()
+            submitted = submitted_solution.strip()
+            is_correct = expected == submitted
+
+            is_first_success = False
+            points_earned = None
+
+            if is_correct:
+                existing = await self._get_first_success_for_squad(
+                    daily_quest_id,
+                    squad_id,
+                )
+
+                is_first_success = existing is None
+
+                # Only add points on first submission
+                if is_first_success:
+                    points_earned = self._calculate_points()
+
+                squad_ops = SquadOperations()
+                members = await squad_ops.get_squad_members(
+                    self.legacy_session,
+                    squad_id,
+                )
+
+                bytes_ops = BytesOperations()
+
+                for member in members:
+                    await bytes_ops.create_system_reward(
+                        self.legacy_session,
+                        guild_id=guild_id,
+                        user_id=member.user_id,
+                        username=member.user_id,  # or cached username if you have it
+                        amount=points_earned,
+                        reason=f"Daily quest reward (first correct solution)",
+                    )
+
+            submission = QuestSubmission(
+                daily_quest_id=daily_quest_id,
+                guild_id=guild_id,
+                squad_id=squad_id,
+                user_id=user_id,
+                username=username,
+                submitted_solution=submitted_solution,
+                is_correct=is_correct,
+                is_first_success=is_first_success,
+                points_earned=points_earned,
+            )
+
+            self.session.add(submission)
+            await self.session.commit()
+
+            return is_correct, is_first_success, points_earned
+
+        except Exception as e:
+            await self.session.rollback()
+            if isinstance(e, ValueError):
+                raise
+            raise DatabaseOperationError(
+                f"Failed to submit quest solution: {e}"
+            ) from e
+
+    async def _get_first_success_for_squad(
+        self,
+        daily_quest_id: UUID,
+        squad_id: UUID,
+    ) -> Optional[QuestSubmission]:
+        result = await self.session.execute(
+            select(QuestSubmission).where(
+                QuestSubmission.daily_quest_id == daily_quest_id,
+                QuestSubmission.squad_id == squad_id,
+                QuestSubmission.is_first_success.is_(True),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_daily_quest_scoreboard(
+            self,
+            daily_quest_id: UUID,
+    ) -> list[dict]:
+        """
+        Get squad rankings for a single daily quest.
+
+        Returns:
+            [
+              {
+                "squad_id": ...,
+                "squad_name": ...,
+                "points": ...,
+                "winner_user_id": ...,
+                "winner_username": ...
+              },
+              ...
+            ]
+        """
+        try:
+            query = (
+                select(
+                    QuestSubmission.squad_id.label("squad_id"),
+                    QuestSubmission.points_earned.label("points"),
+                    QuestSubmission.user_id.label("winner_user_id"),
+                    QuestSubmission.username.label("winner_username"),
+                )
+                .select_from(QuestSubmission)
+                .where(
+                    QuestSubmission.daily_quest_id == daily_quest_id,
+                    QuestSubmission.is_first_success.is_(True),
+                )
+                .order_by(desc(QuestSubmission.points_earned))
+            )
+
+            result = await self.session.execute(query)
+            rows = result.fetchall()
+
+            squad_ops = SquadOperations()
+            scoreboard = []
+            for row in rows:
+                squad = await squad_ops.get_squad(self.legacy_session, row.squad_id)
+                scoreboard.append(
+                    {
+                        "squad_id": row.squad_id,
+                        "squad_name": squad.name,
+                        "points": row.points or 0,
+                        "winner_user_id": row.winner_user_id,
+                        "winner_username": row.winner_username,
+                    }
+                )
+
+            return scoreboard
+
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get daily quest scoreboard: {e}"
+            ) from e
+
+    def _calculate_points(self) -> int:
+        """Simple, deterministic quest scoring."""
+        return 20
+
+
 class CampaignOperations:
     """Database operations for campaign management system.
     
@@ -2994,40 +3489,35 @@ class CampaignOperations:
     
     async def get_upcoming_announcements(self, upcoming_time: datetime) -> List[Challenge]:
         """Get challenges that will be announced soon.
-        
+
         Args:
             upcoming_time: Time limit to check up to
-            
+
         Returns:
             List of challenges that will be announced soon
         """
         try:
-            # Find challenges that:
-            # 1. Haven't been announced yet (is_announced = False)
-            # 2. Are part of active campaigns
-            # Then filter by release time in Python
-            
             now = datetime.now(timezone.utc)
-            
+
+            # Calculate release_time in SQL to avoid loading all challenges:
+            # release_time = campaign.start_time + (order_position - 1) * cadence_hours (in seconds)
+            release_time_expr = Campaign.start_time + func.make_interval(
+                0, 0, 0, 0,  # years, months, weeks, days
+                (Challenge.order_position - 1) * Campaign.release_cadence_hours,  # hours
+                0, 0  # minutes, seconds
+            )
+
             query = select(Challenge).join(Campaign).where(
                 and_(
                     Challenge.is_announced == False,
-                    Campaign.is_active == True
+                    Campaign.is_active == True,
+                    release_time_expr > now,
+                    release_time_expr <= upcoming_time,
                 )
             ).options(selectinload(Challenge.campaign))
-            
+
             result = await self.session.execute(query)
-            all_pending = list(result.scalars().all())
-            
-            # Filter by release time in Python for upcoming window
-            upcoming_challenges = []
-            for challenge in all_pending:
-                campaign = challenge.campaign
-                release_time = challenge.calculate_release_time(campaign.start_time, campaign.release_cadence_hours)
-                if now < release_time <= upcoming_time:
-                    upcoming_challenges.append(challenge)
-            
-            return upcoming_challenges
+            return list(result.scalars().all())
             
         except Exception as e:
             raise DatabaseOperationError(f"Failed to get upcoming announcements: {e}") from e
@@ -5228,3 +5718,206 @@ class AttachmentFilterConfigOperations:
             return result.rowcount > 0
         except Exception as e:
             raise DatabaseOperationError(f"Failed to delete attachment filter config: {e}") from e
+
+
+class ModerationConfigOperations:
+    """Database operations for moderation configuration management.
+
+    Handles CRUD operations for guild-specific AI moderation settings including
+    monitored roles, moderation instructions, and enabled tools.
+    """
+
+    async def get_config(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+    ) -> Optional[ModerationConfig]:
+        """Get moderation config for a guild."""
+        try:
+            stmt = select(ModerationConfig).where(ModerationConfig.guild_id == guild_id)
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get moderation config: {e}") from e
+
+    async def get_or_create_config(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+    ) -> ModerationConfig:
+        """Get or create moderation config for a guild."""
+        try:
+            config = await self.get_config(session, guild_id)
+            if config is None:
+                config = ModerationConfig(guild_id=guild_id)
+                session.add(config)
+                await session.flush()
+            return config
+        except DatabaseOperationError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get or create moderation config: {e}") from e
+
+    async def update_config(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        **updates,
+    ) -> ModerationConfig:
+        """Update moderation config for a guild."""
+        try:
+            config = await self.get_or_create_config(session, guild_id)
+            for key, value in updates.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+            config.updated_at = datetime.now(timezone.utc)
+            await session.flush()
+            return config
+        except DatabaseOperationError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to update moderation config: {e}") from e
+
+    async def get_all_active_configs(
+        self,
+        session: AsyncSession,
+    ) -> list[ModerationConfig]:
+        """Get all active moderation configs (for bot startup cache)."""
+        try:
+            stmt = select(ModerationConfig).where(ModerationConfig.is_active == True)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get active moderation configs: {e}") from e
+
+
+class ModerationActionOperations:
+    """Database operations for moderation action tracking.
+
+    Records and queries warns, kicks, bans, unbans, and timeouts from
+    AI agents, manual commands, and Discord audit log detection.
+    """
+
+    async def create_action(
+        self,
+        session: AsyncSession,
+        *,
+        guild_id: str,
+        target_user_id: str,
+        target_username: str,
+        action_type: str,
+        reason: str | None = None,
+        moderator_user_id: str | None = None,
+        moderator_username: str | None = None,
+        duration_seconds: int | None = None,
+        source: str = "ai",
+        channel_id: str | None = None,
+        trigger_message_id: str | None = None,
+        ai_context_summary: str | None = None,
+    ) -> ModerationAction:
+        """Record a moderation action."""
+        try:
+            action = ModerationAction(
+                guild_id=guild_id,
+                target_user_id=target_user_id,
+                target_username=target_username,
+                action_type=action_type,
+                reason=reason,
+                moderator_user_id=moderator_user_id,
+                moderator_username=moderator_username,
+                duration_seconds=duration_seconds,
+                source=source,
+                channel_id=channel_id,
+                trigger_message_id=trigger_message_id,
+                ai_context_summary=ai_context_summary,
+            )
+            session.add(action)
+            await session.flush()
+            return action
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to create moderation action: {e}") from e
+
+    async def get_actions_for_user(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        target_user_id: str,
+        limit: int = 50,
+    ) -> list[ModerationAction]:
+        """Get moderation actions for a specific user in a guild."""
+        try:
+            stmt = (
+                select(ModerationAction)
+                .where(
+                    ModerationAction.guild_id == guild_id,
+                    ModerationAction.target_user_id == target_user_id,
+                )
+                .order_by(ModerationAction.created_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get user moderation actions: {e}") from e
+
+    async def get_actions_for_guild(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        action_type: str | None = None,
+        limit: int = 100,
+    ) -> list[ModerationAction]:
+        """Get moderation actions for a guild, optionally filtered by type."""
+        try:
+            stmt = (
+                select(ModerationAction)
+                .where(ModerationAction.guild_id == guild_id)
+            )
+            if action_type:
+                stmt = stmt.where(ModerationAction.action_type == action_type)
+            stmt = stmt.order_by(ModerationAction.created_at.desc()).limit(limit)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get guild moderation actions: {e}") from e
+
+    async def count_warns_for_user(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        target_user_id: str,
+    ) -> int:
+        """Count total warnings for a user in a guild."""
+        try:
+            stmt = (
+                select(func.count())
+                .select_from(ModerationAction)
+                .where(
+                    ModerationAction.guild_id == guild_id,
+                    ModerationAction.target_user_id == target_user_id,
+                    ModerationAction.action_type == "warn",
+                )
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one()
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to count user warnings: {e}") from e
+
+    async def get_recent_actions(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        limit: int = 50,
+    ) -> list[ModerationAction]:
+        """Get most recent moderation actions for a guild."""
+        try:
+            stmt = (
+                select(ModerationAction)
+                .where(ModerationAction.guild_id == guild_id)
+                .order_by(ModerationAction.created_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get recent moderation actions: {e}") from e

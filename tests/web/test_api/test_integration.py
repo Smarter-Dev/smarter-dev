@@ -33,7 +33,9 @@ class TestAPIIntegration:
         config_mock.starting_balance = 100
         config_mock.max_transfer = 1000
         config_mock.daily_cooldown_hours = 24
+        config_mock.transfer_cooldown_hours = 0
         config_mock.streak_bonuses = {"8": 2}
+        config_mock.role_rewards = {}
         config_mock.transfer_tax_rate = 0.0
         config_mock.is_enabled = True
         config_mock.created_at = datetime.now(timezone.utc)
@@ -47,6 +49,7 @@ class TestAPIIntegration:
         assert config_response.status_code == 200
         
         # 2. Get user balance (creates if not exists)
+        # The /balance/{user_id} endpoint uses get_or_create_balance
         balance_mock = Mock()
         balance_mock.guild_id = test_guild_id
         balance_mock.user_id = test_user_id
@@ -57,8 +60,8 @@ class TestAPIIntegration:
         balance_mock.last_daily = None
         balance_mock.created_at = datetime.now(timezone.utc)
         balance_mock.updated_at = datetime.now(timezone.utc)
-        mock_bytes_operations.get_balance.return_value = balance_mock
-        
+        mock_bytes_operations.get_or_create_balance.return_value = balance_mock
+
         balance_response = await api_client.get(
             f"/guilds/{test_guild_id}/bytes/balance/{test_user_id}",
             headers=bot_headers
@@ -66,25 +69,29 @@ class TestAPIIntegration:
         assert balance_response.status_code == 200
         assert balance_response.json()["balance"] == 100
         
-        # 3. Claim daily reward
+        # 3. Claim daily reward (new user gets starting_balance=100 as reward)
+        # Also need get_balance for the daily claim endpoint
+        mock_bytes_operations.get_balance.return_value = balance_mock
+
         updated_balance = Mock()
         updated_balance.guild_id = test_guild_id
         updated_balance.user_id = test_user_id
-        updated_balance.balance = 110
-        updated_balance.total_received = 110
+        updated_balance.balance = 200  # 100 starting + 100 (starting_balance as first daily)
+        updated_balance.total_received = 200
         updated_balance.total_sent = 0
         updated_balance.streak_count = 1
         updated_balance.last_daily = datetime.now(timezone.utc).date()
         updated_balance.created_at = datetime.now(timezone.utc)
         updated_balance.updated_at = datetime.now(timezone.utc)
-        mock_bytes_operations.update_daily_reward.return_value = updated_balance
-        
+        mock_bytes_operations.update_daily_reward.return_value = (updated_balance, None)
+
         daily_response = await api_client.post(
-            f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-            headers=bot_headers
+            f"/guilds/{test_guild_id}/bytes/daily",
+            headers=bot_headers,
+            json={"user_id": test_user_id}
         )
         assert daily_response.status_code == 200
-        assert daily_response.json()["balance"]["balance"] == 110
+        assert daily_response.json()["balance"]["balance"] == 200
         
         # 4. Create transaction
         transaction_mock = Mock()
@@ -156,13 +163,14 @@ class TestAPIIntegration:
         squad_mock.role_id = test_role_id
         squad_mock.name = "Test Squad"
         squad_mock.description = "A test squad"
+        squad_mock.welcome_message = None
+        squad_mock.announcement_channel = None
         squad_mock.max_members = 10
         squad_mock.switch_cost = 50
         squad_mock.is_active = True
+        squad_mock.is_default = False
         squad_mock.created_at = datetime.now(timezone.utc)
         squad_mock.updated_at = datetime.now(timezone.utc)
-        # Add spec to prevent attribute access issues
-        squad_mock._spec_class = None
         mock_squad_operations.create_squad.return_value = squad_mock
         
         create_data = {
@@ -273,13 +281,14 @@ class TestAPIIntegration:
         squad_mock.role_id = test_role_id
         squad_mock.name = "Expensive Squad"
         squad_mock.description = None
+        squad_mock.welcome_message = None
+        squad_mock.announcement_channel = None
         squad_mock.max_members = None
         squad_mock.switch_cost = 50  # Costs bytes to join
         squad_mock.is_active = True
+        squad_mock.is_default = False
         squad_mock.created_at = datetime.now(timezone.utc)
         squad_mock.updated_at = datetime.now(timezone.utc)
-        # Add spec to prevent attribute access issues
-        squad_mock._spec_class = None
         mock_squad_operations.create_squad.return_value = squad_mock
         
         create_data = {
@@ -317,11 +326,13 @@ class TestAPIIntegration:
         assert join_response.status_code == 200
         
         # Verify join_squad was called with correct parameters
+        # Endpoint passes: (db, guild_id, user_id, squad_id, username)
         mock_squad_operations.join_squad.assert_called_with(
             mock_squad_operations.join_squad.call_args[0][0],  # session
             test_guild_id,
             test_user_id,
-            squad_id
+            squad_id,
+            None  # username (not provided in join request)
         )
     
     async def test_error_propagation(
@@ -336,15 +347,16 @@ class TestAPIIntegration:
         from smarter_dev.web.crud import DatabaseOperationError
         
         # Test database error propagation
-        mock_bytes_operations.get_balance.side_effect = DatabaseOperationError(
+        # The /balance/{user_id} endpoint uses get_or_create_balance, not get_balance
+        mock_bytes_operations.get_or_create_balance.side_effect = DatabaseOperationError(
             "Connection timeout"
         )
-        
+
         response = await api_client.get(
             f"/guilds/{test_guild_id}/bytes/balance/{test_user_id}",
             headers=bot_headers
         )
-        
+
         assert response.status_code == 500
         assert "Database error" in response.json()["detail"]
         assert "Connection timeout" in response.json()["detail"]
@@ -360,6 +372,7 @@ class TestAPIIntegration:
         import asyncio
         
         # Mock balance for concurrent requests
+        # The /balance/{user_id} endpoint uses get_or_create_balance, not get_balance
         balance_mock = Mock()
         balance_mock.guild_id = test_guild_id
         balance_mock.user_id = "123"
@@ -370,7 +383,7 @@ class TestAPIIntegration:
         balance_mock.last_daily = None
         balance_mock.created_at = datetime.now(timezone.utc)
         balance_mock.updated_at = datetime.now(timezone.utc)
-        mock_bytes_operations.get_balance.return_value = balance_mock
+        mock_bytes_operations.get_or_create_balance.return_value = balance_mock
         
         # Make concurrent requests
         tasks = [

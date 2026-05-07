@@ -41,7 +41,7 @@ def admin_required(func: Callable) -> Callable:
         if not request.session.get("is_admin"):
             # Store the requested path for redirect after login (relative URL only)
             next_path = str(request.url.path)
-            login_url = f"/admin/login?next={next_path}"
+            login_url = f"/bot-admin/login?next={next_path}"
             return RedirectResponse(url=login_url, status_code=303)
         
         return await func(request)
@@ -57,10 +57,10 @@ async def login(request: Request):
     if request.method == "GET":
         # Check if already logged in
         if request.session.get("is_admin"):
-            next_url = request.query_params.get("next", "/admin")
+            next_url = request.query_params.get("next", "/bot-admin")
             # Ensure next_url is a relative path to prevent open redirects
             if not next_url.startswith("/"):
-                next_url = "/admin"
+                next_url = "/bot-admin"
             return RedirectResponse(url=next_url, status_code=303)
         
         # Redirect to Discord OAuth
@@ -72,7 +72,7 @@ async def login(request: Request):
             logger.error(f"Discord OAuth configuration error: {e}")
             return templates.TemplateResponse(
                 request,
-                "admin/login.html",
+                "bot-admin/login.html",
                 {
                     "error": f"Authentication service unavailable: {e}",
                     "config_error": True
@@ -83,7 +83,7 @@ async def login(request: Request):
     # POST method not supported - Discord OAuth only
     return templates.TemplateResponse(
         request,
-        "admin/login.html",
+        "bot-admin/login.html",
         {
             "error": "Username/password authentication is disabled. Please use Discord OAuth.",
             "oauth_only": True
@@ -109,10 +109,10 @@ async def discord_oauth_callback(request: Request):
         logger.info(f"Discord OAuth login successful for user: {discord_user.display_name}")
         
         # Redirect to originally requested page
-        next_url = request.session.pop("oauth_next", "/admin")
+        next_url = request.session.pop("oauth_next", "/bot-admin")
         # Ensure next_url is a relative path to prevent open redirects
         if not next_url.startswith("/"):
-            next_url = "/admin"
+            next_url = "/bot-admin"
         
         return RedirectResponse(url=next_url, status_code=303)
         
@@ -120,7 +120,7 @@ async def discord_oauth_callback(request: Request):
         logger.warning(f"Discord OAuth access denied: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/login.html",
+            "bot-admin/login.html",
             {
                 "permission_error": True
             },
@@ -130,7 +130,7 @@ async def discord_oauth_callback(request: Request):
         logger.error(f"Discord OAuth error: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/login.html",
+            "bot-admin/login.html",
             {
                 "error": f"Authentication failed: {e}",
                 "fallback_login": True
@@ -141,7 +141,7 @@ async def discord_oauth_callback(request: Request):
         logger.error(f"Unexpected error during Discord OAuth callback: {e}")
         return templates.TemplateResponse(
             request,
-            "admin/login.html",
+            "bot-admin/login.html",
             {
                 "error": "An unexpected error occurred during authentication. Please try again.",
                 "fallback_login": True

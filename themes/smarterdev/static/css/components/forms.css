@@ -1,0 +1,204 @@
+/* ══════════════════════════════════════════════════════
+   Forms — Textarea, dropdowns, source chips, char counter
+   ══════════════════════════════════════════════════════ */
+
+/* ── Research Textarea ── */
+.research-textarea {
+  width: 100%;
+  min-height: 120px;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: .85rem;
+  color: var(--white);
+  line-height: 2;
+  caret-color: var(--cyan);
+}
+.research-textarea::placeholder { color: var(--gray) }
+
+/* ── Character Counter ── */
+.char-counter {
+  text-align: right;
+  font-family: var(--heading);
+  font-size: .55rem;
+  color: var(--gray);
+  letter-spacing: .06em;
+  padding: 0 1.5rem .75rem;
+  transition: color .2s;
+}
+.char-counter.warn { color: var(--amber) }
+.char-counter.limit { color: var(--rose) }
+
+/* ── Sources Area ── */
+.sources-area {
+  max-width: 760px;
+  margin: 0 auto;
+  border: 1.5px dashed rgba(0,212,255,.1);
+  background: var(--surface);
+  transition: all .25s;
+  position: relative;
+}
+.sources-area.dragover { border-color: var(--cyan); background: rgba(0,212,255,.03) }
+.sources-area input[type="file"] { display: none }
+.sources-header { display: flex; align-items: center; gap: 10px; padding: 12px 18px 0 }
+.sources-label { font-family: var(--heading); font-size: .5rem; color: var(--gray); letter-spacing: .08em; text-transform: uppercase }
+.sources-body { padding: 8px 18px 14px }
+
+/* ── Source Add Button ── */
+.sources-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: 1px solid rgba(0,212,255,.15);
+  color: var(--gray);
+  cursor: pointer;
+  transition: all .2s;
+  flex-shrink: 0;
+  padding: 0;
+}
+.sources-add-btn:hover { color: var(--cyan); border-color: var(--cyan); background: rgba(0,212,255,.04) }
+.sources-add-btn svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+
+/* ── Empty State ── */
+.sources-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 0 4px;
+  text-align: center;
+}
+.sources-empty-icon svg { width: 20px; height: 20px; fill: none; stroke: var(--gray); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; transition: stroke .2s }
+.sources-area:hover .sources-empty-icon svg, .sources-area.dragover .sources-empty-icon svg { stroke: var(--cyan) }
+.sources-empty-text { font-family: var(--heading); font-size: .52rem; color: var(--gray); letter-spacing: .06em; transition: color .2s }
+.sources-area:hover .sources-empty-text, .sources-area.dragover .sources-empty-text { color: var(--light) }
+
+/* ── Source Chips ── */
+.source-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center }
+.source-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-family: var(--heading);
+  font-size: .52rem;
+  letter-spacing: .06em;
+  color: var(--cyan);
+  border: 1px solid var(--cyan);
+  background: rgba(0,212,255,.06);
+  transition: all .2s;
+  animation: chipIn .2s ease;
+}
+@keyframes chipIn { from { opacity: 0; transform: scale(.9) } to { opacity: 1; transform: none } }
+.source-chip svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; cursor: pointer; opacity: .5; transition: opacity .15s }
+.source-chip svg:hover { opacity: 1 }
+
+/* ── Add Source Dropdown ── */
+.add-source-wrap { position: relative }
+.add-source-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.15);
+  z-index: 20;
+  display: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.add-source-dropdown.visible { display: block }
+.add-source-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  font-size: .75rem;
+  color: var(--light);
+  cursor: pointer;
+  transition: all .15s;
+}
+.add-source-option:hover { background: rgba(0,212,255,.06); color: var(--white) }
+.add-source-option svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0 }
+.add-source-option.disabled { opacity: .35; pointer-events: none }
+.add-source-divider { height: 1px; background: rgba(0,212,255,.08); margin: 2px 0 }
+
+/* ── Split Submit Button ── */
+.submit-row { max-width: 760px; margin: 0 auto; display: flex; align-items: stretch }
+.split-btn { display: flex; align-items: stretch; flex: 1 }
+.split-btn-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 24px;
+  font-family: var(--heading);
+  font-size: .72rem;
+  letter-spacing: .06em;
+  background: transparent;
+  color: var(--cyan);
+  border: 1.5px solid var(--cyan);
+  border-right: none;
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(0,212,255,.15), inset 0 0 15px rgba(0,212,255,.05);
+  transition: all .3s;
+  white-space: nowrap;
+}
+.split-btn-main:hover { background: var(--cyan); color: var(--bg); box-shadow: 0 0 30px rgba(0,212,255,.3) }
+.split-btn-main svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+.split-btn-depth { position: relative }
+.split-btn-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 16px;
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .06em;
+  color: var(--cyan);
+  background: rgba(0,212,255,.04);
+  border: 1.5px solid var(--cyan);
+  cursor: pointer;
+  transition: all .2s;
+  white-space: nowrap;
+  height: 100%;
+}
+.split-btn-toggle:hover { background: rgba(0,212,255,.1) }
+.split-btn-toggle svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .2s }
+.split-btn-toggle.open svg { transform: rotate(180deg) }
+.depth-dropdown {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  min-width: 200px;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.15);
+  z-index: 20;
+  display: none;
+  box-shadow: 0 -8px 24px rgba(0,0,0,.5);
+}
+.depth-dropdown.visible { display: block }
+.depth-option {
+  padding: 10px 14px;
+  font-size: .78rem;
+  color: var(--light);
+  cursor: pointer;
+  transition: all .15s;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.depth-option:hover { background: rgba(0,212,255,.06); color: var(--white) }
+.depth-option.selected { color: var(--cyan) }
+.depth-option .opt-time { font-size: .6rem; color: var(--gray); font-family: var(--heading); letter-spacing: .04em }
+
+/* ── Responsive ── */
+@media (max-width: 520px) {
+  .source-chips { gap: 4px }
+}

@@ -35,6 +35,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: database-url
+                  - name: LEGACY_DATABASE_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: legacy-database-url
                   - name: REDIS_URL
                     valueFrom:
                       secretKeyRef:
@@ -70,30 +75,34 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: anthropic-api-key
+                  - name: JINA_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: jina-api-key
                 resources:
                     requests:
-                        cpu: 100m
-                        memory: 256Mi
+                        cpu: 50m
+                        memory: 384Mi
                     limits:
-                        cpu: 500m
+                        cpu: 200m
                         memory: 512Mi
+                startupProbe:
+                    exec:
+                        command: ["pgrep", "-f", "smarter_dev.bot.client"]
+                    failureThreshold: 30
+                    periodSeconds: 10
                 livenessProbe:
                     exec:
-                        command:
-                          - pgrep
-                          - -f
-                          - "smarter_dev.bot.client"
-                    initialDelaySeconds: 30
+                        command: ["pgrep", "-f", "smarter_dev.bot.client"]
+                    initialDelaySeconds: 10
                     periodSeconds: 30
                     timeoutSeconds: 5
                     failureThreshold: 3
                 readinessProbe:
                     exec:
-                        command:
-                          - pgrep
-                          - -f
-                          - "smarter_dev.bot.client"
-                    initialDelaySeconds: 10
+                        command: ["pgrep", "-f", "smarter_dev.bot.client"]
+                    initialDelaySeconds: 5
                     periodSeconds: 10
                     timeoutSeconds: 3
                     failureThreshold: 2

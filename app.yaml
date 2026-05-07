@@ -1,0 +1,99 @@
+site_name: Smarter Dev
+theme: smarterdev
+domain: smarter.dev
+oauth2_enabled: true
+
+db:
+  url: $DATABASE_URL
+  schema: skrift
+
+session:
+  cookie_domain: ".smarter.dev"
+
+auth:
+  redirect_base_url: "https://smarter.dev"
+  allowed_redirect_domains:
+    - "*.smarter.dev"
+  providers:
+    discord:
+      client_id: $DISCORD_APPLICATION_ID
+      client_secret: $DISCORD_APPLICATION_SECRET
+      scopes:
+        - identify
+        - email
+    github:
+      client_id: $GITHUB_CLIENT_ID
+      client_secret: $GITHUB_CLIENT_SECRET
+      scopes:
+        - user:email
+    google:
+      client_id: $GOOGLE_CLIENT_ID
+      client_secret: $GOOGLE_CLIENT_SECRET
+      scopes:
+        - openid
+        - email
+        - profile
+
+controllers:
+  - skrift.admin.controller:AdminController
+  - skrift.controllers.auth:AuthController
+  - skrift.controllers.web:WebController
+  - smarter_dev.web.controllers:SudoController
+  - smarter_dev.web.controllers:discord_redirect
+  - smarter_dev.web.controllers:api_mount
+  - smarter_dev.web.controllers:bot_admin_mount
+  - smarter_dev.web.campaign_signups_admin:CampaignSignupsAdminController
+  - smarter_dev.web.campaign_signups_api:CampaignSignupsApiController
+  - smarter_dev.web.usage_admin:UsageAdminController
+  - smarter_dev.web.scan_profiles_admin:ScanProfilesAdminController
+  - smarter_dev.web.research_sessions_admin:ResearchSessionsAdminController
+  - smarter_dev.web.bot_admin_skrift:BotAdminController
+  - smarter_dev.web.quests_admin:QuestsAdminController
+  - smarter_dev.web.mod_actions_admin:ModActionsAdminController
+  - smarter_dev.web.scan.api_controller:ScanAPIController
+
+# Partials system (SPA navigation)
+partials:
+  enabled: true
+
+# Page types — auto-generates admin CRUD, public listing, and detail routes
+page_types:
+  - name: post
+    plural: posts
+    icon: pen-tool
+
+storage:
+  default: default
+  stores:
+    default:
+      backend: s3
+      max_upload_size: 10485760
+      s3:
+        bucket: production-bucket-zechz-1234
+        region: sfo3
+        endpoint_url: https://sfo3.digitaloceanspaces.com
+        access_key_id: $SPACES_ACCESS_KEY
+        secret_access_key: $SPACES_SECRET_KEY
+        acl: public-read
+        public_url: https://production-bucket-zechz-1234.sfo3.digitaloceanspaces.com
+
+redis:
+  url: $REDIS_URL
+
+security_headers:
+  enabled: true
+  content_security_policy: "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; style-src-attr 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com https:; img-src 'self' data: https:; connect-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
+notifications:
+  backend: "skrift.lib.notification_backends:RedisBackend"
+
+sites:
+  scan:
+    subdomain: scan
+    controllers:
+      - skrift.controllers.notifications:NotificationsController
+      - smarter_dev.web.scan.controller:ScanController
+
+# Legacy site — existing Starlette app serves from subdomain
+legacy:
+  subdomain: legacy.smarter.dev

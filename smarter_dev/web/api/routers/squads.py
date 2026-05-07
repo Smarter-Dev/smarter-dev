@@ -203,11 +203,15 @@ async def create_squad(
         )
         
         await db.commit()
-        
+        await db.refresh(created_squad)
+
         # Add member count (will be 0 for new squad)
         squad_data = created_squad.__dict__.copy()
         squad_data['member_count'] = 0
-        
+
+        # Add cost information with sale discounts
+        squad_data = await _add_cost_info_to_squad(squad_data, guild_id, db)
+
         return SquadResponse.model_validate(squad_data)
     except ConflictError as e:
         raise create_secure_validation_error(str(e))

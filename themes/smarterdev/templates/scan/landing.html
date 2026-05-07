@@ -1,0 +1,149 @@
+{% extends "scan/base.html" %}
+
+{% block page_type %}scan{% endblock %}
+{% block page_title %}Scan — Research Engine{% endblock %}
+
+{% block page_css %}
+    <link rel="stylesheet" href="{{ theme_url('css/pages/research.css') }}">
+    <style nonce="{{ csp_nonce() }}">
+    .scan-title{font-family:var(--display);font-size:clamp(2rem,5vw,3.2rem);color:var(--white);letter-spacing:.06em;margin-bottom:.75rem;text-shadow:0 0 40px rgba(0,212,255,.1)}
+    .scan-subtitle{font-family:var(--heading);font-size:.65rem;color:var(--mid);letter-spacing:.12em;margin-bottom:2.5rem}
+    .scan-form{position:relative;max-width:600px;margin:0 auto}
+    .scan-input{width:100%;padding:1rem 5.5rem 1rem 1.25rem;font-size:.95rem;font-family:var(--body);background:var(--surface);border:1px solid rgba(0,212,255,.12);color:var(--white);outline:none;transition:border-color .2s;resize:none;overflow:hidden;min-height:3.2rem;line-height:1.5;box-sizing:border-box;display:block}
+    .scan-input:focus{border-color:var(--cyan);box-shadow:0 0 20px rgba(0,212,255,.06)}
+    .scan-input::placeholder{color:var(--gray)}
+    .scan-input:disabled{opacity:.5;cursor:not-allowed;padding-right:1.25rem}
+    .scan-submit{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-family:var(--heading);font-size:.55rem;letter-spacing:.1em;padding:.5rem 1rem;background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.2);color:var(--cyan);cursor:pointer;transition:all .2s}
+    .scan-submit:hover{background:rgba(0,212,255,.18);border-color:var(--cyan)}
+    .scan-signin{font-family:var(--heading);font-size:.5rem;color:var(--gray);letter-spacing:.08em;margin-top:.75rem}
+    .scan-signin a{color:var(--cyan);text-decoration:none}
+    .scan-signin a:hover{text-decoration:underline}
+    .scan-mode{display:flex;gap:1.25rem;justify-content:center;margin-top:.75rem}
+    .scan-mode label{font-family:var(--heading);font-size:.55rem;letter-spacing:.1em;color:var(--gray);cursor:pointer;display:flex;align-items:center;gap:.4rem;transition:color .2s}
+    .scan-mode input[type="radio"]{appearance:none;-webkit-appearance:none;width:10px;height:10px;border:1px solid rgba(0,212,255,.3);border-radius:50%;cursor:pointer;transition:all .2s;margin:0}
+    .scan-mode input[type="radio"]:checked{background:var(--cyan);border-color:var(--cyan);box-shadow:0 0 8px rgba(0,212,255,.3)}
+    .scan-mode input[type="radio"]:checked+span{color:var(--cyan)}
+    .scan-suggestions{max-width:600px;margin:1rem auto 0;text-align:left}
+    .scan-suggestions-label{font-family:var(--heading);font-size:.42rem;letter-spacing:.12em;color:var(--mid);margin-bottom:.5rem}
+    .scan-suggestions-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1px}
+    .scan-suggestion{display:block;padding:.55rem .75rem;font-size:.78rem;font-family:var(--body);background:var(--surface);border:1px solid rgba(0,212,255,.06);color:var(--light);text-decoration:none;cursor:pointer;transition:all .2s}
+    .scan-suggestion:hover{border-color:rgba(0,212,255,.18);background:rgba(0,212,255,.03);color:var(--cyan)}
+    .scan-recent{max-width:600px;margin:2rem auto 0;text-align:left}
+    .scan-recent-label{font-family:var(--heading);font-size:.42rem;letter-spacing:.12em;color:var(--mid);margin-bottom:.5rem}
+    .scan-recent-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:1px}
+    .scan-recent-item{display:flex;align-items:center;gap:.75rem;padding:.6rem .75rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);text-decoration:none;color:var(--light);transition:all .2s}
+    .scan-recent-item:hover{border-color:rgba(0,212,255,.18);background:rgba(0,212,255,.03)}
+    .scan-recent-query{font-size:.78rem;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .scan-recent-status{font-family:var(--heading);font-size:.42rem;letter-spacing:.06em;padding:2px 6px;flex-shrink:0}
+    .scan-recent-status.complete{color:var(--cyan);border:1px solid rgba(0,212,255,.2)}
+    .scan-recent-status.running{color:var(--amber);border:1px solid rgba(255,191,0,.2)}
+    .scan-recent-status.error{color:var(--red, #f44);border:1px solid rgba(255,68,68,.2)}
+    .scan-recent-time{font-size:.6rem;color:var(--gray);flex-shrink:0}
+    .scan-recent-footer{margin-top:.5rem;text-align:right}
+    .scan-recent-footer a{font-family:var(--heading);font-size:.48rem;letter-spacing:.08em;color:var(--cyan);text-decoration:none;opacity:.7;transition:opacity .2s}
+    .scan-recent-footer a:hover{opacity:1}
+    </style>
+{% endblock %}
+
+{% block content %}
+<section class="launch-pad">
+    <h1 class="scan-title">Scan</h1>
+    <p class="scan-subtitle">RESEARCH ENGINE</p>
+
+    {% if user_id %}
+    <form class="scan-form" method="post" action="/">
+        {{ csrf_field() }}
+        <input type="hidden" name="tz" id="scan-tz">
+        <textarea name="query" placeholder="What do you want to research?" class="scan-input" required maxlength="2000" autofocus rows="1"></textarea>
+        <input type="hidden" name="mode" id="scan-mode-input" value="auto">
+        <button type="submit" class="scan-submit">SCAN</button>
+    </form>
+    <div class="scan-mode">
+        <label><input type="radio" name="scan-mode-select" value="auto" checked><span>AUTO</span></label>
+        <label><input type="radio" name="scan-mode-select" value="quick_research"><span>QUICK</span></label>
+        <label><input type="radio" name="scan-mode-select" value="standard"><span>STANDARD</span></label>
+        <label><input type="radio" name="scan-mode-select" value="deep"><span>DEEP</span></label>
+    </div>
+    {% if suggested_queries %}
+    <div class="scan-suggestions">
+        <div class="scan-suggestions-label">SUGGESTED SEARCHES</div>
+        <ul class="scan-suggestions-list">
+            {% for sq in suggested_queries %}
+            <li><a class="scan-suggestion" data-query="{{ sq }}">{{ sq }}</a></li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    {% if recent_searches %}
+    <div class="scan-recent">
+        <div class="scan-recent-label">RECENT SEARCHES</div>
+        <ul class="scan-recent-list">
+            {% for s in recent_searches %}
+            <li>
+                <a href="/r/{{ s.slug or s.id }}" class="scan-recent-item">
+                    <span class="scan-recent-query">{{ s.name or s.query }}</span>
+                    <span class="scan-recent-status {{ s.status }}">{{ s.status|upper }}</span>
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+        <div class="scan-recent-footer">
+            <a href="/history">VIEW ALL HISTORY &rarr;</a>
+        </div>
+    </div>
+    {% endif %}
+    {% else %}
+    <form class="scan-form">
+        <textarea disabled placeholder="What do you want to research?" class="scan-input" rows="1"></textarea>
+        <p class="scan-signin"><a href="https://smarter.dev/auth/login?next=https://scan.smarter.dev/">Sign in</a> to use Scan</p>
+    </form>
+    {% endif %}
+</section>
+{% endblock %}
+
+{% block page_scripts %}
+{% if user_id %}
+<script nonce="{{ csp_nonce() }}">
+(function(){
+    var tzEl = document.getElementById('scan-tz');
+    if (tzEl) tzEl.value = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+    var ta = document.querySelector('.scan-input');
+    if (!ta || ta.tagName !== 'TEXTAREA') return;
+    var form = ta.form;
+    var submitBtn = form ? form.querySelector('.scan-submit') : null;
+    var submitting = false;
+
+    function grow(){ta.style.height='auto';ta.style.height=ta.scrollHeight+'px';}
+    ta.addEventListener('input', grow);
+    ta.addEventListener('keydown', function(e){
+        if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();form.requestSubmit();}
+    });
+    document.querySelectorAll('input[name="scan-mode-select"]').forEach(function(r){
+        r.addEventListener('change', function(){
+            document.getElementById('scan-mode-input').value = r.value;
+        });
+    });
+    document.querySelectorAll('.scan-suggestion').forEach(function(el){
+        el.addEventListener('click', function(e){
+            e.preventDefault();
+            ta.value = el.dataset.query;
+            grow();
+            form.requestSubmit();
+        });
+    });
+
+    // Show loading state on submit — form posts normally, browser follows redirect
+    if (form) {
+        form.addEventListener('submit', function() {
+            if (submitting) return;
+            submitting = true;
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'SCANNING...';
+            }
+        });
+    }
+})();
+</script>
+{% endif %}
+{% endblock %}

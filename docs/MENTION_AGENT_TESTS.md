@@ -26,7 +26,7 @@ uv run python -m pytest tests/bot/test_mention_agent_llm_judge.py -m "not llm" -
 - ✅ Discord message structure
 
 ### LLM Evaluation Tests (Real API calls)
-Uses Gemini 2.5 Flash Lite to evaluate the quality of contextual filtering decisions:
+Uses Gemini 3.1 Flash Lite to evaluate the quality of contextual filtering decisions:
 
 ```bash
 # Run LLM evaluation tests (uses API credits)
@@ -44,9 +44,9 @@ uv run python test_mention_agent.py --with-llm
 **Model Selection:**
 The project supports switching LLM models system-wide using environment variables:
 
-- `LLM_FAST_MODEL`: Fast model for quick operations (default: `gemini/gemini-2.5-flash-lite`)
+- `LLM_FAST_MODEL`: Fast model for quick operations (default: `gemini/gemini-3.1-flash-lite-preview`)
 - `LLM_MEDIUM_MODEL`: Medium intelligence model for complex reasoning (default: `claude-haiku-4-5-20251001`)
-- `LLM_JUDGE_MODEL`: Judge evaluation model (default: `gemini/gemini-2.5-flash-lite`)
+- `LLM_JUDGE_MODEL`: Judge evaluation model (default: `gemini/gemini-3.1-flash-lite-preview`)
 
   ```bash
   # Use GPT-5 Nano for all models

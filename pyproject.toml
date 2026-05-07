@@ -2,7 +2,7 @@
 name = "smarter-dev"
 version = "0.1.0"
 description = "Discord bot with bytes economy and squads system, plus web API and admin interface"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 authors = [
     {name = "Smarter Dev Team"}
 ]
@@ -19,23 +19,18 @@ classifiers = [
 dependencies = [
     # Web framework
     "starlette>=0.47.1",
-    "uvicorn[standard]>=0.35.0",
+    "hypercorn>=0.17.0",
     "jinja2>=3.1.6",
     "markdown>=3.4.0",
     # Core shared dependencies
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
-    "opencv-python>=4.12.0.88",
-    "cairosvg>=2.8.2",
     "pillow>=11.3.0",
-    "numpy>=2.2.6",
-    "scipy>=1.16.0",
-    "matplotlib>=3.10.3",
     "itsdangerous>=2.2.0",
     "python-multipart>=0.0.20",
     "hikari-lightbulb<3.0.0",
-    "blend-modes>=2.2.0",
     "alembic>=1.16.4",
     "asyncpg>=0.30.0",
     "greenlet>=3.2.3",
@@ -43,6 +38,12 @@ dependencies = [
     "httpx>=0.28.1",
     "redis>=6.2.0",
     "dspy-ai>=3.0.0",
+    "hikari>=2.1.1",
+    "genai-prices>=0.0.55",
+    "google-genai>=1.62.0",
+    "resend>=2.0.0",
+    "pydantic-ai[google]>=0.1.0",
+    "skrift>=0.1.0a84",
 ]
 
 [dependency-groups]
@@ -54,7 +55,6 @@ bot = [
     "httpx>=0.24.0", # For API client to communicate with web service
     "dspy>=2.6.27",
     "ddgs>=3.8.0",
-    "markdownify>=0.11.6", # Convert HTML to Markdown
     "pdfplumber>=0.11.0", # Extract text from PDFs
 ]
 
@@ -67,6 +67,7 @@ web = [
     "redis>=5.0.0",
     "httpx>=0.24.0",
     "authlib>=1.2.0",
+    "skrift[s3]>=0.1.0a84",
 ]
 
 # Development dependencies
@@ -81,6 +82,9 @@ dev = [
     "isort>=5.12.0",
     "pre-commit>=3.0.0",
     "aiosqlite>=0.21.0",
+    "pdfplumber>=0.11.7",
+    "psutil>=7.0.0",
+    "ddgs>=9.6.1",
 ]
 
 # Testing dependencies
@@ -129,6 +133,7 @@ addopts = [
     "--cov-report=html",
     "--cov-report=xml",
     "--cov-fail-under=20",  # Temporarily reduced while fixing tests
+    "-m", "not llm",  # Exclude LLM tests by default (expensive API calls)
 ]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",

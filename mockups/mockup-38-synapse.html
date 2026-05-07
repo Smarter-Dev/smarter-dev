@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — Synapse</title>
+<link href="https://fonts.googleapis.com/css2?family=Bungee+Hairline&family=Bruno+Ace+SC&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#020408;--surface:#080c14;--cyan:#00d4ff;--green:#22c55e;--amber:#eab308;--rose:#ef4444;--gray:#2a3a4e;--mid:#4a6078;--light:#8098b0;--white:#d4e0ec;--display:'Bungee Hairline',sans-serif;--heading:'Bruno Ace SC',sans-serif;--body:'Inter',Arial,sans-serif}
+html{scroll-behavior:smooth}body{font-family:var(--body);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.7}
+#bg{position:fixed;inset:0;z-index:0}
+.mockup-nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;background:rgba(2,4,8,.92);backdrop-filter:blur(24px);border-bottom:1px solid rgba(0,212,255,.06);font-family:var(--heading);font-size:.62rem;letter-spacing:.05em}
+.mockup-nav a{color:var(--gray);text-decoration:none;padding:5px 12px;border:1px solid transparent;transition:all .2s;white-space:nowrap}.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.25)}.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.06)}
+.reveal{opacity:0;transform:translateY(16px);transition:all .55s cubic-bezier(.25,.46,.45,.94)}.reveal.visible{opacity:1;transform:none}
+.code-label{font-family:var(--heading);font-size:.65rem;color:var(--cyan);margin-bottom:1rem;opacity:.75;letter-spacing:.08em}
+.sec-h{font-family:var(--heading);font-size:clamp(1.4rem,2.8vw,2rem);color:var(--white);line-height:1.2;margin-bottom:.5rem;letter-spacing:.02em}
+.sec-p{font-size:.9rem;color:var(--mid);max-width:480px;margin-bottom:2.5rem;line-height:1.75}
+.hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;z-index:1;padding:7rem 2rem 4rem;text-align:center}
+.hero-chip{display:inline-flex;align-items:center;gap:8px;padding:6px 18px;border-radius:100px;font-family:var(--heading);font-size:.6rem;background:rgba(0,212,255,.04);border:1px solid rgba(0,212,255,.12);color:var(--cyan);margin-bottom:2.5rem;letter-spacing:.08em}
+.hero-chip .dot{width:6px;height:6px;border-radius:50%;background:var(--cyan);box-shadow:0 0 8px var(--cyan);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.hero-logo{font-family:var(--display);font-size:clamp(3.2rem,8vw,6.5rem);color:var(--white);line-height:1;margin-bottom:.5rem;letter-spacing:.15em;text-shadow:0 0 40px rgba(0,212,255,.15)}
+.hero-logo .dev{font-family:var(--heading);color:var(--cyan);letter-spacing:.06em;font-size:.8em;text-shadow:0 0 30px rgba(0,212,255,.3)}
+.hero-sub{font-family:var(--heading);font-size:clamp(.75rem,1.3vw,.9rem);color:var(--mid);margin-bottom:1.5rem;letter-spacing:.06em}
+.hero-p{font-size:1rem;color:var(--mid);max-width:480px;margin:0 auto 2.5rem;line-height:1.8}.hero-p strong{color:var(--white);font-weight:600}
+.hero-btns{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.btn-glow{padding:13px 34px;font-family:var(--heading);font-size:.7rem;letter-spacing:.06em;background:transparent;color:var(--cyan);border:1.5px solid var(--cyan);border-radius:0;cursor:pointer;box-shadow:0 0 15px rgba(0,212,255,.15),inset 0 0 15px rgba(0,212,255,.05);transition:all .3s;text-decoration:none}.btn-glow:hover{background:var(--cyan);color:var(--bg);box-shadow:0 0 30px rgba(0,212,255,.3)}
+.btn-ghost{padding:13px 34px;font-family:var(--heading);font-size:.7rem;letter-spacing:.06em;background:transparent;color:var(--mid);border:1px solid rgba(255,255,255,.08);border-radius:0;cursor:pointer;transition:all .25s;text-decoration:none}.btn-ghost:hover{border-color:rgba(0,212,255,.2);color:var(--light)}
+.hero-proof{display:flex;gap:2.5rem;margin-top:4rem;flex-wrap:wrap;justify-content:center}
+.hp .n{font-family:var(--heading);font-size:.9rem;color:var(--white);letter-spacing:.04em;text-shadow:0 0 10px rgba(0,212,255,.1)}.hp .l{font-size:.72rem;color:var(--gray);margin-top:2px}
+section{position:relative;z-index:1;padding:clamp(50px,7vw,90px) clamp(2rem,6vw,8rem)}.container{max-width:1080px;margin:0 auto}
+.pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:1px}
+.pillar{padding:2.25rem 2rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);border-top:2px solid rgba(0,212,255,.08);transition:all .3s;position:relative}
+.pillar::after{content:'';position:absolute;inset:0;opacity:0;transition:opacity .3s;box-shadow:inset 0 0 20px rgba(0,212,255,.05)}.pillar:hover{border-color:rgba(0,212,255,.2);border-top-color:var(--cyan)}.pillar:hover::after{opacity:1}
+.pillar .idx{font-family:var(--heading);font-size:.55rem;color:var(--cyan);margin-bottom:1rem;letter-spacing:.15em}
+.pillar h3{font-family:var(--heading);font-size:.85rem;color:var(--white);margin-bottom:.5rem;letter-spacing:.03em}.pillar p{font-size:.82rem;color:var(--mid);line-height:1.75}
+.term{max-width:760px;margin:0 auto;background:var(--surface);overflow:hidden;border:1px solid rgba(0,212,255,.1);box-shadow:0 0 30px rgba(0,212,255,.03)}
+.term-bar{display:flex;align-items:center;gap:7px;padding:11px 16px;background:rgba(0,0,0,.3);border-bottom:1px solid rgba(0,212,255,.06)}
+.td{width:9px;height:9px;border-radius:50%;border:1.5px solid;background:transparent}.td.r{border-color:var(--rose)}.td.y{border-color:var(--amber)}.td.g{border-color:var(--green)}
+.term-bar .p{margin-left:auto;font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.05em}
+.term-body{padding:1.5rem 1.75rem;font-family:'Courier New',monospace;font-size:.78rem;line-height:2.2}
+.cm{color:#1e2e3e}.kw{color:var(--amber)}.fn{color:var(--cyan)}.st{color:var(--green)}
+.term-info{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(0,212,255,.06)}
+.ti{padding:1rem;text-align:center;border-right:1px solid rgba(0,212,255,.04)}.ti:last-child{border-right:none}
+.ti strong{display:block;font-family:var(--heading);font-size:.8rem;color:var(--cyan);margin-bottom:1px;letter-spacing:.03em;text-shadow:0 0 8px rgba(0,212,255,.2)}.ti span{font-size:.6rem;color:var(--gray);letter-spacing:.08em;text-transform:uppercase}
+.bytes-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:1px;max-width:600px}
+.bg-item{display:flex;align-items:center;gap:14px;padding:1.15rem 1.5rem;background:var(--surface);border:1px solid rgba(0,212,255,.04);transition:all .2s}.bg-item:hover{border-color:rgba(0,212,255,.15);box-shadow:inset 0 0 12px rgba(0,212,255,.03)}
+.bg-item .pts{font-family:var(--heading);font-size:.82rem;color:var(--cyan);min-width:44px;letter-spacing:.03em;text-shadow:0 0 6px rgba(0,212,255,.2)}
+.bg-item .nm{font-size:.85rem;font-weight:600;color:var(--white)}.bg-item .ds{font-size:.7rem;color:var(--gray);margin-top:1px}
+.stats{display:flex;justify-content:space-between;flex-wrap:wrap;gap:2rem;padding:3rem 0;border-top:1px solid rgba(0,212,255,.06);border-bottom:1px solid rgba(0,212,255,.06)}
+.stat{text-align:center;flex:1;min-width:100px}.stat .num{font-family:var(--display);font-size:clamp(2rem,4vw,3rem);color:var(--white);line-height:1;text-shadow:0 0 20px rgba(0,212,255,.1)}.stat .num .u{font-family:var(--heading);color:var(--cyan);font-size:.45em}.stat .lbl{font-size:.72rem;color:var(--gray);margin-top:.15rem}
+.quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:2rem}
+.q{padding:2rem;background:var(--surface);border:1px solid rgba(0,212,255,.04);border-left:2px solid transparent;transition:all .3s}.q:hover{border-left-color:var(--cyan);box-shadow:inset 0 0 15px rgba(0,212,255,.02)}
+.q blockquote{font-size:.85rem;color:var(--light);line-height:1.8;margin-bottom:1.25rem}.q .who{font-size:.7rem}.q .nm{color:var(--white);font-weight:600}.q .rl{color:var(--gray)}
+.cta{text-align:center;padding:clamp(70px,10vw,130px) 2rem;position:relative;z-index:1}
+.cta-h{font-family:var(--display);font-size:clamp(1.8rem,4.5vw,3.5rem);color:var(--white);line-height:1.1;margin-bottom:.25rem;letter-spacing:.08em;text-shadow:0 0 30px rgba(0,212,255,.1)}
+.cta-h2{font-family:var(--heading);font-size:clamp(1.2rem,2.5vw,1.8rem);color:var(--cyan);margin-bottom:2rem;letter-spacing:.04em;text-shadow:0 0 20px rgba(0,212,255,.15)}
+.foot{text-align:center;padding:1.5rem;font-family:var(--heading);font-size:.55rem;color:var(--gray);border-top:1px solid rgba(0,212,255,.04);position:relative;z-index:1;letter-spacing:.06em}
+@media(max-width:900px){.pillars,.quotes{grid-template-columns:1fr}.bytes-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.stats{flex-direction:column;align-items:center}}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<nav class="mockup-nav">
+  <a href="mockup-37-graviton.html">37 Graviton</a>
+  <a href="mockup-38-synapse.html" class="active">38 Synapse</a>
+  <a href="mockup-39-shatter.html">39 Shatter</a>
+  <a href="mockup-40-warp.html">40 Warp</a>
+  <a href="mockup-41-pulse.html">41 Pulse</a>
+</nav>
+
+<section class="hero">
+  <div class="hero-chip reveal"><span class="dot"></span> 15,000+ developers and growing</div>
+  <div class="hero-logo reveal">SMARTER <span class="dev">Dev</span></div>
+  <div class="hero-sub reveal">AI writes code. We build developers.</div>
+  <p class="hero-p reveal">A community focused on what actually matters — <strong>critical thinking</strong>, <strong>architecture</strong>, and <strong>adversarial reasoning</strong>. No gatekeeping. No fluff. Just developers getting better, together.</p>
+  <div class="hero-btns reveal"><a href="#" class="btn-glow">Join on Discord</a><a href="#how" class="btn-ghost">How it works</a></div>
+  <div class="hero-proof reveal"><div class="hp"><div class="n">15K+</div><div class="l">Developers</div></div><div class="hp"><div class="n">730</div><div class="l">Challenges</div></div><div class="hp"><div class="n">98%</div><div class="l">"Worth it"</div></div></div>
+</section>
+<section id="how"><div class="container"><div class="reveal"><div class="code-label">// skills.sharpen()</div><div class="sec-h">Three pillars of developer growth.</div><div class="sec-p">AI handles syntax. We handle the thinking that makes syntax matter.</div></div>
+<div class="pillars"><div class="pillar reveal"><div class="idx">DISCIPLINE 01</div><h3>Critical Thinking</h3><p>Evaluate trade-offs. Spot invisible assumptions. Ask the questions that redirect entire projects. The skill that compounds forever.</p></div><div class="pillar reveal"><div class="idx">DISCIPLINE 02</div><h3>Architecture</h3><p>Design systems that survive production. Boundaries, contracts, failure modes — the thinking AI can't do for you.</p></div><div class="pillar reveal"><div class="idx">DISCIPLINE 03</div><h3>Adversarial Reasoning</h3><p>Think like an attacker. Find the edge case before production does. Build paranoid systems that hold up when reality pushes back.</p></div></div></div></section>
+<section><div class="container"><div class="reveal"><div class="code-label">// runhacks.execute()</div><div class="sec-h">Daily challenges. Real growth.</div><div class="sec-p">Real scenarios that train how you think, not just what you type.</div></div>
+<div class="term reveal"><div class="term-bar"><div class="td r"></div><div class="td y"></div><div class="td g"></div><div class="p">challenge_731.sh</div></div><div class="term-body"><div><span class="cm"># Distributed cache: 2% stale reads</span></div><div><span class="cm"># Replication healthy. TTLs correct.</span></div><div><span class="cm"># Difficulty: Hard | Reward: 150 Bytes</span></div><div>&nbsp;</div><div><span class="kw">function</span> <span class="fn">diagnose</span>() {</div><div>&nbsp;&nbsp;<span class="cm"># What architectural assumption is wrong?</span></div><div>&nbsp;&nbsp;<span class="kw">echo</span> <span class="st">"Think architecture, not code."</span></div><div>}</div></div><div class="term-info"><div class="ti"><strong>Daily</strong><span>Frequency</span></div><div class="ti"><strong>3 Tiers</strong><span>Difficulty</span></div><div class="ti"><strong>Peer</strong><span>Review</span></div></div></div></div></section>
+<section><div class="container"><div class="reveal"><div class="code-label">// bytes.earn()</div><div class="sec-h">Earn Bytes. Track your growth.</div><div class="sec-p">A reward system that values consistency, contribution, and quality over clout.</div></div>
+<div class="bytes-grid reveal"><div class="bg-item"><div class="pts">+5</div><div><div class="nm">Daily Check-in</div><div class="ds">Consistency compounds</div></div></div><div class="bg-item"><div class="pts">+50</div><div><div class="nm">Solve a RunHack</div><div class="ds">Ship a real solution</div></div></div><div class="bg-item"><div class="pts">+25</div><div><div class="nm">Peer Review</div><div class="ds">Give actionable feedback</div></div></div><div class="bg-item"><div class="pts">+100</div><div><div class="nm">Top Solution</div><div class="ds">Community-voted best</div></div></div></div></div></section>
+<section><div class="container"><div class="stats reveal"><div class="stat"><div class="num">15<span class="u">K+</span></div><div class="lbl">Developers</div></div><div class="stat"><div class="num">730</div><div class="lbl">Challenges</div></div><div class="stat"><div class="num">42<span class="u">K</span></div><div class="lbl">Solutions</div></div><div class="stat"><div class="num">98<span class="u">%</span></div><div class="lbl">"Worth it"</div></div></div></div></section>
+<section><div class="container"><div class="reveal"><div class="code-label">// community.listen()</div><div class="sec-h">What developers say.</div></div>
+<div class="quotes"><div class="q reveal"><blockquote>"I stopped vibe-coding with AI and started understanding the systems I was building. Smarter Dev changed how I approach everything."</blockquote><div class="who"><span class="nm">Maya Rodriguez</span> &mdash; <span class="rl">Senior Engineer @ Vercel</span></div></div><div class="q reveal"><blockquote>"RunHacks is addictive in the best way. 200+ challenges in and every single one made me think differently about code."</blockquote><div class="who"><span class="nm">James Kim</span> &mdash; <span class="rl">Full-Stack Developer</span></div></div><div class="q reveal"><blockquote>"No ego. No gatekeeping. Just devs helping devs get better. This is what communities should look like."</blockquote><div class="who"><span class="nm">Sarah Petrov</span> &mdash; <span class="rl">Tech Lead @ Stripe</span></div></div></div></div></section>
+<section class="cta"><div class="reveal"><div class="cta-h">Stop writing code.</div><div class="cta-h2">Start thinking.</div><a href="#" class="btn-glow" style="padding:14px 36px">Join on Discord &rarr;</a></div></section>
+<div class="foot">&copy; 2026 SMARTER DEV</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('bg');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  let W = 0, H = 0;
+  let mouse = { x: -9999, y: -9999 };
+  let neurons = [];
+  let connections = [];
+  let pulses = [];
+  let dpr = window.devicePixelRatio || 1;
+
+  const NEURON_COUNT = 60;
+  const MIN_DIST = 80;
+  const MAX_NEIGHBORS = 4;
+  const MIN_NEIGHBORS = 2;
+  const FIRE_RADIUS = 150;
+  const CLICK_RADIUS = 200;
+  const REFRACTORY_MS = 1500;
+  const PULSE_SPEED = 250; // pixels per second
+  const MAX_CASCADE_DEPTH = 4;
+
+  // -- Resize --
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    dpr = window.devicePixelRatio || 1;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    initNetwork();
+  }
+
+  // -- Poisson-disc-like placement --
+  function generateNeurons() {
+    const nodes = [];
+    const maxAttempts = 5000;
+    let attempts = 0;
+    const pad = 40; // padding from edges
+
+    while (nodes.length < NEURON_COUNT && attempts < maxAttempts) {
+      attempts++;
+      const x = pad + Math.random() * (W - pad * 2);
+      const y = pad + Math.random() * (H - pad * 2);
+      let tooClose = false;
+      for (let i = 0; i < nodes.length; i++) {
+        const dx = nodes[i].x - x;
+        const dy = nodes[i].y - y;
+        if (dx * dx + dy * dy < MIN_DIST * MIN_DIST) {
+          tooClose = true;
+          break;
+        }
+      }
+      if (!tooClose) {
+        nodes.push({
+          x: x,
+          y: y,
+          firing: false,
+          fireTime: 0,
+          refractoryUntil: 0,
+          brightness: 0, // 0 = resting, 1 = fully firing
+          neighbors: []  // indices of connected neurons
+        });
+      }
+    }
+    return nodes;
+  }
+
+  // -- Build connections (2-4 nearest neighbors) --
+  function buildConnections(nodes) {
+    const conns = [];
+    const connSet = new Set();
+
+    for (let i = 0; i < nodes.length; i++) {
+      // Sort all other nodes by distance
+      const dists = [];
+      for (let j = 0; j < nodes.length; j++) {
+        if (i === j) continue;
+        const dx = nodes[i].x - nodes[j].x;
+        const dy = nodes[i].y - nodes[j].y;
+        dists.push({ idx: j, dist: Math.sqrt(dx * dx + dy * dy) });
+      }
+      dists.sort((a, b) => a.dist - b.dist);
+
+      // Connect to 2-4 nearest (that we haven't already connected)
+      const targetCount = MIN_NEIGHBORS + Math.floor(Math.random() * (MAX_NEIGHBORS - MIN_NEIGHBORS + 1));
+      let added = 0;
+
+      for (let k = 0; k < dists.length && added < targetCount; k++) {
+        const j = dists[k].idx;
+        const key = i < j ? i + '_' + j : j + '_' + i;
+        if (!connSet.has(key)) {
+          // Only connect if distance is reasonable (avoid super long lines)
+          if (dists[k].dist < 300) {
+            connSet.add(key);
+            conns.push({ a: i, b: j, brightness: 0 });
+            nodes[i].neighbors.push(j);
+            nodes[j].neighbors.push(i);
+            added++;
+          }
+        } else {
+          // Already connected, still counts
+          added++;
+        }
+      }
+    }
+    return conns;
+  }
+
+  function initNetwork() {
+    neurons = generateNeurons();
+    connections = buildConnections(neurons);
+    pulses = [];
+  }
+
+  // -- Fire a neuron --
+  function fireNeuron(index, now, depth) {
+    if (depth > MAX_CASCADE_DEPTH) return;
+    const n = neurons[index];
+    if (!n) return;
+    if (n.refractoryUntil > now) return;
+
+    n.firing = true;
+    n.fireTime = now;
+    n.brightness = 1;
+    n.refractoryUntil = now + REFRACTORY_MS;
+
+    // Send pulses to neighbors
+    for (let i = 0; i < n.neighbors.length; i++) {
+      const ni = n.neighbors[i];
+      const target = neurons[ni];
+      if (!target) continue;
+
+      const dx = target.x - n.x;
+      const dy = target.y - n.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const travelTime = (dist / PULSE_SPEED) * 1000; // ms
+
+      pulses.push({
+        from: index,
+        to: ni,
+        startTime: now,
+        arriveTime: now + travelTime,
+        dist: dist,
+        depth: depth,
+        arrived: false
+      });
+    }
+  }
+
+  // -- Mouse handlers --
+  window.addEventListener('mousemove', function(e) {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+  });
+
+  window.addEventListener('mouseout', function() {
+    mouse.x = -9999;
+    mouse.y = -9999;
+  });
+
+  window.addEventListener('click', function(e) {
+    const now = performance.now();
+    for (let i = 0; i < neurons.length; i++) {
+      const dx = neurons[i].x - e.clientX;
+      const dy = neurons[i].y - e.clientY;
+      if (dx * dx + dy * dy < CLICK_RADIUS * CLICK_RADIUS) {
+        fireNeuron(i, now, 0);
+      }
+    }
+  });
+
+  window.addEventListener('resize', resize);
+
+  // -- Animation loop --
+  let lastFrame = 0;
+
+  function animate(time) {
+    requestAnimationFrame(animate);
+
+    const now = time;
+    const dt = lastFrame ? (now - lastFrame) : 16;
+    lastFrame = now;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Check mouse proximity - fire neurons near cursor
+    for (let i = 0; i < neurons.length; i++) {
+      const n = neurons[i];
+      const dx = n.x - mouse.x;
+      const dy = n.y - mouse.y;
+      if (dx * dx + dy * dy < FIRE_RADIUS * FIRE_RADIUS) {
+        if (n.refractoryUntil < now) {
+          fireNeuron(i, now, 0);
+        }
+      }
+    }
+
+    // Process pulses
+    for (let i = pulses.length - 1; i >= 0; i--) {
+      const p = pulses[i];
+      if (now >= p.arriveTime && !p.arrived) {
+        p.arrived = true;
+        // Fire the target neuron (cascade)
+        fireNeuron(p.to, now, p.depth + 1);
+      }
+      // Remove old pulses (finished animation)
+      if (now > p.arriveTime + 100) {
+        pulses.splice(i, 1);
+      }
+    }
+
+    // Update neuron brightness decay
+    for (let i = 0; i < neurons.length; i++) {
+      const n = neurons[i];
+      if (n.firing) {
+        const elapsed = now - n.fireTime;
+        if (elapsed < 150) {
+          // Initial burst
+          n.brightness = 1;
+        } else if (elapsed < 600) {
+          // Fade down
+          n.brightness = 1 - ((elapsed - 150) / 450);
+        } else {
+          n.brightness = 0;
+          n.firing = false;
+        }
+      }
+      // Dim during refractory (subtle)
+      if (!n.firing && n.refractoryUntil > now) {
+        n.brightness = Math.max(n.brightness, 0.05);
+      }
+    }
+
+    // Draw connections
+    for (let i = 0; i < connections.length; i++) {
+      const c = connections[i];
+      const na = neurons[c.a];
+      const nb = neurons[c.b];
+
+      // Check if any active pulse on this connection
+      let connBrightness = 0.04; // resting brightness
+      for (let j = 0; j < pulses.length; j++) {
+        const p = pulses[j];
+        if ((p.from === c.a && p.to === c.b) || (p.from === c.b && p.to === c.a)) {
+          const progress = Math.min(1, (now - p.startTime) / (p.arriveTime - p.startTime));
+          if (progress >= 0 && progress <= 1) {
+            connBrightness = Math.max(connBrightness, 0.35);
+          }
+        }
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(na.x, na.y);
+      ctx.lineTo(nb.x, nb.y);
+      ctx.strokeStyle = 'rgba(0, 212, 255, ' + connBrightness + ')';
+      ctx.lineWidth = 0.6;
+      ctx.stroke();
+    }
+
+    // Draw pulses as traveling dots
+    for (let i = 0; i < pulses.length; i++) {
+      const p = pulses[i];
+      const na = neurons[p.from];
+      const nb = neurons[p.to];
+      if (!na || !nb) continue;
+
+      const totalTime = p.arriveTime - p.startTime;
+      if (totalTime <= 0) continue;
+      const progress = Math.min(1, Math.max(0, (now - p.startTime) / totalTime));
+
+      const px = na.x + (nb.x - na.x) * progress;
+      const py = na.y + (nb.y - na.y) * progress;
+
+      // Bright traveling dot
+      ctx.beginPath();
+      ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0, 212, 255, 0.9)';
+      ctx.fill();
+
+      // Glow around traveling dot
+      ctx.beginPath();
+      ctx.arc(px, py, 6, 0, Math.PI * 2);
+      const pulseGlow = ctx.createRadialGradient(px, py, 0, px, py, 6);
+      pulseGlow.addColorStop(0, 'rgba(0, 212, 255, 0.35)');
+      pulseGlow.addColorStop(1, 'rgba(0, 212, 255, 0)');
+      ctx.fillStyle = pulseGlow;
+      ctx.fill();
+    }
+
+    // Draw neurons
+    for (let i = 0; i < neurons.length; i++) {
+      const n = neurons[i];
+      const b = n.brightness;
+
+      if (b > 0.1) {
+        // Firing / active neuron
+        const radius = 3 + b * 3; // 3 to 6
+        const alpha = 0.15 + b * 0.85;
+
+        // Outer glow
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, radius + 8, 0, Math.PI * 2);
+        const glow = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, radius + 8);
+        glow.addColorStop(0, 'rgba(0, 212, 255, ' + (b * 0.3) + ')');
+        glow.addColorStop(1, 'rgba(0, 212, 255, 0)');
+        ctx.fillStyle = glow;
+        ctx.fill();
+
+        // Core
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 212, 255, ' + alpha + ')';
+        ctx.fill();
+      } else {
+        // Resting neuron - dim dot
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0, 212, 255, 0.12)';
+        ctx.fill();
+      }
+    }
+  }
+
+  // Initialize
+  resize();
+  requestAnimationFrame(animate);
+
+  // Intersection observer for reveal animations
+  const obs = new IntersectionObserver(function(e) {
+    e.forEach(function(x) {
+      if (x.isIntersecting) {
+        x.target.classList.add('visible');
+        obs.unobserve(x.target);
+      }
+    });
+  }, { threshold: 0.1 });
+  document.querySelectorAll('.reveal').forEach(function(el) { obs.observe(el); });
+})();
+</script>
+</body>
+</html>

@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import sqlite3
+import uuid
+
+# Register UUID adapter so SQLite can bind uuid.UUID objects as strings
+sqlite3.register_adapter(uuid.UUID, lambda u: str(u))
+
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
 from typing import Dict, Any, List, AsyncGenerator
@@ -9,7 +15,9 @@ from typing import Dict, Any, List, AsyncGenerator
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.sessions import SessionMiddleware
-from starlette.routing import Mount, Router
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route, Router
 from starlette.testclient import TestClient
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -22,6 +30,15 @@ from smarter_dev.shared.database import Base, async_sessionmaker
 from smarter_dev.web.api.app import api
 
 
+async def _test_set_admin_session(request: Request):
+    """Test-only endpoint to establish admin session."""
+    request.session["is_admin"] = True
+    request.session["username"] = "testadmin"
+    request.session["discord_id"] = "123456789"
+    request.session["discord_user"] = {"id": "123456789", "username": "testadmin"}
+    return JSONResponse({"ok": True})
+
+
 @pytest.fixture
 def admin_app():
     """Create a test Starlette app with admin routes."""
@@ -32,12 +49,17 @@ def admin_app():
             max_age=86400,
         )
     ]
-    
+
+    # Include a test-only route to set session for authenticated tests
+    all_routes = admin_routes + [
+        Route("/_test/set-session", _test_set_admin_session, methods=["GET"]),
+    ]
+
     app = Starlette(
-        routes=[Mount("/admin", Mount("", routes=admin_routes))],
+        routes=[Mount("/bot-admin", Mount("", routes=all_routes))],
         middleware=middleware,
     )
-    
+
     return app
 
 
@@ -56,16 +78,11 @@ async def admin_async_client(admin_app):
 
 @pytest.fixture
 def authenticated_client(admin_client, mock_settings):
-    """Create an authenticated admin client."""
-    # Mock the admin_required decorator to always pass authentication
-    def mock_admin_required(func):
-        """Mock admin_required decorator that always allows access."""
-        return func
-    
-    with patch("smarter_dev.web.admin.auth.admin_required", side_effect=mock_admin_required):
-        # Also mock the session check for any direct session access
-        with patch.object(admin_client, "session", {"is_admin": True, "discord_user": {"id": "123456789", "username": "testadmin"}}):
-            yield admin_client
+    """Create an authenticated admin client by setting session via test endpoint."""
+    # Hit the test-only endpoint to establish an admin session cookie
+    response = admin_client.get("/bot-admin/_test/set-session")
+    assert response.status_code == 200
+    yield admin_client
 
 
 @pytest.fixture
@@ -271,7 +288,8 @@ def sample_forum_agent_data() -> Dict[str, Any]:
         "system_prompt": "You are a helpful Python programming assistant. Help users with Python-related questions, provide code examples, and explain programming concepts clearly.",
         "monitored_forums": ["123456789012345678", "234567890123456789"],
         "response_threshold": "0.7",
-        "max_responses_per_hour": "5"
+        "max_responses_per_hour": "5",
+        "enable_responses": "on",
     }
 
 
@@ -566,12 +584,18 @@ async def real_api_client(admin_api_settings, real_db_engine) -> AsyncGenerator[
          patch('smarter_dev.shared.database.get_engine', side_effect=mock_get_engine), \
          patch('smarter_dev.shared.database.get_session_maker', side_effect=mock_get_session_maker), \
          patch('smarter_dev.shared.database.get_db_session', side_effect=mock_get_db_session), \
+         patch('smarter_dev.shared.database.get_skrift_db_session', side_effect=mock_get_db_session), \
          patch('smarter_dev.web.api.app.init_database'), \
          patch('smarter_dev.web.api.app.close_database'):
         
         # Override settings in the API app
         api.state.settings = admin_api_settings
-        
+
+        # Override FastAPI dependencies so Depends(get_skrift_db_session) uses the test DB
+        # Must use the exact function reference from the router module for identity match
+        from smarter_dev.web.api.routers import quests as quests_router_mod
+        api.dependency_overrides[quests_router_mod.get_skrift_db_session] = mock_get_db_session
+
         try:
             async with AsyncClient(
                 transport=ASGITransport(app=api),
@@ -581,6 +605,7 @@ async def real_api_client(admin_api_settings, real_db_engine) -> AsyncGenerator[
         finally:
             # Ensure API state cleanup
             try:
+                api.dependency_overrides.pop(quests_router_mod.get_skrift_db_session, None)
                 if hasattr(api, 'state'):
                     api.state.settings = None
             except Exception:

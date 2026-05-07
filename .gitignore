@@ -14,10 +14,18 @@ venv/
 /smarter_dev.db
 .env
 smarter_dev.db
+*.sqlite
 logs/
 .DS_Store
 **/.DS_Store
 k8s/secrets.yaml
+
+# Claude Code per-environment artifacts
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+
+# Stale local config backups
+app.development.yaml.backup.*
 
 # Application log files
 *.log

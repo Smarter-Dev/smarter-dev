@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — Ember</title>
+<link href="https://fonts.googleapis.com/css2?family=Bungee+Hairline&family=Bruno+Ace+SC&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#07090d;--surface:#0c0f15;--surface2:#10141c;--elevated:#161a24;
+  --cyan:#00d4ff;--green:#22c55e;--amber:#eab308;--rose:#ef4444;
+  --gray:#3f4f60;--mid:#64748b;--light:#94a3b8;--white:#e2e8f0;
+  --display:'Bungee Hairline',sans-serif;
+  --heading:'Bruno Ace SC',sans-serif;
+  --body:'Inter',Arial,sans-serif;
+}
+html{scroll-behavior:smooth}
+body{font-family:var(--body);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.7}
+
+/* Ember canvas — floating embers / sparks drifting upward */
+#embers{position:fixed;inset:0;z-index:0}
+
+/* Subtle radial base */
+.base-glow{
+  position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(ellipse 45% 35% at 50% 100%,rgba(0,212,255,.04),transparent),
+    radial-gradient(ellipse 50% 40% at 50% 0%,rgba(0,212,255,.02),transparent);
+}
+
+.mockup-nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  padding:10px 16px;background:rgba(7,9,13,.92);backdrop-filter:blur(24px);
+  border-bottom:1px solid rgba(0,212,255,.05);font-family:var(--heading);font-size:.62rem;letter-spacing:.05em;
+}
+.mockup-nav a{color:var(--gray);text-decoration:none;padding:5px 12px;border-radius:6px;border:1px solid transparent;transition:all .2s;white-space:nowrap}
+.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.2)}
+.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.06)}
+
+.reveal{opacity:0;transform:translateY(16px);transition:all .55s cubic-bezier(.25,.46,.45,.94)}
+.reveal.visible{opacity:1;transform:none}
+
+.code-label{font-family:var(--heading);font-size:.65rem;color:var(--cyan);margin-bottom:1rem;opacity:.75;letter-spacing:.08em}
+.sec-h{font-family:var(--heading);font-size:clamp(1.4rem,2.8vw,2rem);color:var(--white);line-height:1.2;margin-bottom:.5rem;letter-spacing:.02em}
+.sec-p{font-size:.9rem;color:var(--mid);max-width:480px;margin-bottom:2.5rem;line-height:1.75}
+
+/* ==================== HERO ==================== */
+.hero{
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  position:relative;z-index:1;padding:7rem 2rem 4rem;text-align:center;
+}
+.hero-logo{
+  font-family:var(--display);font-size:clamp(3.5rem,9vw,7.5rem);
+  color:var(--white);line-height:.9;margin-bottom:.25rem;letter-spacing:.15em;
+}
+.hero-logo .dev{
+  font-family:var(--heading);color:var(--cyan);letter-spacing:.06em;font-size:.7em;
+  display:block;
+}
+.hero-tagline{
+  font-family:var(--heading);font-size:clamp(.72rem,1.2vw,.85rem);
+  color:var(--mid);margin:1.5rem 0;letter-spacing:.08em;
+}
+.hero-p{font-size:1rem;color:var(--mid);max-width:500px;margin:0 auto 2.5rem;line-height:1.8}
+.hero-p strong{color:var(--white);font-weight:600}
+.hero-cta{
+  display:inline-flex;align-items:center;gap:10px;
+  padding:14px 36px;font-family:var(--heading);font-size:.7rem;letter-spacing:.06em;
+  background:var(--cyan);color:var(--bg);border:none;border-radius:8px;cursor:pointer;
+  box-shadow:0 4px 20px rgba(0,212,255,.15);transition:all .25s;text-decoration:none;
+}
+.hero-cta:hover{box-shadow:0 6px 32px rgba(0,212,255,.28);transform:translateY(-1px)}
+
+/* Metric strip below hero */
+.metric-strip{
+  display:flex;gap:0;margin-top:4rem;
+}
+.ms-item{
+  padding:1.25rem 2rem;background:var(--surface);border-right:1px solid rgba(255,255,255,.03);
+  text-align:center;
+}
+.ms-item:first-child{border-left:1px solid rgba(255,255,255,.03)}
+.ms-item .n{font-family:var(--heading);font-size:.85rem;color:var(--white);letter-spacing:.04em}
+.ms-item .l{font-size:.7rem;color:var(--gray);margin-top:2px}
+
+/* ==================== SECTIONS ==================== */
+section{position:relative;z-index:1;padding:clamp(50px,7vw,90px) clamp(2rem,6vw,8rem)}
+.container{max-width:1080px;margin:0 auto}
+
+/* Pillars */
+.pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:2px}
+.pillar{padding:2.25rem 2rem;background:var(--surface);border-top:2px solid transparent;transition:all .3s}
+.pillar:hover{border-top-color:var(--cyan);background:var(--surface2)}
+.pillar .idx{font-family:var(--heading);font-size:.55rem;color:var(--cyan);margin-bottom:1rem;letter-spacing:.15em}
+.pillar h3{font-family:var(--heading);font-size:.85rem;color:var(--white);margin-bottom:.5rem;letter-spacing:.03em}
+.pillar p{font-size:.82rem;color:var(--mid);line-height:1.75}
+
+/* Terminal */
+.term{max-width:760px;margin:0 auto;background:var(--surface);border:1px solid rgba(255,255,255,.04);overflow:hidden}
+.term-bar{display:flex;align-items:center;gap:7px;padding:11px 16px;background:rgba(0,0,0,.2);border-bottom:1px solid rgba(255,255,255,.03)}
+.td{width:9px;height:9px;border-radius:50%}
+.td.r{background:var(--rose)}.td.y{background:var(--amber)}.td.g{background:var(--green)}
+.term-bar .p{margin-left:auto;font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.05em}
+.term-body{padding:1.5rem 1.75rem;font-family:'Courier New',monospace;font-size:.78rem;line-height:2.2}
+.cm{color:#2d3a48}.kw{color:var(--amber)}.fn{color:var(--cyan)}.st{color:var(--green)}
+.term-info{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(255,255,255,.03)}
+.ti{padding:1rem;text-align:center;border-right:1px solid rgba(255,255,255,.02)}
+.ti:last-child{border-right:none}
+.ti strong{display:block;font-family:var(--heading);font-size:.8rem;color:var(--cyan);margin-bottom:1px;letter-spacing:.03em}
+.ti span{font-size:.6rem;color:var(--gray);letter-spacing:.08em;text-transform:uppercase}
+
+/* Bytes — compact 2x2 */
+.bytes-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:2px;max-width:600px}
+.bg-item{display:flex;align-items:center;gap:14px;padding:1.15rem 1.5rem;background:var(--surface);transition:background .2s}
+.bg-item:hover{background:var(--surface2)}
+.bg-item .pts{font-family:var(--heading);font-size:.82rem;color:var(--cyan);min-width:44px;letter-spacing:.03em}
+.bg-item .nm{font-size:.85rem;font-weight:600;color:var(--white)}
+.bg-item .ds{font-size:.7rem;color:var(--gray);margin-top:1px}
+
+/* Stats */
+.stats{display:flex;justify-content:space-between;flex-wrap:wrap;gap:2rem;padding:3rem 0;border-top:1px solid rgba(255,255,255,.03);border-bottom:1px solid rgba(255,255,255,.03)}
+.stat{text-align:center;flex:1;min-width:100px}
+.stat .num{font-family:var(--display);font-size:clamp(2rem,4vw,3rem);color:var(--white);line-height:1}
+.stat .num .u{font-family:var(--heading);color:var(--cyan);font-size:.45em}
+.stat .lbl{font-size:.72rem;color:var(--gray);margin-top:.15rem}
+
+/* Quotes */
+.quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;margin-top:2rem}
+.q{padding:2rem;background:var(--surface);border-left:2px solid transparent;transition:all .3s}
+.q:hover{border-left-color:var(--cyan)}
+.q blockquote{font-size:.85rem;color:var(--light);line-height:1.8;margin-bottom:1.25rem}
+.q .who{font-size:.7rem}.q .nm{color:var(--white);font-weight:600}.q .rl{color:var(--gray)}
+
+.cta{text-align:center;padding:clamp(70px,10vw,130px) 2rem;position:relative;z-index:1}
+.cta-h{font-family:var(--display);font-size:clamp(1.8rem,4.5vw,3.5rem);color:var(--white);line-height:1.1;margin-bottom:.25rem;letter-spacing:.08em}
+.cta-h2{font-family:var(--heading);font-size:clamp(1.2rem,2.5vw,1.8rem);color:var(--cyan);margin-bottom:2rem;letter-spacing:.04em}
+.foot{text-align:center;padding:1.5rem;font-family:var(--heading);font-size:.55rem;color:var(--gray);border-top:1px solid rgba(255,255,255,.03);position:relative;z-index:1;letter-spacing:.06em}
+
+@media(max-width:900px){.pillars,.quotes{grid-template-columns:1fr}.bytes-grid{grid-template-columns:1fr}.metric-strip{flex-wrap:wrap;justify-content:center}}
+@media(max-width:600px){.stats{flex-direction:column;align-items:center}}
+</style>
+</head>
+<body>
+
+<canvas id="embers"></canvas>
+<div class="base-glow"></div>
+
+<nav class="mockup-nav">
+  <a href="mockup-11-constellation.html">11 Constellation</a>
+  <a href="mockup-12-waveform.html">12 Waveform</a>
+  <a href="mockup-13-aurora.html">13 Aurora</a>
+  <a href="mockup-14-gridpulse.html">14 Grid Pulse</a>
+  <a href="mockup-15-ember.html" class="active">15 Ember</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="reveal">
+    <div class="hero-logo">SMARTER<span class="dev">Dev</span></div>
+    <div class="hero-tagline">AI writes code. We build developers.</div>
+    <p class="hero-p">A community for developers who want to thrive — not just survive — in the AI era. Sharpen <strong>critical thinking</strong>, <strong>architecture</strong>, and <strong>adversarial reasoning</strong> with real challenges and real feedback.</p>
+    <a href="#" class="hero-cta">Join on Discord &rarr;</a>
+    <div class="metric-strip">
+      <div class="ms-item"><div class="n">15K+</div><div class="l">Developers</div></div>
+      <div class="ms-item"><div class="n">730</div><div class="l">Challenges</div></div>
+      <div class="ms-item"><div class="n">42K</div><div class="l">Solutions</div></div>
+      <div class="ms-item"><div class="n">98%</div><div class="l">"Worth it"</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- PILLARS -->
+<section>
+  <div class="container">
+    <div class="reveal">
+      <div class="code-label">// skills.sharpen()</div>
+      <div class="sec-h">Three pillars of developer growth.</div>
+      <div class="sec-p">AI handles syntax. We handle the thinking that makes syntax matter.</div>
+    </div>
+    <div class="pillars">
+      <div class="pillar reveal"><div class="idx">DISCIPLINE 01</div><h3>Critical Thinking</h3><p>Evaluate trade-offs. Spot invisible assumptions. Ask the questions that redirect entire projects. The skill that compounds forever.</p></div>
+      <div class="pillar reveal"><div class="idx">DISCIPLINE 02</div><h3>Architecture</h3><p>Design systems that survive production. Boundaries, contracts, failure modes — the thinking AI can't do for you.</p></div>
+      <div class="pillar reveal"><div class="idx">DISCIPLINE 03</div><h3>Adversarial Reasoning</h3><p>Think like an attacker. Find the edge case before production does. Build paranoid systems that hold up when reality pushes back.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- RUNHACKS -->
+<section>
+  <div class="container">
+    <div class="reveal">
+      <div class="code-label">// runhacks.execute()</div>
+      <div class="sec-h">Daily challenges. Real growth.</div>
+      <div class="sec-p">Real scenarios that train how you think, not just what you type.</div>
+    </div>
+    <div class="term reveal">
+      <div class="term-bar"><div class="td r"></div><div class="td y"></div><div class="td g"></div><div class="p">challenge_731.sh</div></div>
+      <div class="term-body">
+        <div><span class="cm"># Distributed cache: 2% stale reads</span></div>
+        <div><span class="cm"># Replication healthy. TTLs correct.</span></div>
+        <div><span class="cm"># Difficulty: Hard | Reward: 150 Bytes</span></div>
+        <div>&nbsp;</div>
+        <div><span class="kw">function</span> <span class="fn">diagnose</span>() {</div>
+        <div>&nbsp;&nbsp;<span class="cm"># What architectural assumption is wrong?</span></div>
+        <div>&nbsp;&nbsp;<span class="kw">echo</span> <span class="st">"Think architecture, not code."</span></div>
+        <div>}</div>
+      </div>
+      <div class="term-info">
+        <div class="ti"><strong>Daily</strong><span>Frequency</span></div>
+        <div class="ti"><strong>3 Tiers</strong><span>Difficulty</span></div>
+        <div class="ti"><strong>Peer</strong><span>Review</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- BYTES -->
+<section>
+  <div class="container">
+    <div class="reveal">
+      <div class="code-label">// bytes.earn()</div>
+      <div class="sec-h">Earn Bytes. Track your growth.</div>
+      <div class="sec-p">A reward system that values consistency, contribution, and quality over clout.</div>
+    </div>
+    <div class="bytes-grid reveal">
+      <div class="bg-item"><div class="pts">+5</div><div><div class="nm">Daily Check-in</div><div class="ds">Consistency compounds</div></div></div>
+      <div class="bg-item"><div class="pts">+50</div><div><div class="nm">Solve a RunHack</div><div class="ds">Ship a real solution</div></div></div>
+      <div class="bg-item"><div class="pts">+25</div><div><div class="nm">Peer Review</div><div class="ds">Give actionable feedback</div></div></div>
+      <div class="bg-item"><div class="pts">+100</div><div><div class="nm">Top Solution</div><div class="ds">Community-voted best</div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<section><div class="container"><div class="stats reveal">
+  <div class="stat"><div class="num">15<span class="u">K+</span></div><div class="lbl">Developers</div></div>
+  <div class="stat"><div class="num">730</div><div class="lbl">Challenges</div></div>
+  <div class="stat"><div class="num">42<span class="u">K</span></div><div class="lbl">Solutions</div></div>
+  <div class="stat"><div class="num">98<span class="u">%</span></div><div class="lbl">"Worth it"</div></div>
+</div></div></section>
+
+<!-- TESTIMONIALS -->
+<section>
+  <div class="container">
+    <div class="reveal"><div class="code-label">// community.listen()</div><div class="sec-h">What developers say.</div></div>
+    <div class="quotes">
+      <div class="q reveal"><blockquote>"I stopped vibe-coding with AI and started understanding the systems I was building. Smarter Dev changed how I approach everything."</blockquote><div class="who"><span class="nm">Maya Rodriguez</span> &mdash; <span class="rl">Senior Engineer @ Vercel</span></div></div>
+      <div class="q reveal"><blockquote>"RunHacks is addictive in the best way. 200+ challenges in and every single one made me think differently about code."</blockquote><div class="who"><span class="nm">James Kim</span> &mdash; <span class="rl">Full-Stack Developer</span></div></div>
+      <div class="q reveal"><blockquote>"No ego. No gatekeeping. Just devs helping devs get better. This is what communities should look like."</blockquote><div class="who"><span class="nm">Sarah Petrov</span> &mdash; <span class="rl">Tech Lead @ Stripe</span></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta"><div class="reveal">
+  <div class="cta-h">Stop writing code.</div>
+  <div class="cta-h2">Start thinking.</div>
+  <a href="#" class="hero-cta" style="padding:14px 36px">Join on Discord &rarr;</a>
+</div></section>
+
+<div class="foot">&copy; 2026 SMARTER DEV</div>
+
+<script>
+// Ember particles — glowing sparks drifting upward
+const c=document.getElementById('embers'),ctx=c.getContext('2d');
+let W,H;
+function resize(){W=c.width=innerWidth;H=c.height=innerHeight}
+resize();window.addEventListener('resize',resize);
+
+class Ember{
+  constructor(){this.reset(true)}
+  reset(init){
+    this.x=Math.random()*W;
+    this.y=init?Math.random()*H:H+10;
+    this.vx=(Math.random()-.5)*.3;
+    this.vy=-(Math.random()*.4+.15);
+    this.size=Math.random()*2+.5;
+    this.life=1;
+    this.decay=Math.random()*.001+.0005;
+    this.glow=Math.random()*.4+.1;
+    // Color: mostly cyan with occasional warm accents
+    const roll=Math.random();
+    if(roll<.75){
+      this.r=0;this.g=Math.floor(180+Math.random()*32);this.b=255;
+    }else if(roll<.9){
+      this.r=0;this.g=255;this.b=Math.floor(180+Math.random()*75);
+    }else{
+      this.r=255;this.g=Math.floor(180+Math.random()*60);this.b=0;
+    }
+  }
+  update(){
+    this.x+=this.vx+Math.sin(this.y*.008)*.15;
+    this.y+=this.vy;
+    this.life-=this.decay;
+    if(this.life<=0||this.y<-20)this.reset(false);
+  }
+  draw(){
+    const a=this.life*this.glow;
+    // Glow
+    ctx.beginPath();ctx.arc(this.x,this.y,this.size*3,0,Math.PI*2);
+    ctx.fillStyle=`rgba(${this.r},${this.g},${this.b},${a*.15})`;ctx.fill();
+    // Core
+    ctx.beginPath();ctx.arc(this.x,this.y,this.size,0,Math.PI*2);
+    ctx.fillStyle=`rgba(${this.r},${this.g},${this.b},${a})`;ctx.fill();
+  }
+}
+
+const embers=[];
+const count=Math.min(60,Math.floor(W*H/20000));
+for(let i=0;i<count;i++)embers.push(new Ember());
+
+function animate(){
+  ctx.clearRect(0,0,W,H);
+  for(const e of embers){e.update();e.draw()}
+  requestAnimationFrame(animate);
+}
+animate();
+
+const obs=new IntersectionObserver(e=>{e.forEach(x=>{if(x.isIntersecting){x.target.classList.add('visible');obs.unobserve(x.target)}})},{threshold:.1});
+document.querySelectorAll('.reveal').forEach(el=>obs.observe(el));
+</script>
+</body>
+</html>

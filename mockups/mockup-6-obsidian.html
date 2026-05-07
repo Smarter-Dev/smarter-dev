@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — Obsidian Console</title>
+<link href="https://fonts.googleapis.com/css2?family=Commit+Mono:wght@400;700&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#08090e;--surface:#0d0f16;--surface2:#12141d;--elevated:#181b26;
+  --cyan:#00d4ff;--cyan-soft:#00d4ff18;--cyan-med:#00d4ff40;
+  --green:#34d399;--amber:#f59e0b;--rose:#f43f5e;
+  --gray:#4b5563;--mid:#7a8595;--light:#b0bec5;--white:#e2e8f0;
+  --mono:'Commit Mono',monospace;--sans:'Instrument Sans',sans-serif;
+  --radius:16px;
+}
+html{scroll-behavior:smooth}
+body{font-family:var(--sans);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.7}
+
+/* BG — subtle radial gradient layers, no animation */
+.bg-layer{
+  position:fixed;inset:0;z-index:0;
+  background:
+    radial-gradient(ellipse 50% 40% at 25% 0%,rgba(0,212,255,.04),transparent),
+    radial-gradient(ellipse 40% 50% at 80% 100%,rgba(0,212,255,.03),transparent),
+    radial-gradient(ellipse 60% 30% at 50% 50%,rgba(0,212,255,.015),transparent);
+}
+/* Very subtle dot grid */
+.bg-layer::after{
+  content:'';position:fixed;inset:0;
+  background-image:radial-gradient(rgba(0,212,255,.06) 1px,transparent 1px);
+  background-size:32px 32px;
+  mask-image:radial-gradient(ellipse 70% 60% at 50% 30%,black,transparent 75%);
+}
+
+/* Nav */
+.mockup-nav{
+  position:fixed;top:0;left:0;right:0;z-index:100;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  padding:10px 16px;background:rgba(8,9,14,.92);backdrop-filter:blur(24px) saturate(1.2);
+  border-bottom:1px solid rgba(0,212,255,.06);font-family:var(--mono);font-size:.72rem;
+}
+.mockup-nav a{
+  color:var(--gray);text-decoration:none;padding:5px 12px;border-radius:8px;
+  border:1px solid transparent;transition:all .2s;white-space:nowrap;
+}
+.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.2)}
+.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.06)}
+
+.reveal{opacity:0;transform:translateY(20px);transition:all .65s cubic-bezier(.25,.46,.45,.94)}
+.reveal.visible{opacity:1;transform:none}
+
+/* Section code label */
+.code-label{
+  font-family:var(--mono);font-size:.78rem;color:var(--cyan);margin-bottom:1.25rem;
+  display:flex;align-items:center;gap:8px;opacity:.8;
+}
+.code-label::before{content:'//';color:var(--gray)}
+.sec-title{font-size:clamp(1.8rem,3.5vw,2.8rem);font-weight:700;color:var(--white);line-height:1.15;margin-bottom:.6rem}
+.sec-desc{font-size:.95rem;color:var(--mid);max-width:520px;margin-bottom:3rem;line-height:1.75}
+
+/* ==================== HERO ==================== */
+.hero{
+  min-height:100vh;display:flex;align-items:center;position:relative;z-index:1;
+  padding:7rem clamp(2rem,6vw,6rem) 4rem;
+}
+.hero-inner{max-width:720px}
+.hero-overline{
+  font-family:var(--mono);font-size:.78rem;color:var(--mid);margin-bottom:2rem;
+  display:flex;align-items:center;gap:10px;
+}
+.hero-overline .pip{width:6px;height:6px;border-radius:50%;background:var(--green)}
+.hero-h1{
+  font-size:clamp(3rem,7vw,5.5rem);font-weight:700;line-height:.95;
+  color:var(--white);margin-bottom:1.5rem;letter-spacing:-.03em;
+}
+.hero-h1 .thin{font-weight:400;color:var(--light)}
+.hero-h1 .accent{color:var(--cyan)}
+.hero-p{font-size:clamp(1rem,1.8vw,1.15rem);color:var(--mid);max-width:500px;line-height:1.8;margin-bottom:2.5rem}
+.hero-p strong{color:var(--white);font-weight:600}
+.hero-actions{display:flex;gap:12px;flex-wrap:wrap}
+.btn-solid{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:13px 32px;border-radius:12px;font-family:var(--sans);font-size:.9rem;font-weight:600;
+  background:var(--cyan);color:var(--bg);border:none;cursor:pointer;text-decoration:none;
+  transition:all .25s;box-shadow:0 2px 16px rgba(0,212,255,.15);
+}
+.btn-solid:hover{box-shadow:0 4px 28px rgba(0,212,255,.25);transform:translateY(-1px)}
+.btn-subtle{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:13px 32px;border-radius:12px;font-family:var(--sans);font-size:.9rem;font-weight:600;
+  background:var(--surface2);color:var(--light);border:1px solid rgba(255,255,255,.06);cursor:pointer;text-decoration:none;
+  transition:all .25s;
+}
+.btn-subtle:hover{background:var(--elevated);border-color:rgba(255,255,255,.1)}
+
+/* Hero stat strip */
+.hero-stats{
+  display:flex;gap:2.5rem;margin-top:3.5rem;padding-top:2rem;
+  border-top:1px solid rgba(255,255,255,.04);
+}
+.hero-stat .num{font-family:var(--mono);font-size:1.5rem;font-weight:700;color:var(--white)}
+.hero-stat .label{font-size:.78rem;color:var(--gray);margin-top:2px}
+
+/* ==================== SECTIONS ==================== */
+section{position:relative;z-index:1;padding:clamp(60px,8vw,100px) clamp(2rem,6vw,6rem)}
+.container{max-width:1080px;margin:0 auto}
+
+/* Pillar cards */
+.pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem}
+.pillar{
+  padding:2.25rem 2rem;border-radius:var(--radius);
+  background:var(--surface);border:1px solid rgba(255,255,255,.04);
+  transition:border-color .3s,background .3s;position:relative;overflow:hidden;
+}
+.pillar:hover{border-color:rgba(0,212,255,.12);background:var(--surface2)}
+.pillar .p-tag{
+  font-family:var(--mono);font-size:.65rem;color:var(--cyan);letter-spacing:.08em;
+  text-transform:uppercase;margin-bottom:1.25rem;opacity:.7;
+}
+.pillar h3{font-size:1.15rem;font-weight:700;color:var(--white);margin-bottom:.6rem}
+.pillar p{font-size:.85rem;color:var(--mid);line-height:1.75}
+
+/* Terminal card */
+.term-card{
+  max-width:780px;margin:0 auto;border-radius:var(--radius);overflow:hidden;
+  background:var(--surface);border:1px solid rgba(255,255,255,.05);
+  box-shadow:0 16px 64px rgba(0,0,0,.3);
+}
+.term-top{
+  display:flex;align-items:center;gap:7px;padding:13px 18px;
+  background:rgba(255,255,255,.015);border-bottom:1px solid rgba(255,255,255,.04);
+}
+.td{width:10px;height:10px;border-radius:50%}
+.td.r{background:var(--rose)}.td.y{background:var(--amber)}.td.g{background:var(--green)}
+.term-top .path{margin-left:auto;font-family:var(--mono);font-size:.7rem;color:var(--gray)}
+.term-code{padding:1.75rem 2rem;font-family:var(--mono);font-size:.82rem;line-height:2.2}
+.term-code .cm{color:#3d4a5c}.term-code .kw{color:var(--amber)}.term-code .fn{color:var(--cyan)}.term-code .str{color:var(--green)}.term-code .num{color:var(--rose)}
+
+.term-footer{
+  display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid rgba(255,255,255,.04);
+}
+.tf-item{
+  padding:1.25rem;text-align:center;border-right:1px solid rgba(255,255,255,.03);
+}
+.tf-item:last-child{border-right:none}
+.tf-item strong{display:block;font-family:var(--mono);font-size:1.15rem;color:var(--cyan);margin-bottom:2px}
+.tf-item span{font-size:.72rem;color:var(--gray);text-transform:uppercase;letter-spacing:.05em}
+
+/* Bytes */
+.bytes-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;max-width:700px}
+.byte-item{
+  display:flex;align-items:center;gap:14px;padding:1.25rem 1.5rem;border-radius:var(--radius);
+  background:var(--surface);border:1px solid rgba(255,255,255,.04);transition:border-color .3s;
+}
+.byte-item:hover{border-color:rgba(0,212,255,.1)}
+.byte-item .pts{
+  font-family:var(--mono);font-size:1.1rem;font-weight:700;color:var(--cyan);
+  min-width:48px;
+}
+.byte-item .info{font-size:.88rem;color:var(--white);font-weight:500}
+.byte-item .sub{font-size:.75rem;color:var(--gray);margin-top:1px}
+
+/* Stats */
+.stats-row{
+  display:flex;flex-wrap:wrap;justify-content:space-between;gap:2rem;
+  padding:3.5rem 0;
+  border-top:1px solid rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.04);
+}
+.stat{flex:1;min-width:120px;text-align:center}
+.stat .val{font-family:var(--mono);font-size:clamp(2rem,4vw,2.8rem);font-weight:700;color:var(--white)}
+.stat .val .u{color:var(--cyan);font-size:.55em;font-weight:400}
+.stat .lbl{font-size:.78rem;color:var(--gray);margin-top:.25rem}
+
+/* Testimonials */
+.quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem;margin-top:2rem}
+.quote-card{
+  padding:2rem;border-radius:var(--radius);
+  background:var(--surface);border:1px solid rgba(255,255,255,.04);
+  transition:border-color .3s;
+}
+.quote-card:hover{border-color:rgba(0,212,255,.1)}
+.quote-card blockquote{font-size:.88rem;color:var(--light);line-height:1.8;margin-bottom:1.25rem}
+.quote-card .who{display:flex;align-items:center;gap:10px}
+.quote-card .av{
+  width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+  background:var(--elevated);color:var(--cyan);font-family:var(--mono);font-size:.7rem;font-weight:700;
+}
+.quote-card .name{font-size:.8rem;font-weight:600;color:var(--white)}
+.quote-card .role{font-size:.7rem;color:var(--gray)}
+
+/* CTA */
+.cta-section{text-align:center;padding:clamp(80px,10vw,140px) 2rem;position:relative;z-index:1}
+.cta-h{font-size:clamp(2rem,4.5vw,3.5rem);font-weight:700;color:var(--white);line-height:1.1;margin-bottom:.5rem}
+.cta-h .hl{color:var(--cyan)}
+.cta-p{color:var(--mid);font-size:1rem;margin-bottom:2.5rem}
+.foot{text-align:center;padding:2rem;font-family:var(--mono);font-size:.68rem;color:var(--gray);border-top:1px solid rgba(255,255,255,.03);position:relative;z-index:1}
+
+@media(max-width:900px){.pillars,.quotes{grid-template-columns:1fr}.bytes-grid{grid-template-columns:1fr}.hero-stats{flex-wrap:wrap;gap:1.5rem}}
+@media(max-width:600px){.stats-row{flex-direction:column;align-items:center}}
+</style>
+</head>
+<body>
+
+<div class="bg-layer"></div>
+
+<nav class="mockup-nav">
+  <a href="mockup-6-obsidian.html" class="active">06 Obsidian</a>
+  <a href="mockup-7-frost.html">07 Frost</a>
+  <a href="mockup-8-topology.html">08 Topology</a>
+  <a href="mockup-9-carbon.html">09 Carbon</a>
+  <a href="mockup-10-void.html">10 Void</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-inner reveal">
+    <div class="hero-overline"><span class="pip"></span> 15,000+ developers growing daily</div>
+    <h1 class="hero-h1"><span class="thin">AI writes code.</span><br>We build <span class="accent">developers.</span></h1>
+    <p class="hero-p">Smarter Dev sharpens the skills AI can't touch — <strong>critical thinking</strong>, <strong>architecture</strong>, and <strong>adversarial reasoning</strong>. No gatekeeping. No fluff. Just developers getting better, together.</p>
+    <div class="hero-actions">
+      <a href="#" class="btn-solid">Join on Discord &rarr;</a>
+      <a href="#pillars" class="btn-subtle">How it works</a>
+    </div>
+    <div class="hero-stats">
+      <div class="hero-stat"><div class="num">15K+</div><div class="label">Members</div></div>
+      <div class="hero-stat"><div class="num">730</div><div class="label">Challenges</div></div>
+      <div class="hero-stat"><div class="num">42K</div><div class="label">Solutions</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- PILLARS -->
+<section id="pillars">
+  <div class="container">
+    <div class="reveal">
+      <div class="code-label">skills.sharpen()</div>
+      <div class="sec-title">Three disciplines. Zero fluff.</div>
+      <div class="sec-desc">Every challenge, review, and conversation is designed to strengthen the thinking AI can't replicate.</div>
+    </div>
+    <div class="pillars">
+      <div class="pillar reveal">
+        <div class="p-tag">01 &mdash; Foundation</div>
+        <h3>Critical Thinking</h3>
+        <p>Evaluate trade-offs. Deconstruct assumptions. Ask the questions that redirect entire projects. This is the skill that compounds forever.</p>
+      </div>
+      <div class="pillar reveal">
+        <div class="p-tag">02 &mdash; Structure</div>
+        <h3>Architecture</h3>
+        <p>Design systems, not functions. Think in boundaries, contracts, and failure modes. The meta-skill behind every system that survives production.</p>
+      </div>
+      <div class="pillar reveal">
+        <div class="p-tag">03 &mdash; Defense</div>
+        <h3>Adversarial Reasoning</h3>
+        <p>Think like an attacker. Find the edge case. Exploit the assumption. Then architect something that holds when reality pushes back.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- RUNHACKS -->
+<section>
+  <div class="container">
+    <div class="reveal">
+      <div class="code-label">runhacks.execute()</div>
+      <div class="sec-title">Daily challenges that force real thinking.</div>
+      <div class="sec-desc">Not LeetCode. Not trivia. Architectural problems, debugging puzzles, and system design — with peer review.</div>
+    </div>
+    <div class="term-card reveal">
+      <div class="term-top">
+        <div class="td r"></div><div class="td y"></div><div class="td g"></div>
+        <div class="path">~/challenges/731.sh</div>
+      </div>
+      <div class="term-code">
+        <div><span class="cm"># Challenge #731 — Distributed Cache Anomaly</span></div>
+        <div><span class="cm"># Difficulty: Hard | Reward: 150 Bytes</span></div>
+        <div>&nbsp;</div>
+        <div><span class="cm"># Given: 3-node Redis cluster, read replicas healthy</span></div>
+        <div><span class="cm"># Symptom: 2% of reads return stale data</span></div>
+        <div><span class="cm"># Replication lag: 0ms. TTLs: correct.</span></div>
+        <div>&nbsp;</div>
+        <div><span class="kw">function</span> <span class="fn">diagnose</span>() {</div>
+        <div>&nbsp;&nbsp;<span class="cm"># The answer is architectural, not code-level.</span></div>
+        <div>&nbsp;&nbsp;<span class="kw">echo</span> <span class="str">"Think before you type."</span></div>
+        <div>}</div>
+      </div>
+      <div class="term-footer">
+        <div class="tf-item"><strong>Daily</strong><span>Frequency</span></div>
+        <div class="tf-item"><strong>3 Tiers</strong><span>Difficulty</span></div>
+        <div class="tf-item"><strong>Peer</strong><span>Review</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- BYTES -->
+<section>
+  <div class="container">
+    <div class="reveal">
+      <div class="code-label">bytes.earn()</div>
+      <div class="sec-title">Show up. Earn Bytes. Grow.</div>
+      <div class="sec-desc">Your growth, quantified. Bytes reward the actions that actually make you a better developer.</div>
+    </div>
+    <div class="bytes-grid reveal">
+      <div class="byte-item"><div class="pts">+5</div><div><div class="info">Daily Check-in</div><div class="sub">Consistency compounds</div></div></div>
+      <div class="byte-item"><div class="pts">+50</div><div><div class="info">Solve a RunHack</div><div class="sub">Ship a real solution</div></div></div>
+      <div class="byte-item"><div class="pts">+25</div><div><div class="info">Peer Review</div><div class="sub">Give actionable feedback</div></div></div>
+      <div class="byte-item"><div class="pts">+100</div><div><div class="info">Top Solution</div><div class="sub">Community-voted best</div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- STATS -->
+<section>
+  <div class="container">
+    <div class="stats-row reveal">
+      <div class="stat"><div class="val">15<span class="u">K+</span></div><div class="lbl">Developers</div></div>
+      <div class="stat"><div class="val">730</div><div class="lbl">Challenges shipped</div></div>
+      <div class="stat"><div class="val">42<span class="u">K</span></div><div class="lbl">Solutions submitted</div></div>
+      <div class="stat"><div class="val">98<span class="u">%</span></div><div class="lbl">Say "worth it"</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- TESTIMONIALS -->
+<section>
+  <div class="container">
+    <div class="reveal">
+      <div class="code-label">community.listen()</div>
+      <div class="sec-title">Real developers. Honest words.</div>
+    </div>
+    <div class="quotes">
+      <div class="quote-card reveal">
+        <blockquote>"Smarter Dev rewired how I approach problems. I don't just code — I architect. My team noticed within weeks."</blockquote>
+        <div class="who"><div class="av">MR</div><div><div class="name">Maya Rodriguez</div><div class="role">Senior Engineer @ Vercel</div></div></div>
+      </div>
+      <div class="quote-card reveal">
+        <blockquote>"RunHacks broke me out of tutorial hell. The peer reviews are brutally honest and incredibly valuable."</blockquote>
+        <div class="who"><div class="av">JK</div><div><div class="name">James Kim</div><div class="role">Full-Stack Developer</div></div></div>
+      </div>
+      <div class="quote-card reveal">
+        <blockquote>"No ego. No gatekeeping. Just devs helping devs get better. This is what communities should be."</blockquote>
+        <div class="who"><div class="av">SP</div><div><div class="name">Sarah Petrov</div><div class="role">Tech Lead @ Stripe</div></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="reveal">
+    <div class="cta-h">Stop writing code.<br><span class="hl">Start thinking.</span></div>
+    <p class="cta-p">Join 15,000 developers building AI-proof skills.</p>
+    <a href="#" class="btn-solid" style="font-size:.95rem;padding:15px 40px">Join on Discord &rarr;</a>
+  </div>
+</section>
+
+<div class="foot">&copy; 2026 Smarter Dev — developers helping developers get better.</div>
+
+<script>
+const obs=new IntersectionObserver(e=>{e.forEach(x=>{if(x.isIntersecting){x.target.classList.add('visible');obs.unobserve(x.target)}})},{threshold:.1});
+document.querySelectorAll('.reveal').forEach(el=>obs.observe(el));
+</script>
+</body>
+</html>

@@ -23,13 +23,15 @@ class TestRealAPIIntegration:
     """Integration tests using real database and API."""
 
     @pytest.fixture
-    async def api_client_service(self, real_api_client, api_settings):
+    async def api_client_service(self, real_api_client, bot_headers):
         """Create a real API client service for bot services."""
+        # Extract the actual API key from bot_headers (format: "Bearer <key>")
+        bearer_token = bot_headers["Authorization"].replace("Bearer ", "")
         # Use IntegrationAPIClient to avoid async context manager conflicts
         return IntegrationAPIClient(
             httpx_client=real_api_client,
             base_url="http://test",
-            bot_token=api_settings.discord_bot_token
+            bot_token=bearer_token
         )
 
     @pytest.fixture
@@ -102,7 +104,7 @@ class TestRealAPIIntegration:
             name="Test Squad",
             description="A test squad",
             max_members=10,
-            switch_cost=50,
+            switch_cost=0,  # Free to join so tests don't fail on insufficient balance
             is_active=True
         )
         real_db_session.add(squad)

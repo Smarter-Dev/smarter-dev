@@ -1,0 +1,102 @@
+/* ══════════════════════════════════════════════════════
+   Buttons — .btn-glow, .btn-ghost, .btn-start, .btn-follow
+   ══════════════════════════════════════════════════════ */
+
+.btn-glow {
+  display: inline-block;
+  padding: 13px 34px;
+  font-family: var(--heading);
+  font-size: .7rem;
+  letter-spacing: .06em;
+  background: transparent;
+  color: var(--cyan);
+  border: 1.5px solid var(--cyan);
+  border-radius: 0;
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(0,212,255,.15), inset 0 0 15px rgba(0,212,255,.05);
+  transition: all .3s;
+  text-decoration: none;
+}
+.btn-glow:hover {
+  background: var(--cyan);
+  color: var(--bg);
+  box-shadow: 0 0 30px rgba(0,212,255,.3);
+}
+
+.btn-ghost {
+  display: inline-block;
+  padding: 13px 34px;
+  font-family: var(--heading);
+  font-size: .7rem;
+  letter-spacing: .06em;
+  background: transparent;
+  color: var(--mid);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 0;
+  cursor: pointer;
+  transition: all .25s;
+  text-decoration: none;
+}
+.btn-ghost:hover {
+  border-color: rgba(0,212,255,.2);
+  color: var(--light);
+}
+
+.btn-start {
+  display: inline-block;
+  padding: 11px 30px;
+  font-family: var(--heading);
+  font-size: .65rem;
+  letter-spacing: .06em;
+  background: transparent;
+  color: var(--cyan);
+  border: 1.5px solid var(--cyan);
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(0,212,255,.15), inset 0 0 15px rgba(0,212,255,.05);
+  transition: all .3s;
+  text-decoration: none;
+}
+.btn-start:hover {
+  background: var(--cyan);
+  color: var(--bg);
+  box-shadow: 0 0 30px rgba(0,212,255,.3);
+}
+
+.btn-follow {
+  padding: 8px 20px;
+  font-family: var(--heading);
+  font-size: .6rem;
+  letter-spacing: .06em;
+  background: transparent;
+  color: var(--cyan);
+  border: 1px solid rgba(0,212,255,.3);
+  cursor: pointer;
+  transition: all .25s;
+  text-decoration: none;
+}
+.btn-follow:hover {
+  background: rgba(0,212,255,.08);
+  border-color: var(--cyan);
+}
+
+.btn-rerun {
+  padding: 6px 18px;
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .06em;
+  background: transparent;
+  color: var(--cyan);
+  border: 1px solid rgba(0,212,255,.3);
+  cursor: pointer;
+  transition: all .25s;
+  margin-left: auto;
+}
+.btn-rerun:hover {
+  background: rgba(0,212,255,.08);
+  border-color: var(--cyan);
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .btn-glow, .btn-ghost { padding: 11px 22px; font-size: .62rem }
+}

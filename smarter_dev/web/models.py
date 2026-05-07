@@ -6,6 +6,8 @@ from datetime import datetime, timezone, date
 from typing import Optional
 from uuid import UUID, uuid4
 
+from decimal import Decimal
+
 from sqlalchemy import BigInteger
 from sqlalchemy import Boolean
 from sqlalchemy import DateTime, Date
@@ -14,6 +16,7 @@ from sqlalchemy import ForeignKey
 from sqlalchemy import Index, UniqueConstraint, CheckConstraint
 from sqlalchemy import Integer
 from sqlalchemy import JSON
+from sqlalchemy import Numeric
 from sqlalchemy import String
 from sqlalchemy import Text
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
@@ -22,6 +25,60 @@ from sqlalchemy.orm import mapped_column
 from sqlalchemy.sql import func
 
 from smarter_dev.shared.database import Base
+
+
+class CampaignSignup(Base):
+    """Email/Discord signups for marketing campaigns (e.g. sudo launch).
+
+    Separate from the Campaign model which tracks challenge competitions.
+    """
+
+    __tablename__ = "campaign_signups"
+    __table_args__ = (
+        UniqueConstraint(
+            "campaign_slug", "email",
+            name="uq_campaign_signups_slug_email",
+        ),
+        UniqueConstraint(
+            "campaign_slug", "discord_id",
+            name="uq_campaign_signups_slug_discord_id",
+        ),
+        CheckConstraint(
+            "email IS NOT NULL OR discord_id IS NOT NULL",
+            name="at_least_one_contact",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    campaign_slug: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+    email: Mapped[Optional[str]] = mapped_column(
+        String(320),
+        nullable=True,
+    )
+    discord_id: Mapped[Optional[str]] = mapped_column(
+        String(20),
+        nullable=True,
+    )
+    email_confirmed: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    confirmation_token: Mapped[Optional[str]] = mapped_column(
+        String(36),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
 
 
 class BytesBalance(Base):
@@ -571,7 +628,11 @@ class APIKey(Base):
         """Check if the API key has expired."""
         if self.expires_at is None:
             return False
-        return datetime.now(timezone.utc) > self.expires_at
+        expires = self.expires_at
+        # Handle timezone-naive datetimes (e.g. from SQLite) by assuming UTC
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) > expires
     
     @property
     def is_valid(self) -> bool:
@@ -986,14 +1047,14 @@ class BlogPost(Base):
 
 class ForumAgent(Base):
     """Forum monitoring agent configuration for AI-driven post responses.
-    
+
     Stores per-guild agent configurations that monitor forum channels and
     automatically evaluate new posts to determine if they warrant AI responses.
     Each agent has a customizable system prompt and configurable thresholds.
     """
-    
+
     __tablename__ = "forum_agents"
-    
+
     # Primary key
     id: Mapped[UUID] = mapped_column(
         PostgresUUID(as_uuid=True),
@@ -1001,12 +1062,11 @@ class ForumAgent(Base):
         default=uuid4,
         doc="Unique identifier for the forum agent"
     )
-    
-    # Guild context
+
+    # Guild context (index defined in __table_args__)
     guild_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
         doc="Discord guild (server) snowflake ID"
     )
     
@@ -1242,7 +1302,7 @@ class ForumAgentResponse(Base):
     responded_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        index=True,
+
         doc="Timestamp when the response was posted (if responded=True)"
     )
     
@@ -1293,7 +1353,7 @@ class ForumNotificationTopic(Base):
     """
     
     __tablename__ = "forum_notification_topics"
-    
+
     # Primary key
     id: Mapped[UUID] = mapped_column(
         PostgresUUID(as_uuid=True),
@@ -1301,18 +1361,16 @@ class ForumNotificationTopic(Base):
         default=uuid4,
         doc="Unique identifier for the notification topic"
     )
-    
-    # Guild and forum context
+
+    # Guild and forum context (indexes defined in __table_args__)
     guild_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
         doc="Discord guild (server) snowflake ID"
     )
     forum_channel_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
         doc="Discord forum channel snowflake ID"
     )
     
@@ -1384,13 +1442,13 @@ class ForumUserSubscription(Base):
     guild_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord guild (server) snowflake ID"
     )
     user_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord user snowflake ID"
     )
     username: Mapped[str] = mapped_column(
@@ -1401,7 +1459,7 @@ class ForumUserSubscription(Base):
     forum_channel_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord forum channel snowflake ID"
     )
     
@@ -1465,6 +1523,318 @@ class ForumUserSubscription(Base):
         """String representation of the user subscription."""
         return f"<ForumUserSubscription(username='{self.username}', guild_id='{self.guild_id}', topics={len(self.subscribed_topics)})>"
 
+class Quest(Base):
+    __tablename__ = "quests"
+
+    # Identity
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique quest identifier",
+    )
+
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+
+        doc="Discord guild (server) snowflake ID this quest belongs to",
+    )
+
+    # Human-facing content
+    title: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        doc="Quest title",
+    )
+
+    prompt: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Quest instructions / prompt shown to users",
+    )
+
+    quest_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="daily",
+        doc="Quest type (daily, weekly, one_off, etc.)",
+    )
+
+    # Execution / validation scripts
+    python_script: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Reference Python solution or logic",
+    )
+
+    input_generator_script: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Script to generate quest input (optional)",
+    )
+
+    solution_validator_script: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Script to validate user submissions",
+    )
+
+    # Audit
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    __table_args__ = (
+        Index("ix_quests_guild_id", "guild_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Quest(title='{self.title}', guild_id='{self.guild_id}', type='{self.quest_type}')>"
+
+class QuestInput(Base):
+    __tablename__ = "quest_inputs"
+
+    daily_quest_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("daily_quests.id", ondelete="CASCADE"),
+        primary_key=True,
+        doc="Daily quest instance this input belongs to",
+    )
+
+    input_data: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Generated quest input",
+    )
+
+    result_data: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        doc="Expected result for validation",
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class DailyQuest(Base):
+    """Quest instance active for a specific date in a guild.
+
+    Example:
+    2025-12-10 → Quest X is active for this guild until end of day (UTC).
+    """
+
+    __tablename__ = "daily_quests"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+        doc="Unique daily quest instance identifier",
+    )
+
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Discord guild (server) snowflake ID",
+    )
+
+    quest_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("quests.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        doc="Quest template this instance is based on",
+    )
+
+    is_announced: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        doc="Whether this daily quest has been announced"
+    )
+
+    announced_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc="When the daily quest was announced"
+    )
+
+    # Rotation info
+    active_date: Mapped[date] = mapped_column(
+        Date,
+        nullable=False,
+        index=True,
+        doc="Date this quest is active for (UTC-based)",
+    )
+
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        doc="UTC timestamp when this daily quest stops being valid",
+    )
+
+    # Soft-disable flag
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        doc="Whether this daily quest instance is active",
+    )
+
+    quest: Mapped["Quest"] = relationship(
+        "Quest",
+        lazy="joined",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "guild_id",
+            "quest_id",
+            "active_date",
+            name="uq_daily_quests_per_day",
+        ),
+        Index(
+            "ix_daily_quests_guild_date",
+            "guild_id",
+            "active_date",
+        ),
+    )
+
+    @property
+    def is_expired(self) -> bool:
+        return datetime.now(timezone.utc) >= self.expires_at
+
+class QuestSubmission(Base):
+    __tablename__ = "quest_submissions"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+
+    daily_quest_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("daily_quests.id", ondelete="CASCADE"),
+        index=True,
+        nullable=False,
+    )
+
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        index=True,
+        nullable=False,
+    )
+
+    squad_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        index=True,
+        nullable=False,
+    )
+
+    user_id: Mapped[str] = mapped_column(
+        String,
+        index=True,
+        nullable=False,
+    )
+
+    username: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+
+    submitted_solution: Mapped[str] = mapped_column(Text, nullable=False)
+
+    is_correct: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+    )
+
+    is_first_success: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+    )
+
+    points_earned: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_quest_submissions_daily_squad_first",
+            "daily_quest_id",
+            "squad_id",
+            "is_first_success",
+        ),
+    )
+
+
+class QuestProgress(Base):
+    """Per-user completion tracking for a daily quest instance."""
+
+    __tablename__ = "quest_progress"
+
+    daily_quest_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("daily_quests.id", ondelete="CASCADE"),
+        primary_key=True,
+        doc="Daily quest instance this progress relates to",
+    )
+    user_id: Mapped[str] = mapped_column(
+        String,
+        primary_key=True,
+        doc="Discord user snowflake ID",
+    )
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        index=True,
+        doc="Guild (server) where this progress applies",
+    )
+
+    completions: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        doc="How many times the user has completed this daily quest today",
+    )
+    last_completed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="When the user last completed this quest",
+    )
+
+    __table_args__ = (
+        Index("ix_quest_progress_guild_user", "guild_id", "user_id"),
+    )
 
 class Campaign(Base):
     """Campaign definition for challenge competitions.
@@ -1487,7 +1857,7 @@ class Campaign(Base):
     guild_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord guild (server) snowflake ID"
     )
     
@@ -1508,7 +1878,7 @@ class Campaign(Base):
     start_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        index=True,
+
         doc="When the campaign begins and first challenge is released"
     )
     release_cadence_hours: Mapped[int] = mapped_column(
@@ -1631,7 +2001,7 @@ class Challenge(Base):
         PostgresUUID(as_uuid=True),
         ForeignKey("campaigns.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
+
         doc="Campaign this challenge belongs to"
     )
     
@@ -1683,13 +2053,13 @@ class Challenge(Base):
         Boolean,
         nullable=False,
         default=False,
-        index=True,
+
         doc="Whether this challenge has been released to participants"
     )
     released_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        index=True,
+
         doc="Timestamp when the challenge was released"
     )
     
@@ -1698,13 +2068,13 @@ class Challenge(Base):
         Boolean,
         nullable=False,
         default=False,
-        index=True,
+
         doc="Whether this challenge has been announced to Discord channels"
     )
     announced_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        index=True,
+
         doc="Timestamp when the challenge was announced to Discord channels"
     )
     
@@ -1872,7 +2242,7 @@ class ScheduledMessage(Base):
         PostgresUUID(as_uuid=True),
         ForeignKey("campaigns.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
+
         doc="Campaign this scheduled message belongs to"
     )
     
@@ -1898,7 +2268,7 @@ class ScheduledMessage(Base):
     scheduled_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        index=True,
+
         doc="When this message should be sent"
     )
     
@@ -1907,7 +2277,7 @@ class ScheduledMessage(Base):
         Boolean,
         nullable=False,
         default=False,
-        index=True,
+
         doc="Whether this scheduled message has been sent"
     )
     sent_at: Mapped[Optional[datetime]] = mapped_column(
@@ -2091,7 +2461,7 @@ class SquadSaleEvent(Base):
     guild_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord guild (server) snowflake ID"
     )
     
@@ -2112,7 +2482,7 @@ class SquadSaleEvent(Base):
     start_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        index=True,
+
         doc="When the sale event starts"
     )
     duration_hours: Mapped[int] = mapped_column(
@@ -2275,13 +2645,13 @@ class RepeatingMessage(Base):
     guild_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord guild (server) snowflake ID"
     )
     channel_id: Mapped[str] = mapped_column(
         String,
         nullable=False,
-        index=True,
+
         doc="Discord channel snowflake ID where messages are sent"
     )
     
@@ -2314,7 +2684,7 @@ class RepeatingMessage(Base):
     next_send_time: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        index=True,
+
         doc="UTC datetime when the next message should be sent"
     )
     is_active: Mapped[bool] = mapped_column(
@@ -2736,6 +3106,7 @@ class AdventOfCodeThread(Base):
         return f"<AdventOfCodeThread(guild='{self.guild_id}', year={self.year}, day={self.day})>"
 
 
+
 class AttachmentFilterConfig(Base):
     """Attachment filter configuration per guild for file type filtering.
 
@@ -2871,3 +3242,263 @@ class AttachmentFilterConfig(Base):
     def __repr__(self) -> str:
         """String representation of the attachment filter config."""
         return f"<AttachmentFilterConfig(guild_id='{self.guild_id}', active={self.is_active})>"
+
+
+class ResearchSession(Base):
+    """A research session created by the Scan research agent."""
+
+    __tablename__ = "research_sessions"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    slug: Mapped[Optional[str]] = mapped_column(
+        String(250), nullable=True, unique=True, index=True,
+    )
+    user_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    guild_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    channel_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="running"
+    )
+    response: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sources: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=list)
+    tool_log: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=list)
+    followups: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, default=list)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    context: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    input_tokens: Mapped[int] = mapped_column(default=0)
+    output_tokens: Mapped[int] = mapped_column(default=0)
+    pipeline_mode: Mapped[str] = mapped_column(String(20), default="lite")
+    cache_read_tokens: Mapped[int] = mapped_column(default=0)
+    cache_write_tokens: Mapped[int] = mapped_column(default=0)
+    model_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    cost_usd: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<ResearchSession(id='{self.id}', status='{self.status}')>"
+
+
+class ScanUserProfile(Base):
+    """Evolving profile of a Scan user built from their research queries.
+
+    Each time a user submits a query, Gemini 3 Flash evaluates it against the
+    existing profile and writes an updated 2-5 paragraph summary describing
+    the user's interests, skill level, and research patterns.
+    """
+
+    __tablename__ = "scan_user_profiles"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(100), nullable=False, unique=True, index=True,
+    )
+    profile: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    technologies: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
+    recent_queries: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
+    query_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    suggested_queries: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
+    opt_out_narrative: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    opt_out_technologies: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
+    def __repr__(self) -> str:
+        return f"<ScanUserProfile(user_id='{self.user_id}', queries={self.query_count})>"
+
+
+class ScanServiceUsage(Base):
+    """Internal service usage tracking for Scan background tasks.
+
+    Tracks costs that are not user-facing (e.g. profiler LLM calls) separately
+    from per-session costs.  Each row is a single invocation of an internal agent.
+    """
+
+    __tablename__ = "scan_service_usage"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    task_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, index=True,
+    )
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    input_tokens: Mapped[int] = mapped_column(default=0)
+    output_tokens: Mapped[int] = mapped_column(default=0)
+    cache_read_tokens: Mapped[int] = mapped_column(default=0)
+    cache_write_tokens: Mapped[int] = mapped_column(default=0)
+    cost_usd: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 6), nullable=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    session_id: Mapped[Optional[UUID]] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<ScanServiceUsage(task='{self.task_type}', cost={self.cost_usd})>"
+
+
+class ModerationConfig(Base):
+    """Per-guild configuration for AI moderation triage.
+
+    When a user mentions a monitored role, the bot reads chat history and uses
+    an AI triage agent to freeze dangerous situations (timeout, purge, delete)
+    while waiting for human moderators to arrive.
+    """
+
+    __tablename__ = "moderation_configs"
+
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        primary_key=True,
+        doc="Discord guild (server) snowflake ID",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Whether moderation monitoring is enabled",
+    )
+    monitored_role_ids: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        server_default="[]",
+        doc="List of Discord role ID strings to monitor for mentions",
+    )
+    instructions: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="System prompt / moderation instructions given to the AI agent",
+    )
+    enabled_tools: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        default=lambda: ["timeout", "purge", "delete"],
+        server_default='["timeout", "purge", "delete"]',
+        doc="List of action tool names enabled: timeout, purge, delete",
+    )
+    response_channel_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        doc="Channel where triage reports are posted for human moderator review",
+    )
+    context_message_limit: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=25,
+        doc="Number of recent messages to fetch for context",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ModerationConfig(guild_id='{self.guild_id}', active={self.is_active})>"
+
+
+class ModerationAction(Base):
+    """Unified tracking table for all moderation actions.
+
+    Records warns, kicks, bans, unbans, and timeouts regardless of source
+    (AI agent, manual slash command, or Discord audit log detection).
+    """
+
+    __tablename__ = "moderation_actions"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        doc="Discord guild snowflake ID",
+    )
+    target_user_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        doc="Discord user ID of the actioned user",
+    )
+    target_username: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        doc="Username snapshot at action time",
+    )
+    moderator_user_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        doc="Discord user ID of moderator (null for AI actions)",
+    )
+    moderator_username: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        doc="Moderator username snapshot",
+    )
+    action_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        doc="Action type: warn, kick, ban, unban, timeout",
+    )
+    reason: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="Reason for the moderation action",
+    )
+    duration_seconds: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="Duration in seconds (for timeouts)",
+    )
+    source: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="ai",
+        server_default="ai",
+        doc="Action source: ai, manual, audit_log",
+    )
+    channel_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        doc="Channel where the trigger occurred",
+    )
+    trigger_message_id: Mapped[Optional[str]] = mapped_column(
+        String,
+        nullable=True,
+        doc="Message ID that triggered AI moderation",
+    )
+    ai_context_summary: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        doc="AI's summary of the situation (AI-initiated actions only)",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        Index("ix_mod_actions_guild_user", "guild_id", "target_user_id"),
+        Index("ix_mod_actions_guild_type", "guild_id", "action_type"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ModerationAction(type='{self.action_type}', target='{self.target_username}', source='{self.source}')>"

@@ -8,9 +8,9 @@ The project uses three model types for different purposes:
 
 | Model Type | Environment Variable | Default | Purpose |
 |------------|---------------------|---------|---------|
-| `fast` | `LLM_FAST_MODEL` | `gemini/gemini-2.5-flash-lite` | Quick, cheap operations (most agents) |
+| `fast` | `LLM_FAST_MODEL` | `gemini/gemini-3.1-flash-lite-preview` | Quick, cheap operations (most agents) |
 | `medium` | `LLM_MEDIUM_MODEL` | `claude-haiku-4-5-20251001` | Higher quality reasoning (forum agent) |
-| `judge` | `LLM_JUDGE_MODEL` | `gemini/gemini-2.5-flash-lite` | Evaluation/testing |
+| `judge` | `LLM_JUDGE_MODEL` | `gemini/gemini-3.1-flash-lite-preview` | Evaluation/testing |
 
 ## API Keys Required
 
@@ -61,18 +61,18 @@ LLM_FAST_MODEL=gpt-5-nano-2025-08-07 LLM_MEDIUM_MODEL=gpt-5-nano-2025-08-07 LLM_
 Add to your shell profile (`.bashrc`, `.zshrc`, etc.):
 
 ```bash
-export LLM_FAST_MODEL=gemini/gemini-2.5-flash-lite
+export LLM_FAST_MODEL=gemini/gemini-3.1-flash-lite-preview
 export LLM_MEDIUM_MODEL=claude-haiku-4-5-20251001
-export LLM_JUDGE_MODEL=gemini/gemini-2.5-flash-lite
+export LLM_JUDGE_MODEL=gemini/gemini-3.1-flash-lite-preview
 ```
 
 Or create a `.env` file:
 
 ```bash
 # .env
-LLM_FAST_MODEL=gemini/gemini-2.5-flash-lite
+LLM_FAST_MODEL=gemini/gemini-3.1-flash-lite-preview
 LLM_MEDIUM_MODEL=claude-haiku-4-5-20251001
-LLM_JUDGE_MODEL=gemini/gemini-2.5-flash-lite
+LLM_JUDGE_MODEL=gemini/gemini-3.1-flash-lite-preview
 GEMINI_API_KEY=your_gemini_key_here
 ANTHROPIC_API_KEY=your_anthropic_key_here
 ```
@@ -86,7 +86,7 @@ ANTHROPIC_API_KEY=your_anthropic_key_here
 - Any other OpenAI model identifier
 
 ### Google Gemini Models
-- `gemini/gemini-2.5-flash-lite`
+- `gemini/gemini-3.1-flash-lite-preview`
 - `gemini/gemini-2.5-flash`
 - `gemini/gemini-2.0-flash-lite`
 - `gemini/gemini-2.0-flash`
@@ -131,16 +131,16 @@ The bot logs which model it's using on startup:
 
 ```
 ForumMonitorAgent using LLM model: claude-haiku-4-5-20251001 (provider: anthropic)
-HelpAgent using LLM model: gemini/gemini-2.5-flash-lite (provider: gemini)
+HelpAgent using LLM model: gemini/gemini-3.1-flash-lite-preview (provider: gemini)
 ```
 
 Test runs also display model information:
 
 ```
 LLM Models:
-   Fast:   gemini/gemini-2.5-flash-lite (env: LLM_FAST_MODEL)
+   Fast:   gemini/gemini-3.1-flash-lite-preview (env: LLM_FAST_MODEL)
    Medium: claude-haiku-4-5-20251001 (env: LLM_MEDIUM_MODEL)
-   Judge:  gemini/gemini-2.5-flash-lite (env: LLM_JUDGE_MODEL)
+   Judge:  gemini/gemini-3.1-flash-lite-preview (env: LLM_JUDGE_MODEL)
 ```
 
 ## Implementation

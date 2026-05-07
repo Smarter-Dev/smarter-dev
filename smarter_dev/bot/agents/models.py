@@ -9,6 +9,7 @@ class DiscordMessage(BaseModel):
     """Represents a Discord message for context."""
     author: str
     author_id: str | None = None  # Discord user ID as string
+    message_id: str | None = None  # Discord message ID as string
     timestamp: datetime
     content: str
     # Reply context - populated when this message is a reply to another message

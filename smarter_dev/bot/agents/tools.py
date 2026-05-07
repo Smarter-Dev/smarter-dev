@@ -17,18 +17,85 @@ from datetime import timedelta
 from typing import Any
 from urllib.parse import urlparse
 
+import os
+import re
+
 import dspy
 import httpx
 import pdfplumber
 from ddgs import DDGS
-from markdownify import markdownify as md
-
 from smarter_dev.bot.services.channel_state import get_channel_state_manager
 
 logger = logging.getLogger(__name__)
 
 # Custom user agent for the bot
 BOT_USER_AGENT = "Smarter Dev Discord Bot - admin@smarter.dev"
+
+# Regex patterns for fallback HTML stripping (used when Jina is unavailable)
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def is_youtube_url(url: str) -> bool:
+    """Check if a URL is a YouTube video URL."""
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    return hostname in ("www.youtube.com", "youtube.com", "youtu.be", "m.youtube.com")
+
+
+async def fetch_via_jina(url: str) -> dict[str, str] | None:
+    """Fetch a URL via Jina Reader API, returning markdown content.
+
+    Returns dict with keys ``title``, ``description``, ``content``, ``url``
+    on success, or ``None`` on failure.
+    """
+    api_key = os.environ.get("JINA_API_KEY", "")
+    headers: dict[str, str] = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(f"https://r.jina.ai/{url}", headers=headers)
+            if resp.status_code != 200:
+                logger.debug(f"[Tool] Jina Reader returned {resp.status_code} for {url}")
+                return None
+            data = resp.json().get("data", {})
+            return {
+                "title": data.get("title", ""),
+                "description": data.get("description", ""),
+                "content": data.get("content", ""),
+                "url": data.get("url", url),
+            }
+    except Exception as e:
+        logger.debug(f"[Tool] Jina Reader failed for {url}: {e}")
+        return None
+
+
+async def fetch_youtube_metadata(url: str) -> dict[str, str]:
+    """Fetch YouTube video metadata via Jina Reader + oEmbed. Returns dict with title, author, description."""
+    metadata: dict[str, str] = {}
+    try:
+        # Use Jina Reader for title and description
+        jina_data = await fetch_via_jina(url)
+        if jina_data:
+            if jina_data["title"]:
+                metadata["title"] = jina_data["title"]
+            if jina_data["description"]:
+                metadata["description"] = jina_data["description"]
+
+        # oEmbed for author name (Jina doesn't reliably return channel name)
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
+            resp = await client.get(oembed_url)
+            if resp.status_code == 200:
+                data = resp.json()
+                metadata["author"] = data.get("author_name", "")
+                # Backfill title from oEmbed if Jina didn't provide it
+                if "title" not in metadata and data.get("title"):
+                    metadata["title"] = data["title"]
+    except Exception as e:
+        logger.debug(f"[Tool] Could not fetch YouTube metadata: {e}")
+    return metadata
 
 
 class URLRateLimiter:
@@ -133,14 +200,15 @@ class EngagementPlanningSignature(dspy.Signature):
     - If the recommended action is silence, explicitly state this in your plan
 
     The execution agent (Gemini) will follow your plan exactly, so be concrete about:
-    - Which specific tools to call (send_message, reply_to_message, search_web, open_url, add_reaction_to_message, generate_in_depth_response, etc.)
+    - Which specific tools to call (send_message, reply_to_message, lookup_fact, search_web, open_url, add_reaction_to_message, generate_in_depth_response, etc.)
     - What parameters to pass to each tool
     - The order to execute actions in
     - Or if no action should be taken
 
     Guidelines:
     - If the conversation is simple (greetings, quick reactions), recommend simple actions (react + brief message)
-    - If research is needed, recommend search_web_instant_answer() or search_web() first
+    - If a general fact is needed (capitals, dates, definitions), recommend lookup_fact() first
+    - If specific/current information or multiple sources are needed, recommend search_web() first
     - For technical/detailed responses, recommend TWO steps:
       1. `result = generate_in_depth_response(prompt_summary, prompt)` - generates response
       2. `send_message(result['response'])` - sends it to Discord
@@ -181,49 +249,40 @@ class EngagementPlanningSignature(dspy.Signature):
 
 
 class InDepthResponseSignature(dspy.Signature):
-    """You're that knowledgeable community member who loves diving deep into topics and explaining things in a way
-    that actually makes sense. When someone asks a technical question or wants a detailed explanation, you're there
-    with the good stuff - thorough, practical, but totally conversational.
+    """You're a knowledgeable reference for developers - like a smart friend who points you in the right direction
+    rather than doing your work for you.
 
-    ## Your Vibe
-    - You're chatting with someone on Discord, not writing documentation
-    - Share knowledge like you're explaining to a friend over coffee
-    - Be enthusiastic when something's cool, direct when something's tricky
-    - Use natural language - "you can do X" not "one may accomplish X"
-    - It's okay to say "honestly" or "basically" or "here's the thing"
-    - Show personality - this is a conversation, not a textbook
+    ## Your Role
+    - Act as a REFERENCE, not a code generator
+    - Explain concepts and approaches, don't write complete solutions
+    - Show usage examples and patterns, not full implementations
+    - Point to the right tools, functions, or approaches to use
 
-    ## How to Structure Your Response
-    - Start naturally - jump right into the explanation without formal intros
-    - Use examples liberally - they're way more helpful than abstract explanations
-    - Break complex topics into digestible chunks, but keep the flow conversational
-    - If you need to list things, keep it casual (not overly formal bullet points)
-    - End with something useful - a tip, a "this should work for you", or relevant next step
+    ## Response Style
+    - Get straight to the point - no preamble, no "Great question!"
+    - If asked for "brief" or "quick", be exactly that
+    - Explain the concept, show a small usage example, done
+    - Don't pad responses with unnecessary context
+
+    ## For Code Questions
+    - Explain the approach or concept
+    - Show a minimal usage example (a few lines demonstrating the pattern)
+    - Point to relevant docs/APIs if applicable
+    - DON'T write their full solution for them
+    - DON'T scaffold entire functions or classes unless specifically asked
 
     ## Technical Content
-    - Always format code properly: `inline code` for small snippets, ```language blocks``` for examples
-    - Specify the language in code blocks (```python, ```javascript, etc.)
-    - Include practical examples that someone can actually use or adapt
-    - Explain WHY things work a certain way, not just HOW
-    - If there are common gotchas or tips, mention them naturally
+    - Format code properly: `inline code` or ```language blocks```
+    - Keep examples minimal - just enough to show the pattern
+    - Explain WHY when it's not obvious, skip when it is
 
-    ## Length & Style - CRITICAL CONSTRAINT
-    - **ABSOLUTE MAXIMUM: 1900 characters** - Discord has a 2000 character limit, you MUST stay under 1900
-    - Aim for 500-1500 characters for ideal balance of depth and readability
-    - Don't pad for length - say what needs saying, then stop
-    - It's fine to be direct and concise when that's what's needed
-    - Use Discord markdown naturally: **bold** for emphasis, *italic* for nuance
-    - Keep it readable - don't cram too much into one block
-    - If you can't fit everything in 1900 chars, prioritize the most important points
+    ## What NOT to Do
+    - Don't write complete implementations
+    - Don't add "here's a complete example" with full working code
+    - Don't pad with encouragement or extra context
+    - Don't repeat the question back
 
-    ## Context Handling
-    - The prompt contains all context (question, conversation, search results)
-    - Work with what you're given - don't ask for clarification
-    - If replying to a specific message, make it feel like a natural response to them
-    - Reference relevant context from the conversation when it makes sense
-
-    Remember: You're not generating a report, you're sharing knowledge in a conversation. Be helpful, be thorough,
-    but most importantly - be human. And ALWAYS stay under 1900 characters or your message will fail to send!
+    Think: senior dev pointing a junior in the right direction, not doing their homework.
     """
 
     prompt_summary: str = dspy.InputField(
@@ -234,7 +293,7 @@ class InDepthResponseSignature(dspy.Signature):
     )
 
     response: str = dspy.OutputField(
-        description="In-depth, well-formatted response ready to send to Discord. MUST be under 1900 characters (Discord's limit is 2000). Aim for 500-1500 characters ideally, properly formatted with code blocks and markdown as needed."
+        description="Concise, reference-style response: explain the concept, show a minimal usage example, and point to the right approach. No fluff. Properly formatted with code blocks and markdown."
     )
 
 
@@ -683,6 +742,14 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             logger.debug(f"[Tool] send_message called in channel {channel_id}")
             channel_state = get_channel_state_manager().get_state(int(channel_id))
 
+            # Check message length - Discord has a 2000 character limit
+            if len(content) > 2000:
+                logger.warning(f"[Tool] Message too long ({len(content)} chars), rejecting send")
+                return {
+                    "success": False,
+                    "error": f"MESSAGE_TOO_LONG: Your message is {len(content)} characters but Discord's limit is 2000. Please shorten your response by {len(content) - 2000} characters and try again. Focus on the most important points and remove less critical details."
+                }
+
             # Check that typing indicator was started
             if not channel_state.typing_active:
                 return {
@@ -747,6 +814,14 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             logger.debug(f"[Tool] reply_to_message called for message {message_id}")
             channel_state = get_channel_state_manager().get_state(int(channel_id))
+
+            # Check message length - Discord has a 2000 character limit
+            if len(content) > 2000:
+                logger.warning(f"[Tool] Reply too long ({len(content)} chars), rejecting send")
+                return {
+                    "success": False,
+                    "error": f"MESSAGE_TOO_LONG: Your reply is {len(content)} characters but Discord's limit is 2000. Please shorten your response by {len(content) - 2000} characters and try again. Focus on the most important points and remove less critical details."
+                }
 
             # Check that typing indicator was started
             if not channel_state.typing_active:
@@ -887,35 +962,40 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 "error": str(e)
             }
 
-    async def search_web_instant_answer(query: str) -> dict:
-        """Search for quick answers and facts using DuckDuckGo.
+    async def lookup_fact(query: str) -> dict:
+        """Look up a general, widely-known fact (capitals, populations, dates, definitions, etc.).
 
-        Returns the top search result as a quick answer for direct/simple questions.
-        For more detailed information, use search_web instead.
+        USE THIS FOR: Facts that would appear in an encyclopedia or general reference - things most
+        educated people would know or could easily verify. Examples:
+        - "What is the capital of France?" → Paris
+        - "When was Python released?" → 1991
+        - "What is photosynthesis?" → definition
+        - "Population of Tokyo" → ~14 million
 
-        Queries should be either a topic or a specific question. Queries should be clear and specific,
-        avoid vague or overly broad queries. The query should reflect the intent of the search, "DFS software
-        development" is better than "DFS" but "Meaning of DFS in software development?" is even better as it clearly
-        indicates the user is looking for a definition in terms of software development.
+        DO NOT USE THIS FOR: Current events, recent news, specific product recommendations, niche
+        topics, comparisons, or anything that requires multiple sources. Use search_web() instead.
+
+        Returns only the top result as a quick answer - if you need multiple perspectives or
+        comprehensive research, use search_web() instead.
 
         Args:
-            query: The question or topic to search for (e.g., "What is photosynthesis?")
+            query: A factual question or topic (e.g., "What is the capital of France?")
 
         Returns:
             dict with 'success' boolean, 'answer' (title + snippet), and 'url' field
 
         Example:
-            search_web_instant_answer("What is the capital of France?")
+            lookup_fact("What is the capital of France?")
             -> {"success": True, "answer": "Paris - ...", "url": "..."}
         """
         # Check if tool is disabled
-        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("search_web_instant_answer")
+        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("lookup_fact")
         if is_disabled:
-            logger.warning("[Tool] search_web_instant_answer is disabled")
+            logger.warning("[Tool] lookup_fact is disabled")
             return {"success": False, "error": reason, "tool_disabled": True}
 
         try:
-            logger.debug(f"[Tool] search_web_instant_answer called with query: {query}")
+            logger.debug(f"[Tool] lookup_fact called with query: {query}")
 
             # Normalize query for comparison
             normalized_query = query.lower().strip()
@@ -974,40 +1054,47 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             search_cache.add_channel_query(channel_id, query)
 
             # Record success
-            await tool_failure_monitor.record_success("search_web_instant_answer")
+            await tool_failure_monitor.record_success("lookup_fact")
             return response
 
         except Exception as e:
-            logger.error(f"[Tool] search_web_instant_answer failed: {e}")
+            logger.error(f"[Tool] lookup_fact failed: {e}")
             error_msg = str(e)
             # Record failure
-            await tool_failure_monitor.record_failure("search_web_instant_answer", error_msg)
+            await tool_failure_monitor.record_failure("lookup_fact", error_msg)
             return {
                 "success": False,
                 "error": error_msg
             }
 
-    async def search_web(query: str, max_results: int = 3) -> dict:
-        """Perform a comprehensive web search using DuckDuckGo.
+    async def search_web(query: str, max_results: int = 10) -> dict:
+        """Search the web for specific, current, or niche information that requires research.
 
-        Returns multiple search results with titles, URLs, and snippets.
-        Limited to 3 results by default to keep responses concise for Discord.
+        USE THIS FOR: Topics that need multiple sources, current information, or aren't common knowledge:
+        - "Best Python web frameworks 2024" → needs current comparison
+        - "How to fix CORS errors in React" → specific technical issue
+        - "Reviews of the new MacBook Pro" → current product info
+        - "What happened at the tech conference yesterday" → recent news
 
-        Queries should be either a topic or a specific question. Queries should be clear and specific,
-        avoid vague or overly broad queries. The query should reflect the intent of the search, "DFS software
-        development" is better than "DFS" but "Meaning of DFS in software development?" is even better as it clearly
-        indicates the user is looking for a definition in terms of software development.
+        DO NOT USE THIS FOR: Simple facts like capitals, populations, release dates, or definitions.
+        Use lookup_fact() instead for those - it's faster and more direct.
+
+        CHOOSING max_results:
+        - Use fewer results (3-5) for: simple questions with likely consensus answers, quick lookups
+        - Use default (10) for: comparisons, "best of" lists, research requiring multiple perspectives
+        - Use more results (15-20) for: comprehensive research, controversial topics needing many viewpoints,
+          or when initial searches didn't find what you needed
 
         Args:
-            query: The search query (e.g., "Python async programming")
-            max_results: Maximum number of results to return (default 3, max 5 to stay concise)
+            query: The search query - be specific about what you're looking for
+            max_results: Number of results to return (default 10, max 20)
 
         Returns:
             dict with 'success' boolean and 'results' list containing dicts with
             'title', 'url', and 'snippet' fields
 
         Example:
-            search_web("machine learning frameworks")
+            search_web("best machine learning frameworks 2024 comparison")
             -> {"success": True, "results": [{"title": "...", "url": "...", "snippet": "..."}]}
         """
         # Check if tool is disabled
@@ -1017,8 +1104,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             return {"success": False, "error": reason, "tool_disabled": True}
 
         try:
-            # Limit to max 5 results to keep responses Discord-friendly
-            max_results = min(max_results, 5)
+            # Limit to max 20 results
+            max_results = min(max_results, 20)
 
             logger.debug(f"[Tool] search_web called with query: {query}, max_results: {max_results}")
 
@@ -1171,19 +1258,36 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             except Exception as e:
                 logger.error(f"[Tool] Failed to send url usage message: {e}")
 
-            # Tier 1 Cache: Check if we have the content cached
-            cached_content = search_cache.get_url(url)
             content = None
             content_type_str = ""
             final_url = url
 
-            if cached_content is not None:
-                logger.debug(f"[Cache] Content cache hit for '{url}'")
-                content = cached_content
-                # We'll need to determine content type for Gemini
-                # For cached content, we'll default to "html" (most common)
-                content_type_str = "html"
-            else:
+            if is_youtube_url(url):
+                # Fetch YouTube metadata via oEmbed (works from cloud IPs)
+                metadata = await fetch_youtube_metadata(url)
+                if metadata:
+                    logger.debug(f"[Tool] Got YouTube metadata for {url}")
+                    parts = []
+                    if metadata.get("title"):
+                        parts.append(f"Title: {metadata['title']}")
+                    if metadata.get("author"):
+                        parts.append(f"Channel: {metadata['author']}")
+                    if metadata.get("description"):
+                        parts.append(f"Description: {metadata['description']}")
+                    if parts:
+                        content = "\n".join(parts)
+                        content_type_str = "youtube_metadata"
+                        search_cache.set_url(url, content)
+
+            # Tier 1 Cache: Check if we have the content cached (skip for YouTube, handled above)
+            if content is None:
+                cached_content = search_cache.get_url(url)
+                if cached_content is not None:
+                    logger.debug(f"[Cache] Content cache hit for '{url}'")
+                    content = cached_content
+                    content_type_str = "html"
+
+            if content is None:
                 # Content not cached - fetch it
                 # Fetch the URL with httpx (follows redirects by default)
                 try:
@@ -1223,9 +1327,14 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                         # Process content based on content type
                         if "html" in content_type:
                             logger.debug(f"[Tool] Converting HTML to Markdown for {url}")
-                            # Convert HTML to Markdown
-                            html_content = response.text
-                            content = md(html_content, heading_style="ATX")
+                            jina_result = await fetch_via_jina(url)
+                            if jina_result and jina_result["content"]:
+                                content = jina_result["content"]
+                            else:
+                                # Fallback: strip script/style then HTML tags
+                                raw = response.text
+                                raw = _SCRIPT_STYLE_RE.sub("", raw)
+                                content = _HTML_TAG_RE.sub("", raw)
                             content_type_str = "html"
 
                         elif "pdf" in content_type:
@@ -1309,12 +1418,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             logger.debug(f"[Tool] Using Gemini to extract answer from {len(content)} chars")
 
-            # Initialize Gemini 2.5 Flash Lite via the judge model
+            # Initialize Gemini 3.1 Flash Lite via the judge model
             import dspy
 
             from smarter_dev.llm_config import get_llm_model
 
-            gemini_lm = get_llm_model("judge")  # gemini-2.5-flash-lite
+            gemini_lm = get_llm_model("judge")  # gemini-3.1-flash-lite-preview
 
             # Use context manager to temporarily use Gemini without affecting global LLM config
             with dspy.context(lm=gemini_lm):
@@ -1336,11 +1445,17 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             # Record success
             await tool_failure_monitor.record_success("open_url")
 
-            return {
+            result_dict = {
                 "success": True,
                 "answer": answer,
-                "url": final_url
+                "url": final_url,
             }
+            if is_youtube_url(url):
+                result_dict["limitations"] = (
+                    "Only video metadata (title, channel, description) is available. "
+                    "Video transcripts cannot be accessed due to YouTube restrictions."
+                )
+            return result_dict
 
         except Exception as e:
             logger.error(f"[Tool] open_url failed: {e}", exc_info=True)
@@ -1483,13 +1598,15 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     return {
                         "success": True,
                         "messages": formatted_messages,
-                        "count": len(formatted_messages)
+                        "count": len(formatted_messages),
+                        "instructions": "Evaluate these new messages in the context of previously seen messages, but only respond to the new messages shown above."
                     }
                 else:
                     return {
                         "success": True,
                         "messages": [],
-                        "count": 0
+                        "count": 0,
+                        "instructions": "No new messages. Do not send any messages, replies, or reactions. The only acceptable actions are to stop monitoring or wait for new messages."
                     }
 
             except Exception as e:
@@ -1574,17 +1691,31 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             # This allows the auto-restart loop to continue after this agent execution completes
             channel_state.continue_monitoring = True
 
-            # Check if we've processed 100+ messages - if so, end the conversation session
-            messages_processed = channel_state.messages_processed
-            if messages_processed >= 100:
-                logger.info(f"[Tool] Channel {channel_id}: Reached 100+ messages ({messages_processed}), ending conversation session")
+            # Check if limit was already reached in this session - force exit
+            if channel_state.limit_reached_this_session:
+                logger.info(f"[Tool] Channel {channel_id}: Limit already reached this session, forcing exit")
                 channel_state.continue_monitoring = False
                 return {
                     "success": True,
                     "new_messages": [],
                     "count": 0,
+                    "reason": "session_ending",
+                    "instructions": "Your execution must end now. The system will restart you with fresh context."
+                }
+
+            # Check if we've processed 100+ messages - if so, restart with fresh context
+            messages_processed = channel_state.messages_processed
+            if messages_processed >= 100:
+                logger.info(f"[Tool] Channel {channel_id}: Reached 100+ messages ({messages_processed}), restarting with fresh context")
+                channel_state.limit_reached_this_session = True  # Prevent infinite loop on repeated calls
+                # Keep continue_monitoring = True to allow auto-restart with fresh context
+                return {
+                    "success": True,
+                    "new_messages": [],
+                    "count": 0,
                     "reason": "message_limit_reached",
-                    "messages_processed": messages_processed
+                    "messages_processed": messages_processed,
+                    "instructions": "Message limit reached. You will be restarted with fresh context to reduce memory usage. Before your execution ends, call set_conversation_summary() with a brief summary of the conversation so far (key topics, ongoing discussions, tone) so the restarted agent has context. Then let your execution end naturally - do not call stop_monitoring()."
                 }
 
             queue = channel_state.message_queue
@@ -1607,7 +1738,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                     "new_messages": [],
                     "count": 0,
                     "reason": "timeout",
-                    "messages_processed": messages_processed
+                    "messages_processed": messages_processed,
+                    "instructions": "Timeout reached with no new messages. Do not send any messages, replies, or reactions. The only acceptable actions are to stop monitoring or wait for new messages."
                 }
 
             # Phase 2: We got at least one message! Switch to debounce mode
@@ -1635,7 +1767,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                             "new_messages": messages,
                             "count": len(messages),
                             "reason": "queue_full",
-                            "messages_processed": messages_processed
+                            "messages_processed": messages_processed,
+                            "instructions": "Evaluate these new messages in the context of previously seen messages, but only respond to the new messages shown above."
                         }
                 except TimeoutError:
                     # Debounce timeout - return messages
@@ -1649,7 +1782,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 "new_messages": messages,
                 "count": len(messages),
                 "reason": "debounce_elapsed",
-                "messages_processed": messages_processed
+                "messages_processed": messages_processed,
+                "instructions": "Evaluate these new messages in the context of previously seen messages, but only respond to the new messages shown above."
             }
         except Exception as e:
             logger.error(f"[Tool] wait_for_messages failed: {e}")
@@ -1680,6 +1814,43 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             }
         except Exception as e:
             logger.error(f"[Tool] stop_monitoring failed: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
+    async def set_conversation_summary(summary: str) -> dict:
+        """Store a summary of the conversation for context continuity when the agent is restarted.
+
+        Call this when you receive a message_limit_reached response from wait_for_messages().
+        The summary will be passed to the restarted agent so it has context about
+        what has happened in the conversation without needing the full message history.
+
+        The summary should include:
+        - Key topics discussed
+        - Important decisions or conclusions reached
+        - Any ongoing tasks or questions that need follow-up
+        - The general tone/mood of the conversation
+
+        Args:
+            summary: A concise summary of the conversation so far (max 1000 chars recommended)
+
+        Returns:
+            dict with 'success' boolean
+
+        Example:
+            set_conversation_summary("Discussed Python async patterns. User asked about error handling in coroutines. Mood is curious and engaged.")
+        """
+        try:
+            logger.debug(f"[Tool] set_conversation_summary called in channel {channel_id}")
+            channel_state_mgr = get_channel_state_manager()
+            channel_state_mgr.set_conversation_summary(int(channel_id), summary)
+            return {
+                "success": True,
+                "result": "Summary stored. It will be passed to the restarted agent."
+            }
+        except Exception as e:
+            logger.error(f"[Tool] set_conversation_summary failed: {e}")
             return {
                 "success": False,
                 "error": str(e)
@@ -1794,7 +1965,6 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         **WHAT THIS TOOL DOES**:
         - Generates detailed technical responses using Claude (not you, Gemini)
         - Returns a Discord-ready message that you MUST send using send_message()
-        - Automatically enforces Discord's 2000 character limit (truncates to 1900 chars max)
         - Designed for technical/coding questions only
         - **RATE LIMITED**: Can only be used once per minute per channel
 
@@ -1821,11 +1991,13 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 - Relevant conversation context
                 - Any search results or information gathered
                 - What kind of response is needed (explanation, code example, comparison, etc.)
+                - Any user preferences for length/detail (e.g., "brief", "detailed", "eli5")
 
         Returns:
             dict with success and response fields:
             - success: True if generation succeeded, False otherwise
-            - response: Discord-ready message (max 1900 chars, properly formatted)
+            - response: Generated response (properly formatted)
+            - length: Character count of the response
             - error: Error message if success is False
             - on_cooldown: True if rate limited (only present when success=False)
             - cooldown_remaining: Seconds until cooldown ends (only present when on_cooldown=True)
@@ -1834,8 +2006,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             result = generate_in_depth_response(
                 prompt_summary="async/await in Python",
                 prompt="User asked: 'How do I use async/await in Python?'
-                       Explain async/await in Python with a simple example.
-                       Keep it under 1500 characters."
+                       Explain async/await in Python with a simple example."
             )
             if result['success']:
                 send_message(result['response'])  # YOU MUST DO THIS!
@@ -1879,16 +2050,9 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 result = predictor(prompt_summary=prompt_summary, prompt=prompt)
 
             response_text = result.response
-            original_length = len(response_text)
+            response_length = len(response_text)
 
-            # Enforce Discord's 2000 character limit with safety buffer
-            MAX_LENGTH = 1900
-            if len(response_text) > MAX_LENGTH:
-                logger.warning(f"[Tool] Response too long ({original_length} chars), truncating to {MAX_LENGTH}")
-                # Truncate and add indication
-                response_text = response_text[:MAX_LENGTH-50] + "\n\n...(response truncated to fit Discord's limit)"
-
-            logger.info(f"[Tool] Generated in-depth response: {len(response_text)} chars (original: {original_length} chars)")
+            logger.info(f"[Tool] Generated in-depth response: {response_length} chars")
 
             # Record success
             await tool_failure_monitor.record_success("generate_in_depth_response")
@@ -1896,8 +2060,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             return {
                 "success": True,
                 "response": response_text,
-                "original_length": original_length,
-                "truncated": len(response_text) < original_length
+                "length": response_length
             }
 
         except Exception as e:
@@ -1908,6 +2071,58 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             return {
                 "success": False,
                 "error": f"Failed to generate response: {error_msg}"
+            }
+
+    async def report_behavior(classification: str) -> dict:
+        """Report problematic user behavior and get instructions for how to proceed.
+
+        Use this tool when users exhibit behavior that should be noted and handled
+        appropriately, such as:
+        - Rage bait: Users trying to provoke angry responses
+        - Paradox tests: Users asking unsolvable logic puzzles to "break" the bot
+        - Trolling: Users intentionally disrupting conversation
+        - Spam: Users sending repetitive or meaningless messages
+        - Harassment: Users being rude or hostile
+
+        This tool sends a visible status message noting the behavior and provides
+        guidance on how to proceed with the conversation.
+
+        Args:
+            classification: Brief description of the behavior type (e.g., "rage bait",
+                           "paradox test", "trolling", "spam")
+
+        Returns:
+            dict with 'success' boolean and instructions for proceeding
+
+        Example:
+            report_behavior("paradox test")
+            report_behavior("rage bait")
+        """
+        try:
+            logger.debug(f"[Tool] report_behavior called in channel {channel_id}: {classification}")
+
+            # Send thought message to channel
+            thought_message = f"> -# Ignoring {classification}"
+            try:
+                await bot.rest.create_message(int(channel_id), thought_message)
+            except Exception as e:
+                logger.warning(f"[Tool] Failed to send behavior report message: {e}")
+
+            return {
+                "success": True,
+                "result": (
+                    f"Behavior '{classification}' has been noted. Instructions: "
+                    "If there are other users in the conversation engaging appropriately, "
+                    "you may continue participating with them while ignoring the problematic behavior. "
+                    "If the problematic user is the only participant, end the conversation by calling "
+                    "stop_monitoring() - do not engage further with the behavior."
+                )
+            }
+        except Exception as e:
+            logger.error(f"[Tool] report_behavior failed: {e}")
+            return {
+                "success": False,
+                "error": str(e)
             }
 
     # Get recent search queries for this channel
@@ -1921,7 +2136,7 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         reply_to_message,
         add_reaction_to_message,
         list_reaction_types,
-        search_web_instant_answer,
+        lookup_fact,
         search_web,
         open_url,
         generate_engagement_plan,
@@ -1931,7 +2146,57 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         fetch_new_messages,
         wait_for_duration,
         wait_for_messages,
-        stop_monitoring
+        stop_monitoring,
+        set_conversation_summary,
+        report_behavior
     ]
 
     return tools, channel_queries
+
+
+def create_response_tools(bot, channel_id: str, guild_id: str) -> tuple[list[Callable], list[str]]:
+    """Create context-bound Discord interaction tools for a response agent.
+
+    This returns a subset of tools suitable for the response agent in the
+    multi-agent pipeline. Flow control tools (wait_for_messages, stop_monitoring,
+    fetch_new_messages, set_conversation_summary) are excluded because flow
+    control is now managed via structured output fields.
+
+    Args:
+        bot: Discord bot instance (lightbulb.BotApp)
+        channel_id: Channel where the mention occurred (string)
+        guild_id: Guild where the mention occurred (string)
+
+    Returns:
+        Tuple of (List of callable async functions, List of recent search queries in this channel)
+    """
+    # Get the full tool set from create_mention_tools
+    # We pass an empty trigger_message_id since it's not needed for response tools
+    all_tools, channel_queries = create_mention_tools(
+        bot=bot,
+        channel_id=channel_id,
+        guild_id=guild_id,
+        trigger_message_id=""
+    )
+
+    # Tools to exclude (flow control tools)
+    excluded_tool_names = {
+        "wait_for_messages",
+        "wait_for_duration",
+        "stop_monitoring",
+        "fetch_new_messages",
+        "set_conversation_summary"
+    }
+
+    # Filter out excluded tools
+    response_tools = [
+        tool for tool in all_tools
+        if tool.__name__ not in excluded_tool_names
+    ]
+
+    logger.debug(
+        f"Created response tools for channel {channel_id}: "
+        f"{len(response_tools)} tools (excluded {len(excluded_tool_names)} flow control tools)"
+    )
+
+    return response_tools, channel_queries

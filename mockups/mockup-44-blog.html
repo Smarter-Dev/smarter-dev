@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smarter Dev — Why Vibe-Coding Will Kill Your Career</title>
+<link href="https://fonts.googleapis.com/css2?family=Bungee+Hairline&family=Bruno+Ace+SC&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#020408;--surface:#080c14;--cyan:#00d4ff;--green:#22c55e;--amber:#eab308;--rose:#ef4444;--gray:#2a3a4e;--mid:#4a6078;--light:#8098b0;--white:#d4e0ec;--display:'Bungee Hairline',sans-serif;--heading:'Bruno Ace SC',sans-serif;--body:'Inter',Arial,sans-serif}
+html{scroll-behavior:smooth}body{font-family:var(--body);background:var(--bg);color:var(--light);overflow-x:hidden;line-height:1.7}
+#bg{position:fixed;inset:0;z-index:0}
+.mockup-nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;background:rgba(2,4,8,.92);backdrop-filter:blur(24px);border-bottom:1px solid rgba(0,212,255,.06);font-family:var(--heading);font-size:.62rem;letter-spacing:.05em}
+.mockup-nav a{color:var(--gray);text-decoration:none;padding:5px 12px;border:1px solid transparent;transition:all .2s;white-space:nowrap}.mockup-nav a:hover{color:var(--cyan);border-color:rgba(0,212,255,.25)}.mockup-nav a.active{color:var(--cyan);border-color:var(--cyan);background:rgba(0,212,255,.06)}
+.reveal{opacity:0;transform:translateY(16px);transition:all .55s cubic-bezier(.25,.46,.45,.94)}.reveal.visible{opacity:1;transform:none}
+.code-label{font-family:var(--heading);font-size:.65rem;color:var(--cyan);margin-bottom:1rem;opacity:.75;letter-spacing:.08em}
+
+/* ── Article Header ── */
+.article-header{position:relative;z-index:1;text-align:center;padding:8rem 2rem 4rem;max-width:860px;margin:0 auto}
+.article-header .code-label{margin-bottom:1.5rem}
+.article-title{font-family:var(--display);font-size:clamp(2rem,5.5vw,3.8rem);color:var(--white);line-height:1.1;letter-spacing:.06em;margin-bottom:1.25rem;text-shadow:0 0 40px rgba(0,212,255,.1)}
+.article-meta{font-family:var(--body);font-size:.82rem;color:var(--mid);margin-bottom:1.75rem;letter-spacing:.02em}
+.article-meta .author-name{color:var(--cyan);font-weight:600}
+.article-meta .sep{margin:0 .6rem;opacity:.4}
+.article-tags{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.tag{font-family:var(--heading);font-size:.55rem;letter-spacing:.06em;padding:5px 14px;border:1px solid rgba(0,212,255,.18);color:var(--cyan);background:rgba(0,212,255,.04);transition:all .25s}
+.tag:hover{background:rgba(0,212,255,.1);border-color:rgba(0,212,255,.35)}
+.article-divider{width:60px;height:1px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);margin:3rem auto 0;opacity:.4}
+
+/* ── Article Body ── */
+.article-body{position:relative;z-index:1;max-width:720px;margin:0 auto;padding:3rem 2rem 4rem}
+.article-body p{font-size:1rem;color:var(--light);line-height:1.85;margin-bottom:1.75rem}
+.article-body p strong{color:var(--white);font-weight:600}
+.article-body h2{font-family:var(--heading);font-size:clamp(.95rem,2vw,1.25rem);color:var(--white);letter-spacing:.03em;margin:3rem 0 1.25rem;padding-bottom:.75rem;border-bottom:1px solid rgba(0,212,255,.08);position:relative}
+.article-body h2::before{content:'';position:absolute;bottom:-1px;left:0;width:40px;height:1px;background:var(--cyan)}
+
+/* ── Terminal Code Block ── */
+.term{max-width:720px;margin:2rem 0 2.5rem;background:var(--surface);overflow:hidden;border:1px solid rgba(0,212,255,.1);box-shadow:0 0 30px rgba(0,212,255,.03)}
+.term-bar{display:flex;align-items:center;gap:7px;padding:11px 16px;background:rgba(0,0,0,.3);border-bottom:1px solid rgba(0,212,255,.06)}
+.term-bar .p{margin-left:auto;font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.05em}
+.term-body{padding:1.5rem 1.75rem;font-family:'Courier New',monospace;font-size:.78rem;line-height:2.2;overflow-x:auto}
+.cm{color:#1e2e3e}.kw{color:var(--amber)}.fn{color:var(--cyan)}.st{color:var(--green)}.num{color:var(--rose)}.op{color:var(--mid)}.comment{color:#2a4a3e;font-style:italic}
+
+/* ── Blockquote ── */
+.article-body blockquote{border-left:3px solid var(--cyan);margin:2.5rem 0;padding:1.5rem 2rem;background:rgba(0,212,255,.02)}
+.article-body blockquote p{font-size:1.2rem;font-style:italic;color:var(--white);line-height:1.75;margin-bottom:0}
+.article-body blockquote .quote-attr{font-family:var(--heading);font-size:.6rem;color:var(--mid);letter-spacing:.06em;margin-top:.75rem;font-style:normal}
+
+/* ── Numbered List ── */
+.article-body ol{list-style:none;counter-reset:tips;margin:1.5rem 0 2rem;padding:0}
+.article-body ol li{counter-increment:tips;position:relative;padding:1rem 1rem 1rem 3.5rem;margin-bottom:.5rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);transition:all .25s}
+.article-body ol li:hover{border-color:rgba(0,212,255,.18);box-shadow:inset 0 0 12px rgba(0,212,255,.03)}
+.article-body ol li::before{content:counter(tips,decimal-leading-zero);position:absolute;left:1rem;top:1rem;font-family:var(--heading);font-size:.75rem;color:var(--cyan);letter-spacing:.04em}
+.article-body ol li strong{color:var(--white);font-weight:600;display:block;margin-bottom:.25rem;font-size:.92rem}
+.article-body ol li span{font-size:.88rem;color:var(--mid);line-height:1.7}
+
+/* ── CTA Banner ── */
+.article-cta{margin:2.5rem 0 3rem;padding:2rem;text-align:center;border:1px solid rgba(0,212,255,.12);background:rgba(0,212,255,.02)}
+.article-cta p{font-size:.95rem;color:var(--light);margin-bottom:1.25rem;line-height:1.7}
+.btn-glow{display:inline-block;padding:13px 34px;font-family:var(--heading);font-size:.7rem;letter-spacing:.06em;background:transparent;color:var(--cyan);border:1.5px solid var(--cyan);cursor:pointer;box-shadow:0 0 15px rgba(0,212,255,.15),inset 0 0 15px rgba(0,212,255,.05);transition:all .3s;text-decoration:none}.btn-glow:hover{background:var(--cyan);color:var(--bg);box-shadow:0 0 30px rgba(0,212,255,.3)}
+
+/* ── Author Card ── */
+.author-card{position:relative;z-index:1;max-width:720px;margin:0 auto;padding:0 2rem}
+.author-card-inner{display:flex;align-items:center;gap:1.5rem;padding:2rem;background:var(--surface);border:1px solid rgba(0,212,255,.08);border-top:2px solid rgba(0,212,255,.12)}
+.author-avatar{width:64px;height:64px;background:linear-gradient(135deg,rgba(0,212,255,.15),rgba(0,212,255,.05));border:1px solid rgba(0,212,255,.2);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.author-avatar span{font-family:var(--heading);font-size:1.1rem;color:var(--cyan);letter-spacing:.04em}
+.author-info{flex:1;min-width:0}
+.author-info .name{font-family:var(--heading);font-size:.85rem;color:var(--white);letter-spacing:.03em;margin-bottom:.25rem}
+.author-info .bio{font-size:.82rem;color:var(--mid);line-height:1.65}
+.author-follow{flex-shrink:0}
+.btn-follow{padding:8px 20px;font-family:var(--heading);font-size:.6rem;letter-spacing:.06em;background:transparent;color:var(--cyan);border:1px solid rgba(0,212,255,.3);cursor:pointer;transition:all .25s;text-decoration:none}.btn-follow:hover{background:rgba(0,212,255,.08);border-color:var(--cyan)}
+
+/* ── Related Posts ── */
+.related-section{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:4rem 2rem 5rem}
+.related-section .section-label{font-family:var(--heading);font-size:.65rem;color:var(--cyan);letter-spacing:.08em;opacity:.75;margin-bottom:.75rem}
+.related-section .section-title{font-family:var(--heading);font-size:clamp(.95rem,1.8vw,1.15rem);color:var(--white);letter-spacing:.03em;margin-bottom:2rem}
+.related-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px}
+.related-card{padding:1.75rem;background:var(--surface);border:1px solid rgba(0,212,255,.06);border-top:2px solid rgba(0,212,255,.06);transition:all .3s;cursor:pointer;text-decoration:none;display:block}
+.related-card:hover{border-top-color:var(--cyan);border-color:rgba(0,212,255,.18);box-shadow:inset 0 0 15px rgba(0,212,255,.03)}
+.related-card .r-tag{font-family:var(--heading);font-size:.5rem;color:var(--cyan);letter-spacing:.1em;margin-bottom:.75rem;opacity:.7}
+.related-card .r-title{font-family:var(--heading);font-size:.78rem;color:var(--white);letter-spacing:.02em;line-height:1.5;margin-bottom:.75rem}
+.related-card .r-meta{font-size:.7rem;color:var(--gray);letter-spacing:.02em}
+
+/* ── Footer ── */
+.foot{text-align:center;padding:1.5rem;font-family:var(--heading);font-size:.55rem;color:var(--gray);border-top:1px solid rgba(0,212,255,.04);position:relative;z-index:1;letter-spacing:.06em}
+
+/* ── Responsive ── */
+@media(max-width:768px){
+  .related-grid{grid-template-columns:1fr}
+  .author-card-inner{flex-direction:column;text-align:center;gap:1rem}
+  .article-header{padding:7rem 1.5rem 3rem}
+  .article-body{padding:2rem 1.5rem 3rem}
+  .article-body blockquote{padding:1.25rem 1.5rem}
+  .author-follow{margin-top:.5rem}
+}
+@media(max-width:480px){
+  .article-title{font-size:1.8rem}
+  .article-body h2{font-size:.9rem}
+}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<nav class="mockup-nav">
+  <a href="mockup-42-warp-hex.html">42 Hex Warp</a>
+  <a href="mockup-43-dashboard.html">43 Dashboard</a>
+  <a href="mockup-44-blog.html" class="active">44 Blog</a>
+  <a href="mockup-45-questionnaire.html">45 Questionnaire</a>
+  <a href="mockup-46-research-prompt.html">46 Research</a>
+  <a href="mockup-47-research-output.html">47 Output</a>
+  <a href="mockup-48-github-actions.html">48 GitHub</a>
+</nav>
+
+<!-- ── Article Header ── -->
+<header class="article-header reveal">
+  <div class="code-label">// blog.read()</div>
+  <h1 class="article-title">Why Vibe-Coding Will Kill Your Career</h1>
+  <div class="article-meta">
+    By <span class="author-name">Maya Rodriguez</span>
+    <span class="sep">&middot;</span>
+    Feb 18, 2026
+    <span class="sep">&middot;</span>
+    8 min read
+  </div>
+  <div class="article-tags">
+    <span class="tag">Critical Thinking</span>
+    <span class="tag">AI</span>
+    <span class="tag">Career Growth</span>
+  </div>
+  <div class="article-divider"></div>
+</header>
+
+<!-- ── Article Body ── -->
+<article class="article-body">
+
+  <div class="reveal">
+    <p>AI code generation has crossed a threshold. Tools like Copilot, Cursor, and Claude can now produce working code faster than most developers can type it. And that's exactly the problem. <strong>The easier it gets to generate code, the harder it becomes to justify understanding it</strong> &mdash; and an entire generation of developers is sleepwalking into irrelevance.</p>
+  </div>
+
+  <div class="reveal">
+    <h2>The Comfort Trap</h2>
+    <p>Vibe-coding &mdash; the practice of prompting AI to write code you don't fully understand, then shipping it because "it works" &mdash; feels productive. You're moving fast. PRs are merging. The sprint board is clearing. But beneath the surface, something dangerous is happening: <strong>your ability to reason about systems is atrophying.</strong></p>
+    <p>Consider a scenario that plays out in thousands of codebases every day. A developer prompts their AI assistant for a clean service layer. The output looks professional, reads well, and passes the test suite. But there's a subtle flaw &mdash; one that won't surface until production load hits:</p>
+  </div>
+
+  <div class="reveal">
+    <div class="term">
+      <div class="term-bar">
+        <span class="p">order_service.py</span>
+      </div>
+      <div class="term-body">
+<span class="kw">class</span> <span class="fn">OrderService</span><span class="op">:</span>
+    <span class="kw">def</span> <span class="fn">__init__</span><span class="op">(</span><span class="fn">self</span><span class="op">):</span>
+        <span class="fn">self</span><span class="op">.</span><span class="fn">db</span> <span class="op">=</span> <span class="fn">DatabasePool</span><span class="op">.</span><span class="fn">connect</span><span class="op">()</span>  <span class="comment"># new conn per instance</span>
+        <span class="fn">self</span><span class="op">.</span><span class="fn">cache</span> <span class="op">=</span> <span class="fn">RedisClient</span><span class="op">()</span>      <span class="comment"># no shared pool</span>
+
+    <span class="kw">async def</span> <span class="fn">get_order</span><span class="op">(</span><span class="fn">self</span><span class="op">,</span> <span class="fn">order_id</span><span class="op">):</span>
+        <span class="fn">cached</span> <span class="op">=</span> <span class="kw">await</span> <span class="fn">self</span><span class="op">.</span><span class="fn">cache</span><span class="op">.</span><span class="fn">get</span><span class="op">(</span><span class="st">f"order:</span><span class="op">{</span><span class="fn">order_id</span><span class="op">}</span><span class="st">"</span><span class="op">)</span>
+        <span class="kw">if</span> <span class="fn">cached</span><span class="op">:</span>
+            <span class="kw">return</span> <span class="fn">json</span><span class="op">.</span><span class="fn">loads</span><span class="op">(</span><span class="fn">cached</span><span class="op">)</span>  <span class="comment"># no TTL validation</span>
+        <span class="fn">order</span> <span class="op">=</span> <span class="kw">await</span> <span class="fn">self</span><span class="op">.</span><span class="fn">db</span><span class="op">.</span><span class="fn">fetch_one</span><span class="op">(</span><span class="st">"SELECT * FROM orders WHERE id = %s"</span><span class="op">,</span> <span class="fn">order_id</span><span class="op">)</span>
+        <span class="kw">await</span> <span class="fn">self</span><span class="op">.</span><span class="fn">cache</span><span class="op">.</span><span class="fn">set</span><span class="op">(</span><span class="st">f"order:</span><span class="op">{</span><span class="fn">order_id</span><span class="op">}</span><span class="st">"</span><span class="op">,</span> <span class="fn">json</span><span class="op">.</span><span class="fn">dumps</span><span class="op">(</span><span class="fn">order</span><span class="op">))</span>
+        <span class="kw">return</span> <span class="fn">order</span>
+
+    <span class="kw">async def</span> <span class="fn">place_order</span><span class="op">(</span><span class="fn">self</span><span class="op">,</span> <span class="fn">user_id</span><span class="op">,</span> <span class="fn">items</span><span class="op">):</span>
+        <span class="fn">order</span> <span class="op">=</span> <span class="kw">await</span> <span class="fn">self</span><span class="op">.</span><span class="fn">db</span><span class="op">.</span><span class="fn">execute</span><span class="op">(</span><span class="st">"INSERT INTO orders ..."</span><span class="op">,</span> <span class="fn">user_id</span><span class="op">,</span> <span class="fn">items</span><span class="op">)</span>
+        <span class="comment"># cache not invalidated &mdash; stale reads guaranteed</span>
+        <span class="kw">return</span> <span class="fn">order</span>
+      </div>
+    </div>
+    <p>This code looks clean. It follows naming conventions. It even uses caching. But it creates a new database connection <em>per service instance</em>, has no connection pooling for Redis, never validates cache TTL, and &mdash; critically &mdash; <strong>never invalidates the cache on writes</strong>. Under load, this service will exhaust database connections, serve stale data, and silently corrupt the user experience. An AI generated it in seconds. A vibe-coder shipped it in minutes. A production incident will take days to untangle.</p>
+  </div>
+
+  <div class="reveal">
+    <h2>What AI Can't Replace</h2>
+    <p>The skills that will define the next decade of software engineering aren't the ones AI is good at. <strong>Critical thinking</strong> &mdash; the ability to look at a working system and ask "what happens when this assumption breaks?" <strong>System design</strong> &mdash; understanding how components interact at scale, where failure modes hide, and why boundaries exist. <strong>Adversarial reasoning</strong> &mdash; the practiced paranoia of imagining how users, attackers, and entropy will stress your architecture in ways you never intended.</p>
+    <p>These are fundamentally human capabilities. They require context, judgment, and the kind of deep understanding that only comes from wrestling with systems that fight back. No amount of prompt engineering will substitute for the developer who has debugged a distributed deadlock at 3 AM and internalized the lesson.</p>
+  </div>
+
+  <div class="reveal">
+    <blockquote>
+      <p>The developers who thrive won't be the ones who prompt the best. They'll be the ones who think the best.</p>
+      <div class="quote-attr">&mdash; The Smarter Dev Thesis</div>
+    </blockquote>
+  </div>
+
+  <div class="reveal">
+    <h2>How to Build Real Skills</h2>
+    <p>If you recognize yourself in any of this, the good news is that the fix isn't complicated. It's just uncomfortable. Here's where to start:</p>
+    <ol>
+      <li>
+        <strong>Read before you prompt.</strong>
+        <span>Before asking AI to generate code, read the documentation for the library or pattern yourself. Build a mental model first. Then use AI to accelerate implementation &mdash; not to replace understanding.</span>
+      </li>
+      <li>
+        <strong>Break your own code.</strong>
+        <span>After every AI-generated solution, spend ten minutes trying to break it. What happens with null input? Under concurrent access? When the network is unreliable? If you can't find the failure mode, you don't understand the code well enough to ship it.</span>
+      </li>
+      <li>
+        <strong>Architect on paper first.</strong>
+        <span>Before writing a single line, sketch the system on paper. Draw the boundaries. Label the failure modes. Identify what happens when each dependency is unavailable. This practice builds the judgment that AI cannot replicate.</span>
+      </li>
+      <li>
+        <strong>Join communities that challenge you.</strong>
+        <span>Surround yourself with developers who ask hard questions, who push back on your designs, who care about why something works &mdash; not just that it works. Growth happens at the edge of discomfort.</span>
+      </li>
+    </ol>
+  </div>
+
+  <div class="reveal">
+    <p>The AI revolution isn't eliminating the need for skilled developers. It's <strong>raising the bar</strong>. The developers who treat AI as a crutch will find themselves replaceable. The developers who treat it as a power tool &mdash; while continuing to sharpen their own thinking &mdash; will be more valuable than ever.</p>
+
+    <div class="article-cta">
+      <p>Smarter Dev is a community of developers building the skills that AI can't replace. Critical thinking challenges, architecture reviews, and adversarial reasoning exercises &mdash; delivered weekly.</p>
+      <a href="#" class="btn-glow">Join the Community</a>
+    </div>
+  </div>
+
+</article>
+
+<!-- ── Author Card ── -->
+<section class="author-card reveal">
+  <div class="author-card-inner">
+    <div class="author-avatar"><span>MR</span></div>
+    <div class="author-info">
+      <div class="name">Maya Rodriguez</div>
+      <div class="bio">Staff engineer and systems thinker. Writes about developer growth, architecture patterns, and surviving the AI transition. 12 years building distributed systems that refuse to break quietly.</div>
+    </div>
+    <div class="author-follow">
+      <a href="#" class="btn-follow">Follow</a>
+    </div>
+  </div>
+</section>
+
+<!-- ── Related Posts ── -->
+<section class="related-section reveal">
+  <div class="section-label">// related.fetch()</div>
+  <div class="section-title">More from Smarter Dev</div>
+  <div class="related-grid">
+    <a href="#" class="related-card">
+      <div class="r-tag">ARCHITECTURE</div>
+      <div class="r-title">The Dependency Inversion Nobody Talks About</div>
+      <div class="r-meta">Feb 12, 2026 &middot; 6 min read</div>
+    </a>
+    <a href="#" class="related-card">
+      <div class="r-tag">ADVERSARIAL REASONING</div>
+      <div class="r-title">How I Broke Our Microservices With One DNS Change</div>
+      <div class="r-meta">Feb 5, 2026 &middot; 10 min read</div>
+    </a>
+    <a href="#" class="related-card">
+      <div class="r-tag">CRITICAL THINKING</div>
+      <div class="r-title">Stop Measuring Lines of Code. Start Measuring Decisions.</div>
+      <div class="r-meta">Jan 28, 2026 &middot; 7 min read</div>
+    </a>
+  </div>
+</section>
+
+<footer class="foot">&copy; 2026 Smarter Dev &mdash; Think harder. Build better.</footer>
+
+<script>
+(function() {
+  const canvas = document.getElementById('bg');
+  const ctx = canvas.getContext('2d');
+
+  const HEX_SIZE = 18;
+  const H_SPACING = HEX_SIZE * Math.sqrt(3);
+  const V_SPACING = HEX_SIZE * 1.5;
+  const DOT_RADIUS = 2;
+  const INFLUENCE_RADIUS = 200;
+  const MAX_DISPLACEMENT = 20;
+  const LERP_SPEED = 0.08;
+  const AMBIENT_AMPLITUDE = 1;
+  const AMBIENT_SPEED = 0.0008;
+  const CLICK_DURATION = 500;
+  const HEX_LINE_REST = 0.025;
+  const HEX_LINE_ACTIVE = 0.08;
+  const PATH_COUNT = 60;
+  const PATH_SPEED = 1.2;
+  const TURN_CHANCE = 0.2;
+  const SEGMENT_FADE = 0.001;
+  const SEGMENT_PEAK_ALPHA = 0.12;
+
+  let dots = [];
+  let cols = 0;
+  let rows = 0;
+  let mouseX = -9999;
+  let mouseY = -9999;
+  let mouseActive = false;
+  let clickTime = 0;
+  let clickActive = false;
+  let animId = null;
+  let time = 0;
+  let traces = [];
+
+  const hexVerts = [];
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.PI / 180 * (60 * i - 30);
+    hexVerts.push({ x: HEX_SIZE * Math.cos(angle), y: HEX_SIZE * Math.sin(angle) });
+  }
+
+  function createDots() {
+    const w = canvas.width;
+    const h = canvas.height;
+    cols = Math.ceil(w / H_SPACING) + 3;
+    rows = Math.ceil(h / V_SPACING) + 3;
+    dots = [];
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        const isOdd = row % 2 === 1;
+        dots.push({
+          baseX: col * H_SPACING + (isOdd ? H_SPACING * 0.5 : 0) - H_SPACING,
+          baseY: row * V_SPACING - V_SPACING,
+          offsetX: 0, offsetY: 0,
+          targetOffsetX: 0, targetOffsetY: 0,
+          col: col, row: row,
+          phaseX: Math.random() * Math.PI * 2,
+          phaseY: Math.random() * Math.PI * 2
+        });
+      }
+    }
+    initTraces();
+  }
+
+  function getDot(row, col) {
+    if (row < 0 || row >= rows || col < 0 || col >= cols) return null;
+    return dots[row * cols + col];
+  }
+
+  function downNeighbors(row, col) {
+    const isOdd = row % 2 === 1;
+    if (isOdd) return [{ row: row + 1, col: col }, { row: row + 1, col: col + 1 }];
+    return [{ row: row + 1, col: col - 1 }, { row: row + 1, col: col }];
+  }
+
+  function buildRoute(startCol) {
+    const route = [];
+    let col = startCol;
+    for (let row = 0; row < rows; row++) {
+      route.push({ row: row, col: col });
+      if (Math.random() < TURN_CHANCE && row < rows - 1) {
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        const newCol = col + dir;
+        if (newCol >= 0 && newCol < cols) { route.push({ row: row, col: newCol }); col = newCol; }
+      }
+      if (row < rows - 1) {
+        const dns = downNeighbors(row, col);
+        const pick = dns[Math.random() < 0.5 ? 0 : 1];
+        if (pick.col >= 0 && pick.col < cols) col = pick.col;
+        else col = dns[0].col >= 0 && dns[0].col < cols ? dns[0].col : dns[1].col;
+      }
+    }
+    return route;
+  }
+
+  let recentSpawnCols = [];
+  function pickSpawnCol() {
+    const MIN_DIST = 8;
+    for (let a = 0; a < 200; a++) {
+      const col = Math.floor(Math.random() * cols);
+      let bad = false;
+      for (const p of recentSpawnCols) { if (Math.abs(col - p) < MIN_DIST) { bad = true; break; } }
+      if (!bad) { recentSpawnCols.push(col); if (recentSpawnCols.length > 3) recentSpawnCols.shift(); return col; }
+    }
+    const col = Math.floor(Math.random() * cols);
+    recentSpawnCols.push(col); if (recentSpawnCols.length > 3) recentSpawnCols.shift();
+    return col;
+  }
+
+  function spawnTrace() {
+    const col = pickSpawnCol();
+    return { route: buildRoute(col), step: 0, progress: 0, speed: PATH_SPEED * (0.5 + Math.random() * 0.8), segments: [] };
+  }
+
+  function initTraces() {
+    recentSpawnCols = []; traces = [];
+    for (let i = 0; i < PATH_COUNT; i++) { const t = spawnTrace(); t.step = Math.floor(Math.random() * t.route.length * 0.8); traces.push(t); }
+  }
+
+  function updateTraces() {
+    for (let i = 0; i < traces.length; i++) {
+      const t = traces[i];
+      if (t.step < t.route.length - 1) {
+        const from = t.route[t.step], to = t.route[t.step + 1];
+        const d1 = getDot(from.row, from.col), d2 = getDot(to.row, to.col);
+        let stepDist = H_SPACING;
+        if (d1 && d2) { const dx = d2.baseX - d1.baseX, dy = d2.baseY - d1.baseY; stepDist = Math.sqrt(dx*dx+dy*dy) || H_SPACING; }
+        t.progress += t.speed / stepDist;
+        if (t.progress >= 1) { t.segments.push({ fromRow: from.row, fromCol: from.col, toRow: to.row, toCol: to.col, alpha: SEGMENT_PEAK_ALPHA }); t.progress -= 1; t.step++; }
+      } else { traces[i] = spawnTrace(); }
+      for (let j = t.segments.length - 1; j >= 0; j--) { t.segments[j].alpha -= SEGMENT_FADE; if (t.segments[j].alpha <= 0) t.segments.splice(j, 1); }
+    }
+  }
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = window.innerWidth * dpr; canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + 'px'; canvas.style.height = window.innerHeight + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); createDots();
+  }
+
+  function onMouseMove(e) { mouseX = e.clientX; mouseY = e.clientY; mouseActive = true; }
+  function onMouseLeave() { mouseActive = false; mouseX = -9999; mouseY = -9999; }
+  function onClick() { clickTime = performance.now(); clickActive = true; }
+
+  function update(now) {
+    time = now;
+    let clickFactor = 0;
+    if (clickActive) { const el = now - clickTime; if (el < CLICK_DURATION) { clickFactor = 1 - el/CLICK_DURATION; clickFactor *= clickFactor; } else clickActive = false; }
+    const irSq = INFLUENCE_RADIUS * INFLUENCE_RADIUS;
+    for (let i = 0; i < dots.length; i++) {
+      const dot = dots[i];
+      const ax = Math.sin(now * AMBIENT_SPEED + dot.phaseX) * AMBIENT_AMPLITUDE;
+      const ay = Math.cos(now * AMBIENT_SPEED * 0.7 + dot.phaseY) * AMBIENT_AMPLITUDE;
+      let dx2 = 0, dy2 = 0;
+      if (mouseActive) { const ddx = dot.baseX - mouseX, ddy = dot.baseY - mouseY, dSq = ddx*ddx+ddy*ddy;
+        if (dSq < irSq && dSq > 0.01) { const d = Math.sqrt(dSq), p = 1-d/INFLUENCE_RADIUS, s = p*p*MAX_DISPLACEMENT, b = 1-2*clickFactor; dx2 = ddx/d*s*b; dy2 = ddy/d*s*b; } }
+      dot.targetOffsetX = dx2 + ax; dot.targetOffsetY = dy2 + ay;
+      dot.offsetX += (dot.targetOffsetX - dot.offsetX) * LERP_SPEED;
+      dot.offsetY += (dot.targetOffsetY - dot.offsetY) * LERP_SPEED;
+    }
+    updateTraces();
+  }
+
+  function drawHex(cx, cy, alpha) {
+    ctx.beginPath(); ctx.moveTo(cx + hexVerts[0].x, cy + hexVerts[0].y);
+    for (let i = 1; i < 6; i++) ctx.lineTo(cx + hexVerts[i].x, cy + hexVerts[i].y);
+    ctx.closePath(); ctx.strokeStyle = 'rgba(0,212,255,' + alpha.toFixed(4) + ')'; ctx.lineWidth = 0.5; ctx.stroke();
+  }
+
+  function draw() {
+    const w = window.innerWidth, h = window.innerHeight;
+    ctx.clearRect(0, 0, w, h);
+    for (let i = 0; i < dots.length; i++) {
+      const dot = dots[i], x = dot.baseX + dot.offsetX, y = dot.baseY + dot.offsetY;
+      const disp = Math.sqrt(dot.offsetX*dot.offsetX + dot.offsetY*dot.offsetY);
+      const ed = Math.max(0, disp - AMBIENT_AMPLITUDE), dn = Math.min(ed / MAX_DISPLACEMENT, 1);
+      drawHex(x, y, HEX_LINE_REST + (HEX_LINE_ACTIVE - HEX_LINE_REST) * dn);
+      ctx.beginPath(); ctx.arc(x, y, DOT_RADIUS, 0, Math.PI*2);
+      ctx.fillStyle = 'rgba(0,212,255,' + (0.06 + 0.24*dn).toFixed(3) + ')'; ctx.fill();
+    }
+    for (const t of traces) {
+      for (const seg of t.segments) {
+        const d1 = getDot(seg.fromRow, seg.fromCol), d2 = getDot(seg.toRow, seg.toCol);
+        if (!d1||!d2) continue;
+        ctx.beginPath(); ctx.moveTo(d1.baseX+d1.offsetX, d1.baseY+d1.offsetY);
+        ctx.lineTo(d2.baseX+d2.offsetX, d2.baseY+d2.offsetY);
+        ctx.strokeStyle = 'rgba(0,212,255,' + seg.alpha.toFixed(4) + ')'; ctx.lineWidth = 2.5; ctx.stroke();
+      }
+      if (t.step < t.route.length - 1) {
+        const from = t.route[t.step], to = t.route[t.step+1];
+        const d1 = getDot(from.row, from.col), d2 = getDot(to.row, to.col);
+        if (d1&&d2) { const x1=d1.baseX+d1.offsetX,y1=d1.baseY+d1.offsetY,x2=d2.baseX+d2.offsetX,y2=d2.baseY+d2.offsetY;
+          ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x1+(x2-x1)*t.progress, y1+(y2-y1)*t.progress);
+          ctx.strokeStyle='rgba(0,212,255,'+SEGMENT_PEAK_ALPHA+')'; ctx.lineWidth=2.5; ctx.stroke(); }
+      }
+    }
+  }
+
+  function loop(now) { update(now); draw(); animId = requestAnimationFrame(loop); }
+  resize();
+  window.addEventListener('resize', resize);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseleave', onMouseLeave);
+  window.addEventListener('click', onClick);
+  animId = requestAnimationFrame(loop);
+
+  const obs = new IntersectionObserver(e => { e.forEach(x => { if (x.isIntersecting) { x.target.classList.add('visible'); obs.unobserve(x.target); } }); }, { threshold: .1 });
+  document.querySelectorAll('.reveal').forEach(el => obs.observe(el));
+})();
+</script>
+</body>
+</html>

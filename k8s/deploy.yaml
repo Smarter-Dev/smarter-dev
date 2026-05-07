@@ -16,7 +16,7 @@ spec:
         matchLabels:
             app: smarter-dev-website
             tier: frontend
-    replicas: 2
+    replicas: 1
     template:
         metadata:
             labels:
@@ -44,6 +44,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: database-url
+                  - name: LEGACY_DATABASE_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: legacy-database-url
                   - name: REDIS_URL
                     valueFrom:
                       secretKeyRef:
@@ -81,9 +86,9 @@ spec:
                         key: discord-client-secret
                   - name: DISCORD_REDIRECT_URI
                     valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: discord-redirect-uri
+                      configMapKeyRef:
+                        name: smarter-dev-config
+                        key: DISCORD_REDIRECT_URI
                   - name: DISCORD_BOT_TOKEN
                     valueFrom:
                       secretKeyRef:
@@ -109,13 +114,70 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: anthropic-api-key
+                  - name: RESEND_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: resend-api-key
+                  - name: SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: secret-key
+                  - name: JINA_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: jina-api-key
+                  - name: BRAVE_SEARCH_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: brave-search-api-key
+                  - name: YOUTUBE_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: youtube-api-key
+                  - name: GEMINI_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: gemini-api-key
+                  - name: OPENAI_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: openai-api-key
+                  - name: GITHUB_CLIENT_ID
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: github-client-id
+                  - name: GITHUB_CLIENT_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: github-client-secret
+                  - name: GOOGLE_CLIENT_ID
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: google-client-id
+                  - name: GOOGLE_CLIENT_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: google-client-secret
+                  - name: SKRIFT_ENV
+                    value: "production"
                 resources:
                     requests:
-                        cpu: 100m
-                        memory: 256Mi
+                        cpu: 75m
+                        memory: 192Mi
                     limits:
-                        cpu: 500m
-                        memory: 512Mi
+                        cpu: 300m
+                        memory: 384Mi
                 livenessProbe:
                     httpGet:
                         path: /api/health

@@ -1,0 +1,88 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: smarter_dev_postgres
+    environment:
+      POSTGRES_DB: smarter_dev
+      POSTGRES_USER: smarter_dev
+      POSTGRES_PASSWORD: smarter_dev_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smarter_dev -d smarter_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: smarter_dev_redis
+    command: redis-server --requirepass smarter_dev_redis_password
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "smarter_dev_redis_password", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: smarter_dev_web
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/smarter_dev
+      - LEGACY_DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/bc_websites
+      - REDIS_URL=redis://:smarter_dev_redis_password@redis:6379/0
+    ports:
+      - "8001:8000"
+    volumes:
+      - .:/app
+      - /app/.venv
+    working_dir: /app
+    command: uv run hypercorn main:app --bind 0.0.0.0:8000 --reload
+    restart: unless-stopped
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    container_name: smarter_dev_bot
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/smarter_dev
+      - LEGACY_DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/bc_websites
+      - REDIS_URL=redis://:smarter_dev_redis_password@redis:6379/0
+      - API_BASE_URL=http://web:8000/api
+    volumes:
+      - .:/app
+      - /app/.venv
+    working_dir: /app
+    command: uv run python -m smarter_dev.bot.client
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

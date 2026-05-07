@@ -107,11 +107,14 @@ class TestForumAgentService:
                 "is_active": True
             }
         ]
-        
-        mock_api_client.get.return_value = mock_agents
-        
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_agents
+        mock_api_client.get.return_value = mock_response
+
         agents = await forum_agent_service.load_guild_agents(guild_id)
-        
+
         assert len(agents) == 2
         assert agents[0]["name"] == "Agent 1"
         assert agents[1]["name"] == "Agent 2"
@@ -120,10 +123,13 @@ class TestForumAgentService:
     async def test_load_guild_agents_empty_result(self, forum_agent_service, mock_api_client):
         """Test loading agents when none exist for guild."""
         guild_id = "555555555"
-        mock_api_client.get.return_value = []
-        
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+        mock_api_client.get.return_value = mock_response
+
         agents = await forum_agent_service.load_guild_agents(guild_id)
-        
+
         assert agents == []
         mock_api_client.get.assert_called_once_with(f"/guilds/{guild_id}/forum-agents")
 
@@ -282,21 +288,25 @@ class TestForumAgentService:
         response_time_ms = 1200
         responded = True
         
-        mock_api_client.post.return_value = {"id": str(uuid4())}
-        
+        response_id_str = str(uuid4())
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"id": response_id_str}
+        mock_api_client.post.return_value = mock_response
+
         response_id = await forum_agent_service.record_response(
-            agent, post, decision_reason, confidence_score, 
+            agent, post, decision_reason, confidence_score,
             response_content, tokens_used, response_time_ms, responded
         )
-        
+
         assert response_id is not None
         mock_api_client.post.assert_called_once()
-        
+
         # Verify the call was made with correct data
         call_args = mock_api_client.post.call_args
         assert call_args[0][0] == f"/guilds/{post.guild_id}/forum-agents/{agent['id']}/responses"
-        
-        posted_data = call_args[1]['json']
+
+        posted_data = call_args[1]['json_data']
         assert posted_data['channel_id'] == post.channel_id
         assert posted_data['thread_id'] == post.thread_id
         assert posted_data['post_title'] == post.title
@@ -342,16 +352,19 @@ class TestForumAgentService:
             "is_active": True,
             "guild_id": "555555555"
         }
-        
+
         # Mock API to return 3 responses in the last hour
-        mock_api_client.get.return_value = {"count": 3}
-        
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"count": 3}
+        mock_api_client.get.return_value = mock_response
+
         within_limit = await forum_agent_service.check_rate_limit(agent)
-        
+
         assert within_limit is True
         mock_api_client.get.assert_called_once_with(
             f"/guilds/{agent['guild_id']}/forum-agents/{agent['id']}/responses/count",
-            params={'hours': 1}
+            params={"hours": 1}
         )
 
     async def test_check_rate_limit_exceeded(self, forum_agent_service, mock_api_client):
@@ -366,19 +379,22 @@ class TestForumAgentService:
             "is_active": True,
             "guild_id": "555555555"
         }
-        
+
         # Mock API to return 5 responses in the last hour (at limit)
-        mock_api_client.get.return_value = {"count": 5}
-        
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"count": 5}
+        mock_api_client.get.return_value = mock_response
+
         within_limit = await forum_agent_service.check_rate_limit(agent)
-        
+
         assert within_limit is False
         mock_api_client.get.assert_called_once()
 
     async def test_get_agent_analytics_success(self, forum_agent_service, mock_api_client):
         """Test successfully retrieving agent analytics."""
         agent_id = uuid4()
-        
+
         mock_analytics = {
             "total_evaluations": 50,
             "total_responses": 15,
@@ -387,11 +403,14 @@ class TestForumAgentService:
             "response_rate": 0.30,
             "hourly_activity": [2, 3, 1, 4, 2]
         }
-        
-        mock_api_client.get.return_value = mock_analytics
-        
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_analytics
+        mock_api_client.get.return_value = mock_response
+
         analytics = await forum_agent_service.get_agent_analytics(str(agent_id))
-        
+
         assert analytics == mock_analytics
         mock_api_client.get.assert_called_once_with(f"/forum-agents/{agent_id}/analytics")
 
@@ -399,7 +418,7 @@ class TestForumAgentService:
         """Test complete forum post processing workflow."""
         guild_id = "555555555"
         post = MockForumPost()
-        
+
         # Mock agents
         mock_agents = [
             {
@@ -413,23 +432,34 @@ class TestForumAgentService:
                 "guild_id": guild_id
             }
         ]
-        
-        # Mock rate limit check
+
+        # Mock rate limit check - both need to be response objects
+        agents_response = Mock()
+        agents_response.status_code = 200
+        agents_response.json.return_value = mock_agents
+
+        rate_limit_response = Mock()
+        rate_limit_response.status_code = 200
+        rate_limit_response.json.return_value = {"count": 2}
+
         mock_api_client.get.side_effect = [
-            mock_agents,  # load_guild_agents call
-            {"count": 2}  # check_rate_limit call
+            agents_response,      # load_guild_agents call
+            rate_limit_response   # check_rate_limit call
         ]
-        
+
         # Mock response recording
-        mock_api_client.post.return_value = {"id": str(uuid4())}
-        
+        record_response = Mock()
+        record_response.status_code = 200
+        record_response.json.return_value = {"id": str(uuid4())}
+        mock_api_client.post.return_value = record_response
+
         with patch('smarter_dev.bot.services.forum_agent_service.ForumMonitorAgent') as mock_agent_class:
             mock_agent_instance = AsyncMock()
             mock_agent_instance.evaluate_post.return_value = ("Should respond", 0.85, "Helpful response", 150)
             mock_agent_class.return_value = mock_agent_instance
-            
+
             responses = await forum_agent_service.process_forum_post(guild_id, post)
-            
+
             assert len(responses) == 1
             assert responses[0]["agent_name"] == "Agent 1"
             assert responses[0]["should_respond"] is True
@@ -440,18 +470,21 @@ class TestForumAgentService:
         """Test processing post when no agents exist for guild."""
         guild_id = "555555555"
         post = MockForumPost()
-        
-        mock_api_client.get.return_value = []  # No agents
-        
+
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = []  # No agents
+        mock_api_client.get.return_value = mock_response
+
         responses = await forum_agent_service.process_forum_post(guild_id, post)
-        
+
         assert responses == []
 
     async def test_process_forum_post_agent_rate_limited(self, forum_agent_service, mock_api_client):
         """Test processing post when agent is rate limited."""
         guild_id = "555555555"
         post = MockForumPost()
-        
+
         mock_agents = [
             {
                 "id": str(uuid4()),
@@ -464,14 +497,22 @@ class TestForumAgentService:
                 "guild_id": guild_id
             }
         ]
-        
+
+        agents_response = Mock()
+        agents_response.status_code = 200
+        agents_response.json.return_value = mock_agents
+
+        rate_limit_response = Mock()
+        rate_limit_response.status_code = 200
+        rate_limit_response.json.return_value = {"count": 5}
+
         mock_api_client.get.side_effect = [
-            mock_agents,  # load_guild_agents call
-            {"count": 5}  # check_rate_limit call - at limit
+            agents_response,      # load_guild_agents call
+            rate_limit_response   # check_rate_limit call - at limit
         ]
-        
+
         responses = await forum_agent_service.process_forum_post(guild_id, post)
-        
+
         assert len(responses) == 1
         assert responses[0]["should_respond"] is False
         assert "rate limit" in responses[0]["decision_reason"].lower()

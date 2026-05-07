@@ -59,13 +59,14 @@ class TestConcurrentDailyClaims:
             config_mock = Mock()
             config_mock.guild_id = test_guild_id
             config_mock.daily_amount = 10
+            config_mock.starting_balance = 100
             config_mock.streak_bonuses = {"8": 2}
             mock_bytes_config_operations.get_config.return_value = config_mock
-            
+
             # Setup balance for user who can claim
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc)
-            
+
             balance_mock = Mock()
             balance_mock.guild_id = test_guild_id
             balance_mock.user_id = test_user_id
@@ -92,13 +93,14 @@ class TestConcurrentDailyClaims:
             updated_balance_mock.created_at = now
             updated_balance_mock.updated_at = now
             
-            mock_bytes_operations.update_daily_reward.return_value = updated_balance_mock
-            
+            mock_bytes_operations.update_daily_reward.return_value = (updated_balance_mock, None)
+
             # Create multiple concurrent requests
             async def make_claim_request():
                 return await api_client.post(
-                    f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-                    headers=bot_headers
+                    f"/guilds/{test_guild_id}/bytes/daily",
+                    headers=bot_headers,
+                    json={"user_id": test_user_id}
                 )
             
             # Execute concurrent requests
@@ -187,7 +189,7 @@ class TestConcurrentDailyClaims:
         def update_daily_reward_side_effect(session, guild_id, user_id, *args, **kwargs):
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc)
-            
+
             updated_mock = Mock()
             updated_mock.guild_id = guild_id
             updated_mock.user_id = user_id
@@ -198,15 +200,16 @@ class TestConcurrentDailyClaims:
             updated_mock.last_daily = date(2024, 1, 15)
             updated_mock.created_at = now
             updated_mock.updated_at = now
-            return updated_mock
-        
+            return (updated_mock, None)
+
         mock_bytes_operations.update_daily_reward.side_effect = update_daily_reward_side_effect
-        
+
         # Create concurrent requests for different users
         async def make_claim_request(user_id: str):
             return await api_client.post(
-                f"/guilds/{test_guild_id}/bytes/daily/{user_id}",
-                headers=bot_headers
+                f"/guilds/{test_guild_id}/bytes/daily",
+                headers=bot_headers,
+                json={"user_id": user_id}
             )
         
         # Execute concurrent requests
@@ -291,29 +294,30 @@ class TestConcurrentDailyClaims:
         # Mock update_daily_reward for different scenarios
         update_call_count = 0
         
-        async def update_daily_reward_side_effect(session, guild_id, user_id, daily_amount, streak_bonus, new_streak_count, claim_date):
+        async def update_daily_reward_side_effect(session, guild_id, user_id, *args, **kwargs):
             nonlocal update_call_count
             update_call_count += 1
-            
+
             updated_mock = Mock()
             updated_mock.guild_id = guild_id
             updated_mock.user_id = user_id
-            updated_mock.balance = 500 + (daily_amount * streak_bonus)
-            updated_mock.total_received = 400 + (daily_amount * streak_bonus)
+            updated_mock.balance = 520
+            updated_mock.total_received = 420
             updated_mock.total_sent = 0
-            updated_mock.streak_count = new_streak_count
-            updated_mock.last_daily = claim_date
+            updated_mock.streak_count = 16
+            updated_mock.last_daily = date(2024, 1, 15)
             updated_mock.created_at = now
             updated_mock.updated_at = now
-            return updated_mock
-        
+            return (updated_mock, None)
+
         mock_bytes_operations.update_daily_reward.side_effect = update_daily_reward_side_effect
-        
+
         # Create concurrent requests: daily claim and streak reset
         async def make_daily_claim():
             return await api_client.post(
-                f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-                headers=bot_headers
+                f"/guilds/{test_guild_id}/bytes/daily",
+                headers=bot_headers,
+                json={"user_id": test_user_id}
             )
         
         async def make_streak_reset():
@@ -351,13 +355,14 @@ class TestConcurrentDailyClaims:
         config_mock = Mock()
         config_mock.guild_id = test_guild_id
         config_mock.daily_amount = 10
+        config_mock.starting_balance = 100
         config_mock.streak_bonuses = {"8": 2}
         mock_bytes_config_operations.get_config.return_value = config_mock
-        
+
         # Setup balance
         from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
-        
+
         balance_mock = Mock()
         balance_mock.guild_id = test_guild_id
         balance_mock.user_id = test_user_id
@@ -368,16 +373,16 @@ class TestConcurrentDailyClaims:
         balance_mock.last_daily = None
         balance_mock.created_at = now
         balance_mock.updated_at = now
-        
+
         mock_bytes_operations.get_balance.return_value = balance_mock
-        
+
         # Simulate intermittent database failures
         call_count = 0
         
         async def update_with_failure(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            
+
             if call_count % 2 == 1:  # Fail on odd calls
                 raise DatabaseOperationError("Connection timeout")
             else:  # Succeed on even calls
@@ -391,16 +396,17 @@ class TestConcurrentDailyClaims:
                 updated_mock.last_daily = date(2024, 1, 15)
                 updated_mock.created_at = now
                 updated_mock.updated_at = now
-                return updated_mock
-        
+                return (updated_mock, None)
+
         mock_bytes_operations.update_daily_reward.side_effect = update_with_failure
-        
+
         # Make multiple concurrent requests
         async def make_claim_request():
             try:
                 return await api_client.post(
-                    f"/guilds/{test_guild_id}/bytes/daily/{test_user_id}",
-                    headers=bot_headers
+                    f"/guilds/{test_guild_id}/bytes/daily",
+                    headers=bot_headers,
+                    json={"user_id": test_user_id}
                 )
             except Exception as e:
                 return e
@@ -494,29 +500,30 @@ class TestHighConcurrencyScenarios:
         mock_bytes_operations.get_balance.side_effect = get_balance_side_effect
         
         # Setup update responses
-        def update_daily_reward_side_effect(session, guild_id, user_id, daily_amount, streak_bonus, new_streak_count, claim_date):
+        def update_daily_reward_side_effect(session, guild_id, user_id, *args, **kwargs):
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc)
-            
+
             updated_mock = Mock()
             updated_mock.guild_id = guild_id
             updated_mock.user_id = user_id
-            updated_mock.balance = 300 + (daily_amount * streak_bonus)
-            updated_mock.total_received = 275 + (daily_amount * streak_bonus)
+            updated_mock.balance = 325
+            updated_mock.total_received = 300
             updated_mock.total_sent = 0
-            updated_mock.streak_count = new_streak_count
-            updated_mock.last_daily = claim_date
+            updated_mock.streak_count = 2
+            updated_mock.last_daily = date(2024, 1, 15)
             updated_mock.created_at = now
             updated_mock.updated_at = now
-            return updated_mock
-        
+            return (updated_mock, None)
+
         mock_bytes_operations.update_daily_reward.side_effect = update_daily_reward_side_effect
-        
+
         # Create concurrent requests for all users
         async def make_claim_request(user_id: str):
             return await api_client.post(
-                f"/guilds/{test_guild_id}/bytes/daily/{user_id}",
-                headers=bot_headers
+                f"/guilds/{test_guild_id}/bytes/daily",
+                headers=bot_headers,
+                json={"user_id": user_id}
             )
         
         # Execute all requests concurrently
@@ -637,49 +644,50 @@ class TestHighConcurrencyScenarios:
         mock_bytes_operations.get_balance.side_effect = get_balance_side_effect
         
         # Setup dynamic update responses
-        def update_daily_reward_side_effect(session, guild_id, user_id, daily_amount, streak_bonus, new_streak_count, claim_date):
+        def update_daily_reward_side_effect(session, guild_id, user_id, *args, **kwargs):
             state = user_states[user_id]
-            reward = daily_amount * streak_bonus
-            
+            reward = 20  # daily_amount
+
             # Update state
             state['balance'] += reward
-            state['streak'] = new_streak_count
-            state['last_daily'] = claim_date
+            state['streak'] += 1
+            state['last_daily'] = date(2024, 1, 15)
             state['can_claim'] = False  # Claimed today
-            
+
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc)
-            
+
             updated_mock = Mock()
             updated_mock.guild_id = guild_id
             updated_mock.user_id = user_id
             updated_mock.balance = state['balance']
             updated_mock.total_received = state['balance'] - 500
             updated_mock.total_sent = 0
-            updated_mock.streak_count = new_streak_count
-            updated_mock.last_daily = claim_date
+            updated_mock.streak_count = state['streak']
+            updated_mock.last_daily = date(2024, 1, 15)
             updated_mock.created_at = now
             updated_mock.updated_at = now
-            return updated_mock
-        
+            return (updated_mock, None)
+
         mock_bytes_operations.update_daily_reward.side_effect = update_daily_reward_side_effect
-        
+
         # Simulate sustained requests over time
         async def make_random_requests(duration_seconds: int = 5):
             """Make requests at random intervals for specified duration."""
             start_time = asyncio.get_event_loop().time()
             requests_made = 0
             successful_requests = 0
-            
+
             while (asyncio.get_event_loop().time() - start_time) < duration_seconds:
                 # Select random user
                 import random
                 user_id = random.choice(user_pool)
-                
+
                 try:
                     response = await api_client.post(
-                        f"/guilds/{test_guild_id}/bytes/daily/{user_id}",
-                        headers=bot_headers
+                        f"/guilds/{test_guild_id}/bytes/daily",
+                        headers=bot_headers,
+                        json={"user_id": user_id}
                     )
                     requests_made += 1
                     

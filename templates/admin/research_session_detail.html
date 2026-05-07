@@ -1,0 +1,205 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ session.name or 'Session' }} - Research Sessions - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="margin-bottom: 1rem;">
+    <a href="/admin/research-sessions" style="opacity: .6; text-decoration: none;">&larr; All Sessions</a>
+</div>
+
+<hgroup>
+    <h1>{{ session.name or 'Untitled Session' }}</h1>
+    <p>
+        <span class="sk-pill" style="{% if session.status == 'complete' %}background: rgba(0,200,83,.12); color: #0c5;{% elif session.status == 'error' %}background: rgba(255,50,50,.12); color: #f55;{% else %}background: rgba(200,150,0,.12); color: #ca0;{% endif %}">{{ session.status }}</span>
+        <span class="sk-pill">{{ session.pipeline_mode }}</span>
+        {% if session.status == 'complete' %}
+        <a href="https://scan.smarter.dev/r/{{ session.slug or session.id }}" target="_blank" class="sk-pill" style="background: rgba(0,150,255,.12); color: #09f; text-decoration: none;">View Output &#8599;</a>
+        {% endif %}
+    </p>
+</hgroup>
+
+{# ── Meta ────────────────────────────────────────────────────────── #}
+<div class="sk-panel" style="margin-bottom: 1.5rem;">
+    <div class="sk-panel-head"><strong>Session Info</strong></div>
+    <div class="sk-panel-body">
+        <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+                <td style="padding: .4rem 1rem .4rem 0; opacity: .6; white-space: nowrap;">User</td>
+                <td style="padding: .4rem 0;"><code>{{ session.user_id }}</code></td>
+            </tr>
+            <tr>
+                <td style="padding: .4rem 1rem .4rem 0; opacity: .6; white-space: nowrap;">Created</td>
+                <td style="padding: .4rem 0;">{{ session.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</td>
+            </tr>
+            {% if session.model_name %}
+            <tr>
+                <td style="padding: .4rem 1rem .4rem 0; opacity: .6; white-space: nowrap;">Model</td>
+                <td style="padding: .4rem 0;"><code>{{ session.model_name }}</code></td>
+            </tr>
+            {% endif %}
+            {% if session.cost_usd %}
+            <tr>
+                <td style="padding: .4rem 1rem .4rem 0; opacity: .6; white-space: nowrap;">Cost</td>
+                <td style="padding: .4rem 0;">${{ "%.6f"|format(session.cost_usd) }}</td>
+            </tr>
+            {% endif %}
+            <tr>
+                <td style="padding: .4rem 1rem .4rem 0; opacity: .6; white-space: nowrap;">Tokens</td>
+                <td style="padding: .4rem 0;">
+                    {{ "{:,}".format(session.input_tokens) }} in /
+                    {{ "{:,}".format(session.output_tokens) }} out
+                    {% if session.cache_read_tokens %}/ {{ "{:,}".format(session.cache_read_tokens) }} cache read{% endif %}
+                </td>
+            </tr>
+            {% if session.slug %}
+            <tr>
+                <td style="padding: .4rem 1rem .4rem 0; opacity: .6; white-space: nowrap;">Slug</td>
+                <td style="padding: .4rem 0;"><code style="font-size: .85em;">{{ session.slug }}</code></td>
+            </tr>
+            {% endif %}
+        </table>
+    </div>
+</div>
+
+{# ── Query ───────────────────────────────────────────────────────── #}
+<div class="sk-panel" style="margin-bottom: 1.5rem;">
+    <div class="sk-panel-head"><strong>Query</strong></div>
+    <div class="sk-panel-body" style="white-space: pre-wrap; line-height: 1.7;">{{ session.query }}</div>
+</div>
+
+{# ── User Profile Snapshot ───────────────────────────────────────── #}
+{% if user_profile_snapshot %}
+<div class="sk-panel" style="margin-bottom: 1.5rem;">
+    <div class="sk-panel-head"><strong>User Profile (at time of query)</strong></div>
+    <div class="sk-panel-body" style="white-space: pre-wrap; line-height: 1.7;">{{ user_profile_snapshot }}</div>
+</div>
+{% endif %}
+
+{# ── Planner Output ─────────────────────────────────────────────── #}
+{% if planner_output %}
+<div class="sk-panel" style="margin-bottom: 1.5rem;">
+    <div class="sk-panel-head"><strong>Planner Output</strong></div>
+    <div class="sk-panel-body">
+        {% if planner_output.article_points %}
+        <div style="margin-bottom: 1rem;">
+            <strong style="font-size: .85em; opacity: .6;">Article Points</strong>
+            <ol style="margin: .5rem 0 0 1.25rem; padding: 0; line-height: 1.8;">
+                {% for point in planner_output.article_points %}
+                <li>{{ point }}</li>
+                {% endfor %}
+            </ol>
+        </div>
+        {% endif %}
+
+        {% if planner_output.resources %}
+        <div style="margin-bottom: 1rem;">
+            <strong style="font-size: .85em; opacity: .6;">Selected Resources</strong>
+            <div style="margin-top: .5rem;">
+                {% for resource in planner_output.resources %}
+                <div style="margin-bottom: .5rem; padding: .5rem; background: rgba(255,255,255,.02); border: 1px solid rgba(255,255,255,.06); border-radius: 4px;">
+                    <div>
+                        <a href="{{ resource.url }}" target="_blank" style="color: #09f; text-decoration: none;">{{ resource.title }}</a>
+                        {% if resource.site_name %}
+                        <small style="opacity: .5; margin-left: .5rem;">{{ resource.site_name }}</small>
+                        {% endif %}
+                    </div>
+                    {% if resource.description %}
+                    <div style="font-size: .85em; opacity: .6; margin-top: .2rem;">{{ resource.description[:200] }}{% if resource.description|length > 200 %}&hellip;{% endif %}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if planner_output.youtube_video_ids %}
+        <div>
+            <strong style="font-size: .85em; opacity: .6;">YouTube Video IDs</strong>
+            <div style="margin-top: .5rem;">
+                {% for vid_id in planner_output.youtube_video_ids %}
+                <a href="https://youtube.com/watch?v={{ vid_id }}" target="_blank" class="sk-pill" style="margin-right: .25rem; margin-bottom: .25rem; background: rgba(255,0,0,.08); color: #f44; text-decoration: none;">{{ vid_id }}</a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+{# ── Example Plan ──────────────────────────────────────────────── #}
+{% if example_plan %}
+<div class="sk-panel" style="margin-bottom: 1.5rem;">
+    <div class="sk-panel-head"><strong>Example Plan</strong> <small style="opacity: .6;">({{ example_plan|length }} example{{ 's' if example_plan|length != 1 else '' }})</small></div>
+    <div class="sk-panel-body" style="padding: 0;">
+        {% for ex in example_plan %}
+        <div style="padding: .75rem 1rem; border-bottom: 1px solid rgba(255,255,255,.06);">
+            <div style="display: flex; align-items: center; gap: .5rem; margin-bottom: .4rem;">
+                <strong>{{ ex.title }}</strong>
+                {% if ex.language %}
+                <span class="sk-pill" style="font-size: .8em;">{{ ex.language }}</span>
+                {% endif %}
+                {% if ex.scale %}
+                <span class="sk-pill" style="font-size: .8em; background: rgba(200,150,0,.12); color: #ca0;">{{ ex.scale }}</span>
+                {% endif %}
+            </div>
+            {% if ex.description %}
+            <div style="font-size: .9em; opacity: .75; margin-bottom: .4rem;">{{ ex.description }}</div>
+            {% endif %}
+            {% if ex.instructions %}
+            <details>
+                <summary style="font-size: .8em; opacity: .5; cursor: pointer;">Instructions</summary>
+                <div style="margin-top: .3rem; font-family: monospace; font-size: .82em; opacity: .6; white-space: pre-wrap; background: rgba(0,0,0,.15); padding: .5rem; border-radius: 4px;">{{ ex.instructions }}</div>
+            </details>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{# ── Planner Reasoning ──────────────────────────────────────────── #}
+{% if planner_reasoning %}
+<div class="sk-panel" style="margin-bottom: 1.5rem;">
+    <div class="sk-panel-head"><strong>Planner Reasoning</strong> <small style="opacity: .5;">(model's internal text between tool calls)</small></div>
+    <div class="sk-panel-body" style="white-space: pre-wrap; line-height: 1.7; font-family: monospace; font-size: .9em;">{{ planner_reasoning }}</div>
+</div>
+{% endif %}
+
+{# ── Tool Log ────────────────────────────────────────────────────── #}
+{% if session.tool_log %}
+<div class="sk-panel" style="margin-bottom: 1.5rem;">
+    <div class="sk-panel-head"><strong>Tool Log</strong> <small style="opacity: .6;">({{ session.tool_log|length }} call{{ 's' if session.tool_log|length != 1 else '' }})</small></div>
+    <div class="sk-panel-body" style="padding: 0;">
+        {% for entry in session.tool_log %}
+        <div style="padding: .75rem 1rem; border-bottom: 1px solid rgba(255,255,255,.06);">
+            <div style="display: flex; align-items: center; gap: .5rem;">
+                <span class="sk-pill" style="font-size: .8em;">{{ entry.tool }}</span>
+                <span class="sk-pill" style="font-size: .8em; {% if entry.status == 'complete' %}background: rgba(0,200,83,.12); color: #0c5;{% else %}background: rgba(200,150,0,.12); color: #ca0;{% endif %}">{{ entry.status }}</span>
+            </div>
+            {% if entry.input %}
+            <div style="margin-top: .4rem; font-family: monospace; font-size: .82em; opacity: .7;">
+                {% for key, val in entry.input.items() %}
+                <span style="color: #09f;">{{ key }}</span>: {{ val|string }}<br>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if entry.content %}
+            <details style="margin-top: .4rem;">
+                <summary style="font-size: .8em; opacity: .5; cursor: pointer;">Result ({{ entry.content|length }} chars)</summary>
+                <div style="margin-top: .3rem; font-family: monospace; font-size: .78em; opacity: .6; white-space: pre-wrap; max-height: 600px; overflow-y: auto; background: rgba(0,0,0,.15); padding: .5rem; border-radius: 4px;">{{ entry.content }}</div>
+            </details>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+{# ── Error ───────────────────────────────────────────────────────── #}
+{% if session.error_message %}
+<div class="sk-panel" style="margin-bottom: 1.5rem;">
+    <div class="sk-panel-head" style="background: rgba(255,50,50,.08);"><strong>Error</strong></div>
+    <div class="sk-panel-body" style="white-space: pre-wrap; font-family: monospace; font-size: .9em; color: #f55;">{{ session.error_message }}</div>
+</div>
+{% endif %}
+{% endblock %}

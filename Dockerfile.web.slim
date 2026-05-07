@@ -19,9 +19,11 @@ RUN uv sync --frozen --no-dev
 
 # Copy only application code (exclude .venv and other unnecessary files)
 COPY smarter_dev smarter_dev/
+COPY skrift skrift/
+COPY themes themes/
 COPY templates templates/
 COPY static static/
-COPY main.py ./
+COPY main.py app.yaml ./
 COPY alembic.ini ./
 COPY alembic alembic/
 
@@ -38,4 +40,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
 # Run the web application
-CMD ["uv", "run", "python", "main.py"]
+CMD ["uv", "run", "hypercorn", "main:app", "--bind", "0.0.0.0:8000"]

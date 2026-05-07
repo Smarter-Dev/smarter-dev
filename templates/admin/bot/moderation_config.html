@@ -1,0 +1,90 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Moderation Config - Guild {{ guild_id }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Moderation Config</h1>
+            <p>Guild: {{ guild_id }}</p>
+        </hgroup>
+
+        <form method="post" action="/admin/bot/moderation/{{ guild_id }}">
+            {{ csrf_field() }}
+
+            <div class="sk-panel">
+                <div class="sk-panel-head">General</div>
+                <div class="sk-panel-body" style="display:flex; flex-direction:column; gap:1rem;">
+                    <div>
+                        <label>
+                            <input type="checkbox" name="is_active" value="true" {% if config and config.is_active %}checked{% endif %}>
+                            <strong>Enable moderation monitoring</strong>
+                        </label>
+                    </div>
+
+                    <div>
+                        <label for="context_message_limit"><strong>Context message limit</strong></label><br>
+                        <input type="number" name="context_message_limit" id="context_message_limit"
+                               value="{{ config.context_message_limit if config else 25 }}"
+                               min="5" max="50" style="width:80px; padding:0.4rem 0.6rem;">
+                        <small style="color:var(--sk-text-muted, #888);">Messages to fetch for context (5-50)</small>
+                    </div>
+
+                    <div>
+                        <label for="response_channel_id"><strong>Mod report channel ID</strong> (optional)</label><br>
+                        <input type="text" name="response_channel_id" id="response_channel_id"
+                               value="{{ config.response_channel_id or '' if config else '' }}"
+                               placeholder="Leave empty to post reports in the incident channel"
+                               style="width:300px; padding:0.4rem 0.6rem;">
+                        <small style="color:var(--sk-text-muted, #888);">Where triage reports are sent for human moderator review</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Monitored Roles</div>
+                <div class="sk-panel-body">
+                    <p style="margin-bottom:0.75rem; color:var(--sk-text-muted, #888); font-size:0.9rem;">
+                        Enter Discord role IDs to monitor (one per line). When a user mentions one of these roles, the bot will trigger moderation review.
+                    </p>
+                    <textarea name="monitored_role_ids" rows="4" style="width:100%; max-width:400px; padding:0.5rem; font-family:monospace; font-size:0.85rem;"
+                              placeholder="123456789012345678&#10;987654321098765432">{% if config and config.monitored_role_ids %}{% for role_id in config.monitored_role_ids %}{{ role_id }}{% if not loop.last %}
+{% endif %}{% endfor %}{% endif %}</textarea>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Enabled Tools</div>
+                <div class="sk-panel-body">
+                    <p style="margin-bottom:0.75rem; color:var(--sk-text-muted, #888); font-size:0.9rem;">
+                        The agent always has access to flag users, send a channel message, and look up user info/history. These tools control what <em>actions</em> it can take.
+                    </p>
+                    <div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
+                        {% set tools = config.enabled_tools if config and config.enabled_tools else ['timeout', 'purge', 'delete'] %}
+                        <label><input type="checkbox" name="enabled_tools" value="timeout" {% if 'timeout' in tools %}checked{% endif %}> Timeout</label>
+                        <label><input type="checkbox" name="enabled_tools" value="purge" {% if 'purge' in tools %}checked{% endif %}> Purge Messages</label>
+                        <label><input type="checkbox" name="enabled_tools" value="delete" {% if 'delete' in tools %}checked{% endif %}> Delete Message</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Moderation Instructions</div>
+                <div class="sk-panel-body">
+                    <p style="margin-bottom:0.75rem; color:var(--sk-text-muted, #888); font-size:0.9rem;">
+                        These instructions guide the AI triage agent. The agent acts as a stopgap — it freezes dangerous situations with timeouts and message purges, then reports to human moderators. Tell it your server rules and when to escalate.
+                    </p>
+                    <textarea name="instructions" rows="12" style="width:100%; padding:0.5rem; font-size:0.9rem; line-height:1.5;"
+                              placeholder="Example:&#10;- Timeout users who are actively causing harm (spam, hate speech, threats)&#10;- Purge messages containing slurs, threats, or NSFW content&#10;- Delete individual messages that violate rules but aren't part of a pattern&#10;- For heated arguments, send a warning message but don't timeout&#10;- New accounts (< 7 days) spamming are higher risk — prefer timeout&#10;- When in doubt, flag and message only — let the mods decide">{{ config.instructions or '' if config else '' }}</textarea>
+                </div>
+            </div>
+
+            <div style="margin-top:1.5rem;">
+                <button type="submit" class="sk-btn-outline">Save Configuration</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

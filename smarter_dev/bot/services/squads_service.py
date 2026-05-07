@@ -126,7 +126,7 @@ class SquadsService(BaseService):
                 params["include_inactive"] = "true"
 
             response = await self._api_client.get(
-                f"/guilds/{guild_id}/squads",
+                f"/guilds/{guild_id}/squads/",
                 params=params,
                 timeout=10.0
             )

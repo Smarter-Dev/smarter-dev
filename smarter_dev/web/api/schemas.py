@@ -457,9 +457,10 @@ class APIKeyCreate(BaseAPIModel):
         allowed_scopes = {
             "bot:read", "bot:write", "bot:manage",
             "admin:read", "admin:write", "admin:manage",
-            "system:read", "system:write", "system:manage"
+            "system:read", "system:write", "system:manage",
+            "scan:read", "scan:write", "scan:manage",
         }
-        
+
         for scope in v:
             if not isinstance(scope, str) or not scope.strip():
                 raise ValueError("All scopes must be non-empty strings")
@@ -496,9 +497,10 @@ class APIKeyUpdate(BaseAPIModel):
         allowed_scopes = {
             "bot:read", "bot:write", "bot:manage",
             "admin:read", "admin:write", "admin:manage",
-            "system:read", "system:write", "system:manage"
+            "system:read", "system:write", "system:manage",
+            "scan:read", "scan:write", "scan:manage",
         }
-        
+
         for scope in v:
             if scope not in allowed_scopes:
                 raise ValueError(f"Invalid scope: {scope}. Allowed scopes: {allowed_scopes}")

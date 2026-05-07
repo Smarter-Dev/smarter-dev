@@ -1,0 +1,1058 @@
+{% extends "scan/base.html" %}
+
+{% block page_type %}scan-result{% endblock %}
+{% block seo_meta %}<meta name="robots" content="noindex">{% endblock %}
+{% block title %}{% if session and session.name %}{{ session.name }} - Scan - Smarter.Dev{% else %}Research Result - Scan - Smarter.Dev{% endif %}{% endblock %}
+
+{% block page_css %}
+    <link rel="stylesheet" href="{{ theme_url('css/pages/research.css') }}">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1/themes/prism-tomorrow.min.css">
+    <style nonce="{{ csp_nonce() }}">
+    /* Override Prism theme to blend with site */
+    code[class*="language-"],pre[class*="language-"]{background:none;font-family:var(--mono);font-size:.78rem;line-height:1.6;text-shadow:none}
+    .scan-example-code{background:rgba(0,0,0,.15)!important}
+    .scan-sidebar-empty{font-size:.75rem;color:var(--gray)}
+
+    /* Status badge */
+    .scan-status{font-family:var(--heading);font-size:.5rem;letter-spacing:.1em;padding:3px 10px;display:inline-block}
+    .scan-status-running{background:rgba(0,212,255,.1);border:1px solid rgba(0,212,255,.25);color:var(--cyan);animation:scan-pulse 2s ease-in-out infinite}
+    .scan-status-complete{background:rgba(0,255,136,.08);border:1px solid rgba(0,255,136,.2);color:#0f8}
+    .scan-status-error{background:rgba(255,68,68,.08);border:1px solid rgba(255,68,68,.2);color:#f44}
+
+    /* Pulse animation */
+    @keyframes scan-pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+    /* Blinking insert cursor */
+    .scan-cursor{display:inline-block;width:2px;height:1.1em;background:var(--cyan);vertical-align:text-bottom;animation:scan-blink 1s step-end infinite}
+    @keyframes scan-blink{0%,100%{opacity:1}50%{opacity:0}}
+
+    /* Tool activity */
+    .scan-tools-wrap{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 2rem}
+    .scan-tools{margin:0 0 1.5rem;border:1px solid rgba(0,212,255,.06);background:var(--surface)}
+    .scan-tools-header{font-family:var(--heading);font-size:.55rem;letter-spacing:.1em;color:var(--mid);padding:.75rem 1rem;border-bottom:1px solid rgba(0,212,255,.06);cursor:pointer;display:flex;align-items:center;gap:.5rem;user-select:none}
+    .scan-tools-header::before{content:'';display:inline-block;width:0;height:0;border-left:5px solid var(--mid);border-top:4px solid transparent;border-bottom:4px solid transparent;transition:transform .2s}
+    .scan-tools[open] .scan-tools-header::before{transform:rotate(90deg)}
+    .scan-tools-list{padding:0;margin:0;list-style:none}
+    .scan-tool-entry{padding:.6rem 1rem;border-bottom:1px solid rgba(0,212,255,.04);font-size:.78rem;color:var(--light);display:flex;align-items:center;gap:.5rem}
+    .scan-tool-entry:last-child{border-bottom:none}
+    .scan-tool-name{font-family:var(--heading);font-size:.55rem;letter-spacing:.06em;color:var(--cyan);min-width:7rem;flex-shrink:0}
+    .scan-tool-args{color:var(--gray);font-size:.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:400px}
+    .scan-tool-running{animation:scan-pulse 1.5s ease-in-out infinite}
+    .scan-tool-done{cursor:pointer}
+    .scan-tool-done:hover{background:rgba(0,212,255,.03)}
+    .scan-tool-content{display:none;padding:.5rem 1rem .75rem;font-size:.72rem;color:var(--gray);line-height:1.6;word-break:break-word;max-height:400px;overflow-y:auto;border-bottom:1px solid rgba(0,212,255,.04)}
+    .scan-tool-content--text{white-space:pre-wrap}
+    .scan-tool-content.expanded{display:block}
+
+    /* Nested sub-agent tools */
+    .scan-sub-tools{list-style:none;padding:0;margin:0}
+    .scan-sub-tool{padding:.4rem .6rem;border-bottom:1px solid rgba(0,212,255,.03);display:flex;align-items:center;gap:.4rem;cursor:pointer}
+    .scan-sub-tool:last-child{border-bottom:none}
+    .scan-sub-tool:hover{background:rgba(0,212,255,.03)}
+    .scan-sub-tool-name{font-family:var(--heading);font-size:.48rem;letter-spacing:.06em;color:var(--mid)}
+    .scan-sub-tool-args{color:var(--gray);font-size:.68rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:350px}
+    .scan-sub-tool-content{display:none;padding:.3rem .6rem .5rem;font-size:.68rem;color:var(--gray);line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:250px;overflow-y:auto;border-bottom:1px solid rgba(0,212,255,.03);background:rgba(0,0,0,.1)}
+    .scan-sub-tool-content.expanded{display:block}
+    .scan-sub-answer{padding:.5rem .6rem;font-size:.72rem;color:var(--light);line-height:1.6;white-space:pre-wrap;word-break:break-word;border-top:1px solid rgba(0,212,255,.06);margin-top:.3rem}
+
+    /* Response area */
+    .scan-response{min-height:100px}
+    .scan-response a{color:var(--cyan);text-decoration:none;border-bottom:1px solid rgba(0,212,255,.2);transition:border-color .2s}
+    .scan-response a:hover{border-color:var(--cyan)}
+    .scan-response-empty{color:var(--gray);font-size:.85rem;font-style:italic}
+
+    /* Action bar */
+    .scan-actions{display:flex;gap:8px;margin-top:2rem;padding-top:1.5rem;border-top:1px solid rgba(0,212,255,.06)}
+    .scan-action-btn{font-family:var(--heading);font-size:.5rem;letter-spacing:.1em;padding:.5rem 1.2rem;background:rgba(0,212,255,.06);border:1px solid rgba(0,212,255,.12);color:var(--cyan);cursor:pointer;transition:all .2s}
+    .scan-action-btn:hover{background:rgba(0,212,255,.14);border-color:var(--cyan)}
+
+    /* Timer */
+    .scan-timer{font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.04em}
+
+    /* Sources list */
+    .scan-source-link{font-size:.72rem;color:var(--cyan);text-decoration:none}
+
+    /* "X asked" label */
+    .scan-asked{font-family:var(--heading);font-size:.58rem;color:var(--mid);letter-spacing:.08em;margin-bottom:.5rem}
+
+    /* Generation time */
+    .scan-duration{font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.04em;margin-top:1.5rem;padding-top:1rem;border-top:1px solid rgba(0,212,255,.06)}
+
+    /* Error text */
+    .scan-error-text{color:#f44}
+
+    /* Inline citation pills */
+    .scan-cite{font-size:.6em;letter-spacing:.02em;padding:1px 5px;background:rgba(0,212,255,.08);border:1px solid rgba(0,212,255,.18);border-radius:8px;color:var(--cyan);text-decoration:none;white-space:nowrap;vertical-align:super;font-family:var(--heading)}
+    .scan-cite:hover{background:rgba(0,212,255,.18);border-color:var(--cyan)}
+    sup .scan-cite{vertical-align:baseline}
+    .scan-mermaid{margin:1.25rem 0;padding:1rem;border:1px solid rgba(0,212,255,.16);background:rgba(1,12,18,.78);overflow-x:auto}
+    .scan-mermaid svg{max-width:100%;height:auto;display:block;margin:0 auto}
+    .scan-mermaid .node rect,.scan-mermaid .node polygon,.scan-mermaid .node circle,.scan-mermaid .node ellipse,.scan-mermaid .cluster rect{fill:rgba(8,26,38,.96)!important;stroke:#00d4ff!important;stroke-width:1.5px!important}
+    .scan-mermaid .nodeLabel,.scan-mermaid .label,.scan-mermaid text{fill:#e9f7ff!important;color:#e9f7ff!important}
+    .scan-mermaid .edgeLabel,.scan-mermaid .edgeLabel p{background-color:rgba(1,12,18,.92)!important;color:#e9f7ff!important}
+    .scan-mermaid .edgeLabel rect{fill:rgba(1,12,18,.92)!important;opacity:1!important}
+    .scan-mermaid .flowchart-link,.scan-mermaid .edgePath .path{stroke:#7fdcff!important;stroke-width:1.4px!important}
+    .scan-mermaid marker path{fill:#7fdcff!important;stroke:#7fdcff!important}
+    .scan-mermaid-error{border-color:rgba(255,68,68,.2)}
+
+    /* Discovery section — two rows above the answer */
+    .scan-discovery{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:0 2rem 1.5rem}
+
+    /* YouTube cards — independently scrollable row */
+    .scan-youtube-list{list-style:none;padding:0;margin:0 0 1rem;display:flex;gap:.75rem;overflow-x:auto;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;scrollbar-width:none;padding-bottom:.25rem}
+    .scan-youtube-list::-webkit-scrollbar{display:none}
+    .scan-youtube-item{flex-shrink:0;width:180px;scroll-snap-align:start}
+    .scan-youtube-link{display:flex;flex-direction:column;gap:.4rem;text-decoration:none;color:var(--light);transition:opacity .2s}
+    .scan-youtube-link:hover{opacity:.8}
+    .scan-youtube-thumb{width:180px;height:101px;object-fit:cover;border:1px solid rgba(0,212,255,.08)}
+    .scan-youtube-info{min-width:0}
+    .scan-youtube-title{font-size:.68rem;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .scan-youtube-channel{font-size:.55rem;color:var(--gray);margin-top:2px}
+    .scan-youtube-thumb-wrap{position:relative;width:180px;height:101px;flex-shrink:0}
+    .scan-youtube-duration{position:absolute;bottom:4px;right:4px;background:rgba(0,0,0,.8);color:#fff;font-family:var(--mono);font-size:.55rem;padding:1px 4px;letter-spacing:.02em}
+
+    /* Resource cards — independently scrollable row */
+    .scan-resources-list{list-style:none;padding:0;margin:0;display:flex;gap:.75rem;overflow-x:auto;-webkit-overflow-scrolling:touch;scroll-snap-type:x mandatory;scrollbar-width:none;padding-bottom:.25rem}
+    .scan-resources-list::-webkit-scrollbar{display:none}
+    .scan-resource-item{flex-shrink:0;width:200px;scroll-snap-align:start}
+    .scan-resource-link{display:flex;flex-direction:column;gap:.4rem;text-decoration:none;color:var(--light);transition:all .2s;padding:.5rem;border:1px solid rgba(0,212,255,.06);background:var(--surface);height:100%}
+    .scan-resource-link:hover{border-color:rgba(0,212,255,.18);background:rgba(0,212,255,.03)}
+    .scan-resource-og{position:relative;width:100%;height:80px;border:1px solid rgba(0,212,255,.08);background:rgba(0,0,0,.2);overflow:hidden;display:flex;align-items:center;justify-content:center}
+    .scan-resource-og svg{width:24px;height:24px;opacity:.18}
+    .scan-resource-og img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
+    .scan-resource-info{min-width:0;flex:1}
+    .scan-resource-title{font-size:.68rem;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+    .scan-resource-desc{font-size:.58rem;color:var(--gray);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.4}
+    .scan-resource-site{display:flex;align-items:center;gap:4px;font-size:.5rem;color:var(--mid);margin-top:3px}
+    .scan-resource-favicon{width:12px;height:12px}
+
+    /* Resource card fade animation */
+    @keyframes scan-res-fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .scan-res-animate{opacity:0;animation:scan-res-fade .5s ease forwards}
+
+    /* Character fade animation */
+
+    /* YouTube item fade animation */
+    @keyframes scan-yt-fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .scan-yt-animate{opacity:0;animation:scan-yt-fade .5s ease forwards}
+
+    /* Code examples — inside report-content */
+    .scan-examples-section{border-top:1px solid rgba(0,212,255,.06);padding-top:2rem;margin-top:2rem}
+    .scan-examples-heading{font-family:var(--heading);font-size:.58rem;color:var(--mid);letter-spacing:.1em;margin-bottom:1.25rem}
+    #scan-examples-list{display:flex;flex-direction:column;gap:1rem}
+    .scan-example{border:1px solid rgba(0,212,255,.08);background:var(--surface);scroll-margin-top:70px}
+    .scan-example-header{display:flex;justify-content:space-between;align-items:center;padding:.6rem 1rem;border-bottom:1px solid rgba(0,212,255,.06)}
+    .scan-example-title{font-family:var(--heading);font-size:.6rem;letter-spacing:.06em;color:var(--light)}
+    .scan-example-lang{font-family:var(--mono);font-size:.6rem;color:var(--cyan);opacity:.7}
+    .scan-example-code{margin:0;padding:1rem;font-size:.78rem;line-height:1.6;overflow-x:auto;background:rgba(0,0,0,.15)}
+    .scan-example-code code{font-family:var(--mono);color:var(--light);white-space:pre}
+    .scan-example-explanation{padding:.5rem 1rem .6rem;font-size:.72rem;color:var(--gray);line-height:1.5;border-top:1px solid rgba(0,212,255,.04)}
+
+    /* Collapsible long examples */
+    .scan-example-code-wrap{position:relative}
+    .scan-example-code-wrap.collapsed .scan-example-code{max-height:calc(12 * 1.6 * .78rem + 2rem);overflow:hidden}
+    .scan-example-code-wrap.collapsed .scan-example-expand{display:flex}
+    .scan-example-expand{display:none;position:absolute;bottom:0;left:0;right:0;height:4rem;align-items:flex-end;justify-content:center;padding-bottom:.75rem;background:linear-gradient(transparent,rgba(0,0,0,.5) 60%,rgba(0,0,0,.7));cursor:pointer;z-index:1}
+    .scan-example-expand span{font-family:var(--heading);font-size:.55rem;letter-spacing:.08em;color:var(--cyan);border:1px solid rgba(0,212,255,.25);padding:3px 12px;background:rgba(0,0,0,.6);transition:background .2s}
+    .scan-example-expand:hover span{background:rgba(0,212,255,.1)}
+
+    /* Code example fade animation */
+    @keyframes scan-ex-fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    .scan-ex-animate{opacity:0;animation:scan-ex-fade .5s ease forwards}
+
+    /* Mobile alignment — match report-header/report-layout padding */
+    @media(max-width:520px){
+        .scan-tools-wrap{padding:0 1rem}
+        .scan-discovery{padding:0 1rem 1.5rem}
+        .scan-tool-name{min-width:5.5rem}
+    }
+
+    /* Hidden state */
+    .scan-hidden{display:none}
+    </style>
+{% endblock %}
+
+{% block content %}
+<div class="report-header">
+    {% if session %}
+    <div class="scan-asked">{% if creator_name %}{{ creator_name }}{% else %}A user{% endif %} asked</div>
+    {% if query_format == "complex" %}
+    <div class="report-query-md">{{ rendered_query | safe }}</div>
+    {% else %}
+    <div class="report-query">{{ session.query }}</div>
+    {% endif %}
+    {% else %}
+    <div class="report-query">Research Result</div>
+    <div class="report-meta">
+        <span class="meta-item"><strong>ID</strong> {{ result_id }}</span>
+        <span class="meta-item"><strong>STATUS</strong> Not found</span>
+    </div>
+    {% endif %}
+</div>
+<span id="scan-status" class="scan-hidden scan-status scan-status-{{ session.status if session else 'error' }}">{{ session.status|upper if session else 'NOT FOUND' }}</span>
+
+{% if session %}
+{% set tool_labels = {"research": "Research", "search": "Web Search", "read": "Read URL", "read_url": "Read URL", "source_readable": "Check Source", "youtube_search": "YouTube Search", "exp_youtube_search": "YouTube Search", "exp_web_search": "Web Search", "exp_planner_read_url": "Read URL", "exp_answer_read_url": "Read URL"} %}
+<!-- Tool activity -->
+<div class="scan-tools-wrap">
+    <details class="scan-tools" id="scan-tools" {% if session.status == 'running' %}open{% endif %}>
+        <summary class="scan-tools-header">TOOL ACTIVITY <span id="scan-tool-count">({% if session.tool_log %}{{ session.tool_log|selectattr('tool', 'defined')|list|length }}{% else %}0{% endif %})</span></summary>
+        <ul class="scan-tools-list" id="scan-tools-list">
+            {% if session.status != 'running' and session.tool_log %}
+            {% for entry in session.tool_log %}
+            {% if entry.tool is defined %}
+            <li class="scan-tool-entry scan-tool-done">
+                <span class="scan-tool-name">{{ tool_labels.get(entry.tool, entry.tool) }}</span>
+                <span class="scan-tool-args">{% if entry.input is defined and entry.input.question is defined %}{{ entry.input.question|truncate(80) }}{% elif entry.input is defined and entry.input.query is defined %}{{ entry.input.query|truncate(80) }}{% elif entry.input is defined and entry.input.url is defined %}{{ entry.input.url|truncate(80) }}{% else %}{{ (entry.input if entry.input is defined else '')|string|truncate(80) }}{% endif %}</span>
+            </li>
+            {% if entry.sub_tools is defined and entry.sub_tools -%}
+            <div class="scan-tool-content">
+            <ul class="scan-sub-tools">
+            {%- for st in entry.sub_tools %}
+            <li class="scan-sub-tool"><span class="scan-sub-tool-name">{{ tool_labels.get(st.tool, st.tool) }}</span> <span class="scan-sub-tool-args">{% if st.input is defined and st.input.query is defined %}{{ st.input.query|truncate(70) }}{% elif st.input is defined and st.input.url is defined %}{{ st.input.url|truncate(70) }}{% else %}{{ (st.input if st.input is defined else '')|string|truncate(70) }}{% endif %}</span></li>
+            <div class="scan-sub-tool-content">{{ st.content if st.content is defined else '' }}</div>
+            {%- endfor %}
+            </ul>
+            </div>
+            {% elif entry.content is defined -%}
+            <div class="scan-tool-content scan-tool-content--text">{{ entry.content }}</div>
+            {% else -%}
+            <div class="scan-tool-content"></div>
+            {% endif -%}
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+        </ul>
+    </details>
+</div>
+
+<!-- Discovery — YouTube videos + resources -->
+{% if session.context and (session.context.youtube_videos is defined and session.context.youtube_videos or session.context.resources is defined and session.context.resources) %}
+<div class="scan-discovery" id="scan-discovery">
+    {% if session.context.youtube_videos is defined and session.context.youtube_videos %}
+    <ul class="scan-youtube-list" id="scan-youtube-list">
+        {% for v in session.context.youtube_videos %}
+        <li class="scan-youtube-item">
+            <a href="{{ v.url }}" target="_blank" rel="noopener" class="scan-youtube-link">
+                {% if v.thumbnail %}<div class="scan-youtube-thumb-wrap"><img src="{{ v.thumbnail }}" class="scan-youtube-thumb" alt="" loading="lazy">{% if v.duration is defined and v.duration %}<span class="scan-youtube-duration">{{ v.duration }}</span>{% endif %}</div>{% endif %}
+                <div class="scan-youtube-info">
+                    <div class="scan-youtube-title">{{ v.title }}</div>
+                    <div class="scan-youtube-channel">{{ v.channel }}</div>
+                </div>
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <ul class="scan-youtube-list" id="scan-youtube-list"></ul>
+    {% endif %}
+    {% if session.context.resources is defined and session.context.resources %}
+    <ul class="scan-resources-list" id="scan-resources-list">
+        {% for r in session.context.resources %}
+        <li class="scan-resource-item">
+            <a href="{{ r.url }}" target="_blank" rel="noopener" class="scan-resource-link">
+                <div class="scan-resource-og">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                    {% if r.og_image is defined and r.og_image %}<img src="{{ r.og_image }}" alt="" loading="lazy">{% endif %}
+                </div>
+                <div class="scan-resource-info">
+                    <div class="scan-resource-title">{{ r.title }}</div>
+                    <div class="scan-resource-desc">{{ r.description }}</div>
+                    <div class="scan-resource-site">
+                        {% if r.favicon is defined and r.favicon %}<img src="{{ r.favicon }}" class="scan-resource-favicon" alt="">{% endif %}
+                        {{ r.site_name if r.site_name is defined else '' }}
+                    </div>
+                </div>
+            </a>
+        </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <ul class="scan-resources-list" id="scan-resources-list"></ul>
+    {% endif %}
+</div>
+{% else %}
+<div class="scan-discovery scan-hidden" id="scan-discovery">
+    <ul class="scan-youtube-list" id="scan-youtube-list"></ul>
+    <ul class="scan-resources-list" id="scan-resources-list"></ul>
+</div>
+{% endif %}
+
+<!-- Answer -->
+<div class="report-layout">
+    <div class="report-content">
+        <div class="scan-response" id="scan-response">
+            {% if session.status == 'complete' and rendered_response %}
+            {{ rendered_response|safe }}
+            {% elif session.status == 'error' %}
+            <p class="scan-error-text">{{ session.error_message }}</p>
+            {% elif session.status == 'running' %}
+            <span id="scan-response-placeholder">Analyzing query… <span class="scan-cursor"></span></span>
+            {% else %}
+            <p class="scan-response-empty">No response available.</p>
+            {% endif %}
+        </div>
+
+        <!-- Action bar (visible after completion) -->
+        <div class="scan-actions{% if session.status != 'complete' %} scan-hidden{% endif %}" id="scan-actions">
+            <button class="scan-action-btn" id="scan-copy-btn" type="button">COPY</button>
+            <button class="scan-action-btn" id="scan-download-btn" type="button">DOWNLOAD</button>
+        </div>
+
+        <!-- Generation time -->
+        <div class="scan-duration{% if session.status != 'complete' %} scan-hidden{% endif %}" id="scan-duration">
+            {% if session.status == 'complete' %}{% if session.pipeline_mode == 'quick_answer' %}Quick Answer{% elif session.pipeline_mode == 'quick_research' %}Quick Research{% elif session.pipeline_mode == 'deep' %}Deep Research{% else %}Research{% endif %} generated in <span id="scan-timer">{{ ((session.updated_at - session.created_at).total_seconds()|round(0)|int) }}s</span>{% else %}<span id="scan-timer"></span>{% endif %}
+        </div>
+        <!-- Code examples — inside report-content so TOC stays sticky alongside -->
+        {% if session.status == 'complete' and session.context and session.context.code_examples is defined and session.context.code_examples %}
+        <div class="scan-examples-section" id="scan-examples-section">
+            <h3 class="scan-examples-heading">CODE EXAMPLES</h3>
+            <div id="scan-examples-list">
+                {% for ex in session.context.code_examples %}
+                <div class="scan-example">
+                    <div class="scan-example-header">
+                        <span class="scan-example-title">{{ ex.title }}</span>
+                        <span class="scan-example-lang">{{ ex.language }}</span>
+                    </div>
+                    <div class="scan-example-code-wrap{% if ex.code.split('\n')|length > 15 %} collapsed{% endif %}">
+                        <pre class="scan-example-code"><code class="language-{{ ex.language }}">{{ ex.code }}</code></pre>
+                        <div class="scan-example-expand" data-expand><span>VIEW FULL EXAMPLE</span></div>
+                    </div>
+                    {% if ex.explanation %}<div class="scan-example-explanation">{{ ex.explanation }}</div>{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% else %}
+        <div class="scan-examples-section scan-hidden" id="scan-examples-section">
+            <h3 class="scan-examples-heading">CODE EXAMPLES</h3>
+            <div id="scan-examples-list"></div>
+        </div>
+        {% endif %}
+    </div>
+    <!-- Table of Contents sidebar -->
+    <nav class="report-toc" id="report-toc">
+        <div class="report-toc-inner">
+            <div class="toc-label">ON THIS PAGE</div>
+            <ul class="toc-list" id="toc-list"></ul>
+        </div>
+    </nav>
+</div>
+
+{% else %}
+<div class="report-layout">
+    <div class="report-content">
+        <p>This research session was not found.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block page_scripts %}
+<script nonce="{{ csp_nonce() }}" src="https://cdn.jsdelivr.net/npm/prismjs@1/prism.min.js"></script>
+<script nonce="{{ csp_nonce() }}" src="https://cdn.jsdelivr.net/npm/prismjs@1/plugins/autoloader/prism-autoloader.min.js"></script>
+<script nonce="{{ csp_nonce() }}">
+window.scheduleScanMermaidRender = function(root) {
+    clearTimeout(window.__scanMermaidTimer);
+    window.__scanMermaidTimer = setTimeout(function() {
+        if (window.renderScanMermaid) {
+            window.renderScanMermaid(root || document);
+        }
+    }, 180);
+};
+</script>
+<script nonce="{{ csp_nonce() }}" type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    theme: "base",
+    themeVariables: {
+        background: "transparent",
+        mainBkg: "#081a26",
+        secondBkg: "#0d2534",
+        tertiaryBkg: "#102d3f",
+        primaryColor: "#081a26",
+        primaryTextColor: "#e9f7ff",
+        primaryBorderColor: "#00d4ff",
+        secondaryColor: "#0d2534",
+        secondaryTextColor: "#e9f7ff",
+        secondaryBorderColor: "#7fdcff",
+        tertiaryColor: "#102d3f",
+        tertiaryTextColor: "#e9f7ff",
+        tertiaryBorderColor: "#00d4ff",
+        lineColor: "#7fdcff",
+        textColor: "#e9f7ff",
+        edgeLabelBackground: "#010c12",
+        nodeTextColor: "#e9f7ff",
+        clusterBkg: "#07141d",
+        clusterBorder: "#00d4ff",
+        fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
+    },
+    htmlLabels: false,
+    flowchart: {
+        htmlLabels: false,
+        useMaxWidth: true
+    }
+});
+
+let scanMermaidSeq = 0;
+window.renderScanMermaid = async function(root) {
+    var scope = root || document;
+    var blocks = scope.querySelectorAll("pre > code.language-mermaid, pre > code.lang-mermaid");
+    for (var i = 0; i < blocks.length; i++) {
+        var code = blocks[i];
+        var source = code.textContent.trim();
+        if (!source || source.length > 10000) continue;
+        var pre = code.parentElement;
+        if (!pre || pre.dataset.mermaidSource === source) continue;
+        pre.dataset.mermaidSource = source;
+        try {
+            var id = "scan-mermaid-" + (++scanMermaidSeq);
+            var rendered = await mermaid.render(id, source);
+            var wrapper = document.createElement("div");
+            wrapper.className = "scan-mermaid";
+            wrapper.innerHTML = rendered.svg;
+            pre.replaceWith(wrapper);
+        } catch (err) {
+            pre.classList.add("scan-mermaid-error");
+            pre.dataset.mermaidSource = "";
+        }
+    }
+};
+
+window.scheduleScanMermaidRender(document);
+</script>
+<script nonce="{{ csp_nonce() }}">
+// Hide broken resource images (OG images reveal placeholder, favicons hide)
+document.addEventListener("error", function(e) {
+    var t = e.target;
+    if (t.tagName !== "IMG") return;
+    if (t.closest(".scan-resource-og") || t.classList.contains("scan-resource-favicon")) {
+        t.style.display = "none";
+    }
+}, true);
+</script>
+<script nonce="{{ csp_nonce() }}">
+// Shared TOC builder — used by both running and complete states
+function buildTOC() {
+    var responseEl = document.getElementById("scan-response");
+    var tocList = document.getElementById("toc-list");
+    var tocNav = document.getElementById("report-toc");
+    if (!responseEl || !tocList || !tocNav) return;
+
+    var headings = responseEl.querySelectorAll("h2, h3");
+    if (headings.length === 0) return;
+
+    var html = "";
+    for (var i = 0; i < headings.length; i++) {
+        var h = headings[i];
+        // Generate ID if missing
+        if (!h.id) {
+            h.id = "section-" + i;
+        }
+        var level = h.tagName === "H3" ? " toc-h3" : "";
+        var text = h.textContent.trim();
+        html += '<li class="toc-item"><a href="#' + h.id + '" class="toc-link' + level + '" data-target="' + h.id + '">' + text + '</a></li>';
+    }
+    tocList.innerHTML = html;
+
+    // Animate in
+    setTimeout(function() { tocNav.classList.add("toc-visible"); }, 100);
+
+    // Scroll spy — query from document to catch dynamically added example links
+    window._tocTargets = [];
+    window._tocRefresh = function() {
+        var tl = document.getElementById("toc-list");
+        if (!tl) return;
+        var allLinks = tl.querySelectorAll(".toc-link");
+        window._tocTargets = [];
+        for (var j = 0; j < allLinks.length; j++) {
+            var t = document.getElementById(allLinks[j].dataset.target);
+            if (t) window._tocTargets.push({ el: t, link: allLinks[j] });
+        }
+    };
+    window._tocRefresh();
+
+    function updateActive() {
+        var active = null;
+        for (var k = 0; k < window._tocTargets.length; k++) {
+            var rect = window._tocTargets[k].el.getBoundingClientRect();
+            if (rect.top <= 120) active = window._tocTargets[k];
+        }
+        for (var k = 0; k < window._tocTargets.length; k++) {
+            window._tocTargets[k].link.classList.toggle("toc-active", window._tocTargets[k] === active);
+        }
+    }
+
+    var scrollTimer;
+    window.addEventListener("scroll", function() {
+        if (scrollTimer) cancelAnimationFrame(scrollTimer);
+        scrollTimer = requestAnimationFrame(updateActive);
+    });
+    updateActive();
+
+    // Smooth scroll on click
+    tocList.addEventListener("click", function(e) {
+        var link = e.target.closest(".toc-link");
+        if (!link) return;
+        e.preventDefault();
+        var target = document.getElementById(link.dataset.target);
+        if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+}
+
+function buildTOCExamples() {
+    var tocList = document.getElementById("toc-list");
+    var exSection = document.getElementById("scan-examples-section");
+    if (!tocList || !exSection || exSection.classList.contains("scan-hidden")) return;
+
+    var examples = exSection.querySelectorAll(".scan-example");
+    if (examples.length === 0) return;
+
+    // Remove any existing examples group
+    var existing = tocList.querySelectorAll(".toc-examples-divider, .toc-examples-label-item, .toc-example-item");
+    for (var r = 0; r < existing.length; r++) existing[r].remove();
+
+    // Divider
+    var dividerLi = document.createElement("li");
+    dividerLi.className = "toc-item toc-examples-divider";
+    dividerLi.innerHTML = '<div class="toc-divider"></div>';
+    tocList.appendChild(dividerLi);
+
+    // Label
+    var labelLi = document.createElement("li");
+    labelLi.className = "toc-item toc-examples-label-item";
+    labelLi.innerHTML = '<div class="toc-examples-label">EXAMPLES</div>';
+    tocList.appendChild(labelLi);
+
+    for (var i = 0; i < examples.length; i++) {
+        var ex = examples[i];
+        // Set ID on example for linking
+        if (!ex.id) ex.id = "code-example-" + i;
+        var titleEl = ex.querySelector(".scan-example-title");
+        var title = titleEl ? titleEl.textContent.trim() : "Example " + (i + 1);
+        var li = document.createElement("li");
+        li.className = "toc-item toc-example-item";
+        li.innerHTML = '<a href="#' + ex.id + '" class="toc-link toc-h3" data-target="' + ex.id + '">' + title + '</a>';
+        tocList.appendChild(li);
+    }
+    // Refresh scroll spy targets to include examples
+    if (window._tocRefresh) window._tocRefresh();
+}
+</script>
+{% if session and session.status == 'running' %}
+<script nonce="{{ csp_nonce() }}" src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script nonce="{{ csp_nonce() }}">
+if (window.__skriftNotifications) {
+    window.__skriftNotifications.configure({ persistConnection: true });
+}
+(function() {
+    // Event delegation for expand buttons (must be in running block too)
+    document.addEventListener("click", function(e) {
+        var expand = e.target.closest("[data-expand]");
+        if (expand) expand.parentElement.classList.remove("collapsed");
+    });
+
+    const toolsList = document.getElementById("scan-tools-list");
+    const toolsDetail = document.getElementById("scan-tools");
+    const toolCount = document.getElementById("scan-tool-count");
+    const responseEl = document.getElementById("scan-response");
+    const placeholder = document.getElementById("scan-response-placeholder");
+    const actionsEl = document.getElementById("scan-actions");
+    let responseText = "";
+    let toolEntryCount = 0;
+    let completed = false;
+    let lastChunkSeq = -1;
+    let chunkGapDetected = false;
+
+    function renderResponseMarkdown() {
+        var withCitations = processCitations(responseText);
+        var rendered = typeof marked !== "undefined" ? marked.parse(withCitations) : withCitations;
+        responseEl.innerHTML = rendered;
+        if (window.scheduleScanMermaidRender) window.scheduleScanMermaidRender(responseEl);
+    }
+
+    document.addEventListener("sk:notification", function(e) {
+        const data = e.detail;
+        if (!data || !data.type) return;
+
+        // Only handle research notifications for this session
+        if (!data.type.startsWith("research:")) return;
+        if (data.session_id && data.session_id !== "{{ session.id }}") return;
+
+        // Suppress default toast rendering
+        e.preventDefault();
+
+        var eventType = data.type.replace("research:", "");
+
+        if (eventType === "started") {
+            if (placeholder) {
+                placeholder.textContent = "Analyzing query\u2026";
+            }
+        }
+
+        else if (eventType === "session_meta") {
+            if (data.name) {
+                document.title = data.name + " - Scan - Smarter.Dev";
+            }
+            if (data.slug) {
+                history.pushState(null, "", "/r/" + data.slug);
+            }
+        }
+
+        else if (eventType === "youtube_videos") {
+            if (data.videos && data.videos.length > 0) {
+                renderYouTubeVideos(data.videos);
+                if (toolsDetail) toolsDetail.removeAttribute("open");
+            }
+        }
+
+        else if (eventType === "resources") {
+            if (data.resources && data.resources.length > 0) {
+                renderResources(data.resources);
+                if (toolsDetail) toolsDetail.removeAttribute("open");
+            }
+        }
+
+        else if (eventType === "code_examples_status") {
+            var section = document.getElementById("scan-examples-section");
+            var list = document.getElementById("scan-examples-list");
+            if (data.status === "generating" && section && list) {
+                section.classList.remove("scan-hidden");
+                list.innerHTML = '<p class="scan-sidebar-empty" style="animation:scan-pulse 2s ease-in-out infinite">Generating code examples...</p>';
+            } else if (data.status === "done" && section && list) {
+                // Only hide if no examples were actually rendered
+                if (!list.querySelector(".scan-example")) {
+                    section.classList.add("scan-hidden");
+                }
+                // Update TOC with examples
+                buildTOCExamples();
+            }
+        }
+
+        else if (eventType === "code_examples") {
+            if (data.examples && data.examples.length > 0) {
+                renderCodeExamples(data.examples);
+                buildTOCExamples();
+            }
+        }
+
+        else if (eventType === "code_example_chunk") {
+            var section = document.getElementById("scan-examples-section");
+            var list = document.getElementById("scan-examples-list");
+            if (!section || !list) return;
+            section.classList.remove("scan-hidden");
+            // Remove the "generating" placeholder if present
+            var placeholder = list.querySelector(".scan-sidebar-empty");
+            if (placeholder) placeholder.remove();
+            // Find or create the container for this example index
+            var exId = "scan-example-stream-" + data.index;
+            var exEl = document.getElementById(exId);
+            if (!exEl) {
+                exEl = document.createElement("div");
+                exEl.id = exId;
+                exEl.className = "scan-example scan-ex-animate";
+                exEl.innerHTML =
+                    '<div class="scan-example-header"><span class="scan-example-title">Example ' + (data.index + 1) + '</span><span class="scan-example-lang scan-example-streaming">streaming...</span></div>' +
+                    '<pre class="scan-example-code"><code></code></pre>';
+                list.appendChild(exEl);
+            }
+            var codeEl = exEl.querySelector("code");
+            if (codeEl) {
+                codeEl.textContent += (data.delta || "");
+            }
+        }
+
+        else if (eventType === "code_example_complete") {
+            var exId = "scan-example-stream-" + data.index;
+            var exEl = document.getElementById(exId);
+            var list = document.getElementById("scan-examples-list");
+            if (data.example) {
+                var ex = data.example;
+                var lineCount = (ex.code || "").split("\n").length;
+                var collapsed = lineCount > 15 ? " collapsed" : "";
+                var newEl = document.createElement("div");
+                newEl.className = "scan-example";
+                newEl.innerHTML =
+                    '<div class="scan-example-header">' +
+                    '<span class="scan-example-title">' + escapeHtml(ex.title) + '</span>' +
+                    '<span class="scan-example-lang">' + escapeHtml(ex.language) + '</span>' +
+                    '</div>' +
+                    '<div class="scan-example-code-wrap' + collapsed + '">' +
+                    '<pre class="scan-example-code"><code class="language-' + escapeHtml(ex.language) + '">' + escapeHtml(ex.code) + '</code></pre>' +
+                    '<div class="scan-example-expand" data-expand><span>VIEW FULL EXAMPLE</span></div>' +
+                    '</div>' +
+                    (ex.explanation ? '<div class="scan-example-explanation">' + escapeHtml(ex.explanation) + '</div>' : '');
+                if (exEl) {
+                    exEl.replaceWith(newEl);
+                } else if (list) {
+                    list.appendChild(newEl);
+                }
+                if (typeof Prism !== "undefined") Prism.highlightAllUnder(newEl);
+                // Update TOC examples
+                buildTOCExamples();
+            }
+        }
+
+        else if (eventType === "status") {
+            if (placeholder) {
+                placeholder.textContent = data.message || "Processing...";
+            }
+        }
+
+        else if (eventType === "tool_use") {
+            toolEntryCount++;
+            toolCount.textContent = "(" + toolEntryCount + ")";
+            const li = document.createElement("li");
+            li.className = "scan-tool-entry scan-tool-running";
+            li.dataset.tool = data.tool || "";
+            li.innerHTML =
+                '<span class="scan-tool-name">' + escapeHtml(humanToolName(data.tool || "tool")) + '</span>' +
+                '<span class="scan-tool-args">' + escapeHtml(summarizeArgs(data.input, data.tool)) + '</span>';
+            const contentDiv = document.createElement("div");
+            contentDiv.className = "scan-tool-content";
+            toolsList.appendChild(li);
+            toolsList.appendChild(contentDiv);
+        }
+
+        else if (eventType === "tool_result") {
+            const entries = Array.from(toolsList.querySelectorAll(".scan-tool-entry.scan-tool-running"));
+            for (let i = entries.length - 1; i >= 0; i--) {
+                const entry = entries[i];
+                if (entry.dataset.tool === data.tool) {
+                    entry.classList.remove("scan-tool-running");
+                    entry.classList.add("scan-tool-done");
+                    entry.onclick = function() {
+                        const next = this.nextElementSibling;
+                        if (next && next.classList.contains("scan-tool-content")) {
+                            next.classList.toggle("expanded");
+                        }
+                    };
+                    const contentDiv = entry.nextElementSibling;
+                    if (contentDiv && contentDiv.classList.contains("scan-tool-content")) {
+                        // Render nested sub-tools for research tool
+                        if (data.sub_tools && data.sub_tools.length > 0) {
+                            var html = '<ul class="scan-sub-tools">';
+                            for (var st of data.sub_tools) {
+                                var argText = "";
+                                if (st.tool === "search" && st.input && st.input.query) argText = st.input.query;
+                                else if ((st.tool === "read" || st.tool === "read_url") && st.input && st.input.url) argText = st.input.url;
+                                else if (typeof st.input === "string") argText = st.input;
+                                else argText = Object.entries(st.input || {}).map(function(e) { return e[0] + "=" + e[1]; }).join(", ");
+                                if (argText.length > 70) argText = argText.slice(0, 70) + "...";
+                                html += '<li class="scan-sub-tool">' +
+                                    '<span class="scan-sub-tool-name">' + escapeHtml(humanToolName(st.tool)) + '</span>' +
+                                    '<span class="scan-sub-tool-args">' + escapeHtml(argText) + '</span></li>' +
+                                    '<div class="scan-sub-tool-content">' + escapeHtml(st.content || "") + '</div>';
+                            }
+                            html += '</ul>';
+                            contentDiv.innerHTML = html;
+                            // Attach click handlers for sub-tools
+                            contentDiv.querySelectorAll(".scan-sub-tool").forEach(function(subEl) {
+                                subEl.addEventListener("click", function(ev) {
+                                    ev.stopPropagation();
+                                    var subNext = this.nextElementSibling;
+                                    if (subNext && subNext.classList.contains("scan-sub-tool-content")) {
+                                        subNext.classList.toggle("expanded");
+                                    }
+                                });
+                            });
+                        } else if (data.content) {
+                            contentDiv.classList.add("scan-tool-content--text");
+                            contentDiv.textContent = data.content;
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        else if (eventType === "response_chunk") {
+            if (completed || chunkGapDetected) return;
+            if (placeholder) placeholder.remove();
+            var delta = data.delta || "";
+            var seq = typeof data.seq === "number" ? data.seq : null;
+            var offset = typeof data.offset === "number" ? data.offset : null;
+
+            if (seq !== null) {
+                if (seq <= lastChunkSeq) return;
+                if (seq !== lastChunkSeq + 1 || offset !== responseText.length) {
+                    chunkGapDetected = true;
+                    return;
+                }
+                lastChunkSeq = seq;
+            } else if (offset !== null) {
+                if (offset < responseText.length) return;
+                if (offset !== responseText.length) {
+                    chunkGapDetected = true;
+                    return;
+                }
+            }
+
+            responseText += delta;
+            renderResponseMarkdown();
+        }
+
+        else if (eventType === "complete") {
+            completed = true;
+
+
+            // Show generation time
+            var durationEl = document.getElementById("scan-duration");
+            if (durationEl && data.duration) {
+                durationEl.classList.remove("scan-hidden");
+                var modeLabels = {"quick_answer": "Quick Answer", "quick_research": "Quick Research", "deep": "Deep Research"};
+                var modeLabel = modeLabels[data.research_mode] || "Research";
+                durationEl.innerHTML = modeLabel + " generated in <span id=\"scan-timer\">" + data.duration + "s</span>";
+            }
+
+            if (data.response) {
+                responseText = data.response;
+                renderResponseMarkdown();
+            }
+
+            if (placeholder) placeholder.remove();
+
+            // Collapse tools
+            if (toolsDetail) toolsDetail.removeAttribute("open");
+
+            // Show actions
+            actionsEl.classList.remove("scan-hidden");
+
+            // Build TOC from answer headings
+            buildTOC();
+            // Build TOC examples if they're already rendered
+            buildTOCExamples();
+        }
+
+        else if (eventType === "error") {
+            completed = true;
+
+
+            statusEl.textContent = "ERROR";
+            statusEl.className = "scan-status scan-status-error";
+
+            if (placeholder) placeholder.remove();
+            responseEl.innerHTML = '<p class="scan-error-text">' + escapeHtml(data.error || "Unknown error") + '</p>';
+        }
+    });
+
+    // Copy button
+    document.getElementById("scan-copy-btn").addEventListener("click", function() {
+        navigator.clipboard.writeText(responseText).then(function() {
+            const btn = document.getElementById("scan-copy-btn");
+            btn.textContent = "COPIED";
+            setTimeout(function() { btn.textContent = "COPY"; }, 2000);
+        });
+    });
+
+    // Download button
+    document.getElementById("scan-download-btn").addEventListener("click", function() {
+        const blob = new Blob([responseText], { type: "text/markdown" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "scan-result.md";
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    function processCitations(html) {
+        return html.replace(/\[\[(https?:\/\/[^\]\s]+(?:\],\s*\[https?:\/\/[^\]\s]+)*)\]\]/g, function(_, inner) {
+            var urls = inner.match(/https?:\/\/[^\s,\]\[]+/g);
+            if (!urls) return "[[" + inner + "]]";
+            return urls.map(function(url) {
+                var a = document.createElement("a");
+                a.href = url;
+                var domain = a.hostname.replace(/^www\./, "");
+                return '<sup><a href="' + escapeHtml(url) + '" target="_blank" rel="noopener" class="scan-cite">' + escapeHtml(domain) + '</a></sup>';
+            }).join("");
+        });
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement("div");
+        div.textContent = str || "";
+        return div.innerHTML;
+    }
+
+    function renderYouTubeVideos(videos) {
+        var discovery = document.getElementById("scan-discovery");
+        var list = document.getElementById("scan-youtube-list");
+        if (!list) return;
+        if (discovery) discovery.classList.remove("scan-hidden");
+        var html = "";
+        for (var i = 0; i < videos.length; i++) {
+            var v = videos[i];
+            var thumbHtml = '';
+            if (v.thumbnail) {
+                thumbHtml = '<div class="scan-youtube-thumb-wrap"><img src="' + escapeHtml(v.thumbnail) + '" class="scan-youtube-thumb" alt="" loading="lazy">' +
+                    (v.duration ? '<span class="scan-youtube-duration">' + escapeHtml(v.duration) + '</span>' : '') +
+                    '</div>';
+            }
+            html += '<li class="scan-youtube-item scan-yt-animate" style="animation-delay:' + (i * 200) + 'ms">' +
+                '<a href="' + escapeHtml(v.url) + '" target="_blank" rel="noopener" class="scan-youtube-link">' +
+                thumbHtml +
+                '<div class="scan-youtube-info">' +
+                '<div class="scan-youtube-title">' + escapeHtml(v.title) + '</div>' +
+                '<div class="scan-youtube-channel">' + escapeHtml(v.channel) + '</div>' +
+                '</div></a></li>';
+        }
+        list.innerHTML = html;
+    }
+
+    function renderResources(resources) {
+        var discovery = document.getElementById("scan-discovery");
+        var list = document.getElementById("scan-resources-list");
+        if (!list) return;
+        if (discovery) discovery.classList.remove("scan-hidden");
+        var html = "";
+        for (var i = 0; i < resources.length; i++) {
+            var r = resources[i];
+            var ogPlaceholder = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>';
+            html += '<li class="scan-resource-item scan-res-animate" style="animation-delay:' + (i * 150) + 'ms">' +
+                '<a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener" class="scan-resource-link">' +
+                '<div class="scan-resource-og">' + ogPlaceholder +
+                (r.og_image ? '<img src="' + escapeHtml(r.og_image) + '" alt="" loading="lazy">' : '') +
+                '</div>' +
+                '<div class="scan-resource-info">' +
+                '<div class="scan-resource-title">' + escapeHtml(r.title) + '</div>' +
+                '<div class="scan-resource-desc">' + escapeHtml(r.description || '') + '</div>' +
+                '<div class="scan-resource-site">' +
+                (r.favicon ? '<img src="' + escapeHtml(r.favicon) + '" class="scan-resource-favicon" alt="">' : '') +
+                escapeHtml(r.site_name || '') +
+                '</div></div></a></li>';
+        }
+        list.innerHTML = html;
+    }
+
+    function renderCodeExamples(examples) {
+        var section = document.getElementById("scan-examples-section");
+        var list = document.getElementById("scan-examples-list");
+        if (!section || !list) return;
+        section.classList.remove("scan-hidden");
+        var html = "";
+        for (var i = 0; i < examples.length; i++) {
+            var ex = examples[i];
+            var lineCount = (ex.code || "").split("\n").length;
+            var collapsed = lineCount > 15 ? " collapsed" : "";
+            html += '<div class="scan-example scan-ex-animate" style="animation-delay:' + (i * 200) + 'ms">' +
+                '<div class="scan-example-header">' +
+                '<span class="scan-example-title">' + escapeHtml(ex.title) + '</span>' +
+                '<span class="scan-example-lang">' + escapeHtml(ex.language) + '</span>' +
+                '</div>' +
+                '<div class="scan-example-code-wrap' + collapsed + '">' +
+                '<pre class="scan-example-code"><code class="language-' + escapeHtml(ex.language) + '">' + escapeHtml(ex.code) + '</code></pre>' +
+                '<div class="scan-example-expand" data-expand><span>VIEW FULL EXAMPLE</span></div>' +
+                '</div>' +
+                (ex.explanation ? '<div class="scan-example-explanation">' + escapeHtml(ex.explanation) + '</div>' : '') +
+                '</div>';
+        }
+        list.innerHTML = html;
+        if (typeof Prism !== "undefined") Prism.highlightAllUnder(list);
+    }
+
+    var TOOL_NAMES = {
+        "research": "Research",
+        "search": "Web Search",
+        "read": "Read URL",
+        "read_url": "Read URL",
+        "source_readable": "Check Source",
+        "youtube_search": "YouTube Search",
+        "exp_youtube_search": "YouTube Search",
+        "exp_web_search": "Web Search",
+        "exp_planner_read_url": "Read URL",
+        "exp_answer_read_url": "Read URL"
+    };
+    function humanToolName(name) {
+        return TOOL_NAMES[name] || name.replace(/(^exp_|_)/g, function(m) { return m === "_" ? " " : ""; }).replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    }
+
+    function summarizeArgs(input, toolName) {
+        if (!input || typeof input !== "object") return "";
+        if (input.question) {
+            var q = input.question;
+            return q.length > 80 ? q.slice(0, 80) + "..." : q;
+        }
+        if (input.query) {
+            var q = input.query;
+            return q.length > 80 ? q.slice(0, 80) + "..." : q;
+        }
+        if (input.url) {
+            var u = input.url;
+            return u.length > 80 ? u.slice(0, 80) + "..." : u;
+        }
+        var parts = [];
+        for (var key in input) {
+            var val = typeof input[key] === "string" ? input[key] : JSON.stringify(input[key]);
+            parts.push(val.length > 60 ? val.slice(0, 60) + "..." : val);
+        }
+        return parts.join(", ");
+    }
+})();
+</script>
+{% elif session and session.status == 'complete' %}
+<script nonce="{{ csp_nonce() }}">
+(function() {
+    // Tool expansion click handler (top-level and nested sub-tools)
+    var toolsList = document.getElementById("scan-tools-list");
+    if (toolsList) {
+        toolsList.addEventListener("click", function(e) {
+            // Check for sub-tool click first
+            var subTool = e.target.closest(".scan-sub-tool");
+            if (subTool) {
+                e.stopPropagation();
+                var subNext = subTool.nextElementSibling;
+                if (subNext && subNext.classList.contains("scan-sub-tool-content")) {
+                    subNext.classList.toggle("expanded");
+                }
+                return;
+            }
+            // Top-level tool entry click
+            var entry = e.target.closest(".scan-tool-entry");
+            if (!entry) return;
+            var next = entry.nextElementSibling;
+            if (next && next.classList.contains("scan-tool-content")) {
+                next.classList.toggle("expanded");
+            }
+        });
+    }
+
+    var responseEl = document.getElementById("scan-response");
+    var responseText = responseEl ? responseEl.textContent : "";
+
+    // Event delegation for expand buttons (CSP-safe, no inline handlers)
+    document.addEventListener("click", function(e) {
+        var expand = e.target.closest("[data-expand]");
+        if (expand) expand.parentElement.classList.remove("collapsed");
+    });
+
+    document.getElementById("scan-copy-btn").addEventListener("click", function() {
+        navigator.clipboard.writeText(responseText).then(function() {
+            const btn = document.getElementById("scan-copy-btn");
+            btn.textContent = "COPIED";
+            setTimeout(function() { btn.textContent = "COPY"; }, 2000);
+        });
+    });
+
+    document.getElementById("scan-download-btn").addEventListener("click", function() {
+        const blob = new Blob([responseText], { type: "text/markdown" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "scan-result.md";
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    // Build TOC from rendered answer headings
+    buildTOC();
+    // Add examples to TOC
+    buildTOCExamples();
+    if (window.scheduleScanMermaidRender) window.scheduleScanMermaidRender(responseEl || document);
+})();
+</script>
+{% endif %}
+{% endblock %}
