@@ -1,0 +1,57 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Click Tracking - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Click Tracking</h1>
+    <p>{{ total }} tracked link{{ 's' if total != 1 else '' }} ({{ total_clicks }} total click{{ 's' if total_clicks != 1 else '' }})</p>
+</hgroup>
+
+<div class="sk-panel">
+    <div class="sk-panel-head">Filter</div>
+    <div class="sk-panel-body">
+        <form method="get" action="/admin/click-tracking" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
+            <div>
+                <label for="prefix"><strong>Key prefix</strong></label><br>
+                <input type="text" name="prefix" id="prefix" value="{{ filters.prefix }}" placeholder="vibe:course:" style="min-width: 280px;">
+            </div>
+            <div>
+                <button type="submit" class="sk-btn-outline sk-btn-small">Filter</button>
+                <a href="/admin/click-tracking" class="sk-btn-outline sk-btn-small">Clear</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if counters %}
+<table class="sk-admin-table">
+    <thead>
+        <tr>
+            <th>Key</th>
+            <th>URL</th>
+            <th style="text-align: right;">Clicks</th>
+            <th>Last clicked</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in counters %}
+        <tr>
+            <td><code>{{ c.key }}</code></td>
+            <td><a href="{{ c.url }}" target="_blank" rel="noopener" style="word-break: break-all;">{{ c.url }}</a></td>
+            <td style="text-align: right;"><strong>{{ c.count }}</strong></td>
+            <td>{{ c.last_clicked_at.strftime('%Y-%m-%d %H:%M') if c.last_clicked_at else '—' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="sk-no-items">
+    {% if filters.prefix %}
+    No tracked links match that prefix.
+    {% else %}
+    No clicks have been recorded yet.
+    {% endif %}
+</p>
+{% endif %}
+{% endblock %}

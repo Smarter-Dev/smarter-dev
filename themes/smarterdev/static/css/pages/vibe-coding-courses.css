@@ -1,0 +1,499 @@
+/* ══════════════════════════════════════════════════════
+   Vibe Coding Courses — hero, featured strip, tools/creators,
+   filter chips, full course grid.
+   ══════════════════════════════════════════════════════ */
+
+.vc-wrap {
+  position: relative;
+  z-index: 1;
+  padding: clamp(4rem, 8vw, 8rem) clamp(1.5rem, 5vw, 4rem) 6rem;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* ── Breadcrumb ── */
+.vc-breadcrumb {
+  margin: 0 0 2rem;
+  font-family: var(--heading);
+  font-size: .58rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--mid);
+  text-align: center;
+}
+.vc-breadcrumb ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .5rem;
+}
+.vc-breadcrumb li + li::before {
+  content: '/';
+  margin-right: .5rem;
+  color: rgba(0,212,255,.25);
+}
+.vc-breadcrumb a {
+  color: var(--mid);
+  text-decoration: none;
+  transition: color .2s;
+}
+.vc-breadcrumb a:hover { color: var(--cyan) }
+.vc-breadcrumb [aria-current="page"] { color: var(--white) }
+
+/* ── Hero ── */
+.vc-hero {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+.vc-hero-kicker {
+  font-family: var(--heading);
+  font-size: .6rem;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin: 0 0 1.25rem;
+}
+.vc-hero-title {
+  font-family: var(--display);
+  font-size: clamp(2.4rem, 6vw, 4.5rem);
+  color: var(--white);
+  line-height: 1.05;
+  letter-spacing: .06em;
+  margin-bottom: 1.25rem;
+  text-shadow: 0 0 40px rgba(0,212,255,.12);
+}
+.vc-hero-sub {
+  font-family: var(--body);
+  font-size: clamp(.95rem, 1.4vw, 1.05rem);
+  color: var(--light);
+  max-width: 640px;
+  margin: 0 auto;
+  line-height: 1.7;
+}
+
+/* ── On-this-page nav ──
+   The masthead `.site-nav` is `position: fixed` (z-index 100) at top:0,
+   so we offset this sticky nav to sit just below it instead of hiding
+   behind it. */
+.vc-toc {
+  position: sticky;
+  top: 48px;
+  z-index: 50;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .35rem .25rem;
+  padding: .85rem 1rem;
+  margin-bottom: 3.5rem;
+  background: rgba(2,4,8,.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-top: 1px solid rgba(0,212,255,.06);
+  border-bottom: 1px solid rgba(0,212,255,.06);
+}
+.vc-toc-link {
+  font-family: var(--heading);
+  font-size: .58rem;
+  letter-spacing: .15em;
+  text-transform: uppercase;
+  color: var(--mid);
+  text-decoration: none;
+  padding: .5rem .85rem;
+  border: 1px solid transparent;
+  transition: color .2s, border-color .2s, background .2s;
+  white-space: nowrap;
+}
+.vc-toc-link:hover {
+  color: var(--white);
+  border-color: rgba(0,212,255,.15);
+}
+.vc-toc-link.is-active {
+  color: var(--cyan);
+  border-color: rgba(0,212,255,.3);
+  background: rgba(0,212,255,.04);
+}
+
+/* ── Intro ── */
+.vc-intro {
+  max-width: 720px;
+  margin: 0 auto 4.5rem;
+  padding: 0 .25rem;
+}
+.vc-intro-lede {
+  font-family: var(--heading);
+  font-size: clamp(1.2rem, 2.4vw, 1.65rem);
+  color: var(--white);
+  line-height: 1.35;
+  letter-spacing: .005em;
+  margin: 0 0 1.75rem;
+}
+.vc-intro p {
+  font-size: 1.02rem;
+  color: var(--light);
+  line-height: 1.85;
+  margin: 0 0 1.25rem;
+}
+.vc-intro p:last-child { margin-bottom: 0 }
+.vc-intro strong {
+  color: var(--white);
+  font-weight: 600;
+}
+
+/* ── Section scaffolding ── */
+.vc-section { margin-bottom: 6rem }
+.vc-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  flex-wrap: wrap;
+}
+.vc-section-head h2 {
+  font-family: var(--heading);
+  font-size: clamp(.95rem, 2vw, 1.2rem);
+  color: var(--white);
+  letter-spacing: .04em;
+  margin: 0;
+}
+.vc-view-all {
+  font-family: var(--heading);
+  font-size: .65rem;
+  letter-spacing: .12em;
+  color: var(--cyan);
+  text-decoration: none;
+  text-transform: uppercase;
+  transition: opacity .2s;
+}
+.vc-view-all:hover { opacity: .7 }
+.vc-empty {
+  font-size: .9rem;
+  color: var(--mid);
+  font-style: italic;
+}
+
+/* ── Card grid (featured) ── */
+.vc-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+}
+
+/* ── Course card ── */
+.vc-course-card {
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  padding: 2rem 1.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: .9rem;
+  transition: border-color .25s, box-shadow .25s;
+  position: relative;
+}
+.vc-course-card:hover {
+  border-color: rgba(0,212,255,.18);
+  box-shadow: inset 0 0 24px rgba(0,212,255,.04);
+}
+.vc-course-link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+}
+/* Stretched-link pattern: the link's ::after covers the whole card so the
+   entire card area is clickable. The actual <a> stays scoped to the title
+   for accessibility (screen readers still announce the link text). */
+.vc-course-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+.vc-course-title {
+  font-family: var(--heading);
+  font-size: .92rem;
+  color: var(--white);
+  letter-spacing: .02em;
+  line-height: 1.35;
+  margin: 0;
+  transition: color .2s;
+}
+.vc-course-card:hover .vc-course-title { color: var(--cyan) }
+.vc-course-link:focus-visible { outline: 1px dashed var(--cyan); outline-offset: 4px }
+.vc-course-card { cursor: pointer }
+.vc-course-meta {
+  font-family: var(--heading);
+  font-size: .55rem;
+  color: var(--mid);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  margin: 0;
+  display: flex;
+  gap: .65rem;
+  flex-wrap: wrap;
+}
+.vc-course-source { color: var(--cyan) }
+.vc-course-date::before,
+.vc-course-source::before {
+  content: '·';
+  margin-right: .65rem;
+  color: var(--mid);
+}
+.vc-course-category {
+  color: var(--white);
+  background: rgba(0,212,255,.06);
+  padding: .15rem .55rem;
+  border: 1px solid rgba(0,212,255,.12);
+  letter-spacing: .12em;
+}
+.vc-course-blurb {
+  font-size: .88rem;
+  color: var(--light);
+  line-height: 1.7;
+  margin: 0;
+}
+
+/* ── Section subhead (used under Workflow & Practice) ── */
+.vc-section-sub {
+  font-size: .92rem;
+  color: var(--mid);
+  line-height: 1.6;
+  margin: -.75rem 0 1.75rem;
+  max-width: 720px;
+}
+
+/* ── Creators ── */
+.vc-people-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+}
+.vc-person {
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  padding: 1.6rem 1.65rem;
+  text-decoration: none;
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+  transition: border-color .25s;
+}
+.vc-person:hover { border-color: rgba(0,212,255,.18) }
+.vc-person:focus-visible { outline: 1px dashed var(--cyan); outline-offset: 2px }
+.vc-person-name {
+  font-family: var(--heading);
+  font-size: .85rem;
+  letter-spacing: .03em;
+  color: var(--white);
+  transition: color .2s;
+}
+.vc-person:hover .vc-person-name { color: var(--cyan) }
+.vc-person-platform {
+  font-family: var(--mono);
+  font-size: .68rem;
+  color: var(--mid);
+  letter-spacing: .04em;
+  text-transform: lowercase;
+}
+.vc-person-blurb {
+  font-size: .82rem;
+  color: var(--light);
+  line-height: 1.6;
+  margin-top: .15rem;
+}
+
+/* ── Filter chips ── */
+.vc-all-head {
+  align-items: center;
+}
+.vc-popularity-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  font-family: var(--heading);
+  font-size: .6rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--mid);
+  cursor: pointer;
+  user-select: none;
+  transition: color .2s;
+}
+.vc-popularity-toggle:hover { color: var(--white) }
+.vc-popularity-toggle input { accent-color: var(--cyan); width: 14px; height: 14px }
+
+.vc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin-bottom: 1.5rem;
+}
+.vc-chip {
+  font-family: var(--heading);
+  font-size: .6rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--mid);
+  background: transparent;
+  border: 1px solid rgba(0,212,255,.12);
+  padding: .55rem .95rem;
+  cursor: pointer;
+  transition: color .2s, border-color .2s, background .2s;
+}
+.vc-chip:hover { color: var(--white); border-color: rgba(0,212,255,.3) }
+.vc-chip.is-active {
+  color: var(--bg);
+  background: var(--cyan);
+  border-color: var(--cyan);
+}
+
+.vc-card-grid .vc-course-card[hidden] { display: none }
+
+/* ── From Smarter Dev (originals CTA) ── */
+.vc-originals-card {
+  background: linear-gradient(135deg, rgba(0,212,255,.05) 0%, rgba(0,212,255,0) 100%);
+  border: 1px solid rgba(0,212,255,.12);
+  padding: 2.5rem 2.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.vc-originals-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 64px; height: 1px;
+  background: var(--cyan);
+}
+.vc-originals-lede {
+  font-family: var(--heading);
+  font-size: 1.1rem;
+  color: var(--white);
+  letter-spacing: .03em;
+  margin: 0;
+}
+.vc-originals-body {
+  font-size: .95rem;
+  color: var(--light);
+  line-height: 1.75;
+  max-width: 560px;
+  margin: 0 auto;
+}
+.vc-cta-button {
+  display: inline-block;
+  margin: 1rem auto 0;
+  padding: .9rem 1.5rem;
+  font-family: var(--heading);
+  font-size: .68rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  background: rgba(0,212,255,.04);
+  border: 1px solid rgba(0,212,255,.3);
+  text-decoration: none;
+  transition: background .2s, color .2s, border-color .2s;
+}
+.vc-cta-button:hover {
+  color: var(--bg);
+  background: var(--cyan);
+  border-color: var(--cyan);
+}
+
+/* ── FAQ ── */
+.vc-faq-list { display: flex; flex-direction: column }
+.vc-faq-item {
+  border-bottom: 1px solid rgba(0,212,255,.06);
+}
+.vc-faq-item:first-child { border-top: 1px solid rgba(0,212,255,.06) }
+.vc-faq-item > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 1.25rem 0;
+  font-family: var(--heading);
+  font-size: .85rem;
+  color: var(--white);
+  letter-spacing: .02em;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  transition: color .2s;
+}
+.vc-faq-item > summary::-webkit-details-marker { display: none }
+.vc-faq-item > summary::after {
+  content: '+';
+  font-family: var(--mono);
+  font-size: 1.1rem;
+  color: var(--cyan);
+  transition: transform .2s;
+  flex-shrink: 0;
+}
+.vc-faq-item[open] > summary::after { content: '−' }
+.vc-faq-item > summary:hover { color: var(--cyan) }
+.vc-faq-item > p {
+  margin: 0 0 .75rem;
+  padding: 0 2rem 0 0;
+  font-size: .92rem;
+  line-height: 1.8;
+  color: var(--light);
+  max-width: 720px;
+}
+.vc-faq-item > p.vc-faq-source {
+  margin-bottom: 1.5rem;
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--mid);
+}
+.vc-faq-source a {
+  color: var(--cyan);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(0,212,255,.25);
+  transition: border-color .2s;
+}
+.vc-faq-source a:hover { border-bottom-color: var(--cyan) }
+
+/* ── Resources index placeholder card ── */
+.vc-person-placeholder {
+  opacity: .55;
+  cursor: default;
+}
+.vc-person-placeholder:hover { border-color: rgba(0,212,255,.06) }
+
+/* ── Last updated stamp ── */
+.vc-last-updated {
+  text-align: center;
+  margin: 3rem 0 0;
+  font-family: var(--heading);
+  font-size: .58rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--mid);
+}
+.vc-last-updated time { color: var(--cyan) }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .vc-card-grid { grid-template-columns: repeat(2, 1fr) }
+  .vc-people-grid { grid-template-columns: repeat(2, 1fr) }
+}
+@media (max-width: 600px) {
+  .vc-card-grid,
+  .vc-people-grid { grid-template-columns: 1fr }
+  .vc-section-head { flex-direction: column; align-items: flex-start; gap: .4rem }
+  .vc-view-all { align-self: flex-end }
+  .vc-toc {
+    gap: .3rem .15rem;
+    padding: .6rem .5rem;
+  }
+  .vc-toc-link {
+    font-size: .55rem;
+    padding: .4rem .55rem;
+    letter-spacing: .1em;
+  }
+}

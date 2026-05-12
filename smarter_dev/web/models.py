@@ -3502,3 +3502,35 @@ class ModerationAction(Base):
 
     def __repr__(self) -> str:
         return f"<ModerationAction(type='{self.action_type}', target='{self.target_username}', source='{self.source}')>"
+
+
+class TrackedLinkCounter(Base):
+    """Generic outbound-link click counter.
+
+    Increments via /v2/api/track-click when a frontend `data-track-key` anchor is
+    clicked (see themes/smarterdev/static/js/click-tracker.js). Keyed by a stable
+    string so callers control the namespace (e.g. "vibe:course:fireship-...").
+    """
+
+    __tablename__ = "tracked_link_counters"
+
+    key: Mapped[str] = mapped_column(
+        String(200),
+        primary_key=True,
+    )
+    url: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )
+    count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default="0",
+    )
+    last_clicked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    def __repr__(self) -> str:
+        return f"<TrackedLinkCounter(key='{self.key}', count={self.count})>"

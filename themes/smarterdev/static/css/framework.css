@@ -44,7 +44,9 @@ body {
   font-family: var(--body);
   background: var(--bg);
   color: var(--light);
-  overflow-x: hidden;
+  /* `clip` keeps horizontal overflow hidden without making body a scroll
+     container — required so `position: sticky` works for in-page nav. */
+  overflow-x: clip;
   line-height: 1.7;
 }
 
@@ -109,10 +111,10 @@ section {
 /* ── Footer ── */
 .foot {
   display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 1.5rem;
-  padding: 1.5rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 2rem clamp(1.5rem, 5vw, 4rem);
   font-family: var(--heading);
   font-size: .55rem;
   color: var(--gray);
@@ -120,6 +122,7 @@ section {
   position: relative;
   z-index: 1;
   letter-spacing: .06em;
+  flex-wrap: wrap;
 }
 .foot a {
   color: var(--mid);
@@ -128,6 +131,24 @@ section {
 }
 .foot a:hover {
   color: var(--cyan);
+}
+.foot-col {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+}
+.foot-col-meta {
+  flex-direction: row;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+.foot-heading {
+  color: var(--cyan);
+  letter-spacing: .12em;
+}
+@media (max-width: 600px) {
+  .foot { flex-direction: column; align-items: flex-start; gap: 1.5rem }
 }
 
 /* ── Responsive Breakpoints ── */
