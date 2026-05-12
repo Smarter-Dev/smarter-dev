@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block page_type %}vibe-coding-courses{% endblock %}
+{% block page_title %}Building Software with AI Agents: Courses, Tutorials & Best Practices{% endblock %}
+
+{% block page_css %}
+<link rel="stylesheet" href="{{ theme_url('css/pages/vibe-coding-courses.css') }}">
+{% endblock %}
+
+{% block og_meta %}
+{{ super() }}
+{% if og_meta %}
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ og_meta.title }}">
+{% if og_meta.description %}<meta name="twitter:description" content="{{ og_meta.description }}">{% endif %}
+{% if og_meta.image %}<meta name="twitter:image" content="{{ og_meta.image }}">{% endif %}
+<meta name="twitter:site" content="@SmarterDev">
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="vc-wrap container">
+
+    <nav class="vc-breadcrumb" aria-label="Breadcrumb">
+        <ol>
+            <li><a href="/">Smarter Dev</a></li>
+            <li><a href="/resources">Resources</a></li>
+            <li aria-current="page">Agentic Coding</li>
+        </ol>
+    </nav>
+
+    <header class="vc-hero reveal">
+        <h1 class="vc-hero-title">Building Software with AI Agents</h1>
+    </header>
+
+    <nav class="vc-toc" aria-label="On this page">
+        <a class="vc-toc-link" href="#workflow">Best Practices &amp; Courses</a>
+        <a class="vc-toc-link" href="#tools">By Tool</a>
+        <a class="vc-toc-link" href="#creators">Creators</a>
+        <a class="vc-toc-link" href="#stay-current">Stay Current</a>
+        <a class="vc-toc-link" href="#faq">FAQ</a>
+        <a class="vc-toc-link" href="#originals">From Smarter Dev</a>
+    </nav>
+
+    <section class="vc-intro reveal">
+        <p class="vc-intro-lede">
+            Coding agents write fast. The new bottleneck is whether anyone's paying attention.
+        </p>
+        <p>
+            This page is a running collection of writing, tutorials, and
+            courses on <strong>agentic engineering</strong>: using AI coding
+            agents to ship software. The agent does the typing. You stay the
+            engineer, writing the briefs, reading the diff, making the calls.
+        </p>
+    </section>
+
+    <section class="vc-section vc-featured" id="featured">
+        <header class="vc-section-head">
+            <h2>{{ "Most Popular" if featured_mode == "popular" else "Latest" }}</h2>
+            <a class="vc-view-all" href="#workflow">View all <span aria-hidden="true">↓</span></a>
+        </header>
+        {% if featured %}
+        <div class="vc-card-grid">
+            {% for course in featured %}{% include "_partials/_vc-course-card.html" %}{% endfor %}
+        </div>
+        {% else %}
+        <p class="vc-empty">No courses indexed yet. Check back soon.</p>
+        {% endif %}
+    </section>
+
+    <section class="vc-section vc-workflow" id="workflow">
+        <header class="vc-section-head">
+            <h2>Best Practices, Courses &amp; Discussions</h2>
+            {% if popularity_unlocked %}
+            <label class="vc-popularity-toggle">
+                <input type="checkbox" data-vc-popularity data-vc-target="workflow">
+                <span>List by popularity</span>
+            </label>
+            {% endif %}
+        </header>
+
+        <p class="vc-section-sub">Workflow, advice, and writing that isn't tied to one specific tool.</p>
+
+        {% if categories %}
+        <div class="vc-chips" data-vc-chips data-vc-target="workflow" data-vc-attr="category">
+            <button class="vc-chip is-active" type="button" data-value="all">All</button>
+            {% for cat in categories %}
+            <button class="vc-chip" type="button" data-value="{{ cat|lower|replace(' ', '-') }}">{{ cat }}</button>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if workflow_courses %}
+        <div class="vc-card-grid" data-vc-list data-vc-target="workflow">
+            {% for course in workflow_courses %}{% include "_partials/_vc-course-card.html" %}{% endfor %}
+        </div>
+        {% else %}
+        <p class="vc-empty">Coming soon.</p>
+        {% endif %}
+    </section>
+
+    <section class="vc-section vc-tools-resources" id="tools">
+        <header class="vc-section-head">
+            <h2>Resources by Tool</h2>
+            {% if popularity_unlocked %}
+            <label class="vc-popularity-toggle">
+                <input type="checkbox" data-vc-popularity data-vc-target="tools">
+                <span>List by popularity</span>
+            </label>
+            {% endif %}
+        </header>
+
+        <p class="vc-section-sub">Quickstarts, walkthroughs, and tips for each tool.</p>
+
+        {% if tools %}
+        <div class="vc-chips" data-vc-chips data-vc-target="tools" data-vc-attr="tools">
+            {% for tool in tools %}
+            <button class="vc-chip{% if tool.slug == 'claude-code' %} is-active{% endif %}" type="button" data-value="{{ tool.slug }}">{{ tool.name }}</button>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if tool_courses %}
+        <div class="vc-card-grid" data-vc-list data-vc-target="tools">
+            {% for course in tool_courses %}{% include "_partials/_vc-course-card.html" %}{% endfor %}
+        </div>
+        {% else %}
+        <p class="vc-empty">Coming soon.</p>
+        {% endif %}
+    </section>
+
+    {% if people %}
+    <section class="vc-section vc-creators-section" id="creators">
+        <header class="vc-section-head"><h2>Creators to follow</h2></header>
+        <p class="vc-section-sub">Writers, builders, and YouTubers worth a follow.</p>
+        <div class="vc-people-grid">
+            {% for p in people %}
+            <a class="vc-person"
+               href="{{ p.url }}"
+               data-track-key="{{ p.key }}"
+               target="_blank" rel="noopener" data-sk-no-spa>
+                <span class="vc-person-name">{{ p.name }}</span>
+                <span class="vc-person-platform">{{ p.platform }} · @{{ p.handle }}</span>
+                {% if p.blurb %}<span class="vc-person-blurb">{{ p.blurb }}</span>{% endif %}
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if stay_current %}
+    <section class="vc-section vc-stay-current" id="stay-current">
+        <header class="vc-section-head"><h2>Stay Current</h2></header>
+        <p class="vc-section-sub">Newsletters and podcasts that cover what's shipping each week.</p>
+        <div class="vc-people-grid">
+            {% for p in stay_current %}
+            <a class="vc-person"
+               href="{{ p.url }}"
+               data-track-key="{{ p.key }}"
+               target="_blank" rel="noopener" data-sk-no-spa>
+                <span class="vc-person-name">{{ p.name }}</span>
+                <span class="vc-person-platform">{{ p.platform }} · @{{ p.handle }}</span>
+                {% if p.blurb %}<span class="vc-person-blurb">{{ p.blurb }}</span>{% endif %}
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if faqs %}
+    <section class="vc-section vc-faq" id="faq">
+        <header class="vc-section-head"><h2>Frequently Asked Questions</h2></header>
+        <p class="vc-section-sub">Short answers grounded in the work of practitioners shipping with coding agents today.</p>
+        <div class="vc-faq-list">
+            {% for f in faqs %}
+            <details class="vc-faq-item">
+                <summary>{{ f.question }}</summary>
+                <p>{{ f.answer }}</p>
+                <p class="vc-faq-source">
+                    Source:
+                    <a href="{{ f.source_url }}"
+                       data-track-key="{{ f.source_key }}"
+                       target="_blank" rel="noopener" data-sk-no-spa>{{ f.source_label }}</a>
+                </p>
+            </details>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <section class="vc-section vc-originals" id="originals">
+        <header class="vc-section-head"><h2>From Smarter Dev</h2></header>
+        <div class="vc-originals-card">
+            <p class="vc-originals-lede">Our own writeups are coming.</p>
+            <p class="vc-originals-body">We use these tools every day to build Smarter Dev. Soon we'll start publishing our own walkthroughs, tips, and short courses right here.</p>
+            <a class="vc-cta-button" href="/discord">Join the Discord to be notified</a>
+        </div>
+    </section>
+
+    {% if last_updated %}
+    <p class="vc-last-updated">
+        Last updated <time datetime="{{ last_updated.isoformat() }}">{{ last_updated.strftime("%B %-d, %Y") }}</time>
+    </p>
+    {% endif %}
+
+</div>
+
+{%- set all_indexed = tool_courses + workflow_courses -%}
+<script type="application/ld+json" nonce="{{ csp_nonce() }}">
+{
+  "@context": "https://schema.org",
+  "@type": "CollectionPage",
+  "name": "Vibe Coding: Courses, Tutorials & Best Practices",
+  "description": {{ seo_meta.description | tojson }},
+  "url": "{{ seo_meta.canonical_url }}",
+  {% if last_updated %}"dateModified": {{ last_updated.isoformat() | tojson }},{% endif %}
+  "mainEntity": {
+    "@type": "ItemList",
+    "numberOfItems": {{ all_indexed|length }},
+    "itemListElement": [
+      {%- for course in all_indexed -%}{% if not loop.first %},{% endif %}
+      {
+        "@type": "ListItem",
+        "position": {{ loop.index }},
+        "url": {{ course.url | tojson }},
+        "name": {{ course.title | tojson }}{% if course.blurb %},
+        "description": {{ course.blurb | tojson }}{% endif %}
+      }
+      {%- endfor -%}
+    ]
+  }
+}
+</script>
+<script type="application/ld+json" nonce="{{ csp_nonce() }}">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Smarter Dev", "item": "https://smarter.dev/" },
+    { "@type": "ListItem", "position": 2, "name": "Resources", "item": "https://smarter.dev/resources" },
+    { "@type": "ListItem", "position": 3, "name": "Agentic Coding", "item": "{{ seo_meta.canonical_url }}" }
+  ]
+}
+</script>
+{% if faqs %}
+<script type="application/ld+json" nonce="{{ csp_nonce() }}">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {%- for f in faqs -%}{% if not loop.first %},{% endif %}
+    {
+      "@type": "Question",
+      "name": {{ f.question | tojson }},
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": {{ f.answer | tojson }}
+      }
+    }
+    {%- endfor -%}
+  ]
+}
+</script>
+{% endif %}
+{% endblock %}
+
+{% block page_scripts %}
+<script src="{{ theme_url('js/vibe-coding-courses.js') }}"></script>
+{% endblock %}

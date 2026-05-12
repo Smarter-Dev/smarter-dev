@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block page_type %}resources{% endblock %}
+{% block page_title %}Resources{% endblock %}
+
+{% block page_css %}
+<link rel="stylesheet" href="{{ theme_url('css/pages/vibe-coding-courses.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="vc-wrap container">
+
+    <nav class="vc-breadcrumb" aria-label="Breadcrumb">
+        <ol>
+            <li><a href="/">Smarter Dev</a></li>
+            <li aria-current="page">Resources</li>
+        </ol>
+    </nav>
+
+    <header class="vc-hero reveal">
+        <p class="vc-hero-kicker">Smarter Dev · Resources</p>
+        <h1 class="vc-hero-title">Resources</h1>
+        <p class="vc-hero-sub">
+            Curated guides for working with modern dev tooling and AI coding agents.
+        </p>
+    </header>
+
+    <section class="vc-section">
+        <div class="vc-people-grid">
+            <a class="vc-person" href="/resources/vibe-coding-courses">
+                <span class="vc-person-name">Agentic Coding</span>
+                <span class="vc-person-platform">Guide · curated</span>
+                <span class="vc-person-blurb">Tutorials, courses, and notes on building software with AI coding agents.</span>
+            </a>
+            <div class="vc-person vc-person-placeholder">
+                <span class="vc-person-name">More coming</span>
+                <span class="vc-person-platform">In the works</span>
+                <span class="vc-person-blurb">We'll publish additional guides as we build them.</span>
+            </div>
+        </div>
+    </section>
+
+</div>
+
+<script type="application/ld+json" nonce="{{ csp_nonce() }}">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Smarter Dev", "item": "https://smarter.dev/" },
+    { "@type": "ListItem", "position": 2, "name": "Resources", "item": "https://smarter.dev/resources" }
+  ]
+}
+</script>
+{% endblock %}

@@ -34,6 +34,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "research_sessions",
     "scan_service_usage",
     "scan_user_profiles",
+    "tracked_link_counters",
 })
 
 SCHEMA = "skrift"
