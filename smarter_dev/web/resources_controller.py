@@ -1,8 +1,8 @@
 """Resources index page at /resources.
 
-Lightweight hub that lists the curated guides we publish under /resources/*.
-Currently a single entry (vibe coding) plus a "more coming" placeholder, so
-the route doubles as a stable parent for breadcrumbs and future SEO.
+Lightweight hub that lists the collections we publish under /resources/*.
+Currently a single entry (agentic coding) plus a "more coming" placeholder,
+so the route doubles as a stable parent for breadcrumbs and future SEO.
 """
 
 from __future__ import annotations
@@ -18,16 +18,18 @@ async def resources_index() -> Template:
         context={
             "seo_meta": {
                 "description": (
-                    "Curated guides from Smarter Dev on modern dev tooling, "
-                    "agentic coding, and AI-assisted software development."
+                    "Writing, courses, and tutorials from around the "
+                    "web for engineers working with modern dev tooling "
+                    "and AI-assisted software development."
                 ),
                 "canonical_url": "https://smarter.dev/resources",
                 "robots": "index,follow",
             },
             "og_meta": {
-                "title": "Resources — Smarter Dev",
+                "title": "Resources: Smarter Dev",
                 "description": (
-                    "Curated guides from Smarter Dev on modern dev tooling "
+                    "Writing, courses, and tutorials from around the "
+                    "web for engineers working with modern dev tooling "
                     "and AI-assisted software development."
                 ),
                 "url": "https://smarter.dev/resources",
