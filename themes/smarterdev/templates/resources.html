@@ -7,6 +7,17 @@
 <link rel="stylesheet" href="{{ theme_url('css/pages/vibe-coding-courses.css') }}">
 {% endblock %}
 
+{% block og_meta %}
+{{ super() }}
+{% if og_meta %}
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ og_meta.title }}">
+{% if og_meta.description %}<meta name="twitter:description" content="{{ og_meta.description }}">{% endif %}
+{% if og_meta.image %}<meta name="twitter:image" content="{{ og_meta.image }}">{% endif %}
+<meta name="twitter:site" content="@SmarterDev">
+{% endif %}
+{% endblock %}
+
 {% block content %}
 <div class="vc-wrap container">
 
@@ -18,10 +29,9 @@
     </nav>
 
     <header class="vc-hero reveal">
-        <p class="vc-hero-kicker">Smarter Dev · Resources</p>
         <h1 class="vc-hero-title">Resources</h1>
         <p class="vc-hero-sub">
-            Curated guides for working with modern dev tooling and AI coding agents.
+            Writing, courses, and tutorials from around the web for engineers shipping with modern dev tooling.
         </p>
     </header>
 
@@ -29,13 +39,13 @@
         <div class="vc-people-grid">
             <a class="vc-person" href="/resources/vibe-coding-courses">
                 <span class="vc-person-name">Agentic Coding</span>
-                <span class="vc-person-platform">Guide · curated</span>
-                <span class="vc-person-blurb">Tutorials, courses, and notes on building software with AI coding agents.</span>
+                <span class="vc-person-platform">Collection</span>
+                <span class="vc-person-blurb">For engineers using AI coding agents to ship real software.</span>
             </a>
             <div class="vc-person vc-person-placeholder">
                 <span class="vc-person-name">More coming</span>
                 <span class="vc-person-platform">In the works</span>
-                <span class="vc-person-blurb">We'll publish additional guides as we build them.</span>
+                <span class="vc-person-blurb">Additional collections will appear here over time.</span>
             </div>
         </div>
     </section>

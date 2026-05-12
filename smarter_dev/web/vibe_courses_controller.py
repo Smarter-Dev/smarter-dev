@@ -15,10 +15,15 @@ The page has two filterable content sections:
 
 from __future__ import annotations
 
+import logging
+
 from litestar import get
 from litestar.response import Redirect, Template
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from smarter_dev.web.models import TrackedLinkCounter
 from smarter_dev.web.vibe_courses_data import (
@@ -117,13 +122,27 @@ async def vibe_courses(db_session: AsyncSession) -> Template:
 
 
 async def _load_course_counts(db_session: AsyncSession) -> dict[str, int]:
-    """Fetch click counts for every vibe-coding course key in one query."""
-    result = await db_session.execute(
-        select(TrackedLinkCounter.key, TrackedLinkCounter.count).where(
-            TrackedLinkCounter.key.like("vibe:course:%")
+    """Fetch click counts for every vibe-coding course key in one query.
+
+    Falls back to an empty dict when the counter table can't be queried (for
+    example, when the migration hasn't been applied to a fresh environment
+    yet). The page still renders without click counts so the deploy isn't
+    blocked on the migration landing.
+    """
+    try:
+        result = await db_session.execute(
+            select(TrackedLinkCounter.key, TrackedLinkCounter.count).where(
+                TrackedLinkCounter.key.like("vibe:course:%")
+            )
         )
-    )
-    return {row.key: row.count for row in result}
+        return {row.key: row.count for row in result}
+    except SQLAlchemyError:
+        logger.exception(
+            "Could not load tracked_link_counters; rendering vibe-coding "
+            "page without click counts. (Migration applied?)"
+        )
+        await db_session.rollback()
+        return {}
 
 
 class _CourseView:
