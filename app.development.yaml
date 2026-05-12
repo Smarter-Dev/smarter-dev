@@ -27,6 +27,7 @@ controllers:
   - smarter_dev.web.resources_controller:resources_index
   - smarter_dev.web.vibe_courses_controller:vibe_courses
   - smarter_dev.web.vibe_courses_controller:vibe_courses_legacy_redirect
+  - smarter_dev.web.vibe_courses_controller:vibe_courses_resources_redirect
   - smarter_dev.web.campaign_signups_admin:CampaignSignupsAdminController
   - smarter_dev.web.campaign_signups_api:CampaignSignupsApiController
   - smarter_dev.web.click_tracking_api:ClickTrackingApiController

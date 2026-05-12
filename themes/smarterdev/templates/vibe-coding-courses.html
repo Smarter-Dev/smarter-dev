@@ -210,7 +210,7 @@
 {
   "@context": "https://schema.org",
   "@type": "CollectionPage",
-  "name": "Vibe Coding: Courses, Tutorials & Best Practices",
+  "name": "Agentic Coding: Courses, Tutorials & Best Practices",
   "description": {{ seo_meta.description | tojson }},
   "url": "{{ seo_meta.canonical_url }}",
   {% if last_updated %}"dateModified": {{ last_updated.isoformat() | tojson }},{% endif %}
@@ -222,9 +222,23 @@
       {
         "@type": "ListItem",
         "position": {{ loop.index }},
-        "url": {{ course.url | tojson }},
-        "name": {{ course.title | tojson }}{% if course.blurb %},
-        "description": {{ course.blurb | tojson }}{% endif %}
+        "item": {
+          "@type": "Course",
+          "url": {{ course.url | tojson }},
+          "name": {{ course.title | tojson }},
+          "description": {{ (course.blurb or course.title) | tojson }},
+          "provider": {
+            "@type": "Organization",
+            "name": {{ course.source | tojson }}
+          },
+          "learningResourceType": {{ course.category | tojson }},
+          "inLanguage": "en"{% if course.published_at %},
+          "datePublished": {{ course.published_at.isoformat() | tojson }}{% endif %}{% if course.tools %},
+          "about": [{% for slug in course.tools %}{% if not loop.first %},{% endif %}{
+            "@type": "Thing",
+            "name": {{ slug | tojson }}
+          }{% endfor %}]{% endif %}
+        }
       }
       {%- endfor -%}
     ]

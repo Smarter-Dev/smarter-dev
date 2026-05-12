@@ -43,11 +43,17 @@ _POPULARITY_THRESHOLD = 10
 
 @get("/vibe-coding-courses", status_code=301)
 async def vibe_courses_legacy_redirect() -> Redirect:
-    """301 the old URL so any existing inbound links survive the move."""
-    return Redirect("/resources/vibe-coding-courses", status_code=301)
+    """301 the original URL straight to the current canonical path."""
+    return Redirect("/resources/agentic-coding-courses", status_code=301)
 
 
-@get("/resources/vibe-coding-courses")
+@get("/resources/vibe-coding-courses", status_code=301)
+async def vibe_courses_resources_redirect() -> Redirect:
+    """301 the earlier /resources/vibe-coding-courses to the renamed slug."""
+    return Redirect("/resources/agentic-coding-courses", status_code=301)
+
+
+@get("/resources/agentic-coding-courses")
 async def vibe_courses(db_session: AsyncSession) -> Template:
     counts = await _load_course_counts(db_session)
 
@@ -106,13 +112,13 @@ async def vibe_courses(db_session: AsyncSession) -> Template:
             "faqs": FAQS,
             "seo_meta": {
                 "description": description,
-                "canonical_url": "https://smarter.dev/resources/vibe-coding-courses",
+                "canonical_url": "https://smarter.dev/resources/agentic-coding-courses",
                 "robots": "index,follow",
             },
             "og_meta": {
                 "title": "Building Software with AI Agents: A Curated Index",
                 "description": description,
-                "url": "https://smarter.dev/resources/vibe-coding-courses",
+                "url": "https://smarter.dev/resources/agentic-coding-courses",
                 "site_name": "Smarter Dev",
                 "type": "article",
                 "image": "",
