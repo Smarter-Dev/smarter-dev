@@ -62,20 +62,6 @@
         </p>
     </section>
 
-    <section class="vc-section vc-featured" id="featured">
-        <header class="vc-section-head">
-            <h2>{{ "Most Popular" if featured_mode == "popular" else "Latest" }}</h2>
-            <a class="vc-view-all" href="#spine">View all <span aria-hidden="true">↓</span></a>
-        </header>
-        {% if featured %}
-        <div class="vc-card-grid">
-            {% for r in featured %}{% include "_partials/_arch-resource-card.html" %}{% endfor %}
-        </div>
-        {% else %}
-        <p class="vc-empty">No resources indexed yet.</p>
-        {% endif %}
-    </section>
-
     <section class="vc-section vc-workflow" id="spine">
         <header class="vc-section-head">
             <h2>Best Practices, Courses &amp; Discussions</h2>

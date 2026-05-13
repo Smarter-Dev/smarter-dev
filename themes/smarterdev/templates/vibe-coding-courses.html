@@ -54,20 +54,6 @@
         </p>
     </section>
 
-    <section class="vc-section vc-featured" id="featured">
-        <header class="vc-section-head">
-            <h2>{{ "Most Popular" if featured_mode == "popular" else "Latest" }}</h2>
-            <a class="vc-view-all" href="#workflow">View all <span aria-hidden="true">↓</span></a>
-        </header>
-        {% if featured %}
-        <div class="vc-card-grid">
-            {% for course in featured %}{% include "_partials/_vc-course-card.html" %}{% endfor %}
-        </div>
-        {% else %}
-        <p class="vc-empty">No courses indexed yet. Check back soon.</p>
-        {% endif %}
-    </section>
-
     <section class="vc-section vc-workflow" id="workflow">
         <header class="vc-section-head">
             <h2>Best Practices, Courses &amp; Discussions</h2>
