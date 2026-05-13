@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block page_type %}production-operations{% endblock %}
-{% block page_title %}Production Operations: Keeping Systems Healthy{% endblock %}
+{% block page_title %}Running Modern Systems: Courses, Tutorials & Best Practices{% endblock %}
 
 {% block page_css %}
 <link rel="stylesheet" href="{{ theme_url('css/pages/vibe-coding-courses.css') }}">
@@ -31,7 +31,7 @@
     </nav>
 
     <header class="vc-hero reveal">
-        <h1 class="vc-hero-title">Production Operations</h1>
+        <h1 class="vc-hero-title">Running Modern Systems</h1>
     </header>
 
     <nav class="vc-toc" aria-label="On this page">
@@ -44,14 +44,19 @@
 
     <section class="vc-intro reveal">
         <p class="vc-intro-lede">
-            Most production outages are predictable. Knowing what to watch and how to respond is the discipline.
+            Reliability isn't designed. It's defended.
         </p>
         <p>
-            Early draft. This directory currently covers observability and
-            auth & secrets. Incident response, logging pipelines, the modern
-            auth wave (Clerk, WorkOS, Stytch), and secret managers
-            (Doppler, Infisical, SOPS, age) will land as that work
-            progresses. For the systems you build with, see
+            A running collection of writing, courses, and tutorials on
+            <strong>operating production systems</strong>: observability,
+            incident response, performance, identity, secrets, and network
+            security. Less about the tools than about the practice. What to
+            instrument, when to page, how to respond, and what to do before
+            the next time.
+        </p>
+        <p class="vc-intro-aside">
+            This index covers what you do once your systems are running.
+            For what to build them with, see
             <a href="/resources/system-architecture">System Architecture</a>.
             For where they run, see
             <a href="/resources/infrastructure-hosting">Infrastructure &amp; Hosting</a>.
@@ -103,7 +108,7 @@
         {% for cat in categories %}
         <article class="sa-category" id="{{ cat.slug }}">
             <h3 class="sa-category-name">{{ cat.name }}</h3>
-            <p class="sa-category-intro">{{ cat.intro }}</p>
+            <p class="sa-category-intro">{{ cat.intro|safe }}</p>
             <ul class="sa-tool-list">
                 {% for tool in cat.tools %}
                 <li class="sa-tool">
