@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block page_type %}infrastructure-hosting{% endblock %}
-{% block page_title %}Infrastructure & Hosting: Where Your Systems Run{% endblock %}
+{% block page_title %}Hosting Modern Systems: Courses, Tutorials & Best Practices{% endblock %}
 
 {% block page_css %}
 <link rel="stylesheet" href="{{ theme_url('css/pages/vibe-coding-courses.css') }}">
@@ -31,32 +31,73 @@
     </nav>
 
     <header class="vc-hero reveal">
-        <h1 class="vc-hero-title">Infrastructure &amp; Hosting</h1>
+        <h1 class="vc-hero-title">Hosting Modern Systems</h1>
     </header>
 
     <nav class="vc-toc" aria-label="On this page">
+        <a class="vc-toc-link" href="#spine">Best Practices &amp; Courses</a>
         <a class="vc-toc-link" href="#tools">Tools by Category</a>
+        <a class="vc-toc-link" href="#creators">Creators</a>
+        <a class="vc-toc-link" href="#faq">FAQ</a>
+        <a class="vc-toc-link" href="#originals">From Smarter Dev</a>
     </nav>
 
     <section class="vc-intro reveal">
         <p class="vc-intro-lede">
-            Where your systems run.
+            Where your software runs decides who pages you at 3 AM.
         </p>
         <p>
-            Early draft. This directory currently covers ingress and
-            orchestration. Cloud providers, PaaS, managed data services,
-            networking, server OS, and edge will land as that work
-            progresses. For the systems you build with, see
-            <a href="/resources/system-architecture">System Architecture</a>.
-            For keeping them healthy in production, see
+            A running collection of writing, courses, and tutorials on
+            <strong>hosting modern systems</strong>: cloud providers, PaaS,
+            managed data services, containers, orchestration, networking,
+            and the rest of the substrate. Less about which provider, more
+            about the trade-offs you're committing to.
+        </p>
+        <p class="vc-intro-aside">
+            This index covers where your systems run. For what to build
+            them with, see <a href="/resources/system-architecture">System
+            Architecture</a>. For keeping them healthy in production, see
             <a href="/resources/production-operations">Production Operations</a>.
         </p>
+    </section>
+
+    <section class="vc-section vc-workflow" id="spine">
+        <header class="vc-section-head">
+            <h2>Best Practices, Courses &amp; Discussions</h2>
+            {% if popularity_unlocked %}
+            <label class="vc-popularity-toggle">
+                <input type="checkbox" data-vc-popularity data-vc-target="spine">
+                <span>List by popularity</span>
+            </label>
+            {% endif %}
+        </header>
+
+        <p class="vc-section-sub">Cross-cutting writings on hosting trade-offs that aren't tied to one tool.</p>
+
+        {% if learning_types %}
+        <div class="vc-chips" data-vc-chips data-vc-target="spine" data-vc-attr="category">
+            <button class="vc-chip is-active" type="button" data-value="all">All</button>
+            {% for cat in learning_types %}
+            <button class="vc-chip" type="button" data-value="{{ cat|lower|replace(' ', '-') }}">{{ cat }}</button>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if spine %}
+        <div class="vc-card-grid" data-vc-list data-vc-target="spine">
+            {% for r in spine %}{% include "_partials/_arch-resource-card.html" %}{% endfor %}
+        </div>
+        {% else %}
+        <p class="vc-empty">Coming soon.</p>
+        {% endif %}
     </section>
 
     <section class="vc-section sa-tools" id="tools">
         <header class="vc-section-head">
             <h2>Tools by Category</h2>
         </header>
+
+        <p class="vc-section-sub">Peer tools grouped by what problem they solve. The intro before each list articulates the decision space; the list is what you actually choose between.</p>
 
         <nav class="sa-cat-nav" aria-label="Tool categories">
             {% for cat in categories %}
@@ -67,7 +108,7 @@
         {% for cat in categories %}
         <article class="sa-category" id="{{ cat.slug }}">
             <h3 class="sa-category-name">{{ cat.name }}</h3>
-            <p class="sa-category-intro">{{ cat.intro }}</p>
+            <p class="sa-category-intro">{{ cat.intro|safe }}</p>
             <ul class="sa-tool-list">
                 {% for tool in cat.tools %}
                 <li class="sa-tool">
@@ -97,17 +138,97 @@
         {% endfor %}
     </section>
 
+    {% if people %}
+    <section class="vc-section vc-creators-section" id="creators">
+        <header class="vc-section-head"><h2>Creators to follow</h2></header>
+        <p class="vc-section-sub">Engineers consistently publishing on cloud strategy, containers, and the production substrate.</p>
+        <div class="vc-people-grid">
+            {% for p in people %}
+            <a class="vc-person"
+               href="{{ p.url }}"
+               data-track-key="{{ p.key }}"
+               target="_blank" rel="noopener" data-sk-no-spa>
+                <span class="vc-person-name">{{ p.name }}</span>
+                <span class="vc-person-platform">{{ p.platform }} · @{{ p.handle }}</span>
+                {% if p.blurb %}<span class="vc-person-blurb">{{ p.blurb }}</span>{% endif %}
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if faqs %}
+    <section class="vc-section vc-faq" id="faq">
+        <header class="vc-section-head"><h2>Frequently Asked Questions</h2></header>
+        <p class="vc-section-sub">Short answers grounded in the work of practitioners running real production systems.</p>
+        <div class="vc-faq-list">
+            {% for f in faqs %}
+            <details class="vc-faq-item">
+                <summary>{{ f.question }}</summary>
+                <p>{{ f.answer }}</p>
+                <p class="vc-faq-source">
+                    Source:
+                    <a href="{{ f.source_url }}"
+                       data-track-key="{{ f.source_key }}"
+                       target="_blank" rel="noopener" data-sk-no-spa>{{ f.source_label }}</a>
+                </p>
+            </details>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
     <section class="vc-section vc-originals" id="originals">
         <header class="vc-section-head"><h2>From Smarter Dev</h2></header>
         <div class="vc-originals-card">
             <p class="vc-originals-lede">Original writing coming.</p>
-            <p class="vc-originals-body">Smarter Dev essays, walkthroughs, and short courses on the production runtime will land here as they're written.</p>
+            <p class="vc-originals-body">Smarter Dev essays, walkthroughs, and short courses on hosting production systems will land here as they're written.</p>
             <a class="vc-cta-button" href="/discord">Join the Discord to be notified</a>
         </div>
     </section>
 
+    {% if last_updated %}
+    <p class="vc-last-updated">
+        Last updated <time datetime="{{ last_updated.isoformat() }}">{{ last_updated.strftime("%B %-d, %Y") }}</time>
+    </p>
+    {% endif %}
+
 </div>
 
+{%- set all_indexed = spine -%}
+<script type="application/ld+json" nonce="{{ csp_nonce() }}">
+{
+  "@context": "https://schema.org",
+  "@type": "CollectionPage",
+  "name": "Hosting Modern Systems: A Curated Index",
+  "description": {{ seo_meta.description | tojson }},
+  "url": "{{ seo_meta.canonical_url }}",
+  {% if last_updated %}"dateModified": {{ last_updated.isoformat() | tojson }},{% endif %}
+  "mainEntity": {
+    "@type": "ItemList",
+    "numberOfItems": {{ all_indexed|length }},
+    "itemListElement": [
+      {%- for r in all_indexed -%}{% if not loop.first %},{% endif %}
+      {
+        "@type": "ListItem",
+        "position": {{ loop.index }},
+        "item": {
+          "@type": "Article",
+          "url": {{ r.url | tojson }},
+          "name": {{ r.title | tojson }},
+          "description": {{ (r.blurb or r.title) | tojson }},
+          "author": {
+            "@type": "Organization",
+            "name": {{ r.source | tojson }}
+          }{% if r.published_at %},
+          "datePublished": {{ r.published_at.isoformat() | tojson }}{% endif %}
+        }
+      }
+      {%- endfor -%}
+    ]
+  }
+}
+</script>
 <script type="application/ld+json" nonce="{{ csp_nonce() }}">
 {
   "@context": "https://schema.org",
@@ -119,6 +240,26 @@
   ]
 }
 </script>
+{% if faqs %}
+<script type="application/ld+json" nonce="{{ csp_nonce() }}">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {%- for f in faqs -%}{% if not loop.first %},{% endif %}
+    {
+      "@type": "Question",
+      "name": {{ f.question | tojson }},
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": {{ f.answer | tojson }}
+      }
+    }
+    {%- endfor -%}
+  ]
+}
+</script>
+{% endif %}
 {% endblock %}
 
 {% block page_scripts %}
