@@ -85,9 +85,9 @@ async def production_operations(db_session: AsyncSession) -> Template:
     last_updated = max(candidates) if candidates else None
 
     description = (
-        "Keeping systems healthy in production: observability, auth, "
-        "secrets, incident response. Curated docs, tutorials, and best "
-        "practices for the running side of software."
+        "A curated index of writing, courses, and tutorials on running "
+        "modern systems in production: observability, incident response, "
+        "performance, identity, secrets, and network security."
     )
 
     return Template(
@@ -109,7 +109,7 @@ async def production_operations(db_session: AsyncSession) -> Template:
                 "robots": "index,follow",
             },
             "og_meta": {
-                "title": "Production Operations: A Curated Index",
+                "title": "Running Modern Systems: A Curated Index",
                 "description": description,
                 "url": "https://smarter.dev/resources/production-operations",
                 "site_name": "Smarter Dev",
