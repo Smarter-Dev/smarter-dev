@@ -117,7 +117,7 @@
   }
 
   function initSmoothScroll() {
-    var links = document.querySelectorAll('.vc-view-all, .vc-toc-link');
+    var links = document.querySelectorAll('.vc-view-all, .vc-toc-link, .sa-cat-nav-link');
     links.forEach(function (link) {
       if (link.dataset.vcScrollWired === '1') return;
       link.dataset.vcScrollWired = '1';
@@ -193,11 +193,48 @@
     scrollToHashSection();
   }
 
+  function initActiveSubnavHighlight() {
+    // Parallel to initActiveTocHighlight but for the system-architecture
+    // sub-nav inside the Tools-by-Category section. Runs independently so
+    // the main TOC stays on the #tools chip while the sub-nav highlights
+    // whichever category is in the viewport.
+    var navLinks = document.querySelectorAll('.sa-cat-nav-link');
+    if (!navLinks.length || !('IntersectionObserver' in window)) return;
+    var map = {};
+    navLinks.forEach(function (link) {
+      var id = (link.getAttribute('href') || '').slice(1);
+      if (id) map[id] = link;
+    });
+    var sections = Object.keys(map)
+      .map(function (id) { return document.getElementById(id); })
+      .filter(Boolean);
+    if (!sections.length) return;
+
+    var intersecting = new Set();
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) intersecting.add(e.target.id);
+        else intersecting.delete(e.target.id);
+      });
+      navLinks.forEach(function (l) { l.classList.remove('is-active'); });
+      for (var i = 0; i < sections.length; i++) {
+        if (intersecting.has(sections[i].id)) {
+          var link = map[sections[i].id];
+          if (link) link.classList.add('is-active');
+          break;
+        }
+      }
+    }, { rootMargin: '-30% 0px -60% 0px', threshold: 0 });
+    sections.forEach(function (s) { observer.observe(s); });
+  }
+
   function init() {
     initSection('tools');
     initSection('workflow');
+    initSection('spine');
     initSmoothScroll();
     initActiveTocHighlight();
+    initActiveSubnavHighlight();
     // If the page loaded with a compound hash (#tools/cursor), scroll into
     // place — the section's filter was already applied inside initSection().
     if (parseHash() && parseHash().value) {
