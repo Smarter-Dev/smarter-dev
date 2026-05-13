@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block page_type %}infrastructure-hosting{% endblock %}
+{% block page_title %}Infrastructure & Hosting: Where Your Systems Run{% endblock %}
+
+{% block page_css %}
+<link rel="stylesheet" href="{{ theme_url('css/pages/vibe-coding-courses.css') }}">
+<link rel="stylesheet" href="{{ theme_url('css/pages/system-architecture.css') }}">
+{% endblock %}
+
+{% block og_meta %}
+{{ super() }}
+{% if og_meta %}
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ og_meta.title }}">
+{% if og_meta.description %}<meta name="twitter:description" content="{{ og_meta.description }}">{% endif %}
+{% if og_meta.image %}<meta name="twitter:image" content="{{ og_meta.image }}">{% endif %}
+<meta name="twitter:site" content="@SmarterDev">
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<div class="vc-wrap container">
+
+    <nav class="vc-breadcrumb" aria-label="Breadcrumb">
+        <ol>
+            <li><a href="/">Smarter Dev</a></li>
+            <li><a href="/resources">Resources</a></li>
+            <li aria-current="page">Infrastructure &amp; Hosting</li>
+        </ol>
+    </nav>
+
+    <header class="vc-hero reveal">
+        <h1 class="vc-hero-title">Infrastructure &amp; Hosting</h1>
+    </header>
+
+    <nav class="vc-toc" aria-label="On this page">
+        <a class="vc-toc-link" href="#tools">Tools by Category</a>
+    </nav>
+
+    <section class="vc-intro reveal">
+        <p class="vc-intro-lede">
+            Where your systems run.
+        </p>
+        <p>
+            Early draft. This directory currently covers ingress and
+            orchestration. Cloud providers, PaaS, managed data services,
+            networking, server OS, and edge will land as that work
+            progresses. For the systems you build with, see
+            <a href="/resources/system-architecture">System Architecture</a>.
+            For keeping them healthy in production, see
+            <a href="/resources/production-operations">Production Operations</a>.
+        </p>
+    </section>
+
+    <section class="vc-section sa-tools" id="tools">
+        <header class="vc-section-head">
+            <h2>Tools by Category</h2>
+        </header>
+
+        <nav class="sa-cat-nav" aria-label="Tool categories">
+            {% for cat in categories %}
+            <a class="sa-cat-nav-link" href="#{{ cat.slug }}">{{ cat.name }}</a>
+            {% endfor %}
+        </nav>
+
+        {% for cat in categories %}
+        <article class="sa-category" id="{{ cat.slug }}">
+            <h3 class="sa-category-name">{{ cat.name }}</h3>
+            <p class="sa-category-intro">{{ cat.intro }}</p>
+            <ul class="sa-tool-list">
+                {% for tool in cat.tools %}
+                <li class="sa-tool">
+                    <a class="sa-tool-link"
+                       href="{{ tool.url }}"
+                       data-track-key="{{ tool.home_key }}"
+                       target="_blank" rel="noopener" data-sk-no-spa>{{ tool.name }}</a>
+                    <span class="sa-tool-blurb">{{ tool.blurb }}</span>
+                </li>
+                {% endfor %}
+            </ul>
+
+            {% set resources = category_resources.get(cat.slug, []) %}
+            {% if resources %}
+            <div class="vc-chips sa-cat-chips" data-vc-chips data-vc-target="cat-{{ cat.slug }}" data-vc-attr="tools">
+                <button class="vc-chip is-active" type="button" data-value="all">All</button>
+                {% for tool in cat.tools %}
+                <button class="vc-chip" type="button" data-value="{{ tool.slug }}">{{ tool.name }}</button>
+                {% endfor %}
+            </div>
+
+            <div class="vc-card-grid sa-cat-grid" data-vc-list data-vc-target="cat-{{ cat.slug }}">
+                {% for r in resources %}{% include "_partials/_arch-tool-resource-card.html" %}{% endfor %}
+            </div>
+            {% endif %}
+        </article>
+        {% endfor %}
+    </section>
+
+    <section class="vc-section vc-originals" id="originals">
+        <header class="vc-section-head"><h2>From Smarter Dev</h2></header>
+        <div class="vc-originals-card">
+            <p class="vc-originals-lede">Original writing coming.</p>
+            <p class="vc-originals-body">Smarter Dev essays, walkthroughs, and short courses on the production runtime will land here as they're written.</p>
+            <a class="vc-cta-button" href="/discord">Join the Discord to be notified</a>
+        </div>
+    </section>
+
+</div>
+
+<script type="application/ld+json" nonce="{{ csp_nonce() }}">
+{
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  "itemListElement": [
+    { "@type": "ListItem", "position": 1, "name": "Smarter Dev", "item": "https://smarter.dev/" },
+    { "@type": "ListItem", "position": 2, "name": "Resources", "item": "https://smarter.dev/resources" },
+    { "@type": "ListItem", "position": 3, "name": "Infrastructure & Hosting", "item": "{{ seo_meta.canonical_url }}" }
+  ]
+}
+</script>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="{{ theme_url('js/vibe-coding-courses.js') }}"></script>
+{% endblock %}

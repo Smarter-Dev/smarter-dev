@@ -47,6 +47,8 @@ controllers:
   - smarter_dev.web.vibe_courses_controller:vibe_courses_legacy_redirect
   - smarter_dev.web.vibe_courses_controller:vibe_courses_resources_redirect
   - smarter_dev.web.system_architecture_controller:system_architecture
+  - smarter_dev.web.infrastructure_hosting_controller:infrastructure_hosting
+  - smarter_dev.web.production_operations_controller:production_operations
   - smarter_dev.web.campaign_signups_admin:CampaignSignupsAdminController
   - smarter_dev.web.campaign_signups_api:CampaignSignupsApiController
   - smarter_dev.web.click_tracking_api:ClickTrackingApiController

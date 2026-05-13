@@ -141,6 +141,20 @@
   color: var(--white);
   font-weight: 600;
 }
+.vc-intro-aside {
+  font-size: .92rem !important;
+  color: var(--mid) !important;
+  border-left: 2px solid rgba(0,212,255,.12);
+  padding-left: 1rem;
+  margin-top: 1.75rem !important;
+}
+.vc-intro-aside a {
+  color: var(--cyan);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(0,212,255,.25);
+  transition: border-color .2s;
+}
+.vc-intro-aside a:hover { border-bottom-color: var(--cyan) }
 
 /* ── Section scaffolding ── */
 .vc-section { margin-bottom: 6rem }

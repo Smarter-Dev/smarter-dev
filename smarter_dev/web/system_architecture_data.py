@@ -202,38 +202,6 @@ ARCH_CATEGORIES: list[ArchCategory] = [
         ),
     ),
     ArchCategory(
-        slug="ingress",
-        name="Ingress, proxies & routing",
-        intro=(
-            "The proxy is where your traffic story lives: TLS, routing, rate "
-            "limits, auth. Nginx and HAProxy are the battle-tested defaults. "
-            "Caddy makes TLS automatic. Reach for Envoy when you're building "
-            "a service mesh, Traefik when you're already in orchestrated containers."
-        ),
-        tools=(
-            ArchTool("nginx", "Nginx",
-                     "https://nginx.org/",
-                     "arch:tool:nginx:home",
-                     "Battle-tested high-performance web server and reverse proxy."),
-            ArchTool("traefik", "Traefik",
-                     "https://traefik.io/traefik/",
-                     "arch:tool:traefik:home",
-                     "Modern proxy designed for container orchestrators; auto-discovers services."),
-            ArchTool("caddy", "Caddy",
-                     "https://caddyserver.com/",
-                     "arch:tool:caddy:home",
-                     "Web server with automatic TLS by default. Written in Go. Simplest config of the bunch."),
-            ArchTool("haproxy", "HAProxy",
-                     "https://www.haproxy.org/",
-                     "arch:tool:haproxy:home",
-                     "High-performance TCP/HTTP proxy with deep tuning surface for serious load."),
-            ArchTool("envoy", "Envoy",
-                     "https://www.envoyproxy.io/",
-                     "arch:tool:envoy:home",
-                     "Proxy designed for service meshes. Powers Istio, Consul Connect, Linkerd."),
-        ),
-    ),
-    ArchCategory(
         slug="search",
         name="Search",
         intro=(
@@ -291,68 +259,6 @@ ARCH_CATEGORIES: list[ArchCategory] = [
         ),
     ),
     ArchCategory(
-        slug="orchestration",
-        name="Orchestration & runtime",
-        intro=(
-            "Kubernetes is right when scaling out makes operating it cheaper "
-            "than not. That's later than most teams reach for it. Docker "
-            "Compose on a VM is often enough. Nomad is a serious alternative "
-            "if you want orchestration without the YAML universe."
-        ),
-        tools=(
-            ArchTool("kubernetes", "Kubernetes",
-                     "https://kubernetes.io/",
-                     "arch:tool:kubernetes:home",
-                     "The dominant container orchestrator. Complex but ubiquitous; managed offerings everywhere."),
-            ArchTool("nomad", "HashiCorp Nomad",
-                     "https://www.nomadproject.io/",
-                     "arch:tool:nomad:home",
-                     "Simpler orchestrator supporting more than containers. Pairs well with Consul and Vault."),
-            ArchTool("docker-compose", "Docker Compose",
-                     "https://docs.docker.com/compose/",
-                     "arch:tool:docker-compose:home",
-                     "Multi-container apps on a single host. Often enough for small deployments."),
-        ),
-    ),
-    ArchCategory(
-        slug="observability",
-        name="Observability",
-        intro=(
-            "The three pillars (metrics, logs, traces) are a taxonomy, not a "
-            "plan. What you want is structured events you can slice "
-            "arbitrarily: OpenTelemetry to instrument, plus a backend that "
-            "handles high-cardinality (Honeycomb, Logfire) or a predictable "
-            "metrics stack (Prometheus + Grafana + Loki). Start with one "
-            "signal you'll actually look at."
-        ),
-        tools=(
-            ArchTool("prometheus", "Prometheus",
-                     "https://prometheus.io/",
-                     "arch:tool:prometheus:home",
-                     "Pull-based metrics collection. Deeply integrated with the Kubernetes ecosystem."),
-            ArchTool("grafana", "Grafana",
-                     "https://grafana.com/",
-                     "arch:tool:grafana:home",
-                     "Dashboard tool that fronts Prometheus, Loki, and most observability backends."),
-            ArchTool("opentelemetry", "OpenTelemetry",
-                     "https://opentelemetry.io/",
-                     "arch:tool:opentelemetry:home",
-                     "Vendor-neutral instrumentation standard for traces, metrics, and logs."),
-            ArchTool("loki", "Grafana Loki",
-                     "https://grafana.com/oss/loki/",
-                     "arch:tool:loki:home",
-                     "Log aggregation system designed to pair with Prometheus and Grafana."),
-            ArchTool("logfire", "Pydantic Logfire",
-                     "https://pydantic.dev/logfire",
-                     "arch:tool:logfire:home",
-                     "Observability platform from the Pydantic team. Structured tracing, OpenTelemetry-native."),
-            ArchTool("honeycomb", "Honeycomb",
-                     "https://www.honeycomb.io/",
-                     "arch:tool:honeycomb:home",
-                     "High-cardinality structured-event observability. Pioneered the \"observability 2.0\" frame."),
-        ),
-    ),
-    ArchCategory(
         slug="vector",
         name="Vector & retrieval",
         intro=(
@@ -382,30 +288,57 @@ ARCH_CATEGORIES: list[ArchCategory] = [
         ),
     ),
     ArchCategory(
-        slug="auth",
-        name="Auth & secrets",
+        slug="apis",
+        name="APIs & protocols",
         intro=(
-            "Auth is one of the few things worth outsourcing early. Auth0 if "
-            "you need it now. Keycloak or Ory for OSS you self-host. Vault is "
-            "for secrets at scale; you'll outgrow .env faster than you expect."
+            "REST is the default for most public-facing APIs. GraphQL pays "
+            "off when clients have wildly varying data needs and you can "
+            "absorb the resolver complexity. gRPC and Protobuf win for "
+            "internal service-to-service traffic where latency and schema "
+            "discipline matter. The protocol is a contract: pick once, "
+            "change rarely."
         ),
         tools=(
-            ArchTool("vault", "HashiCorp Vault",
-                     "https://www.vaultproject.io/",
-                     "arch:tool:vault:home",
-                     "Secrets management: dynamic credentials, encryption-as-a-service, deep audit."),
-            ArchTool("keycloak", "Keycloak",
-                     "https://www.keycloak.org/",
-                     "arch:tool:keycloak:home",
-                     "Self-hostable identity and access management. Full OAuth, OIDC, SAML support."),
-            ArchTool("ory", "Ory",
-                     "https://www.ory.sh/",
-                     "arch:tool:ory:home",
-                     "Modern OSS identity stack split into composable services (Kratos, Hydra, Oathkeeper)."),
-            ArchTool("auth0", "Auth0",
-                     "https://auth0.com/",
-                     "arch:tool:auth0:home",
-                     "Managed identity-as-a-service. Fastest to integrate; expensive at scale."),
+            ArchTool("openapi", "OpenAPI (Swagger)",
+                     "https://www.openapis.org/",
+                     "arch:tool:openapi:home",
+                     "REST spec format and tooling ecosystem; the lingua franca for documenting HTTP APIs."),
+            ArchTool("json-schema", "JSON Schema",
+                     "https://json-schema.org/",
+                     "arch:tool:json-schema:home",
+                     "Schema validation standard for JSON; backbone of OpenAPI, AsyncAPI, and a lot of tooling."),
+            ArchTool("protobuf", "Protocol Buffers",
+                     "https://protobuf.dev/",
+                     "arch:tool:protobuf:home",
+                     "Google's IDL and binary wire format; used by gRPC and many in-house RPC systems."),
+            ArchTool("graphql", "GraphQL",
+                     "https://graphql.org/",
+                     "arch:tool:graphql:home",
+                     "Query language and runtime spec for client-driven APIs with flexible field selection."),
+            ArchTool("grpc", "gRPC",
+                     "https://grpc.io/",
+                     "arch:tool:grpc:home",
+                     "Google's binary RPC framework over HTTP/2; the default for service-to-service traffic."),
+            ArchTool("trpc", "tRPC",
+                     "https://trpc.io/",
+                     "arch:tool:trpc:home",
+                     "TypeScript-native end-to-end typed RPC; no codegen, no schema, just function calls."),
+            ArchTool("apollo-server", "Apollo Server",
+                     "https://www.apollographql.com/docs/apollo-server",
+                     "arch:tool:apollo-server:home",
+                     "The most-used GraphQL server in the JS/TS ecosystem; the path of least resistance."),
+            ArchTool("hasura", "Hasura",
+                     "https://hasura.io/",
+                     "arch:tool:hasura:home",
+                     "Instant GraphQL over Postgres (and other DBs); subscriptions and authorization built in."),
+            ArchTool("postgrest", "PostgREST",
+                     "https://postgrest.org/",
+                     "arch:tool:postgrest:home",
+                     "Instant REST over Postgres; tables and views become endpoints with row-level security."),
+            ArchTool("connect", "Connect (Buf)",
+                     "https://connectrpc.com/",
+                     "arch:tool:connect:home",
+                     "gRPC-compatible RPC that also works in browsers; the friendly modern face of Protobuf."),
         ),
     ),
 ]
@@ -479,15 +412,6 @@ ARCH_RESOURCES: list[ArchResource] = [
         blurb="Eight-lecture Cambridge series on clocks, replication, consensus, linearizability, and Spanner.",
     ),
     ArchResource(
-        "Performance Analysis Methodology",
-        "https://www.brendangregg.com/methodology.html",
-        "Brendan Gregg",
-        "arch:spine:gregg-methodology",
-        learning_type="Best Practices",
-        first_indexed_at=_INDEXED,
-        blurb="USE Method and other systematic approaches to finding real performance bottlenecks fast.",
-    ),
-    ArchResource(
         "Hyrum's Law",
         "https://www.hyrumslaw.com/",
         "Hyrum Wright",
@@ -504,15 +428,6 @@ ARCH_RESOURCES: list[ArchResource] = [
         learning_type="Best Practices",
         first_indexed_at=_INDEXED,
         blurb="Multi-tenant fault isolation pattern that limits blast radius without dedicated capacity.",
-    ),
-    ArchResource(
-        "Static Stability Using Availability Zones",
-        "https://aws.amazon.com/builders-library/static-stability-using-availability-zones/",
-        "AWS Builders' Library",
-        "arch:spine:static-stability",
-        learning_type="Best Practices",
-        first_indexed_at=_INDEXED,
-        blurb="Design so a dependency's failure changes nothing. Pre-provision instead of reacting.",
     ),
     ArchResource(
         "The Morning Paper (archive)",
@@ -705,52 +620,6 @@ ARCH_TOOL_RESOURCES: list[ArchToolResource] = [
        "Deni Bertovic", "arch:res:celery:best-practices", ["celery"], "Best Practices",
        "Canonical post on idempotent tasks, retries, naming, and avoiding common Celery pitfalls."),
 
-    # Nginx
-    _r("Nginx Beginner's Guide",
-       "https://nginx.org/en/docs/beginners_guide.html",
-       "Nginx docs", "arch:res:nginx:beginners", ["nginx"], "Tutorial",
-       "Official intro: serving static content, reverse proxy, FastCGI, and load balancing basics."),
-    _r("Nginx Admin's Handbook",
-       "https://github.com/trimstray/nginx-admins-handbook",
-       "GitHub · trimstray", "arch:res:nginx:admins-handbook", ["nginx"], "Best Practices",
-       "Operator guide covering configuration patterns, hardening, performance, and debugging."),
-
-    # Traefik
-    _r("Traefik Quick Start",
-       "https://doc.traefik.io/traefik/getting-started/quick-start/",
-       "Traefik docs", "arch:res:traefik:quick-start", ["traefik"], "Tutorial",
-       "Run Traefik with Docker, discover services automatically, and route HTTP traffic."),
-
-    # Caddy
-    _r("Caddy Getting Started",
-       "https://caddyserver.com/docs/getting-started",
-       "Caddy docs", "arch:res:caddy:getting-started", ["caddy"], "Tutorial",
-       "Run Caddy as a static file server, reverse proxy, and HTTPS terminator with automatic TLS."),
-    _r("Caddyfile Concepts",
-       "https://caddyserver.com/docs/caddyfile/concepts",
-       "Caddy docs", "arch:res:caddy:caddyfile", ["caddy"], "Tutorial",
-       "Caddyfile syntax, matchers, directives, and snippets for typical reverse-proxy setups."),
-
-    # HAProxy
-    _r("HAProxy Starter Guide",
-       "https://docs.haproxy.org/3.0/intro.html",
-       "HAProxy docs", "arch:res:haproxy:intro", ["haproxy"], "Tutorial",
-       "Introduction to load balancing concepts, frontends, backends, and ACLs in HAProxy."),
-    _r("HAProxy Configuration Manual",
-       "https://docs.haproxy.org/3.0/configuration.html",
-       "HAProxy docs", "arch:res:haproxy:config-manual", ["haproxy"], "Best Practices",
-       "Canonical reference for every config directive: timeouts, health checks, stick tables, SSL."),
-
-    # Envoy
-    _r("Envoy Getting Started",
-       "https://www.envoyproxy.io/docs/envoy/latest/start/start",
-       "Envoy docs", "arch:res:envoy:start", ["envoy"], "Tutorial",
-       "Run Envoy in Docker, configure listeners, clusters, and basic HTTP routing."),
-    _r("Envoy Sandboxes",
-       "https://www.envoyproxy.io/docs/envoy/latest/start/sandboxes/sandboxes",
-       "Envoy docs", "arch:res:envoy:sandboxes", ["envoy"], "Tutorial",
-       "Working Docker Compose examples for front proxy, gRPC bridge, JWT auth, and more."),
-
     # Elasticsearch
     _r("Elasticsearch Quick Start",
        "https://www.elastic.co/guide/en/elasticsearch/reference/current/getting-started.html",
@@ -807,83 +676,6 @@ ARCH_TOOL_RESOURCES: list[ArchToolResource] = [
        "MinIO docs", "arch:res:minio:quickstart", ["minio"], "Tutorial",
        "Install MinIO single-node and distributed, use the mc client, and configure access policies."),
 
-    # Kubernetes
-    _r("Kubernetes Tutorials",
-       "https://kubernetes.io/docs/tutorials/",
-       "Kubernetes docs", "arch:res:kubernetes:tutorials", ["kubernetes"], "Tutorial",
-       "Official tutorials: Kubernetes Basics, stateful apps, services, and ConfigMaps."),
-    _r("Kubernetes The Hard Way",
-       "https://github.com/kelseyhightower/kubernetes-the-hard-way",
-       "GitHub · Kelsey Hightower", "arch:res:kubernetes:hard-way", ["kubernetes"], "Tutorial",
-       "Bootstrap a cluster from scratch to understand every component without abstractions."),
-    _r("Kubernetes Production Best Practices",
-       "https://learnk8s.io/production-best-practices",
-       "Learnk8s", "arch:res:kubernetes:learnk8s-prod", ["kubernetes"], "Best Practices",
-       "Checklist covering app health, scalability, observability, security, and resource governance."),
-
-    # Nomad
-    _r("Nomad Tutorials",
-       "https://developer.hashicorp.com/nomad/tutorials",
-       "HashiCorp Developer", "arch:res:nomad:tutorials", ["nomad"], "Tutorial",
-       "Official learning path: install, run jobs, schedule services, batch jobs, and integrate Consul."),
-
-    # Docker Compose
-    _r("Docker Compose Overview",
-       "https://docs.docker.com/compose/",
-       "Docker docs", "arch:res:docker-compose:overview", ["docker-compose"], "Tutorial",
-       "Get started defining multi-container apps with compose.yaml, networks, volumes, and profiles."),
-    _r("Awesome Compose",
-       "https://github.com/docker/awesome-compose",
-       "GitHub · Docker", "arch:res:docker-compose:awesome", ["docker-compose"], "Tutorial",
-       "Official sample compose files: Django+Postgres, Flask+Redis, Nginx, and other common stacks."),
-
-    # Prometheus
-    _r("Prometheus Getting Started",
-       "https://prometheus.io/docs/prometheus/latest/getting_started/",
-       "Prometheus docs", "arch:res:prometheus:getting-started", ["prometheus"], "Tutorial",
-       "Install Prometheus, scrape targets, run PromQL queries, and configure your first alert."),
-    _r("PromQL for Mere Mortals",
-       "https://grafana.com/blog/2020/02/04/introduction-to-promql-the-prometheus-query-language/",
-       "Grafana Labs blog", "arch:res:prometheus:promql-intro", ["prometheus"], "Tutorial",
-       "Approachable intro to PromQL data types, selectors, rate, and aggregation operators."),
-
-    # Grafana
-    _r("Grafana Getting Started",
-       "https://grafana.com/docs/grafana/latest/getting-started/",
-       "Grafana docs", "arch:res:grafana:getting-started", ["grafana"], "Tutorial",
-       "Install Grafana, connect a data source, build dashboards, and configure alerting."),
-
-    # OpenTelemetry
-    _r("OpenTelemetry Getting Started",
-       "https://opentelemetry.io/docs/getting-started/",
-       "OpenTelemetry docs", "arch:res:opentelemetry:getting-started", ["opentelemetry"], "Tutorial",
-       "Instrument an app with traces, metrics, and logs using the Collector and language SDKs."),
-    _r("OpenTelemetry Demo",
-       "https://opentelemetry.io/docs/demo/",
-       "OpenTelemetry docs", "arch:res:opentelemetry:demo", ["opentelemetry"], "Tutorial",
-       "Microservices reference app showing real instrumentation across many languages and signals."),
-
-    # Loki
-    _r("Grafana Loki Get Started",
-       "https://grafana.com/docs/loki/latest/get-started/",
-       "Grafana docs", "arch:res:loki:get-started", ["loki"], "Tutorial",
-       "Install Loki, ship logs with Promtail or Alloy, and query them with LogQL in Grafana."),
-
-    # Logfire
-    _r("Pydantic Logfire Documentation",
-       "https://logfire.pydantic.dev/docs/",
-       "Pydantic docs", "arch:res:logfire:docs", ["logfire"], "Tutorial",
-       "Install Logfire, instrument Python apps, and view structured traces and logs in the UI."),
-
-    # Honeycomb
-    _r("Honeycomb Get Started",
-       "https://docs.honeycomb.io/get-started/",
-       "Honeycomb docs", "arch:res:honeycomb:get-started", ["honeycomb"], "Tutorial",
-       "Send events via OpenTelemetry, run BubbleUp queries, and investigate production issues."),
-    _r("Observability Engineering",
-       "https://www.honeycomb.io/wp-content/uploads/2022/05/observability-engineering-honeycomb.pdf",
-       "Honeycomb · O'Reilly", "arch:res:honeycomb:observability-engineering", ["honeycomb"], "Best Practices",
-       "Charity Majors et al. on high-cardinality events, SLOs, and modern observability practice."),
 
     # pgvector
     _r("pgvector README",
@@ -909,41 +701,84 @@ ARCH_TOOL_RESOURCES: list[ArchToolResource] = [
        "Pinecone docs", "arch:res:pinecone:quickstart", ["pinecone"], "Tutorial",
        "Create an index, upsert vectors with metadata, and run similarity queries via Python SDK."),
 
-    # Vault
-    _r("Vault Tutorials",
-       "https://developer.hashicorp.com/vault/tutorials",
-       "HashiCorp Developer", "arch:res:vault:tutorials", ["vault"], "Tutorial",
-       "Hands-on tutorials for KV secrets, dynamic database creds, transit encryption, and auth methods."),
-    _r("Vault Production Hardening",
-       "https://developer.hashicorp.com/vault/tutorials/operations/production-hardening",
-       "HashiCorp Developer", "arch:res:vault:production-hardening", ["vault"], "Best Practices",
-       "Official checklist: end-to-end TLS, root token rotation, auditing, and least-privilege policies."),
+    # APIs & protocols
+    _r("Getting Started with the OpenAPI Specification",
+       "https://learn.openapis.org/",
+       "OpenAPI Initiative", "arch:res:openapi:learn", ["openapi"], "Tutorial",
+       "Official guided entry point that walks new authors through writing their first OpenAPI description."),
 
-    # Keycloak
-    _r("Keycloak Getting Started (Docker)",
-       "https://www.keycloak.org/getting-started/getting-started-docker",
-       "Keycloak docs", "arch:res:keycloak:docker-start", ["keycloak"], "Tutorial",
-       "Run Keycloak in Docker, create a realm, register a client, and secure a sample app."),
-    _r("Keycloak Server Administration Guide",
-       "https://www.keycloak.org/docs/latest/server_admin/",
-       "Keycloak docs", "arch:res:keycloak:server-admin", ["keycloak"], "Best Practices",
-       "Reference for realms, clients, identity brokering, user federation, and authentication flows."),
+    _r("Creating your first JSON Schema",
+       "https://json-schema.org/learn/getting-started-step-by-step",
+       "JSON Schema docs", "arch:res:json-schema:first", ["json-schema"], "Tutorial",
+       "Step-by-step product-catalog example covering types, required fields, constraints, and $ref."),
+    _r("Understanding JSON Schema",
+       "https://json-schema.org/understanding-json-schema",
+       "JSON Schema docs", "arch:res:json-schema:understanding", ["json-schema"], "Best Practices",
+       "Reference companion that explains keywords and idiomatic patterns for real-world schema design."),
 
-    # Ory
-    _r("Ory Documentation",
-       "https://www.ory.sh/docs/",
-       "Ory docs", "arch:res:ory:docs", ["ory"], "Tutorial",
-       "Get started with Ory Kratos identities, Hydra OAuth2/OIDC, Keto permissions, and Oathkeeper."),
+    _r("Protocol Buffers Tutorials",
+       "https://protobuf.dev/getting-started/",
+       "protobuf.dev", "arch:res:protobuf:tutorials", ["protobuf"], "Tutorial",
+       "Official per-language quickstarts (Go, Python, Java, C++) covering .proto files and codegen."),
+    _r("Proto Best Practices",
+       "https://protobuf.dev/best-practices/dos-donts/",
+       "protobuf.dev", "arch:res:protobuf:best-practices", ["protobuf"], "Best Practices",
+       "Google's vetted rules on tag numbers, enum zero values, and safe schema evolution."),
 
-    # Auth0
-    _r("Auth0 Get Started",
-       "https://auth0.com/docs/get-started",
-       "Auth0 docs", "arch:res:auth0:get-started", ["auth0"], "Tutorial",
-       "Set up a tenant, create applications, and integrate login via Universal Login and SDKs."),
-    _r("Auth0 Architecture Scenarios",
-       "https://auth0.com/docs/get-started/architecture-scenarios",
-       "Auth0 docs", "arch:res:auth0:architecture-scenarios", ["auth0"], "Best Practices",
-       "Reference architectures for SPA+API, mobile+API, and B2B/B2C identity scenarios."),
+    _r("Learn GraphQL",
+       "https://graphql.org/learn/",
+       "GraphQL Foundation", "arch:res:graphql:learn", ["graphql"], "Tutorial",
+       "Official tour through schemas, queries, mutations, subscriptions, HTTP transport, and authorization."),
+    _r("Production Ready GraphQL",
+       "https://book.productionreadygraphql.com/",
+       "Marc-Andre Giroux", "arch:res:graphql:production-ready", ["graphql"], "Best Practices",
+       "Shopify/GitHub veteran's book on schema design, performance, security, and migrating legacy APIs."),
+
+    _r("Introduction to gRPC",
+       "https://grpc.io/docs/what-is-grpc/introduction/",
+       "grpc.io", "arch:res:grpc:intro", ["grpc"], "Tutorial",
+       "Conceptual primer plus links to per-language quickstarts that build a working client and server."),
+
+    _r("tRPC Quickstart",
+       "https://trpc.io/docs/quickstart",
+       "tRPC docs", "arch:res:trpc:quickstart", ["trpc"], "Tutorial",
+       "Framework-agnostic walkthrough of routers, queries, mutations, and zod input validation."),
+    _r("GraphQL, tRPC, REST and more: Pick Your Poison",
+       "https://www.youtube.com/watch?v=ZfccwYUD8H0",
+       "YouTube · Theo", "arch:res:trpc:theo-pick-your-poison", ["trpc", "graphql", "grpc"], "Talk",
+       "Decision-framework video on when tRPC beats GraphQL or REST for typed full-stack TypeScript."),
+
+    _r("Get Started with Apollo Server",
+       "https://www.apollographql.com/docs/apollo-server/getting-started",
+       "Apollo GraphQL docs", "arch:res:apollo-server:getting-started", ["apollo-server"], "Tutorial",
+       "Eight-step TypeScript tutorial building a Books schema, resolvers, and Apollo Sandbox queries."),
+
+    _r("Hasura Basics",
+       "https://hasura.io/learn/graphql/hasura/introduction/",
+       "Hasura Learn", "arch:res:hasura:basics", ["hasura"], "Course",
+       "30-minute course building a realtime todo backend with queries, subscriptions, and authorization."),
+    _r("Hasura Quickstart with Docker",
+       "https://hasura.io/docs/2.0/getting-started/docker-simple/",
+       "Hasura docs", "arch:res:hasura:docker-quickstart", ["hasura"], "Tutorial",
+       "Spin up Hasura Engine plus Postgres locally and get an auto-generated GraphQL API in minutes."),
+
+    _r("PostgREST Tutorial 0: Get it Running",
+       "https://docs.postgrest.org/en/latest/tutorials/tut0.html",
+       "PostgREST docs", "arch:res:postgrest:tut0", ["postgrest"], "Tutorial",
+       "Install PostgREST and build a todo API backed by a schema with role-based access."),
+    _r("PostgREST Tutorial 1: The Golden Key",
+       "https://docs.postgrest.org/en/latest/tutorials/tut1.html",
+       "PostgREST docs", "arch:res:postgrest:tut1", ["postgrest"], "Tutorial",
+       "Layer JWT authentication and per-role authorization on top of the Tutorial 0 API."),
+
+    _r("Connect Introduction",
+       "https://connectrpc.com/docs/introduction/",
+       "Connect RPC docs", "arch:res:connect:intro", ["connect"], "Tutorial",
+       "Overview of Connect's browser- and gRPC-compatible protocol with codegen across Go, TS, and more."),
+    _r("Connect Getting Started in Go",
+       "https://connectrpc.com/docs/go/getting-started/",
+       "Connect RPC docs", "arch:res:connect:go-getting-started", ["connect"], "Tutorial",
+       "Fifteen-minute walkthrough writing a protobuf schema and serving it with connect-go."),
 ]
 
 
@@ -966,19 +801,9 @@ ARCH_PEOPLE: list[Person] = [
         "Jepsen author. The empirical voice on what distributed systems actually do under failure.",
     ),
     Person(
-        "Brendan Gregg", "brendangregg", "blog", "https://www.brendangregg.com/",
-        "arch:person:blog:brendangregg",
-        "The reference for Linux performance, flame graphs, and BPF observability.",
-    ),
-    Person(
         "Will Larson", "lethain", "blog", "https://lethain.com/",
         "arch:person:blog:lethain",
         "Engineering leader writing concrete frameworks for strategy, architecture, and staff-engineer work.",
-    ),
-    Person(
-        "Charity Majors", "mipsytipsy", "blog", "https://charity.wtf/",
-        "arch:person:blog:charity",
-        "Honeycomb co-founder. Defines what modern observability means and where it's going.",
     ),
     Person(
         "Hillel Wayne", "hillelogram", "blog", "https://www.hillelwayne.com/",
@@ -989,11 +814,6 @@ ARCH_PEOPLE: list[Person] = [
         "Camille Fournier", "skamille", "blog", "https://skamille.medium.com/",
         "arch:person:blog:camille",
         "Ex-ZooKeeper maintainer; pragmatic essays on technical strategy and engineering leadership.",
-    ),
-    Person(
-        "Jessica Kerr", "jessitron", "blog", "https://jessitron.com/",
-        "arch:person:blog:jessitron",
-        "Honeycomb dev advocate; systems-thinking essays on observability and socio-technical design.",
     ),
     Person(
         "Alex Xu (ByteByteGo)", "bytebytego", "newsletter", "https://www.bytebytego.com/",
@@ -1053,20 +873,6 @@ ARCH_FAQS: list[FAQ] = [
         source_key="arch:faq:tigerdata-just-use-postgres",
     ),
     FAQ(
-        "What's the smallest observability stack that's actually useful?",
-        "One signal you'll actually look at, instrumented well, beats four "
-        "signals you glance at during incidents. Charity Majors frames this "
-        "as observability 1.0 vs. 2.0: the three pillars (metrics, logs, "
-        "traces) are 1.0. Structured wide events you can slice arbitrarily "
-        "are 2.0. For most teams, OpenTelemetry to instrument plus one "
-        "backend that handles high-cardinality (Honeycomb, Logfire) is the "
-        "smallest setup that pays off. Add the other pillars once you're "
-        "actually using the first one.",
-        source_label="Charity Majors: Observability 1.0 vs 2.0",
-        source_url="https://www.honeycomb.io/blog/one-key-difference-observability1dot0-2dot0",
-        source_key="arch:faq:charity-observability-2",
-    ),
-    FAQ(
         "What do I need to know about caching before I deploy a cache?",
         "Caches add a metastable failure mode that load tests usually miss. "
         "When your cache is warm, the database sees 10% of traffic. When "
@@ -1081,16 +887,45 @@ ARCH_FAQS: list[FAQ] = [
         source_key="arch:faq:brooker-caches",
     ),
     FAQ(
-        "How do I think about reliability without overengineering?",
-        "Static stability is the cleanest mental model: design so that when "
-        "a dependency fails, your system behaves the same. Pre-provision "
-        "instead of reacting. Pre-build instead of pulling at request time. "
-        "Decide what works looks like when half your dependencies are down. "
-        "Most overengineering is reacting to abstract failures instead of "
-        "ones that have actually hurt you. Re-read your last three "
-        "postmortems, then design for those.",
-        source_label="AWS Builders' Library: Static Stability",
-        source_url="https://aws.amazon.com/builders-library/static-stability-using-availability-zones/",
-        source_key="arch:faq:aws-static-stability",
+        "When should I reach for GraphQL or gRPC instead of REST?",
+        "GraphQL pays off at client-server edges where the client wants to "
+        "fetch exactly the fields it needs in one round trip, and where the "
+        "complexity of writing resolvers is a price you can afford. gRPC "
+        "wins for internal service-to-service traffic: binary framing, "
+        "HTTP/2 streaming, generated clients, tight schema discipline. "
+        "REST is still the right default for everything else, especially "
+        "public APIs where caching, browser support, and developer "
+        "familiarity matter more than the protocol's expressive power.",
+        source_label="Stack Overflow Blog: When to use gRPC vs GraphQL",
+        source_url="https://stackoverflow.blog/2022/11/28/when-to-use-grpc-vs-graphql/",
+        source_key="arch:faq:so-blog-grpc-vs-graphql",
+    ),
+    FAQ(
+        "Do I need a separate search index, or can Postgres full-text handle it?",
+        "Postgres full-text search is more capable than most teams realize. "
+        "For typical workloads (tens of millions of rows, basic ranking, "
+        "single-language stemming) it's competitive with Elasticsearch and "
+        "Meilisearch and skips the operational cost of running a second "
+        "system. The line is when you need fuzzy/typo-tolerant matching, "
+        "rich faceting, multi-language ranking, or real-time updates over "
+        "very large indexes. Until then, the right move is staying in "
+        "Postgres.",
+        source_label="Supabase Engineering: Postgres FTS vs the rest",
+        source_url="https://supabase.com/blog/postgres-full-text-search-vs-the-rest",
+        source_key="arch:faq:supabase-postgres-fts",
+    ),
+    FAQ(
+        "When does pgvector stop being enough?",
+        "pgvector inside the Postgres you already run wins until the "
+        "retrieval workload starts to dominate normal load. Specialized "
+        "vector databases buy you horizontal sharding past tens of "
+        "millions of vectors, faster index rebuilds, and best-in-class "
+        "filtered approximate-nearest-neighbor search. If your "
+        "collection fits comfortably alongside your transactional data "
+        "and your query patterns are simple kNN with a few filters, "
+        "stay in Postgres.",
+        source_label="Tiger Data Engineering: pgvector vs Qdrant",
+        source_url="https://www.tigerdata.com/blog/pgvector-vs-qdrant",
+        source_key="arch:faq:tigerdata-pgvector-vs-qdrant",
     ),
 ]

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
-{% block page_type %}system-architecture{% endblock %}
-{% block page_title %}Architecting Modern Systems: Courses, Tutorials & Best Practices{% endblock %}
+{% block page_type %}production-operations{% endblock %}
+{% block page_title %}Production Operations: Keeping Systems Healthy{% endblock %}
 
 {% block page_css %}
 <link rel="stylesheet" href="{{ theme_url('css/pages/vibe-coding-courses.css') }}">
@@ -26,16 +26,16 @@
         <ol>
             <li><a href="/">Smarter Dev</a></li>
             <li><a href="/resources">Resources</a></li>
-            <li aria-current="page">System Architecture</li>
+            <li aria-current="page">Production Operations</li>
         </ol>
     </nav>
 
     <header class="vc-hero reveal">
-        <h1 class="vc-hero-title">Architecting Modern Systems</h1>
+        <h1 class="vc-hero-title">Production Operations</h1>
     </header>
 
     <nav class="vc-toc" aria-label="On this page">
-        <a class="vc-toc-link" href="#spine">Best Practices &amp; Courses</a>
+        <a class="vc-toc-link" href="#spine">Best Practices &amp; Discussions</a>
         <a class="vc-toc-link" href="#tools">Tools by Category</a>
         <a class="vc-toc-link" href="#creators">Creators</a>
         <a class="vc-toc-link" href="#faq">FAQ</a>
@@ -44,41 +44,35 @@
 
     <section class="vc-intro reveal">
         <p class="vc-intro-lede">
-            Every system has an architecture. Most of them weren't designed, they accumulated.
+            Most production outages are predictable. Knowing what to watch and how to respond is the discipline.
         </p>
         <p>
-            A running collection of writing, courses, and tutorials on
-            <strong>architecting modern systems</strong>: how to choose between
-            databases, queues, caches, search engines, APIs, and the rest of
-            the data and integration stack. Less about new tools, more about
-            the judgment behind picking one and living with it.
-        </p>
-        <p class="vc-intro-aside">
-            This index covers the data and integration layer — the systems
-            you build with. For where those systems run, see
+            Early draft. This directory currently covers observability and
+            auth & secrets. Incident response, logging pipelines, the modern
+            auth wave (Clerk, WorkOS, Stytch), and secret managers
+            (Doppler, Infisical, SOPS, age) will land as that work
+            progresses. For the systems you build with, see
+            <a href="/resources/system-architecture">System Architecture</a>.
+            For where they run, see
             <a href="/resources/infrastructure-hosting">Infrastructure &amp; Hosting</a>.
-            For keeping them healthy in production, see
-            <a href="/resources/production-operations">Production Operations</a>.
         </p>
     </section>
 
+    {% if featured %}
     <section class="vc-section vc-featured" id="featured">
         <header class="vc-section-head">
             <h2>{{ "Most Popular" if featured_mode == "popular" else "Latest" }}</h2>
             <a class="vc-view-all" href="#spine">View all <span aria-hidden="true">↓</span></a>
         </header>
-        {% if featured %}
         <div class="vc-card-grid">
             {% for r in featured %}{% include "_partials/_arch-resource-card.html" %}{% endfor %}
         </div>
-        {% else %}
-        <p class="vc-empty">No resources indexed yet.</p>
-        {% endif %}
     </section>
+    {% endif %}
 
     <section class="vc-section vc-workflow" id="spine">
         <header class="vc-section-head">
-            <h2>Best Practices, Courses &amp; Discussions</h2>
+            <h2>Best Practices &amp; Discussions</h2>
             {% if popularity_unlocked %}
             <label class="vc-popularity-toggle">
                 <input type="checkbox" data-vc-popularity data-vc-target="spine">
@@ -87,7 +81,7 @@
             {% endif %}
         </header>
 
-        <p class="vc-section-sub">Cross-cutting writings on how to think about systems, regardless of which tool you pick.</p>
+        <p class="vc-section-sub">Cross-cutting writings on running production systems well.</p>
 
         {% if learning_types %}
         <div class="vc-chips" data-vc-chips data-vc-target="spine" data-vc-attr="category">
@@ -111,8 +105,6 @@
         <header class="vc-section-head">
             <h2>Tools by Category</h2>
         </header>
-
-        <p class="vc-section-sub">Peer tools grouped by what problem they solve. The intro before each list articulates the decision space; the list is what you actually choose between.</p>
 
         <nav class="sa-cat-nav" aria-label="Tool categories">
             {% for cat in categories %}
@@ -156,7 +148,7 @@
     {% if people %}
     <section class="vc-section vc-creators-section" id="creators">
         <header class="vc-section-head"><h2>Creators to follow</h2></header>
-        <p class="vc-section-sub">Writers and engineers consistently publishing substantive content on architecture, distributed systems, and performance.</p>
+        <p class="vc-section-sub">Engineers consistently publishing on observability, performance, and operations.</p>
         <div class="vc-people-grid">
             {% for p in people %}
             <a class="vc-person"
@@ -197,7 +189,7 @@
         <header class="vc-section-head"><h2>From Smarter Dev</h2></header>
         <div class="vc-originals-card">
             <p class="vc-originals-lede">Original writing coming.</p>
-            <p class="vc-originals-body">Smarter Dev essays, walkthroughs, and short courses on architecting production systems will land here as they're written.</p>
+            <p class="vc-originals-body">Smarter Dev walkthroughs and short courses on observability, incident response, and running real production systems will land here.</p>
             <a class="vc-cta-button" href="/discord">Join the Discord to be notified</a>
         </div>
     </section>
@@ -213,44 +205,11 @@
 <script type="application/ld+json" nonce="{{ csp_nonce() }}">
 {
   "@context": "https://schema.org",
-  "@type": "CollectionPage",
-  "name": "Architecting Modern Systems: A Curated Index",
-  "description": {{ seo_meta.description | tojson }},
-  "url": "{{ seo_meta.canonical_url }}",
-  {% if last_updated %}"dateModified": {{ last_updated.isoformat() | tojson }},{% endif %}
-  "mainEntity": {
-    "@type": "ItemList",
-    "numberOfItems": {{ spine|length }},
-    "itemListElement": [
-      {%- for r in spine -%}{% if not loop.first %},{% endif %}
-      {
-        "@type": "ListItem",
-        "position": {{ loop.index }},
-        "item": {
-          "@type": "Article",
-          "url": {{ r.url | tojson }},
-          "name": {{ r.title | tojson }},
-          "description": {{ (r.blurb or r.title) | tojson }},
-          "author": {
-            "@type": "Organization",
-            "name": {{ r.source | tojson }}
-          }{% if r.published_at %},
-          "datePublished": {{ r.published_at.isoformat() | tojson }}{% endif %}
-        }
-      }
-      {%- endfor -%}
-    ]
-  }
-}
-</script>
-<script type="application/ld+json" nonce="{{ csp_nonce() }}">
-{
-  "@context": "https://schema.org",
   "@type": "BreadcrumbList",
   "itemListElement": [
     { "@type": "ListItem", "position": 1, "name": "Smarter Dev", "item": "https://smarter.dev/" },
     { "@type": "ListItem", "position": 2, "name": "Resources", "item": "https://smarter.dev/resources" },
-    { "@type": "ListItem", "position": 3, "name": "System Architecture", "item": "{{ seo_meta.canonical_url }}" }
+    { "@type": "ListItem", "position": 3, "name": "Production Operations", "item": "{{ seo_meta.canonical_url }}" }
   ]
 }
 </script>
