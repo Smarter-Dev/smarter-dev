@@ -29,6 +29,11 @@
   color: var(--white);
   border-color: rgba(0,212,255,.3);
 }
+.sa-cat-nav-link.is-active {
+  color: var(--cyan);
+  border-color: rgba(0,212,255,.4);
+  background: rgba(0,212,255,.05);
+}
 
 /* ── Each category section ── */
 .sa-category {
