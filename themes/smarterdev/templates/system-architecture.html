@@ -128,6 +128,20 @@
                 </li>
                 {% endfor %}
             </ul>
+
+            {% set resources = category_resources.get(cat.slug, []) %}
+            {% if resources %}
+            <div class="vc-chips sa-cat-chips" data-vc-chips data-vc-target="cat-{{ cat.slug }}" data-vc-attr="tools">
+                <button class="vc-chip is-active" type="button" data-value="all">All</button>
+                {% for tool in cat.tools %}
+                <button class="vc-chip" type="button" data-value="{{ tool.slug }}">{{ tool.name }}</button>
+                {% endfor %}
+            </div>
+
+            <div class="vc-card-grid sa-cat-grid" data-vc-list data-vc-target="cat-{{ cat.slug }}">
+                {% for r in resources %}{% include "_partials/_arch-tool-resource-card.html" %}{% endfor %}
+            </div>
+            {% endif %}
         </article>
         {% endfor %}
     </section>

@@ -22,8 +22,10 @@ from smarter_dev.web.system_architecture_data import (
     ARCH_FAQS,
     ARCH_PEOPLE,
     ARCH_RESOURCES,
+    ARCH_TOOL_RESOURCES,
     CATEGORIES,
     ArchResource,
+    ArchToolResource,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,7 +57,32 @@ async def system_architecture(db_session: AsyncSession) -> Template:
     spine = [_ResourceView(r, counts.get(r.key, 0)) for r in by_latest]
     featured_views = [_ResourceView(r, counts.get(r.key, 0)) for r in featured]
 
-    last_updated = max(r.sort_date for r in ARCH_RESOURCES) if ARCH_RESOURCES else None
+    # Group per-tool resources by their category. A tool's category is the
+    # ArchCategory that contains its slug. Resources that touch tools across
+    # multiple categories are duplicated under each (rare in practice).
+    tool_to_category: dict[str, str] = {}
+    for cat in ARCH_CATEGORIES:
+        for tool in cat.tools:
+            tool_to_category[tool.slug] = cat.slug
+
+    category_resources: dict[str, list[_ToolResourceView]] = {
+        cat.slug: [] for cat in ARCH_CATEGORIES
+    }
+    for r in ARCH_TOOL_RESOURCES:
+        cats_seen: set[str] = set()
+        for slug in r.tool_slugs:
+            cat_slug = tool_to_category.get(slug)
+            if cat_slug and cat_slug not in cats_seen:
+                category_resources[cat_slug].append(
+                    _ToolResourceView(r, counts.get(r.key, 0))
+                )
+                cats_seen.add(cat_slug)
+
+    last_updated_candidates = [r.sort_date for r in ARCH_RESOURCES]
+    last_updated_candidates += [
+        (r.published_at or r.first_indexed_at) for r in ARCH_TOOL_RESOURCES
+    ]
+    last_updated = max(last_updated_candidates) if last_updated_candidates else None
 
     description = (
         "A curated index of writing, courses, and tutorials on architecting "
@@ -67,6 +94,7 @@ async def system_architecture(db_session: AsyncSession) -> Template:
         "system-architecture.html",
         context={
             "categories": ARCH_CATEGORIES,
+            "category_resources": category_resources,
             "learning_types": CATEGORIES,
             "spine": spine,
             "featured": featured_views,
@@ -114,6 +142,17 @@ class _ResourceView:
     __slots__ = ("_r", "click_count")
 
     def __init__(self, r: ArchResource, click_count: int) -> None:
+        self._r = r
+        self.click_count = click_count
+
+    def __getattr__(self, name: str):
+        return getattr(self._r, name)
+
+
+class _ToolResourceView:
+    __slots__ = ("_r", "click_count")
+
+    def __init__(self, r: ArchToolResource, click_count: int) -> None:
         self._r = r
         self.click_count = click_count
 

@@ -59,6 +59,25 @@ class ArchResource:
         return self.learning_type.lower().replace(" ", "-")
 
 
+@dataclass(frozen=True)
+class ArchToolResource:
+    """Per-tool learning resource: docs, tutorial, walkthrough, talk."""
+
+    title: str
+    url: str
+    source: str
+    key: str
+    tool_slugs: tuple[str, ...]  # which tool(s) this resource teaches
+    learning_type: str
+    first_indexed_at: date
+    published_at: date | None = None
+    blurb: str = ""
+
+    @property
+    def category_slug(self) -> str:
+        return self.learning_type.lower().replace(" ", "-")
+
+
 CATEGORIES: tuple[str, ...] = (
     "Tutorial",
     "Course",
@@ -504,6 +523,427 @@ ARCH_RESOURCES: list[ArchResource] = [
         first_indexed_at=_INDEXED,
         blurb="Archive of daily computer-science paper summaries. Paused since 2021; back catalog is foundational.",
     ),
+]
+
+
+# ─── PER-TOOL RESOURCES ──────────────────────────────────────────────────────
+# Each entry teaches a specific tool. The controller groups them by category
+# at render time using each tool's parent ArchCategory.
+
+
+def _r(title, url, source, key, tool_slugs, learning_type, blurb=""):
+    """Compact builder for ArchToolResource. Defaults first_indexed_at."""
+    return ArchToolResource(
+        title=title, url=url, source=source, key=key,
+        tool_slugs=tuple(tool_slugs), learning_type=learning_type,
+        first_indexed_at=_INDEXED, blurb=blurb,
+    )
+
+
+ARCH_TOOL_RESOURCES: list[ArchToolResource] = [
+    # Postgres
+    _r("PostgreSQL Tutorial (official)",
+       "https://www.postgresql.org/docs/current/tutorial.html",
+       "PostgreSQL docs", "arch:res:postgres:docs-tutorial", ["postgres"], "Tutorial",
+       "Official tutorial covering SQL basics, schemas, transactions, inheritance, and Postgres-specific features."),
+    _r("PostgreSQL Tutorial (third-party)",
+       "https://www.postgresqltutorial.com/",
+       "PostgreSQL Tutorial", "arch:res:postgres:pgtutorial", ["postgres"], "Tutorial",
+       "Free comprehensive tutorial covering psql, queries, joins, transactions, indexes, and performance."),
+    _r("Use The Index, Luke!",
+       "https://use-the-index-luke.com/",
+       "Markus Winand", "arch:res:postgres:use-the-index-luke", ["postgres", "mysql"], "Best Practices",
+       "Canonical guide to SQL indexing and query performance tuning for application developers."),
+
+    # MySQL
+    _r("MySQL Tutorial",
+       "https://dev.mysql.com/doc/refman/8.0/en/tutorial.html",
+       "MySQL docs", "arch:res:mysql:docs-tutorial", ["mysql"], "Tutorial",
+       "Official walkthrough of the mysql client, creating databases, tables, and running queries."),
+    _r("MySQL Course for Beginners",
+       "https://www.youtube.com/watch?v=7S_tz1z_5bA",
+       "YouTube · freeCodeCamp", "arch:res:mysql:freecodecamp", ["mysql"], "Course",
+       "Three-hour video course covering installation, SQL syntax, joins, and database design."),
+
+    # SQLite
+    _r("SQLite Quickstart",
+       "https://www.sqlite.org/quickstart.html",
+       "SQLite docs", "arch:res:sqlite:quickstart", ["sqlite"], "Tutorial",
+       "Official quickstart for the sqlite3 CLI: creating databases, schemas, and running queries."),
+    _r("Appropriate Uses For SQLite",
+       "https://www.sqlite.org/whentouse.html",
+       "SQLite docs", "arch:res:sqlite:when-to-use", ["sqlite"], "Best Practices",
+       "When SQLite is the right choice versus a client/server database, with concrete scenarios."),
+
+    # MongoDB
+    _r("MongoDB Getting Started",
+       "https://www.mongodb.com/docs/manual/tutorial/getting-started/",
+       "MongoDB docs", "arch:res:mongodb:getting-started", ["mongodb"], "Tutorial",
+       "Official getting-started covering documents, collections, CRUD operations, and aggregation."),
+    _r("MongoDB University",
+       "https://learn.mongodb.com/",
+       "MongoDB University", "arch:res:mongodb:university", ["mongodb"], "Course",
+       "Free structured courses on data modeling, indexing, aggregation, and operational topics."),
+
+    # DynamoDB
+    _r("Getting Started with DynamoDB",
+       "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GettingStartedDynamoDB.html",
+       "AWS docs", "arch:res:dynamodb:getting-started", ["dynamodb"], "Tutorial",
+       "Official tutorial walking through tables, items, queries, and the DynamoDB Local environment."),
+    _r("The DynamoDB Guide",
+       "https://www.dynamodbguide.com/",
+       "Alex DeBrie", "arch:res:dynamodb:debrie-guide", ["dynamodb"], "Best Practices",
+       "Opinionated guide to single-table design, access patterns, and DynamoDB modeling fundamentals."),
+
+    # DuckDB
+    _r("DuckDB Getting Started",
+       "https://duckdb.org/docs/stable/",
+       "DuckDB docs", "arch:res:duckdb:docs", ["duckdb"], "Tutorial",
+       "Official quickstart for the embedded analytical database, with CLI, Python, and SQL examples."),
+    _r("DuckDB Tutorial for Beginners",
+       "https://motherduck.com/blog/duckdb-tutorial-for-beginners/",
+       "MotherDuck blog", "arch:res:duckdb:motherduck-tutorial", ["duckdb"], "Tutorial",
+       "Hands-on intro to querying CSV, Parquet, and JSON files directly with DuckDB."),
+
+    # ClickHouse
+    _r("ClickHouse Quick Start",
+       "https://clickhouse.com/docs/getting-started/quick-start",
+       "ClickHouse docs", "arch:res:clickhouse:quick-start", ["clickhouse"], "Tutorial",
+       "Install, load data, and run analytical queries on the columnar OLAP database."),
+    _r("ClickHouse Academy",
+       "https://learn.clickhouse.com/",
+       "ClickHouse Academy", "arch:res:clickhouse:academy", ["clickhouse"], "Course",
+       "Free courses on data modeling, MergeTree engines, and production operations."),
+
+    # Redis
+    _r("Redis Quick Start",
+       "https://redis.io/docs/latest/get-started/",
+       "Redis docs", "arch:res:redis:quick-start", ["redis"], "Tutorial",
+       "Official getting-started covering installation, redis-cli, key types, and common commands."),
+    _r("Redis University",
+       "https://university.redis.io/",
+       "Redis University", "arch:res:redis:university", ["redis"], "Course",
+       "Free structured courses on data structures, caching patterns, and Redis Stack modules."),
+
+    # Valkey
+    _r("Valkey: Introduction",
+       "https://valkey.io/topics/introduction/",
+       "Valkey docs", "arch:res:valkey:intro", ["valkey"], "Tutorial",
+       "Introduction to the Linux Foundation Redis fork, including installation and command reference."),
+
+    # Memcached
+    _r("Memcached Wiki",
+       "https://github.com/memcached/memcached/wiki",
+       "GitHub · memcached", "arch:res:memcached:wiki", ["memcached"], "Tutorial",
+       "Official wiki covering protocol, configuration, tuning, and common usage patterns."),
+
+    # RabbitMQ
+    _r("RabbitMQ Tutorials",
+       "https://www.rabbitmq.com/tutorials",
+       "RabbitMQ docs", "arch:res:rabbitmq:tutorials", ["rabbitmq"], "Tutorial",
+       "Six canonical tutorials: work queues, pub/sub, routing, topics, RPC, and acknowledgements."),
+    _r("RabbitMQ Documentation",
+       "https://www.rabbitmq.com/docs",
+       "RabbitMQ docs", "arch:res:rabbitmq:docs", ["rabbitmq"], "Best Practices",
+       "Full documentation hub: clustering, persistence, flow control, monitoring, and production tuning."),
+
+    # Kafka
+    _r("Apache Kafka Quickstart",
+       "https://kafka.apache.org/quickstart",
+       "Kafka docs", "arch:res:kafka:quickstart", ["kafka"], "Tutorial",
+       "Start a broker, create topics, produce and consume messages, and run Kafka Connect."),
+    _r("Apache Kafka 101",
+       "https://developer.confluent.io/courses/apache-kafka/events/",
+       "Confluent Developer", "arch:res:kafka:101-course", ["kafka"], "Course",
+       "Free video course on Kafka fundamentals: topics, partitions, producers, consumers, and brokers."),
+
+    # NATS
+    _r("NATS Concepts & Walkthrough",
+       "https://docs.nats.io/nats-concepts/overview",
+       "NATS docs", "arch:res:nats:overview", ["nats"], "Tutorial",
+       "Concept overview and walkthroughs covering core NATS, JetStream, and key/value stores."),
+
+    # SQS
+    _r("Getting Started with Amazon SQS",
+       "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-getting-started.html",
+       "AWS docs", "arch:res:sqs:getting-started", ["sqs"], "Tutorial",
+       "Create queues, send and receive messages, and configure dead-letter queues via console or SDK."),
+    _r("SQS Best Practices",
+       "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-best-practices.html",
+       "AWS docs", "arch:res:sqs:best-practices", ["sqs"], "Best Practices",
+       "Official guidance on visibility timeouts, polling, idempotency, and queue throughput tuning."),
+
+    # Redis Streams
+    _r("Introduction to Redis Streams",
+       "https://redis.io/docs/latest/develop/data-types/streams/",
+       "Redis docs", "arch:res:redis-streams:intro", ["redis-streams"], "Tutorial",
+       "Official guide: XADD, consumer groups, XREADGROUP, acknowledgement, and stream trimming."),
+
+    # BullMQ
+    _r("BullMQ Guide",
+       "https://docs.bullmq.io/guide/introduction",
+       "BullMQ docs", "arch:res:bullmq:guide", ["bullmq"], "Tutorial",
+       "Official guide for the Node.js queue library: producers, workers, flows, repeatable jobs."),
+
+    # Sidekiq
+    _r("Sidekiq Getting Started",
+       "https://github.com/sidekiq/sidekiq/wiki/Getting-Started",
+       "Sidekiq wiki", "arch:res:sidekiq:getting-started", ["sidekiq"], "Tutorial",
+       "Official wiki: install, define workers, enqueue jobs, and run the Sidekiq process."),
+    _r("Sidekiq Best Practices",
+       "https://github.com/sidekiq/sidekiq/wiki/Best-Practices",
+       "Sidekiq wiki", "arch:res:sidekiq:best-practices", ["sidekiq"], "Best Practices",
+       "Job idempotency, small arguments, embracing concurrency, and operational guidance."),
+
+    # Celery
+    _r("First Steps with Celery",
+       "https://docs.celeryq.dev/en/stable/getting-started/first-steps-with-celery.html",
+       "Celery docs", "arch:res:celery:first-steps", ["celery"], "Tutorial",
+       "Official tutorial: define tasks, configure brokers, run workers, and check results."),
+    _r("Celery Best Practices",
+       "https://denibertovic.com/posts/celery-best-practices/",
+       "Deni Bertovic", "arch:res:celery:best-practices", ["celery"], "Best Practices",
+       "Canonical post on idempotent tasks, retries, naming, and avoiding common Celery pitfalls."),
+
+    # Nginx
+    _r("Nginx Beginner's Guide",
+       "https://nginx.org/en/docs/beginners_guide.html",
+       "Nginx docs", "arch:res:nginx:beginners", ["nginx"], "Tutorial",
+       "Official intro: serving static content, reverse proxy, FastCGI, and load balancing basics."),
+    _r("Nginx Admin's Handbook",
+       "https://github.com/trimstray/nginx-admins-handbook",
+       "GitHub · trimstray", "arch:res:nginx:admins-handbook", ["nginx"], "Best Practices",
+       "Operator guide covering configuration patterns, hardening, performance, and debugging."),
+
+    # Traefik
+    _r("Traefik Quick Start",
+       "https://doc.traefik.io/traefik/getting-started/quick-start/",
+       "Traefik docs", "arch:res:traefik:quick-start", ["traefik"], "Tutorial",
+       "Run Traefik with Docker, discover services automatically, and route HTTP traffic."),
+
+    # Caddy
+    _r("Caddy Getting Started",
+       "https://caddyserver.com/docs/getting-started",
+       "Caddy docs", "arch:res:caddy:getting-started", ["caddy"], "Tutorial",
+       "Run Caddy as a static file server, reverse proxy, and HTTPS terminator with automatic TLS."),
+    _r("Caddyfile Concepts",
+       "https://caddyserver.com/docs/caddyfile/concepts",
+       "Caddy docs", "arch:res:caddy:caddyfile", ["caddy"], "Tutorial",
+       "Caddyfile syntax, matchers, directives, and snippets for typical reverse-proxy setups."),
+
+    # HAProxy
+    _r("HAProxy Starter Guide",
+       "https://docs.haproxy.org/3.0/intro.html",
+       "HAProxy docs", "arch:res:haproxy:intro", ["haproxy"], "Tutorial",
+       "Introduction to load balancing concepts, frontends, backends, and ACLs in HAProxy."),
+    _r("HAProxy Configuration Manual",
+       "https://docs.haproxy.org/3.0/configuration.html",
+       "HAProxy docs", "arch:res:haproxy:config-manual", ["haproxy"], "Best Practices",
+       "Canonical reference for every config directive: timeouts, health checks, stick tables, SSL."),
+
+    # Envoy
+    _r("Envoy Getting Started",
+       "https://www.envoyproxy.io/docs/envoy/latest/start/start",
+       "Envoy docs", "arch:res:envoy:start", ["envoy"], "Tutorial",
+       "Run Envoy in Docker, configure listeners, clusters, and basic HTTP routing."),
+    _r("Envoy Sandboxes",
+       "https://www.envoyproxy.io/docs/envoy/latest/start/sandboxes/sandboxes",
+       "Envoy docs", "arch:res:envoy:sandboxes", ["envoy"], "Tutorial",
+       "Working Docker Compose examples for front proxy, gRPC bridge, JWT auth, and more."),
+
+    # Elasticsearch
+    _r("Elasticsearch Quick Start",
+       "https://www.elastic.co/guide/en/elasticsearch/reference/current/getting-started.html",
+       "Elastic docs", "arch:res:elasticsearch:quick-start", ["elasticsearch"], "Tutorial",
+       "Run Elasticsearch locally, index documents, and run match, term, and aggregation queries."),
+    _r("Elasticsearch: The Definitive Guide",
+       "https://www.elastic.co/guide/en/elasticsearch/guide/current/index.html",
+       "Elastic docs", "arch:res:elasticsearch:definitive-guide", ["elasticsearch"], "Best Practices",
+       "Long-form guide to mapping, analyzers, relevance, aggregations, and cluster scaling."),
+
+    # OpenSearch
+    _r("OpenSearch Quickstart",
+       "https://opensearch.org/docs/latest/getting-started/",
+       "OpenSearch docs", "arch:res:opensearch:quickstart", ["opensearch"], "Tutorial",
+       "Run OpenSearch and Dashboards, index data, and run search and aggregation queries."),
+
+    # Meilisearch
+    _r("Meilisearch Quick Start",
+       "https://www.meilisearch.com/docs/learn/getting_started/quick_start",
+       "Meilisearch docs", "arch:res:meilisearch:quick-start", ["meilisearch"], "Tutorial",
+       "Install, add documents, and run typo-tolerant searches with filters and ranking rules."),
+
+    # Typesense
+    _r("Typesense Guide",
+       "https://typesense.org/docs/guide/",
+       "Typesense docs", "arch:res:typesense:guide", ["typesense"], "Tutorial",
+       "Install, create collections, index documents, and tune ranking and faceting in Typesense."),
+
+    # S3
+    _r("Getting Started with Amazon S3",
+       "https://docs.aws.amazon.com/AmazonS3/latest/userguide/GetStartedWithS3.html",
+       "AWS docs", "arch:res:s3:getting-started", ["s3"], "Tutorial",
+       "Create buckets, upload objects, manage access, and configure lifecycle and versioning."),
+    _r("S3 Performance Best Practices",
+       "https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html",
+       "AWS docs", "arch:res:s3:performance", ["s3"], "Best Practices",
+       "Official guidance on request rates, key naming, multipart uploads, and Transfer Acceleration."),
+
+    # R2
+    _r("Cloudflare R2 Get Started",
+       "https://developers.cloudflare.com/r2/get-started/",
+       "Cloudflare docs", "arch:res:r2:get-started", ["r2"], "Tutorial",
+       "Create R2 buckets, upload objects via Wrangler or the S3-compatible API, and serve them."),
+
+    # B2
+    _r("Backblaze B2 Getting Started",
+       "https://www.backblaze.com/docs/cloud-storage-getting-started-with-backblaze-b2",
+       "Backblaze docs", "arch:res:b2:getting-started", ["b2"], "Tutorial",
+       "Create buckets and application keys, upload files via web UI, CLI, and S3-compatible API."),
+
+    # MinIO
+    _r("MinIO Quickstart",
+       "https://min.io/docs/minio/linux/index.html",
+       "MinIO docs", "arch:res:minio:quickstart", ["minio"], "Tutorial",
+       "Install MinIO single-node and distributed, use the mc client, and configure access policies."),
+
+    # Kubernetes
+    _r("Kubernetes Tutorials",
+       "https://kubernetes.io/docs/tutorials/",
+       "Kubernetes docs", "arch:res:kubernetes:tutorials", ["kubernetes"], "Tutorial",
+       "Official tutorials: Kubernetes Basics, stateful apps, services, and ConfigMaps."),
+    _r("Kubernetes The Hard Way",
+       "https://github.com/kelseyhightower/kubernetes-the-hard-way",
+       "GitHub · Kelsey Hightower", "arch:res:kubernetes:hard-way", ["kubernetes"], "Tutorial",
+       "Bootstrap a cluster from scratch to understand every component without abstractions."),
+    _r("Kubernetes Production Best Practices",
+       "https://learnk8s.io/production-best-practices",
+       "Learnk8s", "arch:res:kubernetes:learnk8s-prod", ["kubernetes"], "Best Practices",
+       "Checklist covering app health, scalability, observability, security, and resource governance."),
+
+    # Nomad
+    _r("Nomad Tutorials",
+       "https://developer.hashicorp.com/nomad/tutorials",
+       "HashiCorp Developer", "arch:res:nomad:tutorials", ["nomad"], "Tutorial",
+       "Official learning path: install, run jobs, schedule services, batch jobs, and integrate Consul."),
+
+    # Docker Compose
+    _r("Docker Compose Overview",
+       "https://docs.docker.com/compose/",
+       "Docker docs", "arch:res:docker-compose:overview", ["docker-compose"], "Tutorial",
+       "Get started defining multi-container apps with compose.yaml, networks, volumes, and profiles."),
+    _r("Awesome Compose",
+       "https://github.com/docker/awesome-compose",
+       "GitHub · Docker", "arch:res:docker-compose:awesome", ["docker-compose"], "Tutorial",
+       "Official sample compose files: Django+Postgres, Flask+Redis, Nginx, and other common stacks."),
+
+    # Prometheus
+    _r("Prometheus Getting Started",
+       "https://prometheus.io/docs/prometheus/latest/getting_started/",
+       "Prometheus docs", "arch:res:prometheus:getting-started", ["prometheus"], "Tutorial",
+       "Install Prometheus, scrape targets, run PromQL queries, and configure your first alert."),
+    _r("PromQL for Mere Mortals",
+       "https://grafana.com/blog/2020/02/04/introduction-to-promql-the-prometheus-query-language/",
+       "Grafana Labs blog", "arch:res:prometheus:promql-intro", ["prometheus"], "Tutorial",
+       "Approachable intro to PromQL data types, selectors, rate, and aggregation operators."),
+
+    # Grafana
+    _r("Grafana Getting Started",
+       "https://grafana.com/docs/grafana/latest/getting-started/",
+       "Grafana docs", "arch:res:grafana:getting-started", ["grafana"], "Tutorial",
+       "Install Grafana, connect a data source, build dashboards, and configure alerting."),
+
+    # OpenTelemetry
+    _r("OpenTelemetry Getting Started",
+       "https://opentelemetry.io/docs/getting-started/",
+       "OpenTelemetry docs", "arch:res:opentelemetry:getting-started", ["opentelemetry"], "Tutorial",
+       "Instrument an app with traces, metrics, and logs using the Collector and language SDKs."),
+    _r("OpenTelemetry Demo",
+       "https://opentelemetry.io/docs/demo/",
+       "OpenTelemetry docs", "arch:res:opentelemetry:demo", ["opentelemetry"], "Tutorial",
+       "Microservices reference app showing real instrumentation across many languages and signals."),
+
+    # Loki
+    _r("Grafana Loki Get Started",
+       "https://grafana.com/docs/loki/latest/get-started/",
+       "Grafana docs", "arch:res:loki:get-started", ["loki"], "Tutorial",
+       "Install Loki, ship logs with Promtail or Alloy, and query them with LogQL in Grafana."),
+
+    # Logfire
+    _r("Pydantic Logfire Documentation",
+       "https://logfire.pydantic.dev/docs/",
+       "Pydantic docs", "arch:res:logfire:docs", ["logfire"], "Tutorial",
+       "Install Logfire, instrument Python apps, and view structured traces and logs in the UI."),
+
+    # Honeycomb
+    _r("Honeycomb Get Started",
+       "https://docs.honeycomb.io/get-started/",
+       "Honeycomb docs", "arch:res:honeycomb:get-started", ["honeycomb"], "Tutorial",
+       "Send events via OpenTelemetry, run BubbleUp queries, and investigate production issues."),
+    _r("Observability Engineering",
+       "https://www.honeycomb.io/wp-content/uploads/2022/05/observability-engineering-honeycomb.pdf",
+       "Honeycomb · O'Reilly", "arch:res:honeycomb:observability-engineering", ["honeycomb"], "Best Practices",
+       "Charity Majors et al. on high-cardinality events, SLOs, and modern observability practice."),
+
+    # pgvector
+    _r("pgvector README",
+       "https://github.com/pgvector/pgvector",
+       "GitHub · pgvector", "arch:res:pgvector:readme", ["pgvector"], "Tutorial",
+       "Install the extension, create vector columns, build HNSW/IVFFlat indexes, and run kNN queries."),
+
+    # Qdrant
+    _r("Qdrant Quickstart",
+       "https://qdrant.tech/documentation/quickstart/",
+       "Qdrant docs", "arch:res:qdrant:quickstart", ["qdrant"], "Tutorial",
+       "Run Qdrant in Docker, create collections, upsert vectors with payloads, and run filtered searches."),
+
+    # Weaviate
+    _r("Weaviate Quickstart",
+       "https://weaviate.io/developers/weaviate/quickstart",
+       "Weaviate docs", "arch:res:weaviate:quickstart", ["weaviate"], "Tutorial",
+       "Spin up Weaviate Cloud, define collections, import data, and run vector and hybrid queries."),
+
+    # Pinecone
+    _r("Pinecone Quickstart",
+       "https://docs.pinecone.io/guides/get-started/quickstart",
+       "Pinecone docs", "arch:res:pinecone:quickstart", ["pinecone"], "Tutorial",
+       "Create an index, upsert vectors with metadata, and run similarity queries via Python SDK."),
+
+    # Vault
+    _r("Vault Tutorials",
+       "https://developer.hashicorp.com/vault/tutorials",
+       "HashiCorp Developer", "arch:res:vault:tutorials", ["vault"], "Tutorial",
+       "Hands-on tutorials for KV secrets, dynamic database creds, transit encryption, and auth methods."),
+    _r("Vault Production Hardening",
+       "https://developer.hashicorp.com/vault/tutorials/operations/production-hardening",
+       "HashiCorp Developer", "arch:res:vault:production-hardening", ["vault"], "Best Practices",
+       "Official checklist: end-to-end TLS, root token rotation, auditing, and least-privilege policies."),
+
+    # Keycloak
+    _r("Keycloak Getting Started (Docker)",
+       "https://www.keycloak.org/getting-started/getting-started-docker",
+       "Keycloak docs", "arch:res:keycloak:docker-start", ["keycloak"], "Tutorial",
+       "Run Keycloak in Docker, create a realm, register a client, and secure a sample app."),
+    _r("Keycloak Server Administration Guide",
+       "https://www.keycloak.org/docs/latest/server_admin/",
+       "Keycloak docs", "arch:res:keycloak:server-admin", ["keycloak"], "Best Practices",
+       "Reference for realms, clients, identity brokering, user federation, and authentication flows."),
+
+    # Ory
+    _r("Ory Documentation",
+       "https://www.ory.sh/docs/",
+       "Ory docs", "arch:res:ory:docs", ["ory"], "Tutorial",
+       "Get started with Ory Kratos identities, Hydra OAuth2/OIDC, Keto permissions, and Oathkeeper."),
+
+    # Auth0
+    _r("Auth0 Get Started",
+       "https://auth0.com/docs/get-started",
+       "Auth0 docs", "arch:res:auth0:get-started", ["auth0"], "Tutorial",
+       "Set up a tenant, create applications, and integrate login via Universal Login and SDKs."),
+    _r("Auth0 Architecture Scenarios",
+       "https://auth0.com/docs/get-started/architecture-scenarios",
+       "Auth0 docs", "arch:res:auth0:architecture-scenarios", ["auth0"], "Best Practices",
+       "Reference architectures for SPA+API, mobile+API, and B2B/B2C identity scenarios."),
 ]
 
 
