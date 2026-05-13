@@ -1,16 +1,12 @@
-"""Controller for the /vibe-coding-courses landing page.
+"""Controller for /resources/agentic-coding-courses.
 
-Renders the curated content from ``vibe_courses_data.py`` and merges in click
-counts from ``tracked_link_counters``. The featured strip auto-flips from
-"Latest" to "Most Popular" once the 3rd-ranked course link has \u226510 clicks;
-the "List by popularity" toggle becomes available at that same threshold.
+Renders content loaded from the DB. Two structural quirks compared to the
+other four directories:
 
-The page has two filterable content sections:
-
-* **Agentic Tools**: resources that teach a specific tool. Filter chips = tool slugs.
-* **Workflow & Practice**: cross-cutting resources on the practice of building
-  software with coding agents. Filter chips = categories (Tutorial / Course /
-  Discussion / Best Practices / Talk).
+* tools live under one synthetic category (``agentic-tools``); the flat
+  ``tools`` list the template wants is that category's ``tools`` tuple.
+* creators are split into "Creators to follow" and "Stay current" based on
+  ``platform``; the latter is for subscribable feeds (newsletters, podcasts).
 """
 
 from __future__ import annotations
@@ -18,69 +14,66 @@ from __future__ import annotations
 import logging
 
 from litestar import get
+from litestar.exceptions import NotFoundException
 from litestar.response import Redirect, Template
-from sqlalchemy import select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from smarter_dev.web.resources_data import load_directory_payload
 
 logger = logging.getLogger(__name__)
 
-from smarter_dev.web.models import TrackedLinkCounter
-from smarter_dev.web.vibe_courses_data import (
-    CATEGORIES,
-    COURSES,
-    FAQS,
-    PEOPLE,
-    STAY_CURRENT_PLATFORMS,
-    TOOLS,
-    Course,
-)
-
-# A featured strip needs at least this many clicks on its 3rd-ranked course
-# link before we flip from "Latest" to "Most Popular".
+# Featured strip flips from "Latest" to "Most Popular" once the 3rd-ranked
+# tool/workflow source has crossed this threshold.
 _POPULARITY_THRESHOLD = 10
+
+# Subscribable platforms get their own section so the "Creators to follow"
+# block stays profile-shaped.
+_STAY_CURRENT_PLATFORMS: frozenset[str] = frozenset({"newsletter", "podcast"})
 
 
 @get("/vibe-coding-courses", status_code=301)
 async def vibe_courses_legacy_redirect() -> Redirect:
-    """301 the original URL straight to the current canonical path."""
     return Redirect("/resources/agentic-coding-courses", status_code=301)
 
 
 @get("/resources/vibe-coding-courses", status_code=301)
 async def vibe_courses_resources_redirect() -> Redirect:
-    """301 the earlier /resources/vibe-coding-courses to the renamed slug."""
     return Redirect("/resources/agentic-coding-courses", status_code=301)
 
 
 @get("/resources/agentic-coding-courses")
 async def vibe_courses(db_session: AsyncSession) -> Template:
-    counts = await _load_course_counts(db_session)
+    payload = await load_directory_payload(db_session, "agentic-coding-courses")
+    if payload is None:
+        raise NotFoundException()
 
-    by_latest = sorted(COURSES, key=lambda c: c.sort_date, reverse=True)
-    by_popular = sorted(
-        COURSES, key=lambda c: counts.get(c.key, 0), reverse=True
-    )
+    # tool_courses = all sources placed under any tool inside the (single)
+    # category. workflow_courses = spine.
+    tool_courses_sources = list(
+        payload.category_resources.get(payload.categories[0].slug, [])
+    ) if payload.categories else []
+    workflow_courses = list(payload.spine)
 
+    all_courses = tool_courses_sources + workflow_courses
+
+    tool_courses = sorted(tool_courses_sources, key=lambda s: s.sort_date, reverse=True)
+    workflow_courses = sorted(workflow_courses, key=lambda s: s.sort_date, reverse=True)
+
+    # Featured strip: top-3 by click count if the threshold is crossed,
+    # else the most-recently-indexed three.
+    by_popular = sorted(all_courses, key=lambda s: s.click_count, reverse=True)
     popularity_unlocked = (
-        len(by_popular) >= 3
-        and counts.get(by_popular[2].key, 0) >= _POPULARITY_THRESHOLD
+        len(by_popular) >= 3 and by_popular[2].click_count >= _POPULARITY_THRESHOLD
     )
-
     if popularity_unlocked:
         featured = by_popular[:3]
         featured_mode = "popular"
     else:
-        featured = by_latest[:3]
+        featured = sorted(all_courses, key=lambda s: s.sort_date, reverse=True)[:3]
         featured_mode = "latest"
 
-    tool_courses = [
-        _CourseView(c, counts.get(c.key, 0)) for c in by_latest if c.tools
-    ]
-    workflow_courses = [
-        _CourseView(c, counts.get(c.key, 0)) for c in by_latest if not c.tools
-    ]
-    featured_views = [_CourseView(c, counts.get(c.key, 0)) for c in featured]
+    creators = [p for p in payload.people if p.platform not in _STAY_CURRENT_PLATFORMS]
+    stay_current = [p for p in payload.people if p.platform in _STAY_CURRENT_PLATFORMS]
 
     description = (
         "Tutorials, courses, and notes on building software with AI coding "
@@ -89,27 +82,22 @@ async def vibe_courses(db_session: AsyncSession) -> Template:
         "agent mode, or vibe coding."
     )
 
-    creators = [p for p in PEOPLE if p.platform not in STAY_CURRENT_PLATFORMS]
-    stay_current = [p for p in PEOPLE if p.platform in STAY_CURRENT_PLATFORMS]
-
-    # Most-recent indexing date (or publish date, whichever is newer) across
-    # all curated resources. Drives the "Last updated" stamp at the bottom.
-    last_updated = max(c.sort_date for c in COURSES) if COURSES else None
-
     return Template(
         "vibe-coding-courses.html",
         context={
-            "tools": TOOLS,
+            "tools": payload.categories[0].tools if payload.categories else (),
             "people": creators,
             "stay_current": stay_current,
-            "categories": CATEGORIES,
-            "featured": featured_views,
+            # The vibe template's `categories` chip is actually the learning-
+            # type chip; keep the existing template field name.
+            "categories": payload.learning_types,
+            "featured": featured,
             "featured_mode": featured_mode,
             "tool_courses": tool_courses,
             "workflow_courses": workflow_courses,
             "popularity_unlocked": popularity_unlocked,
-            "last_updated": last_updated,
-            "faqs": FAQS,
+            "last_updated": payload.last_updated,
+            "faqs": payload.faqs,
             "seo_meta": {
                 "description": description,
                 "canonical_url": "https://smarter.dev/resources/agentic-coding-courses",
@@ -125,44 +113,3 @@ async def vibe_courses(db_session: AsyncSession) -> Template:
             },
         },
     )
-
-
-async def _load_course_counts(db_session: AsyncSession) -> dict[str, int]:
-    """Fetch click counts for every vibe-coding course key in one query.
-
-    Falls back to an empty dict when the counter table can't be queried (for
-    example, when the migration hasn't been applied to a fresh environment
-    yet). The page still renders without click counts so the deploy isn't
-    blocked on the migration landing.
-    """
-    try:
-        result = await db_session.execute(
-            select(TrackedLinkCounter.key, TrackedLinkCounter.count).where(
-                TrackedLinkCounter.key.like("vibe:course:%")
-            )
-        )
-        return {row.key: row.count for row in result}
-    except SQLAlchemyError:
-        logger.exception(
-            "Could not load tracked_link_counters; rendering vibe-coding "
-            "page without click counts. (Migration applied?)"
-        )
-        await db_session.rollback()
-        return {}
-
-
-class _CourseView:
-    """View wrapper that exposes Course fields plus a live click_count.
-
-    Frozen dataclasses can't be mutated, so we wrap rather than copy. Jinja
-    reads attributes off this transparently.
-    """
-
-    __slots__ = ("_course", "click_count")
-
-    def __init__(self, course: Course, click_count: int) -> None:
-        self._course = course
-        self.click_count = click_count
-
-    def __getattr__(self, name: str):
-        return getattr(self._course, name)

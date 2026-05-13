@@ -3534,3 +3534,220 @@ class TrackedLinkCounter(Base):
 
     def __repr__(self) -> str:
         return f"<TrackedLinkCounter(key='{self.key}', count={self.count})>"
+
+
+# ─── /resources/* content ───────────────────────────────────────────────────
+
+
+class ResourceDirectory(Base):
+    """One of the five /resources/* directory pages."""
+
+    __tablename__ = "resource_directories"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    slug: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    track_key_prefix: Mapped[str] = mapped_column(
+        String(16), nullable=False, unique=True
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    categories: Mapped[list["ResourceCategory"]] = relationship(
+        back_populates="directory",
+        cascade="all, delete-orphan",
+        order_by="ResourceCategory.sort_order",
+    )
+    spine_placements: Mapped[list["ResourceDirectorySpine"]] = relationship(
+        back_populates="directory",
+        cascade="all, delete-orphan",
+        order_by="ResourceDirectorySpine.sort_order",
+    )
+    creators: Mapped[list["ResourceCreator"]] = relationship(
+        back_populates="directory",
+        cascade="all, delete-orphan",
+        order_by="ResourceCreator.sort_order",
+    )
+    faqs: Mapped[list["ResourceFaq"]] = relationship(
+        back_populates="directory",
+        cascade="all, delete-orphan",
+        order_by="ResourceFaq.sort_order",
+    )
+
+    def __repr__(self) -> str:
+        return f"<ResourceDirectory(slug='{self.slug}')>"
+
+
+class ResourceCategory(Base):
+    """Section inside a directory ('Databases', 'Caching', etc.)."""
+
+    __tablename__ = "resource_categories"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    directory_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("resource_directories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    intro_html: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    directory: Mapped[ResourceDirectory] = relationship(back_populates="categories")
+    tools: Mapped[list["ResourceTool"]] = relationship(
+        back_populates="category",
+        cascade="all, delete-orphan",
+        order_by="ResourceTool.sort_order",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("directory_id", "slug", name="uq_resource_categories_dir_slug"),
+    )
+
+
+class ResourceTool(Base):
+    """A peer tool inside a category (Postgres, Terraform, ...)."""
+
+    __tablename__ = "resource_tools"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    category_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("resource_categories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    home_track_key: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    blurb: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    category: Mapped[ResourceCategory] = relationship(back_populates="tools")
+    source_placements: Mapped[list["ResourceToolSource"]] = relationship(
+        back_populates="tool",
+        cascade="all, delete-orphan",
+        order_by="ResourceToolSource.sort_order",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("category_id", "slug", name="uq_resource_tools_cat_slug"),
+    )
+
+
+class ResourceSource(Base):
+    """A learning resource we link out to: tutorial, article, book, talk, course."""
+
+    __tablename__ = "resource_sources"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    track_key: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    title: Mapped[str] = mapped_column(String(512), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    byline: Mapped[str] = mapped_column(String(256), nullable=False)
+    blurb: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    learning_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    published_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    first_indexed_at: Mapped[date] = mapped_column(Date, nullable=False)
+
+
+class ResourceDirectorySpine(Base):
+    """A source's placement in a directory's spine."""
+
+    __tablename__ = "resource_directory_spine"
+
+    directory_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("resource_directories.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    source_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("resource_sources.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    directory: Mapped[ResourceDirectory] = relationship(back_populates="spine_placements")
+    source: Mapped[ResourceSource] = relationship()
+
+
+class ResourceToolSource(Base):
+    """A source's placement under one or more specific tools."""
+
+    __tablename__ = "resource_tool_sources"
+
+    tool_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("resource_tools.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    source_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("resource_sources.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    tool: Mapped[ResourceTool] = relationship(back_populates="source_placements")
+    source: Mapped[ResourceSource] = relationship()
+
+
+class ResourceCreator(Base):
+    """A 'Creators to follow' entry, scoped per directory."""
+
+    __tablename__ = "resource_creators"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    directory_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("resource_directories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    handle: Mapped[str] = mapped_column(String(64), nullable=False)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    track_key: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    blurb: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    directory: Mapped[ResourceDirectory] = relationship(back_populates="creators")
+
+    __table_args__ = (
+        UniqueConstraint("directory_id", "slug", name="uq_resource_creators_dir_slug"),
+    )
+
+
+class ResourceFaq(Base):
+    """Per-directory FAQ entry."""
+
+    __tablename__ = "resource_faqs"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    directory_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("resource_directories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer: Mapped[str] = mapped_column(Text, nullable=False)
+    source_label: Mapped[str] = mapped_column(String(256), nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_track_key: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    directory: Mapped[ResourceDirectory] = relationship(back_populates="faqs")
