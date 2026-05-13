@@ -198,6 +198,39 @@
 <script type="application/ld+json" nonce="{{ csp_nonce() }}">
 {
   "@context": "https://schema.org",
+  "@type": "CollectionPage",
+  "name": "Running Modern Systems: A Curated Index",
+  "description": {{ seo_meta.description | tojson }},
+  "url": "{{ seo_meta.canonical_url }}",
+  {% if last_updated %}"dateModified": {{ last_updated.isoformat() | tojson }},{% endif %}
+  "mainEntity": {
+    "@type": "ItemList",
+    "numberOfItems": {{ spine|length }},
+    "itemListElement": [
+      {%- for r in spine -%}{% if not loop.first %},{% endif %}
+      {
+        "@type": "ListItem",
+        "position": {{ loop.index }},
+        "item": {
+          "@type": "Article",
+          "url": {{ r.url | tojson }},
+          "name": {{ r.title | tojson }},
+          "description": {{ (r.blurb or r.title) | tojson }},
+          "author": {
+            "@type": "Organization",
+            "name": {{ r.source | tojson }}
+          }{% if r.published_at %},
+          "datePublished": {{ r.published_at.isoformat() | tojson }}{% endif %}
+        }
+      }
+      {%- endfor -%}
+    ]
+  }
+}
+</script>
+<script type="application/ld+json" nonce="{{ csp_nonce() }}">
+{
+  "@context": "https://schema.org",
   "@type": "BreadcrumbList",
   "itemListElement": [
     { "@type": "ListItem", "position": 1, "name": "Smarter Dev", "item": "https://smarter.dev/" },
