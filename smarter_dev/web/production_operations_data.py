@@ -296,9 +296,9 @@ OPS_CATEGORIES: list[ArchCategory] = [
             "heavyweight when you need dynamic credentials and deep audit. "
             "Doppler and Infisical are the modern alternatives with better "
             "DX. SOPS and age handle the \"encrypt at rest, decrypt at "
-            "deploy\" pattern for Git-backed secrets. Secrets at deploy "
-            "time is a delivery concern (Software Delivery directory "
-            "coming soon)."
+            "deploy\" pattern for Git-backed secrets. Wiring secrets "
+            "through your pipeline is a delivery concern (see "
+            "<a href=\"/resources/software-delivery#cicd\">Software Delivery</a>)."
         ),
         tools=(
             ArchTool("vault", "HashiCorp Vault",
