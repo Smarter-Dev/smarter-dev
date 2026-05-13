@@ -229,9 +229,15 @@
   }
 
   function init() {
-    initSection('tools');
-    initSection('workflow');
-    initSection('spine');
+    // Auto-discover every chip group on the page and wire it up. Each
+    // group's data-vc-target uniquely identifies the chips + list pair
+    // (e.g. "tools", "workflow", "spine", "cat-databases", "cat-caching").
+    var groups = document.querySelectorAll('[data-vc-chips]');
+    var seen = {};
+    groups.forEach(function (g) {
+      var t = g.getAttribute('data-vc-target');
+      if (t && !seen[t]) { seen[t] = true; initSection(t); }
+    });
     initSmoothScroll();
     initActiveTocHighlight();
     initActiveSubnavHighlight();

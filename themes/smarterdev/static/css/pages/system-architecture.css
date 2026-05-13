@@ -101,6 +101,15 @@
   font-size: .88rem;
 }
 
+/* ── Per-category chips + resource grid ── */
+.sa-cat-chips {
+  margin-top: 2.25rem;
+  margin-bottom: 1.25rem;
+}
+.sa-cat-grid {
+  margin-top: 1rem;
+}
+
 @media (max-width: 760px) {
   .sa-tool-list { grid-template-columns: 1fr; column-gap: 0 }
 }
