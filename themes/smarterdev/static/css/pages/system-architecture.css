@@ -1,0 +1,101 @@
+/* ══════════════════════════════════════════════════════
+   System Architecture page — extends vibe-coding-courses.css.
+   Only the Tools-by-Category sub-section needs new styles.
+   ══════════════════════════════════════════════════════ */
+
+/* ── Tools section: secondary nav of category jumps ── */
+.sa-cat-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem;
+  margin: 1.5rem 0 3rem;
+  padding: 1rem 1.25rem;
+  background: rgba(0,212,255,.02);
+  border: 1px solid rgba(0,212,255,.06);
+}
+.sa-cat-nav-link {
+  font-family: var(--heading);
+  font-size: .6rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--mid);
+  text-decoration: none;
+  padding: .45rem .85rem;
+  border: 1px solid rgba(0,212,255,.12);
+  transition: color .2s, border-color .2s, background .2s;
+  white-space: nowrap;
+}
+.sa-cat-nav-link:hover {
+  color: var(--white);
+  border-color: rgba(0,212,255,.3);
+}
+
+/* ── Each category section ── */
+.sa-category {
+  margin-bottom: 4rem;
+  scroll-margin-top: 120px; /* leaves room for the sticky TOC when deep-linked */
+}
+.sa-category-name {
+  font-family: var(--heading);
+  font-size: clamp(1.05rem, 2vw, 1.35rem);
+  color: var(--white);
+  letter-spacing: .02em;
+  margin: 0 0 1rem;
+  padding-bottom: .65rem;
+  border-bottom: 1px solid rgba(0,212,255,.08);
+  position: relative;
+}
+.sa-category-name::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  width: 40px;
+  height: 1px;
+  background: var(--cyan);
+}
+.sa-category-intro {
+  font-size: 1rem;
+  line-height: 1.8;
+  color: var(--light);
+  max-width: 720px;
+  margin: 0 0 1.75rem;
+}
+
+/* ── Tool list inside a category ── */
+.sa-tool-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  column-gap: 2.5rem;
+}
+.sa-tool {
+  padding: 1rem 0;
+  border-bottom: 1px solid rgba(0,212,255,.05);
+  font-size: .92rem;
+  color: var(--light);
+  line-height: 1.6;
+}
+.sa-tool:last-child { border-bottom: none }
+.sa-tool-link {
+  font-family: var(--heading);
+  font-size: .78rem;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--white);
+  text-decoration: none;
+  margin-right: .65rem;
+  transition: color .2s;
+  display: inline-block;
+}
+.sa-tool-link:hover { color: var(--cyan) }
+.sa-tool-blurb {
+  color: var(--mid);
+  font-size: .88rem;
+}
+
+@media (max-width: 760px) {
+  .sa-tool-list { grid-template-columns: 1fr; column-gap: 0 }
+}

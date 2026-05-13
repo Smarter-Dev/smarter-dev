@@ -1,0 +1,17 @@
+<article class="vc-course-card"
+         data-category="{{ r.category_slug }}"
+         data-click-count="{{ r.click_count }}">
+    <a class="vc-course-link" href="{{ r.url }}"
+       data-track-key="{{ r.key }}"
+       target="_blank" rel="noopener" data-sk-no-spa>
+        <h3 class="vc-course-title">{{ r.title }}</h3>
+    </a>
+    <p class="vc-course-meta">
+        <span class="vc-course-category">{{ r.learning_type }}</span>
+        <span class="vc-course-source">{{ r.source }}</span>
+        {% if r.published_at %}
+        <span class="vc-course-date">{{ r.published_at.strftime("%b %Y") }}</span>
+        {% endif %}
+    </p>
+    {% if r.blurb %}<p class="vc-course-blurb">{{ r.blurb }}</p>{% endif %}
+</article>
