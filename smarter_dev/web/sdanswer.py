@@ -47,6 +47,11 @@ _FENCE_RE = re.compile(
     re.DOTALL,
 )
 
+# Card kinds that the agent sometimes emits at the top level without wrapping
+# them in a `{"type": "cards", "cards": [...]}` envelope. We accept those and
+# wrap them ourselves so a missing wrapper doesn't dump raw JSON on the page.
+_BARE_CARD_KINDS = {"article", "snippet", "collection", "tradeoff", "prereq", "gotcha"}
+
 
 async def enrich_answer(
     db_session: AsyncSession, markdown_content: str
@@ -127,6 +132,8 @@ def _decode_block(inner_html: str) -> dict:
     if not isinstance(payload, dict):
         logger.warning("sdanswer block: top-level must be an object")
         return {"_ok": False}
+    if payload.get("type") in _BARE_CARD_KINDS:
+        payload = {"type": "cards", "cards": [payload]}
     return {"_ok": True, "payload": payload}
 
 
