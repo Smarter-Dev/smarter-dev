@@ -17,10 +17,11 @@
   }
 
   function clockNow() {
-    var d = new Date();
-    var h = d.getHours() % 12 || 12;
-    var m = d.getMinutes();
-    return h + ':' + (m < 10 ? '0' + m : m) + ' ' + (d.getHours() < 12 ? 'AM' : 'PM');
+    return new Date().toLocaleTimeString(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
   }
 
   function renderUserTurn(msg, askerName) {
@@ -33,7 +34,7 @@
           '<span class="ai-turn-marker" aria-hidden="true"></span>' +
           '<span class="ai-turn-role-label">' + escapeHtml(label) + '</span>' +
         '</p>' +
-        '<time class="ai-turn-time">' + clockNow() + '</time>' +
+        '<time class="ai-turn-time" datetime="' + new Date().toISOString() + '">' + clockNow() + '</time>' +
       '</header>' +
       '<div class="ai-turn-body ai-turn-question markdown-body">' +
       (msg.content_html || escapeHtml(msg.content || '')) +
@@ -91,7 +92,7 @@
           '<span class="ai-turn-model" aria-hidden="true">/+/</span>' +
           '<span class="ai-turn-model-name">gemini 3 flash</span>' +
         '</p>' +
-        '<time class="ai-turn-time">' + clockNow() + '</time>' +
+        '<time class="ai-turn-time" datetime="' + new Date().toISOString() + '">' + clockNow() + '</time>' +
       '</header>' +
       '<div class="ai-turn-body ai-turn-answer markdown-body">' + body + '</div>' +
       payloadScript +
