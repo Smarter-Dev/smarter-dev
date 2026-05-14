@@ -29,7 +29,8 @@ from smarter_dev.web.models import (
 )
 
 
-# Order matches /resources hub: Agentic → Architecture → Hosting → Delivery → Operations.
+# Order matches /resources hub: Agentic → Architecture → Hosting → Delivery →
+# Operations → Patterns of Practice → Patterns for the Age of Agents.
 _DIRECTORIES: list[dict] = [
     {"slug": "agentic-coding-courses", "name": "Agentic Coding",
      "track_key_prefix": "vibe", "sort_order": 10},
@@ -43,6 +44,8 @@ _DIRECTORIES: list[dict] = [
      "track_key_prefix": "ops", "sort_order": 50},
     {"slug": "patterns-of-practice", "name": "Patterns of Practice",
      "track_key_prefix": "patterns", "sort_order": 60},
+    {"slug": "agent-engineering-patterns", "name": "Patterns for the Age of Agents",
+     "track_key_prefix": "agent-patterns", "sort_order": 70},
 ]
 
 
@@ -51,6 +54,7 @@ def seed_all(bind: Connection) -> None:
     # Late imports keep the migration file self-contained while still letting
     # us delete the legacy modules later without touching this file's imports.
     from smarter_dev.web import (
+        agent_engineering_patterns_data,
         infrastructure_hosting_data,
         patterns_of_practice_data,
         production_operations_data,
@@ -121,6 +125,15 @@ def seed_all(bind: Connection) -> None:
         tool_resources=patterns_of_practice_data.POP_TOOL_RESOURCES,
         people=patterns_of_practice_data.POP_PEOPLE,
         faqs=patterns_of_practice_data.POP_FAQS,
+    )
+    _seed_arch_directory(
+        bind,
+        directory_id=dir_ids["agent-engineering-patterns"],
+        categories=agent_engineering_patterns_data.AGENT_CATEGORIES,
+        spine=agent_engineering_patterns_data.AGENT_SPINE_RESOURCES,
+        tool_resources=agent_engineering_patterns_data.AGENT_TOOL_RESOURCES,
+        people=agent_engineering_patterns_data.AGENT_PEOPLE,
+        faqs=agent_engineering_patterns_data.AGENT_FAQS,
     )
 
 

@@ -1,8 +1,10 @@
-"""Curated content for /resources/patterns-of-practice.
+"""Content for /resources/patterns-of-practice.
 
 The Patterns layer of the resources index. Pairs with /resources/system-architecture
 (the What), /resources/infrastructure-hosting (the Where), /resources/software-delivery
-(the Shipping), and /resources/production-operations (the Keep-it-healthy).
+(the Shipping), /resources/production-operations (the Keep-it-healthy), and
+/resources/agent-engineering-patterns (the Age-of-Agents shapes, kept separate
+because they evolve on a different cadence).
 
 Source dossier: docs/patterns-of-practice-research.md.
 Flagged URLs to skip: docs/patterns-of-practice-urls-needed.md.
@@ -39,12 +41,35 @@ def _s(title, url, source, key, learning_type, blurb=""):
 
 
 # ─── CATEGORIES ──────────────────────────────────────────────────────────────
+#
+# Each category lives under one H2 section. The template groups consecutive
+# categories with the same `section` value under one H2 heading. Sections,
+# in order: Code Patterns, Architecture Patterns, Patterns of Discipline,
+# Anti-Patterns.
+
+POP_SECTIONS_BY_SLUG: dict[str, str] = {
+    "composition-construction": "Code Patterns",
+    "control-flow": "Code Patterns",
+    "boundaries-abstraction": "Code Patterns",
+    "error-handling-resilience": "Code Patterns",
+    "concurrency": "Code Patterns",
+    "data-state": "Architecture Patterns",
+    "messaging-coordination": "Architecture Patterns",
+    "topology": "Architecture Patterns",
+    "resilience-at-scale": "Architecture Patterns",
+    "evolution-migration": "Architecture Patterns",
+    "change-patterns": "Patterns of Discipline",
+    "review-verification": "Patterns of Discipline",
+    "operational-patterns": "Patterns of Discipline",
+    "anti-patterns": "Anti-Patterns",
+}
+
 
 POP_CATEGORIES: list[ArchCategory] = [
     # ── Code Patterns ────────────────────────────────────────────────────────
     ArchCategory(
         slug="composition-construction",
-        name="Code Patterns: Composition & Construction",
+        name="Composition & Construction",
         intro=(
             "Code Patterns. How objects and modules come together. Builder, "
             "Fluent Interface, Dependency Injection, Factory variants, and "
@@ -54,7 +79,7 @@ POP_CATEGORIES: list[ArchCategory] = [
         ),
         tools=(
             ArchTool("builder", "Builder",
-                     "https://martinfowler.com/bliki/FluentInterface.html",
+                     "https://refactoring.guru/design-patterns/builder",
                      "patterns:tool:builder:home",
                      "Step-by-step construction of a complex object that separates the recipe from the result."),
             ArchTool("fluent-interface", "Fluent Interface",
@@ -77,7 +102,7 @@ POP_CATEGORIES: list[ArchCategory] = [
     ),
     ArchCategory(
         slug="control-flow",
-        name="Code Patterns: Control Flow",
+        name="Control Flow",
         intro=(
             "Code Patterns. How the next step is chosen. Strategy, Command, "
             "Pipeline/Chain of Responsibility, Middleware, Visitor, and State "
@@ -113,7 +138,7 @@ POP_CATEGORIES: list[ArchCategory] = [
     ),
     ArchCategory(
         slug="boundaries-abstraction",
-        name="Code Patterns: Boundaries & Abstraction",
+        name="Boundaries & Abstraction",
         intro=(
             "Code Patterns. Where one model ends and another begins. Adapter, "
             "Facade, Anti-Corruption Layer, Ports and Adapters, and Repository "
@@ -145,7 +170,7 @@ POP_CATEGORIES: list[ArchCategory] = [
     ),
     ArchCategory(
         slug="error-handling-resilience",
-        name="Code Patterns: Error Handling & Resilience",
+        name="Error Handling & Resilience",
         intro=(
             "Code Patterns. How failure is named and recovered from at the "
             "function and module level. Result/Either, errors-as-values, "
@@ -178,7 +203,7 @@ POP_CATEGORIES: list[ArchCategory] = [
     ),
     ArchCategory(
         slug="concurrency",
-        name="Code Patterns: Concurrency",
+        name="Concurrency",
         intro=(
             "Code Patterns. How parallel work is structured and survived. "
             "Actor model, Producer/Consumer, Fan-out/Fan-in, Supervisor Trees, "
@@ -212,7 +237,7 @@ POP_CATEGORIES: list[ArchCategory] = [
     # ── Architecture Patterns ────────────────────────────────────────────────
     ArchCategory(
         slug="data-state",
-        name="Architecture Patterns: Data & State",
+        name="Data & State",
         intro=(
             "Architecture Patterns. How a system holds memory and tells the "
             "truth about it. Event Sourcing, CQRS, Outbox, Saga, Materialized "
@@ -248,7 +273,7 @@ POP_CATEGORIES: list[ArchCategory] = [
     ),
     ArchCategory(
         slug="messaging-coordination",
-        name="Architecture Patterns: Messaging & Coordination",
+        name="Messaging & Coordination",
         intro=(
             "Architecture Patterns. How services agree on what happened. "
             "Request/Response, Work Queues, Dead Letter Queues, Idempotency "
@@ -281,7 +306,7 @@ POP_CATEGORIES: list[ArchCategory] = [
     ),
     ArchCategory(
         slug="topology",
-        name="Architecture Patterns: Topology",
+        name="Topology",
         intro=(
             "Architecture Patterns. The shape of the deployment. Monolith, "
             "Microservices, Modular Monolith, Backends for Frontends, "
@@ -321,7 +346,7 @@ POP_CATEGORIES: list[ArchCategory] = [
     ),
     ArchCategory(
         slug="resilience-at-scale",
-        name="Architecture Patterns: Resilience at Scale",
+        name="Resilience at Scale",
         intro=(
             "Architecture Patterns. How a system bends without breaking when "
             "things go sideways. Bulkhead between services, Circuit Breaker "
@@ -354,7 +379,7 @@ POP_CATEGORIES: list[ArchCategory] = [
     ),
     ArchCategory(
         slug="evolution-migration",
-        name="Architecture Patterns: Evolution & Migration",
+        name="Evolution & Migration",
         intro=(
             "Architecture Patterns. How a system changes shape without "
             "stopping. Strangler Fig at the system level, Expand/Contract "
@@ -389,7 +414,7 @@ POP_CATEGORIES: list[ArchCategory] = [
     # ── Patterns of Discipline ───────────────────────────────────────────────
     ArchCategory(
         slug="change-patterns",
-        name="Patterns of Discipline: Change Patterns",
+        name="Change Patterns",
         intro=(
             "Patterns of Discipline. How big changes ship in small, "
             "reversible steps. Branch by Abstraction, Expand/Contract "
@@ -418,7 +443,7 @@ POP_CATEGORIES: list[ArchCategory] = [
     ),
     ArchCategory(
         slug="review-verification",
-        name="Patterns of Discipline: Review & Verification",
+        name="Review & Verification",
         intro=(
             "Patterns of Discipline. How a team agrees the work is done. "
             "Review-as-Conversation, Characterization Tests, Golden/Snapshot "
@@ -450,7 +475,7 @@ POP_CATEGORIES: list[ArchCategory] = [
     ),
     ArchCategory(
         slug="operational-patterns",
-        name="Patterns of Discipline: Operational Patterns",
+        name="Operational Patterns",
         intro=(
             "Patterns of Discipline. How a team keeps the running system "
             "trustworthy. Runbooks as Code, the Four Golden Signals, Error "
@@ -543,94 +568,6 @@ POP_CATEGORIES: list[ArchCategory] = [
         ),
     ),
 
-    # ── Age of Agents ────────────────────────────────────────────────────────
-    ArchCategory(
-        slug="agents-spec-first",
-        name="Age of Agents: Spec-First Patterns",
-        intro=(
-            "Age of Agents. How a codebase is shaped so an agent can do "
-            "useful work on it. Naming Discipline, Module Boundaries for "
-            "Agents, Comment-as-Contract / AGENTS.md, and Specification by "
-            "Example are about giving the agent the same context a good "
-            "human onboard would expect."
-        ),
-        tools=(
-            ArchTool("naming-discipline", "Naming Discipline",
-                     "https://martinfowler.com/bliki/TwoHardThings.html",
-                     "patterns:tool:naming-discipline:home",
-                     "Names are the agent's primary index into the codebase; ambiguity in a name multiplies into wrong calls and bad PRs."),
-            ArchTool("module-boundaries-agents", "Module Boundaries for Agents",
-                     "https://martinfowler.com/bliki/ModuleAr.html",
-                     "patterns:tool:module-boundaries-agents:home",
-                     "Draw boundaries small enough that an agent can hold a module in its context window and reason about it whole."),
-            ArchTool("agents-md", "Comment-as-Contract / AGENTS.md",
-                     "https://agents.md/",
-                     "patterns:tool:agents-md:home",
-                     "A canonical file telling agents the conventions, commands, and tests they should respect when changing this repo."),
-            ArchTool("specification-by-example", "Specification by Example",
-                     "https://gojko.net/books/specification-by-example/",
-                     "patterns:tool:specification-by-example:home",
-                     "Encode the spec as concrete examples that act as both documentation and tests for human and agent contributors."),
-        ),
-    ),
-    ArchCategory(
-        slug="agents-verification",
-        name="Age of Agents: Verification Patterns",
-        intro=(
-            "Age of Agents. How an agent's work is verified at machine "
-            "speed. Property tests as agent fence, Snapshot/Golden for "
-            "agent rewrites, Contract Tests and Types-as-Fences, and "
-            "Differential Testing are about closing the loop without "
-            "lengthening the review queue."
-        ),
-        tools=(
-            ArchTool("property-tests-agent-fence", "Property Tests as Agent Fence",
-                     "https://hypothesis.works/articles/what-is-property-based-testing/",
-                     "patterns:tool:property-tests-agent-fence:home",
-                     "Use properties as the safety rail an agent must clear before its diff is allowed to merge, not just as bug-finding."),
-            ArchTool("snapshot-golden-agents", "Snapshot / Golden for Agents",
-                     "https://jestjs.io/docs/snapshot-testing",
-                     "patterns:tool:snapshot-golden-agents:home",
-                     "Lock in current outputs as truth, so an agent refactor must reproduce them exactly or surface its disagreements."),
-            ArchTool("contract-tests-types-as-fences", "Contract Tests / Types-as-Fences",
-                     "https://martinfowler.com/bliki/ContractTest.html",
-                     "patterns:tool:contract-tests-types-as-fences:home",
-                     "Use type checkers and contract tests as the cheap, fast layer an agent must satisfy before any human reviews."),
-            ArchTool("differential-testing", "Differential Testing",
-                     "https://github.com/github/scientist",
-                     "patterns:tool:differential-testing:home",
-                     "Run the agent's rewrite next to the original against live traffic and compare; ship only when disagreement is zero."),
-        ),
-    ),
-    ArchCategory(
-        slug="agents-human-loop",
-        name="Age of Agents: Human-in-the-Loop Patterns",
-        intro=(
-            "Age of Agents. How humans stay in the decision path without "
-            "becoming the bottleneck. Stage Gates, Confidence-Tiered "
-            "Autonomy, Review Queue design, and Agent-as-Pair / Reviewer "
-            "are about giving humans the calls only they can make and "
-            "letting agents do the rest."
-        ),
-        tools=(
-            ArchTool("stage-gates", "Stage Gates",
-                     "https://simonwillison.net/2025/Sep/30/designing-agentic-loops/",
-                     "patterns:tool:stage-gates:home",
-                     "Split agent work into plan, propose, and apply phases with a human checkpoint between each, instead of one big leap."),
-            ArchTool("confidence-tiered-autonomy", "Confidence-Tiered Autonomy",
-                     "https://www.anthropic.com/research/practices-for-governing-agentic-ai-systems",
-                     "patterns:tool:confidence-tiered-autonomy:home",
-                     "Let agents act unilaterally on low-risk classes, propose for medium-risk, and ask for high-risk — graded by category."),
-            ArchTool("review-queue", "Review Queue",
-                     "https://google.github.io/eng-practices/review/reviewer/",
-                     "patterns:tool:review-queue:home",
-                     "Design the inbound stream of agent PRs as an explicit queue with rules and SLA, not an ad-hoc reviewer pileup."),
-            ArchTool("agent-as-pair-reviewer", "Agent-as-Pair / Reviewer",
-                     "https://github.blog/2024-04-29-github-copilot-workspace/",
-                     "patterns:tool:agent-as-pair-reviewer:home",
-                     "Put the agent on the reviewer seat for human-authored work, so the cheap pass catches what humans tend to miss."),
-        ),
-    ),
 ]
 
 
@@ -1203,71 +1140,6 @@ POP_TOOL_RESOURCES: list[ArchToolResource] = [
        "refactoring.guru", "patterns:res:speculative-generality:refactoring-guru", ["speculative-generality"], "Tutorial",
        "Smell catalog entry — hooks and indirection added 'just in case' that arrives only as confusion for later readers."),
 
-    # ── Spec-First (Age of Agents) ──
-    _r("Two Hard Things",
-       "https://martinfowler.com/bliki/TwoHardThings.html",
-       "Martin Fowler", "patterns:res:naming-discipline:fowler", ["naming-discipline"], "Discussion",
-       "Fowler's bliki entry on the joke — cache invalidation and naming things — that's foundational to the discipline."),
-    _r("The Power of Ten: Rules for Developing Safety-Critical Code",
-       "https://web.eecs.umich.edu/~imarkov/10rules.pdf",
-       "Gerard J. Holzmann · NASA JPL", "patterns:res:module-boundaries-agents:power-of-ten", ["module-boundaries-agents"], "Best Practices",
-       "Ten rules for keeping a module readable by humans (and now by agents) — small functions, no surprises, bounded loops."),
-    _r("AGENTS.md",
-       "https://agents.md/",
-       "agents.md", "patterns:res:agents-md:home", ["agents-md"], "Best Practices",
-       "Community-driven spec for the AGENTS.md file: the conventions, commands, and tests an agent should respect."),
-    _r("Specification by Example",
-       "https://gojko.net/books/specification-by-example/",
-       "Gojko Adzic · Manning", "patterns:res:specification-by-example:adzic", ["specification-by-example"], "Tutorial",
-       "Adzic's reference text: living specs that double as tests, written in concrete examples humans and machines can read."),
-
-    # ── Verification (Age of Agents) ──
-    _r("Scientist",
-       "https://github.com/github/scientist",
-       "GitHub", "patterns:res:differential-testing:github-scientist", ["differential-testing"], "Tutorial",
-       "GitHub's open-source library for differential testing \u2014 run new code in shadow next to old, compare, switch over."),
-    _r("How we rebuilt Next.js with AI in one week",
-       "https://blog.cloudflare.com/vinext/",
-       "Cloudflare blog", "patterns:res:differential-testing:cloudflare-vinext", ["differential-testing"], "Discussion",
-       "vinext at 94% of the Next.js API surface, scored against 1,700 Vitest + 380 Playwright tests ported straight from Next.js \u2014 differential testing at framework scale."),
-    _r("A 10x Faster TypeScript",
-       "https://devblogs.microsoft.com/typescript/typescript-native-port/",
-       "Anders Hejlsberg \u00b7 Microsoft", "patterns:res:differential-testing:typescript-native-port", ["differential-testing"], "Discussion",
-       "Hejlsberg on porting tsc to Go for semantic parity \u2014 the entire reason it's a port and not a rewrite is so the existing test suite stays the source of truth."),
-    _r("Anthropic's Bun team trials port from Zig to Rust",
-       "https://www.theregister.com/2026/05/05/bun_rust_port/",
-       "The Register", "patterns:res:differential-testing:bun-rust", ["differential-testing"], "Discussion",
-       "Bun's AI-assisted Zig\u2192Rust port at 99.8% of the pre-existing test suite \u2014 the rewrite stays in shadow until disagreement hits zero, exactly the pattern."),
-    _r("ContractTest",
-       "https://martinfowler.com/bliki/ContractTest.html",
-       "Martin Fowler", "patterns:res:contract-tests-types-as-fences:fowler-contract-test", ["contract-tests-types-as-fences"], "Discussion",
-       "Fowler's bliki entry on contract tests — narrow, fast tests that pin down the shape of an inter-service contract."),
-    _r("Type-Driven Development",
-       "https://www.manning.com/books/type-driven-development-with-idris",
-       "Edwin Brady · Manning", "patterns:res:contract-tests-types-as-fences:brady", ["contract-tests-types-as-fences"], "Tutorial",
-       "Brady's book on types-as-fences taken to its conclusion — the type checker as the first and cheapest verifier."),
-
-    # ── Human-in-the-Loop (Age of Agents) ──
-    _r("Designing agentic loops",
-       "https://simonwillison.net/2025/Sep/30/designing-agentic-loops/",
-       "Simon Willison", "patterns:res:stage-gates:willison", ["stage-gates"], "Discussion",
-       "Willison's essay on splitting agent runs into plan, propose, and apply phases with checkpoints between."),
-    _r("Practices for Governing Agentic AI Systems",
-       "https://www.anthropic.com/research/practices-for-governing-agentic-ai-systems",
-       "Anthropic", "patterns:res:confidence-tiered-autonomy:anthropic", ["confidence-tiered-autonomy"], "Best Practices",
-       "Anthropic's framework for tiering agent autonomy by risk class \u2014 the underpinnings of confidence-tiered policies."),
-    _r("Software Is Changing (Again)",
-       "https://www.youtube.com/watch?v=LCEmiRjPEtQ",
-       "Andrej Karpathy \u00b7 YC AI Startup School", "patterns:res:confidence-tiered-autonomy:karpathy-software-3", ["confidence-tiered-autonomy"], "Discussion",
-       "Karpathy on the autonomy slider \u2014 the Tesla Autopilot analogy for handing tasks to an agent gradually instead of going for full autonomy on day one."),
-    _r("GitHub Copilot Workspace",
-       "https://github.blog/2024-04-29-github-copilot-workspace/",
-       "GitHub blog", "patterns:res:agent-as-pair-reviewer:copilot-workspace", ["agent-as-pair-reviewer"], "Discussion",
-       "GitHub's announcement post for Copilot Workspace — the working sketch of the agent-as-reviewer interaction."),
-    _r("Pull Request Reviews with Copilot",
-       "https://docs.github.com/en/copilot/using-github-copilot/code-review/using-copilot-code-review",
-       "GitHub docs", "patterns:res:agent-as-pair-reviewer:copilot-review-docs", ["agent-as-pair-reviewer", "review-queue"], "Tutorial",
-       "GitHub's documentation on letting Copilot review PRs — the cheap pass that catches the boring things humans miss."),
 ]
 
 
@@ -1421,21 +1293,6 @@ POP_FAQS: list[FAQ] = [
         source_label="Working Effectively with Legacy Code",
         source_url="https://www.oreilly.com/library/view/working-effectively-with/0131177052/",
         source_key="patterns:faq:feathers-legacy-code",
-    ),
-    FAQ(
-        "How do I structure a codebase so an agent can be useful in it?",
-        "Three things compound: naming that an agent's index can rely on, "
-        "modules small enough to fit in a context window, and a "
-        "machine-readable file (AGENTS.md is the emerging convention) "
-        "that tells the agent the conventions, commands, and tests it "
-        "should respect. The verification layer matters as much — "
-        "property tests, snapshot tests, and type checks become the "
-        "fences an agent must clear before merge. None of this is "
-        "specific to agents; agents just punish the codebases that "
-        "didn't already do it.",
-        source_label="AGENTS.md",
-        source_url="https://agents.md/",
-        source_key="patterns:faq:agents-md",
     ),
     FAQ(
         "Where does an anti-pattern stop being a smell and start being a crisis?",

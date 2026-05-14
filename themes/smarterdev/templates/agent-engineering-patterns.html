@@ -1,10 +1,7 @@
 {% extends "base.html" %}
 
-{% block page_type %}patterns-of-practice{% endblock %}
-{% block page_title %}Patterns of Practice: The Shapes of Software, What They Cost, and When Not to Reach for Them{% endblock %}
-
-{# Looking for the new shapes that emerged with LLM-driven agents?
-   They live at /resources/agent-engineering-patterns now. #}
+{% block page_type %}agent-engineering-patterns{% endblock %}
+{% block page_title %}Patterns for the Age of Agents: Shaping Code, Verifying Output, Keeping Humans in the Loop{% endblock %}
 
 {% block page_css %}
 <link rel="stylesheet" href="{{ theme_url('css/pages/vibe-coding-courses.css') }}">
@@ -29,12 +26,12 @@
         <ol>
             <li><a href="/">Smarter Dev</a></li>
             <li><a href="/resources">Resources</a></li>
-            <li aria-current="page">Patterns of Practice</li>
+            <li aria-current="page">Patterns for the Age of Agents</li>
         </ol>
     </nav>
 
     <header class="vc-hero reveal">
-        <h1 class="vc-hero-title">Patterns of Practice</h1>
+        <h1 class="vc-hero-title">Patterns for the Age of Agents</h1>
     </header>
 
     <nav class="vc-toc" aria-label="On this page">
@@ -47,24 +44,29 @@
 
     <section class="vc-intro reveal">
         <p class="vc-intro-lede">
-            The recurring shapes of software, what they cost, and when not to reach for them.
+            The shapes that emerged because LLM-driven agents now write, refactor, test, and review code at machine speed.
         </p>
         <p>
-            Patterns are the vocabulary of engineering judgment. Once you can name
-            the shape of a problem, you can argue about whether to reach for it.
-            Without the names, you reinvent the same five solutions every year and
-            never learn which one paid back. A working index of patterns at every
-            scope: code, architecture, discipline, plus the anti-patterns worth
-            refusing on purpose.
+            None of these patterns are agent-specific in the sense of belonging
+            to no other era. Naming discipline, small modules, property tests,
+            type checkers, and staged rollouts have always paid off. Agents
+            punish the codebases that already neglected them and reward the
+            ones that didn't. What is new is the cadence: feedback loops have
+            shrunk from days to minutes, and the bottleneck is no longer
+            keystrokes. It is judgment about what to build and which diffs to
+            trust.
         </p>
         <p class="vc-intro-aside">
-            Every entry names what the pattern <em>costs</em>, not just what it
-            gives you. Every entry says <em>when not to reach for it</em>. The
-            <a href="#spine">Foundations</a> section anchors the lineage. The
-            <a href="#tools">Patterns by Category</a> section is the working
-            index. The new shapes emerging with LLM-driven agents live in their
-            own directory now:
-            <a href="/resources/agent-engineering-patterns">Patterns for the Age of Agents</a>.
+            Three groups, in order:
+            <a href="#spec-first">how a codebase is shaped</a> so an agent can
+            do useful work,
+            <a href="#verification">how that work is verified</a> before merge,
+            and
+            <a href="#human-loop">how humans stay in the decision path</a>
+            without becoming the bottleneck. The
+            <a href="#spine">Foundations</a> section anchors the lineage.
+            For the timeless shapes that pre-date all of this, see
+            <a href="/resources/patterns-of-practice">Patterns of Practice</a>.
         </p>
     </section>
 
@@ -79,7 +81,7 @@
             {% endif %}
         </header>
 
-        <p class="vc-section-sub">The lineage. Books and essays the rest of this directory is in conversation with &mdash; some load-bearing today, some worth knowing as the argument behind a pattern, some kept for historical orientation.</p>
+        <p class="vc-section-sub">The lineage. Essays, talks, and books the rest of this directory is in conversation with. Some load-bearing today, some worth knowing as the argument behind a pattern.</p>
 
         {% if learning_types %}
         <div class="vc-chips" data-vc-chips data-vc-target="spine" data-vc-attr="category">
@@ -104,22 +106,17 @@
             <h2>Patterns by Category</h2>
         </header>
 
-        <p class="vc-section-sub">Patterns grouped by where they live in the system. Each category intro names the scope. Click a pattern name for its canonical reference, then read the per-pattern resources below for what it costs and when not to use it.</p>
+        <p class="vc-section-sub">Patterns grouped by where they live in the agent workflow. Each category intro names the scope. Click a pattern name for its canonical reference, then read the per-pattern resources below.</p>
 
         <nav class="sa-cat-nav" aria-label="Pattern categories">
-            {% for section_name, section_cats in categories_by_section %}
-            <span class="sa-cat-nav-section">{{ section_name }}:</span>
-            {% for cat in section_cats %}
+            {% for cat in categories %}
             <a class="sa-cat-nav-link" href="#{{ cat.slug }}">{{ cat.name }}</a>
-            {% endfor %}
             {% endfor %}
         </nav>
 
-        {% for section_name, section_cats in categories_by_section %}
-        <h3 class="sa-section-name" id="section-{{ section_name|lower|replace(' ', '-') }}">{{ section_name }}</h3>
-        {% for cat in section_cats %}
+        {% for cat in categories %}
         <article class="sa-category" id="{{ cat.slug }}">
-            <h4 class="sa-category-name">{{ cat.name }}</h4>
+            <h3 class="sa-category-name">{{ cat.name }}</h3>
             <p class="sa-category-intro">{{ cat.intro }}</p>
             <ul class="sa-tool-list">
                 {% for tool in cat.tools %}
@@ -148,13 +145,12 @@
             {% endif %}
         </article>
         {% endfor %}
-        {% endfor %}
     </section>
 
     {% if people %}
     <section class="vc-section vc-creators-section" id="creators">
         <header class="vc-section-head"><h2>Creators to follow</h2></header>
-        <p class="vc-section-sub">Writers consistently publishing substantive material on patterns, design, and the discipline of software. The bench this directory leans on.</p>
+        <p class="vc-section-sub">Writers and engineers consistently publishing substantive material on agentic coding, spec-driven workflows, and what changes when AI joins the team.</p>
         <div class="vc-people-grid">
             {% for p in people %}
             <a class="vc-person"
@@ -173,7 +169,7 @@
     {% if faqs %}
     <section class="vc-section vc-faq" id="faq">
         <header class="vc-section-head"><h2>Frequently Asked Questions</h2></header>
-        <p class="vc-section-sub">Short answers to the questions that recur about how to read this directory and how to use patterns honestly.</p>
+        <p class="vc-section-sub">Short answers to the questions that recur about working with coding agents in real codebases.</p>
         <div class="vc-faq-list">
             {% for f in faqs %}
             <details class="vc-faq-item">
@@ -195,7 +191,7 @@
         <header class="vc-section-head"><h2>From Smarter Dev</h2></header>
         <div class="vc-originals-card">
             <p class="vc-originals-lede">Original writing coming.</p>
-            <p class="vc-originals-body">Smarter Dev essays, walkthroughs, and short courses on naming the shapes you're already working with &mdash; and arguing about whether to reach for them &mdash; will land here as they're written.</p>
+            <p class="vc-originals-body">Smarter Dev essays, walkthroughs, and short courses on shipping with agents, designing your harness, and keeping judgment where it matters will land here as they're written.</p>
             <a class="vc-cta-button" href="/discord">Join the Discord to be notified</a>
         </div>
     </section>
@@ -212,7 +208,7 @@
 {
   "@context": "https://schema.org",
   "@type": "CollectionPage",
-  "name": "Patterns of Practice: A Curated Index",
+  "name": "Patterns for the Age of Agents",
   "description": {{ seo_meta.description | tojson }},
   "url": "{{ seo_meta.canonical_url }}",
   {% if last_updated %}"dateModified": {{ last_updated.isoformat() | tojson }},{% endif %}
@@ -248,7 +244,7 @@
   "itemListElement": [
     { "@type": "ListItem", "position": 1, "name": "Smarter Dev", "item": "https://smarter.dev/" },
     { "@type": "ListItem", "position": 2, "name": "Resources", "item": "https://smarter.dev/resources" },
-    { "@type": "ListItem", "position": 3, "name": "Patterns of Practice", "item": "{{ seo_meta.canonical_url }}" }
+    { "@type": "ListItem", "position": 3, "name": "Patterns for the Age of Agents", "item": "{{ seo_meta.canonical_url }}" }
   ]
 }
 </script>
