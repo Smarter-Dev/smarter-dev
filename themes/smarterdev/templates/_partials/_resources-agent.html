@@ -1,0 +1,80 @@
+{# /resources — ASK THE RESOURCE AGENT block.
+   Renders the form when `is_authenticated`, otherwise a sign-in CTA. #}
+
+{% if is_authenticated %}
+<section class="rsa reveal" aria-labelledby="rsa-title">
+    <span class="rsa-corner rsa-corner-tl" aria-hidden="true"></span>
+    <span class="rsa-corner rsa-corner-tr" aria-hidden="true"></span>
+    <span class="rsa-corner rsa-corner-bl" aria-hidden="true"></span>
+    <span class="rsa-corner rsa-corner-br" aria-hidden="true"></span>
+
+    <header class="rsa-head">
+        <h2 class="rsa-title" id="rsa-title">
+            <svg class="rsa-hex" width="14" height="14" viewBox="0 0 10 10" aria-hidden="true">
+                <polygon points="5,0.5 9.5,3 9.5,7 5,9.5 0.5,7 0.5,3"
+                         fill="none" stroke="currentColor" stroke-width="1.2"/>
+                <circle cx="5" cy="5" r="1.8" fill="currentColor"/>
+            </svg>
+            Ask the Resource Agent
+        </h2>
+        <span class="rsa-head-line" aria-hidden="true"></span>
+    </header>
+
+    <form id="rsa-form" novalidate>
+        <div class="rsa-form-row">
+            <label for="rsa-input" class="visually-hidden">Your question</label>
+            <textarea id="rsa-input" class="rsa-input" name="question"
+                      placeholder="What do you want to learn, build, debug, or compare?"
+                      rows="3" maxlength="1000" required></textarea>
+        </div>
+
+        <div class="rsa-controls">
+            <button type="submit" id="rsa-submit" class="rsa-submit">
+                <svg class="rsa-submit-hex" width="14" height="14" viewBox="0 0 10 10" aria-hidden="true">
+                    <polygon points="5,0.5 9.5,3 9.5,7 5,9.5 0.5,7 0.5,3"
+                             fill="none" stroke="currentColor" stroke-width="1.2"/>
+                    <circle cx="5" cy="5" r="1.8" fill="currentColor"/>
+                </svg>
+                Ask <span aria-hidden="true">→</span>
+            </button>
+        </div>
+
+        <span id="rsa-hint" class="rsa-hint" hidden></span>
+    </form>
+</section>
+{% else %}
+<section class="rsa rsa-anon reveal" aria-labelledby="rsa-anon-title">
+    <h2 class="rsa-anon-title" id="rsa-anon-title">// Ask the Resource Agent</h2>
+    <p class="rsa-anon-sub">
+        Sign in to ask. Discord, GitHub, or Google — your call.
+    </p>
+    <a class="rsa-anon-btn" href="/auth/login?next=/resources">
+        Sign in to ask <span aria-hidden="true">→</span>
+    </a>
+</section>
+{% endif %}
+
+{% set try_examples = [
+    ("Learn", "I want to understand event-driven architecture from scratch."),
+    ("Build", "I'm shipping my first Postgres + Kafka stack. What should I read?"),
+    ("Debug", "My agent loops infinitely on tool errors. Help me reason about this."),
+    ("Compare", "Pulsar vs. Kafka vs. NATS for a 3-engineer team.")
+] %}
+<section class="rsa-or-try reveal" aria-labelledby="rsa-or-try-label">
+    <p class="rsa-or-try-label" id="rsa-or-try-label">// or try</p>
+    <div class="rsa-or-try-grid">
+        {% for tag, prompt in try_examples %}
+            {% if is_authenticated %}
+            <button type="button" class="rsa-try-card" data-prefill="{{ prompt }}">
+                <span class="rsa-try-tag">{{ tag }}</span>
+                <span>{{ prompt }}</span>
+            </button>
+            {% else %}
+            <a class="rsa-try-card" href="/auth/login?next=/resources">
+                <span class="rsa-try-tag">{{ tag }}</span>
+                <span>{{ prompt }}</span>
+            </a>
+            {% endif %}
+        {% endfor %}
+    </div>
+</section>

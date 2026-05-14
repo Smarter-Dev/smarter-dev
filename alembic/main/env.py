@@ -23,6 +23,8 @@ import smarter_dev.web.models  # noqa: F401  -- registers all models with Base.m
 # legacy config; partition is enforced via `include_object` so each migration
 # only touches its own tables.
 MAIN_TABLES: frozenset[str] = frozenset({
+    "agent_conversations",
+    "agent_messages",
     "campaign_signups",
     "daily_quests",
     "moderation_actions",

@@ -7,15 +7,21 @@ so the route doubles as a stable parent for breadcrumbs and future SEO.
 
 from __future__ import annotations
 
-from litestar import get
+from litestar import Request, get
 from litestar.response import Template
+
+from skrift.auth.session_keys import SESSION_USER_ID
 
 
 @get("/resources")
-async def resources_index() -> Template:
+async def resources_index(request: Request) -> Template:
+    is_authenticated = bool(
+        request.session and request.session.get(SESSION_USER_ID)
+    )
     return Template(
         "resources.html",
         context={
+            "is_authenticated": is_authenticated,
             "seo_meta": {
                 "description": (
                     "Writing, courses, and tutorials from around the "

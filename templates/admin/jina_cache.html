@@ -1,0 +1,443 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Jina Cache - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<style nonce="{{ csp_nonce() }}">
+.jc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1rem;
+    margin: 1rem 0 1.5rem;
+}
+.jc-stat {
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 6px;
+    padding: 1rem 1.1rem;
+}
+.jc-stat-label {
+    font-size: .7rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,.55);
+    margin: 0 0 .35rem;
+}
+.jc-stat-value {
+    font-size: 1.55rem;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1;
+}
+.jc-stat-sub {
+    font-size: .7rem;
+    color: rgba(255,255,255,.55);
+    margin-top: .25rem;
+}
+
+.jc-status-line {
+    display: flex;
+    gap: .9rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin: 0 0 .75rem;
+}
+.jc-dot {
+    width: .55rem;
+    height: .55rem;
+    border-radius: 50%;
+    background: rgba(255,255,255,.25);
+    box-shadow: 0 0 0 0 rgba(0,0,0,0);
+    flex: 0 0 auto;
+}
+.jc-dot.running {
+    background: #22c55e;
+    animation: jc-pulse 1.4s ease-in-out infinite;
+}
+.jc-dot.error { background: #ef4444; }
+.jc-dot.idle { background: rgba(255,255,255,.3); }
+@keyframes jc-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,.5); }
+    50% { box-shadow: 0 0 0 6px rgba(34,197,94,0); }
+}
+.jc-status-text {
+    font-weight: 600;
+    color: #fff;
+}
+.jc-status-meta {
+    color: rgba(255,255,255,.6);
+    font-size: .85rem;
+}
+
+.jc-progress-wrap {
+    background: rgba(255,255,255,.06);
+    border-radius: 6px;
+    height: .7rem;
+    overflow: hidden;
+    margin: .5rem 0 .75rem;
+}
+.jc-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #22c55e);
+    width: 0%;
+    transition: width .25s ease-out;
+}
+.jc-progress-bar.error {
+    background: linear-gradient(90deg, #3b82f6, #ef4444);
+}
+
+.jc-start-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: end;
+    margin-top: .75rem;
+}
+.jc-start-form label {
+    display: flex;
+    flex-direction: column;
+    gap: .2rem;
+    font-size: .85rem;
+    color: rgba(255,255,255,.75);
+}
+.jc-start-form input[type=number] {
+    width: 6.5rem;
+}
+.jc-checkbox {
+    flex-direction: row !important;
+    align-items: center;
+    gap: .4rem !important;
+}
+
+.jc-events {
+    max-height: 28rem;
+    overflow-y: auto;
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 6px;
+    background: rgba(0,0,0,.25);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: .78rem;
+    line-height: 1.45;
+}
+.jc-event {
+    display: grid;
+    grid-template-columns: 6rem 4rem 1fr 5rem;
+    gap: .65rem;
+    align-items: baseline;
+    padding: .35rem .75rem;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.jc-event:last-child { border-bottom: none; }
+.jc-event-time { color: rgba(255,255,255,.45); font-size: .72rem; white-space: nowrap; }
+.jc-event-status {
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    font-size: .68rem;
+    font-weight: 600;
+}
+.jc-event-status.ok { color: #22c55e; }
+.jc-event-status.error { color: #ef4444; }
+.jc-event-status.empty { color: #f59e0b; }
+.jc-event-status.started, .jc-event-status.finished, .jc-event-status.snapshot { color: #93c5fd; }
+.jc-event-url {
+    color: rgba(255,255,255,.85);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.jc-event-detail {
+    color: rgba(255,255,255,.45);
+    font-size: .72rem;
+    text-align: right;
+    white-space: nowrap;
+}
+.jc-events-empty {
+    padding: 1rem 1.2rem;
+    color: rgba(255,255,255,.5);
+    font-style: italic;
+}
+
+.jc-recent-url {
+    max-width: 28rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+</style>
+
+<hgroup>
+    <h1>Jina Cache</h1>
+    <p>Curated source bodies cached from Jina Reader. Warm-ups can be kicked off below and watched live.</p>
+</hgroup>
+
+<div class="jc-grid">
+    <div class="jc-stat">
+        <p class="jc-stat-label">Sources</p>
+        <div class="jc-stat-value">{{ "{:,}".format(totals.total) }}</div>
+        <div class="jc-stat-sub">curated URLs</div>
+    </div>
+    <div class="jc-stat">
+        <p class="jc-stat-label">Cached</p>
+        <div class="jc-stat-value">{{ "{:,}".format(totals.cached) }}</div>
+        <div class="jc-stat-sub">have a stored body</div>
+    </div>
+    <div class="jc-stat">
+        <p class="jc-stat-label">Fresh</p>
+        <div class="jc-stat-value">{{ "{:,}".format(totals.fresh) }}</div>
+        <div class="jc-stat-sub">&lt; {{ stale_after_days }}d old</div>
+    </div>
+    <div class="jc-stat">
+        <p class="jc-stat-label">Stale</p>
+        <div class="jc-stat-value">{{ "{:,}".format(totals.stale) }}</div>
+        <div class="jc-stat-sub">&ge; {{ stale_after_days }}d old</div>
+    </div>
+    <div class="jc-stat">
+        <p class="jc-stat-label">Missing</p>
+        <div class="jc-stat-value">{{ "{:,}".format(totals.missing) }}</div>
+        <div class="jc-stat-sub">never warmed</div>
+    </div>
+</div>
+
+<div class="sk-panel">
+    <div class="sk-panel-head">Run Status</div>
+    <div class="sk-panel-body">
+        <div class="jc-status-line">
+            <span class="jc-dot {% if running %}running{% else %}idle{% endif %}" id="jc-dot" aria-hidden="true"></span>
+            <span class="jc-status-text" id="jc-status-text">
+                {% if running %}Running{% else %}Idle{% endif %}
+            </span>
+            <span class="jc-status-meta" id="jc-status-meta">
+                {% if runner.state.started_at %}
+                    started {{ runner.state.started_at }}
+                {% endif %}
+            </span>
+        </div>
+        <div class="jc-progress-wrap">
+            <div class="jc-progress-bar" id="jc-progress-bar"></div>
+        </div>
+        <div class="jc-status-meta" id="jc-progress-meta">
+            <span id="jc-completed">{{ runner.state.completed }}</span> / <span id="jc-total">{{ runner.state.total }}</span> done
+            &middot; <span id="jc-errors">{{ runner.state.errors }}</span> error{{ 's' if runner.state.errors != 1 else '' }}
+            &middot; <span id="jc-inflight">{{ runner.state.in_flight | length }}</span> in flight
+        </div>
+
+        <form method="post" action="/admin/jina-cache/start" class="jc-start-form">
+            {{ csrf_field() }}
+            <label>
+                <span>Concurrency</span>
+                <input type="number" name="concurrency" min="1" max="16" value="4">
+            </label>
+            <label>
+                <span>TTL (days)</span>
+                <input type="number" name="ttl_days" min="1" max="365" value="{{ stale_after_days }}">
+            </label>
+            <label>
+                <span>Limit (optional)</span>
+                <input type="number" name="limit" min="1" placeholder="all">
+            </label>
+            <label class="jc-checkbox">
+                <input type="checkbox" name="force" value="1">
+                <span>Force refresh fresh rows</span>
+            </label>
+            <div>
+                <button type="submit" class="sk-btn-outline sk-btn-small" id="jc-start-btn" {% if running %}disabled{% endif %}>
+                    {% if running %}Running…{% else %}Start warm-up{% endif %}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="sk-panel">
+    <div class="sk-panel-head">Live Events</div>
+    <div class="sk-panel-body" style="padding: 0;">
+        <div class="jc-events" id="jc-events">
+            <div class="jc-events-empty">Waiting for events…</div>
+        </div>
+    </div>
+</div>
+
+{% if recent %}
+<div class="sk-panel">
+    <div class="sk-panel-head">Recently Cached Sources</div>
+    <div class="sk-panel-body" style="padding: 0;">
+        <table class="sk-admin-table">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>URL</th>
+                    <th style="text-align: right;">Body size</th>
+                    <th>Fetched</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in recent %}
+                <tr>
+                    <td>{{ r.title or '—' }}</td>
+                    <td class="jc-recent-url"><a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.url }}</a></td>
+                    <td style="text-align: right;">{{ "{:,}".format(r.body_len) }} ch</td>
+                    <td>{{ r.fetched_at.strftime('%Y-%m-%d %H:%M') if r.fetched_at else '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<script nonce="{{ csp_nonce() }}">
+(function () {
+    var dot = document.getElementById('jc-dot');
+    var statusText = document.getElementById('jc-status-text');
+    var statusMeta = document.getElementById('jc-status-meta');
+    var bar = document.getElementById('jc-progress-bar');
+    var completedEl = document.getElementById('jc-completed');
+    var totalEl = document.getElementById('jc-total');
+    var errorsEl = document.getElementById('jc-errors');
+    var inflightEl = document.getElementById('jc-inflight');
+    var startBtn = document.getElementById('jc-start-btn');
+    var eventsEl = document.getElementById('jc-events');
+
+    function fmtTime(iso) {
+        if (!iso) return '';
+        try {
+            var d = new Date(iso);
+            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        } catch (e) { return iso; }
+    }
+
+    function shortUrl(url) {
+        if (!url) return '';
+        try {
+            var u = new URL(url);
+            return u.host + u.pathname;
+        } catch (e) { return url; }
+    }
+
+    function renderState(state) {
+        var running = !!state.running;
+        dot.classList.toggle('running', running);
+        dot.classList.toggle('idle', !running);
+        dot.classList.remove('error');
+        if (state.last_error) {
+            dot.classList.add('error');
+            dot.classList.remove('running', 'idle');
+        }
+
+        if (running) {
+            statusText.textContent = 'Running';
+        } else if (state.last_error) {
+            statusText.textContent = 'Errored';
+        } else if (state.finished_at) {
+            statusText.textContent = 'Finished';
+        } else {
+            statusText.textContent = 'Idle';
+        }
+
+        var metaParts = [];
+        if (state.started_at) metaParts.push('started ' + fmtTime(state.started_at));
+        if (state.finished_at && !running) metaParts.push('finished ' + fmtTime(state.finished_at));
+        if (state.options && state.options.concurrency) {
+            metaParts.push('concurrency ' + state.options.concurrency);
+        }
+        if (state.options && state.options.force) metaParts.push('force');
+        statusMeta.textContent = metaParts.join(' · ');
+
+        completedEl.textContent = state.completed || 0;
+        totalEl.textContent = state.total || 0;
+        errorsEl.textContent = state.errors || 0;
+        inflightEl.textContent = (state.in_flight || []).length;
+
+        var total = state.total || 0;
+        var done = state.completed || 0;
+        var pct = total > 0 ? Math.min(100, (done / total) * 100) : 0;
+        bar.style.width = pct + '%';
+        bar.classList.toggle('error', (state.errors || 0) > 0);
+
+        if (startBtn) {
+            startBtn.disabled = running;
+            startBtn.textContent = running ? 'Running…' : 'Start warm-up';
+        }
+    }
+
+    function appendEvent(ev) {
+        if (!ev) return;
+        var empty = eventsEl.querySelector('.jc-events-empty');
+        if (empty) empty.remove();
+
+        var row = document.createElement('div');
+        row.className = 'jc-event';
+
+        var time = document.createElement('span');
+        time.className = 'jc-event-time';
+        time.textContent = fmtTime(ev.at);
+
+        var status = document.createElement('span');
+        var statusClass = ev.status || ev.kind || '';
+        status.className = 'jc-event-status ' + statusClass;
+        status.textContent = (ev.status || ev.kind || '').toUpperCase();
+
+        var url = document.createElement('span');
+        url.className = 'jc-event-url';
+        if (ev.url) {
+            url.textContent = shortUrl(ev.url);
+            url.title = ev.url;
+        } else if (ev.kind === 'snapshot') {
+            url.textContent = (ev.to_warm || 0) + ' to warm (' + (ev.total_sources || 0) + ' total, '
+                + (ev.skipped_fresh || 0) + ' fresh)';
+        } else if (ev.kind === 'started') {
+            url.textContent = 'warm-up started';
+        } else if (ev.kind === 'finished') {
+            url.textContent = 'finished: ' + (ev.completed || 0) + '/' + (ev.total || 0)
+                + ' (' + (ev.errors || 0) + ' err)';
+        } else if (ev.kind === 'error') {
+            url.textContent = ev.detail || 'runner error';
+        }
+
+        var detail = document.createElement('span');
+        detail.className = 'jc-event-detail';
+        if (ev.duration_ms != null) {
+            detail.textContent = (ev.duration_ms / 1000).toFixed(2) + 's';
+        } else if (ev.detail) {
+            detail.textContent = ev.detail;
+            detail.title = ev.detail;
+        }
+
+        row.appendChild(time);
+        row.appendChild(status);
+        row.appendChild(url);
+        row.appendChild(detail);
+
+        eventsEl.insertBefore(row, eventsEl.firstChild);
+
+        while (eventsEl.children.length > 200) {
+            eventsEl.removeChild(eventsEl.lastChild);
+        }
+    }
+
+    function connect() {
+        var src = new EventSource('/admin/jina-cache/stream');
+        src.addEventListener('snapshot', function (e) {
+            try {
+                var data = JSON.parse(e.data);
+                if (data.state) renderState(data.state);
+                (data.events || []).forEach(function (ev) { appendEvent(ev); });
+            } catch (err) { console.error('snapshot parse', err); }
+        });
+        src.addEventListener('update', function (e) {
+            try {
+                var data = JSON.parse(e.data);
+                if (data.state) renderState(data.state);
+                if (data.event) appendEvent(data.event);
+            } catch (err) { console.error('update parse', err); }
+        });
+        src.addEventListener('error', function () {
+            // EventSource will auto-reconnect; just leave the dot dim.
+        });
+        window.addEventListener('beforeunload', function () { src.close(); });
+    }
+
+    connect();
+})();
+</script>
+{% endblock %}

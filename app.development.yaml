@@ -25,6 +25,9 @@ controllers:
   - smarter_dev.web.controllers:api_mount
   - smarter_dev.web.controllers:bot_admin_mount
   - smarter_dev.web.resources_controller:resources_index
+  - smarter_dev.web.agent_api:ResourcesAgentApiController
+  - smarter_dev.web.agent_api:AgentConversationApiController
+  - smarter_dev.web.agent_view_controller:answer_view
   - smarter_dev.web.vibe_courses_controller:vibe_courses
   - smarter_dev.web.vibe_courses_controller:vibe_courses_legacy_redirect
   - smarter_dev.web.vibe_courses_controller:vibe_courses_resources_redirect
@@ -36,6 +39,7 @@ controllers:
   - smarter_dev.web.campaign_signups_api:CampaignSignupsApiController
   - smarter_dev.web.click_tracking_api:ClickTrackingApiController
   - smarter_dev.web.click_tracking_admin:ClickTrackingAdminController
+  - smarter_dev.web.jina_cache_admin:JinaCacheAdminController
   - smarter_dev.web.usage_admin:UsageAdminController
   - smarter_dev.web.scan_profiles_admin:ScanProfilesAdminController
   - smarter_dev.web.research_sessions_admin:ResearchSessionsAdminController
@@ -63,6 +67,19 @@ redis:
 
 notifications:
   backend: "skrift.lib.notification_backends:RedisBackend"
+
+workers:
+  enabled: true
+  preset: local
+  queues:
+    - agents
+  imports:
+    - smarter_dev.web.resources_agent
+
+agents:
+  default_queue: agents
+  tool_call_queue: agents
+  blob_backend: skrift.agents.blob:InMemoryBlobStore
 
 sites:
   scan:

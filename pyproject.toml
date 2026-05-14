@@ -42,8 +42,8 @@ dependencies = [
     "genai-prices>=0.0.55",
     "google-genai>=1.62.0",
     "resend>=2.0.0",
-    "pydantic-ai[google]>=0.1.0",
-    "skrift>=0.1.0a84",
+    "pydantic-ai-slim[google]>=1.89.1,<2.0.0",
+    "skrift>=0.1.0a100",
 ]
 
 [dependency-groups]
@@ -67,7 +67,7 @@ web = [
     "redis>=5.0.0",
     "httpx>=0.24.0",
     "authlib>=1.2.0",
-    "skrift[s3]>=0.1.0a84",
+    "skrift[s3]>=0.1.0a100",
 ]
 
 # Development dependencies

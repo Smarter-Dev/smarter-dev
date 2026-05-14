@@ -469,6 +469,10 @@ ARCH_TOOL_RESOURCES: list[ArchToolResource] = [
        "https://use-the-index-luke.com/",
        "Markus Winand", "arch:res:postgres:use-the-index-luke", ["postgres", "mysql"], "Best Practices",
        "Canonical guide to SQL indexing and query performance tuning for application developers."),
+    _r("Transactionally Staged Job Drains in Postgres",
+       "https://brandur.org/job-drain",
+       "Brandur Leach", "arch:res:postgres:job-drain", ["postgres"], "Best Practices",
+       "How to queue background jobs inside a database transaction by staging them in a table — so jobs only fire once their data has actually committed."),
 
     # MySQL
     _r("MySQL Tutorial",
