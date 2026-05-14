@@ -35,6 +35,36 @@
   background: rgba(0,212,255,.05);
 }
 
+/* ── H2 section heading (PoP groups categories under sections) ── */
+.sa-section-name {
+  font-family: var(--heading);
+  font-size: clamp(1.4rem, 2.6vw, 1.85rem);
+  color: var(--cyan);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  margin: 4rem 0 2rem;
+  padding-bottom: .75rem;
+  border-bottom: 2px solid rgba(0,212,255,.18);
+  scroll-margin-top: 120px;
+}
+.sa-section-name:first-of-type {
+  margin-top: 2rem;
+}
+
+/* ── Inline section label in the secondary nav ── */
+.sa-cat-nav-section {
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  padding: .55rem .25rem .55rem 0;
+  align-self: center;
+}
+.sa-cat-nav-section:not(:first-child) {
+  margin-left: 1rem;
+}
+
 /* ── Each category section ── */
 .sa-category {
   margin-bottom: 4rem;
