@@ -1,0 +1,45 @@
+{# Resource-agent turn renderer.
+   Expects: `turn` dict with keys {role, content, citations}. #}
+{% if turn.role == "user" %}
+<article class="ai-turn ai-turn-user reveal">
+    <p class="ai-turn-label">// asked</p>
+    <div class="ai-turn-body ai-turn-question markdown-body">{{ turn.content_html | safe }}</div>
+</article>
+{% elif turn.role == "assistant" %}
+<article class="ai-turn ai-turn-assistant reveal"
+         data-turn-id="{{ turn.id }}"
+         {% if turn.sdanswer_blocks %}data-has-sdanswer="1"{% endif %}>
+    <button type="button" class="ai-turn-copy" data-ai-copy
+            aria-label="Copy answer as markdown">
+        <span class="ai-turn-copy-label" data-default>COPY</span>
+        <span class="ai-turn-copy-label" data-copied hidden>COPIED ✓</span>
+    </button>
+    <p class="ai-turn-label">// resource agent</p>
+    <div class="ai-turn-body ai-turn-answer markdown-body">{{ turn.content_html | safe }}</div>
+    <template class="ai-turn-markdown">{{ turn.content }}</template>
+    {% if turn.sdanswer_blocks %}
+    <script type="application/json" class="sdanswer-payload">{{ turn.sdanswer_blocks | tojson }}</script>
+    {% endif %}
+    {% if turn.citations and not turn.sdanswer_blocks %}
+    <div class="ai-citations">
+        <p class="ai-citations-label">// sources</p>
+        <div class="ai-citation-grid">
+            {% for c in turn.citations %}
+            <article class="ai-citation-card">
+                <a class="ai-citation-link" href="{{ c.url }}"
+                   {% if c.track_key %}data-track-key="{{ c.track_key }}"{% endif %}
+                   target="_blank" rel="noopener" data-sk-no-spa>
+                    <h3 class="ai-citation-title">{{ c.title }}</h3>
+                </a>
+                <p class="ai-citation-meta">
+                    {% if c.learning_type %}<span class="ai-citation-type">{{ c.learning_type }}</span>{% endif %}
+                    {% if c.byline %}<span class="ai-citation-byline">{{ c.byline }}</span>{% endif %}
+                </p>
+                {% if c.blurb %}<p class="ai-citation-blurb">{{ c.blurb }}</p>{% endif %}
+            </article>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+</article>
+{% endif %}

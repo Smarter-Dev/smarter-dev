@@ -3657,6 +3657,10 @@ class ResourceSource(Base):
     learning_type: Mapped[str] = mapped_column(String(32), nullable=False)
     published_at: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     first_indexed_at: Mapped[date] = mapped_column(Date, nullable=False)
+    jina_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    jina_fetched_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class ResourceDirectorySpine(Base):
@@ -3751,3 +3755,64 @@ class ResourceFaq(Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
 
     directory: Mapped[ResourceDirectory] = relationship(back_populates="faqs")
+
+
+# ---------------------------------------------------------------------------
+# Agent conversations — persisted Q&A sessions for the /resources agent (and
+# future agent_types). Schema is agent-type-agnostic; the rendering template
+# branches on AgentConversation.agent_type.
+# ---------------------------------------------------------------------------
+
+
+class AgentConversation(Base):
+    """A persisted conversation between a user and a Skrift agent."""
+
+    __tablename__ = "agent_conversations"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    agent_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # FK to skrift.users(id); declared manually in the migration since the
+    # Skrift User model lives on a separate Base metadata.
+    owner_user_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False
+    )
+    meta: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    messages: Mapped[list[AgentMessage]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="AgentMessage.sequence",
+    )
+
+    __table_args__ = (
+        Index("ix_agent_conversations_owner_created", "owner_user_id", "created_at"),
+    )
+
+
+class AgentMessage(Base):
+    """One turn (user or assistant) within an AgentConversation."""
+
+    __tablename__ = "agent_messages"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("agent_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    citations: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    usage: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+    conversation: Mapped[AgentConversation] = relationship(back_populates="messages")
+
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "sequence", name="uq_agent_messages_conv_seq"),
+    )
