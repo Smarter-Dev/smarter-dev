@@ -1,8 +1,17 @@
 {# Resource-agent turn renderer.
-   Expects: `turn` dict with keys {role, content, citations}. #}
+   Expects: `turn` dict with keys {role, content, citations, created_at_display}. #}
 {% if turn.role == "user" %}
 <article class="ai-turn ai-turn-user reveal">
-    <p class="ai-turn-label">// asked</p>
+    <header class="ai-turn-head">
+        <p class="ai-turn-role">
+            <span class="ai-turn-marker" aria-hidden="true"></span>
+            <span class="ai-turn-role-label">USER</span>
+        </p>
+        <time class="ai-turn-time"
+              {% if turn.created_at %}datetime="{{ turn.created_at.isoformat() }}"{% endif %}>
+            {{ turn.created_at_display }}
+        </time>
+    </header>
     <div class="ai-turn-body ai-turn-question markdown-body">{{ turn.content_html | safe }}</div>
 </article>
 {% elif turn.role == "assistant" %}
@@ -14,7 +23,18 @@
         <span class="ai-turn-copy-label" data-default>COPY</span>
         <span class="ai-turn-copy-label" data-copied hidden>COPIED ✓</span>
     </button>
-    <p class="ai-turn-label">// resource agent</p>
+    <header class="ai-turn-head">
+        <p class="ai-turn-role">
+            <span class="ai-turn-marker" aria-hidden="true"></span>
+            <span class="ai-turn-role-label">RESOURCE AGENT</span>
+            <span class="ai-turn-model" aria-hidden="true">/+/</span>
+            <span class="ai-turn-model-name">gemini 3 flash</span>
+        </p>
+        <time class="ai-turn-time"
+              {% if turn.created_at %}datetime="{{ turn.created_at.isoformat() }}"{% endif %}>
+            {{ turn.created_at_display }}
+        </time>
+    </header>
     <div class="ai-turn-body ai-turn-answer markdown-body">{{ turn.content_html | safe }}</div>
     <template class="ai-turn-markdown">{{ turn.content }}</template>
     {% if turn.sdanswer_blocks %}
