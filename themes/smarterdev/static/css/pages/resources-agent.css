@@ -266,7 +266,16 @@
    Chat view — /ai/answer/{id}
    ══════════════════════════════════════════════════════ */
 
-.ai-answer { max-width: 880px; }
+/* Answer pages benefit from more reading width than the default 880px hero
+   container — the inline sdanswer card grids need room for 3 cards. Override
+   .vc-wrap's horizontal padding too so the thread doesn't sit inside a thick
+   left/right gutter on phones. */
+.ai-answer.vc-wrap {
+  max-width: 1200px;
+  padding-left: clamp(.85rem, 3vw, 2.5rem);
+  padding-right: clamp(.85rem, 3vw, 2.5rem);
+  padding-top: clamp(2.25rem, 5vw, 5rem);
+}
 
 .ai-answer-hero { margin-bottom: 2.5rem; }
 .ai-answer-eyebrow {
