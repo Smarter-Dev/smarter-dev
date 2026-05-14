@@ -19,7 +19,7 @@ from pydantic_ai.providers.google import GoogleProvider
 
 logger = logging.getLogger(__name__)
 
-TITLE_MODEL = os.getenv("TITLE_AGENT_MODEL", "gemini-3-flash-lite-preview")
+TITLE_MODEL = os.getenv("TITLE_AGENT_MODEL", "gemini-3.1-flash-lite")
 
 _SYSTEM_PROMPT = """\
 You generate concise titles for engineering Q&A sessions.
