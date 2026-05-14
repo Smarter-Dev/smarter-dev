@@ -8,6 +8,7 @@ else gets a read-only view with a CTA back to /resources.
 from __future__ import annotations
 
 import logging
+from datetime import timezone
 from uuid import UUID
 
 from litestar import Request, get
@@ -45,8 +46,27 @@ def _asker_display_name(user) -> str:
     return "Guest"
 
 
+def _to_utc(dt):
+    """Ensure ``dt.isoformat()`` carries a UTC offset.
+
+    Postgres TIMESTAMPTZ values come back tz-aware, but a naive datetime would
+    serialize without an offset and the browser would mis-parse it as local
+    time. This guards against that drift.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _format_clock(dt) -> str:
-    """Render a message timestamp as `H:MM AM/PM` (no leading zero on hour)."""
+    """Render a UTC fallback timestamp as `H:MM AM/PM` (no leading zero on hour).
+
+    The browser overrides this via `answer-time.js` so each reader sees their
+    own local clock; this string only shows for the brief moment before the
+    script runs (and for JS-disabled readers).
+    """
     if dt is None:
         return ""
     hour = dt.hour % 12 or 12
@@ -102,7 +122,7 @@ async def answer_view(
                 "content_html": html,
                 "citations": list(m.citations or []),
                 "sdanswer_blocks": blocks,
-                "created_at": m.created_at,
+                "created_at": _to_utc(m.created_at),
                 "created_at_display": _format_clock(m.created_at),
             }
         )
