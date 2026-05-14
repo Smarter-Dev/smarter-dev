@@ -53,6 +53,7 @@ controllers:
   - smarter_dev.web.infrastructure_hosting_controller:infrastructure_hosting
   - smarter_dev.web.production_operations_controller:production_operations
   - smarter_dev.web.software_delivery_controller:software_delivery
+  - smarter_dev.web.patterns_of_practice_controller:patterns_of_practice
   - smarter_dev.web.campaign_signups_admin:CampaignSignupsAdminController
   - smarter_dev.web.campaign_signups_api:CampaignSignupsApiController
   - smarter_dev.web.click_tracking_api:ClickTrackingApiController

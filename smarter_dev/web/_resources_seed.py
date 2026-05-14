@@ -41,6 +41,8 @@ _DIRECTORIES: list[dict] = [
      "track_key_prefix": "deliv", "sort_order": 40},
     {"slug": "production-operations", "name": "Production Operations",
      "track_key_prefix": "ops", "sort_order": 50},
+    {"slug": "patterns-of-practice", "name": "Patterns of Practice",
+     "track_key_prefix": "patterns", "sort_order": 60},
 ]
 
 
@@ -50,6 +52,7 @@ def seed_all(bind: Connection) -> None:
     # us delete the legacy modules later without touching this file's imports.
     from smarter_dev.web import (
         infrastructure_hosting_data,
+        patterns_of_practice_data,
         production_operations_data,
         software_delivery_data,
         system_architecture_data,
@@ -109,6 +112,15 @@ def seed_all(bind: Connection) -> None:
         tool_resources=production_operations_data.OPS_TOOL_RESOURCES,
         people=production_operations_data.OPS_PEOPLE,
         faqs=production_operations_data.OPS_FAQS,
+    )
+    _seed_arch_directory(
+        bind,
+        directory_id=dir_ids["patterns-of-practice"],
+        categories=patterns_of_practice_data.POP_CATEGORIES,
+        spine=patterns_of_practice_data.POP_SPINE_RESOURCES,
+        tool_resources=patterns_of_practice_data.POP_TOOL_RESOURCES,
+        people=patterns_of_practice_data.POP_PEOPLE,
+        faqs=patterns_of_practice_data.POP_FAQS,
     )
 
 
