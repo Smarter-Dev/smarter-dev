@@ -28,6 +28,7 @@
     var label = (askerName || 'USER').toUpperCase();
     var art = document.createElement('article');
     art.className = 'ai-turn ai-turn-user';
+    if (msg.id) art.id = 'turn-' + msg.id;
     art.innerHTML =
       '<header class="ai-turn-head">' +
         '<p class="ai-turn-role">' +
@@ -68,11 +69,13 @@
     );
   }
 
-  function renderAssistantTurn(msg) {
+  function renderAssistantTurn(msg, answerUrl) {
     var body = msg.content_html || escapeHtml(msg.content || '');
     var hasBlocks = Array.isArray(msg.sdanswer_blocks) && msg.sdanswer_blocks.length > 0;
     var art = document.createElement('article');
     art.className = 'ai-turn ai-turn-assistant';
+    if (msg.id) art.id = 'turn-' + msg.id;
+    if (msg.id) art.setAttribute('data-turn-id', msg.id);
     if (hasBlocks) art.setAttribute('data-has-sdanswer', '1');
     var payloadScript = hasBlocks
       ? '<script type="application/json" class="sdanswer-payload">' +
@@ -80,11 +83,8 @@
         '<\/script>'
       : '';
     var citationsHtml = hasBlocks ? '' : renderCitations(msg.citations || []);
+    var shareUrl = (answerUrl || '') + (msg.id ? '#turn-' + msg.id : '');
     art.innerHTML =
-      '<button type="button" class="ai-turn-copy" data-ai-copy aria-label="Copy answer as markdown">' +
-        '<span class="ai-turn-copy-label" data-default>COPY</span>' +
-        '<span class="ai-turn-copy-label" data-copied hidden>COPIED ✓</span>' +
-      '</button>' +
       '<header class="ai-turn-head">' +
         '<p class="ai-turn-role">' +
           '<span class="ai-turn-marker" aria-hidden="true"></span>' +
@@ -96,7 +96,17 @@
       '</header>' +
       '<div class="ai-turn-body ai-turn-answer markdown-body">' + body + '</div>' +
       payloadScript +
-      citationsHtml;
+      citationsHtml +
+      '<footer class="ai-turn-actions">' +
+        '<button type="button" class="ai-turn-action" data-ai-copy aria-label="Copy answer as markdown">' +
+          '<span class="ai-turn-action-label" data-default>COPY</span>' +
+          '<span class="ai-turn-action-label" data-copied hidden>COPIED ✓</span>' +
+        '</button>' +
+        '<button type="button" class="ai-turn-action" data-share-url="' + escapeHtml(shareUrl) + '" aria-label="Copy a link to this message">' +
+          '<span class="ai-turn-action-label" data-default>SHARE</span>' +
+          '<span class="ai-turn-action-label" data-copied hidden>COPIED ✓</span>' +
+        '</button>' +
+      '</footer>';
     // Stash the raw markdown in a <template> so the copy button can read it
     // back verbatim without HTML escaping issues.
     var tpl = document.createElement('template');
@@ -119,6 +129,8 @@
     var conversationId = thread && thread.getAttribute('data-conversation-id');
     if (!conversationId) return;
     var askerName = thread.getAttribute('data-asker-name') || '';
+    var answerUrl = thread.getAttribute('data-answer-url') ||
+      (window.location.origin + window.location.pathname);
 
     var textarea = $('ai-followup-input');
     var submitBtn = form.querySelector('.ai-followup-btn');
@@ -163,8 +175,11 @@
         .then(function (resp) {
           if (resp.ok && resp.body && resp.body.user_message && resp.body.assistant_message) {
             thread.insertBefore(renderUserTurn(resp.body.user_message, askerName), form);
-            var assistantNode = renderAssistantTurn(resp.body.assistant_message);
+            var assistantNode = renderAssistantTurn(resp.body.assistant_message, answerUrl);
             thread.insertBefore(assistantNode, form);
+            if (window.AIAnswerTime && typeof window.AIAnswerTime.hydrate === 'function') {
+              window.AIAnswerTime.hydrate(assistantNode);
+            }
             if (window.SDAnswer && typeof window.SDAnswer.hydrate === 'function') {
               window.SDAnswer.hydrate(assistantNode);
             }

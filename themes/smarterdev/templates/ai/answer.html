@@ -23,6 +23,14 @@
     <header class="vc-hero reveal ai-answer-hero">
         <p class="ai-answer-eyebrow">// smarter dev · gemini 3 flash</p>
         <h1 class="vc-hero-title ai-answer-title">{{ conversation.title }}</h1>
+        <div class="ai-answer-actions">
+            <button type="button" class="ai-turn-action ai-answer-share"
+                    data-share-url="{{ answer_url }}"
+                    aria-label="Copy a link to this answer">
+                <span class="ai-turn-action-label" data-default>SHARE ANSWER</span>
+                <span class="ai-turn-action-label" data-copied hidden>COPIED &check;</span>
+            </button>
+        </div>
         {% if not is_owner %}
         <p class="vc-hero-sub ai-answer-sub">
             Read-only view of a Smarter Dev answer.
@@ -33,7 +41,8 @@
 
     <section class="ai-thread"
              data-conversation-id="{{ conversation.id }}"
-             data-asker-name="{{ asker_name }}">
+             data-asker-name="{{ asker_name }}"
+             data-answer-url="{{ answer_url }}">
         {% if conversation.agent_type == "resources" %}
             {% for turn in turns %}
                 {% include "ai/_partials/_answer-resources.html" %}
