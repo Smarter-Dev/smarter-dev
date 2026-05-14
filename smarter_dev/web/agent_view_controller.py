@@ -18,12 +18,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from skrift.auth.session_keys import SESSION_USER_ID
+from skrift.db.models.user import User
 from skrift.lib.markdown import render_markdown
 
 from smarter_dev.web.models import AgentConversation
 from smarter_dev.web.sdanswer import enrich_answer
 
 logger = logging.getLogger(__name__)
+
+
+def _asker_display_name(user) -> str:
+    """Return a human-readable label for the conversation's asker.
+
+    Falls back to the local-part of their email, then a generic "Guest" so
+    the chat never renders a blank role label if the user row is missing or
+    has nullable fields unset.
+    """
+    if user is None:
+        return "Guest"
+    name = (getattr(user, "name", None) or "").strip()
+    if name:
+        return name
+    email = (getattr(user, "email", None) or "").strip()
+    if email:
+        return email.split("@", 1)[0]
+    return "Guest"
 
 
 def _format_clock(dt) -> str:
@@ -61,6 +80,11 @@ async def answer_view(
     current_id = _current_user_id(request)
     is_owner = current_id is not None and current_id == conversation.owner_user_id
 
+    owner = await db_session.scalar(
+        select(User).where(User.id == conversation.owner_user_id)
+    )
+    asker_name = _asker_display_name(owner)
+
     messages = sorted(conversation.messages, key=lambda m: m.sequence)
     turns = []
     for m in messages:
@@ -83,7 +107,7 @@ async def answer_view(
             }
         )
 
-    title = conversation.title or "Resource Agent answer"
+    title = conversation.title or "Smarter Dev answer"
 
     return Template(
         "ai/answer.html",
@@ -98,6 +122,7 @@ async def answer_view(
             },
             "turns": turns,
             "is_owner": is_owner,
+            "asker_name": asker_name,
             "seo_meta": {
                 "description": title,
                 "canonical_url": (
@@ -107,9 +132,7 @@ async def answer_view(
             },
             "og_meta": {
                 "title": title,
-                "description": (
-                    "An answer from the Smarter Dev Resource Agent."
-                ),
+                "description": "An answer from Smarter Dev.",
                 "url": f"https://smarter.dev/ai/answer/{conversation.id}",
                 "site_name": "Smarter Dev",
                 "type": "article",

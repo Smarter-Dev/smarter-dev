@@ -21,17 +21,19 @@
     </nav>
 
     <header class="vc-hero reveal ai-answer-hero">
-        <p class="ai-answer-eyebrow">// resource agent · gemini 3 flash</p>
+        <p class="ai-answer-eyebrow">// smarter dev · gemini 3 flash</p>
         <h1 class="vc-hero-title ai-answer-title">{{ conversation.title }}</h1>
         {% if not is_owner %}
         <p class="vc-hero-sub ai-answer-sub">
-            Read-only view of a Resource Agent answer.
+            Read-only view of a Smarter Dev answer.
             <a href="/resources">Ask your own question →</a>
         </p>
         {% endif %}
     </header>
 
-    <section class="ai-thread" data-conversation-id="{{ conversation.id }}">
+    <section class="ai-thread"
+             data-conversation-id="{{ conversation.id }}"
+             data-asker-name="{{ asker_name }}">
         {% if conversation.agent_type == "resources" %}
             {% for turn in turns %}
                 {% include "ai/_partials/_answer-resources.html" %}

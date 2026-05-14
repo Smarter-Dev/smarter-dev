@@ -5,7 +5,7 @@
     <header class="ai-turn-head">
         <p class="ai-turn-role">
             <span class="ai-turn-marker" aria-hidden="true"></span>
-            <span class="ai-turn-role-label">USER</span>
+            <span class="ai-turn-role-label">{{ asker_name|default("USER", true)|upper }}</span>
         </p>
         <time class="ai-turn-time"
               {% if turn.created_at %}datetime="{{ turn.created_at.isoformat() }}"{% endif %}>
@@ -26,7 +26,7 @@
     <header class="ai-turn-head">
         <p class="ai-turn-role">
             <span class="ai-turn-marker" aria-hidden="true"></span>
-            <span class="ai-turn-role-label">RESOURCE AGENT</span>
+            <span class="ai-turn-role-label">SMARTER DEV</span>
             <span class="ai-turn-model" aria-hidden="true">/+/</span>
             <span class="ai-turn-model-name">gemini 3 flash</span>
         </p>
