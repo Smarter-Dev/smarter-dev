@@ -26,6 +26,14 @@ from smarter_dev.web.sdanswer import enrich_answer
 logger = logging.getLogger(__name__)
 
 
+def _format_clock(dt) -> str:
+    """Render a message timestamp as `H:MM AM/PM` (no leading zero on hour)."""
+    if dt is None:
+        return ""
+    hour = dt.hour % 12 or 12
+    return f"{hour}:{dt.minute:02d} {'AM' if dt.hour < 12 else 'PM'}"
+
+
 def _current_user_id(request: Request) -> UUID | None:
     raw = request.session.get(SESSION_USER_ID) if request.session else None
     if not raw:
@@ -71,6 +79,7 @@ async def answer_view(
                 "citations": list(m.citations or []),
                 "sdanswer_blocks": blocks,
                 "created_at": m.created_at,
+                "created_at_display": _format_clock(m.created_at),
             }
         )
 

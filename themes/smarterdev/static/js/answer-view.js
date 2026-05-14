@@ -16,11 +16,24 @@
     });
   }
 
+  function clockNow() {
+    var d = new Date();
+    var h = d.getHours() % 12 || 12;
+    var m = d.getMinutes();
+    return h + ':' + (m < 10 ? '0' + m : m) + ' ' + (d.getHours() < 12 ? 'AM' : 'PM');
+  }
+
   function renderUserTurn(msg) {
     var art = document.createElement('article');
     art.className = 'ai-turn ai-turn-user';
     art.innerHTML =
-      '<p class="ai-turn-label">// asked</p>' +
+      '<header class="ai-turn-head">' +
+        '<p class="ai-turn-role">' +
+          '<span class="ai-turn-marker" aria-hidden="true"></span>' +
+          '<span class="ai-turn-role-label">USER</span>' +
+        '</p>' +
+        '<time class="ai-turn-time">' + clockNow() + '</time>' +
+      '</header>' +
       '<div class="ai-turn-body ai-turn-question markdown-body">' +
       (msg.content_html || escapeHtml(msg.content || '')) +
       '</div>';
@@ -70,7 +83,15 @@
         '<span class="ai-turn-copy-label" data-default>COPY</span>' +
         '<span class="ai-turn-copy-label" data-copied hidden>COPIED ✓</span>' +
       '</button>' +
-      '<p class="ai-turn-label">// resource agent</p>' +
+      '<header class="ai-turn-head">' +
+        '<p class="ai-turn-role">' +
+          '<span class="ai-turn-marker" aria-hidden="true"></span>' +
+          '<span class="ai-turn-role-label">RESOURCE AGENT</span>' +
+          '<span class="ai-turn-model" aria-hidden="true">/+/</span>' +
+          '<span class="ai-turn-model-name">gemini 3 flash</span>' +
+        '</p>' +
+        '<time class="ai-turn-time">' + clockNow() + '</time>' +
+      '</header>' +
       '<div class="ai-turn-body ai-turn-answer markdown-body">' + body + '</div>' +
       payloadScript +
       citationsHtml;
