@@ -20,8 +20,10 @@ from skrift.auth.session_keys import SESSION_USER_ID
 from smarter_dev.web.models import AgentConversation
 
 # Read-and-up tiers of the sudo Unix-permission ladder. Anyone holding one
-# of these can see their own answer history on /resources.
+# of these — plus the Skrift built-in `administrator` permission, which sits
+# above the ladder — can see their own answer history on /resources.
 _HISTORY_ROLES: frozenset[str] = frozenset({"sudo-r", "sudo-rw", "sudo-rwx"})
+_HISTORY_PERMS: frozenset[str] = frozenset({"administrator"})
 
 
 @get("/resources")
@@ -36,7 +38,7 @@ async def resources_index(
     recent_answers: list[dict] = []
     if user_id_raw:
         perms = await get_user_permissions(db_session, user_id_raw)
-        if _HISTORY_ROLES & perms.roles:
+        if (_HISTORY_ROLES & perms.roles) or (_HISTORY_PERMS & perms.permissions):
             try:
                 user_uuid = UUID(str(user_id_raw))
             except (ValueError, TypeError):
