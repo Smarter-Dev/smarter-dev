@@ -23,14 +23,15 @@
     return h + ':' + (m < 10 ? '0' + m : m) + ' ' + (d.getHours() < 12 ? 'AM' : 'PM');
   }
 
-  function renderUserTurn(msg) {
+  function renderUserTurn(msg, askerName) {
+    var label = (askerName || 'USER').toUpperCase();
     var art = document.createElement('article');
     art.className = 'ai-turn ai-turn-user';
     art.innerHTML =
       '<header class="ai-turn-head">' +
         '<p class="ai-turn-role">' +
           '<span class="ai-turn-marker" aria-hidden="true"></span>' +
-          '<span class="ai-turn-role-label">USER</span>' +
+          '<span class="ai-turn-role-label">' + escapeHtml(label) + '</span>' +
         '</p>' +
         '<time class="ai-turn-time">' + clockNow() + '</time>' +
       '</header>' +
@@ -86,7 +87,7 @@
       '<header class="ai-turn-head">' +
         '<p class="ai-turn-role">' +
           '<span class="ai-turn-marker" aria-hidden="true"></span>' +
-          '<span class="ai-turn-role-label">RESOURCE AGENT</span>' +
+          '<span class="ai-turn-role-label">SMARTER DEV</span>' +
           '<span class="ai-turn-model" aria-hidden="true">/+/</span>' +
           '<span class="ai-turn-model-name">gemini 3 flash</span>' +
         '</p>' +
@@ -116,6 +117,7 @@
     var thread = form.parentElement;
     var conversationId = thread && thread.getAttribute('data-conversation-id');
     if (!conversationId) return;
+    var askerName = thread.getAttribute('data-asker-name') || '';
 
     var textarea = $('ai-followup-input');
     var submitBtn = form.querySelector('.ai-followup-btn');
@@ -159,7 +161,7 @@
         })
         .then(function (resp) {
           if (resp.ok && resp.body && resp.body.user_message && resp.body.assistant_message) {
-            thread.insertBefore(renderUserTurn(resp.body.user_message), form);
+            thread.insertBefore(renderUserTurn(resp.body.user_message, askerName), form);
             var assistantNode = renderAssistantTurn(resp.body.assistant_message);
             thread.insertBefore(assistantNode, form);
             if (window.SDAnswer && typeof window.SDAnswer.hydrate === 'function') {
