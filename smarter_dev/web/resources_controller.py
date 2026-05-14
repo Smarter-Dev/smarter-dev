@@ -14,16 +14,15 @@ from litestar.response import Template
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from skrift.auth.guards import Permission
 from skrift.auth.services import get_user_permissions
 from skrift.auth.session_keys import SESSION_USER_ID
 
 from smarter_dev.web.models import AgentConversation
 
-# Read-and-up tiers of the sudo Unix-permission ladder. Anyone holding one
-# of these — plus the Skrift built-in `administrator` permission, which sits
-# above the ladder — can see their own answer history on /resources.
-_HISTORY_ROLES: frozenset[str] = frozenset({"sudo-r", "sudo-rw", "sudo-rwx"})
-_HISTORY_PERMS: frozenset[str] = frozenset({"administrator"})
+# Granted to every `sudo-*` tier in `smarter_dev/web/roles.py`; the Skrift
+# `Permission` guard also bypasses for anyone holding `administrator`.
+_HISTORY_PERMISSION = Permission("view-answer-history")
 
 
 @get("/resources")
@@ -38,7 +37,7 @@ async def resources_index(
     recent_answers: list[dict] = []
     if user_id_raw:
         perms = await get_user_permissions(db_session, user_id_raw)
-        if (_HISTORY_ROLES & perms.roles) or (_HISTORY_PERMS & perms.permissions):
+        if await _HISTORY_PERMISSION.check(perms):
             try:
                 user_uuid = UUID(str(user_id_raw))
             except (ValueError, TypeError):
