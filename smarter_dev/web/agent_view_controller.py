@@ -128,6 +128,7 @@ async def answer_view(
         )
 
     title = conversation.title or "Smarter Dev answer"
+    answer_url = f"https://smarter.dev/ai/answer/{conversation.id}"
 
     return Template(
         "ai/answer.html",
@@ -143,17 +144,16 @@ async def answer_view(
             "turns": turns,
             "is_owner": is_owner,
             "asker_name": asker_name,
+            "answer_url": answer_url,
             "seo_meta": {
                 "description": title,
-                "canonical_url": (
-                    f"https://smarter.dev/ai/answer/{conversation.id}"
-                ),
+                "canonical_url": answer_url,
                 "robots": "noindex,nofollow",
             },
             "og_meta": {
                 "title": title,
                 "description": "An answer from Smarter Dev.",
-                "url": f"https://smarter.dev/ai/answer/{conversation.id}",
+                "url": answer_url,
                 "site_name": "Smarter Dev",
                 "type": "article",
                 "image": "",

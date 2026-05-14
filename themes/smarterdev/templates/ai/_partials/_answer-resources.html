@@ -1,7 +1,8 @@
 {# Resource-agent turn renderer.
-   Expects: `turn` dict with keys {role, content, citations, created_at_display}. #}
+   Expects: `turn` dict with keys {role, content, citations, created_at_display}.
+   Also reads `conversation` (for the share URL) and `asker_name` from context. #}
 {% if turn.role == "user" %}
-<article class="ai-turn ai-turn-user reveal">
+<article class="ai-turn ai-turn-user reveal" id="turn-{{ turn.id }}">
     <header class="ai-turn-head">
         <p class="ai-turn-role">
             <span class="ai-turn-marker" aria-hidden="true"></span>
@@ -16,13 +17,9 @@
 </article>
 {% elif turn.role == "assistant" %}
 <article class="ai-turn ai-turn-assistant reveal"
+         id="turn-{{ turn.id }}"
          data-turn-id="{{ turn.id }}"
          {% if turn.sdanswer_blocks %}data-has-sdanswer="1"{% endif %}>
-    <button type="button" class="ai-turn-copy" data-ai-copy
-            aria-label="Copy answer as markdown">
-        <span class="ai-turn-copy-label" data-default>COPY</span>
-        <span class="ai-turn-copy-label" data-copied hidden>COPIED ✓</span>
-    </button>
     <header class="ai-turn-head">
         <p class="ai-turn-role">
             <span class="ai-turn-marker" aria-hidden="true"></span>
@@ -61,5 +58,18 @@
         </div>
     </div>
     {% endif %}
+    <footer class="ai-turn-actions">
+        <button type="button" class="ai-turn-action" data-ai-copy
+                aria-label="Copy answer as markdown">
+            <span class="ai-turn-action-label" data-default>COPY</span>
+            <span class="ai-turn-action-label" data-copied hidden>COPIED &check;</span>
+        </button>
+        <button type="button" class="ai-turn-action"
+                data-share-url="{{ answer_url }}#turn-{{ turn.id }}"
+                aria-label="Copy a link to this message">
+            <span class="ai-turn-action-label" data-default>SHARE</span>
+            <span class="ai-turn-action-label" data-copied hidden>COPIED &check;</span>
+        </button>
+    </footer>
 </article>
 {% endif %}
