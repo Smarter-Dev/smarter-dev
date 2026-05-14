@@ -39,7 +39,7 @@ from skrift.auth.session_keys import SESSION_USER_ID
 from skrift.lib.markdown import render_markdown
 from skrift.lib.notifications import notify_user
 
-from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.shared.database import get_skrift_db_session_context
 from smarter_dev.web.models import (
     AgentConversation,
     AgentMessage,
@@ -133,8 +133,10 @@ def _kick_title_generation(
             title = await generate_title(question)
             if not title:
                 return
-            session_ctx = get_db_session_context()
-            async with session_ctx as bg_session:
+            # NB: must be the *Skrift* session context — agent_conversations
+            # lives in the main DB under the `skrift` schema. The plain
+            # `get_db_session_context()` targets the legacy bot-admin DB.
+            async with get_skrift_db_session_context() as bg_session:
                 conv = await bg_session.get(AgentConversation, conversation_id)
                 if conv is None:
                     return
