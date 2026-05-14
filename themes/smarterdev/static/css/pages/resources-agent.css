@@ -562,6 +562,8 @@
   background: rgba(0,212,255,.02);
   border: 1px solid rgba(0,212,255,.08);
   border-radius: 2px;
+  max-height: 18rem;
+  overflow-y: auto;
 }
 .rsa-history-head {
   font-family: var(--heading);
