@@ -13,6 +13,7 @@ entries (with the existing ``track_key`` for click counting).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import defaultdict
@@ -36,7 +37,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.auth.session_keys import SESSION_USER_ID
 from skrift.lib.markdown import render_markdown
+from skrift.lib.notifications import notify_user
 
+from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.models import (
     AgentConversation,
     AgentMessage,
@@ -44,6 +47,7 @@ from smarter_dev.web.models import (
 )
 from smarter_dev.web.resources_agent import begin_run, resource_agent
 from smarter_dev.web.sdanswer import enrich_answer
+from smarter_dev.web.title_agent import generate_title
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +99,11 @@ def _require_user_id(request: Request) -> UUID:
 
 
 def _derive_title(question: str, max_len: int = 80) -> str:
-    """Cheap derived title — first sentence or truncated question."""
+    """Cheap derived title — first sentence or truncated question.
+
+    Used as the placeholder while ``generate_title`` (Gemini Flash Lite) is
+    still in flight on the background task.
+    """
     clean = " ".join(question.split())
     for sep in (". ", "? ", "! ", "\n"):
         if sep in clean:
@@ -104,6 +112,49 @@ def _derive_title(question: str, max_len: int = 80) -> str:
                 return head
             break
     return (clean[: max_len - 1] + "…") if len(clean) > max_len else clean
+
+
+# Hold strong refs to in-flight title tasks so the GC doesn't kill them
+# mid-run while their fire-and-forget creator has long since returned.
+_TITLE_TASKS: set[asyncio.Task] = set()
+
+
+def _kick_title_generation(
+    conversation_id: UUID, owner_user_id: UUID, question: str
+) -> None:
+    """Fire-and-forget: generate a real title, persist it, notify the owner.
+
+    Runs in its own DB session because the request-scoped one closes the
+    moment we return the JSON response.
+    """
+
+    async def _run() -> None:
+        try:
+            title = await generate_title(question)
+            if not title:
+                return
+            session_ctx = get_db_session_context()
+            async with session_ctx as bg_session:
+                conv = await bg_session.get(AgentConversation, conversation_id)
+                if conv is None:
+                    return
+                conv.title = title
+                await bg_session.commit()
+            await notify_user(
+                str(owner_user_id),
+                "agent_title_updated",
+                conversation_id=str(conversation_id),
+                title=title,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "Background title generation failed for conversation %s",
+                conversation_id,
+            )
+
+    task = asyncio.create_task(_run())
+    _TITLE_TASKS.add(task)
+    task.add_done_callback(_TITLE_TASKS.discard)
 
 
 async def _resolve_citations(
@@ -359,6 +410,11 @@ class ResourcesAgentApiController(Controller):
             db_session, conversation, question, message_history=None
         )
         await db_session.commit()
+
+        # Kick the real Gemini-generated title in the background. It updates
+        # the row + pushes an `agent_title_updated` notification to the owner
+        # so the open `/ai/answer/{id}` tab swaps the placeholder in place.
+        _kick_title_generation(conversation.id, user_id, question)
 
         return {
             "id": str(conversation.id),
