@@ -7,21 +7,57 @@ so the route doubles as a stable parent for breadcrumbs and future SEO.
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from litestar import Request, get
 from litestar.response import Template
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from skrift.auth.services import get_user_permissions
 from skrift.auth.session_keys import SESSION_USER_ID
+
+from smarter_dev.web.models import AgentConversation
+
+# Read-and-up tiers of the sudo Unix-permission ladder. Anyone holding one
+# of these can see their own answer history on /resources.
+_HISTORY_ROLES: frozenset[str] = frozenset({"sudo-r", "sudo-rw", "sudo-rwx"})
 
 
 @get("/resources")
-async def resources_index(request: Request) -> Template:
-    is_authenticated = bool(
-        request.session and request.session.get(SESSION_USER_ID)
+async def resources_index(
+    request: Request, db_session: AsyncSession
+) -> Template:
+    user_id_raw = (
+        request.session.get(SESSION_USER_ID) if request.session else None
     )
+    is_authenticated = bool(user_id_raw)
+
+    recent_answers: list[dict] = []
+    if user_id_raw:
+        perms = await get_user_permissions(db_session, user_id_raw)
+        if _HISTORY_ROLES & perms.roles:
+            try:
+                user_uuid = UUID(str(user_id_raw))
+            except (ValueError, TypeError):
+                user_uuid = None
+            if user_uuid is not None:
+                stmt = (
+                    select(AgentConversation.id, AgentConversation.title)
+                    .where(AgentConversation.owner_user_id == user_uuid)
+                    .order_by(AgentConversation.created_at.desc())
+                )
+                result = await db_session.execute(stmt)
+                recent_answers = [
+                    {"id": str(row.id), "title": row.title or "Untitled"}
+                    for row in result.all()
+                ]
+
     return Template(
         "resources.html",
         context={
             "is_authenticated": is_authenticated,
+            "recent_answers": recent_answers,
             "seo_meta": {
                 "description": (
                     "Writing, courses, and tutorials from around the "

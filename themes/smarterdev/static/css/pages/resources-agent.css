@@ -552,3 +552,59 @@
 @media (max-width: 600px) {
   .rsa-submit { width: 100%; }
 }
+
+/* ── Recent answers history (gated on sudo-r+) ────────────────────────────
+   Default: inline above the collections grid on narrow viewports.
+   Wide viewports (>=1400px): pinned to the left gutter as a sticky rail. */
+.rsa-history {
+  margin: 0 0 1.75rem;
+  padding: .9rem 1rem;
+  background: rgba(0,212,255,.02);
+  border: 1px solid rgba(0,212,255,.08);
+  border-radius: 2px;
+}
+.rsa-history-head {
+  font-family: var(--heading);
+  font-size: .6rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin: 0 0 .65rem;
+}
+.rsa-history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.rsa-history-item {
+  padding: .35rem 0;
+  border-bottom: 1px solid rgba(0,212,255,.05);
+}
+.rsa-history-item:last-child { border-bottom: none; }
+.rsa-history-link {
+  color: var(--light);
+  text-decoration: none;
+  font-size: .9rem;
+  line-height: 1.4;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  transition: color .15s;
+}
+.rsa-history-link:hover { color: var(--cyan); }
+
+@media (min-width: 1400px) {
+  .rsa-history {
+    position: fixed;
+    top: 7.5rem;
+    left: 1.25rem;
+    width: 15rem;
+    max-height: calc(100vh - 9rem);
+    overflow-y: auto;
+    margin: 0;
+    z-index: 5;
+  }
+}
