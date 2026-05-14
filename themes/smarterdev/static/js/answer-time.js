@@ -111,6 +111,24 @@
     writeClipboard(url).then(function () { flashCopied(btn); });
   });
 
+  // When the Gemini-generated title lands (fired from the /v2/api/resources/ask
+  // background task via notify_user), swap the placeholder in place — both in
+  // the visible <h1> and the document <title>. Only the owner's sessions
+  // receive this notification, so read-only viewers are unaffected.
+  document.addEventListener('sk:notification', function (e) {
+    var data = (e && e.detail) || {};
+    if (data.type !== 'agent_title_updated') return;
+    var thread = document.querySelector('.ai-thread[data-conversation-id]');
+    if (!thread) return;
+    if (thread.getAttribute('data-conversation-id') !== data.conversation_id) return;
+    var newTitle = (data.title || '').trim();
+    if (!newTitle) return;
+    var h1 = document.querySelector('.ai-answer-title');
+    if (h1) h1.textContent = newTitle;
+    document.title = newTitle + ' · Smarter Dev';
+    e.preventDefault();  // skip the default generic toast
+  });
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () { hydrate(); });
   } else {
