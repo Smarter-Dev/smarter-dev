@@ -2,7 +2,9 @@
    Renders the form when `is_authenticated`, otherwise a sign-in CTA. #}
 
 {% if is_authenticated %}
-<section class="rsa reveal" aria-labelledby="rsa-title">
+<section class="rsa reveal" aria-labelledby="rsa-title"
+         data-rsa-form
+         data-asker-name="{{ asker_name|default('You') }}">
     <span class="rsa-corner rsa-corner-tl" aria-hidden="true"></span>
     <span class="rsa-corner rsa-corner-tr" aria-hidden="true"></span>
     <span class="rsa-corner rsa-corner-bl" aria-hidden="true"></span>

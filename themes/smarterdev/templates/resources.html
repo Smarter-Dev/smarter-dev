@@ -38,18 +38,7 @@
 
     {% include "_partials/_resources-agent.html" %}
 
-    {% if recent_answers %}
-    <aside class="rsa-history" aria-label="Your recent answers">
-        <p class="rsa-history-head">// your recent answers</p>
-        <ul class="rsa-history-list">
-            {% for a in recent_answers %}
-            <li class="rsa-history-item">
-                <a class="rsa-history-link" href="/ai/answer/{{ a.id }}">{{ a.title }}</a>
-            </li>
-            {% endfor %}
-        </ul>
-    </aside>
-    {% endif %}
+    {% include "_partials/_answer-history-sidebar.html" %}
 
     <section class="vc-section reveal">
         <p class="rsa-or-try-label">// or browse collections</p>

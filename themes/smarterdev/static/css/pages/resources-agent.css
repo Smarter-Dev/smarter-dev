@@ -696,3 +696,148 @@
     z-index: 5;
   }
 }
+
+/* ══════════════════════════════════════════════════════
+   Live answer mode — /resources morphs into /ai/answer
+   on ASK submit. The scaffold renders before the API
+   response and gets hydrated by sk:notification events.
+   ══════════════════════════════════════════════════════ */
+
+.ai-answer-live {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Blinking caret used as the title placeholder until
+   `agent_title_updated` types the real title in. */
+.ai-title-caret {
+  display: inline-block;
+  width: .6ch;
+  height: 1.05em;
+  background: var(--cyan);
+  vertical-align: -0.1em;
+  margin-left: .15em;
+  animation: ai-caret-blink 1.05s steps(2, end) infinite;
+}
+@keyframes ai-caret-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* Tools stream — vertical list of `agent_tool_event` chips that fill
+   the assistant turn body while the run is in flight, then collapse
+   when `agent_run_complete` lands. */
+.ai-tools-stream {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  margin: 0 0 .25rem;
+  overflow: hidden;
+}
+.ai-tools-stream:empty { display: none; }
+
+.ai-tool-chip {
+  display: grid;
+  grid-template-columns: 1.4rem auto 1fr auto;
+  align-items: baseline;
+  gap: .55rem;
+  padding: .55rem .8rem;
+  font-family: var(--mono);
+  font-size: .82rem;
+  line-height: 1.4;
+  color: var(--light);
+  background: rgba(0,212,255,.04);
+  border: 1px solid rgba(0,212,255,.18);
+  border-left: 2px solid var(--cyan);
+  border-radius: 2px;
+  opacity: 0;
+  transform: translateY(4px);
+  animation: ai-chip-in .35s ease forwards;
+}
+@keyframes ai-chip-in {
+  to { opacity: 1; transform: translateY(0); }
+}
+.ai-tool-chip[data-status="active"] {
+  border-color: rgba(0,212,255,.5);
+  box-shadow: 0 0 18px rgba(0,212,255,.12) inset;
+}
+.ai-tool-chip[data-status="active"] .ai-tool-chip-icon {
+  animation: ai-chip-pulse 1.4s ease-in-out infinite;
+}
+.ai-tool-chip[data-status="done"] {
+  opacity: .55;
+  border-left-color: rgba(0,212,255,.35);
+  background: transparent;
+}
+@keyframes ai-chip-pulse {
+  0%, 100% { opacity: .55; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.12); }
+}
+.ai-tool-chip-icon {
+  color: var(--cyan);
+  font-size: 1rem;
+  line-height: 1;
+}
+.ai-tool-chip-label {
+  font-family: var(--heading);
+  font-size: .58rem;
+  letter-spacing: .2em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  white-space: nowrap;
+}
+.ai-tool-chip-arg {
+  color: var(--white);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-tool-chip-summary {
+  font-family: var(--heading);
+  font-size: .56rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--mid);
+  white-space: nowrap;
+}
+
+.ai-answer-prose {
+  font-family: var(--body);
+  font-size: 1.02rem;
+  line-height: 1.75;
+  color: var(--white);
+}
+.ai-answer-prose p { margin: 0 0 1rem; }
+.ai-answer-prose p:last-child { margin-bottom: 0; }
+.ai-answer-prose a {
+  color: var(--cyan);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(0,212,255,.3);
+}
+.ai-answer-prose a:hover { border-bottom-color: var(--cyan); }
+.ai-answer-prose code {
+  font-family: var(--mono);
+  font-size: .92em;
+  background: rgba(0,212,255,.08);
+  padding: .1em .35em;
+  border-radius: 2px;
+}
+.ai-answer-prose strong { color: var(--white); font-weight: 600; }
+
+.ai-live-error {
+  font-family: var(--body);
+  font-size: .92rem;
+  color: var(--rose, #ff9b9b);
+}
+.ai-live-error a {
+  color: var(--cyan);
+  border-bottom: 1px solid rgba(0,212,255,.3);
+  text-decoration: none;
+}
+
+/* While live, the body locks the original page from scrolling away
+   under the morph. */
+body.ai-live .vc-hero,
+body.ai-live .rsa,
+body.ai-live .rsa-or-try,
+body.ai-live .vc-section { pointer-events: none; }

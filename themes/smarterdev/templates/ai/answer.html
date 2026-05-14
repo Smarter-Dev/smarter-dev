@@ -39,6 +39,8 @@
         {% endif %}
     </header>
 
+    {% include "_partials/_answer-history-sidebar.html" %}
+
     <section class="ai-thread"
              data-conversation-id="{{ conversation.id }}"
              data-asker-name="{{ asker_name }}"
