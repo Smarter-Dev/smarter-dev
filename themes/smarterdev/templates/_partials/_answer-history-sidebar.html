@@ -1,0 +1,17 @@
+{# Recent agent answers sidebar.
+   Rendered on /resources and /ai/answer/{id} for users with the
+   `view-answer-history` permission. Each link routes to /ai/answer/{id}.
+   The query is scoped by `agent_type` upstream so this list only contains
+   conversations from the same agent the surrounding page is bound to. #}
+{% if recent_answers %}
+<aside class="rsa-history" aria-label="Your recent answers">
+    <p class="rsa-history-head">// your recent answers</p>
+    <ul class="rsa-history-list">
+        {% for a in recent_answers %}
+        <li class="rsa-history-item">
+            <a class="rsa-history-link" href="/ai/answer/{{ a.id }}">{{ a.title }}</a>
+        </li>
+        {% endfor %}
+    </ul>
+</aside>
+{% endif %}

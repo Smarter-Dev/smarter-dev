@@ -18,12 +18,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from skrift.auth.guards import Permission
+from skrift.auth.services import get_user_permissions
 from skrift.auth.session_keys import SESSION_USER_ID
 from skrift.db.models.user import User
 from skrift.lib.markdown import render_markdown
 
 from smarter_dev.web.models import AgentConversation
 from smarter_dev.web.sdanswer import enrich_answer
+
+_HISTORY_PERMISSION = Permission("view-answer-history")
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +109,26 @@ async def answer_view(
     )
     asker_name = _asker_display_name(owner)
 
+    # Sidebar of the viewer's own recent conversations of the SAME agent
+    # type (so the resources answer page only links to other resources
+    # answers, etc.). Gated on the same `view-answer-history` permission
+    # used on /resources.
+    recent_answers: list[dict] = []
+    if current_id is not None:
+        perms = await get_user_permissions(db_session, current_id)
+        if await _HISTORY_PERMISSION.check(perms):
+            stmt = (
+                select(AgentConversation.id, AgentConversation.title)
+                .where(AgentConversation.owner_user_id == current_id)
+                .where(AgentConversation.agent_type == conversation.agent_type)
+                .order_by(AgentConversation.created_at.desc())
+            )
+            result = await db_session.execute(stmt)
+            recent_answers = [
+                {"id": str(row.id), "title": row.title or "Untitled"}
+                for row in result.all()
+            ]
+
     messages = sorted(conversation.messages, key=lambda m: m.sequence)
     turns = []
     for m in messages:
@@ -145,6 +169,7 @@ async def answer_view(
             "is_owner": is_owner,
             "asker_name": asker_name,
             "answer_url": answer_url,
+            "recent_answers": recent_answers,
             "seo_meta": {
                 "description": title,
                 "canonical_url": answer_url,

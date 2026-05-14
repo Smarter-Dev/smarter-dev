@@ -117,6 +117,7 @@ def _derive_title(question: str, max_len: int = 80) -> str:
 # Hold strong refs to in-flight title tasks so the GC doesn't kill them
 # mid-run while their fire-and-forget creator has long since returned.
 _TITLE_TASKS: set[asyncio.Task] = set()
+_RUN_TASKS: set[asyncio.Task] = set()
 
 
 def _kick_title_generation(
@@ -252,6 +253,113 @@ def _coerce_usage(result_usage) -> Optional[dict]:
         return None
 
 
+def _kick_agent_run(
+    conversation_id: UUID,
+    owner_user_id: UUID,
+    question: str,
+) -> None:
+    """Fire-and-forget: run the resource agent and finalize the answer.
+
+    Skrift's agent runs are dispatched to the workers queue (the in-process
+    ``local`` preset still runs them on the event loop, but the API contract
+    is the same as a remote worker — we get a ``Session`` handle back
+    immediately). This helper:
+
+    1. Opens its own DB session (the request-scoped one is closed by now).
+    2. Queues the run with ``deps_ref`` carrying the conversation + owner
+       ids so tool implementations can emit ``agent_tool_event``
+       notifications.
+    3. Waits on ``session.result()``, persists the assistant turn with
+       resolved citations, and fires ``agent_run_complete`` so the open
+       browser tab swaps the tool stream for the final markdown.
+    4. On exception, fires ``agent_run_error`` with the detail.
+    """
+
+    async def _run() -> None:
+        try:
+            hits = begin_run()
+            session = await resource_agent.run(
+                question,
+                deps_ref={
+                    "conversation_id": str(conversation_id),
+                    "owner_user_id": str(owner_user_id),
+                },
+            )
+            answer_text = await session.result()
+            if not isinstance(answer_text, str):
+                answer_text = (
+                    getattr(answer_text, "output", None) or str(answer_text)
+                )
+
+            async with get_skrift_db_session_context() as bg_session:
+                citations = await _resolve_citations(bg_session, hits)
+
+                conversation = await bg_session.get(
+                    AgentConversation, conversation_id
+                )
+                if conversation is None:
+                    return
+
+                next_seq_q = await bg_session.execute(
+                    select(AgentMessage.sequence)
+                    .where(AgentMessage.conversation_id == conversation_id)
+                    .order_by(AgentMessage.sequence.desc())
+                    .limit(1)
+                )
+                last_seq = next_seq_q.scalar_one_or_none() or 0
+
+                assistant_turn = AgentMessage(
+                    conversation_id=conversation_id,
+                    sequence=last_seq + 1,
+                    role="assistant",
+                    content=answer_text,
+                    citations=citations,
+                )
+                bg_session.add(assistant_turn)
+                await bg_session.commit()
+                await bg_session.refresh(assistant_turn)
+
+                content_html, blocks = await enrich_answer(
+                    bg_session, answer_text
+                )
+
+            await notify_user(
+                str(owner_user_id),
+                "agent_run_complete",
+                conversation_id=str(conversation_id),
+                assistant_message_id=str(assistant_turn.id),
+                content_html=content_html,
+                sdanswer_blocks=blocks,
+                citations=citations,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "agent run finalize failed for conversation %s", conversation_id
+            )
+            msg = str(exc)
+            if (
+                "GEMINI_API_KEY" in msg
+                or "GOOGLE_API_KEY" in msg
+                or "api_key" in msg.lower()
+            ):
+                detail = "Agent not configured. Try again later."
+            else:
+                detail = "Agent failed to respond. Try again in a moment."
+            try:
+                await notify_user(
+                    str(owner_user_id),
+                    "agent_run_error",
+                    conversation_id=str(conversation_id),
+                    detail=detail,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("agent_run_error notify_user failed")
+
+    task = asyncio.create_task(_run())
+    _RUN_TASKS.add(task)
+    task.add_done_callback(_RUN_TASKS.discard)
+
+
 async def _run_agent_turn(
     db_session: AsyncSession,
     conversation: AgentConversation,
@@ -281,7 +389,14 @@ async def _run_agent_turn(
 
     hits = begin_run()
     try:
-        session = await resource_agent.run(question, message_history=message_history)
+        session = await resource_agent.run(
+            question,
+            message_history=message_history,
+            deps_ref={
+                "conversation_id": str(conversation.id),
+                "owner_user_id": str(conversation.owner_user_id),
+            },
+        )
         # Skrift's Agent.run returns a Session — poll until completion to get
         # the final text the model produced.
         answer_text = await session.result()
@@ -393,6 +508,15 @@ class ResourcesAgentApiController(Controller):
     async def ask(
         self, data: AskBody, request: Request, db_session: AsyncSession
     ) -> dict:
+        """Create the conversation + user turn and return immediately.
+
+        The agent run is queued in the background; the browser subscribes
+        to ``agent_tool_event`` / ``agent_run_complete`` notifications on
+        the conversation to animate tool calls and the final answer in
+        place. This handler aims to complete in under 200ms so the
+        client-side morph from /resources to /ai/answer/{id} doesn't
+        stall on the form submit.
+        """
         user_id = _require_user_id(request)
         _enforce_rate(_ask_log, str(user_id), _ASK_LIMIT)
 
@@ -408,21 +532,35 @@ class ResourcesAgentApiController(Controller):
         db_session.add(conversation)
         await db_session.flush()
 
-        assistant_turn = await _run_agent_turn(
-            db_session, conversation, question, message_history=None
+        user_turn = AgentMessage(
+            conversation_id=conversation.id,
+            sequence=1,
+            role="user",
+            content=question,
+            citations=[],
         )
+        db_session.add(user_turn)
         await db_session.commit()
+        await db_session.refresh(user_turn)
 
-        # Kick the real Gemini-generated title in the background. It updates
-        # the row + pushes an `agent_title_updated` notification to the owner
-        # so the open `/ai/answer/{id}` tab swaps the placeholder in place.
+        # Title generation + agent run both happen in the background. The
+        # browser stays on /resources (morphed into the answer layout) and
+        # picks up notifications as each completes.
         _kick_title_generation(conversation.id, user_id, question)
+        _kick_agent_run(conversation.id, user_id, question)
 
         return {
             "id": str(conversation.id),
             "url": f"/ai/answer/{conversation.id}",
-            "answer": assistant_turn.content,
-            "citations": list(assistant_turn.citations or []),
+            "user_message": {
+                "id": str(user_turn.id),
+                "sequence": user_turn.sequence,
+                "content": user_turn.content,
+                "created_at": (
+                    user_turn.created_at.isoformat()
+                    if user_turn.created_at else None
+                ),
+            },
         }
 
 

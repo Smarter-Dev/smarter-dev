@@ -28,12 +28,16 @@ import logging
 import os
 import time
 from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import Optional
 
 import httpx
 import skrift
+from pydantic_ai import RunContext
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
+from skrift.agents.models import ResumeContext
+from skrift.lib.notifications import notify_user
 
 from smarter_dev.web.scan.tools import jina_read
 
@@ -428,11 +432,62 @@ def _build_model() -> GoogleModel:
     )
 
 
+@dataclass
+class RunDeps:
+    """Per-run dependencies injected into tool calls via ``RunContext.deps``.
+
+    Carries the identifiers needed to push real-time ``agent_tool_event``
+    notifications back to the asker's browser. The values come from
+    ``deps_ref`` on the queued run; the worker rebuilds this dataclass via
+    :func:`_build_deps` each time it resumes.
+    """
+
+    conversation_id: str
+    owner_user_id: str
+
+
+def _build_deps(ctx: ResumeContext) -> RunDeps:
+    return RunDeps(
+        conversation_id=str(ctx.deps_ref.get("conversation_id", "")),
+        owner_user_id=str(ctx.deps_ref.get("owner_user_id", "")),
+    )
+
+
 resource_agent = skrift.Agent(
     _build_model(),
     name=AGENT_NAME,
     system_prompt=_SYSTEM_PROMPT,
+    deps_type=RunDeps,
+    deps_factory=_build_deps,
 )
+
+
+async def _emit_tool_event(
+    deps: RunDeps | None,
+    *,
+    tool: str,
+    label: str,
+    summary: str,
+) -> None:
+    """Push an `agent_tool_event` to the asker's open answer page.
+
+    Silently no-ops when no owner is set (e.g. tests or replay paths). Any
+    notification failure is logged but never propagated — tool callers must
+    not see clipboard/SSE issues.
+    """
+    if not deps or not deps.owner_user_id:
+        return
+    try:
+        await notify_user(
+            deps.owner_user_id,
+            "agent_tool_event",
+            conversation_id=deps.conversation_id,
+            tool=tool,
+            label=label,
+            summary=summary,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("agent_tool_event notify_user failed")
 
 
 # ---------------------------------------------------------------------------
@@ -445,8 +500,10 @@ _READ_MAX_CHARS = 10_000
 _READ_DB_TTL_DAYS = 30  # how long a stored jina body is considered fresh
 
 
-@resource_agent.tool_plain
-async def search_resources(query: str, limit: int = 8) -> list[dict]:
+@resource_agent.tool
+async def search_resources(
+    ctx: RunContext[RunDeps], query: str, limit: int = 8
+) -> list[dict]:
     """Search the curated resource catalog.
 
     Use this first. Returns a ranked list of candidate sources and tools,
@@ -566,11 +623,18 @@ async def search_resources(query: str, limit: int = 8) -> list[dict]:
     hits = hits[:limit]
     for hit in hits:
         _record_hit({"source": "search", **hit})
+
+    await _emit_tool_event(
+        ctx.deps,
+        tool="search_resources",
+        label=query,
+        summary=f"{len(hits)} hit" + ("s" if len(hits) != 1 else ""),
+    )
     return hits
 
 
-@resource_agent.tool_plain
-async def read_source(url: str) -> str:
+@resource_agent.tool
+async def read_source(ctx: RunContext[RunDeps], url: str) -> str:
     """Read the full text of a curated resource.
 
     Reads come from a tiered cache:
@@ -594,33 +658,53 @@ async def read_source(url: str) -> str:
     if not url:
         return "[error] no URL provided"
 
+    body: str | None = None
+
     db_body = await _read_from_db_cache(url)
     if db_body is not None:
         _record_hit({"source": "read", "url": url})
-        return db_body
+        body = db_body
+    else:
+        now = time.time()
+        cached = _READ_CACHE.get(url)
+        if cached and (now - cached[0]) < _READ_TTL_SECONDS:
+            _record_hit({"source": "read", "url": url})
+            body = cached[1]
+        else:
+            async with httpx.AsyncClient() as client:
+                result = await jina_read(client, url)
 
-    now = time.time()
-    cached = _READ_CACHE.get(url)
-    if cached and (now - cached[0]) < _READ_TTL_SECONDS:
-        _record_hit({"source": "read", "url": url})
-        return cached[1]
+            if "error" in result:
+                # Emit a failing tool event so the UI can show the error
+                # alongside the chip rather than swallowing silently.
+                await _emit_tool_event(
+                    ctx.deps,
+                    tool="read_source",
+                    label=url,
+                    summary=f"[error] {result['error']}",
+                )
+                return f"[error] {result['error']}"
 
-    async with httpx.AsyncClient() as client:
-        result = await jina_read(client, url)
+            title = result.get("title", "") or ""
+            content = result.get("content", "") or ""
+            body = f"{title}\n\n{content}".strip()[:_READ_MAX_CHARS]
 
-    if "error" in result:
-        return f"[error] {result['error']}"
+            stored = await _write_to_db_cache(url, body)
+            if not stored:
+                # Non-curated URL — fall back to the in-process LRU.
+                _READ_CACHE[url] = (now, body)
 
-    title = result.get("title", "") or ""
-    content = result.get("content", "") or ""
-    body = f"{title}\n\n{content}".strip()[:_READ_MAX_CHARS]
+            _record_hit({"source": "read", "url": url})
 
-    stored = await _write_to_db_cache(url, body)
-    if not stored:
-        # Non-curated URL — fall back to the in-process LRU.
-        _READ_CACHE[url] = (now, body)
-
-    _record_hit({"source": "read", "url": url})
+    label = body.split("\n", 1)[0].strip() if body else url
+    if len(label) > 80:
+        label = label[:79].rstrip() + "…"
+    await _emit_tool_event(
+        ctx.deps,
+        tool="read_source",
+        label=label or url,
+        summary=url,
+    )
     return body
 
 
