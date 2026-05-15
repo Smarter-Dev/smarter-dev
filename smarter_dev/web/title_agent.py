@@ -1,10 +1,16 @@
 """Gemini-backed title generator for `agent_conversations`.
 
-Cheap, one-shot model call (Gemini 3 Flash Lite by default) that turns a
+Cheap, one-shot Skrift agent (Gemini 3 Flash Lite by default) that turns a
 user's first question into a short, topic-style title. Used by the
 ``/v2/api/resources/ask`` endpoint via a fire-and-forget background task — it
 patches ``agent_conversations.title`` and notifies the owner via Skrift's
 notification system so the open browser tab can swap the placeholder in place.
+
+Skrift wraps the underlying pydantic-ai call so the run is durable (state in
+RunState), cost-tracked (token usage rolls into Skrift's agent audit), and
+queueable. We still run it on the same node — Skrift's default
+``queued`` dispatch + `workers.preset: local` means it executes inline on the
+web process, which is what we want for a sub-second one-shot.
 """
 
 from __future__ import annotations
@@ -13,13 +19,14 @@ import logging
 import os
 import re
 
-from pydantic_ai import Agent
+import skrift
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
 logger = logging.getLogger(__name__)
 
 TITLE_MODEL = os.getenv("TITLE_AGENT_MODEL", "gemini-3.1-flash-lite")
+AGENT_NAME = "smarter.dev.title.generator"
 
 _SYSTEM_PROMPT = """\
 You generate concise titles for engineering Q&A sessions.
@@ -43,7 +50,11 @@ def _build_model() -> GoogleModel:
     return GoogleModel(TITLE_MODEL, provider=GoogleProvider(api_key=api_key))
 
 
-title_agent = Agent(_build_model(), system_prompt=_SYSTEM_PROMPT)
+title_agent = skrift.Agent(
+    _build_model(),
+    name=AGENT_NAME,
+    system_prompt=_SYSTEM_PROMPT,
+)
 
 
 def _sanitize(raw: str) -> str:
@@ -66,8 +77,15 @@ def _sanitize(raw: str) -> str:
     return text
 
 
-async def generate_title(question: str) -> str | None:
-    """Generate a title for ``question`` via Gemini. ``None`` on failure."""
+async def generate_title(
+    question: str, *, actor: str | None = None
+) -> str | None:
+    """Generate a title for ``question`` via Gemini. ``None`` on failure.
+
+    ``actor`` is the user id this run should be attributed to in Skrift's
+    audit trail. Pass the asker's UUID as a string so cost/usage rolls up
+    to the right account.
+    """
     if not (question or "").strip():
         return None
     # Local debug short-circuit: skip the Gemini call and return a synthetic
@@ -77,10 +95,15 @@ async def generate_title(question: str) -> str | None:
         words = question.strip().split()[:6]
         return _sanitize(" ".join(w.capitalize() for w in words)) or "Synthetic Title"
     try:
-        result = await title_agent.run(question.strip())
+        session = await title_agent.run(question.strip(), actor=actor)
+        # Skrift's Agent.run returns a Session; poll until completion to
+        # collect the final text. With `workers.preset: local` the run
+        # executes inline on this node, so this awaits ~Gemini-latency.
+        raw = await session.result()
     except Exception:  # noqa: BLE001
         logger.exception("Title generation failed")
         return None
-    raw = getattr(result, "output", None) or getattr(result, "data", None) or ""
+    if not isinstance(raw, str):
+        raw = getattr(raw, "output", None) or getattr(raw, "data", None) or str(raw)
     title = _sanitize(str(raw))
     return title or None

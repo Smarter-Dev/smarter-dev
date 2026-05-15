@@ -277,7 +277,7 @@ def _kick_title_generation(
 
     async def _run() -> None:
         try:
-            title = await generate_title(question)
+            title = await generate_title(question, actor=str(owner_user_id))
             if not title:
                 return
             # NB: must be the *Skrift* session context — agent_conversations
@@ -463,6 +463,7 @@ def _kick_agent_run(
                 session = await resource_agent.run(
                     question,
                     message_history=message_history,
+                    actor=str(owner_user_id),
                     deps_ref={
                         "conversation_id": str(conversation_id),
                         "owner_user_id": str(owner_user_id),
@@ -538,73 +539,6 @@ def _kick_agent_run(
     task = asyncio.create_task(_run())
     _RUN_TASKS.add(task)
     task.add_done_callback(_RUN_TASKS.discard)
-
-
-async def _run_agent_turn(
-    db_session: AsyncSession,
-    conversation: AgentConversation,
-    question: str,
-    message_history,
-) -> AgentMessage:
-    """Run the agent, persist the user turn + assistant turn, return the assistant turn."""
-    # Fetch the next sequence number atomically-ish — we hold the row already
-    # via the surrounding controller's commit.
-    next_seq_q = await db_session.execute(
-        select(AgentMessage.sequence)
-        .where(AgentMessage.conversation_id == conversation.id)
-        .order_by(AgentMessage.sequence.desc())
-        .limit(1)
-    )
-    last_seq = next_seq_q.scalar_one_or_none() or 0
-
-    user_turn = AgentMessage(
-        conversation_id=conversation.id,
-        sequence=last_seq + 1,
-        role="user",
-        content=question,
-        citations=[],
-    )
-    db_session.add(user_turn)
-    await db_session.flush()
-
-    try:
-        session = await resource_agent.run(
-            question,
-            message_history=message_history,
-            deps_ref={
-                "conversation_id": str(conversation.id),
-                "owner_user_id": str(conversation.owner_user_id),
-            },
-        )
-        # Skrift's Agent.run returns a Session — poll until completion to get
-        # the final text the model produced.
-        answer_text = await session.result()
-    except Exception as exc:  # noqa: BLE001
-        # Surface a clean error rather than 500-stacktracing into the JSON.
-        msg = str(exc)
-        logger.exception("Resource agent run failed")
-        if "GEMINI_API_KEY" in msg or "GOOGLE_API_KEY" in msg or "api_key" in msg.lower():
-            raise HTTPException(
-                status_code=HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Agent not configured. Try again later.",
-            )
-        raise HTTPException(
-            status_code=HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Agent failed to respond. Try again in a moment.",
-        )
-
-    if not isinstance(answer_text, str):
-        answer_text = getattr(answer_text, "output", None) or str(answer_text)
-
-    assistant_turn = AgentMessage(
-        conversation_id=conversation.id,
-        sequence=last_seq + 2,
-        role="assistant",
-        content=answer_text,
-        citations=[],
-    )
-    db_session.add(assistant_turn)
-    return assistant_turn
 
 
 # ---------------------------------------------------------------------------
