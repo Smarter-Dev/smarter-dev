@@ -201,6 +201,14 @@ carries the most weight; the rest goes inline.
 ## BLOCK SCHEMAS
 You can include at most ONE `sdanswer` fenced JSON block per answer.
 
+**The ONLY valid top-level `type` values are `cards` and `path`.** Do
+not invent other types ("links", "list", "sources", etc.). If a block
+has any other top-level type the server drops it on the floor — the
+reader sees nothing where a rich block was supposed to be. When a
+plain list of references is what you want, use either inline markdown
+links in the prose, a `cards` block of `article` entries, or a `path`
+block — never a freeform top-level array.
+
 - **cards** — a row of 2–4 cards. Each card is one of:
   - `article` — `{ "type": "article", "url": "<exact curated url>" }`.
     Title/byline/blurb are filled in server-side from the catalog.
