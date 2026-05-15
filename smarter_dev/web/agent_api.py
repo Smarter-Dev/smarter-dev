@@ -455,8 +455,6 @@ def _kick_agent_run(
                     )
 
             async with get_skrift_db_session_context() as bg_session:
-                citations = await _resolve_citations(bg_session, hits)
-
                 conversation = await bg_session.get(
                     AgentConversation, conversation_id
                 )
@@ -476,7 +474,7 @@ def _kick_agent_run(
                     sequence=last_seq + 1,
                     role="assistant",
                     content=answer_text,
-                    citations=citations,
+                    citations=[],
                 )
                 bg_session.add(assistant_turn)
                 await bg_session.commit()
@@ -493,7 +491,6 @@ def _kick_agent_run(
                 assistant_message_id=str(assistant_turn.id),
                 content_html=content_html,
                 sdanswer_blocks=blocks,
-                citations=citations,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
@@ -550,7 +547,6 @@ async def _run_agent_turn(
     db_session.add(user_turn)
     await db_session.flush()
 
-    hits = begin_run()
     try:
         session = await resource_agent.run(
             question,
@@ -579,16 +575,13 @@ async def _run_agent_turn(
 
     if not isinstance(answer_text, str):
         answer_text = getattr(answer_text, "output", None) or str(answer_text)
-    citations = await _resolve_citations(db_session, hits)
-    usage = None
 
     assistant_turn = AgentMessage(
         conversation_id=conversation.id,
         sequence=last_seq + 2,
         role="assistant",
         content=answer_text,
-        citations=citations,
-        usage=usage,
+        citations=[],
     )
     db_session.add(assistant_turn)
     return assistant_turn

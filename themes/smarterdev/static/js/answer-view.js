@@ -43,32 +43,6 @@
     return art;
   }
 
-  function renderCitations(citations) {
-    if (!citations || !citations.length) return '';
-    var cards = citations.map(function (c) {
-      var meta = '';
-      if (c.learning_type) meta += '<span class="ai-citation-type">' + escapeHtml(c.learning_type) + '</span>';
-      if (c.byline) meta += '<span class="ai-citation-byline">' + escapeHtml(c.byline) + '</span>';
-      var trackAttr = c.track_key ? ' data-track-key="' + escapeHtml(c.track_key) + '"' : '';
-      return (
-        '<article class="ai-citation-card">' +
-        '<a class="ai-citation-link" href="' + escapeHtml(c.url) + '"' + trackAttr +
-        ' target="_blank" rel="noopener" data-sk-no-spa>' +
-        '<h3 class="ai-citation-title">' + escapeHtml(c.title) + '</h3>' +
-        '</a>' +
-        '<p class="ai-citation-meta">' + meta + '</p>' +
-        (c.blurb ? '<p class="ai-citation-blurb">' + escapeHtml(c.blurb) + '</p>' : '') +
-        '</article>'
-      );
-    }).join('');
-    return (
-      '<div class="ai-citations">' +
-      '<p class="ai-citations-label">// sources</p>' +
-      '<div class="ai-citation-grid">' + cards + '</div>' +
-      '</div>'
-    );
-  }
-
   function renderAssistantTurn(msg, answerUrl) {
     var body = msg.content_html || escapeHtml(msg.content || '');
     var hasBlocks = Array.isArray(msg.sdanswer_blocks) && msg.sdanswer_blocks.length > 0;
@@ -82,7 +56,6 @@
         JSON.stringify(msg.sdanswer_blocks).replace(/</g, '\\u003c') +
         '<\/script>'
       : '';
-    var citationsHtml = hasBlocks ? '' : renderCitations(msg.citations || []);
     var shareUrl = (answerUrl || '') + (msg.id ? '#turn-' + msg.id : '');
     art.innerHTML =
       '<header class="ai-turn-head">' +
@@ -96,9 +69,8 @@
       '</header>' +
       '<div class="ai-turn-body ai-turn-answer markdown-body">' + body + '</div>' +
       payloadScript +
-      citationsHtml +
       '<footer class="ai-turn-actions">' +
-        '<button type="button" class="ai-turn-action" data-ai-copy aria-label="Copy answer as markdown">' +
+        '<button type="button" class="ai-turn-action" data-ai-copy aria-label="Copy answer">' +
           '<span class="ai-turn-action-label" data-default>COPY</span>' +
           '<span class="ai-turn-action-label" data-copied hidden>COPIED ✓</span>' +
         '</button>' +
@@ -107,17 +79,6 @@
           '<span class="ai-turn-action-label" data-copied hidden>COPIED ✓</span>' +
         '</button>' +
       '</footer>';
-    // Stash the raw markdown in a <template> so the copy button can read it
-    // back verbatim without HTML escaping issues.
-    var tpl = document.createElement('template');
-    tpl.className = 'ai-turn-markdown';
-    tpl.textContent = msg.content || '';
-    var bodyEl = art.querySelector('.ai-turn-body');
-    if (bodyEl && bodyEl.parentNode) {
-      bodyEl.parentNode.insertBefore(tpl, bodyEl.nextSibling);
-    } else {
-      art.appendChild(tpl);
-    }
     return art;
   }
 
