@@ -66,7 +66,10 @@
                       maxlength="1000" required></textarea>
             <div class="ai-followup-row">
                 <span class="ai-followup-hint" data-error hidden></span>
-                <span class="ai-followup-counter">
+                <span class="ai-followup-counter"
+                      data-ai-followup-counter
+                      data-remaining="{{ quota_state.followups_remaining }}"
+                      data-max="{{ quota_state.max_followups }}">
                     {{ quota_state.followups_remaining }}/{{ quota_state.max_followups }} follow-ups left
                 </span>
                 <button type="submit" class="ai-followup-btn">

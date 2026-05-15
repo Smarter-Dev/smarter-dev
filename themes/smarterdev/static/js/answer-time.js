@@ -275,6 +275,11 @@
     }, 50);
 
     assistant.setAttribute('data-status', 'done');
+    // Strip the placeholder marker so a *next* follow-up's empty
+    // assistant turn becomes the one matchThread / revealAnswer picks
+    // up. Without this, the just-resolved turn would keep stealing
+    // every subsequent run-complete.
+    assistant.removeAttribute('data-ai-assistant-turn');
   }
 
   function showError(thread, detail) {
