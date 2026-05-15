@@ -95,7 +95,7 @@ def _enforce_rate(bucket: dict[str, list[float]], key: str, limit: int) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _resources_weekly_quota(perms) -> tuple[int, int]:
+def resources_weekly_quota(perms) -> tuple[int, int]:
     """Return ``(max_questions_per_week, max_followups_per_answer)``."""
     if (
         "administrator" in perms.permissions
@@ -107,6 +107,47 @@ def _resources_weekly_quota(perms) -> tuple[int, int]:
     if "sudo-r" in perms.roles:
         return 20, 10
     return 3, 0
+
+
+# Back-compat alias (the leading underscore version was the original name).
+_resources_weekly_quota = resources_weekly_quota
+
+
+async def resources_quota_state(
+    db_session: AsyncSession,
+    user_id: UUID,
+    *,
+    conversation_id: UUID | None = None,
+) -> dict:
+    """Compute the user's current resources-agent quota state.
+
+    Returns a dict with:
+      - ``max_questions``: weekly cap for the user's tier
+      - ``used_questions``: count of resources conversations in the last 7d
+      - ``questions_remaining``: max - used (>= 0)
+      - ``max_followups``: per-answer follow-up cap for the user's tier
+      - ``used_followups``: follow-ups already made on the given conversation
+        (0 when ``conversation_id`` is None)
+      - ``followups_remaining``: max - used (>= 0)
+    """
+    perms = await get_user_permissions(db_session, user_id)
+    max_q, max_f = resources_weekly_quota(perms)
+    used_q = await _count_questions_last_week(db_session, user_id, "resources")
+
+    if conversation_id is not None:
+        user_turns = await _count_user_turns(db_session, conversation_id)
+        used_f = max(0, user_turns - 1)
+    else:
+        used_f = 0
+
+    return {
+        "max_questions": max_q,
+        "used_questions": used_q,
+        "questions_remaining": max(0, max_q - used_q),
+        "max_followups": max_f,
+        "used_followups": used_f,
+        "followups_remaining": max(0, max_f - used_f),
+    }
 
 
 async def _count_questions_last_week(

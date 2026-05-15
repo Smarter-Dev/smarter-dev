@@ -58,7 +58,7 @@
             {% endfor %}
         {% endif %}
 
-        {% if is_owner %}
+        {% if is_owner and quota_state and quota_state.followups_remaining > 0 %}
         <form id="ai-followup-form" class="ai-followup" novalidate>
             <label for="ai-followup-input" class="visually-hidden">Follow-up question</label>
             <textarea id="ai-followup-input" name="question"
@@ -66,11 +66,24 @@
                       maxlength="1000" required></textarea>
             <div class="ai-followup-row">
                 <span class="ai-followup-hint" data-error hidden></span>
+                <span class="ai-followup-counter">
+                    {{ quota_state.followups_remaining }}/{{ quota_state.max_followups }} follow-ups left
+                </span>
                 <button type="submit" class="ai-followup-btn">
                     ASK <span aria-hidden="true">→</span>
                 </button>
             </div>
         </form>
+        {% elif is_owner %}
+        <p class="ai-followup-closed">
+            {% if quota_state and quota_state.max_followups <= 0 %}
+            Follow-ups aren't enabled for your tier.
+            <a href="/resources">Ask a new question on /resources →</a>
+            {% else %}
+            You've used all {{ quota_state.max_followups }} follow-ups on this answer.
+            <a href="/resources">Start a fresh question on /resources →</a>
+            {% endif %}
+        </p>
         {% else %}
         <p class="ai-followup-closed">
             This is a read-only view of someone else's conversation.
