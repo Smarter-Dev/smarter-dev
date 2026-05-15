@@ -70,6 +70,12 @@ async def generate_title(question: str) -> str | None:
     """Generate a title for ``question`` via Gemini. ``None`` on failure."""
     if not (question or "").strip():
         return None
+    # Local debug short-circuit: skip the Gemini call and return a synthetic
+    # title derived from the question's first 6 words so we can iterate on
+    # the live UI without burning Flash Lite tokens.
+    if os.getenv("TITLE_AGENT_STUB", "").strip().lower() in {"1", "true", "yes"}:
+        words = question.strip().split()[:6]
+        return _sanitize(" ".join(w.capitalize() for w in words)) or "Synthetic Title"
     try:
         result = await title_agent.run(question.strip())
     except Exception:  # noqa: BLE001
