@@ -640,8 +640,13 @@
 }
 
 /* ── Recent answers history (gated on sudo-r+) ────────────────────────────
-   Default: inline above the collections grid on narrow viewports.
-   Wide viewports (>=1400px): pinned to the left gutter as a sticky rail. */
+   Default: inline above the collections grid in the page flow.
+   Wide viewports: pinned to the left gutter as a fixed rail — but only
+   when the viewport is wide enough that the rail (~260px from the left)
+   doesn't overlap the centered content (.container max-width 1080px /
+   .ai-answer.vc-wrap max-width 1200px). Need viewport ≥ 1200 + 2*(260+32
+   gap) ≈ 1784px before fixing. Below that, stay inline to avoid the
+   "sidebar floating over the answer text" bug. */
 .rsa-history {
   margin: 0 0 1.75rem;
   padding: .9rem 1rem;
@@ -684,7 +689,7 @@
 }
 .rsa-history-link:hover { color: var(--cyan); }
 
-@media (min-width: 1400px) {
+@media (min-width: 1800px) {
   .rsa-history {
     position: fixed;
     top: 7.5rem;
