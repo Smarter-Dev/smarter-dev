@@ -372,4 +372,39 @@
     format: formatStamp,
     registerLiveConversation: registerLiveConversation,
   };
+
+  // ── Recent-answers drawer toggle ───────────────────────────────────
+  // The sidebar is fixed-positioned. On wide viewports it's pinned open
+  // and the toggle/backdrop are display:none. Below 1800px the toggle
+  // slides the drawer in and the backdrop catches clicks to close.
+  function initHistoryDrawer() {
+    var toggle = document.querySelector('.rsa-history-toggle');
+    var drawer = document.querySelector('.rsa-history');
+    var backdrop = document.querySelector('[data-rsa-history-backdrop]');
+    if (!toggle || !drawer) return;
+    function open() {
+      drawer.classList.add('is-open');
+      document.body.classList.add('rsa-history-open');
+      toggle.setAttribute('aria-expanded', 'true');
+    }
+    function close() {
+      drawer.classList.remove('is-open');
+      document.body.classList.remove('rsa-history-open');
+      toggle.setAttribute('aria-expanded', 'false');
+    }
+    function toggleOpen() {
+      if (drawer.classList.contains('is-open')) close();
+      else open();
+    }
+    toggle.addEventListener('click', toggleOpen);
+    if (backdrop) backdrop.addEventListener('click', close);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && drawer.classList.contains('is-open')) close();
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initHistoryDrawer);
+  } else {
+    initHistoryDrawer();
+  }
 })();
