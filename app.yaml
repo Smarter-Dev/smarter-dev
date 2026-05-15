@@ -111,6 +111,7 @@ workers:
     - agents
   imports:
     - smarter_dev.web.resources_agent
+    - smarter_dev.web.title_agent
 
 agents:
   default_queue: agents
