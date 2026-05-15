@@ -69,6 +69,11 @@ if str(REPO) not in sys.path:
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import convert_postgres_url_for_asyncpg
+# Reuse the production resources-agent authoring prompt so the eval
+# author's tone, posture, response shape, and rich-block rules match
+# what users see in prod. The researcher prompt stays bespoke (the
+# researcher's job is a strict subset — find sources, no authoring).
+from smarter_dev.web.resources_agent import _SYSTEM_PROMPT as _PROD_AUTHOR_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -254,20 +259,12 @@ Aim for 3-8 bullets. Drop entries that aren't a genuine fit, even if
 they came back from search. No preamble, no closing, no headings —
 just the bullet list."""
 
-_AUTHOR_PROMPT = """\
-You are the AUTHOR step in a two-stage pipeline. A researcher has
-already searched the Smarter Dev curated catalog and given you a
-compact list of relevant entries. Your job is to write the final
-answer for the user.
-
-Style: friendly, direct, opinionated. Use contractions. Lead with the
-answer in the first sentence. Use inline markdown links to cite the
-researcher's entries — never invent URLs, only use URLs from the
-research block. Keep the answer to 1-3 short paragraphs. If the
-research is thin, say so plainly rather than padding.
-
-You will see the user prompt and the research findings in the user
-turn that follows. Output JUST the answer markdown — no preamble."""
+# The author runs the production resources-agent system prompt verbatim
+# (imported above as `_PROD_AUTHOR_PROMPT`) so we're testing the same
+# voice + response-shape + rich-block rules we ship. The harness author
+# has no tools — instead the user turn carries the research findings as
+# if they came from a prior `search_resources` / `read_source` sweep.
+_AUTHOR_PROMPT = _PROD_AUTHOR_PROMPT
 
 
 # ---------------------------------------------------------------------------
@@ -338,11 +335,19 @@ async def _run_author(
     model_id: str, prompt: str, research: str
 ) -> CallResult:
     agent = Agent(build_model(model_id), system_prompt=_AUTHOR_PROMPT)
+    # The production prompt tells the agent to call `search_resources` /
+    # `read_source` itself. In the harness we've already done that and
+    # we feed the results in via the user turn. Lead the user turn with
+    # a short framing note so the model uses the supplied catalog and
+    # doesn't try to invent URLs or apologise for not searching.
     user_turn = (
-        "# User prompt\n\n"
-        f"{prompt}\n\n"
-        "# Researcher findings\n\n"
-        f"{research}"
+        "Pre-fetched catalog (treat these as your `search_resources` + "
+        "`read_source` results — use any URL here, never invent new "
+        "ones; level: senior):\n\n"
+        f"{research}\n\n"
+        "---\n\n"
+        "User question:\n\n"
+        f"{prompt}"
     )
     t0 = time.monotonic()
     result = await agent.run(user_turn)
