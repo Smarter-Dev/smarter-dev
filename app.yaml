@@ -45,6 +45,7 @@ controllers:
   - smarter_dev.web.resources_controller:resources_index
   - smarter_dev.web.agent_api:ResourcesAgentApiController
   - smarter_dev.web.agent_api:AgentConversationApiController
+  - smarter_dev.web.agent_api:AgentMessageApiController
   - smarter_dev.web.agent_view_controller:answer_view
   - smarter_dev.web.vibe_courses_controller:vibe_courses
   - smarter_dev.web.vibe_courses_controller:vibe_courses_legacy_redirect

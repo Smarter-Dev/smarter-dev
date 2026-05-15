@@ -337,49 +337,73 @@
   });
 
   /* ── Copy-answer button ──────────────────────────────────────────────
-     Reads the visible answer text out of the rendered body. We dropped
-     the markdown-stash <template> to keep the HTML source clean — the
-     tradeoff is that copies are plaintext (no list markers, no fences)
-     instead of the original markdown.
+     Fetches the raw markdown from `/v2/api/agent/messages/{id}/markdown`
+     on click and writes it to the clipboard. Keeps the HTML source clean
+     (no duplicate <template> stash per turn) while still giving real
+     markdown to whoever pastes — lists, code fences, sdanswer blocks.
+
+     Falls back to `bodyEl.innerText` if the turn has no `data-turn-id`
+     (e.g. a freshly-rendered live turn that hasn't been persisted yet)
+     or the fetch fails.
   */
+  function flashCopied(btn) {
+    var def = btn.querySelector('[data-default]');
+    var ok = btn.querySelector('[data-copied]');
+    if (def) def.setAttribute('hidden', '');
+    if (ok) ok.removeAttribute('hidden');
+    btn.classList.add('is-copied');
+    setTimeout(function () {
+      if (def) def.removeAttribute('hidden');
+      if (ok) ok.setAttribute('hidden', '');
+      btn.classList.remove('is-copied');
+    }, 1600);
+  }
+
+  function writeAndFlash(text, btn) {
+    if (!text) return;
+    var write = navigator.clipboard && navigator.clipboard.writeText
+      ? navigator.clipboard.writeText(text)
+      : Promise.reject(new Error('clipboard unavailable'));
+    write.then(function () { flashCopied(btn); }).catch(function () {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); flashCopied(btn); } catch (e) { /* swallow */ }
+      document.body.removeChild(ta);
+    });
+  }
+
   document.addEventListener('click', function (event) {
     var btn = event.target.closest && event.target.closest('[data-ai-copy]');
     if (!btn) return;
     event.preventDefault();
     var turn = btn.closest('.ai-turn-assistant');
     if (!turn) return;
-    var body = turn.querySelector('.ai-turn-body');
-    var md = body ? (body.innerText || body.textContent || '') : '';
-    md = md.replace(/^\n+/, '').replace(/\n+$/, '');
-    if (!md) return;
-
-    var write = navigator.clipboard && navigator.clipboard.writeText
-      ? navigator.clipboard.writeText(md)
-      : Promise.reject(new Error('clipboard unavailable'));
-
-    write.then(function () {
-      var def = btn.querySelector('[data-default]');
-      var ok = btn.querySelector('[data-copied]');
-      if (def) def.setAttribute('hidden', '');
-      if (ok) ok.removeAttribute('hidden');
-      btn.classList.add('is-copied');
-      setTimeout(function () {
-        if (def) def.removeAttribute('hidden');
-        if (ok) ok.setAttribute('hidden', '');
-        btn.classList.remove('is-copied');
-      }, 1600);
-    }).catch(function () {
-      // Fallback: use a hidden textarea + execCommand for older browsers.
-      var ta = document.createElement('textarea');
-      ta.value = md;
-      ta.setAttribute('readonly', '');
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); } catch (e) { /* swallow */ }
-      document.body.removeChild(ta);
-    });
+    var turnId = turn.getAttribute('data-turn-id') ||
+                 (turn.id && turn.id.indexOf('turn-') === 0 ? turn.id.slice(5) : null);
+    if (turnId) {
+      fetch('/v2/api/agent/messages/' + encodeURIComponent(turnId) + '/markdown', {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'text/markdown, text/plain' },
+      })
+        .then(function (r) { return r.ok ? r.text() : Promise.reject(new Error(r.status)); })
+        .then(function (md) { writeAndFlash(md.replace(/^\n+/, '').replace(/\n+$/, ''), btn); })
+        .catch(function () {
+          // Fallback to rendered text if the API roundtrip fails.
+          var body = turn.querySelector('.ai-turn-body');
+          var md = body ? (body.innerText || body.textContent || '') : '';
+          writeAndFlash(md.replace(/^\n+/, '').replace(/\n+$/, ''), btn);
+        });
+      return;
+    }
+    // No id yet — use the rendered text.
+    var body2 = turn.querySelector('.ai-turn-body');
+    var md2 = body2 ? (body2.innerText || body2.textContent || '') : '';
+    writeAndFlash(md2.replace(/^\n+/, '').replace(/\n+$/, ''), btn);
   });
 
   window.SDAnswer = { hydrate: hydrateArticle, hydrateAll: hydrateAll };
