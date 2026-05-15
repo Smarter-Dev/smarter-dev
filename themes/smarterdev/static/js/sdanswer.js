@@ -337,9 +337,10 @@
   });
 
   /* ── Copy-answer button ──────────────────────────────────────────────
-     Each assistant turn carries a <template class="ai-turn-markdown"> with
-     the raw markdown. The COPY button writes that to the clipboard and
-     flips its label briefly to confirm.
+     Reads the visible answer text out of the rendered body. We dropped
+     the markdown-stash <template> to keep the HTML source clean — the
+     tradeoff is that copies are plaintext (no list markers, no fences)
+     instead of the original markdown.
   */
   document.addEventListener('click', function (event) {
     var btn = event.target.closest && event.target.closest('[data-ai-copy]');
@@ -347,14 +348,8 @@
     event.preventDefault();
     var turn = btn.closest('.ai-turn-assistant');
     if (!turn) return;
-    var tpl = turn.querySelector('template.ai-turn-markdown');
-    var md = '';
-    if (tpl && tpl.content) {
-      md = tpl.content.textContent || '';
-    } else {
-      var body = turn.querySelector('.ai-turn-body');
-      md = body ? (body.textContent || '') : '';
-    }
+    var body = turn.querySelector('.ai-turn-body');
+    var md = body ? (body.innerText || body.textContent || '') : '';
     md = md.replace(/^\n+/, '').replace(/\n+$/, '');
     if (!md) return;
 
