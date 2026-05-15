@@ -47,10 +47,15 @@ _FENCE_RE = re.compile(
     re.DOTALL,
 )
 
-# Card kinds that the agent sometimes emits at the top level without wrapping
-# them in a `{"type": "cards", "cards": [...]}` envelope. We accept those and
-# wrap them ourselves so a missing wrapper doesn't dump raw JSON on the page.
-_BARE_CARD_KINDS = {"article", "snippet", "collection", "tradeoff", "prereq", "gotcha"}
+# Card kinds the agent can emit either at the top level OR inside a
+# `{"type": "cards", "cards": [...]}` envelope. When emitted top-level we wrap
+# them into a single-card row so the rest of the pipeline only deals with
+# `cards` and `path`. Both `cards` and `path` themselves cannot nest inside a
+# cards row.
+_BARE_CARD_KINDS = {
+    "article", "snippet", "collection", "tradeoff", "prereq", "gotcha",
+    "links", "hint", "tip", "warning",
+}
 
 
 async def enrich_answer(
@@ -74,22 +79,32 @@ async def enrich_answer(
         raw_blocks.append(_decode_block(match.group(1)))
 
     needed_urls: set[str] = set()
+
+    def _gather_card(card: dict) -> None:
+        kind = card.get("type")
+        if kind == "article" and card.get("url"):
+            needed_urls.add(card["url"])
+        elif kind == "collection":
+            for link in card.get("links") or []:
+                if isinstance(link, str):
+                    needed_urls.add(link)
+        elif kind == "prereq":
+            for item in card.get("items") or []:
+                if isinstance(item, dict) and isinstance(item.get("url"), str):
+                    needed_urls.add(item["url"])
+        elif kind == "links":
+            for link in card.get("links") or []:
+                if isinstance(link, dict) and isinstance(link.get("url"), str):
+                    needed_urls.add(link["url"])
+
     for block in raw_blocks:
         if not block.get("_ok"):
             continue
         payload = block["payload"]
         if payload.get("type") == "cards":
             for card in payload.get("cards") or []:
-                if card.get("type") == "article" and card.get("url"):
-                    needed_urls.add(card["url"])
-                elif card.get("type") == "collection":
-                    for link in card.get("links") or []:
-                        if isinstance(link, str):
-                            needed_urls.add(link)
-                elif card.get("type") == "prereq":
-                    for item in card.get("items") or []:
-                        if isinstance(item, dict) and isinstance(item.get("url"), str):
-                            needed_urls.add(item["url"])
+                if isinstance(card, dict):
+                    _gather_card(card)
         elif payload.get("type") == "path":
             for link in payload.get("links") or []:
                 url = _coerce_path_url(link)
@@ -227,9 +242,83 @@ def _resolve_cards(
             resolved = _resolve_gotcha(card)
             if resolved is not None:
                 out.append(resolved)
+        elif kind == "links":
+            resolved = _resolve_links(card, sources_by_url)
+            if resolved is not None:
+                out.append(resolved)
+        elif kind in {"hint", "tip", "warning"}:
+            resolved = _resolve_callout(card, kind)
+            if resolved is not None:
+                out.append(resolved)
         if len(out) >= 4:
             break
     return out
+
+
+def _resolve_links(
+    card: dict, sources_by_url: dict[str, ResourceSource]
+) -> dict | None:
+    """A titled, vertical list of labelled URLs.
+
+    Each link entry may be a string URL or an object
+    ``{label, url, description?}``. URLs may be curated (we'll pull the
+    title from `resource_sources`) or freeform (we use the agent's
+    `label` verbatim). At least one valid entry required.
+    """
+    raw_links = card.get("links") or []
+    if not isinstance(raw_links, list):
+        return None
+    items: list[dict] = []
+    seen: set[str] = set()
+    for entry in raw_links:
+        if isinstance(entry, str):
+            url = _trim_str(entry, 500)
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            src = sources_by_url.get(url)
+            label = src.title if src else url
+            items.append({"label": label, "url": url})
+        elif isinstance(entry, dict):
+            url_raw = entry.get("url")
+            url = _trim_str(url_raw, 500) if isinstance(url_raw, str) else None
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            agent_label = _trim_str(entry.get("label"), 200)
+            src = sources_by_url.get(url)
+            label = agent_label or (src.title if src else url)
+            description = _trim_str(entry.get("description"), 280) or ""
+            items.append({
+                "label": label,
+                "url": url,
+                "description": description,
+            })
+        if len(items) >= 8:
+            break
+    if not items:
+        return None
+    return {
+        "type": "links",
+        "title": _trim_str(card.get("title"), 200) or "",
+        "items": items,
+    }
+
+
+def _resolve_callout(card: dict, kind: str) -> dict | None:
+    """Render `hint`, `tip`, `warning` as a single coloured callout.
+
+    Each requires a `body` (the message). Optional `title` for a short
+    one-line header above the body.
+    """
+    body = _trim_str(card.get("body"), 800)
+    if not body:
+        return None
+    return {
+        "type": kind,
+        "title": _trim_str(card.get("title"), 160) or "",
+        "body": body,
+    }
 
 
 def _source_to_article_card(src: ResourceSource) -> dict:

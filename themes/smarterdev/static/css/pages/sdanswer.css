@@ -550,3 +550,133 @@ li.sda-prereq-item-link a:hover {
 }
 
 body.sda-modal-open { overflow: hidden; }
+
+/* ── Links card ────────────────────────────────────────────────────────
+   A titled vertical list of `{label, url, description?}` rows. Spans
+   the full cards row when used alone (the agent typically uses it as
+   the single rich block in an answer). */
+.sda-card-links {
+  grid-column: 1 / -1;
+  cursor: default;
+}
+.sda-card-links:hover {
+  border-color: rgba(0,212,255,.12);
+  background: rgba(2,4,8,.55);
+  transform: none;
+}
+ul.sda-link-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+}
+li.sda-link-row {
+  margin: 0;
+  padding: 0;
+}
+.sda-link-anchor {
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  padding: .6rem .75rem;
+  text-decoration: none;
+  color: inherit;
+  border-left: 2px solid rgba(0,212,255,.18);
+  background: rgba(0,212,255,.02);
+  border-radius: 0 2px 2px 0;
+  transition: border-color .15s, background .15s;
+}
+.sda-link-anchor:hover {
+  border-left-color: var(--cyan);
+  background: rgba(0,212,255,.06);
+}
+.sda-link-anchor:hover .sda-link-label { color: var(--cyan); }
+.sda-link-anchor:hover .sda-link-arrow { color: var(--cyan); }
+.sda-link-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.sda-link-label {
+  font-family: var(--heading);
+  font-size: .85rem;
+  letter-spacing: .01em;
+  color: var(--white);
+  line-height: 1.35;
+  transition: color .15s;
+}
+.sda-link-desc {
+  font-family: var(--body);
+  font-size: .8rem;
+  line-height: 1.5;
+  color: rgba(255,255,255,.6);
+  margin-top: .2rem;
+}
+.sda-link-arrow {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: .9rem;
+  color: var(--mid);
+  transition: color .15s;
+}
+
+/* ── Hint / Tip / Warning callouts ─────────────────────────────────────
+   One paragraph + optional one-line title, tinted by kind. Span the full
+   cards row by default (callouts read better wide). */
+.sda-card-callout {
+  grid-column: 1 / -1;
+  cursor: default;
+}
+.sda-card-callout:hover {
+  background: rgba(2,4,8,.55);
+  transform: none;
+}
+.sda-callout-body {
+  font-family: var(--body);
+  font-size: .92rem;
+  line-height: 1.6;
+  color: rgba(255,255,255,.85);
+  margin: 0;
+}
+
+/* Hint = cyan/blue, informational. */
+.sda-card-callout-hint {
+  border-color: rgba(0,212,255,.22);
+  background: rgba(0,212,255,.03);
+  border-left: 3px solid var(--cyan);
+}
+.sda-card-callout-hint:hover { border-color: rgba(0,212,255,.22); }
+.sda-chip-callout-hint {
+  color: var(--cyan);
+  background: rgba(0,212,255,.08);
+  border: 1px solid rgba(0,212,255,.3);
+}
+
+/* Tip = green, "here's the cheat code". */
+.sda-card-callout-tip {
+  border-color: rgba(89, 230, 144, .25);
+  background: rgba(89, 230, 144, .03);
+  border-left: 3px solid #59e690;
+}
+.sda-card-callout-tip:hover { border-color: rgba(89, 230, 144, .25); }
+.sda-chip-callout-tip {
+  color: #79f3a8;
+  background: rgba(89, 230, 144, .08);
+  border: 1px solid rgba(89, 230, 144, .35);
+}
+
+/* Warning = amber/rose, "watch out". */
+.sda-card-callout-warning {
+  border-color: rgba(255, 184, 92, .28);
+  background: rgba(255, 184, 92, .03);
+  border-left: 3px solid #ffb85c;
+}
+.sda-card-callout-warning:hover { border-color: rgba(255, 184, 92, .28); }
+.sda-chip-callout-warning {
+  color: #ffc97b;
+  background: rgba(255, 184, 92, .08);
+  border: 1px solid rgba(255, 184, 92, .4);
+}

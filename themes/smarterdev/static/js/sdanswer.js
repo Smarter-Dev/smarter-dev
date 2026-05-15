@@ -164,6 +164,49 @@
     );
   }
 
+  function renderLinksCard(card) {
+    var items = (card.items || []).map(function (item) {
+      var desc = item.description
+        ? '<span class="sda-link-desc">' + esc(item.description) + '</span>'
+        : '';
+      return (
+        '<li class="sda-link-row">' +
+        '<a class="sda-link-anchor" href="' + esc(item.url) + '" target="_blank" rel="noopener" data-sk-no-spa>' +
+        '<span class="sda-link-text">' +
+        '<span class="sda-link-label">' + esc(item.label) + '</span>' +
+        desc +
+        '</span>' +
+        '<span class="sda-link-arrow" aria-hidden="true">↗</span>' +
+        '</a>' +
+        '</li>'
+      );
+    }).join('');
+    return (
+      '<div class="sda-card sda-card-links">' +
+      '<div class="sda-card-meta">' +
+      '<span class="sda-chip sda-chip-type">LINKS</span>' +
+      '</div>' +
+      (card.title ? '<h3 class="sda-card-title">' + esc(card.title) + '</h3>' : '') +
+      '<ul class="sda-link-list">' + items + '</ul>' +
+      '</div>'
+    );
+  }
+
+  function renderCalloutCard(card) {
+    // hint / tip / warning — same shape, different tint.
+    var kind = card.type;
+    var label = kind.toUpperCase();
+    return (
+      '<div class="sda-card sda-card-callout sda-card-callout-' + esc(kind) + '">' +
+      '<div class="sda-card-meta">' +
+      '<span class="sda-chip sda-chip-type sda-chip-callout-' + esc(kind) + '">' + label + '</span>' +
+      '</div>' +
+      (card.title ? '<h3 class="sda-card-title">' + esc(card.title) + '</h3>' : '') +
+      '<p class="sda-callout-body">' + esc(card.body) + '</p>' +
+      '</div>'
+    );
+  }
+
   function renderCards(payload, blockId) {
     var cards = (payload.cards || []).map(function (card, i) {
       var cardIndex = blockId + ':' + i;
@@ -172,6 +215,10 @@
       if (card.type === 'tradeoff')   return renderTradeoffCard(card);
       if (card.type === 'prereq')     return renderPrereqCard(card);
       if (card.type === 'gotcha')     return renderGotchaCard(card);
+      if (card.type === 'links')      return renderLinksCard(card);
+      if (card.type === 'hint' || card.type === 'tip' || card.type === 'warning') {
+        return renderCalloutCard(card);
+      }
       return renderArticleCard(card);
     }).join('');
     return '<div class="sda-cards-row">' + cards + '</div>';
