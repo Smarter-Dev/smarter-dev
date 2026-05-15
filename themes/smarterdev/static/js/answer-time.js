@@ -296,6 +296,19 @@
   function handleAgentEvent(data) {
     if (data.type === 'agent_title_updated') {
       var thread = matchThread(data);
+      var threadCid = (function () {
+        var t = document.querySelector('.ai-thread');
+        return t ? t.getAttribute('data-conversation-id') : null;
+      })();
+      try {
+        console.log('[ai title]', {
+          event_cid: data.conversation_id,
+          thread_cid: threadCid,
+          live_ids: Array.from(liveConversationIds),
+          matched: !!thread,
+          title: data.title,
+        });
+      } catch (_) {}
       if (!thread) return false;
       var newTitle = (data.title || '').trim();
       if (!newTitle) return true;
@@ -344,6 +357,7 @@
   function registerLiveConversation(id) {
     if (!id) return;
     liveConversationIds.add(String(id));
+    try { console.log('[ai title] registerLiveConversation', String(id)); } catch (_) {}
     // Replay any events that arrived before the registration. Strict-match
     // first; bumped to live-match on the second pass via matchThread's
     // whitelist branch.
