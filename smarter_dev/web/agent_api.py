@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from collections import defaultdict
 from typing import Optional
@@ -277,19 +278,37 @@ def _kick_agent_run(
 
     async def _run() -> None:
         try:
-            hits = begin_run()
-            session = await resource_agent.run(
-                question,
-                deps_ref={
-                    "conversation_id": str(conversation_id),
-                    "owner_user_id": str(owner_user_id),
-                },
-            )
-            answer_text = await session.result()
-            if not isinstance(answer_text, str):
+            hits: list[dict] = []
+            stub = os.getenv("RESOURCE_AGENT_STUB", "").strip().lower() in {
+                "1", "true", "yes",
+            }
+            if stub:
+                # Local dev/debug short-circuit: skip the real Gemini call
+                # and any tool invocations, sleep briefly to mimic latency,
+                # and return a fixed answer. Keeps the title agent + the
+                # rest of the streaming flow honest.
+                await asyncio.sleep(2.0)
                 answer_text = (
-                    getattr(answer_text, "output", None) or str(answer_text)
+                    "[stub] resource_agent is disabled via "
+                    "`RESOURCE_AGENT_STUB=1`; no Gemini call was made.\n\n"
+                    "This is a placeholder answer so we can debug the live "
+                    "title typewriter and run-complete reveal without "
+                    "burning tokens."
                 )
+            else:
+                hits = begin_run()
+                session = await resource_agent.run(
+                    question,
+                    deps_ref={
+                        "conversation_id": str(conversation_id),
+                        "owner_user_id": str(owner_user_id),
+                    },
+                )
+                answer_text = await session.result()
+                if not isinstance(answer_text, str):
+                    answer_text = (
+                        getattr(answer_text, "output", None) or str(answer_text)
+                    )
 
             async with get_skrift_db_session_context() as bg_session:
                 citations = await _resolve_citations(bg_session, hits)

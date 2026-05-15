@@ -66,8 +66,12 @@
     var askerLabel = (askerName || 'YOU').toUpperCase();
     var wrap = document.createElement('div');
     wrap.className = 'ai-answer-live';
+    // NB: no `.reveal` on any of these — that class is `opacity: 0` until
+    // the global IntersectionObserver flips it to `.visible`, but the
+    // observer only watches elements present at page-load. Anything we
+    // inject here would otherwise stay invisible forever.
     wrap.innerHTML =
-      '<header class="vc-hero reveal ai-answer-hero" data-ai-live-hero>' +
+      '<header class="vc-hero ai-answer-hero" data-ai-live-hero>' +
         '<p class="ai-answer-eyebrow">// smarter dev · gemini 3.1 flash lite</p>' +
         '<h1 class="vc-hero-title ai-answer-title">' +
           '<span class="ai-title-text"></span>' +
