@@ -118,12 +118,28 @@
   // ---------------------------------------------------------------------
 
   function matchThread(data) {
-    var thread = document.querySelector('.ai-thread[data-conversation-id]');
-    if (!thread) return null;
-    if (thread.getAttribute('data-conversation-id') !== data.conversation_id) {
-      return null;
+    // Strict match first: thread whose `data-conversation-id` equals the
+    // notification's conversation_id. Handles all post-load views and the
+    // live-morph view once the API ack has stamped the id.
+    var threads = document.querySelectorAll('.ai-thread');
+    for (var i = 0; i < threads.length; i++) {
+      var cid = threads[i].getAttribute('data-conversation-id');
+      if (cid && cid === data.conversation_id) return threads[i];
     }
-    return thread;
+    // Fallback: in the live-morph window, an event may arrive before the
+    // POST ack has come back with the id. The morph sets `body.ai-live`,
+    // and there's only ever one un-stamped thread on the page at that
+    // moment, so it's safe to claim it for any incoming notification.
+    if (document.body.classList.contains('ai-live')) {
+      for (var j = 0; j < threads.length; j++) {
+        if (!threads[j].getAttribute('data-conversation-id')) {
+          // Stamp it so subsequent events take the fast path.
+          threads[j].setAttribute('data-conversation-id', data.conversation_id);
+          return threads[j];
+        }
+      }
+    }
+    return null;
   }
 
   function escapeHtml(s) {
