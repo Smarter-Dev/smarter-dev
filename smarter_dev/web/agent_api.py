@@ -36,6 +36,7 @@ from msgspec import Struct
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from skrift.auth.services import get_user_permissions
 from skrift.auth.session_keys import SESSION_USER_ID
 from skrift.lib.markdown import render_markdown
 from skrift.lib.notifications import notify_user
@@ -80,6 +81,108 @@ def _enforce_rate(bucket: dict[str, list[float]], key: str, limit: int) -> None:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Weekly quotas (the per-minute `_enforce_rate` above is for anti-spam burst
+# control; these gate sustained usage per role tier).
+#
+# Tiers (highest wins):
+#   sudo-rwx / administrator -> 50 questions/week, 10 follow-ups per answer
+#   sudo-rw                  -> 30 / 10
+#   sudo-r                   -> 20 / 10
+#   everyone else            ->  3 /  0
+# ---------------------------------------------------------------------------
+
+
+def _resources_weekly_quota(perms) -> tuple[int, int]:
+    """Return ``(max_questions_per_week, max_followups_per_answer)``."""
+    if (
+        "administrator" in perms.permissions
+        or "sudo-rwx" in perms.roles
+    ):
+        return 50, 10
+    if "sudo-rw" in perms.roles:
+        return 30, 10
+    if "sudo-r" in perms.roles:
+        return 20, 10
+    return 3, 0
+
+
+async def _count_questions_last_week(
+    db_session: AsyncSession, user_id: UUID, agent_type: str
+) -> int:
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import func
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    stmt = (
+        select(func.count(AgentConversation.id))
+        .where(AgentConversation.owner_user_id == user_id)
+        .where(AgentConversation.agent_type == agent_type)
+        .where(AgentConversation.created_at >= cutoff)
+    )
+    return int((await db_session.execute(stmt)).scalar() or 0)
+
+
+async def _count_user_turns(
+    db_session: AsyncSession, conversation_id: UUID
+) -> int:
+    from sqlalchemy import func
+
+    stmt = (
+        select(func.count(AgentMessage.id))
+        .where(AgentMessage.conversation_id == conversation_id)
+        .where(AgentMessage.role == "user")
+    )
+    return int((await db_session.execute(stmt)).scalar() or 0)
+
+
+async def _enforce_weekly_question_quota(
+    db_session: AsyncSession, request: Request, user_id: UUID
+) -> None:
+    """Raise 429 if the user has used their weekly question allowance."""
+    perms = await get_user_permissions(db_session, user_id)
+    max_questions, _ = _resources_weekly_quota(perms)
+    used = await _count_questions_last_week(db_session, user_id, "resources")
+    if used >= max_questions:
+        if max_questions <= 0:
+            detail = "Asking is not enabled for your account."
+        else:
+            detail = (
+                f"Weekly limit reached ({used}/{max_questions} questions "
+                "in the last 7 days). The window rolls forward as your "
+                "earliest question ages out."
+            )
+        raise HTTPException(
+            status_code=HTTP_429_TOO_MANY_REQUESTS, detail=detail
+        )
+
+
+async def _enforce_followup_quota(
+    db_session: AsyncSession,
+    request: Request,
+    user_id: UUID,
+    conversation_id: UUID,
+) -> None:
+    """Raise 429 if the conversation has used its follow-up allowance."""
+    perms = await get_user_permissions(db_session, user_id)
+    _, max_followups = _resources_weekly_quota(perms)
+    user_turns = await _count_user_turns(db_session, conversation_id)
+    # `user_turns` includes the original question; the follow-up budget is
+    # the additional user turns the asker is allowed to add.
+    if user_turns >= 1 + max_followups:
+        if max_followups <= 0:
+            detail = "Follow-ups aren't enabled on your account."
+        else:
+            detail = (
+                f"Follow-up limit reached ({user_turns - 1}/{max_followups} "
+                "replies in this answer). Start a fresh question on "
+                "/resources to keep going."
+            )
+        raise HTTPException(
+            status_code=HTTP_429_TOO_MANY_REQUESTS, detail=detail
+        )
 
 
 def _require_user_id(request: Request) -> UUID:
@@ -538,6 +641,7 @@ class ResourcesAgentApiController(Controller):
         """
         user_id = _require_user_id(request)
         _enforce_rate(_ask_log, str(user_id), _ASK_LIMIT)
+        await _enforce_weekly_question_quota(db_session, request, user_id)
 
         question = _validate_question(data.question)
         level = _validate_level(data.level)
@@ -614,6 +718,9 @@ class AgentConversationApiController(Controller):
                 status_code=HTTP_403_FORBIDDEN,
                 detail="Only the original asker can reply here.",
             )
+        await _enforce_followup_quota(
+            db_session, request, user_id, conversation.id
+        )
 
         # Load prior messages to feed back to the agent as message_history.
         msg_result = await db_session.execute(
