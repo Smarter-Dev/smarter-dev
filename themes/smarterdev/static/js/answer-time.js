@@ -117,23 +117,25 @@
   // notifications from a different open tab don't bleed in.
   // ---------------------------------------------------------------------
 
+  // Conversations the current page kicked off. Resources-agent.js calls
+  // `window.AIAnswerTime.registerLiveConversation(id)` the instant the POST
+  // ack returns. Without this whitelist, a queued OLD title event replayed
+  // by the SSE flush would claim the unstamped morph thread first.
+  var liveConversationIds = new Set();
+  var pendingEvents = [];
+
   function matchThread(data) {
-    // Strict match first: thread whose `data-conversation-id` equals the
-    // notification's conversation_id. Handles all post-load views and the
-    // live-morph view once the API ack has stamped the id.
+    // Strict: a thread whose `data-conversation-id` already matches.
     var threads = document.querySelectorAll('.ai-thread');
     for (var i = 0; i < threads.length; i++) {
       var cid = threads[i].getAttribute('data-conversation-id');
       if (cid && cid === data.conversation_id) return threads[i];
     }
-    // Fallback: in the live-morph window, an event may arrive before the
-    // POST ack has come back with the id. The morph sets `body.ai-live`,
-    // and there's only ever one un-stamped thread on the page at that
-    // moment, so it's safe to claim it for any incoming notification.
-    if (document.body.classList.contains('ai-live')) {
+    // Live whitelist: only conversations this page kicked off can claim an
+    // unstamped thread. Old replayed events (different cid) bounce off.
+    if (liveConversationIds.has(data.conversation_id)) {
       for (var j = 0; j < threads.length; j++) {
         if (!threads[j].getAttribute('data-conversation-id')) {
-          // Stamp it so subsequent events take the fast path.
           threads[j].setAttribute('data-conversation-id', data.conversation_id);
           return threads[j];
         }
@@ -151,18 +153,13 @@
   // ── Title typewriter ─────────────────────────────────────────────────
   function typewriteTitle(text) {
     var h1 = document.querySelector('.ai-answer-title');
-    if (!h1) {
-      try { console.warn('[ai] typewriteTitle: no .ai-answer-title h1 found'); } catch (_) {}
-      return;
-    }
+    if (!h1) return;
     var slot = h1.querySelector('.ai-title-text');
     var caret = h1.querySelector('.ai-title-caret');
     if (!slot) {
-      try { console.log('[ai] typewriteTitle: no slot — instant swap'); } catch (_) {}
       h1.textContent = text;
       return;
     }
-    try { console.log('[ai] typewriteTitle: animating into slot'); } catch (_) {}
     var i = 0;
     function step() {
       if (i >= text.length) {
@@ -296,72 +293,68 @@
     assistant.setAttribute('data-status', 'error');
   }
 
+  function handleAgentEvent(data) {
+    if (data.type === 'agent_title_updated') {
+      var thread = matchThread(data);
+      if (!thread) return false;
+      var newTitle = (data.title || '').trim();
+      if (!newTitle) return true;
+      typewriteTitle(newTitle);
+      document.title = newTitle + ' · Smarter Dev';
+      return true;
+    }
+    if (data.type === 'agent_tool_event') {
+      var thread2 = matchThread(data);
+      if (!thread2) return false;
+      var stream = thread2.querySelector('[data-ai-tools-stream]');
+      renderToolChip(stream, data);
+      return true;
+    }
+    if (data.type === 'agent_run_complete') {
+      var thread3 = matchThread(data);
+      if (!thread3) return false;
+      revealAnswer(thread3, data);
+      return true;
+    }
+    if (data.type === 'agent_run_error') {
+      var thread4 = matchThread(data);
+      if (!thread4) return false;
+      showError(thread4, data.detail);
+      return true;
+    }
+    return false;
+  }
+
   document.addEventListener('sk:notification', function (e) {
     var data = (e && e.detail) || {};
     if (!data || !data.type) return;
-
-    // TEMP DEBUG: surface every notification arriving on /ai/answer or the
-    // morphed /resources view so we can diagnose the title-not-landing
-    // report. Remove once the path is verified.
-    if (data.type && data.type.indexOf('agent_') === 0) {
-      try {
-        console.log('[ai] sk:notification', data.type, {
-          conversation_id: data.conversation_id,
-          title: data.title,
-          tool: data.tool,
-          ai_live: document.body.classList.contains('ai-live'),
-          thread_count: document.querySelectorAll('.ai-thread').length,
-          thread_cid: (function () {
-            var t = document.querySelector('.ai-thread');
-            return t ? t.getAttribute('data-conversation-id') : null;
-          })(),
-        });
-      } catch (_) { /* swallow */ }
-    }
-
-    if (data.type === 'agent_title_updated') {
-      var thread = matchThread(data);
-      if (!thread) {
-        try { console.warn('[ai] agent_title_updated: matchThread returned null', data); } catch (_) {}
-        return;
-      }
-      var newTitle = (data.title || '').trim();
-      if (!newTitle) {
-        try { console.warn('[ai] agent_title_updated: empty title'); } catch (_) {}
-        return;
-      }
-      try { console.log('[ai] typewriting title:', newTitle); } catch (_) {}
-      typewriteTitle(newTitle);
-      document.title = newTitle + ' · Smarter Dev';
+    if (data.type.indexOf('agent_') !== 0) return;
+    var handled = handleAgentEvent(data);
+    if (handled) {
       e.preventDefault();
-      return;
-    }
-
-    if (data.type === 'agent_tool_event') {
-      var thread2 = matchThread(data);
-      if (!thread2) return;
-      var stream = thread2.querySelector('[data-ai-tools-stream]');
-      renderToolChip(stream, data);
-      e.preventDefault();
-      return;
-    }
-
-    if (data.type === 'agent_run_complete') {
-      var thread3 = matchThread(data);
-      if (!thread3) return;
-      revealAnswer(thread3, data);
-      e.preventDefault();
-      return;
-    }
-
-    if (data.type === 'agent_run_error') {
-      var thread4 = matchThread(data);
-      if (!thread4) return;
-      showError(thread4, data.detail);
-      e.preventDefault();
-      return;
+    } else if (data.conversation_id) {
+      // Couldn't match yet (probably the fetch ack hasn't registered the
+      // conversation_id). Buffer for replay when registerLiveConversation
+      // fires; cap the buffer so a flood of unrelated queued events
+      // doesn't grow forever.
+      if (pendingEvents.length < 64) pendingEvents.push(data);
     }
   });
+
+  function registerLiveConversation(id) {
+    if (!id) return;
+    liveConversationIds.add(String(id));
+    // Replay any events that arrived before the registration. Strict-match
+    // first; bumped to live-match on the second pass via matchThread's
+    // whitelist branch.
+    var remaining = [];
+    for (var i = 0; i < pendingEvents.length; i++) {
+      if (!handleAgentEvent(pendingEvents[i])) {
+        remaining.push(pendingEvents[i]);
+      }
+    }
+    pendingEvents = remaining;
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () { hydrate(); });
@@ -369,5 +362,9 @@
     hydrate();
   }
 
-  window.AIAnswerTime = { hydrate: hydrate, format: formatStamp };
+  window.AIAnswerTime = {
+    hydrate: hydrate,
+    format: formatStamp,
+    registerLiveConversation: registerLiveConversation,
+  };
 })();
