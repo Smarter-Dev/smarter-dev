@@ -291,6 +291,12 @@
                 userTurn.id = 'turn-' + resp.body.user_message.id;
               }
             }
+            // Tell answer-time.js this conversation is mine — only events
+            // with this conversation_id are allowed to claim an unstamped
+            // thread (defeats the queued-replay race for old events).
+            if (window.AIAnswerTime && window.AIAnswerTime.registerLiveConversation) {
+              window.AIAnswerTime.registerLiveConversation(resp.body.id);
+            }
             return;
           }
           var detail = (resp.body && (resp.body.detail || resp.body.message)) || '';
