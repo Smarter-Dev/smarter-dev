@@ -538,6 +538,10 @@ async def search_resources(
         convert_postgres_url_for_asyncpg(settings.effective_database_url),
         poolclass=NullPool,
     )
+    # Word-level matching: `to_tsvector @@ plainto_tsquery` matches if any
+    # query word appears (with stemming) in the title or blurb. Trigram
+    # similarity gates a fuzzy second pass so phrases like "postgres queue"
+    # still surface entries titled "Postgres SKIP LOCKED queues".
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SET search_path TO skrift, public"))
@@ -545,14 +549,25 @@ async def search_resources(
                 """
                 SELECT s.title, s.url, s.byline, s.blurb, s.learning_type,
                        d.slug AS directory, COALESCE(c.slug, '') AS category,
-                       GREATEST(similarity(s.title, :q), similarity(s.blurb, :q)) AS score
+                       GREATEST(
+                         similarity(s.title, :q),
+                         similarity(coalesce(s.blurb, ''), :q),
+                         CASE WHEN to_tsvector('english',
+                                coalesce(s.title,'') || ' ' || coalesce(s.blurb,'')
+                              ) @@ plainto_tsquery('english', :q) THEN 0.4 ELSE 0 END
+                       ) AS score
                 FROM resource_sources s
                 LEFT JOIN resource_directory_spine dsp ON dsp.source_id = s.id
                 LEFT JOIN resource_directories d ON d.id = dsp.directory_id
                 LEFT JOIN resource_tool_sources ts ON ts.source_id = s.id
                 LEFT JOIN resource_tools t ON t.id = ts.tool_id
                 LEFT JOIN resource_categories c ON c.id = t.category_id
-                WHERE s.title ILIKE :like_q OR s.blurb ILIKE :like_q
+                WHERE
+                  to_tsvector('english',
+                    coalesce(s.title,'') || ' ' || coalesce(s.blurb,'')
+                  ) @@ plainto_tsquery('english', :q)
+                  OR similarity(s.title, :q) > 0.15
+                  OR similarity(coalesce(s.blurb, ''), :q) > 0.15
                 ORDER BY score DESC NULLS LAST, s.first_indexed_at DESC
                 LIMIT :limit
                 """
@@ -561,25 +576,35 @@ async def search_resources(
                 """
                 SELECT t.name AS title, t.url, '' AS byline, t.blurb,
                        'Tool' AS learning_type, d.slug AS directory, c.slug AS category,
-                       GREATEST(similarity(t.name, :q), similarity(t.blurb, :q)) AS score
+                       GREATEST(
+                         similarity(t.name, :q),
+                         similarity(coalesce(t.blurb, ''), :q),
+                         CASE WHEN to_tsvector('english',
+                                coalesce(t.name,'') || ' ' || coalesce(t.blurb,'')
+                              ) @@ plainto_tsquery('english', :q) THEN 0.4 ELSE 0 END
+                       ) AS score
                 FROM resource_tools t
                 JOIN resource_categories c ON c.id = t.category_id
                 JOIN resource_directories d ON d.id = c.directory_id
-                WHERE t.name ILIKE :like_q OR t.blurb ILIKE :like_q
+                WHERE
+                  to_tsvector('english',
+                    coalesce(t.name,'') || ' ' || coalesce(t.blurb,'')
+                  ) @@ plainto_tsquery('english', :q)
+                  OR similarity(t.name, :q) > 0.15
+                  OR similarity(coalesce(t.blurb, ''), :q) > 0.15
                 ORDER BY score DESC NULLS LAST, t.name
                 LIMIT :tool_limit
                 """
             )
-            like = f"%{query}%"
             src_rows = (
                 await conn.execute(
-                    sources_sql, {"q": query, "like_q": like, "limit": limit}
+                    sources_sql, {"q": query, "limit": limit}
                 )
             ).mappings().all()
             tool_rows = (
                 await conn.execute(
                     tools_sql,
-                    {"q": query, "like_q": like, "tool_limit": max(2, limit // 2)},
+                    {"q": query, "tool_limit": max(2, limit // 2)},
                 )
             ).mappings().all()
     finally:
