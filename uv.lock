@@ -2480,7 +2480,7 @@ wheels = [
 
 [[package]]
 name = "skrift"
-version = "0.1.0a100"
+version = "0.1.0a101"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "advanced-alchemy" },
@@ -2502,9 +2502,9 @@ dependencies = [
     { name = "ruamel-yaml" },
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/27/17/4150b6fcaf1fcc65b58be0f8c57c9c7098e2bac5d1cb7e7efdf4e8a4e465/skrift-0.1.0a100.tar.gz", hash = "sha256:ddc996ad93a1e0661edd78431f5e1a85c4c320b8b96162c48b4a7bfd9870467c", size = 352191 }
+sdist = { url = "https://files.pythonhosted.org/packages/d3/88/b98d3aefb13e62936366d188282b8ae64586406e2c453121511599cbebbc/skrift-0.1.0a101.tar.gz", hash = "sha256:975f2f34221796ea17ac64184ca23b3089054033309d9d4e3759723c31065f8f", size = 358037 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8c/92/ba7e7243d735737ab86ad0e632936efa8a6f8248c92ed508db7c9addb215/skrift-0.1.0a100-py3-none-any.whl", hash = "sha256:ca9b94d50343e1291d5c9914d08a5e05ef135c35d4bceccc97a7302378aa8de7", size = 490903 },
+    { url = "https://files.pythonhosted.org/packages/6c/10/3e829061e6b6b3f1b256b9c84511af871ee6b6ad71628a8faa74d4590ed3/skrift-0.1.0a101-py3-none-any.whl", hash = "sha256:012c66b03dd3775b3bf3a099cdd430bea73c007653afe20db4b380f92129ae5e", size = 497703 },
 ]
 
 [package.optional-dependencies]
@@ -2629,7 +2629,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "redis", specifier = ">=6.2.0" },
     { name = "resend", specifier = ">=2.0.0" },
-    { name = "skrift", specifier = ">=0.1.0a100" },
+    { name = "skrift", specifier = ">=0.1.0a101" },
     { name = "starlette", specifier = ">=0.47.1" },
 ]
 
