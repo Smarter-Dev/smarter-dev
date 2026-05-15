@@ -441,9 +441,28 @@ def _kick_agent_run(
                     "burning tokens."
                 )
             else:
+                # Load prior turns so follow-ups inherit the conversation's
+                # context. For an initial ask there's only the just-committed
+                # user turn — drop it (the agent receives it as `question`).
+                async with get_skrift_db_session_context() as history_session:
+                    prior_q = await history_session.execute(
+                        select(AgentMessage)
+                        .where(AgentMessage.conversation_id == conversation_id)
+                        .order_by(AgentMessage.sequence.asc())
+                    )
+                    prior = list(prior_q.scalars().all())
+                # Drop the latest user turn — it's `question` itself; the
+                # agent gets it via the prompt arg.
+                if prior and prior[-1].role == "user":
+                    prior = prior[:-1]
+                message_history = (
+                    _build_message_history(prior) if prior else None
+                )
+
                 hits = begin_run()
                 session = await resource_agent.run(
                     question,
+                    message_history=message_history,
                     deps_ref={
                         "conversation_id": str(conversation_id),
                         "owner_user_id": str(owner_user_id),
@@ -735,6 +754,13 @@ class AgentConversationApiController(Controller):
         request: Request,
         db_session: AsyncSession,
     ) -> dict:
+        """Commit the user's follow-up + return immediately.
+
+        Mirrors `ResourcesAgentApiController.ask`: the agent run is
+        queued in the background; the browser subscribes to the same
+        `sk:notification` types as the initial ask (`agent_tool_event`,
+        `agent_run_complete`) to animate the new turn in place.
+        """
         user_id = _require_user_id(request)
         _enforce_rate(_reply_log, str(user_id), _REPLY_LIMIT)
 
@@ -757,35 +783,46 @@ class AgentConversationApiController(Controller):
             db_session, request, user_id, conversation.id
         )
 
-        # Load prior messages to feed back to the agent as message_history.
-        msg_result = await db_session.execute(
-            select(AgentMessage)
+        next_seq_q = await db_session.execute(
+            select(AgentMessage.sequence)
             .where(AgentMessage.conversation_id == conversation.id)
-            .order_by(AgentMessage.sequence.asc())
-        )
-        prior = msg_result.scalars().all()
-        message_history = _build_message_history(prior)
-
-        assistant_turn = await _run_agent_turn(
-            db_session, conversation, question, message_history=message_history
-        )
-        await db_session.commit()
-
-        # Reload the user turn we just appended so we can return both turns.
-        await db_session.refresh(assistant_turn)
-        user_turn_q = await db_session.execute(
-            select(AgentMessage)
-            .where(
-                AgentMessage.conversation_id == conversation.id,
-                AgentMessage.sequence == assistant_turn.sequence - 1,
-            )
+            .order_by(AgentMessage.sequence.desc())
             .limit(1)
         )
-        user_turn = user_turn_q.scalar_one()
+        last_seq = next_seq_q.scalar_one_or_none() or 0
+
+        user_turn = AgentMessage(
+            conversation_id=conversation.id,
+            sequence=last_seq + 1,
+            role="user",
+            content=question,
+            citations=[],
+        )
+        db_session.add(user_turn)
+        await db_session.commit()
+        await db_session.refresh(user_turn)
+
+        _kick_agent_run(conversation.id, user_id, question)
+
+        # Recompute the remaining follow-ups *after* the just-committed
+        # user turn so the client can decrement its counter from the
+        # returned number.
+        quota = await resources_quota_state(
+            db_session, user_id, conversation_id=conversation.id
+        )
 
         return {
-            "user_message": await _message_to_dict(db_session, user_turn),
-            "assistant_message": await _message_to_dict(db_session, assistant_turn),
+            "user_message": {
+                "id": str(user_turn.id),
+                "sequence": user_turn.sequence,
+                "content": user_turn.content,
+                "created_at": (
+                    user_turn.created_at.isoformat()
+                    if user_turn.created_at else None
+                ),
+            },
+            "followups_remaining": quota["followups_remaining"],
+            "max_followups": quota["max_followups"],
         }
 
 
