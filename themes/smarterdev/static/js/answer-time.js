@@ -151,14 +151,18 @@
   // ── Title typewriter ─────────────────────────────────────────────────
   function typewriteTitle(text) {
     var h1 = document.querySelector('.ai-answer-title');
-    if (!h1) return;
+    if (!h1) {
+      try { console.warn('[ai] typewriteTitle: no .ai-answer-title h1 found'); } catch (_) {}
+      return;
+    }
     var slot = h1.querySelector('.ai-title-text');
     var caret = h1.querySelector('.ai-title-caret');
     if (!slot) {
-      // No live scaffold — instant swap (e.g. an already-loaded answer page).
+      try { console.log('[ai] typewriteTitle: no slot — instant swap'); } catch (_) {}
       h1.textContent = text;
       return;
     }
+    try { console.log('[ai] typewriteTitle: animating into slot'); } catch (_) {}
     var i = 0;
     function step() {
       if (i >= text.length) {
@@ -296,11 +300,37 @@
     var data = (e && e.detail) || {};
     if (!data || !data.type) return;
 
+    // TEMP DEBUG: surface every notification arriving on /ai/answer or the
+    // morphed /resources view so we can diagnose the title-not-landing
+    // report. Remove once the path is verified.
+    if (data.type && data.type.indexOf('agent_') === 0) {
+      try {
+        console.log('[ai] sk:notification', data.type, {
+          conversation_id: data.conversation_id,
+          title: data.title,
+          tool: data.tool,
+          ai_live: document.body.classList.contains('ai-live'),
+          thread_count: document.querySelectorAll('.ai-thread').length,
+          thread_cid: (function () {
+            var t = document.querySelector('.ai-thread');
+            return t ? t.getAttribute('data-conversation-id') : null;
+          })(),
+        });
+      } catch (_) { /* swallow */ }
+    }
+
     if (data.type === 'agent_title_updated') {
       var thread = matchThread(data);
-      if (!thread) return;
+      if (!thread) {
+        try { console.warn('[ai] agent_title_updated: matchThread returned null', data); } catch (_) {}
+        return;
+      }
       var newTitle = (data.title || '').trim();
-      if (!newTitle) return;
+      if (!newTitle) {
+        try { console.warn('[ai] agent_title_updated: empty title'); } catch (_) {}
+        return;
+      }
+      try { console.log('[ai] typewriting title:', newTitle); } catch (_) {}
       typewriteTitle(newTitle);
       document.title = newTitle + ' · Smarter Dev';
       e.preventDefault();
