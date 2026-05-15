@@ -198,10 +198,11 @@
       var wrap = document.querySelector('.vc-wrap.container');
       if (!wrap) return null;
 
-      // Fade out the page furniture (hero, ask box, or-try, directory grid,
-      // history sidebar) and append the scaffold in their place.
+      // Fade out the page furniture (hero, or-try, directory grid). The
+      // history sidebar stays visible — it's still useful context on the
+      // live answer view too.
       var faders = wrap.querySelectorAll(
-        '.vc-hero, .rsa-or-try, .vc-section, .rsa-history'
+        '.vc-hero, .rsa-or-try, .vc-section'
       );
       faders.forEach(function (el, i) {
         el.style.transition = 'opacity .3s ease, transform .3s ease';
