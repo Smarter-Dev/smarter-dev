@@ -21,8 +21,9 @@ from collections import defaultdict
 from typing import Optional
 from uuid import UUID
 
-from litestar import Controller, Request, post
+from litestar import Controller, Request, get, post
 from litestar.exceptions import HTTPException
+from litestar.response import Response
 from litestar.status_codes import (
     HTTP_201_CREATED,
     HTTP_401_UNAUTHORIZED,
@@ -786,6 +787,34 @@ class AgentConversationApiController(Controller):
             "user_message": await _message_to_dict(db_session, user_turn),
             "assistant_message": await _message_to_dict(db_session, assistant_turn),
         }
+
+
+class AgentMessageApiController(Controller):
+    """Read-only access to a stored ``AgentMessage`` body.
+
+    The COPY button on /ai/answer/{id} fetches `/markdown` at click time
+    instead of carrying a duplicate of every assistant turn in the page
+    source. Same access policy as the answer page itself: anyone with the
+    link can read (the answer pages are private-but-not-protected; share
+    URLs are intentionally readable to anyone who has them).
+    """
+
+    path = "/v2/api/agent/messages"
+
+    @get("/{message_id:uuid}/markdown")
+    async def markdown(
+        self, message_id: UUID, db_session: AsyncSession
+    ) -> Response:
+        msg = await db_session.get(AgentMessage, message_id)
+        if msg is None:
+            raise HTTPException(
+                status_code=HTTP_404_NOT_FOUND, detail="Message not found."
+            )
+        return Response(
+            content=msg.content or "",
+            media_type="text/markdown; charset=utf-8",
+            headers={"Cache-Control": "private, max-age=300"},
+        )
 
 
 def _build_message_history(prior: list[AgentMessage]):
