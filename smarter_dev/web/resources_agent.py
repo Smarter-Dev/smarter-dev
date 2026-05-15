@@ -201,13 +201,15 @@ carries the most weight; the rest goes inline.
 ## BLOCK SCHEMAS
 You can include at most ONE `sdanswer` fenced JSON block per answer.
 
-**The ONLY valid top-level `type` values are `cards` and `path`.** Do
-not invent other types ("links", "list", "sources", etc.). If a block
-has any other top-level type the server drops it on the floor — the
-reader sees nothing where a rich block was supposed to be. When a
-plain list of references is what you want, use either inline markdown
-links in the prose, a `cards` block of `article` entries, or a `path`
-block — never a freeform top-level array.
+**Valid top-level `type` values**: `cards`, `path`, or any one of the
+card kinds below as a standalone block — `article`, `snippet`,
+`collection`, `tradeoff`, `prereq`, `gotcha`, `links`, `hint`,
+`tip`, `warning`. The server wraps a bare card-kind as a single-card
+row, so emitting `{"type": "warning", "body": "…"}` at the top level
+is equivalent to wrapping it in `cards`. **`cards` and `path` are
+themselves NOT valid card kinds** — those cannot nest inside `cards`.
+Anything else (`"type": "list"`, `"type": "sources"`, etc.) is
+dropped on the floor with nothing rendered — invent at your own risk.
 
 - **cards** — a row of 2–4 cards. Each card is one of:
   - `article` — `{ "type": "article", "url": "<exact curated url>" }`.
@@ -236,6 +238,22 @@ block — never a freeform top-level array.
     on *why* it's wrong), `right` (one sentence on what to do instead
     — text, not code), and `language` (e.g. "python", "ts"). The wrong
     snippet renders crossed out.
+  - `links` — a titled vertical list of labelled URLs. Requires
+    `links`: a list of 2–8 entries, each `{ "label": "<short label>",
+    "url": "<url>", "description": "<one short line>" }` (description
+    optional). URLs may be curated (we'll pull the catalog title) or
+    freeform — but bias toward curated. Optional `title` for a header
+    above the list. Use this when the answer is "here's a small set of
+    further reading," shorter than a `path` and looser than a `cards`
+    row. Don't combine with a `cards` block — pick one.
+  - `hint` / `tip` / `warning` — single-paragraph callouts, tinted by
+    kind. Each requires a `body` (the paragraph) and optional `title`
+    (one short line). Use **hint** for sideline context the reader
+    might want ("if you're new to X, start with…"). Use **tip** for
+    actionable, "here's the cheat code" practical advice. Use
+    **warning** for cautions and footguns. One sentence to one short
+    paragraph each — these are calls-to-attention, not essays. If you
+    need code, that's a `snippet` or `gotcha`, not a callout.
 
   `category` is **only** for `snippet` and `collection` cards. Valid values:
   `agentic-coding-courses`, `system-architecture`, `infrastructure-hosting`,
