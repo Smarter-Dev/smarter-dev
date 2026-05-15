@@ -107,8 +107,10 @@ async def enrich_answer(
 
         block = _resolve_block(raw, sources_by_url)
         if block is None:
-            # Keep the original fence intact so the user still sees the JSON.
-            parts.append(match.group(0))
+            # Bad block (invalid JSON, unknown top-level type, or every
+            # referenced URL missed the catalog). Drop the fence entirely
+            # rather than dump raw JSON in front of the reader — the
+            # logger.warning in `_resolve_block` is enough to debug from.
             continue
 
         idx = len(resolved_blocks)
