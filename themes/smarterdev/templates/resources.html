@@ -6,6 +6,9 @@
 {% block page_css %}
 <link rel="stylesheet" href="{{ theme_url('css/pages/vibe-coding-courses.css') }}">
 <link rel="stylesheet" href="{{ theme_url('css/pages/resources-agent.css') }}">
+{# sdanswer.css is needed once the page morphs into the live answer view
+   so the hydrated sdanswer cards in the final answer render correctly. #}
+<link rel="stylesheet" href="{{ theme_url('css/pages/sdanswer.css') }}">
 {% endblock %}
 
 {% block og_meta %}
@@ -96,6 +99,13 @@
 {% endblock %}
 
 {% block page_scripts %}
+{# answer-time.js carries the sk:notification handlers for the live
+   answer view that resources-agent.js morphs into on submit (title
+   typewriter, tool chips, final reveal). sdanswer.js hydrates inline
+   cards once the final answer markdown lands. Both load on /resources
+   so the morph can plug straight into them without a navigation. #}
+<script src="{{ theme_url('js/sdanswer.js') }}" defer></script>
+<script src="{{ theme_url('js/answer-time.js') }}" defer></script>
 {% if is_authenticated %}
 <script src="{{ theme_url('js/resources-agent.js') }}" defer></script>
 {% endif %}
