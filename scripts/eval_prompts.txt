@@ -1,0 +1,7 @@
+# One prompt per line, or use `---` separators for multi-line prompts.
+# Lines starting with `#` are skipped.
+I'm new to event-driven architecture and want a 30-minute intro that's not a vendor pitch.
+We're picking between Postgres SKIP LOCKED and a managed SQS for a 10k-events/min burst workload — what are the trade-offs and where should I read up?
+What's the right way to think about transactional outbox vs change data capture for an agentic email platform on Kubernetes?
+I want to deeply understand database internals — index structures, write-ahead logging, MVCC — and I have a free weekend. What should I read first?
+How do I instrument an agent's tool calls so I can debug a runaway loop without losing the production trace?
