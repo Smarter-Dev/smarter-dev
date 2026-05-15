@@ -4,7 +4,14 @@
    The query is scoped by `agent_type` upstream so this list only contains
    conversations from the same agent the surrounding page is bound to. #}
 {% if recent_answers %}
-<aside class="rsa-history" aria-label="Your recent answers">
+<button type="button" class="rsa-history-toggle"
+        aria-controls="rsa-history-drawer"
+        aria-expanded="false"
+        aria-label="Open recent answers">
+    <span class="rsa-history-toggle-tab" aria-hidden="true">// recent</span>
+</button>
+<div class="rsa-history-backdrop" data-rsa-history-backdrop aria-hidden="true"></div>
+<aside class="rsa-history" id="rsa-history-drawer" aria-label="Your recent answers">
     <p class="rsa-history-head">// your recent answers</p>
     <ul class="rsa-history-list">
         {% for a in recent_answers %}

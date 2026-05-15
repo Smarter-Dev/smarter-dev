@@ -640,21 +640,25 @@
 }
 
 /* ── Recent answers history (gated on sudo-r+) ────────────────────────────
-   Default: inline above the collections grid in the page flow.
-   Wide viewports: pinned to the left gutter as a fixed rail — but only
-   when the viewport is wide enough that the rail (~260px from the left)
-   doesn't overlap the centered content (.container max-width 1080px /
-   .ai-answer.vc-wrap max-width 1200px). Need viewport ≥ 1200 + 2*(260+32
-   gap) ≈ 1784px before fixing. Below that, stay inline to avoid the
-   "sidebar floating over the answer text" bug. */
+   Always a fixed left-rail sidebar — never inline. Below the wide
+   breakpoint it collapses into a drawer that slides in over the page
+   when the user clicks the `.rsa-history-toggle` tab on the left edge.
+   When open it has an opaque glassy backdrop so the page text isn't
+   readable underneath. */
 .rsa-history {
-  margin: 0 0 1.75rem;
+  position: fixed;
+  top: 7.5rem;
+  left: 1.25rem;
+  width: 15rem;
+  max-height: calc(100vh - 9rem);
+  margin: 0;
   padding: .9rem 1rem;
-  background: rgba(0,212,255,.02);
-  border: 1px solid rgba(0,212,255,.08);
+  background: rgba(2,4,8,.95);
+  border: 1px solid rgba(0,212,255,.18);
   border-radius: 2px;
-  max-height: 18rem;
   overflow-y: auto;
+  z-index: 60;
+  backdrop-filter: blur(8px);
 }
 .rsa-history-head {
   font-family: var(--heading);
@@ -689,17 +693,80 @@
 }
 .rsa-history-link:hover { color: var(--cyan); }
 
+/* ── Drawer behavior on narrow viewports ──────────────────────────────────
+   Below 1800px the rail would overlap the centered content if always
+   visible. So default to closed (slid off-screen). The toggle tab on
+   the left edge opens it; the backdrop catches clicks to close. */
+.rsa-history-toggle {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  z-index: 50;
+  display: block;
+}
+.rsa-history-toggle-tab {
+  display: inline-block;
+  padding: .85rem .55rem;
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  background: rgba(2,4,8,.85);
+  border: 1px solid rgba(0,212,255,.3);
+  border-left: none;
+  border-radius: 0 4px 4px 0;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  transition: background .15s, color .15s, border-color .15s;
+}
+.rsa-history-toggle:hover .rsa-history-toggle-tab {
+  background: rgba(0,212,255,.08);
+  color: var(--white);
+  border-color: var(--cyan);
+}
+.rsa-history-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2,4,8,.55);
+  backdrop-filter: blur(3px);
+  z-index: 55;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .25s ease;
+}
+
+/* Closed state (default): drawer hidden to the left, backdrop inert,
+   toggle tab visible. */
+.rsa-history {
+  transform: translateX(calc(-100% - 1.5rem));
+  transition: transform .35s cubic-bezier(.4,.0,.2,1);
+}
+.rsa-history.is-open {
+  transform: translateX(0);
+}
+body.rsa-history-open .rsa-history-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+body.rsa-history-open { overflow: hidden; }
+
+/* Wide viewports (≥ 1800px): drawer is always open, no toggle/backdrop. */
 @media (min-width: 1800px) {
   .rsa-history {
-    position: fixed;
-    top: 7.5rem;
-    left: 1.25rem;
-    width: 15rem;
-    max-height: calc(100vh - 9rem);
-    overflow-y: auto;
-    margin: 0;
-    z-index: 5;
+    transform: translateX(0);
   }
+  .rsa-history-toggle,
+  .rsa-history-backdrop {
+    display: none;
+  }
+  body.rsa-history-open { overflow: auto; }
 }
 
 /* ══════════════════════════════════════════════════════
