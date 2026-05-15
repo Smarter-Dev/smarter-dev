@@ -841,3 +841,43 @@ body.ai-live .vc-hero,
 body.ai-live .rsa,
 body.ai-live .rsa-or-try,
 body.ai-live .vc-section { pointer-events: none; }
+
+/* ── Quota indicators ── */
+.rsa-quota-counter,
+.ai-followup-counter {
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--mid);
+}
+
+.rsa-quota-block {
+  padding: 1rem 1.25rem 1.1rem;
+  margin-top: .5rem;
+  border: 1px dashed rgba(0,212,255,.18);
+  border-radius: 2px;
+  background: rgba(2,4,8,.5);
+}
+.rsa-quota-head {
+  font-family: var(--heading);
+  font-size: .58rem;
+  letter-spacing: .22em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  margin: 0 0 .55rem;
+}
+.rsa-quota-msg {
+  font-family: var(--body);
+  font-size: .92rem;
+  line-height: 1.55;
+  color: var(--light);
+  margin: 0;
+}
+.rsa-quota-msg strong { color: var(--white); font-weight: 600; }
+.rsa-quota-msg a {
+  color: var(--cyan);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(0,212,255,.3);
+}
+.rsa-quota-msg a:hover { border-bottom-color: var(--cyan); }

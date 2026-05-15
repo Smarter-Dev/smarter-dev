@@ -22,6 +22,25 @@
         <span class="rsa-head-line" aria-hidden="true"></span>
     </header>
 
+    {% if quota_state and quota_state.questions_remaining <= 0 %}
+    <div class="rsa-quota-block" role="status">
+        <p class="rsa-quota-head">// weekly limit reached</p>
+        {% if quota_state.max_questions <= 0 %}
+        <p class="rsa-quota-msg">
+            Asking isn't enabled for your account.
+            <a href="https://discord.gg/de8kajxbYS" target="_blank" data-sk-no-spa>
+                Reach out on Discord
+            </a> if you'd like access.
+        </p>
+        {% else %}
+        <p class="rsa-quota-msg">
+            You've used <strong>{{ quota_state.used_questions }}/{{ quota_state.max_questions }}</strong>
+            questions in the last 7 days. The window rolls forward as your
+            earliest question ages out.
+        </p>
+        {% endif %}
+    </div>
+    {% else %}
     <form id="rsa-form" novalidate>
         <div class="rsa-form-row">
             <label for="rsa-input" class="visually-hidden">Your question</label>
@@ -31,6 +50,11 @@
         </div>
 
         <div class="rsa-controls">
+            {% if quota_state %}
+            <span class="rsa-quota-counter" aria-label="Weekly usage">
+                {{ quota_state.questions_remaining }}/{{ quota_state.max_questions }} left this week
+            </span>
+            {% endif %}
             <button type="submit" id="rsa-submit" class="rsa-submit">
                 <svg class="rsa-submit-hex" width="14" height="14" viewBox="0 0 10 10" aria-hidden="true">
                     <polygon points="5,0.5 9.5,3 9.5,7 5,9.5 0.5,7 0.5,3"
@@ -43,6 +67,7 @@
 
         <span id="rsa-hint" class="rsa-hint" hidden></span>
     </form>
+    {% endif %}
 </section>
 {% else %}
 <section class="rsa rsa-anon reveal" aria-labelledby="rsa-anon-title">

@@ -19,6 +19,7 @@ from skrift.auth.services import get_user_permissions
 from skrift.auth.session_keys import SESSION_USER_ID
 from skrift.db.models.user import User
 
+from smarter_dev.web.agent_api import resources_quota_state
 from smarter_dev.web.models import AgentConversation
 
 
@@ -51,6 +52,7 @@ async def resources_index(
 
     asker_name = "You"
     recent_answers: list[dict] = []
+    quota_state: dict | None = None
     if user_id_raw:
         try:
             user_uuid = UUID(str(user_id_raw))
@@ -61,6 +63,7 @@ async def resources_index(
                 select(User).where(User.id == user_uuid)
             )
             asker_name = _asker_display_name(owner)
+            quota_state = await resources_quota_state(db_session, user_uuid)
         perms = await get_user_permissions(db_session, user_id_raw)
         if user_uuid is not None and await _HISTORY_PERMISSION.check(perms):
             stmt = (
@@ -81,6 +84,7 @@ async def resources_index(
             "is_authenticated": is_authenticated,
             "asker_name": asker_name,
             "recent_answers": recent_answers,
+            "quota_state": quota_state,
             "seo_meta": {
                 "description": (
                     "Writing, courses, and tutorials from around the "

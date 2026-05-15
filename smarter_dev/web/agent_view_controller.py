@@ -24,6 +24,7 @@ from skrift.auth.session_keys import SESSION_USER_ID
 from skrift.db.models.user import User
 from skrift.lib.markdown import render_markdown
 
+from smarter_dev.web.agent_api import resources_quota_state
 from smarter_dev.web.models import AgentConversation
 from smarter_dev.web.sdanswer import enrich_answer
 
@@ -109,6 +110,12 @@ async def answer_view(
     )
     asker_name = _asker_display_name(owner)
 
+    quota_state: dict | None = None
+    if is_owner:
+        quota_state = await resources_quota_state(
+            db_session, current_id, conversation_id=conversation.id
+        )
+
     # Sidebar of the viewer's own recent conversations of the SAME agent
     # type (so the resources answer page only links to other resources
     # answers, etc.). Gated on the same `view-answer-history` permission
@@ -170,6 +177,7 @@ async def answer_view(
             "asker_name": asker_name,
             "answer_url": answer_url,
             "recent_answers": recent_answers,
+            "quota_state": quota_state,
             "seo_meta": {
                 "description": title,
                 "canonical_url": answer_url,
