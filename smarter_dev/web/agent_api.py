@@ -48,7 +48,7 @@ from smarter_dev.web.models import (
     AgentMessage,
     ResourceSource,
 )
-from smarter_dev.web.resources_agent import begin_run, resource_agent
+from smarter_dev.web.resources_agent import begin_run, run_resources_pipeline
 from smarter_dev.web.sdanswer import enrich_answer
 from smarter_dev.web.title_agent import generate_title
 
@@ -460,20 +460,13 @@ def _kick_agent_run(
                 )
 
                 hits = begin_run()
-                session = await resource_agent.run(
+                answer_text = await run_resources_pipeline(
                     question,
                     message_history=message_history,
                     actor=str(owner_user_id),
-                    deps_ref={
-                        "conversation_id": str(conversation_id),
-                        "owner_user_id": str(owner_user_id),
-                    },
+                    conversation_id=str(conversation_id),
+                    owner_user_id=str(owner_user_id),
                 )
-                answer_text = await session.result()
-                if not isinstance(answer_text, str):
-                    answer_text = (
-                        getattr(answer_text, "output", None) or str(answer_text)
-                    )
 
             async with get_skrift_db_session_context() as bg_session:
                 conversation = await bg_session.get(
