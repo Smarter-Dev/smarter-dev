@@ -518,6 +518,8 @@ You'll also want to note down further reading that would likely add depth but wa
 
 If, after at least two distinct search queries for a particular concept, you can't find a relevant document in the corpus, report the gap in `gaps` (with the missing `concept`, the `tried_queries` you ran, and what kind of source would be `needed`) and move on. Do not keep searching endlessly, and do not invent citations to paper over a gap.
 
+**Tool budget: at most 5 `search_resources` calls and at most 5 `read_source` calls per run.** Plan your queries before firing them. If you've burned your budget and still don't have enough citations, finalize with what you have — better a slightly thinner answer than an over-thrashed one.
+
 **[CRITICAL] URLs NOT PRESENT IN search_resources RESULTS WILL NOT OPEN**
 All URLs passed to `read_source` must have been present in the `search_resources` results or it will return an error. This is to prevent abuse."""
 
