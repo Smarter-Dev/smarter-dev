@@ -329,7 +329,7 @@ dropped on the floor with nothing rendered — invent at your own risk.
   builds on the prior: foundations and prerequisites first, then
   intermediate, then advanced.
 
-  Each entry in `links` is an object: `{ "url": "<exact curated url>",
+  Each entry in `links` is an object: `{ "url": "<exact url>",
   "description": "<one sentence on why it's here and what to take from
   it>", "estimate": "<time>" }`. **Every step must include an `estimate`** —
   a focused realistic time-to-complete for *that one step*, not the whole
@@ -339,6 +339,24 @@ dropped on the floor with nothing rendered — invent at your own risk.
   strings are still accepted but skip the description/estimate
   affordances, so always prefer the object form. Descriptions are
   strongly recommended on every step.
+
+  **Non-curated URLs in a path require a `title` field.** Curated URLs
+  (from `search_resources`) hydrate title/byline/blurb from the
+  catalog automatically. If a step points at a URL the gap-filler
+  surfaced from the open web — i.e. a URL that came from the
+  pre-fetched research bundle but is NOT one of the catalog
+  entries — include a `title` field so the rendered card has a
+  human-readable header instead of just a hostname:
+  `{ "url": "<web url>", "title": "<the source's title>",
+  "description": "…", "estimate": "…" }`.
+
+  **Introduce path resources in the prose before the path.** The path
+  card is the ramp; the prose is the entrance. Every distinct
+  resource the path links must either (a) already be cited inline in
+  the prose above OR (b) get a short lead-in sentence right before
+  the path that names what's new ("There's also a write-up worth
+  reading first — …"). The reader should never reach the path and
+  encounter a step they have no context for.
 
   Estimate honestly: a 30-minute article is 30 minutes, a 2-hour
   video is 2 hours, a chapter excerpt of a book is the chapter, not
