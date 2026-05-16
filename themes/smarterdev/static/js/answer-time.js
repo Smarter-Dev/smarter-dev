@@ -181,6 +181,9 @@
   function toolIcon(tool) {
     if (tool === 'search_resources') return '⌬';
     if (tool === 'read_source') return '▤';
+    if (tool === 'web_search') return '⌖';
+    if (tool === 'read_url') return '⎘';
+    if (tool === 'gap_filler') return '⚠';
     return '·';
   }
 

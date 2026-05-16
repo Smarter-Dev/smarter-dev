@@ -1,29 +1,38 @@
 """The Resource Agent — answers /resources questions using the curated DB.
 
-A Skrift agent (Gemini 3 Flash) with two tools:
+Three-stage pipeline, presented to the user as a single agent:
 
-* ``search_resources``: full-text search over ``resource_sources`` and
-  ``resource_tools`` with trigram-similarity ranking.
-* ``read_source``: wraps :func:`smarter_dev.web.scan.tools.jina_read` so the
-  agent can pull the full body of a curated link before citing it.
+1. **Researcher** (gpt-5.4-nano · think=medium) — searches the curated
+   catalog (``search_resources``), opens promising sources
+   (``read_source``), and produces a typed ``ResearchOutput`` listing
+   distilled excerpts, further-reading, and gaps the catalog didn't
+   cover.
+2. **Gap-filler** (gemini-3-flash-preview · think=low) — only runs when
+   the researcher reported gaps. For each gap, runs ``web_search`` over
+   the open web and ``read_url`` on the single best result. Returns one
+   ``GapCitation`` per gap.
+3. **Author** (gemini-3-flash-preview · think=low) — gets the merged
+   research bundle (curated excerpts + web citations) and writes the
+   final markdown answer using the production system prompt.
 
-Citation capture
-----------------
-Both tools push their hits onto a ``ContextVar`` so the controller can drain
-them after the run finishes and resolve each URL against ``resource_sources``
-to build the citation card list. ``read_source`` hits win priority;
-``search_resources`` hits are the fallback when the agent never read anything.
+Tool events from every stage flow into the same ``agent_tool_event``
+notification stream so the user sees one continuous chip timeline
+without any stage breaks.
 
 Worker preset
 -------------
 The app YAML uses ``workers.preset: local`` → ``execution: inline`` and
-in-memory backends, so ``Chat.send`` blocks in the request context and no
-queue/Redis state survives the request. Persistence is owned by the
-``agent_conversations`` / ``agent_messages`` tables, not Skrift's RunState.
+in-memory backends, so each ``Agent.run`` blocks in the request context
+and no queue/Redis state survives the request. Persistence is owned by
+the ``agent_conversations`` / ``agent_messages`` tables, not Skrift's
+RunState.
 """
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
+import json
 import logging
 import os
 import time
@@ -33,18 +42,42 @@ from typing import Optional
 
 import httpx
 import skrift
+from pydantic import BaseModel, Field
 from pydantic_ai import RunContext
+from pydantic_ai.messages import (
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    UserPromptPart,
+)
 from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.models.openai import OpenAIResponsesModel
+from pydantic_ai.models.google import GoogleModelSettings
+from pydantic_ai.models.openai import OpenAIResponsesModelSettings
 from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.providers.openai import OpenAIProvider
 from skrift.agents.models import ResumeContext
 from skrift.lib.notifications import notify_user
 
-from smarter_dev.web.scan.tools import jina_read
+from smarter_dev.web.scan.tools import jina_read, jina_search
 
 logger = logging.getLogger(__name__)
 
-RESOURCE_AGENT_MODEL = os.getenv("RESOURCE_AGENT_MODEL", "gemini-3-flash-preview")
-AGENT_NAME = "smarter.dev.resources.curator"
+RESEARCHER_MODEL = os.getenv("RESOURCE_RESEARCHER_MODEL", "gpt-5.4-nano")
+GAP_FILLER_MODEL = os.getenv("RESOURCE_GAP_FILLER_MODEL", "gemini-3-flash-preview")
+AUTHOR_MODEL = os.getenv("RESOURCE_AUTHOR_MODEL", "gemini-3-flash-preview")
+
+# Per-stage Agent names — three separate Skrift agents (one per stage),
+# all transparent to the end user via the shared tool-event stream.
+RESEARCHER_AGENT_NAME = "smarter.dev.resources.researcher"
+GAP_FILLER_AGENT_NAME = "smarter.dev.resources.gap_filler"
+AUTHOR_AGENT_NAME = "smarter.dev.resources.author"
+
+# Per-stage timeouts. Researcher and gap-filler can be slow because of
+# cold Jina reads; the author is short.
+_RESEARCHER_TIMEOUT_S = float(os.getenv("RESOURCE_RESEARCHER_TIMEOUT_S", "180"))
+_GAP_FILLER_TIMEOUT_S = float(os.getenv("RESOURCE_GAP_FILLER_TIMEOUT_S", "180"))
+_AUTHOR_TIMEOUT_S = float(os.getenv("RESOURCE_AUTHOR_TIMEOUT_S", "60"))
 
 
 _SYSTEM_PROMPT = """\
@@ -432,8 +465,163 @@ research" filler, no enumeration of the planning beat itself.
 """
 
 
-# A list of dicts (one per tool hit) accumulated during a single run. The
-# controller resets this before invoking the agent and drains it after.
+_RESEARCHER_PROMPT = """\
+You're a novice tasked with researching a topic using the Smarter Dev document corpus. Each document is represented by a URL that you can use to get the full document content. You must carefully copy the URLs provided by the search tool to read the documents you want; guessing URLs only wastes time and can return errors.
+
+You should look for documents you can cite. For each citation, you must have read the document, then provide a brief (single sentence) purpose for the citation, the verbatim excerpt (1-4 sentences), and the exact (copy carefully) URL for reference. Each source can be cited multiple times. You'll want to shoot for 4-8 citations in total.
+
+You'll also want to note down further reading that would likely add depth but wasn't directly within the scope of the topic. For each, carefully copy over the URL and provide a blurb explaining why you think it would be relevant for further reading. Shoot for 2 to 5 uncited further reading entries.
+
+If, after at least two distinct search queries for a particular concept, you can't find a relevant document in the corpus, report the gap in `gaps` (with the missing `concept`, the `tried_queries` you ran, and what kind of source would be `needed`) and move on. Do not keep searching endlessly, and do not invent citations to paper over a gap.
+
+**[CRITICAL] URLs NOT PRESENT IN search_resources RESULTS WILL NOT OPEN**
+All URLs passed to `read_source` must have been present in the `search_resources` results or it will return an error. This is to prevent abuse."""
+
+
+_GAP_FILLER_PROMPT = """\
+You are filling specific gaps in a curated document corpus. The user turn lists `gaps`, each describing a concept the corpus didn't cover. For each gap, your job is:
+
+1. Run exactly 2 `web_search` queries targeting **primary or authoritative** sources for the gap's concept. Prefer official documentation (e.g., postgresql.org/docs, kubernetes.io/docs), RFCs, canonical academic papers, or domain-expert deep-dives. Avoid SEO blogspam, vendor marketing, and listicles.
+2. Skim the search results and pick the **single highest-quality** URL that genuinely fills the gap.
+3. Read that URL with `read_url`, then write one `GapCitation` for that gap. The `excerpt` must be a verbatim 1-4 sentence quote from the source you actually read.
+
+Return exactly one `GapCitation` per input gap.
+
+**[CRITICAL] URLs NOT PRESENT IN web_search RESULTS WILL NOT READ**
+All URLs passed to `read_url` must have been returned by `web_search` in this run. URLs you didn't get from `web_search` will error. Do not guess URLs."""
+
+
+# ---------------------------------------------------------------------------
+# Typed schemas (researcher + gap-filler outputs)
+# ---------------------------------------------------------------------------
+
+
+class Excerpt(BaseModel):
+    """A cited passage from a curated document."""
+
+    purpose: str = Field(
+        ...,
+        description=(
+            "One short sentence stating why this citation matters for "
+            "the user's question."
+        ),
+    )
+    excerpt: str = Field(
+        ...,
+        description="Verbatim excerpt (1-4 sentences) from the document.",
+    )
+    source_url: str = Field(
+        ...,
+        description=(
+            "URL copied verbatim from a `search_resources` hit you "
+            "opened. URLs you didn't see in `search_resources` results "
+            "this run will be dropped."
+        ),
+    )
+
+
+class FurtherReading(BaseModel):
+    """A document worth pointing the reader at for a deeper dive after
+    the answer, but not directly cited."""
+
+    source_url: str = Field(
+        ...,
+        description=(
+            "URL copied verbatim from a `search_resources` hit. Must "
+            "come from this run's `search_resources` results."
+        ),
+    )
+    blurb: str = Field(
+        ...,
+        description=(
+            "One sentence on why this is worth a deeper look in the "
+            "context of the user's question."
+        ),
+    )
+
+
+class Gap(BaseModel):
+    """A concept the user's question implicates that the corpus didn't
+    cover after at least two distinct search queries."""
+
+    concept: str = Field(
+        ...,
+        description=(
+            "The concept or sub-topic you couldn't find a relevant "
+            "document for."
+        ),
+    )
+    tried_queries: list[str] = Field(
+        ...,
+        description=(
+            "The search queries you actually ran while looking for "
+            "this concept (at least two distinct attempts)."
+        ),
+    )
+    needed: str = Field(
+        ...,
+        description=(
+            "One sentence describing what kind of source would fill "
+            "this gap."
+        ),
+    )
+
+
+class ResearchOutput(BaseModel):
+    """Structured researcher payload — distilled excerpts the author
+    weaves into prose, plus further-reading and any gaps in the
+    catalog."""
+
+    excerpts: list[Excerpt] = Field(default_factory=list)
+    further_reading: list[FurtherReading] = Field(default_factory=list)
+    gaps: list[Gap] = Field(default_factory=list)
+
+
+class GapCitation(BaseModel):
+    """The single best citation the web searcher found for one gap."""
+
+    gap_concept: str = Field(
+        ...,
+        description=(
+            "The `concept` of the gap this citation fills — copy "
+            "verbatim from the input gap."
+        ),
+    )
+    source_title: str = Field(
+        ...,
+        description="Title of the cited source (verbatim from web_search).",
+    )
+    source_url: str = Field(
+        ...,
+        description=(
+            "URL of the cited source. Must be one of the URLs returned "
+            "by `web_search` in this run."
+        ),
+    )
+    excerpt: str = Field(
+        ...,
+        description="1-4 sentence verbatim excerpt that addresses the gap.",
+    )
+    rationale: str = Field(
+        ...,
+        description=(
+            "One sentence on why this is an authoritative source for "
+            "the gap (e.g., 'official Postgres docs', 'canonical paper "
+            "by X')."
+        ),
+    )
+
+
+class GapFillerOutput(BaseModel):
+    """One citation per input gap, drawn from the open web."""
+
+    citations: list[GapCitation] = Field(default_factory=list)
+
+
+# A list of dicts (one per tool hit) accumulated during a single run.
+# Kept for legacy callers; new pipeline does not depend on it for
+# citations (citations are surfaced via the structured Pydantic
+# outputs).
 _HITS: ContextVar[Optional[list[dict]]] = ContextVar("resource_agent_hits", default=None)
 
 
@@ -450,11 +638,37 @@ def _record_hit(hit: dict) -> None:
         bucket.append(hit)
 
 
-def _build_model() -> GoogleModel:
+# ---------------------------------------------------------------------------
+# Model factories
+# ---------------------------------------------------------------------------
+
+
+def _build_google_model(model_id: str) -> GoogleModel:
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-    return GoogleModel(
-        RESOURCE_AGENT_MODEL,
-        provider=GoogleProvider(api_key=api_key),
+    return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
+
+
+def _build_openai_model(model_id: str) -> OpenAIResponsesModel:
+    # gpt-5 family with reasoning_effort + function tools requires the
+    # Responses API (`/v1/responses`); chat-completions rejects the
+    # combo.
+    api_key = os.getenv("OPENAI_API_KEY") or ""
+    return OpenAIResponsesModel(model_id, provider=OpenAIProvider(api_key=api_key))
+
+
+def _researcher_model_settings() -> OpenAIResponsesModelSettings:
+    return OpenAIResponsesModelSettings(openai_reasoning_effort="medium")
+
+
+def _gap_filler_model_settings() -> GoogleModelSettings:
+    return GoogleModelSettings(
+        google_thinking_config={"thinking_level": "LOW"},
+    )
+
+
+def _author_model_settings() -> GoogleModelSettings:
+    return GoogleModelSettings(
+        google_thinking_config={"thinking_level": "LOW"},
     )
 
 
@@ -463,13 +677,14 @@ class RunDeps:
     """Per-run dependencies injected into tool calls via ``RunContext.deps``.
 
     Carries the identifiers needed to push real-time ``agent_tool_event``
-    notifications back to the asker's browser. The values come from
-    ``deps_ref`` on the queued run; the worker rebuilds this dataclass via
-    :func:`_build_deps` each time it resumes.
+    notifications back to the asker's browser. ``seen_urls`` is the
+    gap-filler's per-run allowlist: `web_search` populates it, `read_url`
+    enforces it. The researcher and author tools don't touch it.
     """
 
     conversation_id: str
     owner_user_id: str
+    seen_urls: set[str] = dataclasses.field(default_factory=set)
 
 
 def _build_deps(ctx: ResumeContext) -> RunDeps:
@@ -479,10 +694,36 @@ def _build_deps(ctx: ResumeContext) -> RunDeps:
     )
 
 
-resource_agent = skrift.Agent(
-    _build_model(),
-    name=AGENT_NAME,
+# ---------------------------------------------------------------------------
+# Skrift agents — one per pipeline stage
+# ---------------------------------------------------------------------------
+
+
+researcher_agent = skrift.Agent(
+    _build_openai_model(RESEARCHER_MODEL),
+    name=RESEARCHER_AGENT_NAME,
+    system_prompt=_RESEARCHER_PROMPT,
+    output_type=ResearchOutput,
+    model_settings=_researcher_model_settings(),
+    deps_type=RunDeps,
+    deps_factory=_build_deps,
+)
+
+gap_filler_agent = skrift.Agent(
+    _build_google_model(GAP_FILLER_MODEL),
+    name=GAP_FILLER_AGENT_NAME,
+    system_prompt=_GAP_FILLER_PROMPT,
+    output_type=GapFillerOutput,
+    model_settings=_gap_filler_model_settings(),
+    deps_type=RunDeps,
+    deps_factory=_build_deps,
+)
+
+author_agent = skrift.Agent(
+    _build_google_model(AUTHOR_MODEL),
+    name=AUTHOR_AGENT_NAME,
     system_prompt=_SYSTEM_PROMPT,
+    model_settings=_author_model_settings(),
     deps_type=RunDeps,
     deps_factory=_build_deps,
 )
@@ -526,7 +767,7 @@ _READ_MAX_CHARS = 10_000
 _READ_DB_TTL_DAYS = 30  # how long a stored jina body is considered fresh
 
 
-@resource_agent.tool
+@researcher_agent.tool
 async def search_resources(
     ctx: RunContext[RunDeps], query: str, limit: int = 8
 ) -> list[dict]:
@@ -674,6 +915,8 @@ async def search_resources(
     hits = hits[:limit]
     for hit in hits:
         _record_hit({"source": "search", **hit})
+        if hit.get("url"):
+            ctx.deps.seen_urls.add(hit["url"])
 
     await _emit_tool_event(
         ctx.deps,
@@ -684,7 +927,7 @@ async def search_resources(
     return hits
 
 
-@resource_agent.tool
+@researcher_agent.tool
 async def read_source(ctx: RunContext[RunDeps], url: str) -> str:
     """Read the full text of a curated resource.
 
@@ -708,6 +951,21 @@ async def read_source(ctx: RunContext[RunDeps], url: str) -> str:
     """
     if not url:
         return "[error] no URL provided"
+
+    if url not in ctx.deps.seen_urls:
+        # Enforce the per-run allowlist: every URL the model passes to
+        # `read_source` must have been returned by `search_resources`
+        # in this run. Stops URL fabrication cold.
+        await _emit_tool_event(
+            ctx.deps,
+            tool="read_source",
+            label=url,
+            summary="[error] URL not in search results",
+        )
+        return (
+            "[error] URL not in search_resources results from this run. "
+            "Run `search_resources` first and use a URL from the results."
+        )
 
     body: str | None = None
 
@@ -846,3 +1104,296 @@ async def _write_to_db_cache(url: str, body: str) -> bool:
             return result.rowcount > 0
     finally:
         await engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Gap-filler tools (open-web search + read, with per-run URL allowlist)
+# ---------------------------------------------------------------------------
+
+
+@gap_filler_agent.tool
+async def web_search(ctx: RunContext[RunDeps], query: str) -> list[dict]:
+    """Search the open web for authoritative/primary sources.
+
+    Returns up to 5 hits, each with `title`, `url`, and `description`.
+    To read a hit's full body, call `read_url` with the URL.
+    """
+    t0 = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            raw = await jina_search(client, query, num_results=5)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("jina_search raised for %s: %s", query, exc)
+        await _emit_tool_event(
+            ctx.deps,
+            tool="web_search",
+            label=query,
+            summary=f"[error] {exc}",
+        )
+        return []
+
+    hits: list[dict] = []
+    for h in raw:
+        if "error" in h or not h.get("url"):
+            continue
+        hits.append(
+            {
+                "title": h.get("title", "") or "",
+                "url": h["url"],
+                "description": h.get("description", "") or "",
+            }
+        )
+        ctx.deps.seen_urls.add(h["url"])
+
+    await _emit_tool_event(
+        ctx.deps,
+        tool="web_search",
+        label=query,
+        summary=f"{len(hits)} hit" + ("s" if len(hits) != 1 else ""),
+    )
+    logger.debug("web_search %r → %d hits in %.2fs", query, len(hits), time.monotonic() - t0)
+    return hits
+
+
+@gap_filler_agent.tool
+async def read_url(ctx: RunContext[RunDeps], url: str) -> str:
+    """Read the full body of a URL.
+
+    The URL must have been returned by `web_search` in this run;
+    URLs you didn't get from `web_search` will error. Returns the
+    plain-text body (truncated to ~10k chars) or an ``"[error] …"``
+    string on failure.
+    """
+    if not url:
+        return "[error] no URL provided"
+
+    if url not in ctx.deps.seen_urls:
+        await _emit_tool_event(
+            ctx.deps,
+            tool="read_url",
+            label=url,
+            summary="[error] URL not in web_search results",
+        )
+        return (
+            "[error] URL not in web_search results from this run. "
+            "Run `web_search` first and use a URL from the results."
+        )
+
+    # Reuse the same tiered cache the researcher uses: durable DB cache
+    # first, in-process LRU second, live Jina Reader last. Web URLs
+    # won't be in `resource_sources` so the DB-cache write is a no-op
+    # for them (handled by `_write_to_db_cache` returning False).
+    body: str | None = None
+    db_body = await _read_from_db_cache(url)
+    if db_body is not None:
+        body = db_body
+    else:
+        now = time.time()
+        cached = _READ_CACHE.get(url)
+        if cached and (now - cached[0]) < _READ_TTL_SECONDS:
+            body = cached[1]
+        else:
+            async with httpx.AsyncClient() as client:
+                result = await jina_read(client, url)
+            if "error" in result:
+                await _emit_tool_event(
+                    ctx.deps,
+                    tool="read_url",
+                    label=url,
+                    summary=f"[error] {result['error']}",
+                )
+                return f"[error] {result['error']}"
+
+            title = result.get("title", "") or ""
+            content = result.get("content", "") or ""
+            body = f"{title}\n\n{content}".strip()[:_READ_MAX_CHARS]
+            stored = await _write_to_db_cache(url, body)
+            if not stored:
+                _READ_CACHE[url] = (now, body)
+
+    label = body.split("\n", 1)[0].strip() if body else url
+    if len(label) > 80:
+        label = label[:79].rstrip() + "…"
+    await _emit_tool_event(
+        ctx.deps,
+        tool="read_url",
+        label=label or url,
+        summary=url,
+    )
+    return body
+
+
+# ---------------------------------------------------------------------------
+# Pipeline orchestrator
+# ---------------------------------------------------------------------------
+
+
+def _format_gap_payload(
+    question: str, gaps: list[Gap]
+) -> str:
+    """Format the researcher's gaps into a user turn for the gap-filler."""
+    return (
+        "Original user question:\n\n"
+        f"{question}\n\n"
+        "Curated-corpus gaps to fill (one citation each):\n\n"
+        "```json\n"
+        f"{json.dumps([g.model_dump() for g in gaps], indent=2, ensure_ascii=False)}\n"
+        "```\n"
+    )
+
+
+def _build_author_payload(
+    research: ResearchOutput,
+    web_citations: list[GapCitation],
+) -> dict:
+    """Merge curated excerpts + web citations into the author payload.
+
+    The author sees a unified shape: every excerpt has a `purpose`,
+    `excerpt`, `source_url`. Web citations become additional excerpts
+    keyed by their gap concept. Further-reading flows through unchanged.
+    """
+    excerpts: list[dict] = []
+    for ex in research.excerpts:
+        excerpts.append({
+            "purpose": ex.purpose,
+            "excerpt": ex.excerpt,
+            "source_url": ex.source_url,
+        })
+    for c in web_citations:
+        excerpts.append({
+            "purpose": c.gap_concept,
+            "excerpt": c.excerpt,
+            "source_url": c.source_url,
+            "source_title": c.source_title,
+        })
+    further_reading: list[dict] = [
+        {"source_url": fr.source_url, "blurb": fr.blurb}
+        for fr in research.further_reading
+    ]
+    return {"excerpts": excerpts, "further_reading": further_reading}
+
+
+def _build_author_user_turn(question: str, payload: dict) -> str:
+    return (
+        "Pre-fetched research (cite using these URLs only — every URL "
+        "is from the verified catalog or a vetted web source; do not "
+        "invent any):\n\n"
+        "- `excerpts`: passages with citations that directly answer "
+        "the question. `purpose` is why the citation matters; "
+        "`excerpt` is the verbatim supporting text.\n"
+        "- `further_reading`: related sources for the reader to dig "
+        "into after the answer.\n\n"
+        "```json\n"
+        f"{json.dumps(payload, indent=2, ensure_ascii=False)}\n"
+        "```\n\n"
+        "User question:\n\n"
+        f"{question}"
+    )
+
+
+async def _await_text_result(session) -> str:
+    """Extract the author's markdown answer from a Skrift session."""
+    result = await session.result()
+    if isinstance(result, str):
+        return result
+    return getattr(result, "output", None) or str(result)
+
+
+async def _await_typed_result(session, model_cls):
+    """Extract a typed Pydantic result, defensively handling the
+    deferred-tool-request union Skrift wraps `output_type` with."""
+    result = await session.result()
+    if isinstance(result, model_cls):
+        return result
+    # Fallback paths if Skrift returns the raw pydantic-ai run-result
+    inner = getattr(result, "output", None)
+    if isinstance(inner, model_cls):
+        return inner
+    raise RuntimeError(
+        f"Expected {model_cls.__name__} from agent, got {type(result).__name__}"
+    )
+
+
+async def run_resources_pipeline(
+    question: str,
+    *,
+    message_history: Optional[list],
+    actor: str,
+    conversation_id: str,
+    owner_user_id: str,
+) -> str:
+    """Run the three-stage pipeline (researcher → gap-filler → author)
+    as a single user-visible agent run. Tool events from every stage
+    are emitted into the same `agent_tool_event` stream so the user
+    sees one continuous chip timeline. Returns the author's markdown.
+
+    Behavior on failure:
+    - Researcher failure: re-raised so the caller fires `agent_run_error`.
+    - Gap-filler failure: logged + a degraded `tool="gap_filler"` chip
+      is emitted; pipeline continues to the author with curated-only
+      excerpts.
+    - Author failure: re-raised so the caller fires `agent_run_error`.
+    """
+    deps_ref = {
+        "conversation_id": conversation_id,
+        "owner_user_id": owner_user_id,
+    }
+    # Minimal deps copy the orchestrator uses to emit its own degraded
+    # status chips when a stage misbehaves.
+    orchestrator_deps = RunDeps(
+        conversation_id=conversation_id,
+        owner_user_id=owner_user_id,
+    )
+
+    # ── Stage 1: Researcher ──────────────────────────────────────────────
+    researcher_session = await asyncio.wait_for(
+        researcher_agent.run(
+            question,
+            message_history=message_history,
+            actor=actor,
+            deps_ref=deps_ref,
+        ),
+        timeout=_RESEARCHER_TIMEOUT_S,
+    )
+    research = await _await_typed_result(researcher_session, ResearchOutput)
+
+    # ── Stage 2: Gap-filler (only if the researcher reported gaps) ──────
+    web_citations: list[GapCitation] = []
+    if research.gaps:
+        try:
+            gap_session = await asyncio.wait_for(
+                gap_filler_agent.run(
+                    _format_gap_payload(question, research.gaps),
+                    actor=actor,
+                    deps_ref=deps_ref,
+                ),
+                timeout=_GAP_FILLER_TIMEOUT_S,
+            )
+            gap_output = await _await_typed_result(
+                gap_session, GapFillerOutput
+            )
+            web_citations = list(gap_output.citations)
+        except Exception:  # noqa: BLE001
+            logger.exception("gap_filler stage failed; continuing without web cites")
+            await _emit_tool_event(
+                orchestrator_deps,
+                tool="gap_filler",
+                label=(
+                    f"{len(research.gaps)} gap"
+                    + ("s" if len(research.gaps) != 1 else "")
+                ),
+                summary="skipped (error)",
+            )
+
+    # ── Stage 3: Author ──────────────────────────────────────────────────
+    author_payload = _build_author_payload(research, web_citations)
+    author_session = await asyncio.wait_for(
+        author_agent.run(
+            _build_author_user_turn(question, author_payload),
+            message_history=message_history,
+            actor=actor,
+            deps_ref=deps_ref,
+        ),
+        timeout=_AUTHOR_TIMEOUT_S,
+    )
+    return await _await_text_result(author_session)
