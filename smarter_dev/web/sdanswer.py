@@ -465,7 +465,15 @@ def _resolve_gotcha(card: dict) -> dict | None:
 def _resolve_path_steps(
     links: list[Any], sources_by_url: dict[str, ResourceSource]
 ) -> list[dict]:
-    """Each `links[]` entry may be a URL string or `{url, description, estimate}`."""
+    """Each `links[]` entry may be a URL string or
+    ``{url, title?, description?, estimate?}``.
+
+    Curated URLs hydrate from ``resource_sources`` (title/byline/blurb
+    come from the catalog). Non-curated URLs (e.g. a citation the
+    gap-filler agent pulled from the open web) are accepted as long as
+    the link dict provides a ``title`` — the renderer uses that plus
+    the URL/description/estimate as-is.
+    """
     steps: list[dict] = []
     seen: set[str] = set()
     for link in links:
@@ -474,9 +482,21 @@ def _resolve_path_steps(
             continue
         seen.add(url)
         src = sources_by_url.get(url)
-        if src is None:
-            continue
-        step = _source_to_article_card(src)
+        if src is not None:
+            step = _source_to_article_card(src)
+        else:
+            title = _coerce_path_title(link) or _fallback_title_from_url(url)
+            if not title:
+                continue
+            step = {
+                "type": "article",
+                "url": url,
+                "title": title,
+                "byline": "",
+                "blurb": "",
+                "learning_type": "Web",
+                "track_key": "",
+            }
         description = _coerce_path_description(link)
         if description:
             step["description"] = description
@@ -486,6 +506,27 @@ def _resolve_path_steps(
             step["estimate_minutes"] = estimate_minutes
         steps.append(step)
     return steps
+
+
+def _coerce_path_title(link: Any) -> str | None:
+    if isinstance(link, dict):
+        return _trim_str(link.get("title"), 200)
+    return None
+
+
+def _fallback_title_from_url(url: str) -> str:
+    """Cheap, readable title when the path link is non-curated and the
+    author didn't provide one. Use the hostname so the chip isn't an
+    opaque URL."""
+    from urllib.parse import urlparse
+
+    try:
+        host = urlparse(url).hostname or ""
+    except Exception:  # noqa: BLE001
+        return url
+    if host.startswith("www."):
+        host = host[4:]
+    return host or url
 
 
 def _coerce_path_url(link: Any) -> str | None:
