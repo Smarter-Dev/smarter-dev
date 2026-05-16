@@ -59,7 +59,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from skrift.agents.models import ResumeContext
 from skrift.lib.notifications import notify_user
 
-from smarter_dev.web.scan.tools import jina_read, jina_search
+from smarter_dev.web.scan.tools import brave_search, jina_read
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +139,32 @@ rule: when you reference a curated resource, link the title with
 `read_source`. Bold and lists are fine when they help; never invent
 headings. If nothing in the curated set fits, say so plainly and suggest
 the closest adjacent directory.
+
+## DON'T SOUND LIKE AN LLM
+Write the way a sharp, opinionated engineer writes a Slack message,
+not the way ChatGPT writes a blog post. Concretely:
+
+- **No em-dashes (—)**. Use a period, a comma, or parentheses. If you
+  catch yourself reaching for `—`, restructure the sentence instead.
+- **No hedging filler.** Cut "It's important to note that…", "It's
+  worth mentioning…", "In essence…", "At the end of the day…",
+  "Ultimately…", "That said…" used as conjunctive throat-clearing.
+- **No "not just X, but Y" / "not only X, but also Y" patterns.**
+  Pick the actual point and state it.
+- **No marketing adjectives.** Avoid "seamless," "robust,"
+  "powerful," "leverage," "delve," "comprehensive," "cutting-edge,"
+  "robust," "elegant," "intricate," "nuanced" as filler.
+- **No section transitions.** Skip "Furthermore," "Moreover," "In
+  conclusion," "Additionally," at the start of sentences.
+- **No meta-narration.** Don't say "Let me explain," "Here's the
+  thing," "The key takeaway is," "In summary," or "To wrap up."
+- **No performative empathy.** No "Great question," "That's a smart
+  thing to think about," or any acknowledgment of the asker before
+  the answer.
+- **Don't over-bold.** Bold the load-bearing noun in a sentence at
+  most. Don't bold whole sentences for emphasis.
+
+A reader should not be able to tell an LLM wrote this.
 
 ## RESPONSE SHAPE
 Before you write, think about what each part of your answer is doing.
@@ -1115,15 +1141,23 @@ async def _write_to_db_cache(url: str, body: str) -> bool:
 async def web_search(ctx: RunContext[RunDeps], query: str) -> list[dict]:
     """Search the open web for authoritative/primary sources.
 
-    Returns up to 5 hits, each with `title`, `url`, and `description`.
-    To read a hit's full body, call `read_url` with the URL.
+    Returns up to 5 English-language hits, each with `title`, `url`,
+    and `description`. To read a hit's full body, call `read_url` with
+    the URL.
     """
     t0 = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            raw = await jina_search(client, query, num_results=5)
+            raw = await brave_search(
+                client,
+                query,
+                num_results=5,
+                country="US",
+                search_lang="en",
+                ui_lang="en-US",
+            )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("jina_search raised for %s: %s", query, exc)
+        logger.warning("brave_search raised for %s: %s", query, exc)
         await _emit_tool_event(
             ctx.deps,
             tool="web_search",
