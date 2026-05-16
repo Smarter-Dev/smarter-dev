@@ -54,19 +54,38 @@ async def brave_search(
     client: httpx.AsyncClient,
     query: str,
     num_results: int = 5,
+    *,
+    country: str | None = None,
+    search_lang: str | None = None,
+    ui_lang: str | None = None,
 ) -> list[dict]:
     """Search the web via the Brave Search API.
 
     Returns a list of dicts with keys: title, url, description.
+
+    The optional locale kwargs pin the result language/region:
+    ``country`` (2-char, e.g. "US"), ``search_lang`` (e.g. "en"),
+    ``ui_lang`` (e.g. "en-US"). Omit to let Brave decide.
     """
     api_key = os.environ.get("BRAVE_SEARCH_API_KEY", "")
     if not api_key:
         return [{"error": "BRAVE_SEARCH_API_KEY not configured"}]
 
+    params: dict[str, str | int] = {
+        "q": query,
+        "count": min(num_results, 20),
+    }
+    if country:
+        params["country"] = country
+    if search_lang:
+        params["search_lang"] = search_lang
+    if ui_lang:
+        params["ui_lang"] = ui_lang
+
     try:
         resp = await client.get(
             "https://api.search.brave.com/res/v1/web/search",
-            params={"q": query, "count": min(num_results, 20)},
+            params=params,
             headers={
                 "Accept": "application/json",
                 "Accept-Encoding": "gzip",
