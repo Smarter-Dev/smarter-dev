@@ -11,10 +11,11 @@
 from smarter_dev.bot.agents.aoc_thread_agent import AoCThreadAgent
 from smarter_dev.bot.agents.chat_agent import get_chat_agent
 from smarter_dev.bot.agents.chat_models import (
-    AgentInput,
     AgentReturn,
     Author,
     ChannelInfo,
+    FollowupAgentInput,
+    InitialAgentInput,
     Message,
     NoResponse,
     SendResponse,
@@ -29,7 +30,8 @@ from smarter_dev.bot.agents.tldr_agent import TLDRAgent, estimate_message_tokens
 __all__ = [
     "get_chat_agent",
     "ChatDeps",
-    "AgentInput",
+    "InitialAgentInput",
+    "FollowupAgentInput",
     "AgentReturn",
     "Author",
     "ChannelInfo",

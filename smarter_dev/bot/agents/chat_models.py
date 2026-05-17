@@ -55,25 +55,55 @@ class Me(BaseModel):
     username: str
 
 
-class AgentInput(BaseModel):
-    """The per-turn input passed to the chat agent.
+class InitialAgentInput(BaseModel):
+    """Input for the first turn of an engagement.
 
-    On the **first activation** of an engagement, ``new_messages`` carries
-    the last ~10 channel messages and ``is_initial_activation`` is True;
-    ``topic`` and ``notes`` may be populated from durable memory.
-
-    On every **follow-up turn**, ``new_messages`` carries only the messages
-    queued since the agent's last turn; the rest of the conversation lives
-    in the agent's Pydantic AI message history. ``topic`` and ``notes``
-    are None — the agent's history already carries those.
+    Carries the activation trigger separately from the pre-engagement
+    context so the agent can clearly distinguish "the message that woke me
+    up" from "what was happening before I was called in".
     """
 
+    kind: Literal["initial"] = "initial"
+    me: Me
+    channel_history: list[Message] = Field(
+        description=(
+            "The most recent channel messages BEFORE the activation message, "
+            "oldest first. Use this to read the room — see who's talking, "
+            "what they're discussing, what tone fits."
+        ),
+    )
+    activation_message: Message = Field(
+        description=(
+            "The @mention or reply that triggered this engagement. This is "
+            "the message you're being asked to respond to."
+        ),
+    )
+    authors: list[Author]
+    channel: ChannelInfo
+    now_utc: datetime
+    topic: str | None = None
+    notes: str | None = None
+
+
+class FollowupAgentInput(BaseModel):
+    """Input for a follow-up turn inside an active engagement.
+
+    Carries ONLY the messages that arrived since the agent's last turn. The
+    rest of the conversation (channel history from the initial activation,
+    the agent's own prior replies, tool calls/returns) lives in the agent's
+    Pydantic AI message history.
+
+    ``topic`` and ``notes`` are passed on every turn — they're the most
+    recently durable view of memory and may have been updated since the
+    last turn (or since the engagement started).
+    """
+
+    kind: Literal["followup"] = "followup"
     me: Me
     new_messages: list[Message]
     authors: list[Author]
     channel: ChannelInfo
     now_utc: datetime
-    is_initial_activation: bool = False
     topic: str | None = None
     notes: str | None = None
 
