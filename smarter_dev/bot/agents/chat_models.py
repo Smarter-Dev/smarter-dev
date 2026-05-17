@@ -112,7 +112,14 @@ class NoResponse(BaseModel):
     """Agent decided not to send a message this turn."""
 
     kind: Literal["no_response"] = "no_response"
-    continue_watching: bool = True
+    continue_watching: bool = Field(
+        default=True,
+        description=(
+            "Stay engaged so future messages will trigger you. Set False only "
+            "if the engagement is genuinely over (user dismissed you, "
+            "conversation ran its course)."
+        ),
+    )
     topic: str = Field(
         description="1-2 sentence summary of the current conversation topic.",
     )
@@ -127,48 +134,69 @@ class SendResponse(BaseModel):
     """
 
     kind: Literal["send_response"] = "send_response"
-    reply_to_message_id: str | None = None
+    reply_to_message_id: str | None = Field(
+        default=None,
+        description=(
+            "Only set when answering a message that is NOT the most recent one "
+            "or two in your input. Setting it on the latest message just renders "
+            "a redundant reply pointer back to the message right above yours, "
+            "which looks noisy. Use it to disambiguate when you're answering an "
+            "older question that's drifted up in the channel; leave None for "
+            "replies to the freshest message."
+        ),
+    )
     message: str | None = Field(
         default=None,
         description=(
-            "Plain-text message body to send to Discord. Leave None if the user "
+            "Plain-text message body to post to Discord. Leave None if the user "
             "only wanted a voice reply."
         ),
     )
     voice_summary: str | None = Field(
         default=None,
         description=(
-            "Short, spoken-style SUMMARY of the response to send as a Discord voice "
-            "message via TTS. Only include when the user asked for voice. Voice "
-            "messages should almost always be a *summary* — a few sentences max — "
-            "not the full reply. Set ``message`` to the full text alongside this if "
-            "the user would still benefit from reading the long form."
+            "Short, spoken-style SUMMARY to send as a Discord voice message via "
+            "TTS. CRITICAL: any voice / audio / persona / tone / accent request "
+            "from the user REQUIRES this field — NEVER answer such requests by "
+            "writing *stage directions* or *clears throat* inside `message`. "
+            "Voice messages should be a few sentences max — not paragraphs, "
+            "code blocks, or full long-form. If the reply needs detail (code, "
+            "links, deep explanation), set `message` for the full text AND "
+            "`voice_summary` for a 1-3 sentence spoken digest."
         ),
     )
     voice_instruction: str | None = Field(
         default=None,
         description=(
-            "Optional stage direction passed to the TTS model alongside the "
-            "voice_summary. Use this to shape HOW the voice sounds — tone, "
-            "pacing, emotion, energy. Examples: \"Say this with mock-serious "
-            "deadpan delivery\", \"Speak excitedly, like sharing good news\", "
-            "\"Use a slow, considered pace with a slight pause before the punch "
-            "line\". Leave None to use the default warm, casual, peer-developer "
-            "voice. Only meaningful when voice_summary is set."
+            "Stage direction passed to the TTS model to shape HOW the voice "
+            "sounds — tone, pace, energy, emotion, accent, persona. Only "
+            "meaningful alongside voice_summary. Examples: \"mock-serious "
+            "deadpan delivery\", \"excitedly, like sharing good news\", \"slow "
+            "and considered with a pause before the punch line\", \"overly-"
+            "caffeinated tech-bro persona, slightly frantic\". Leave None for "
+            "the default warm, casual, peer-developer voice."
         ),
     )
-    continue_watching: bool = True
+    continue_watching: bool = Field(
+        default=True,
+        description=(
+            "Stay engaged for follow-ups. Set False only when the conversation "
+            "is genuinely done, the user dismissed you, or continuing would be "
+            "intrusive."
+        ),
+    )
     topic: str = Field(
         description="1-2 sentence summary of the current conversation topic.",
     )
     notes: str = Field(
         description=(
-            "1-5 sentences naming and tracking the conversation threads you're "
-            "actively engaged in. This is durable memory across engagements — "
-            "write it for your future self to remember WHAT you're tracking, not "
-            "to summarise what was said (your conversation history already does "
-            "that). Examples: \"Tracking Alice's question about async/await in "
-            "Python and Bob's debugging session for the Stripe webhook.\""
+            "Per-person thread tracker. Format: 'alice: <thread + status>; "
+            "bob: <thread + status>; carol: <thread + status>'. Accumulate as "
+            "new threads emerge — don't replace. Drop a thread only when it has "
+            "clearly concluded. This is durable memory across engagements; "
+            "write it for your future self to remember WHO is asking about WHAT, "
+            "not to summarise what was said (your conversation history covers "
+            "that)."
         ),
     )
 
