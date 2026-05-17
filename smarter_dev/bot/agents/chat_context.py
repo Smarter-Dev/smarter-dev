@@ -1,7 +1,16 @@
 """Build an ``AgentInput`` from live Discord state.
 
-Pulls the last 10 channel messages, the authors referenced, channel metadata,
-and merges in memory (topic/notes) from Redis.
+Two entry points:
+
+- ``build_initial_input`` — used on the first activation of an engagement
+  (the @mention or reply that wakes the engine). Pulls the last ~10 channel
+  messages so the agent can read the room, and merges in durable memory
+  (``topic`` + ``notes``) from Redis.
+
+- ``build_followup_input`` — used on every subsequent turn. Takes a snapshot
+  of hikari messages already pulled out of the engine's queue and only
+  passes those forward — older context lives in the agent's Pydantic AI
+  message history.
 """
 
 from __future__ import annotations
@@ -30,26 +39,69 @@ logger = logging.getLogger(__name__)
 CONTEXT_MESSAGE_LIMIT = 10
 
 
-async def build_agent_input(
+async def build_initial_input(
     *,
     bot: hikari.GatewayBot,
     channel_id: int,
     guild_id: int,
     memory: ChatMemory,
-    include_notes: bool,
 ) -> AgentInput:
-    """Build the input passed to the chat agent for one turn.
+    """Build the ``AgentInput`` for the first activation of an engagement.
 
-    Args:
-        bot: Hikari bot instance for REST access.
-        channel_id: Discord channel ID.
-        guild_id: Discord guild ID.
-        memory: ChatMemory wrapper. Topic is looked up if not stale; notes are
-            included only when ``include_notes`` is True (i.e. follow-up turns
-            within an active engagement, never first activations).
-        include_notes: Whether to include the in-session notes from memory.
+    Pulls the last ``CONTEXT_MESSAGE_LIMIT`` channel messages so the agent
+    can read the room, and merges in any non-stale ``topic`` and ``notes``
+    from durable memory.
     """
-    raw_messages = await _fetch_recent_messages(bot, channel_id, CONTEXT_MESSAGE_LIMIT)
+    raw_messages = await _fetch_recent_messages(
+        bot, channel_id, CONTEXT_MESSAGE_LIMIT
+    )
+    topic = await memory.topic_for_activation(channel_id)
+    notes = await memory.get_notes(channel_id)
+    return await _build_input(
+        bot=bot,
+        channel_id=channel_id,
+        guild_id=guild_id,
+        raw_messages=raw_messages,
+        is_initial_activation=True,
+        topic=topic,
+        notes=notes,
+    )
+
+
+async def build_followup_input(
+    *,
+    bot: hikari.GatewayBot,
+    channel_id: int,
+    guild_id: int,
+    queued: list[hikari.Message],
+) -> AgentInput:
+    """Build the ``AgentInput`` for a follow-up turn inside an active engagement.
+
+    Only the queued messages (already drained from the engine queue) are
+    surfaced. The rest of the conversation lives in the agent's Pydantic AI
+    message history.
+    """
+    return await _build_input(
+        bot=bot,
+        channel_id=channel_id,
+        guild_id=guild_id,
+        raw_messages=queued,
+        is_initial_activation=False,
+        topic=None,
+        notes=None,
+    )
+
+
+async def _build_input(
+    *,
+    bot: hikari.GatewayBot,
+    channel_id: int,
+    guild_id: int,
+    raw_messages: list[hikari.Message],
+    is_initial_activation: bool,
+    topic: str | None,
+    notes: str | None,
+) -> AgentInput:
     bot_user = bot.get_me()
     bot_user_id = bot_user.id if bot_user else None
 
@@ -86,9 +138,6 @@ async def build_agent_input(
     authors = await _build_authors(bot, guild_id, raw_messages)
     channel = await _build_channel_info(bot, channel_id)
 
-    topic = await memory.topic_for_activation(channel_id)
-    notes = await memory.get_notes(channel_id) if include_notes else None
-
     me = Me(
         user_id=str(bot_user.id) if bot_user else "",
         username=bot_user.username if bot_user else "bot",
@@ -96,10 +145,11 @@ async def build_agent_input(
 
     return AgentInput(
         me=me,
-        messages=messages,
+        new_messages=messages,
         authors=authors,
         channel=channel,
         now_utc=datetime.now(UTC),
+        is_initial_activation=is_initial_activation,
         topic=topic,
         notes=notes,
     )
@@ -129,7 +179,6 @@ async def _build_authors(
         if msg.author.id not in seen:
             seen[msg.author.id] = msg.author
 
-    # Pre-fetch guild roles once.
     guild_roles: dict[int, str] = {}
     try:
         roles = await bot.rest.fetch_roles(guild_id)
@@ -144,7 +193,7 @@ async def _build_authors(
             member = await bot.rest.fetch_member(guild_id, user_id)
             nickname = member.nickname
         except Exception:
-            member = None
+            pass
 
         role_names = await fetch_user_roles(bot, guild_id, user_id, guild_roles)
         authors.append(

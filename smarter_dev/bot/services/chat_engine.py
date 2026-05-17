@@ -36,7 +36,10 @@ import hikari
 from pydantic_ai.usage import RunUsage
 
 from smarter_dev.bot.agents.chat_agent import get_chat_agent
-from smarter_dev.bot.agents.chat_context import build_agent_input
+from smarter_dev.bot.agents.chat_context import (
+    build_followup_input,
+    build_initial_input,
+)
 from smarter_dev.bot.agents.chat_models import NoResponse, SendResponse
 from smarter_dev.bot.agents.chat_tools import ChatDeps
 from smarter_dev.bot.services.chat_memory import get_chat_memory
@@ -56,9 +59,9 @@ MAX_RUNTIME = timedelta(hours=2)
 
 @dataclass
 class _QueuedMessage:
-    message_id: int
-    author_id: int
-    content: str
+    """A snapshot of a hikari message awaiting agent activation."""
+
+    message: hikari.Message
     enqueued_at: datetime
 
 
@@ -118,9 +121,7 @@ class ChannelEngine:
         async with self.queue_lock:
             self.queue.append(
                 _QueuedMessage(
-                    message_id=int(event.message.id),
-                    author_id=int(event.author.id),
-                    content=content,
+                    message=event.message,
                     enqueued_at=datetime.now(UTC),
                 )
             )
@@ -170,11 +171,20 @@ class ChannelEngine:
         if not self.active:
             return
         self.active = False
+        memory = get_chat_memory()
+        if send_notes_clear:
+            try:
+                await memory.clear_notes(self.channel_id)
+            except Exception:
+                logger.exception(
+                    "Failed to clear notes for channel %s", self.channel_id
+                )
         try:
-            if send_notes_clear:
-                await get_chat_memory().clear_notes(self.channel_id)
+            await memory.clear_history(self.channel_id)
         except Exception:
-            logger.exception("Failed to clear notes for channel %s", self.channel_id)
+            logger.exception(
+                "Failed to clear chat history for channel %s", self.channel_id
+            )
         await self.on_deactivate(self.channel_id)
         self.fire_event.set()  # wake the runner so it can exit
 
@@ -222,23 +232,35 @@ class ChannelEngine:
 
     async def _run_once(self, *, first_activation: bool) -> None:
         async with self.run_lock:
-            # Drain queue snapshot; new messages can keep arriving.
+            # Snapshot queue; new messages can keep arriving while we run.
             async with self.queue_lock:
+                drained = [q.message for q in self.queue]
                 self.queue.clear()
 
             memory = get_chat_memory()
-            # Reset the idle counter as soon as we engage — the agent is active now.
             if first_activation:
                 await memory.reset_idle_counter(self.channel_id)
 
             try:
-                agent_input = await build_agent_input(
-                    bot=self.bot,
-                    channel_id=self.channel_id,
-                    guild_id=self.guild_id,
-                    memory=memory,
-                    include_notes=not first_activation,
-                )
+                if first_activation:
+                    agent_input = await build_initial_input(
+                        bot=self.bot,
+                        channel_id=self.channel_id,
+                        guild_id=self.guild_id,
+                        memory=memory,
+                    )
+                    history = []
+                else:
+                    if not drained:
+                        # Engine fired with nothing new to react to. Skip.
+                        return
+                    agent_input = await build_followup_input(
+                        bot=self.bot,
+                        channel_id=self.channel_id,
+                        guild_id=self.guild_id,
+                        queued=drained,
+                    )
+                    history = await memory.read_history(self.channel_id)
             except Exception:
                 logger.exception(
                     "Failed to build agent input for channel %s", self.channel_id
@@ -247,11 +269,12 @@ class ChannelEngine:
 
             request_id = uuid.uuid4().hex[:8]
             logger.info(
-                "[%s] Chat agent firing channel=%s first=%s messages=%d",
+                "[%s] Chat agent firing channel=%s first=%s new=%d history=%d",
                 request_id,
                 self.channel_id,
                 first_activation,
-                len(agent_input.messages),
+                len(agent_input.new_messages),
+                len(history),
             )
 
             agent = get_chat_agent()
@@ -263,6 +286,7 @@ class ChannelEngine:
             try:
                 result = await agent.run(
                     user_prompt=agent_input.model_dump_json(),
+                    message_history=history,
                     deps=deps,
                 )
             except Exception:
@@ -282,6 +306,18 @@ class ChannelEngine:
                 output.continue_watching,
                 tokens,
             )
+
+            # Persist the post-processor history for the next turn.
+            try:
+                await memory.write_history(
+                    self.channel_id, list(result.all_messages())
+                )
+            except Exception:
+                logger.exception(
+                    "[%s] Failed to persist chat history for channel %s",
+                    request_id,
+                    self.channel_id,
+                )
 
             await self._apply_output(output)
 

@@ -56,13 +56,24 @@ class Me(BaseModel):
 
 
 class AgentInput(BaseModel):
-    """The full input passed to the chat agent on every turn."""
+    """The per-turn input passed to the chat agent.
+
+    On the **first activation** of an engagement, ``new_messages`` carries
+    the last ~10 channel messages and ``is_initial_activation`` is True;
+    ``topic`` and ``notes`` may be populated from durable memory.
+
+    On every **follow-up turn**, ``new_messages`` carries only the messages
+    queued since the agent's last turn; the rest of the conversation lives
+    in the agent's Pydantic AI message history. ``topic`` and ``notes``
+    are None — the agent's history already carries those.
+    """
 
     me: Me
-    messages: list[Message]
+    new_messages: list[Message]
     authors: list[Author]
     channel: ChannelInfo
     now_utc: datetime
+    is_initial_activation: bool = False
     topic: str | None = None
     notes: str | None = None
 
@@ -110,12 +121,12 @@ class SendResponse(BaseModel):
     )
     notes: str = Field(
         description=(
-            "1-5 sentences of working notes carried into the next turn. Track ONLY "
-            "the conversation threads you were activated for (the ones where users "
-            "have directly engaged you via @mention or reply). Capture the salient "
-            "points users have made, open questions, and where each thread is "
-            "heading. Ignore unrelated channel chatter unless a new message in your "
-            "input explicitly references one of your tracked topics."
+            "1-5 sentences naming and tracking the conversation threads you're "
+            "actively engaged in. This is durable memory across engagements — "
+            "write it for your future self to remember WHAT you're tracking, not "
+            "to summarise what was said (your conversation history already does "
+            "that). Examples: \"Tracking Alice's question about async/await in "
+            "Python and Bob's debugging session for the Stripe webhook.\""
         ),
     )
 
