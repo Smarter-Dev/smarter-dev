@@ -36,8 +36,17 @@ logger = logging.getLogger(__name__)
 plugin = lightbulb.Plugin("mention")
 
 
-async def _voice_send(channel_id: int, text: str, reply_to: int | None) -> None:
-    """Send ``text`` as a voice message via the bot's voice service."""
+async def _voice_send(
+    channel_id: int,
+    text: str,
+    reply_to: int | None,
+    instruction: str | None = None,
+) -> None:
+    """Send ``text`` as a voice message via the bot's voice service.
+
+    ``instruction`` (if provided by the agent) is a natural-language stage
+    direction passed to Gemini TTS to shape tone / pacing / emotion.
+    """
     voice_service = getattr(plugin.bot, "d", {}).get("voice_service") or (
         getattr(plugin.bot, "d", {}).get("_services", {}).get("voice_service")
     )
@@ -54,6 +63,7 @@ async def _voice_send(channel_id: int, text: str, reply_to: int | None) -> None:
         channel_id=channel_id,
         text=text,
         reply_to_message_id=reply_to,
+        instruction=instruction,
     )
 
 
@@ -120,16 +130,27 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
                 logger.exception("Failed to send rate-limit message")
             return
 
+        # Distinguish "engine doesn't exist yet" (first activation in this
+        # engagement) from "engine is already running and the user is
+        # @mentioning again" — the two need different plumbing.
+        existing_active = await registry.has_active(event.channel_id)
         engine = await registry.ensure_engine(
             bot=plugin.bot,
             channel_id=event.channel_id,
             guild_id=event.guild_id,
             voice_send=_voice_send,
         )
-        # Activation messages don't bump the staleness counter — they reset it
-        # implicitly when the engine fires. The agent reads the channel history
-        # and decides for itself whether to reply with voice.
-        engine.trigger_initial(event.message)
+        if not existing_active:
+            # Brand new engagement: kick off the initial activation. The
+            # engine reads the channel history and decides for itself
+            # whether to reply with voice.
+            engine.trigger_initial(event.message)
+        else:
+            # Engine already active — enqueue this @mention/reply and
+            # force-fire so the agent reacts to it right now rather than
+            # waiting on the 5s idle timer.
+            await engine.observe(event)
+            engine.fire_now()
         return
 
     # Not an engagement — feed to engine if active, otherwise just bump the

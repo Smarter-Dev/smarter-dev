@@ -145,6 +145,18 @@ class SendResponse(BaseModel):
             "the user would still benefit from reading the long form."
         ),
     )
+    voice_instruction: str | None = Field(
+        default=None,
+        description=(
+            "Optional stage direction passed to the TTS model alongside the "
+            "voice_summary. Use this to shape HOW the voice sounds — tone, "
+            "pacing, emotion, energy. Examples: \"Say this with mock-serious "
+            "deadpan delivery\", \"Speak excitedly, like sharing good news\", "
+            "\"Use a slow, considered pace with a slight pause before the punch "
+            "line\". Leave None to use the default warm, casual, peer-developer "
+            "voice. Only meaningful when voice_summary is set."
+        ),
+    )
     continue_watching: bool = True
     topic: str = Field(
         description="1-2 sentence summary of the current conversation topic.",
