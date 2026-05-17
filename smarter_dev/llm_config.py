@@ -7,6 +7,7 @@ project using environment variables.
 import os
 import dotenv
 import dspy
+from google import genai
 from typing import Optional
 
 
@@ -106,6 +107,18 @@ def get_model_info(model_type: str = "fast") -> dict:
         "has_api_key": bool(api_key),
         "env_var": env_var,
     }
+
+
+def get_gemini_client_for_tts(model_name: str | None = None):
+    """Return Gemini client for TTS (not handled by DSPy)."""
+    if model_name is None:
+        from smarter_dev.shared.config import get_settings
+
+        model_name = get_settings().voice_tts_model
+    api_key = os.getenv("GEMINI_API_KEY") or dotenv.get_key(".env", "GEMINI_API_KEY")
+    if model_name.startswith("gemini/"):
+        model_name = model_name.removeprefix("gemini/")
+    return genai.Client(api_key=api_key), model_name
 
 
 def _get_provider_from_model(model_name: str) -> str:

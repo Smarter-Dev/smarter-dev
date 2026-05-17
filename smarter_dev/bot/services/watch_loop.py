@@ -33,6 +33,8 @@ WATCH_LOOP_INTERVAL = 5
 # Maximum time a watch loop can run before stopping (prevents runaway loops)
 MAX_LOOP_RUNTIME_SECONDS = 3600  # 1 hour
 
+VOICE_TRIGGER = "VOICE"
+
 
 class WatchLoop:
     """Background task that manages watchers for a channel."""
@@ -165,11 +167,16 @@ class WatchLoop:
         if not watcher.queued_messages:
             return
 
+        is_voice = self._messages_request_voice(watcher.queued_messages)
+        evaluated_messages = [msg.copy() for msg in watcher.queued_messages]
+        if is_voice:
+            for msg in evaluated_messages:
+                msg["content"] = self._strip_voice_trigger(msg.get("content", ""))
+
         # Format messages for evaluation
-        new_messages = self._format_messages_for_evaluation(watcher.queued_messages)
+        new_messages = self._format_messages_for_evaluation(evaluated_messages)
 
         # Clear queued messages (we've consumed them for evaluation)
-        evaluated_messages = watcher.queued_messages.copy()
         watcher.queued_messages = []
 
         # Update last evaluation time
@@ -213,7 +220,8 @@ class WatchLoop:
                 channel_state,
                 evaluated_messages,
                 result.relevant_message_ids,
-                result.personality_hint
+                result.personality_hint,
+                is_voice,
             )
 
     async def _invoke_response_agent(
@@ -222,7 +230,8 @@ class WatchLoop:
         channel_state,
         messages: list[dict],
         relevant_ids: list[str],
-        personality_hint: str = ""
+        personality_hint: str = "",
+        voice_mode: bool = False,
     ) -> None:
         """Invoke the response agent for a watcher.
 
@@ -264,6 +273,8 @@ class WatchLoop:
             # For watcher responses, use the FULL recent conversation timeline
             # Don't filter aggressively - the bot needs to see what was actually said
             relevant_messages = context["conversation_timeline"]
+            if voice_mode:
+                relevant_messages = self._strip_voice_trigger(relevant_messages)
             logger.debug(f"[{request_id}] Context built, invoking response agent...")
 
             # Invoke response agent
@@ -273,13 +284,14 @@ class WatchLoop:
                 channel_id=self.channel_id,
                 guild_id=self.guild_id,
                 relevant_messages=relevant_messages,
-                intent=f"Continue conversation - user said something new",
+                intent="Continue conversation - user said something new",
                 context_summary=f"Watching for: {watcher.context.watching_for}",
                 channel_info=context["channel"],
                 users=context["users"],
                 me_info=context["me"],
                 request_id=request_id,
-                personality_hint=personality_hint
+                personality_hint=personality_hint,
+                voice_mode=voice_mode,
             )
 
             if success:
@@ -287,6 +299,31 @@ class WatchLoop:
                     f"[{request_id}] Response complete: continue_watching={output.continue_watching}, "
                     f"tokens={output.tokens_used}"
                 )
+
+                if voice_mode:
+                    voice_service = getattr(self.bot, "d", {}).get("voice_service")
+                    if not voice_service:
+                        voice_service = (
+                            getattr(self.bot, "d", {}).get("_services", {}).get("voice_service")
+                        )
+                    if not voice_service:
+                        logger.error(f"[{request_id}] Voice service unavailable")
+                    else:
+                        reply_to_message_id = int(relevant_ids[0]) if relevant_ids else None
+                        try:
+                            await voice_service.synthesize_and_send(
+                                bot=self.bot,
+                                channel_id=self.channel_id,
+                                text=output.response_text,
+                                reply_to_message_id=reply_to_message_id,
+                            )
+                        except Exception:
+                            logger.exception(f"[{request_id}] Voice synthesis failed")
+                            await self.bot.rest.create_message(
+                                self.channel_id,
+                                output.response_text[:2000],
+                                reply=reply_to_message_id,
+                            )
 
                 if output.continue_watching:
                     # Update watcher for continued monitoring
@@ -315,6 +352,15 @@ class WatchLoop:
             watcher.is_responding = False
             watcher.response_lock.release()
             logger.debug(f"[{request_id}] === WATCHER COMPLETE ===")
+
+    def _messages_request_voice(self, messages: list[dict]) -> bool:
+        return any(
+            msg.get("voice_requested") or VOICE_TRIGGER in (msg.get("content") or "")
+            for msg in messages
+        )
+
+    def _strip_voice_trigger(self, text: str) -> str:
+        return text.replace(VOICE_TRIGGER, "").strip()
 
     def _format_messages_for_evaluation(self, messages: list[dict]) -> str:
         """Format messages for the evaluation agent.

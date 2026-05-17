@@ -34,3 +34,14 @@ data:
   LLM_FAST_MODEL: "gemini/gemini-3.1-flash-lite-preview"
   LLM_MEDIUM_MODEL: "claude-haiku-4-5-20251001"
   LLM_JUDGE_MODEL: "gemini/gemini-3.1-flash-lite-preview"
+
+  # Discord voice message configuration
+  VOICE_TTS_MODEL: "gemini-2.5-flash-preview-tts"
+  VOICE_TTS_VOICE: "Kore"
+  VOICE_TTS_SAMPLE_RATE: "24000"
+  VOICE_TTS_CHANNELS: "1"
+  VOICE_TTS_SAMPLE_WIDTH: "2"
+  VOICE_MAX_INPUT_CHARS: "800"
+  VOICE_WORDS_PER_MINUTE: "150"
+  VOICE_MAX_DURATION_SECONDS: "30"
+  VOICE_OPUS_BITRATE: "48k"

@@ -598,7 +598,13 @@ def with_failure_tracking(tool_name: str, tool_func: Callable, critical: bool = 
     return wrapped
 
 
-def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id: str) -> tuple[list[Callable], list[str]]:
+def create_mention_tools(
+    bot,
+    channel_id: str,
+    guild_id: str,
+    trigger_message_id: str,
+    voice_response_parts: list[str] | None = None,
+) -> tuple[list[Callable], list[str]]:
     """Create context-bound Discord interaction tools for a mention agent.
 
     All returned tools are bound to the specific channel and guild where the
@@ -609,6 +615,8 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         channel_id: Channel where the mention occurred (string)
         guild_id: Guild where the mention occurred (string)
         trigger_message_id: ID of the message that triggered the mention
+        voice_response_parts: Optional sink for voice-mode responses. When set,
+            response send tools capture text instead of posting it to Discord.
 
     Returns:
         Tuple of (List of callable async functions, List of recent search queries in this channel)
@@ -667,6 +675,14 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             # Stop typing indicator before sending
             channel_state.typing_active = False
+            if voice_response_parts is not None:
+                voice_response_parts.append(content)
+                channel_state.add_recent_message(content)
+                return {
+                    "success": True,
+                    "result": "Message captured for voice response. Typing indicator stopped.",
+                }
+
             message = await bot.rest.create_message(int(channel_id), content)
 
             # Track the message to prevent duplicates
@@ -738,6 +754,14 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
 
             # Stop typing indicator before sending
             channel_state.typing_active = False
+            if voice_response_parts is not None:
+                voice_response_parts.append(content)
+                channel_state.add_recent_message(content)
+                return {
+                    "success": True,
+                    "result": "Reply captured for voice response. Typing indicator stopped.",
+                }
+
             message = await bot.rest.create_message(
                 int(channel_id),
                 content,
@@ -1806,11 +1830,11 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
             # Track the planning call for this invocation
             invocation_searches[plan_key] = current_time
 
-            # Send status message to channel
-            try:
-                await bot.rest.create_message(int(channel_id), "> -# Planning my response")
-            except Exception as e:
-                logger.warning(f"[Tool] Failed to send planning status message: {e}")
+            if voice_response_parts is None:
+                try:
+                    await bot.rest.create_message(int(channel_id), "> -# Planning my response")
+                except Exception as e:
+                    logger.warning(f"[Tool] Failed to send planning status message: {e}")
 
             # Build FULL context (20 messages) for strategic planning
             context_builder = ConversationContextBuilder(
@@ -1885,12 +1909,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         try:
             logger.debug(f"[Tool] report_behavior called in channel {channel_id}: {classification}")
 
-            # Send thought message to channel
-            thought_message = f"> -# Ignoring {classification}"
-            try:
-                await bot.rest.create_message(int(channel_id), thought_message)
-            except Exception as e:
-                logger.warning(f"[Tool] Failed to send behavior report message: {e}")
+            if voice_response_parts is None:
+                thought_message = f"> -# Ignoring {classification}"
+                try:
+                    await bot.rest.create_message(int(channel_id), thought_message)
+                except Exception as e:
+                    logger.warning(f"[Tool] Failed to send behavior report message: {e}")
 
             return {
                 "success": True,
@@ -1937,7 +1961,12 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
     return tools, channel_queries
 
 
-def create_response_tools(bot, channel_id: str, guild_id: str) -> tuple[list[Callable], list[str]]:
+def create_response_tools(
+    bot,
+    channel_id: str,
+    guild_id: str,
+    voice_response_parts: list[str] | None = None,
+) -> tuple[list[Callable], list[str]]:
     """Create context-bound Discord interaction tools for a response agent.
 
     This returns a subset of tools suitable for the response agent in the
@@ -1949,6 +1978,7 @@ def create_response_tools(bot, channel_id: str, guild_id: str) -> tuple[list[Cal
         bot: Discord bot instance (lightbulb.BotApp)
         channel_id: Channel where the mention occurred (string)
         guild_id: Guild where the mention occurred (string)
+        voice_response_parts: Optional sink for voice-mode responses.
 
     Returns:
         Tuple of (List of callable async functions, List of recent search queries in this channel)
@@ -1959,7 +1989,8 @@ def create_response_tools(bot, channel_id: str, guild_id: str) -> tuple[list[Cal
         bot=bot,
         channel_id=channel_id,
         guild_id=guild_id,
-        trigger_message_id=""
+        trigger_message_id="",
+        voice_response_parts=voice_response_parts,
     )
 
     # Tools to exclude (flow control tools)
