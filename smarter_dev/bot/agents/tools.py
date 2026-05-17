@@ -200,7 +200,7 @@ class EngagementPlanningSignature(dspy.Signature):
     - If the recommended action is silence, explicitly state this in your plan
 
     The execution agent (Gemini) will follow your plan exactly, so be concrete about:
-    - Which specific tools to call (send_message, reply_to_message, lookup_fact, search_web, open_url, add_reaction_to_message, generate_in_depth_response, etc.)
+    - Which specific tools to call (send_message, reply_to_message, lookup_fact, search_web, open_url, add_reaction_to_message, etc.)
     - What parameters to pass to each tool
     - The order to execute actions in
     - Or if no action should be taken
@@ -209,13 +209,7 @@ class EngagementPlanningSignature(dspy.Signature):
     - If the conversation is simple (greetings, quick reactions), recommend simple actions (react + brief message)
     - If a general fact is needed (capitals, dates, definitions), recommend lookup_fact() first
     - If specific/current information or multiple sources are needed, recommend search_web() first
-    - For technical/detailed responses, recommend TWO steps:
-      1. `result = generate_in_depth_response(prompt_summary, prompt)` - generates response
-      2. `send_message(result['response'])` - sends it to Discord
-      - Use this for: technical explanations, code examples, detailed answers (anything longer than 2-3 lines)
-      - First parameter is a brief summary shown to users (e.g., "async/await in Python")
-      - Second parameter is the complete prompt with context, research results, and what's needed
-      - Response is automatically limited to 1900 chars (Discord's 2000 char limit)
+    - For technical/detailed responses, Gemini writes them directly via send_message()
     - For quick casual responses, Gemini can write them directly
     - If a URL needs analysis, recommend open_url(url, question) with a specific question
     - If engaging with a specific message, recommend reply_to_message(message_id, content)
@@ -245,55 +239,6 @@ class EngagementPlanningSignature(dspy.Signature):
     )
     reasoning: str = dspy.OutputField(
         description="Brief explanation (2-3 sentences) of why these actions make sense for this conversation"
-    )
-
-
-class InDepthResponseSignature(dspy.Signature):
-    """You're a knowledgeable reference for developers - like a smart friend who points you in the right direction
-    rather than doing your work for you.
-
-    ## Your Role
-    - Act as a REFERENCE, not a code generator
-    - Explain concepts and approaches, don't write complete solutions
-    - Show usage examples and patterns, not full implementations
-    - Point to the right tools, functions, or approaches to use
-
-    ## Response Style
-    - Get straight to the point - no preamble, no "Great question!"
-    - If asked for "brief" or "quick", be exactly that
-    - Explain the concept, show a small usage example, done
-    - Don't pad responses with unnecessary context
-
-    ## For Code Questions
-    - Explain the approach or concept
-    - Show a minimal usage example (a few lines demonstrating the pattern)
-    - Point to relevant docs/APIs if applicable
-    - DON'T write their full solution for them
-    - DON'T scaffold entire functions or classes unless specifically asked
-
-    ## Technical Content
-    - Format code properly: `inline code` or ```language blocks```
-    - Keep examples minimal - just enough to show the pattern
-    - Explain WHY when it's not obvious, skip when it is
-
-    ## What NOT to Do
-    - Don't write complete implementations
-    - Don't add "here's a complete example" with full working code
-    - Don't pad with encouragement or extra context
-    - Don't repeat the question back
-
-    Think: senior dev pointing a junior in the right direction, not doing their homework.
-    """
-
-    prompt_summary: str = dspy.InputField(
-        description="Brief summary of what response is being generated (shown to users in status message)"
-    )
-    prompt: str = dspy.InputField(
-        description="Complete prompt with all context: the question, relevant conversation, any search results, and what response is needed"
-    )
-
-    response: str = dspy.OutputField(
-        description="Concise, reference-style response: explain the concept, show a minimal usage example, and point to the right approach. No fluff. Properly formatted with code blocks and markdown."
     )
 
 
@@ -446,53 +391,6 @@ class SearchCache:
 
 # Global search cache instance
 search_cache = SearchCache()
-
-
-class InDepthResponseRateLimiter:
-    """Rate limiter for generate_in_depth_response tool to prevent excessive usage."""
-
-    COOLDOWN_SECONDS = 60  # 1 minute cooldown between uses per channel
-
-    def __init__(self):
-        """Initialize the rate limiter."""
-        # Track last usage time per channel
-        # Format: {channel_id: datetime}
-        self.last_usage: dict[str, datetime] = {}
-        self._lock = asyncio.Lock()
-
-    async def check_and_record(self, channel_id: str) -> tuple[bool, float | None]:
-        """Check if tool can be used and record usage.
-
-        Args:
-            channel_id: The Discord channel ID
-
-        Returns:
-            Tuple[bool, Optional[float]]: (can_use, seconds_remaining)
-                - can_use: True if tool can be used now, False if on cooldown
-                - seconds_remaining: Seconds until cooldown ends (None if can_use=True)
-        """
-        async with self._lock:
-            now = datetime.now()
-
-            # Check if channel has used this tool recently
-            if channel_id in self.last_usage:
-                last_time = self.last_usage[channel_id]
-                elapsed = (now - last_time).total_seconds()
-
-                # Still on cooldown
-                if elapsed < self.COOLDOWN_SECONDS:
-                    remaining = self.COOLDOWN_SECONDS - elapsed
-                    logger.debug(f"[RateLimit] generate_in_depth_response on cooldown for channel {channel_id}: {remaining:.1f}s remaining")
-                    return False, remaining
-
-            # Allow usage and record timestamp
-            self.last_usage[channel_id] = now
-            logger.debug(f"[RateLimit] generate_in_depth_response allowed for channel {channel_id}")
-            return True, None
-
-
-# Global rate limiter for in-depth responses
-in_depth_response_rate_limiter = InDepthResponseRateLimiter()
 
 
 class ToolFailureMonitor:
@@ -1959,120 +1857,6 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
                 "error": f"Failed to generate plan: {error_msg}"
             }
 
-    async def generate_in_depth_response(prompt_summary: str, prompt: str) -> dict:
-        """Generate an in-depth, technical response using Claude Haiku 4.5.
-
-        **WHAT THIS TOOL DOES**:
-        - Generates detailed technical responses using Claude (not you, Gemini)
-        - Returns a Discord-ready message that you MUST send using send_message()
-        - Designed for technical/coding questions only
-        - **RATE LIMITED**: Can only be used once per minute per channel
-
-        **WHEN TO USE**:
-        - Technical explanations or detailed answers
-        - Code examples or programming help
-        - Complex topic breakdowns
-        - Structured, multi-part responses
-        - Any technical question that needs more depth than a quick casual message
-
-        **WHEN NOT TO USE**:
-        - Casual conversation or opinions (you handle these)
-        - Simple questions you can answer in 1-2 lines
-        - Non-technical topics
-        - When you've already used it in the last minute (will be rate limited)
-
-        **IMPORTANT**: After calling this tool, you MUST call send_message(result['response'])
-        to actually send the generated response to Discord!
-
-        Args:
-            prompt_summary: Brief description shown to users (e.g., "async/await in Python", "fixing AttributeError")
-            prompt: Complete prompt with all context:
-                - The user's question or request
-                - Relevant conversation context
-                - Any search results or information gathered
-                - What kind of response is needed (explanation, code example, comparison, etc.)
-                - Any user preferences for length/detail (e.g., "brief", "detailed", "eli5")
-
-        Returns:
-            dict with success and response fields:
-            - success: True if generation succeeded, False otherwise
-            - response: Generated response (properly formatted)
-            - length: Character count of the response
-            - error: Error message if success is False
-            - on_cooldown: True if rate limited (only present when success=False)
-            - cooldown_remaining: Seconds until cooldown ends (only present when on_cooldown=True)
-
-        Example:
-            result = generate_in_depth_response(
-                prompt_summary="async/await in Python",
-                prompt="User asked: 'How do I use async/await in Python?'
-                       Explain async/await in Python with a simple example."
-            )
-            if result['success']:
-                send_message(result['response'])  # YOU MUST DO THIS!
-            else:
-                send_message(f"Sorry, I had trouble generating a response: {result['error']}")
-        """
-        # Check if tool is disabled (before rate limit check to avoid consuming quota)
-        is_disabled, reason = await tool_failure_monitor.is_tool_disabled("generate_in_depth_response")
-        if is_disabled:
-            logger.warning("[Tool] generate_in_depth_response is disabled")
-            return {"success": False, "error": reason, "tool_disabled": True}
-
-        try:
-            from smarter_dev.llm_config import get_llm_model
-
-            logger.info(f"[Tool] generate_in_depth_response called: {prompt_summary}")
-
-            # Check rate limit
-            can_use, remaining = await in_depth_response_rate_limiter.check_and_record(channel_id)
-            if not can_use:
-                logger.warning(f"[Tool] generate_in_depth_response rate limited in channel {channel_id}: {remaining:.0f}s remaining")
-                return {
-                    "success": False,
-                    "error": f"This tool can only be used once per minute. Please wait {int(remaining)} seconds before trying again.",
-                    "on_cooldown": True,
-                    "cooldown_remaining": int(remaining)
-                }
-
-            # Send status message to channel with the provided summary
-            try:
-                await bot.rest.create_message(int(channel_id), f'> -# Writing a response for "{prompt_summary}"')
-            except Exception as e:
-                logger.warning(f"[Tool] Failed to send in-depth response status message: {e}")
-
-            # Get fast model for in-depth response generation
-            claude_lm = get_llm_model("fast")
-
-            # Use context manager for thread-safe LLM switching
-            with dspy.context(lm=claude_lm):
-                predictor = dspy.Predict(InDepthResponseSignature)
-                result = predictor(prompt_summary=prompt_summary, prompt=prompt)
-
-            response_text = result.response
-            response_length = len(response_text)
-
-            logger.info(f"[Tool] Generated in-depth response: {response_length} chars")
-
-            # Record success
-            await tool_failure_monitor.record_success("generate_in_depth_response")
-
-            return {
-                "success": True,
-                "response": response_text,
-                "length": response_length
-            }
-
-        except Exception as e:
-            logger.error(f"[Tool] generate_in_depth_response failed: {e}", exc_info=True)
-            error_msg = str(e)
-            # Record failure
-            await tool_failure_monitor.record_failure("generate_in_depth_response", error_msg)
-            return {
-                "success": False,
-                "error": f"Failed to generate response: {error_msg}"
-            }
-
     async def report_behavior(classification: str) -> dict:
         """Report problematic user behavior and get instructions for how to proceed.
 
@@ -2140,7 +1924,6 @@ def create_mention_tools(bot, channel_id: str, guild_id: str, trigger_message_id
         search_web,
         open_url,
         generate_engagement_plan,
-        generate_in_depth_response,
         start_typing,
         stop_typing,
         fetch_new_messages,
