@@ -507,9 +507,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         # Create services
         from smarter_dev.bot.services.bytes_service import BytesService
         from smarter_dev.bot.services.challenge_service import ChallengeService
-        from smarter_dev.bot.services.channel_state import (
-            initialize_channel_state_manager,
-        )
+        from smarter_dev.bot.services.chat_memory import init_chat_memory
         from smarter_dev.bot.services.quests_service import QuestService
         from smarter_dev.bot.services.forum_agent_service import ForumAgentService
         from smarter_dev.bot.services.repeating_message_service import (
@@ -538,8 +536,21 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         advent_of_code_service = AdventOfCodeService(api_client, cache_manager, bot)
         voice_service = VoiceService(api_client, cache_manager, settings)
 
-        # Initialize conversation participation services
-        channel_state_manager = initialize_channel_state_manager()
+        # Initialize chat agent memory (Redis-backed; non-critical)
+        import redis.asyncio as redis_async
+
+        chat_memory_redis = redis_async.from_url(
+            settings.effective_redis_url, decode_responses=False
+        )
+        try:
+            await chat_memory_redis.ping()
+            init_chat_memory(chat_memory_redis)
+            logger.info("✓ Chat agent memory initialised against Redis")
+        except Exception:
+            logger.exception(
+                "Chat agent memory Redis connection failed — chat agent will not start"
+            )
+            chat_memory_redis = None
 
         # Initialize services
         logger.info("Initializing bytes service...")
@@ -672,7 +683,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d["scheduled_message_service"] = scheduled_message_service
         bot.d["repeating_message_service"] = repeating_message_service
         bot.d["advent_of_code_service"] = advent_of_code_service
-        bot.d["channel_state_manager"] = channel_state_manager
+        bot.d["chat_memory_redis"] = chat_memory_redis
         bot.d["voice_service"] = voice_service
 
         # Store services in d for plugin access (primary)
@@ -685,7 +696,6 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             "scheduled_message_service": scheduled_message_service,
             "repeating_message_service": repeating_message_service,
             "advent_of_code_service": advent_of_code_service,
-            "channel_state_manager": channel_state_manager,
             "voice_service": voice_service,
         }
 
