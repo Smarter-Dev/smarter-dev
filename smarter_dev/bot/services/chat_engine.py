@@ -72,7 +72,7 @@ class ChannelEngine:
     bot: Any  # hikari.GatewayBot; Any keeps tests light
     channel_id: int
     guild_id: int
-    voice_send: Callable[[int, str, int | None], Awaitable[None]]
+    voice_send: Callable[[int, str, int | None, str | None], Awaitable[None]]
     on_deactivate: Callable[[int], Awaitable[None]]
 
     queue: list[_QueuedMessage] = field(default_factory=list)
@@ -106,6 +106,16 @@ class ChannelEngine:
         pre-engagement ``channel_history`` context.
         """
         self.activation_message = trigger_message
+        self.fire_event.set()
+
+    def fire_now(self) -> None:
+        """Force the runner to fire on the current queue immediately.
+
+        Used by the mention plugin when an @mention or reply lands in a
+        channel where the engine is already active — the message has been
+        enqueued via ``observe`` and we want a response right now rather
+        than waiting on the 5s idle timer.
+        """
         self.fire_event.set()
 
     async def observe(self, event: hikari.MessageCreateEvent) -> None:
@@ -241,6 +251,15 @@ class ChannelEngine:
                 drained = [q.message for q in self.queue]
                 self.queue.clear()
 
+            # Best reply-to anchor for any user-facing error message: the
+            # activation trigger on first turn, otherwise the freshest
+            # queued message.
+            error_reply_to: int | None = None
+            if first_activation and self.activation_message is not None:
+                error_reply_to = int(self.activation_message.id)
+            elif drained:
+                error_reply_to = int(drained[-1].id)
+
             memory = get_chat_memory()
             if first_activation:
                 await memory.reset_idle_counter(self.channel_id)
@@ -279,6 +298,11 @@ class ChannelEngine:
                 logger.exception(
                     "Failed to build agent input for channel %s", self.channel_id
                 )
+                await self._post_error(
+                    "Sorry, couldn't process that one — something went wrong "
+                    "preparing your message.",
+                    reply_to=error_reply_to,
+                )
                 return
 
             new_count = (
@@ -313,6 +337,10 @@ class ChannelEngine:
                     "[%s] Chat agent run failed for channel %s",
                     request_id,
                     self.channel_id,
+                )
+                await self._post_error(
+                    "Sorry, couldn't generate a reply for that one — try again?",
+                    reply_to=error_reply_to,
                 )
                 return
 
@@ -381,44 +409,89 @@ class ChannelEngine:
 
         Text and voice are independent channels; either, both, or (by validator)
         at least one is present. When both are present they're dispatched in
-        parallel.
+        parallel. If voice fails AND there was no text alongside it, the user
+        sees a brief "couldn't send a voice message" fallback so the silence
+        doesn't look like the agent ignored them.
         """
         reply_to: int | None = None
         if output.reply_to_message_id and output.reply_to_message_id.isdigit():
             reply_to = int(output.reply_to_message_id)
 
-        tasks: list[asyncio.Task] = []
-        if output.message and output.message.strip():
-            tasks.append(
-                asyncio.create_task(self._send_text(output.message, reply_to))
-            )
-        if output.voice_summary and output.voice_summary.strip():
-            tasks.append(
-                asyncio.create_task(self._send_voice(output.voice_summary, reply_to))
+        has_text = bool(output.message and output.message.strip())
+        has_voice = bool(output.voice_summary and output.voice_summary.strip())
+
+        text_ok = True
+        voice_ok = True
+        tasks: dict[str, asyncio.Task] = {}
+        if has_text:
+            tasks["text"] = asyncio.create_task(self._send_text(output.message, reply_to))
+        if has_voice:
+            tasks["voice"] = asyncio.create_task(
+                self._send_voice(output.voice_summary, reply_to, output.voice_instruction)
             )
 
         if not tasks:
             return
-        await asyncio.gather(*tasks, return_exceptions=True)
 
-    async def _send_text(self, message: str, reply_to: int | None) -> None:
+        results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+        for kind, ok in zip(tasks.keys(), results):
+            if isinstance(ok, BaseException) or ok is False:
+                if kind == "text":
+                    text_ok = False
+                else:
+                    voice_ok = False
+
+        # Voice-only failed → tell the user, since otherwise they see silence.
+        if has_voice and not voice_ok and not has_text:
+            await self._post_error(
+                "Couldn't send a voice message in this channel — give the bot "
+                "SEND_VOICE_MESSAGES permission, or ask me to reply in text.",
+                reply_to=reply_to,
+            )
+
+    async def _send_text(self, message: str, reply_to: int | None) -> bool:
         try:
             kwargs: dict[str, Any] = {"content": message.strip()[:2000]}
             if reply_to is not None:
                 kwargs["reply"] = reply_to
             await self.bot.rest.create_message(self.channel_id, **kwargs)
+            return True
         except Exception:
             logger.exception(
                 "Failed to send chat agent text in channel %s", self.channel_id
             )
+            return False
 
-    async def _send_voice(self, voice_summary: str, reply_to: int | None) -> None:
+    async def _send_voice(
+        self,
+        voice_summary: str,
+        reply_to: int | None,
+        instruction: str | None,
+    ) -> bool:
         try:
-            await self.voice_send(self.channel_id, voice_summary.strip(), reply_to)
+            await self.voice_send(
+                self.channel_id, voice_summary.strip(), reply_to, instruction
+            )
+            return True
         except Exception:
             logger.exception(
                 "Voice send failed for channel %s", self.channel_id
             )
+            return False
+
+    async def _post_error(self, text: str, *, reply_to: int | None = None) -> None:
+        """Send a brief, user-facing error message to the channel.
+
+        Best-effort: failures are swallowed (we don't want a cascading
+        exception when the channel itself is the problem).
+        """
+        try:
+            kwargs: dict[str, Any] = {"content": text[:2000]}
+            if reply_to is not None:
+                kwargs["reply"] = reply_to
+            await self.bot.rest.create_message(self.channel_id, **kwargs)
+        except Exception:
+            logger.debug("Failed to post error message", exc_info=True)
 
     async def _maybe_refire(self) -> None:
         async with self.queue_lock:

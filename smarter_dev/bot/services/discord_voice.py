@@ -30,6 +30,13 @@ DISCORD_API_BASE = "https://discord.com/api/v10"
 VOICE_MESSAGE_FLAG = 8192
 MARKDOWN_RE = re.compile(r"[*_`>#]")
 
+# Used as the TTS prompt prefix when the agent doesn't specify its own.
+# Gemini's TTS API follows natural-language stage directions like this.
+DEFAULT_VOICE_INSTRUCTION = (
+    "Say this in a warm, casual, peer-developer voice with natural pacing — "
+    "like a senior dev chatting with a colleague, not a corporate announcer"
+)
+
 
 async def discord_request(
     session: aiohttp.ClientSession,
@@ -213,9 +220,11 @@ def generate_tts_pcm(
     transcript: str,
     model_name: str,
     voice_name: str,
+    instruction: str | None = None,
 ) -> bytes:
     client, model = get_gemini_client_for_tts(model_name)
-    prompt = f"Synthesize speech:\n{transcript}"
+    prefix = (instruction or DEFAULT_VOICE_INSTRUCTION).strip().rstrip(":")
+    prompt = f"{prefix}:\n{transcript}"
     response = client.models.generate_content(
         model=model,
         contents=prompt,
@@ -268,6 +277,7 @@ class VoiceService(BaseService):
         channel_id: int,
         text: str,
         reply_to_message_id: int | None = None,
+        instruction: str | None = None,
     ) -> None:
         self._log_operation("synthesize_and_send", channel_id=channel_id)
 
@@ -285,6 +295,7 @@ class VoiceService(BaseService):
                 text,
                 self._settings.voice_tts_model,
                 self._settings.voice_tts_voice,
+                instruction,
             )
         except Exception:
             self._logger.warning("TTS generation failed, retrying shorter text", exc_info=True)
@@ -293,6 +304,7 @@ class VoiceService(BaseService):
                 text[:400],
                 self._settings.voice_tts_model,
                 self._settings.voice_tts_voice,
+                instruction,
             )
 
         with tempfile.TemporaryDirectory() as tmp:

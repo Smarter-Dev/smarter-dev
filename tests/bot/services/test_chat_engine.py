@@ -119,7 +119,7 @@ async def _build_engine(bot, voice_send=None):
     async def _on_deactivate(channel_id: int) -> None:
         deactivated.append(channel_id)
 
-    async def _noop_voice(channel_id, text, reply_to):
+    async def _noop_voice(channel_id, text, reply_to, instruction=None):
         pass
 
     engine = ChannelEngine(
@@ -408,7 +408,7 @@ async def test_send_response_reply_to_message_id_passes_through(fake_bot, fake_m
 async def test_voice_only_response_sends_voice_not_text(fake_bot, fake_memory):
     voice_calls: list[tuple] = []
 
-    async def voice_send(channel_id, text, reply_to):
+    async def voice_send(channel_id, text, reply_to, instruction=None):
         voice_calls.append((channel_id, text, reply_to))
 
     async def fake_run(*, user_prompt, message_history, deps):
@@ -438,7 +438,7 @@ async def test_text_and_voice_dispatched_in_parallel(fake_bot, fake_memory):
     """Both channels populated → both sends happen for the same turn."""
     voice_calls: list[tuple] = []
 
-    async def voice_send(channel_id, text, reply_to):
+    async def voice_send(channel_id, text, reply_to, instruction=None):
         voice_calls.append((channel_id, text, reply_to))
 
     async def fake_run(*, user_prompt, message_history, deps):
@@ -462,6 +462,159 @@ async def test_text_and_voice_dispatched_in_parallel(fake_bot, fake_memory):
     assert voice_calls, "expected voice send"
     fake_bot.rest.create_message.assert_awaited()
     assert "Python example" in voice_calls[0][1]
+
+
+@pytest.mark.asyncio
+async def test_fire_now_re_triggers_an_active_engine(fake_bot, fake_memory):
+    """Regression: a follow-up @mention on an active engine used to drop
+    silently because trigger_initial set the fire event but the queue was
+    empty, so _run_once short-circuited. The fix is observe()+fire_now()
+    so the mention is queued AND the agent fires immediately."""
+    runs: list[str] = []
+
+    async def fake_run(*, user_prompt, message_history, deps):
+        runs.append(user_prompt)
+        return _result(
+            SendResponse(message="ack", topic="t", notes="n"),
+            all_messages=["m1", "m2"],
+        )
+
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    with patches[0], patches[1], patches[2], patches[3]:
+        engine, _ = await _build_engine(fake_bot)
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        await asyncio.sleep(0.05)
+        initial_runs = len(runs)
+
+        # Simulate a follow-up @mention: observe + fire_now (what mention.py
+        # does when an active engine sees another engagement).
+        await engine.observe(_make_event(7777, 200, "@bot follow-up"))
+        engine.fire_now()
+        await asyncio.sleep(0.05)
+        await engine.shutdown()
+
+    assert len(runs) >= initial_runs + 1, (
+        "follow-up engagement didn't trigger another agent run — "
+        "fire_now/observe path is broken"
+    )
+
+
+@pytest.mark.asyncio
+async def test_voice_instruction_forwarded_to_voice_send(fake_bot, fake_memory):
+    """SendResponse.voice_instruction reaches voice_send so the TTS service
+    can use it as a stage direction."""
+    voice_calls: list[tuple] = []
+
+    async def voice_send(channel_id, text, reply_to, instruction=None):
+        voice_calls.append((channel_id, text, reply_to, instruction))
+
+    async def fake_run(*, user_prompt, message_history, deps):
+        return _result(
+            SendResponse(
+                voice_summary="bazinga",
+                voice_instruction="Say this with mock-serious deadpan delivery",
+                topic="t",
+                notes="n",
+            )
+        )
+
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    with patches[0], patches[1], patches[2], patches[3]:
+        engine, _ = await _build_engine(fake_bot, voice_send=voice_send)
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        await asyncio.sleep(0.05)
+        await engine.shutdown()
+
+    assert voice_calls
+    assert voice_calls[0][3] == "Say this with mock-serious deadpan delivery"
+
+
+@pytest.mark.asyncio
+async def test_voice_only_failure_posts_fallback(fake_bot, fake_memory):
+    """If voice fails and there's no text alongside, the user is told —
+    silence after a request would look like the agent ignored them.
+    Regression for Discord 50173 (no SEND_VOICE_MESSAGES permission)."""
+
+    async def voice_send(channel_id, text, reply_to, instruction=None):
+        raise RuntimeError("Discord error 400: 50173")
+
+    async def fake_run(*, user_prompt, message_history, deps):
+        return _result(
+            SendResponse(
+                voice_summary="here you go",
+                topic="t",
+                notes="n",
+            )
+        )
+
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    with patches[0], patches[1], patches[2], patches[3]:
+        engine, _ = await _build_engine(fake_bot, voice_send=voice_send)
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        await asyncio.sleep(0.05)
+        await engine.shutdown()
+
+    # The fallback "Couldn't send a voice message..." post should be the
+    # only thing on the channel.
+    fake_bot.rest.create_message.assert_awaited()
+    posted = fake_bot.rest.create_message.await_args.kwargs.get("content", "")
+    assert "voice message" in posted.lower()
+
+
+@pytest.mark.asyncio
+async def test_voice_failure_with_text_does_not_post_extra_fallback(fake_bot, fake_memory):
+    """When voice fails but text was sent alongside, no extra error message
+    is posted (the user already got the text reply)."""
+
+    async def voice_send(channel_id, text, reply_to, instruction=None):
+        raise RuntimeError("Discord error 400")
+
+    async def fake_run(*, user_prompt, message_history, deps):
+        return _result(
+            SendResponse(
+                message="here's the text",
+                voice_summary="and a voice version",
+                topic="t",
+                notes="n",
+            )
+        )
+
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    with patches[0], patches[1], patches[2], patches[3]:
+        engine, _ = await _build_engine(fake_bot, voice_send=voice_send)
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        await asyncio.sleep(0.05)
+        await engine.shutdown()
+
+    # Exactly one create_message — the text reply, not a fallback.
+    assert fake_bot.rest.create_message.await_count == 1
+    posted = fake_bot.rest.create_message.await_args.kwargs.get("content", "")
+    assert posted == "here's the text"
+
+
+@pytest.mark.asyncio
+async def test_agent_run_failure_posts_error_message(fake_bot, fake_memory):
+    """If agent.run raises, the user sees a brief "couldn't generate a reply"
+    note rather than silent nothing."""
+
+    async def fake_run(*, user_prompt, message_history, deps):
+        raise RuntimeError("provider exploded")
+
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    with patches[0], patches[1], patches[2], patches[3]:
+        engine, _ = await _build_engine(fake_bot)
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        await asyncio.sleep(0.05)
+        await engine.shutdown()
+
+    fake_bot.rest.create_message.assert_awaited()
+    posted = fake_bot.rest.create_message.await_args.kwargs.get("content", "")
+    assert "couldn't" in posted.lower() or "could not" in posted.lower()
 
 
 @pytest.mark.asyncio
