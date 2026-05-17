@@ -39,8 +39,8 @@ from pydantic_ai.providers.google import GoogleProvider
 
 logger = logging.getLogger(__name__)
 
-COMPACT_THRESHOLD_CHARS = 1500
-MAX_SUMMARY_CHARS = 1200
+COMPACT_THRESHOLD_CHARS = 10_000
+MAX_SUMMARY_CHARS = 2_000
 
 DEFAULT_COMPACT_MODEL = "gemini-3.1-flash-lite-preview"
 COMPACT_MODEL_ENV_VAR = "CHAT_AGENT_COMPACT_MODEL"
@@ -168,24 +168,8 @@ def _index_of_last_request(messages: list[ModelMessage]) -> int:
     return len(messages)
 
 
-def _index_of_first_request(messages: list[ModelMessage]) -> int:
-    """Return the index of the first ModelRequest in ``messages``, or -1."""
-    for idx, msg in enumerate(messages):
-        if isinstance(msg, ModelRequest):
-            return idx
-    return -1
-
-
 async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
-    """Length-gated compaction over prior turns; current turn left intact.
-
-    The very first ``ModelRequest`` in ``prior`` is ALSO left intact: it
-    carries the initial activation's last-10 channel messages, the agent's
-    only window into pre-engagement context. Without this guard, that
-    structurally-large blob would be summarised on turn 2 and the agent
-    would lose its earliest conversational context for the rest of the
-    engagement.
-    """
+    """Length-gated compaction over prior turns; current turn left intact."""
     if len(messages) <= 1:
         return messages
 
@@ -193,14 +177,8 @@ async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
     prior = messages[:current_start]
     current = messages[current_start:]
 
-    # Protect the first ModelRequest — the initial activation's context.
-    protected_idx = _index_of_first_request(prior)
-
     compacted: list[ModelMessage] = []
-    for idx, msg in enumerate(prior):
-        if idx == protected_idx:
-            compacted.append(msg)
-            continue
+    for msg in prior:
         if isinstance(msg, ModelRequest):
             new_parts = await _compact_request_parts(list(msg.parts))
             compacted.append(dataclasses.replace(msg, parts=new_parts))
