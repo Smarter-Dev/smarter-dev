@@ -1,4 +1,4 @@
-"""Tests for open_url Jina Reader integration and YouTube metadata support."""
+"""Tests for the web-fetch utilities used by the chat agent's ``web_read`` tool."""
 
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -6,11 +6,11 @@ from unittest.mock import patch
 
 import pytest
 
-from smarter_dev.bot.agents.tools import _HTML_TAG_RE
-from smarter_dev.bot.agents.tools import _SCRIPT_STYLE_RE
-from smarter_dev.bot.agents.tools import fetch_via_jina
-from smarter_dev.bot.agents.tools import fetch_youtube_metadata
-from smarter_dev.bot.agents.tools import is_youtube_url
+from smarter_dev.bot.utils.web_fetch import _HTML_TAG_RE
+from smarter_dev.bot.utils.web_fetch import _SCRIPT_STYLE_RE
+from smarter_dev.bot.utils.web_fetch import fetch_via_jina
+from smarter_dev.bot.utils.web_fetch import fetch_youtube_metadata
+from smarter_dev.bot.utils.web_fetch import is_youtube_url
 
 
 class TestFallbackHtmlStripping:
@@ -54,7 +54,7 @@ class TestFetchViaJina:
         mock_client = AsyncMock()
         mock_client.get.return_value = mock_resp
 
-        with patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_cls:
+        with patch("smarter_dev.bot.utils.web_fetch.httpx.AsyncClient") as mock_cls:
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -72,7 +72,7 @@ class TestFetchViaJina:
         mock_client = AsyncMock()
         mock_client.get.return_value = mock_resp
 
-        with patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_cls:
+        with patch("smarter_dev.bot.utils.web_fetch.httpx.AsyncClient") as mock_cls:
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -85,7 +85,7 @@ class TestFetchViaJina:
         mock_client = AsyncMock()
         mock_client.get.side_effect = Exception("Network error")
 
-        with patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_cls:
+        with patch("smarter_dev.bot.utils.web_fetch.httpx.AsyncClient") as mock_cls:
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
@@ -134,8 +134,8 @@ class TestFetchYoutubeMetadata:
         mock_client.get.return_value = mock_oembed_resp
 
         with (
-            patch("smarter_dev.bot.agents.tools.fetch_via_jina", return_value=jina_result) as mock_jina,
-            patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_cls,
+            patch("smarter_dev.bot.utils.web_fetch.fetch_via_jina", return_value=jina_result),
+            patch("smarter_dev.bot.utils.web_fetch.httpx.AsyncClient") as mock_cls,
         ):
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
@@ -149,8 +149,8 @@ class TestFetchYoutubeMetadata:
     @pytest.mark.asyncio
     async def test_returns_empty_on_failure(self):
         with (
-            patch("smarter_dev.bot.agents.tools.fetch_via_jina", return_value=None),
-            patch("smarter_dev.bot.agents.tools.httpx.AsyncClient") as mock_cls,
+            patch("smarter_dev.bot.utils.web_fetch.fetch_via_jina", return_value=None),
+            patch("smarter_dev.bot.utils.web_fetch.httpx.AsyncClient") as mock_cls,
         ):
             mock_client = AsyncMock()
             mock_client.get.side_effect = Exception("Network error")
