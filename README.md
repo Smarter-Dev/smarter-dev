@@ -101,7 +101,7 @@ These only matter when you exercise the feature:
 | Var | Feature |
 |---|---|
 | `DISCORD_BOT_TOKEN` + `DISCORD_APPLICATION_ID` | The bot connecting to Discord. Without these the bot logs an error and exits cleanly. |
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | LLM-backed features (mod agent, help, mention, scan synthesis). |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | LLM-backed features (mod agent, help, mention, scan synthesis). `GEMINI_API_KEY` is also used for Discord voice message TTS. |
 | `BRAVE_SEARCH_API_KEY` / `JINA_API_KEY` / `YOUTUBE_API_KEY` | Scan tools (search, page reader, YouTube). |
 | `RESEND_API_KEY` | Outbound email (e.g. signup confirmations). Logs a warning and skips if absent. |
 | `SPACES_ACCESS_KEY` / `SPACES_SECRET_KEY` | DigitalOcean Spaces / S3-compatible asset storage. |

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 from pydantic import Field
@@ -51,6 +50,44 @@ class Settings(BaseSettings):
     discord_application_id: str = Field(
         default="",
         description="Discord application ID",
+    )
+
+    # Discord Voice Messages
+    voice_tts_model: str = Field(
+        default="gemini-2.5-flash-preview-tts",
+        description="Gemini TTS model for Discord voice messages",
+    )
+    voice_tts_voice: str = Field(
+        default="Kore",
+        description="Gemini prebuilt voice name for Discord voice messages",
+    )
+    voice_tts_sample_rate: int = Field(
+        default=24000,
+        description="PCM sample rate returned by the configured TTS model",
+    )
+    voice_tts_channels: int = Field(
+        default=1,
+        description="PCM channel count returned by the configured TTS model",
+    )
+    voice_tts_sample_width: int = Field(
+        default=2,
+        description="PCM sample width in bytes returned by the configured TTS model",
+    )
+    voice_max_input_chars: int = Field(
+        default=800,
+        description="Maximum response characters sent to TTS for one voice message",
+    )
+    voice_words_per_minute: int = Field(
+        default=150,
+        description="Estimated spoken words per minute for voice response budgeting",
+    )
+    voice_max_duration_seconds: int = Field(
+        default=30,
+        description="Target maximum spoken duration for one voice response",
+    )
+    voice_opus_bitrate: str = Field(
+        default="48k",
+        description="Opus bitrate used when encoding Discord voice messages",
     )
 
     # API
