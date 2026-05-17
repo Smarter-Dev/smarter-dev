@@ -61,10 +61,6 @@ class ResponseSignature(dspy.Signature):
     - Use `add_reaction_to_message()` for quick acknowledgments
     - Use `lookup_fact()` for general facts (capitals, dates)
     - Use `search_web()` for specific/current information
-    - Use `generate_in_depth_response()` for technical topics, then send the result
-
-    **IMPORTANT: If `generate_in_depth_response` is on cooldown, just write a direct response
-    yourself using `send_message()`. Don't wait or retry - provide your best answer directly.**
 
     ## FLOW CONTROL (Important!)
 
