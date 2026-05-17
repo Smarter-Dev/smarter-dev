@@ -74,17 +74,20 @@ async def test_short_parts_pass_through_unchanged(patched_summarise):
 
 @pytest.mark.asyncio
 async def test_long_user_prompt_summarised(patched_summarise):
+    """The first ModelRequest is protected, so a long *later* user prompt is
+    what gets summarised."""
     long = _long_text()
     messages = [
-        _request(UserPromptPart(content=long)),
+        _request(UserPromptPart(content="initial activation")),  # protected
         _response(TextPart(content="ok")),
-        _request(UserPromptPart(content="new turn input")),
+        _request(UserPromptPart(content=long)),  # later, long → compact
+        _response(TextPart(content="ack")),
+        _request(UserPromptPart(content="current turn")),
     ]
     out = await compact_history(messages)
     assert patched_summarise.await_count == 1
-    # First part now carries the stub summary.
-    assert out[0].parts[0].content.startswith("[compacted]")
-    assert "USER_PROMPT" in out[0].parts[0].content
+    assert out[2].parts[0].content.startswith("[compacted]")
+    assert "USER_PROMPT" in out[2].parts[0].content
 
 
 @pytest.mark.asyncio
@@ -130,12 +133,53 @@ async def test_current_turn_never_compacted(patched_summarise):
 
 
 @pytest.mark.asyncio
+async def test_initial_activation_user_prompt_never_compacted(patched_summarise):
+    """Regression: the very first ModelRequest in history carries the agent's
+    initial activation context (the last 10 channel messages). It must NOT
+    be summarised — that's the agent's only window into pre-engagement
+    context. Without this guard, the user reported the agent losing the
+    earliest messages after just one follow-up turn."""
+    initial_input = _long_text()  # the AgentInput JSON is naturally long
+    messages = [
+        _request(UserPromptPart(content=initial_input)),  # initial activation
+        _response(TextPart(content="hi")),
+        _request(UserPromptPart(content="follow-up 1")),  # turn 2
+        _response(TextPart(content="ok")),
+        _request(UserPromptPart(content="follow-up 2 — current turn")),
+    ]
+    out = await compact_history(messages)
+    # First ModelRequest is left intact even though it's >threshold.
+    assert out[0].parts[0].content == initial_input
+    # Nothing else exceeds threshold, so summariser never runs.
+    assert patched_summarise.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_subsequent_long_prompts_still_compacted(patched_summarise):
+    """Only the FIRST ModelRequest is protected — later long ones still get
+    summarised, otherwise compaction would do nothing useful."""
+    messages = [
+        _request(UserPromptPart(content="short initial")),
+        _response(TextPart(content="ok")),
+        _request(UserPromptPart(content=_long_text())),  # later, long → compact
+        _response(TextPart(content="ack")),
+        _request(UserPromptPart(content="current")),
+    ]
+    out = await compact_history(messages)
+    assert patched_summarise.await_count == 1
+    assert out[0].parts[0].content == "short initial"  # initial passes through
+    assert out[2].parts[0].content.startswith("[compacted]")
+
+
+@pytest.mark.asyncio
 async def test_already_compacted_parts_passed_through(patched_summarise):
     """Running the processor a second time after a compaction shouldn't
     re-summarise — the summary stub is short so the threshold check skips it."""
     messages = [
-        _request(UserPromptPart(content=_long_text())),
+        _request(UserPromptPart(content="initial activation")),  # protected
         _response(TextPart(content="ok")),
+        _request(UserPromptPart(content=_long_text())),  # gets compacted
+        _response(TextPart(content="ack")),
         _request(UserPromptPart(content="new turn input")),
     ]
     first = await compact_history(messages)
@@ -149,8 +193,8 @@ async def test_already_compacted_parts_passed_through(patched_summarise):
     out = await compact_history(second_round)
     # Still only the one original call — second pass found nothing long.
     assert patched_summarise.await_count == 1
-    # Old summary is preserved verbatim.
-    assert out[0].parts[0].content == first[0].parts[0].content
+    # The compacted part is preserved verbatim.
+    assert out[2].parts[0].content == first[2].parts[0].content
 
 
 @pytest.mark.asyncio
