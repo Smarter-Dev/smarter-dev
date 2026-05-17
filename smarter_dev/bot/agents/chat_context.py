@@ -199,9 +199,13 @@ async def _fetch_messages_before(
     limit: int,
 ) -> list[hikari.Message]:
     """Fetch up to ``limit`` channel messages older than ``before_id``,
-    oldest-first."""
+    oldest-first.
+
+    Note: hikari takes ``before`` as a kwarg on ``fetch_messages``; the
+    returned ``LazyIterator`` has ``.limit`` but no chainable ``.before``.
+    """
     fetched: list[hikari.Message] = []
-    iterator = bot.rest.fetch_messages(channel_id).before(int(before_id)).limit(limit)
+    iterator = bot.rest.fetch_messages(channel_id, before=int(before_id)).limit(limit)
     async for msg in iterator:
         fetched.append(msg)
     fetched.reverse()
