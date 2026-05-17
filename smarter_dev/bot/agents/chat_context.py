@@ -21,9 +21,10 @@ from datetime import UTC, datetime
 import hikari
 
 from smarter_dev.bot.agents.chat_models import (
-    AgentInput,
     Author,
     ChannelInfo,
+    FollowupAgentInput,
+    InitialAgentInput,
     Me,
     Message,
 )
@@ -45,24 +46,50 @@ async def build_initial_input(
     channel_id: int,
     guild_id: int,
     memory: ChatMemory,
-) -> AgentInput:
-    """Build the ``AgentInput`` for the first activation of an engagement.
+    trigger_message: hikari.Message,
+) -> InitialAgentInput:
+    """Build the input for the first activation of an engagement.
 
-    Pulls the last ``CONTEXT_MESSAGE_LIMIT`` channel messages so the agent
-    can read the room, and merges in any non-stale ``topic`` and ``notes``
-    from durable memory.
+    Pulls the last ``CONTEXT_MESSAGE_LIMIT`` channel messages *before* the
+    activation trigger and surfaces them as ``channel_history``. The trigger
+    itself is passed in as ``activation_message`` so the agent doesn't have
+    to guess which message woke it up.
     """
-    raw_messages = await _fetch_recent_messages(
-        bot, channel_id, CONTEXT_MESSAGE_LIMIT
+    raw_history = await _fetch_messages_before(
+        bot, channel_id, before_id=trigger_message.id, limit=CONTEXT_MESSAGE_LIMIT
     )
     topic = await memory.topic_for_activation(channel_id)
     notes = await memory.get_notes(channel_id)
-    return await _build_input(
+
+    # Convert history + trigger together so authors/channel cover everything.
+    all_msgs = raw_history + [trigger_message]
+    messages, authors, channel, me = await _convert(
         bot=bot,
         channel_id=channel_id,
         guild_id=guild_id,
-        raw_messages=raw_messages,
-        is_initial_activation=True,
+        raw_messages=all_msgs,
+    )
+    # Split: trigger is the message whose ID matches; everything else is history.
+    trigger_str_id = str(trigger_message.id)
+    history_messages = [m for m in messages if m.message_id != trigger_str_id]
+    trigger_messages = [m for m in messages if m.message_id == trigger_str_id]
+    if not trigger_messages:
+        # Should never happen, but fall back to converting the trigger alone.
+        trigger_only, _, _, _ = await _convert(
+            bot=bot,
+            channel_id=channel_id,
+            guild_id=guild_id,
+            raw_messages=[trigger_message],
+        )
+        trigger_messages = trigger_only
+
+    return InitialAgentInput(
+        me=me,
+        channel_history=history_messages,
+        activation_message=trigger_messages[0],
+        authors=authors,
+        channel=channel,
+        now_utc=datetime.now(UTC),
         topic=topic,
         notes=notes,
     )
@@ -74,34 +101,40 @@ async def build_followup_input(
     channel_id: int,
     guild_id: int,
     queued: list[hikari.Message],
-) -> AgentInput:
-    """Build the ``AgentInput`` for a follow-up turn inside an active engagement.
+    memory: ChatMemory,
+) -> FollowupAgentInput:
+    """Build the input for a follow-up turn inside an active engagement.
 
     Only the queued messages (already drained from the engine queue) are
-    surfaced. The rest of the conversation lives in the agent's Pydantic AI
-    message history.
+    surfaced. ``topic`` and ``notes`` are re-read from durable memory on
+    every turn so the agent always sees the most recent version.
     """
-    return await _build_input(
+    messages, authors, channel, me = await _convert(
         bot=bot,
         channel_id=channel_id,
         guild_id=guild_id,
         raw_messages=queued,
-        is_initial_activation=False,
-        topic=None,
-        notes=None,
+    )
+    topic = await memory.topic_for_activation(channel_id)
+    notes = await memory.get_notes(channel_id)
+    return FollowupAgentInput(
+        me=me,
+        new_messages=messages,
+        authors=authors,
+        channel=channel,
+        now_utc=datetime.now(UTC),
+        topic=topic,
+        notes=notes,
     )
 
 
-async def _build_input(
+async def _convert(
     *,
     bot: hikari.GatewayBot,
     channel_id: int,
     guild_id: int,
     raw_messages: list[hikari.Message],
-    is_initial_activation: bool,
-    topic: str | None,
-    notes: str | None,
-) -> AgentInput:
+) -> tuple[list[Message], list[Author], ChannelInfo, Me]:
     bot_user = bot.get_me()
     bot_user_id = bot_user.id if bot_user else None
 
@@ -142,17 +175,7 @@ async def _build_input(
         user_id=str(bot_user.id) if bot_user else "",
         username=bot_user.username if bot_user else "bot",
     )
-
-    return AgentInput(
-        me=me,
-        new_messages=messages,
-        authors=authors,
-        channel=channel,
-        now_utc=datetime.now(UTC),
-        is_initial_activation=is_initial_activation,
-        topic=topic,
-        notes=notes,
-    )
+    return messages, authors, channel, me
 
 
 async def _fetch_recent_messages(
@@ -163,6 +186,23 @@ async def _fetch_recent_messages(
     """Fetch the most recent messages in oldest-first order."""
     fetched: list[hikari.Message] = []
     async for msg in bot.rest.fetch_messages(channel_id).limit(limit):
+        fetched.append(msg)
+    fetched.reverse()
+    return fetched
+
+
+async def _fetch_messages_before(
+    bot: hikari.GatewayBot,
+    channel_id: int,
+    *,
+    before_id: int,
+    limit: int,
+) -> list[hikari.Message]:
+    """Fetch up to ``limit`` channel messages older than ``before_id``,
+    oldest-first."""
+    fetched: list[hikari.Message] = []
+    iterator = bot.rest.fetch_messages(channel_id).before(int(before_id)).limit(limit)
+    async for msg in iterator:
         fetched.append(msg)
     fetched.reverse()
     return fetched

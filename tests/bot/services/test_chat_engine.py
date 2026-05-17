@@ -25,9 +25,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from smarter_dev.bot.agents.chat_models import (
-    AgentInput,
     Author,
     ChannelInfo,
+    FollowupAgentInput,
+    InitialAgentInput,
     Me,
     Message,
     NoResponse,
@@ -49,29 +50,35 @@ def _make_event(message_id: int, author_id: int, content: str):
     )
 
 
-def _initial_input() -> AgentInput:
-    return AgentInput(
+def _fake_trigger_message(message_id: int = 9001):
+    """A stand-in hikari.Message used as the activation trigger in tests."""
+    return SimpleNamespace(id=message_id)
+
+
+def _initial_input() -> InitialAgentInput:
+    return InitialAgentInput(
         me=Me(user_id="999", username="bot"),
-        new_messages=[
-            Message(
-                message_id="100",
-                author_id="200",
-                body="hi",
-            )
+        channel_history=[
+            Message(message_id="100", author_id="200", body="prior message"),
         ],
+        activation_message=Message(
+            message_id="101",
+            author_id="200",
+            body="@bot hi",
+            mentions_bot=True,
+        ),
         authors=[Author(user_id="200", username="alice")],
         channel=ChannelInfo(channel_id="1", name="general"),
         now_utc=datetime.now(UTC),
-        is_initial_activation=True,
     )
 
 
-def _followup_input() -> AgentInput:
-    return AgentInput(
+def _followup_input() -> FollowupAgentInput:
+    return FollowupAgentInput(
         me=Me(user_id="999", username="bot"),
         new_messages=[
             Message(
-                message_id="101",
+                message_id="102",
                 author_id="200",
                 body="follow-up",
             )
@@ -79,7 +86,6 @@ def _followup_input() -> AgentInput:
         authors=[Author(user_id="200", username="alice")],
         channel=ChannelInfo(channel_id="1", name="general"),
         now_utc=datetime.now(UTC),
-        is_initial_activation=False,
     )
 
 
@@ -181,7 +187,7 @@ async def test_initial_activation_fires_agent_exactly_once(fake_bot, fake_memory
     with patches[0], patches[1], patches[2], patches[3]:
         engine, _ = await _build_engine(fake_bot)
         engine.start()
-        engine.trigger_initial()
+        engine.trigger_initial(_fake_trigger_message())
         await asyncio.sleep(0.1)
         await engine.shutdown()
 
@@ -209,7 +215,7 @@ async def test_initial_activation_calls_initial_builder(fake_bot, fake_memory):
     with patches[0], patches[1], patches[2] as initial_builder, patches[3] as followup_builder:
         engine, _ = await _build_engine(fake_bot)
         engine.start()
-        engine.trigger_initial()
+        engine.trigger_initial(_fake_trigger_message())
         await asyncio.sleep(0.05)
         await engine.shutdown()
 
@@ -247,7 +253,7 @@ async def test_followup_turn_loads_history_and_uses_followup_builder(
         engine, _ = await _build_engine(fake_bot)
         engine.start()
         # Initial activation (turn 1)
-        engine.trigger_initial()
+        engine.trigger_initial(_fake_trigger_message())
         await asyncio.sleep(0.05)
         # Follow-up triggered by queue-threshold
         for i in range(QUEUE_FIRE_THRESHOLD):
@@ -275,7 +281,7 @@ async def test_queue_threshold_fires_agent(fake_bot, fake_memory):
     with patches[0], patches[1], patches[2], patches[3]:
         engine, _ = await _build_engine(fake_bot)
         engine.start()
-        engine.trigger_initial()
+        engine.trigger_initial(_fake_trigger_message())
         await asyncio.sleep(0.05)
         initial_runs = len(runs)
 
@@ -301,7 +307,7 @@ async def test_no_response_deactivates_after_three_turns(
     with patches[0], patches[1], patches[2], patches[3]:
         engine, deactivated = await _build_engine(fake_bot)
         engine.start()
-        engine.trigger_initial()
+        engine.trigger_initial(_fake_trigger_message())
         await asyncio.sleep(0.05)
         for i in range(MAX_NO_RESPONSE_TURNS):
             await engine.observe(_make_event(2000 + i, 200, f"meh {i}"))
@@ -331,7 +337,7 @@ async def test_continue_watching_false_deactivates(fake_bot, fake_memory):
     with patches[0], patches[1], patches[2], patches[3]:
         engine, deactivated = await _build_engine(fake_bot)
         engine.start()
-        engine.trigger_initial()
+        engine.trigger_initial(_fake_trigger_message())
         await asyncio.sleep(0.05)
         await engine.shutdown()
 
@@ -362,7 +368,7 @@ async def test_stop_phrase_in_observe_deactivates_and_arms_cooldown(
     with patches[0], patches[1], patches[2], patches[3]:
         engine, deactivated = await _build_engine(fake_bot)
         engine.start()
-        engine.trigger_initial()
+        engine.trigger_initial(_fake_trigger_message())
         await asyncio.sleep(0.05)
         await engine.observe(_make_event(5000, 200, "shut up"))
         await asyncio.sleep(0.05)
@@ -390,7 +396,7 @@ async def test_send_response_reply_to_message_id_passes_through(fake_bot, fake_m
     with patches[0], patches[1], patches[2], patches[3]:
         engine, _ = await _build_engine(fake_bot)
         engine.start()
-        engine.trigger_initial()
+        engine.trigger_initial(_fake_trigger_message())
         await asyncio.sleep(0.05)
         await engine.shutdown()
 
@@ -418,7 +424,7 @@ async def test_voice_only_response_sends_voice_not_text(fake_bot, fake_memory):
     with patches[0], patches[1], patches[2], patches[3]:
         engine, _ = await _build_engine(fake_bot, voice_send=voice_send)
         engine.start()
-        engine.trigger_initial()
+        engine.trigger_initial(_fake_trigger_message())
         await asyncio.sleep(0.05)
         await engine.shutdown()
 
@@ -449,7 +455,7 @@ async def test_text_and_voice_dispatched_in_parallel(fake_bot, fake_memory):
     with patches[0], patches[1], patches[2], patches[3]:
         engine, _ = await _build_engine(fake_bot, voice_send=voice_send)
         engine.start()
-        engine.trigger_initial()
+        engine.trigger_initial(_fake_trigger_message())
         await asyncio.sleep(0.05)
         await engine.shutdown()
 

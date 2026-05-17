@@ -129,7 +129,7 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
         # Activation messages don't bump the staleness counter — they reset it
         # implicitly when the engine fires. The agent reads the channel history
         # and decides for itself whether to reply with voice.
-        engine.trigger_initial()
+        engine.trigger_initial(event.message)
         return
 
     # Not an engagement — feed to engine if active, otherwise just bump the

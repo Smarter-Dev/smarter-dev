@@ -79,6 +79,7 @@ class ChannelEngine:
     queue_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     run_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     fire_event: asyncio.Event = field(default_factory=asyncio.Event)
+    activation_message: Any = None  # hikari.Message — set once via trigger_initial
 
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_sent_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -96,12 +97,15 @@ class ChannelEngine:
         if self._runner_task is None:
             self._runner_task = asyncio.create_task(self._runner())
 
-    def trigger_initial(self) -> None:
-        """Fire the agent immediately with the most-recent channel context.
+    def trigger_initial(self, trigger_message: hikari.Message) -> None:
+        """Fire the agent immediately for the first turn of this engagement.
 
-        Called once when the engine is first created by an @mention/reply.
-        Queue is left empty; the agent works off the live channel history.
+        ``trigger_message`` is the @mention or reply that woke the engine; it
+        is passed through to the agent as the InitialAgentInput's
+        ``activation_message`` so the agent can distinguish it from the
+        pre-engagement ``channel_history`` context.
         """
+        self.activation_message = trigger_message
         self.fire_event.set()
 
     async def observe(self, event: hikari.MessageCreateEvent) -> None:
@@ -243,11 +247,20 @@ class ChannelEngine:
 
             try:
                 if first_activation:
+                    trigger = self.activation_message
+                    if trigger is None:
+                        logger.error(
+                            "Initial activation for channel %s has no "
+                            "trigger_message set — aborting fire",
+                            self.channel_id,
+                        )
+                        return
                     agent_input = await build_initial_input(
                         bot=self.bot,
                         channel_id=self.channel_id,
                         guild_id=self.guild_id,
                         memory=memory,
+                        trigger_message=trigger,
                     )
                     history = []
                 else:
@@ -259,6 +272,7 @@ class ChannelEngine:
                         channel_id=self.channel_id,
                         guild_id=self.guild_id,
                         queued=drained,
+                        memory=memory,
                     )
                     history = await memory.read_history(self.channel_id)
             except Exception:
@@ -267,13 +281,18 @@ class ChannelEngine:
                 )
                 return
 
+            new_count = (
+                len(agent_input.channel_history) + 1
+                if first_activation
+                else len(agent_input.new_messages)
+            )
             request_id = uuid.uuid4().hex[:8]
             logger.info(
                 "[%s] Chat agent firing channel=%s first=%s new=%d history=%d",
                 request_id,
                 self.channel_id,
                 first_activation,
-                len(agent_input.new_messages),
+                new_count,
                 len(history),
             )
 
