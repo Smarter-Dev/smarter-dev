@@ -79,7 +79,14 @@
                     {{ eng.total_voice_tokens_input + eng.total_voice_tokens_output }}
                 </small>
             </td>
-            <td><small>${{ '%.4f'|format(eng.total_cost_usd) }}</small></td>
+            <td>
+                <small>${{ '%.4f'|format(eng.total_cost_usd) }}</small>
+                <br><small class="sk-text-muted" title="chat / comp / voice">
+                    ${{ '%.4f'|format(eng.total_chat_cost_usd) }}
+                    / ${{ '%.4f'|format(eng.total_compaction_cost_usd) }}
+                    / ${{ '%.4f'|format(eng.total_voice_cost_usd) }}
+                </small>
+            </td>
             <td>
                 <small class="sk-text-muted">
                     {{ (eng.last_topic or '—')[:80] }}{% if eng.last_topic and eng.last_topic|length > 80 %}&hellip;{% endif %}

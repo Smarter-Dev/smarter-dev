@@ -200,6 +200,9 @@ async def create_turn(
         + summarizer_in_total,
         "total_compaction_tokens_output": ChatAgentEngagement.total_compaction_tokens_output
         + summarizer_out_total,
+        "total_chat_cost_usd": ChatAgentEngagement.total_chat_cost_usd + chat_cost,
+        "total_voice_cost_usd": ChatAgentEngagement.total_voice_cost_usd + voice_cost,
+        "total_compaction_cost_usd": ChatAgentEngagement.total_compaction_cost_usd + summarizer_cost_total,
         "total_cost_usd": ChatAgentEngagement.total_cost_usd + total_cost_delta,
     }
     if last_topic is not None:
