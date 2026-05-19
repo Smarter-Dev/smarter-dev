@@ -42,6 +42,33 @@
     @media (max-width: 900px) {
         .cc-metric-cards { grid-template-columns: 1fr 1fr; }
     }
+    .cc-filter-form {
+        display: flex;
+        gap: .75rem;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+    }
+    .cc-filter-form label { display: block; }
+    .cc-filter-form .cc-filter-label {
+        display: block;
+        font-size: .8rem;
+        color: var(--sk-color-muted);
+        margin-bottom: .15rem;
+    }
+    .cc-filter-form select,
+    .cc-filter-form input[type="text"] {
+        background: var(--sk-color-surface);
+        color: var(--sk-color-text);
+        border: 1px solid var(--sk-color-border);
+        border-radius: .375rem;
+        padding: .4rem .6rem;
+    }
+    .sk-pill.cc-pill-ended {
+        background: var(--sk-color-surface);
+        color: var(--sk-color-muted);
+        border: 1px solid var(--sk-color-border);
+    }
 </style>
 
 <section class="cc-metric-cards" aria-label="Last {{ metrics.days }} days">
@@ -67,10 +94,9 @@
     </div>
 </section>
 
-<form method="get" action="/admin/chat-conversations"
-      style="display: flex; gap: .75rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 1rem;">
+<form method="get" action="/admin/chat-conversations" class="cc-filter-form">
     <label>
-        <span class="sk-text-muted" style="display: block; font-size: .8rem;">Guild</span>
+        <span class="cc-filter-label">Guild</span>
         <select name="guild_id" style="min-width: 12rem;">
             <option value="">All</option>
             {% for gid in guild_ids %}
@@ -79,17 +105,17 @@
         </select>
     </label>
     <label>
-        <span class="sk-text-muted" style="display: block; font-size: .8rem;">Channel ID</span>
+        <span class="cc-filter-label">Channel ID</span>
         <input type="text" name="channel_id" value="{{ selected_channel_id }}"
                placeholder="any" style="min-width: 14rem;">
     </label>
     <label>
-        <span class="sk-text-muted" style="display: block; font-size: .8rem;">Activation user ID</span>
+        <span class="cc-filter-label">Activation user ID</span>
         <input type="text" name="user_id" value="{{ selected_user_id }}"
                placeholder="any" style="min-width: 14rem;">
     </label>
-    <button type="submit" class="sk-btn-outline">Filter</button>
-    <a href="/admin/chat-conversations" class="sk-btn-outline">Reset</a>
+    <button type="submit" class="sk-btn sk-btn-outline">Filter</button>
+    <a role="button" href="/admin/chat-conversations" class="sk-btn sk-btn-outline">Reset</a>
 </form>
 
 {% if engagements %}
@@ -123,11 +149,11 @@
             </td>
             <td>
                 {% if eng.ended_at %}
-                <span class="sk-pill" title="ended {{ eng.ended_at.strftime('%Y-%m-%d %H:%M:%S') }}">
+                <span class="sk-pill cc-pill-ended" title="ended {{ eng.ended_at.strftime('%Y-%m-%d %H:%M:%S') }}">
                     {{ eng.deactivation_reason or 'ended' }}
                 </span>
                 {% else %}
-                <span class="sk-pill" style="background: #d1ecf1;">active</span>
+                <span class="sk-pill sk-pill-published">active</span>
                 {% endif %}
             </td>
             <td>{{ item.turn_count }}</td>
@@ -159,13 +185,13 @@
 {% if total_pages > 1 %}
 <nav style="display: flex; gap: .5rem; justify-content: center; margin-top: 1rem;">
     {% if page > 1 %}
-    <a href="?page={{ page - 1 }}&guild_id={{ selected_guild_id }}&channel_id={{ selected_channel_id }}&user_id={{ selected_user_id }}"
-       class="sk-btn-outline sk-btn-small">&laquo; Prev</a>
+    <a role="button" href="?page={{ page - 1 }}&guild_id={{ selected_guild_id }}&channel_id={{ selected_channel_id }}&user_id={{ selected_user_id }}"
+       class="sk-btn sk-btn-outline sk-btn-small">&laquo; Prev</a>
     {% endif %}
     <span class="sk-text-muted" style="align-self: center;">page {{ page }} / {{ total_pages }}</span>
     {% if page < total_pages %}
-    <a href="?page={{ page + 1 }}&guild_id={{ selected_guild_id }}&channel_id={{ selected_channel_id }}&user_id={{ selected_user_id }}"
-       class="sk-btn-outline sk-btn-small">Next &raquo;</a>
+    <a role="button" href="?page={{ page + 1 }}&guild_id={{ selected_guild_id }}&channel_id={{ selected_channel_id }}&user_id={{ selected_user_id }}"
+       class="sk-btn sk-btn-outline sk-btn-small">Next &raquo;</a>
     {% endif %}
 </nav>
 {% endif %}
