@@ -28,12 +28,11 @@ from skrift.admin.navigation import ADMIN_NAV_TAG
 from skrift.auth.guards import Permission, auth_guard
 from skrift.lib.flash import get_flash_messages
 
-from smarter_dev.bot.services.discord_voice import (
-    clean_transcript_for_tts,
-    convert_wav_to_opus_ogg,
-    generate_tts,
-    write_wave_file,
-)
+# Note: ``smarter_dev.bot.services.discord_voice`` (used in the
+# voice-replay handler) pulls in ``google.genai`` + ``aiohttp`` which are
+# heavy and used to push the web container over its 384Mi startup limit.
+# Imported lazily inside ``voice_replay`` so the controller stays
+# featherweight at module load.
 from smarter_dev.shared.config import get_settings
 from smarter_dev.web.models import (
     ChatAgentCompactionEvent,
@@ -177,6 +176,15 @@ class ChatConversationsAdminController(Controller):
         """Re-synthesise a turn's voice_summary and stream OGG back to the
         browser. Lets operators hear what a voice reply sounded like without
         needing the original Discord upload."""
+        # Lazy import: pulls in google.genai + aiohttp, which the website
+        # otherwise doesn't need and were tipping the pod over OOM at boot.
+        from smarter_dev.bot.services.discord_voice import (
+            clean_transcript_for_tts,
+            convert_wav_to_opus_ogg,
+            generate_tts,
+            write_wave_file,
+        )
+
         stmt = select(ChatAgentTurn).where(ChatAgentTurn.id == turn_id)
         turn = (await db_session.execute(stmt)).scalar_one_or_none()
         if turn is None:
