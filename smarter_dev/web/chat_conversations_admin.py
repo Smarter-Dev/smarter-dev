@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import tempfile
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID
@@ -19,7 +21,7 @@ from litestar.exceptions import NotFoundException
 from litestar.params import Parameter
 from litestar.response import Response
 from litestar.response import Template as TemplateResponse
-from sqlalchemy import desc, distinct, func, select
+from sqlalchemy import and_, case, desc, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -70,6 +72,7 @@ class ChatConversationsAdminController(Controller):
     ) -> TemplateResponse:
         ctx = await get_admin_context(request, db_session)
         page_size = 25
+        metrics = await _rolling_metrics(db_session, days=28)
 
         # Filter dropdowns
         guild_rows = await db_session.execute(
@@ -124,6 +127,7 @@ class ChatConversationsAdminController(Controller):
                 "page_size": page_size,
                 "total": total,
                 "total_pages": max(1, (total + page_size - 1) // page_size),
+                "metrics": metrics,
                 "flash_messages": get_flash_messages(request),
                 **ctx,
             },
@@ -237,3 +241,66 @@ class ChatConversationsAdminController(Controller):
                 "Content-Disposition": f'inline; filename="turn-{turn_id}.ogg"',
             },
         )
+
+
+async def _rolling_metrics(
+    db_session: AsyncSession, *, days: int
+) -> dict[str, object]:
+    """Return aggregate metrics over the last ``days`` for the list-view cards.
+
+    ``activations`` counts engagements that STARTED in the window.
+    ``voice_messages`` counts turns inside that window where the agent
+    actually sent voice (``voice_sent_ok = true``). Token/cost rollups sum
+    over the turn rows started in the window so the numbers reflect
+    activity AT the time, not retroactive backfills.
+    """
+    since = datetime.now(UTC) - timedelta(days=days)
+
+    # Engagement-level: activations
+    activations_stmt = select(func.count(ChatAgentEngagement.id)).where(
+        ChatAgentEngagement.started_at >= since
+    )
+
+    # Turn-level: chat / voice tokens + cost, voice messages sent
+    turns_stmt = select(
+        func.coalesce(
+            func.sum(ChatAgentTurn.chat_tokens_input + ChatAgentTurn.chat_tokens_output),
+            0,
+        ),
+        func.coalesce(func.sum(ChatAgentTurn.chat_cost_usd), Decimal("0")),
+        func.coalesce(
+            func.sum(
+                ChatAgentTurn.voice_tokens_input + ChatAgentTurn.voice_tokens_output
+            ),
+            0,
+        ),
+        func.coalesce(func.sum(ChatAgentTurn.voice_cost_usd), Decimal("0")),
+        func.coalesce(
+            func.sum(
+                case(
+                    (ChatAgentTurn.voice_sent_ok.is_(True), 1),
+                    else_=0,
+                )
+            ),
+            0,
+        ),
+    ).where(ChatAgentTurn.started_at >= since)
+
+    activations = (await db_session.execute(activations_stmt)).scalar() or 0
+    (
+        chat_tokens,
+        chat_cost,
+        voice_tokens,
+        voice_cost,
+        voice_messages,
+    ) = (await db_session.execute(turns_stmt)).one()
+
+    return {
+        "days": days,
+        "activations": int(activations),
+        "voice_messages": int(voice_messages),
+        "chat_tokens": int(chat_tokens),
+        "chat_cost": Decimal(chat_cost),
+        "voice_tokens": int(voice_tokens),
+        "voice_cost": Decimal(voice_cost),
+    }
