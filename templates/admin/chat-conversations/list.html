@@ -50,7 +50,7 @@
     <tbody>
         {% for item in engagements %}
         {% set eng = item.engagement %}
-        <tr onclick="window.location='/admin/chat-conversations/{{ eng.id }}'" style="cursor: pointer;">
+        <tr class="cc-row" data-href="/admin/chat-conversations/{{ eng.id }}" style="cursor: pointer;">
             <td><small>{{ eng.started_at.strftime('%Y-%m-%d %H:%M:%S') }}</small></td>
             <td>
                 <strong>#{{ eng.channel_name or eng.channel_id }}</strong>
@@ -107,4 +107,12 @@
 {% else %}
 <p class="sk-no-items">No chat-agent engagements yet. They'll appear here once the bot is @mentioned in a channel.</p>
 {% endif %}
+
+<script nonce="{{ csp_nonce() }}">
+    document.querySelectorAll('tr.cc-row[data-href]').forEach(function (row) {
+        row.addEventListener('click', function () {
+            window.location = row.dataset.href;
+        });
+    });
+</script>
 {% endblock %}
