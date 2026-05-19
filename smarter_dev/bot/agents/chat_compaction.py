@@ -21,6 +21,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+from contextvars import ContextVar
 from typing import Any
 
 from pydantic_ai import Agent
@@ -44,6 +45,55 @@ MAX_SUMMARY_CHARS = 2_000
 
 DEFAULT_COMPACT_MODEL = "gemini-3.1-flash-lite-preview"
 COMPACT_MODEL_ENV_VAR = "CHAT_AGENT_COMPACT_MODEL"
+
+
+@dataclasses.dataclass
+class CompactionEvent:
+    """One record of the compactor replacing a long part with a summary.
+
+    Collected per agent run via the ``_collected`` ContextVar so the engine
+    can persist them alongside the turn for the operator dashboard.
+    """
+
+    event_kind: str  # user_prompt / assistant_text / tool_call_args / tool_return
+    tool_name: str | None
+    original_content: str
+    summary: str
+    original_chars: int
+    summary_chars: int
+    summarizer_tokens_input: int
+    summarizer_tokens_output: int
+    summarizer_model_name: str
+
+
+_collected: ContextVar[list[CompactionEvent] | None] = ContextVar(
+    "chat_compaction_events", default=None
+)
+
+
+def start_collection() -> list[CompactionEvent]:
+    """Install a fresh per-run collector and return it.
+
+    The engine calls this immediately before ``agent.run(...)``; the
+    processor (running inside the same context) appends to it; the engine
+    drains via ``drain_collection`` after the run completes.
+    """
+    bucket: list[CompactionEvent] = []
+    _collected.set(bucket)
+    return bucket
+
+
+def drain_collection() -> list[CompactionEvent]:
+    """Return the current collector and reset it to None."""
+    bucket = _collected.get()
+    _collected.set(None)
+    return list(bucket) if bucket is not None else []
+
+
+def _record_event(event: CompactionEvent) -> None:
+    bucket = _collected.get()
+    if bucket is not None:
+        bucket.append(event)
 
 
 _SUMMARIZER_PROMPT = """\
@@ -93,12 +143,30 @@ def get_summarizer_agent() -> Agent[None, str]:
     return _summarizer_agent
 
 
-async def _summarise(label: str, text: str) -> str:
+@dataclasses.dataclass
+class _SummariseResult:
+    text: str
+    tokens_input: int
+    tokens_output: int
+    model_name: str
+
+
+async def _summarise(label: str, text: str) -> _SummariseResult:
     """Run the summarizer and clamp the output to ``MAX_SUMMARY_CHARS``."""
     prompt = f"[{label}]\n\n{text}"
+    tokens_input = 0
+    tokens_output = 0
+    model_name = os.getenv(COMPACT_MODEL_ENV_VAR, DEFAULT_COMPACT_MODEL)
     try:
         result = await get_summarizer_agent().run(user_prompt=prompt)
         summary = (result.output or "").strip()
+        try:
+            usage = result.usage()
+            if usage is not None:
+                tokens_input = int(usage.input_tokens or 0)
+                tokens_output = int(usage.output_tokens or 0)
+        except Exception:
+            pass
     except Exception:
         logger.exception("Summariser failed; falling back to a truncation")
         summary = text[:MAX_SUMMARY_CHARS]
@@ -106,7 +174,12 @@ async def _summarise(label: str, text: str) -> str:
         summary = summary[:MAX_SUMMARY_CHARS]
     if not summary:
         summary = text[:MAX_SUMMARY_CHARS]
-    return f"[compacted] {summary}"
+    return _SummariseResult(
+        text=f"[compacted] {summary}",
+        tokens_input=tokens_input,
+        tokens_output=tokens_output,
+        model_name=model_name,
+    )
 
 
 def _content_text(value: Any) -> str:
@@ -125,13 +198,39 @@ async def _compact_request_parts(parts: list) -> list:
             text = _content_text(part.content)
             if len(text) > COMPACT_THRESHOLD_CHARS:
                 summary = await _summarise("USER_PROMPT", text)
-                new_parts.append(dataclasses.replace(part, content=summary))
+                _record_event(
+                    CompactionEvent(
+                        event_kind="user_prompt",
+                        tool_name=None,
+                        original_content=text,
+                        summary=summary.text,
+                        original_chars=len(text),
+                        summary_chars=len(summary.text),
+                        summarizer_tokens_input=summary.tokens_input,
+                        summarizer_tokens_output=summary.tokens_output,
+                        summarizer_model_name=summary.model_name,
+                    )
+                )
+                new_parts.append(dataclasses.replace(part, content=summary.text))
                 continue
         elif isinstance(part, ToolReturnPart):
             text = _content_text(part.content)
             if len(text) > COMPACT_THRESHOLD_CHARS:
                 summary = await _summarise("TOOL_RETURN", text)
-                new_parts.append(dataclasses.replace(part, content=summary))
+                _record_event(
+                    CompactionEvent(
+                        event_kind="tool_return",
+                        tool_name=getattr(part, "tool_name", None),
+                        original_content=text,
+                        summary=summary.text,
+                        original_chars=len(text),
+                        summary_chars=len(summary.text),
+                        summarizer_tokens_input=summary.tokens_input,
+                        summarizer_tokens_output=summary.tokens_output,
+                        summarizer_model_name=summary.model_name,
+                    )
+                )
+                new_parts.append(dataclasses.replace(part, content=summary.text))
                 continue
         elif isinstance(part, SystemPromptPart):
             # Never compact system prompts — they're owned by the framework.
@@ -147,7 +246,20 @@ async def _compact_response_parts(parts: list) -> list:
             text = _content_text(part.content)
             if len(text) > COMPACT_THRESHOLD_CHARS:
                 summary = await _summarise("ASSISTANT_TEXT", text)
-                new_parts.append(dataclasses.replace(part, content=summary))
+                _record_event(
+                    CompactionEvent(
+                        event_kind="assistant_text",
+                        tool_name=None,
+                        original_content=text,
+                        summary=summary.text,
+                        original_chars=len(text),
+                        summary_chars=len(summary.text),
+                        summarizer_tokens_input=summary.tokens_input,
+                        summarizer_tokens_output=summary.tokens_output,
+                        summarizer_model_name=summary.model_name,
+                    )
+                )
+                new_parts.append(dataclasses.replace(part, content=summary.text))
                 continue
         elif isinstance(part, ToolCallPart):
             args_text = _content_text(part.args)
@@ -155,7 +267,20 @@ async def _compact_response_parts(parts: list) -> list:
                 summary = await _summarise(
                     f"TOOL_CALL {part.tool_name}", args_text
                 )
-                new_parts.append(dataclasses.replace(part, args=summary))
+                _record_event(
+                    CompactionEvent(
+                        event_kind="tool_call_args",
+                        tool_name=part.tool_name,
+                        original_content=args_text,
+                        summary=summary.text,
+                        original_chars=len(args_text),
+                        summary_chars=len(summary.text),
+                        summarizer_tokens_input=summary.tokens_input,
+                        summarizer_tokens_output=summary.tokens_output,
+                        summarizer_model_name=summary.model_name,
+                    )
+                )
+                new_parts.append(dataclasses.replace(part, args=summary.text))
                 continue
         new_parts.append(part)
     return new_parts

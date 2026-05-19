@@ -48,6 +48,7 @@ controllers:
   - smarter_dev.web.research_sessions_admin:ResearchSessionsAdminController
   - smarter_dev.web.bot_admin_skrift:BotAdminController
   - smarter_dev.web.quests_admin:QuestsAdminController
+  - smarter_dev.web.chat_conversations_admin:ChatConversationsAdminController
   - smarter_dev.web.mod_actions_admin:ModActionsAdminController
   - smarter_dev.web.scan.api_controller:ScanAPIController
 

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -35,13 +36,26 @@ from typing import Any
 import hikari
 from pydantic_ai.usage import RunUsage
 
-from smarter_dev.bot.agents.chat_agent import get_chat_agent
+from smarter_dev.bot.agents.chat_agent import (
+    DEFAULT_MODEL as CHAT_DEFAULT_MODEL,
+    MODEL_ENV_VAR as CHAT_MODEL_ENV_VAR,
+    get_chat_agent,
+)
+from smarter_dev.bot.agents.chat_compaction import (
+    drain_collection,
+    start_collection,
+)
 from smarter_dev.bot.agents.chat_context import (
     build_followup_input,
     build_initial_input,
 )
 from smarter_dev.bot.agents.chat_models import NoResponse, SendResponse
 from smarter_dev.bot.agents.chat_tools import ChatDeps
+from smarter_dev.bot.services.chat_conversation_persistence import (
+    end_engagement,
+    persist_turn,
+    start_engagement,
+)
 from smarter_dev.bot.services.chat_memory import get_chat_memory
 from smarter_dev.bot.utils.stop_detection import (
     is_stop_request,
@@ -66,13 +80,33 @@ class _QueuedMessage:
 
 
 @dataclass
+class _VoiceOutcome:
+    """Result of a voice send for one turn — surfaced to the persister."""
+
+    sent_ok: bool
+    tokens_input: int = 0
+    tokens_output: int = 0
+    model_name: str | None = None
+    error: str | None = None
+
+
+@dataclass
+class _TurnDispatchOutcome:
+    """Per-turn dispatch result returned by ``_apply_output`` so the engine
+    can persist it before any subsequent deactivation tears state down."""
+
+    voice: _VoiceOutcome | None = None
+    deactivate_reason: str | None = None
+
+
+@dataclass
 class ChannelEngine:
     """Drives the chat agent for a single channel."""
 
     bot: Any  # hikari.GatewayBot; Any keeps tests light
     channel_id: int
     guild_id: int
-    voice_send: Callable[[int, str, int | None, str | None], Awaitable[None]]
+    voice_send: Callable[[int, str, int | None, str | None], Awaitable[Any]]
     on_deactivate: Callable[[int], Awaitable[None]]
 
     queue: list[_QueuedMessage] = field(default_factory=list)
@@ -80,6 +114,7 @@ class ChannelEngine:
     run_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     fire_event: asyncio.Event = field(default_factory=asyncio.Event)
     activation_message: Any = None  # hikari.Message — set once via trigger_initial
+    engagement_id: Any = None  # UUID — set after start_engagement persists
 
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_sent_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -179,9 +214,14 @@ class ChannelEngine:
             "Stop request detected in channel %s — deactivating engine", self.channel_id
         )
         set_channel_cooldown(self.channel_id)
-        await self._deactivate(send_notes_clear=True)
+        await self._deactivate(send_notes_clear=True, reason="stop_phrase")
 
-    async def _deactivate(self, *, send_notes_clear: bool) -> None:
+    async def _deactivate(
+        self,
+        *,
+        send_notes_clear: bool,
+        reason: str = "shutdown",
+    ) -> None:
         if not self.active:
             return
         self.active = False
@@ -199,6 +239,19 @@ class ChannelEngine:
             logger.exception(
                 "Failed to clear chat history for channel %s", self.channel_id
             )
+        # Best-effort: tell the dashboard the engagement is over.
+        if self.engagement_id is not None:
+            try:
+                await end_engagement(
+                    bot=self.bot,
+                    engagement_id=self.engagement_id,
+                    deactivation_reason=reason,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to finalise chat engagement for channel %s",
+                    self.channel_id,
+                )
         await self.on_deactivate(self.channel_id)
         self.fire_event.set()  # wake the runner so it can exit
 
@@ -225,7 +278,9 @@ class ChannelEngine:
                         self.channel_id,
                         INACTIVITY_TIMEOUT,
                     )
-                    await self._deactivate(send_notes_clear=True)
+                    await self._deactivate(
+                        send_notes_clear=True, reason="inactivity"
+                    )
                     break
 
                 if datetime.now(UTC) - self.started_at > MAX_RUNTIME:
@@ -233,7 +288,9 @@ class ChannelEngine:
                         "Engine for channel %s hit max runtime — deactivating",
                         self.channel_id,
                     )
-                    await self._deactivate(send_notes_clear=True)
+                    await self._deactivate(
+                        send_notes_clear=True, reason="max_runtime"
+                    )
                     break
 
                 await self._run_once(first_activation=first_activation)
@@ -242,10 +299,11 @@ class ChannelEngine:
             raise
         except Exception:
             logger.exception("Chat engine crashed for channel %s", self.channel_id)
-            await self._deactivate(send_notes_clear=True)
+            await self._deactivate(send_notes_clear=True, reason="crash")
 
     async def _run_once(self, *, first_activation: bool) -> None:
         async with self.run_lock:
+            turn_started_at = datetime.now(UTC)
             # Snapshot queue; new messages can keep arriving while we run.
             async with self.queue_lock:
                 drained = [q.message for q in self.queue]
@@ -320,12 +378,37 @@ class ChannelEngine:
                 len(history),
             )
 
+            # Start engagement persistence on the very first turn — gives us
+            # an engagement_id we attach to every persisted turn that follows.
+            if first_activation and self.engagement_id is None:
+                trigger = self.activation_message
+                guild = self.bot.cache.get_guild(self.guild_id) if hasattr(
+                    self.bot, "cache"
+                ) else None
+                guild_name = getattr(guild, "name", None) if guild else None
+                channel_name = getattr(agent_input.channel, "name", None)
+                self.engagement_id = await start_engagement(
+                    bot=self.bot,
+                    guild_id=self.guild_id,
+                    channel_id=self.channel_id,
+                    guild_name=guild_name,
+                    channel_name=channel_name,
+                    activation_user_id=int(trigger.author.id) if trigger else 0,
+                    activation_username=(
+                        trigger.author.username if trigger else "unknown"
+                    ),
+                    activation_message_id=int(trigger.id) if trigger else 0,
+                )
+
             agent = get_chat_agent()
             deps = ChatDeps(
                 bot=self.bot,
                 channel_id=self.channel_id,
                 guild_id=self.guild_id,
             )
+            # Install a per-run compaction collector. The history processor
+            # appends events to it; we drain after the run.
+            start_collection()
             try:
                 result = await agent.run(
                     user_prompt=agent_input.model_dump_json(),
@@ -338,11 +421,13 @@ class ChannelEngine:
                     request_id,
                     self.channel_id,
                 )
+                drain_collection()  # discard
                 await self._post_error(
                     "Sorry, couldn't generate a reply for that one — try again?",
                     reply_to=error_reply_to,
                 )
                 return
+            compaction_events = drain_collection()
 
             output = result.output
             tokens = _extract_tokens(result.usage())
@@ -366,13 +451,85 @@ class ChannelEngine:
                     self.channel_id,
                 )
 
-            await self._apply_output(output)
+            dispatch = await self._apply_output(output)
+
+            # Persist this turn to the operator dashboard (best-effort).
+            try:
+                triggering = (
+                    [agent_input.activation_message.model_dump(mode="json")]
+                    if first_activation
+                    else [m.model_dump(mode="json") for m in agent_input.new_messages]
+                )
+                chat_usage = result.usage()
+                chat_in = int(getattr(chat_usage, "input_tokens", 0) or 0)
+                chat_out = int(getattr(chat_usage, "output_tokens", 0) or 0)
+                chat_model = (
+                    getattr(chat_usage, "requests", None)
+                    and getattr(chat_usage, "model", None)
+                    or os.environ.get(CHAT_MODEL_ENV_VAR, CHAT_DEFAULT_MODEL)
+                )
+
+                voice = dispatch.voice or _VoiceOutcome(sent_ok=False) if False else dispatch.voice
+                duration_ms = int(
+                    (datetime.now(UTC) - turn_started_at).total_seconds() * 1000
+                )
+                if self.engagement_id is not None:
+                    await persist_turn(
+                        bot=self.bot,
+                        engagement_id=self.engagement_id,
+                        request_id=request_id,
+                        turn_kind="initial" if first_activation else "followup",
+                        output_kind=(
+                            "send_response"
+                            if isinstance(output, SendResponse)
+                            else "no_response"
+                        ),
+                        triggering_messages=triggering,
+                        agent_output=output.model_dump(mode="json"),
+                        new_model_messages=list(result.new_messages()),
+                        duration_ms=duration_ms,
+                        chat_tokens_input=chat_in,
+                        chat_tokens_output=chat_out,
+                        chat_model_name=chat_model,
+                        voice_tokens_input=(
+                            voice.tokens_input if voice else 0
+                        ),
+                        voice_tokens_output=(
+                            voice.tokens_output if voice else 0
+                        ),
+                        voice_model_name=voice.model_name if voice else None,
+                        voice_sent_ok=voice.sent_ok if voice else None,
+                        voice_send_error=voice.error if voice else None,
+                        compaction_events=compaction_events,
+                    )
+            except Exception:
+                logger.exception(
+                    "[%s] Failed to persist chat agent turn", request_id
+                )
+
+            # Now that the turn is persisted, honour any pending deactivation.
+            if dispatch.deactivate_reason:
+                logger.info(
+                    "Engine for channel %s deactivating: %s",
+                    self.channel_id,
+                    dispatch.deactivate_reason,
+                )
+                await self._deactivate(
+                    send_notes_clear=True,
+                    reason=dispatch.deactivate_reason,
+                )
+                return
 
         # After releasing run_lock, re-check fire conditions immediately.
         await self._maybe_refire()
 
-    async def _apply_output(self, output: NoResponse | SendResponse) -> None:
+    async def _apply_output(
+        self, output: NoResponse | SendResponse
+    ) -> _TurnDispatchOutcome:
+        """Write memory + dispatch sends. Returns the dispatch outcome so the
+        engine can persist the turn BEFORE finalising any deactivation."""
         memory = get_chat_memory()
+        outcome = _TurnDispatchOutcome()
 
         await memory.write_topic(self.channel_id, output.topic)
 
@@ -385,33 +542,23 @@ class ChannelEngine:
                 logger.exception(
                     "Failed to persist chat notes for channel %s", self.channel_id
                 )
-
-            await self._send(output)
+            outcome.voice = await self._send(output)
         else:
             self.consecutive_no_response += 1
             if self.consecutive_no_response >= MAX_NO_RESPONSE_TURNS:
-                logger.info(
-                    "Engine for channel %s hit %d consecutive no-response turns — deactivating",
-                    self.channel_id,
-                    MAX_NO_RESPONSE_TURNS,
-                )
-                await self._deactivate(send_notes_clear=True)
-                return
+                outcome.deactivate_reason = "no_response_quota"
+                return outcome
 
         if not output.continue_watching:
-            logger.info(
-                "Agent requested deactivation for channel %s", self.channel_id
-            )
-            await self._deactivate(send_notes_clear=True)
+            outcome.deactivate_reason = "continue_watching_false"
 
-    async def _send(self, output: SendResponse) -> None:
+        return outcome
+
+    async def _send(self, output: SendResponse) -> _VoiceOutcome | None:
         """Dispatch the agent's send outputs.
 
-        Text and voice are independent channels; either, both, or (by validator)
-        at least one is present. When both are present they're dispatched in
-        parallel. If voice fails AND there was no text alongside it, the user
-        sees a brief "couldn't send a voice message" fallback so the silence
-        doesn't look like the agent ignored them.
+        Returns the voice outcome (sent_ok + usage + error) when voice was
+        attempted, None otherwise — so the engine can record it on the turn.
         """
         reply_to: int | None = None
         if output.reply_to_message_id and output.reply_to_message_id.isdigit():
@@ -421,33 +568,55 @@ class ChannelEngine:
         has_voice = bool(output.voice_summary and output.voice_summary.strip())
 
         text_ok = True
-        voice_ok = True
-        tasks: dict[str, asyncio.Task] = {}
-        if has_text:
-            tasks["text"] = asyncio.create_task(self._send_text(output.message, reply_to))
-        if has_voice:
-            tasks["voice"] = asyncio.create_task(
-                self._send_voice(output.voice_summary, reply_to, output.voice_instruction)
+        voice_outcome: _VoiceOutcome | None = None
+
+        if not has_text and not has_voice:
+            return None
+
+        # Dispatch in parallel; capture each result independently.
+        async def _text_runner() -> bool:
+            return await self._send_text(output.message, reply_to)
+
+        async def _voice_runner() -> _VoiceOutcome:
+            return await self._send_voice(
+                output.voice_summary, reply_to, output.voice_instruction
             )
 
-        if not tasks:
-            return
+        tasks: dict[str, asyncio.Task] = {}
+        if has_text:
+            tasks["text"] = asyncio.create_task(_text_runner())
+        if has_voice:
+            tasks["voice"] = asyncio.create_task(_voice_runner())
 
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
-        for kind, ok in zip(tasks.keys(), results):
-            if isinstance(ok, BaseException) or ok is False:
-                if kind == "text":
+        for kind, res in zip(tasks.keys(), results):
+            if kind == "text":
+                if isinstance(res, BaseException) or res is False:
                     text_ok = False
+            else:  # voice
+                if isinstance(res, BaseException):
+                    voice_outcome = _VoiceOutcome(
+                        sent_ok=False,
+                        error=f"{type(res).__name__}: {res}",
+                    )
                 else:
-                    voice_ok = False
+                    voice_outcome = res
 
-        # Voice-only failed → tell the user, since otherwise they see silence.
-        if has_voice and not voice_ok and not has_text:
+        # Voice-only failed → tell the user so silence doesn't look like
+        # the agent ignored them.
+        if (
+            has_voice
+            and voice_outcome is not None
+            and not voice_outcome.sent_ok
+            and not has_text
+        ):
             await self._post_error(
                 "Couldn't send a voice message in this channel — give the bot "
                 "SEND_VOICE_MESSAGES permission, or ask me to reply in text.",
                 reply_to=reply_to,
             )
+
+        return voice_outcome
 
     async def _send_text(self, message: str, reply_to: int | None) -> bool:
         try:
@@ -467,17 +636,27 @@ class ChannelEngine:
         voice_summary: str,
         reply_to: int | None,
         instruction: str | None,
-    ) -> bool:
+    ) -> _VoiceOutcome:
         try:
-            await self.voice_send(
+            usage = await self.voice_send(
                 self.channel_id, voice_summary.strip(), reply_to, instruction
             )
-            return True
-        except Exception:
+        except Exception as e:
             logger.exception(
                 "Voice send failed for channel %s", self.channel_id
             )
-            return False
+            return _VoiceOutcome(sent_ok=False, error=f"{type(e).__name__}: {e}")
+        # The voice_send callback returns a TTSUsage (from VoiceService) when
+        # successful. Older callers may return None — handle both.
+        tokens_in = int(getattr(usage, "tokens_input", 0) or 0)
+        tokens_out = int(getattr(usage, "tokens_output", 0) or 0)
+        model = getattr(usage, "model_name", None) or None
+        return _VoiceOutcome(
+            sent_ok=True,
+            tokens_input=tokens_in,
+            tokens_output=tokens_out,
+            model_name=model,
+        )
 
     async def _post_error(self, text: str, *, reply_to: int | None = None) -> None:
         """Send a brief, user-facing error message to the channel.

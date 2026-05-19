@@ -11,6 +11,7 @@ import struct
 import subprocess
 import tempfile
 import wave
+from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 from pathlib import Path
@@ -216,12 +217,30 @@ def waveform_from_pcm(
     return base64.b64encode(bytes(waveform)).decode("ascii")
 
 
-def generate_tts_pcm(
+@dataclass
+class TTSUsage:
+    """Token + model metadata for a single TTS call, used for cost tracking."""
+
+    tokens_input: int = 0
+    tokens_output: int = 0
+    model_name: str = ""
+
+
+@dataclass
+class TTSResult:
+    """PCM bytes from a TTS call, paired with its usage metadata."""
+
+    pcm: bytes
+    usage: TTSUsage
+
+
+def generate_tts(
     transcript: str,
     model_name: str,
     voice_name: str,
     instruction: str | None = None,
-) -> bytes:
+) -> TTSResult:
+    """Render speech via Gemini TTS, returning audio + usage metadata."""
     client, model = get_gemini_client_for_tts(model_name)
     prefix = (instruction or DEFAULT_VOICE_INSTRUCTION).strip().rstrip(":")
     prompt = f"{prefix}:\n{transcript}"
@@ -247,10 +266,38 @@ def generate_tts_pcm(
 
     data = part.inline_data.data
     if isinstance(data, bytes):
-        return data
+        pcm = data
+    else:
+        data += "=" * (-len(data) % 4)
+        pcm = base64.b64decode(data)
 
-    data += "=" * (-len(data) % 4)
-    return base64.b64decode(data)
+    usage = _extract_tts_usage(response, model)
+    return TTSResult(pcm=pcm, usage=usage)
+
+
+def generate_tts_pcm(
+    transcript: str,
+    model_name: str,
+    voice_name: str,
+    instruction: str | None = None,
+) -> bytes:
+    """Legacy entrypoint — returns just PCM bytes. Prefer ``generate_tts``."""
+    return generate_tts(transcript, model_name, voice_name, instruction).pcm
+
+
+def _extract_tts_usage(response, model_name: str) -> TTSUsage:
+    """Read prompt/candidates token counts off a Gemini response."""
+    tokens_input = 0
+    tokens_output = 0
+    meta = getattr(response, "usage_metadata", None)
+    if meta is not None:
+        tokens_input = int(getattr(meta, "prompt_token_count", 0) or 0)
+        tokens_output = int(getattr(meta, "candidates_token_count", 0) or 0)
+    return TTSUsage(
+        tokens_input=tokens_input,
+        tokens_output=tokens_output,
+        model_name=model_name,
+    )
 
 
 def clean_transcript_for_tts(text: str) -> str:
@@ -278,7 +325,9 @@ class VoiceService(BaseService):
         text: str,
         reply_to_message_id: int | None = None,
         instruction: str | None = None,
-    ) -> None:
+    ) -> TTSUsage:
+        """Render + upload a voice message. Returns the TTS usage so callers
+        can persist tokens/cost."""
         self._log_operation("synthesize_and_send", channel_id=channel_id)
 
         text = text.strip()
@@ -290,8 +339,8 @@ class VoiceService(BaseService):
             token = self._settings.discord_bot_token
 
         try:
-            pcm = await asyncio.to_thread(
-                generate_tts_pcm,
+            tts_result = await asyncio.to_thread(
+                generate_tts,
                 text,
                 self._settings.voice_tts_model,
                 self._settings.voice_tts_voice,
@@ -299,13 +348,15 @@ class VoiceService(BaseService):
             )
         except Exception:
             self._logger.warning("TTS generation failed, retrying shorter text", exc_info=True)
-            pcm = await asyncio.to_thread(
-                generate_tts_pcm,
+            tts_result = await asyncio.to_thread(
+                generate_tts,
                 text[:400],
                 self._settings.voice_tts_model,
                 self._settings.voice_tts_voice,
                 instruction,
             )
+        pcm = tts_result.pcm
+        usage = tts_result.usage
 
         with tempfile.TemporaryDirectory() as tmp:
             wav = Path(tmp) / "voice.wav"
@@ -341,6 +392,7 @@ class VoiceService(BaseService):
                 ),
                 reply_to_message_id=reply_to_message_id,
             )
+        return usage
 
     async def health_check(self) -> ServiceHealth:
         try:

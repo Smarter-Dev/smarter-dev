@@ -30,6 +30,7 @@ from smarter_dev.web.api.routers.squad_sale_events import (
     router as squad_sale_events_router,
 )
 from smarter_dev.web.api.routers.admin import router as admin_router
+from smarter_dev.web.api.routers.chat_conversations import router as chat_conversations_router
 from smarter_dev.web.api.routers.forum_agents_simple import (
     router as forum_agents_router,
 )
@@ -392,6 +393,8 @@ api.include_router(
 )
 
 api.include_router(admin_router, tags=["Admin Management"])
+
+api.include_router(chat_conversations_router, tags=["Chat Agent Conversations"])
 
 api.include_router(forum_agents_router, tags=["Forum Agents"])
 

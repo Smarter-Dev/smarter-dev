@@ -787,9 +787,78 @@ class ActiveSaleEventResponse(BaseAPIModel):
 
 class SquadCostInfo(BaseAPIModel):
     """Cost information including sale discounts."""
-    
+
     original_cost: int = Field(description="Original cost before any discounts")
     current_cost: int = Field(description="Current cost after applying best available discount")
     discount_percent: Optional[int] = Field(None, description="Discount percentage applied (0-100)")
     active_sale: Optional[ActiveSaleEventResponse] = Field(None, description="Active sale event providing discount")
     is_on_sale: bool = Field(description="Whether this action is currently discounted")
+
+
+# ============================================================================
+# Chat Agent Conversation Schemas (Discord chat agent dashboard)
+# ============================================================================
+
+
+class ChatAgentEngagementStart(BaseAPIModel):
+    guild_id: str
+    channel_id: str
+    guild_name: Optional[str] = None
+    channel_name: Optional[str] = None
+    activation_user_id: str
+    activation_username: str
+    activation_message_id: str
+
+
+class ChatAgentEngagementStartResponse(BaseAPIModel):
+    id: UUID
+    started_at: datetime
+
+
+class ChatAgentEngagementEnd(BaseAPIModel):
+    deactivation_reason: str = Field(
+        description=(
+            "no_response_quota / inactivity / continue_watching_false / "
+            "stop_phrase / max_runtime / shutdown / crash"
+        ),
+    )
+
+
+class ChatAgentCompactionEventCreate(BaseAPIModel):
+    event_kind: str
+    tool_name: Optional[str] = None
+    original_content: str
+    summary: str
+    original_chars: int
+    summary_chars: int
+    summarizer_tokens_input: int = 0
+    summarizer_tokens_output: int = 0
+    summarizer_model_name: Optional[str] = None
+
+
+class ChatAgentTurnCreate(BaseAPIModel):
+    engagement_id: UUID
+    request_id: str
+    turn_kind: str = Field(description="initial or followup")
+    output_kind: str = Field(description="send_response or no_response")
+    triggering_messages: List[dict]
+    agent_output: dict
+    model_messages_delta: Optional[List[dict]] = None
+    duration_ms: Optional[int] = None
+    chat_tokens_input: int = 0
+    chat_tokens_output: int = 0
+    chat_model_name: Optional[str] = None
+    voice_tokens_input: int = 0
+    voice_tokens_output: int = 0
+    voice_model_name: Optional[str] = None
+    voice_sent_ok: Optional[bool] = None
+    voice_send_error: Optional[str] = None
+    compaction_events: List[ChatAgentCompactionEventCreate] = Field(default_factory=list)
+
+
+class ChatAgentTurnCreateResponse(BaseAPIModel):
+    id: UUID
+    started_at: datetime
+    chat_cost_usd: str  # serialised Decimal
+    voice_cost_usd: str
+    summarizer_cost_usd_total: str
