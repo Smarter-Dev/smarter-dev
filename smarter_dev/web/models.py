@@ -3876,7 +3876,18 @@ class ChatAgentEngagement(Base):
     total_voice_tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     total_voice_tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    # Aggregate USD cost (sum of per-turn cost contributions)
+    # Aggregate USD cost — broken out by bucket so operators can see
+    # which model is driving spend. ``total_cost_usd`` is the convenience
+    # sum of the three.
+    total_chat_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(10, 6), nullable=False, default=Decimal("0")
+    )
+    total_voice_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(10, 6), nullable=False, default=Decimal("0")
+    )
+    total_compaction_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(10, 6), nullable=False, default=Decimal("0")
+    )
     total_cost_usd: Mapped[Decimal] = mapped_column(
         Numeric(10, 6), nullable=False, default=Decimal("0")
     )

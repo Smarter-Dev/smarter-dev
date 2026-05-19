@@ -176,21 +176,22 @@
     <div>
         <div class="label">Total</div>
         <div class="value">${{ '%.6f'|format(engagement.total_cost_usd) }}</div>
+        <div class="sub">{{ total_chat_tokens + total_comp_tokens + total_voice_tokens }} tokens all-in</div>
     </div>
     <div>
         <div class="label">Chat</div>
-        <div class="value">{{ total_chat_tokens }} tokens</div>
-        <div class="sub">{{ engagement.total_chat_tokens_input }} in / {{ engagement.total_chat_tokens_output }} out</div>
+        <div class="value">${{ '%.6f'|format(engagement.total_chat_cost_usd) }}</div>
+        <div class="sub">{{ total_chat_tokens }} tokens ({{ engagement.total_chat_tokens_input }} in / {{ engagement.total_chat_tokens_output }} out)</div>
     </div>
     <div>
         <div class="label">Compaction</div>
-        <div class="value">{{ total_comp_tokens }} tokens</div>
-        <div class="sub">{{ engagement.total_compaction_tokens_input }} in / {{ engagement.total_compaction_tokens_output }} out</div>
+        <div class="value">${{ '%.6f'|format(engagement.total_compaction_cost_usd) }}</div>
+        <div class="sub">{{ total_comp_tokens }} tokens ({{ engagement.total_compaction_tokens_input }} in / {{ engagement.total_compaction_tokens_output }} out)</div>
     </div>
     <div>
         <div class="label">Voice</div>
-        <div class="value">{{ total_voice_tokens }} tokens</div>
-        <div class="sub">{{ engagement.total_voice_tokens_input }} in / {{ engagement.total_voice_tokens_output }} out</div>
+        <div class="value">${{ '%.6f'|format(engagement.total_voice_cost_usd) }}</div>
+        <div class="sub">{{ total_voice_tokens }} tokens ({{ engagement.total_voice_tokens_input }} in / {{ engagement.total_voice_tokens_output }} out)</div>
     </div>
 </aside>
 
