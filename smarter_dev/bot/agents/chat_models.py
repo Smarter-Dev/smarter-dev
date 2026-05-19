@@ -156,13 +156,17 @@ class SendResponse(BaseModel):
         default=None,
         description=(
             "Short, spoken-style SUMMARY to send as a Discord voice message via "
-            "TTS. CRITICAL: any voice / audio / persona / tone / accent request "
-            "from the user REQUIRES this field — NEVER answer such requests by "
-            "writing *stage directions* or *clears throat* inside `message`. "
-            "Voice messages should be a few sentences max — not paragraphs, "
-            "code blocks, or full long-form. If the reply needs detail (code, "
-            "links, deep explanation), set `message` for the full text AND "
-            "`voice_summary` for a 1-3 sentence spoken digest."
+            "TTS. Default to None. Only set when ONE of these is true: (a) the "
+            "user explicitly asked for voice in the message you're responding to "
+            "RIGHT NOW (a previous voice exchange does NOT carry forward), (b) "
+            "voice is genuinely the best medium for this specific answer (e.g. "
+            "pronouncing a word, demonstrating intonation), or (c) the bit lands "
+            "better spoken — a one-line zinger / punchline where the surprise "
+            "IS the audio; in that case send ONLY voice_summary, no message. "
+            "Otherwise leave None and use `message`. Voice should be a few "
+            "sentences max, never paragraphs / code / long-form. If the reply "
+            "needs detail AND voice was requested, set BOTH: `message` for the "
+            "full text, `voice_summary` for a 1-3 sentence spoken digest."
         ),
     )
     voice_instruction: str | None = Field(
