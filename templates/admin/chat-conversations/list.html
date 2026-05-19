@@ -8,6 +8,65 @@
     <p>{{ total }} engagement{{ 's' if total != 1 else '' }}</p>
 </hgroup>
 
+<style nonce="{{ csp_nonce() }}">
+    .cc-metric-cards {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: .75rem;
+        margin: 0 0 1rem;
+    }
+    .cc-metric-card {
+        background: var(--sk-color-surface);
+        border: 1px solid var(--sk-color-border);
+        border-radius: .5rem;
+        padding: .75rem 1rem;
+        color: var(--sk-color-text);
+    }
+    .cc-metric-card .label {
+        color: var(--sk-color-muted);
+        font-size: .75rem;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+    }
+    .cc-metric-card .value {
+        color: var(--sk-color-text);
+        font-weight: 600;
+        font-size: 1.25rem;
+        margin-top: .15rem;
+    }
+    .cc-metric-card .sub {
+        color: var(--sk-color-muted);
+        font-size: .8rem;
+        margin-top: .15rem;
+    }
+    @media (max-width: 900px) {
+        .cc-metric-cards { grid-template-columns: 1fr 1fr; }
+    }
+</style>
+
+<section class="cc-metric-cards" aria-label="Last {{ metrics.days }} days">
+    <div class="cc-metric-card">
+        <div class="label">Activations · {{ metrics.days }}d</div>
+        <div class="value">{{ metrics.activations }}</div>
+        <div class="sub">new engagements started</div>
+    </div>
+    <div class="cc-metric-card">
+        <div class="label">Chat · {{ metrics.days }}d</div>
+        <div class="value">${{ '%.4f'|format(metrics.chat_cost) }}</div>
+        <div class="sub">{{ metrics.chat_tokens }} tokens</div>
+    </div>
+    <div class="cc-metric-card">
+        <div class="label">Voice · {{ metrics.days }}d</div>
+        <div class="value">${{ '%.4f'|format(metrics.voice_cost) }}</div>
+        <div class="sub">{{ metrics.voice_tokens }} tokens</div>
+    </div>
+    <div class="cc-metric-card">
+        <div class="label">Voice messages · {{ metrics.days }}d</div>
+        <div class="value">{{ metrics.voice_messages }}</div>
+        <div class="sub">turns that sent voice OK</div>
+    </div>
+</section>
+
 <form method="get" action="/admin/chat-conversations"
       style="display: flex; gap: .75rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 1rem;">
     <label>
