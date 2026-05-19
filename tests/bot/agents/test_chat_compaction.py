@@ -41,8 +41,15 @@ def _response(*parts) -> ModelResponse:
     return ModelResponse(parts=list(parts))
 
 
-def _stub_summary(label: str, text: str) -> str:
-    return f"[compacted] summary-of-{label}"
+def _stub_summary(label: str, text: str):
+    from smarter_dev.bot.agents.chat_compaction import _SummariseResult
+
+    return _SummariseResult(
+        text=f"[compacted] summary-of-{label}",
+        tokens_input=10,
+        tokens_output=5,
+        model_name="stub-model",
+    )
 
 
 @pytest.fixture
@@ -168,6 +175,57 @@ async def test_typical_initial_activation_input_passes_through(patched_summarise
     out = await compact_history(messages)
     assert patched_summarise.await_count == 0
     assert out[0].parts[0].content == realistic_initial
+
+
+@pytest.mark.asyncio
+async def test_compaction_events_recorded_when_collector_active(patched_summarise):
+    """The processor should append a CompactionEvent for every part it
+    summarises into the per-run ContextVar collector. The engine drains this
+    after agent.run() to persist alongside the turn."""
+    from smarter_dev.bot.agents.chat_compaction import (
+        drain_collection,
+        start_collection,
+    )
+
+    long = _long_text()
+    messages = [
+        _request(UserPromptPart(content=long)),
+        _response(TextPart(content=_long_text())),
+        _request(UserPromptPart(content="current turn")),
+    ]
+
+    start_collection()
+    await compact_history(messages)
+    events = drain_collection()
+
+    assert len(events) == 2
+    kinds = sorted(e.event_kind for e in events)
+    assert kinds == ["assistant_text", "user_prompt"]
+    for e in events:
+        assert e.original_chars > 0
+        assert e.summary_chars > 0
+        assert e.summarizer_tokens_input == 10
+        assert e.summarizer_tokens_output == 5
+        assert e.summarizer_model_name == "stub-model"
+
+    # Drained — collector is reset.
+    assert drain_collection() == []
+
+
+@pytest.mark.asyncio
+async def test_compaction_events_silently_dropped_when_no_collector(patched_summarise):
+    """If no collector is active (e.g. tests that don't call start_collection),
+    the processor still works — it just doesn't record events."""
+    long = _long_text()
+    messages = [
+        _request(UserPromptPart(content=long)),
+        _response(TextPart(content="ok")),
+        _request(UserPromptPart(content="current turn")),
+    ]
+    # No start_collection() call — collector is None.
+    await compact_history(messages)
+    # No exception, summariser still called.
+    assert patched_summarise.await_count == 1
 
 
 @pytest.mark.asyncio

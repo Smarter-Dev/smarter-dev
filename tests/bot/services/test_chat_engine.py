@@ -50,9 +50,12 @@ def _make_event(message_id: int, author_id: int, content: str):
     )
 
 
-def _fake_trigger_message(message_id: int = 9001):
+def _fake_trigger_message(message_id: int = 9001, author_id: int = 200):
     """A stand-in hikari.Message used as the activation trigger in tests."""
-    return SimpleNamespace(id=message_id)
+    return SimpleNamespace(
+        id=message_id,
+        author=SimpleNamespace(id=author_id, username="alice"),
+    )
 
 
 def _initial_input() -> InitialAgentInput:
@@ -162,11 +165,12 @@ def _patch_engine(
     ]
 
 
-def _result(output, all_messages=None):
+def _result(output, all_messages=None, new_messages=None):
     return SimpleNamespace(
         output=output,
         usage=lambda: None,
         all_messages=lambda: all_messages or [],
+        new_messages=lambda: new_messages or [],
     )
 
 

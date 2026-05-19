@@ -50,7 +50,7 @@ services:
       - LEGACY_DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/bc_websites
       - REDIS_URL=redis://:smarter_dev_redis_password@redis:6379/0
     ports:
-      - "8001:8000"
+      - "8002:8000"
     volumes:
       - .:/app
       - /app/.venv

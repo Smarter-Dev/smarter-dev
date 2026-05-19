@@ -3816,3 +3816,235 @@ class AgentMessage(Base):
     __table_args__ = (
         UniqueConstraint("conversation_id", "sequence", name="uq_agent_messages_conv_seq"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Discord chat agent — engagement / turn / compaction tables for the
+# operator dashboard. One engagement = one ChannelEngine lifecycle; one
+# turn = one agent fire (SendResponse OR NoResponse).
+# ---------------------------------------------------------------------------
+
+
+class ChatAgentEngagement(Base):
+    """One row per Discord chat-agent engine lifecycle in a channel."""
+
+    __tablename__ = "chat_agent_engagements"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+
+    # Discord context
+    guild_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    channel_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    guild_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    channel_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+
+    # Activation trigger snapshot
+    activation_user_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    activation_username: Mapped[str] = mapped_column(String(100), nullable=False)
+    activation_message_id: Mapped[str] = mapped_column(String, nullable=False)
+
+    # Lifecycle
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+    ended_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    deactivation_reason: Mapped[Optional[str]] = mapped_column(
+        String(40),
+        nullable=True,
+        doc=(
+            "no_response_quota / inactivity / continue_watching_false / "
+            "stop_phrase / max_runtime / shutdown / crash"
+        ),
+    )
+
+    # Denormalised latest values for the list view
+    last_topic: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Aggregate tokens across all turns
+    total_chat_tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_chat_tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_compaction_tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_compaction_tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_voice_tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_voice_tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    # Aggregate USD cost (sum of per-turn cost contributions)
+    total_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(10, 6), nullable=False, default=Decimal("0")
+    )
+
+    turns: Mapped[list["ChatAgentTurn"]] = relationship(
+        back_populates="engagement",
+        cascade="all, delete-orphan",
+        order_by="ChatAgentTurn.started_at",
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_chat_agent_engagements_guild_started", "guild_id", "started_at"
+        ),
+        Index(
+            "ix_chat_agent_engagements_channel_started",
+            "channel_id",
+            "started_at",
+        ),
+        Index(
+            "ix_chat_agent_engagements_user_started",
+            "activation_user_id",
+            "started_at",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ChatAgentEngagement(id='{self.id}', channel='{self.channel_name}', "
+            f"started_at='{self.started_at}', reason='{self.deactivation_reason}')>"
+        )
+
+
+class ChatAgentTurn(Base):
+    """One row per chat-agent fire (SendResponse OR NoResponse)."""
+
+    __tablename__ = "chat_agent_turns"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    engagement_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("chat_agent_engagements.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    request_id: Mapped[str] = mapped_column(String(16), nullable=False)
+    turn_kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, doc="initial or followup"
+    )
+    output_kind: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        doc="send_response or no_response",
+    )
+
+    # Snapshots of what the agent saw and produced
+    triggering_messages: Mapped[list] = mapped_column(
+        JSON,
+        nullable=False,
+        doc=(
+            "List of `Message` dicts: activation_message on initial, "
+            "new_messages on followup."
+        ),
+    )
+    agent_output: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+        doc=(
+            "Full SendResponse or NoResponse model_dump — includes message, "
+            "voice_summary, voice_instruction, topic, notes, reply_to_message_id, "
+            "continue_watching, kind."
+        ),
+    )
+    model_messages_delta: Mapped[Optional[list]] = mapped_column(
+        JSON,
+        nullable=True,
+        doc=(
+            "Pydantic AI messages added during this turn "
+            "(result.new_messages() JSON-serialised). Used to render tool "
+            "calls/returns inline in the timeline."
+        ),
+    )
+
+    # Timing
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Token / cost bucket: chat
+    chat_tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chat_tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chat_model_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    chat_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(10, 6), nullable=False, default=Decimal("0")
+    )
+
+    # Token / cost bucket: voice (zero unless voice_summary was sent)
+    voice_tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    voice_tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    voice_model_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    voice_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(10, 6), nullable=False, default=Decimal("0")
+    )
+    voice_sent_ok: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    voice_send_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    engagement: Mapped[ChatAgentEngagement] = relationship(back_populates="turns")
+    compaction_events: Mapped[list["ChatAgentCompactionEvent"]] = relationship(
+        back_populates="turn",
+        cascade="all, delete-orphan",
+        order_by="ChatAgentCompactionEvent.id",
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ChatAgentTurn(id='{self.id}', kind='{self.turn_kind}', "
+            f"output='{self.output_kind}', tokens_in={self.chat_tokens_input})>"
+        )
+
+
+class ChatAgentCompactionEvent(Base):
+    """One row per part that the history compactor summarised, during a turn."""
+
+    __tablename__ = "chat_agent_compaction_events"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    turn_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("chat_agent_turns.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    event_kind: Mapped[str] = mapped_column(
+        String(24),
+        nullable=False,
+        doc="user_prompt / assistant_text / tool_call_args / tool_return",
+    )
+    tool_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+
+    # Full content — no truncation. Operator wants to review the
+    # summariser's quality and can't do that with a snippet.
+    original_content: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    original_chars: Mapped[int] = mapped_column(Integer, nullable=False)
+    summary_chars: Mapped[int] = mapped_column(Integer, nullable=False)
+    chars_saved: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    summarizer_tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    summarizer_tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    summarizer_model_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    summarizer_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(10, 6), nullable=False, default=Decimal("0")
+    )
+
+    turn: Mapped[ChatAgentTurn] = relationship(back_populates="compaction_events")
+
+    def __repr__(self) -> str:
+        return (
+            f"<ChatAgentCompactionEvent(kind='{self.event_kind}', "
+            f"{self.original_chars}c->{self.summary_chars}c)>"
+        )

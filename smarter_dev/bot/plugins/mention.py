@@ -41,11 +41,15 @@ async def _voice_send(
     text: str,
     reply_to: int | None,
     instruction: str | None = None,
-) -> None:
+):
     """Send ``text`` as a voice message via the bot's voice service.
 
     ``instruction`` (if provided by the agent) is a natural-language stage
     direction passed to Gemini TTS to shape tone / pacing / emotion.
+
+    Returns the ``TTSUsage`` from the voice service on success so the engine
+    can record tokens + cost on the persisted turn. Returns None when we
+    fell back to a text reply (no voice service available).
     """
     voice_service = getattr(plugin.bot, "d", {}).get("voice_service") or (
         getattr(plugin.bot, "d", {}).get("_services", {}).get("voice_service")
@@ -57,8 +61,8 @@ async def _voice_send(
             text[:2000],
             reply=reply_to if reply_to else hikari.UNDEFINED,
         )
-        return
-    await voice_service.synthesize_and_send(
+        return None
+    return await voice_service.synthesize_and_send(
         bot=plugin.bot,
         channel_id=channel_id,
         text=text,

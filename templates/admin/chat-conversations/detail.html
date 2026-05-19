@@ -1,0 +1,326 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Engagement - Chat Conversations - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+
+{% set total_voice_tokens = engagement.total_voice_tokens_input + engagement.total_voice_tokens_output %}
+{% set total_chat_tokens = engagement.total_chat_tokens_input + engagement.total_chat_tokens_output %}
+{% set total_comp_tokens = engagement.total_compaction_tokens_input + engagement.total_compaction_tokens_output %}
+
+<style>
+    .cc-header {
+        margin-bottom: 1rem;
+    }
+    .cc-header h1 { margin: 0 0 .25rem 0; }
+    .cc-header .meta { color: var(--sk-color-muted); font-size: .9rem; }
+    .cc-status-active { color: var(--sk-color-success, #2fb344); font-weight: 600; }
+    .cc-status-ended  { color: var(--sk-color-muted); }
+
+    .cc-cost-banner {
+        background: var(--sk-color-surface);
+        border: 1px solid var(--sk-color-border);
+        border-radius: .5rem;
+        padding: .75rem 1rem;
+        margin-bottom: 1.25rem;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 1rem;
+        color: var(--sk-color-text);
+    }
+    .cc-cost-banner .label {
+        color: var(--sk-color-muted);
+        font-size: .8rem;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+    }
+    .cc-cost-banner .value {
+        color: var(--sk-color-text);
+        font-weight: 600;
+        font-size: 1.05rem;
+    }
+    .cc-cost-banner .sub {
+        color: var(--sk-color-muted);
+        font-size: .8rem;
+    }
+
+    .cc-back {
+        display: inline-block; margin-bottom: 1rem;
+    }
+
+    .cc-timeline { display: flex; flex-direction: column; gap: .5rem; margin-top: .5rem; }
+
+    .cc-turn-divider {
+        color: var(--sk-color-muted);
+        font-size: .8rem;
+        margin: 1.25rem 0 .25rem;
+        border-top: 1px dashed var(--sk-color-border);
+        padding-top: .5rem;
+    }
+
+    .cc-user-msg, .cc-agent-msg, .cc-no-response, .cc-compaction, .cc-tool-event {
+        border-radius: .5rem;
+        padding: .75rem 1rem;
+        color: var(--sk-color-text);
+        border: 1px solid var(--sk-color-border);
+        background: var(--sk-color-surface);
+    }
+
+    .cc-user-msg {
+        border-left: 3px solid rgba(255, 255, 255, 0.25);
+    }
+    .cc-user-msg.cc-mention {
+        border-left-color: var(--sk-color-accent, #34D399);
+    }
+    .cc-agent-msg {
+        background: var(--sk-color-accent-soft, rgba(52, 211, 153, 0.08));
+        border-left: 3px solid var(--sk-color-accent, #34D399);
+    }
+    .cc-no-response {
+        background: transparent;
+        color: var(--sk-color-muted);
+        font-size: .85rem;
+        padding: .4rem .75rem;
+        border: 1px dashed var(--sk-color-border);
+        border-left: 3px dashed var(--sk-color-muted);
+    }
+    .cc-compaction {
+        background: rgba(245, 158, 11, 0.08);   /* warm amber wash */
+        border-left: 3px solid var(--sk-color-warning, #F59E0B);
+    }
+    .cc-tool-event {
+        background: rgba(168, 85, 247, 0.08);   /* violet wash */
+        border-left: 3px solid #A855F7;
+        font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+        font-size: .85rem;
+    }
+
+    .cc-meta {
+        font-size: .75rem;
+        color: var(--sk-color-muted);
+        margin-bottom: .35rem;
+    }
+    .cc-meta strong { color: var(--sk-color-text); }
+    .cc-body {
+        white-space: pre-wrap;
+        line-height: 1.45;
+    }
+
+    .cc-voice {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--sk-color-border);
+        border-radius: .375rem;
+        padding: .5rem .75rem;
+        margin-top: .5rem;
+        font-size: .9rem;
+    }
+    .cc-voice .quote {
+        font-style: italic;
+        color: var(--sk-color-text);
+    }
+
+    details { margin-top: .5rem; }
+    details > summary {
+        cursor: pointer;
+        font-size: .85rem;
+        color: var(--sk-color-muted);
+    }
+    details > summary:hover {
+        color: var(--sk-color-text);
+    }
+
+    pre.cc-dump {
+        background: rgba(0, 0, 0, 0.25);
+        color: var(--sk-color-text);
+        border: 1px solid var(--sk-color-border);
+        padding: .5rem;
+        max-height: 24rem;
+        overflow: auto;
+        white-space: pre-wrap;
+        font-size: .8rem;
+        border-radius: .25rem;
+        margin: .5rem 0;
+    }
+
+    .cc-comp-cols {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: .75rem;
+        margin-top: .5rem;
+    }
+    @media (max-width: 720px) {
+        .cc-comp-cols { grid-template-columns: 1fr; }
+        .cc-cost-banner { grid-template-columns: 1fr 1fr; }
+    }
+
+    .cc-author { font-weight: 600; color: var(--sk-color-text); }
+    .cc-tag { font-size: .7rem; color: var(--sk-color-muted); padding: 0 .25rem; }
+</style>
+
+<div class="cc-header">
+    <h1>#{{ engagement.channel_name or engagement.channel_id }}</h1>
+    <div class="meta">
+        {% if engagement.guild_name %}{{ engagement.guild_name }} · {% endif %}
+        engaged {{ engagement.started_at.strftime('%Y-%m-%d %H:%M:%S') }}
+        by <strong>{{ engagement.activation_username }}</strong> ·
+        {% if engagement.ended_at %}
+            <span class="cc-status-ended">ended {{ engagement.ended_at.strftime('%H:%M:%S') }} ({{ engagement.deactivation_reason or 'unknown' }})</span>
+        {% else %}
+            <span class="cc-status-active">active</span>
+        {% endif %}
+        · {{ turns|length }} turn{{ 's' if turns|length != 1 else '' }}
+    </div>
+</div>
+
+<aside class="cc-cost-banner">
+    <div>
+        <div class="label">Total</div>
+        <div class="value">${{ '%.6f'|format(engagement.total_cost_usd) }}</div>
+    </div>
+    <div>
+        <div class="label">Chat</div>
+        <div class="value">{{ total_chat_tokens }} tokens</div>
+        <div class="sub">{{ engagement.total_chat_tokens_input }} in / {{ engagement.total_chat_tokens_output }} out</div>
+    </div>
+    <div>
+        <div class="label">Compaction</div>
+        <div class="value">{{ total_comp_tokens }} tokens</div>
+        <div class="sub">{{ engagement.total_compaction_tokens_input }} in / {{ engagement.total_compaction_tokens_output }} out</div>
+    </div>
+    <div>
+        <div class="label">Voice</div>
+        <div class="value">{{ total_voice_tokens }} tokens</div>
+        <div class="sub">{{ engagement.total_voice_tokens_input }} in / {{ engagement.total_voice_tokens_output }} out</div>
+    </div>
+</aside>
+
+<a href="/admin/chat-conversations" class="cc-back">&larr; back to list</a>
+
+<div class="cc-timeline">
+    {% for turn in turns %}
+    <div class="cc-turn-divider">
+        turn {{ loop.index }} · {{ turn.turn_kind }} · {{ turn.started_at.strftime('%H:%M:%S') }}
+        {% if turn.duration_ms is not none %}· {{ turn.duration_ms }}ms{% endif %}
+        · {{ turn.chat_tokens_input + turn.chat_tokens_output }} chat tokens
+        · ${{ '%.6f'|format(turn.chat_cost_usd + turn.voice_cost_usd) }}
+    </div>
+
+    {# what the agent saw on this turn #}
+    {% for msg in turn.triggering_messages %}
+    <div class="cc-user-msg {% if msg.mentions_bot %}cc-mention{% endif %}">
+        <div class="cc-meta">
+            👤 <span class="cc-author">{{ msg.author_id }}</span>
+            {% if msg.mentions_bot %}<span class="cc-tag" title="mentions_bot=True">📣 mentioned</span>{% endif %}
+            <span class="cc-tag">msg {{ msg.message_id }}</span>
+            {% if msg.has_attachments %}<span class="cc-tag">📎 attachments (not visible)</span>{% endif %}
+        </div>
+        <div class="cc-body">{{ msg.body }}</div>
+        {% if msg.reactions %}
+        <div class="cc-meta" style="margin-top: .25rem;">reactions: {{ msg.reactions | join(' ') }}</div>
+        {% endif %}
+    </div>
+    {% endfor %}
+
+    {# compactions that happened during this turn #}
+    {% for comp in turn.compaction_events %}
+    <details class="cc-compaction">
+        <summary>
+            🗜 <strong>compaction</strong> · {{ comp.event_kind }}{% if comp.tool_name %} ({{ comp.tool_name }}){% endif %}
+            · {{ comp.original_chars }}c → {{ comp.summary_chars }}c
+            (saved {{ comp.chars_saved }}c,
+            {{ comp.summarizer_tokens_input + comp.summarizer_tokens_output }} tokens,
+            ${{ '%.6f'|format(comp.summarizer_cost_usd) }})
+        </summary>
+        <div class="cc-comp-cols">
+            <div>
+                <strong>Original</strong>
+                <pre class="cc-dump">{{ comp.original_content }}</pre>
+            </div>
+            <div>
+                <strong>Summary</strong>
+                <pre class="cc-dump">{{ comp.summary }}</pre>
+            </div>
+        </div>
+    </details>
+    {% endfor %}
+
+    {# tool calls + returns from this turn's message delta #}
+    {% if turn.model_messages_delta %}
+        {% for m in turn.model_messages_delta %}
+            {% for part in m.parts %}
+                {% if part.part_kind == 'tool-call' %}
+                <details class="cc-tool-event">
+                    <summary>🛠 <strong>{{ part.tool_name }}</strong>(...)</summary>
+                    <pre class="cc-dump">{{ part.args | tojson(indent=2) if part.args is mapping else part.args }}</pre>
+                </details>
+                {% elif part.part_kind == 'tool-return' %}
+                <details class="cc-tool-event">
+                    <summary>🛠 <strong>{{ part.tool_name }}</strong> → returned {{ (part.content | string)|length }} chars</summary>
+                    <pre class="cc-dump">{{ part.content | tojson(indent=2) if part.content is mapping else part.content }}</pre>
+                </details>
+                {% endif %}
+            {% endfor %}
+        {% endfor %}
+    {% endif %}
+
+    {# agent output #}
+    {% if turn.output_kind == 'no_response' %}
+    <div class="cc-no-response">
+        🔇 <strong>NoResponse</strong> · topic: "{{ turn.agent_output.topic }}"
+        {% if not turn.agent_output.continue_watching %}· <em>continue_watching=False</em>{% endif %}
+    </div>
+    {% else %}
+    <div class="cc-agent-msg">
+        <div class="cc-meta">🤖 <strong>agent</strong> · {{ turn.chat_model_name or '—' }}</div>
+        {% if turn.agent_output.message %}
+        <div class="cc-body">{{ turn.agent_output.message }}</div>
+        {% endif %}
+
+        {% if turn.agent_output.voice_summary %}
+        <div class="cc-voice">
+            🔊 <strong>voice_summary</strong>: <span class="quote">"{{ turn.agent_output.voice_summary }}"</span>
+            {% if turn.agent_output.voice_instruction %}
+            <div class="cc-meta">instruction: {{ turn.agent_output.voice_instruction }}</div>
+            {% endif %}
+            <div class="cc-meta">
+                {% if turn.voice_sent_ok %}sent OK{% elif turn.voice_sent_ok is false %}send failed: {{ turn.voice_send_error or 'unknown' }}{% endif %}
+                {% if turn.voice_tokens_input or turn.voice_tokens_output %}
+                · {{ turn.voice_tokens_input + turn.voice_tokens_output }} TTS tokens
+                · ${{ '%.6f'|format(turn.voice_cost_usd) }}
+                {% endif %}
+            </div>
+            <button type="button"
+                    onclick="playVoice('{{ turn.id }}')"
+                    style="margin-top: .35rem; padding: .25rem .6rem; cursor: pointer;">
+                🔊 Play in browser
+            </button>
+            <audio id="audio-{{ turn.id }}" controls hidden style="margin-top: .35rem; display: block; width: 100%;"></audio>
+        </div>
+        {% endif %}
+
+        <details>
+            <summary>structured output (topic, notes, reply-to, continue_watching, …)</summary>
+            <pre class="cc-dump">{{ turn.agent_output | tojson(indent=2) }}</pre>
+        </details>
+    </div>
+    {% endif %}
+    {% endfor %}
+</div>
+
+<script>
+    async function playVoice(turnId) {
+        const audio = document.getElementById('audio-' + turnId);
+        if (!audio) return;
+        audio.hidden = false;
+        try {
+            const resp = await fetch(`/admin/chat-conversations/turns/${turnId}/voice`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            const blob = await resp.blob();
+            audio.src = URL.createObjectURL(blob);
+            await audio.play();
+        } catch (e) {
+            alert('Voice replay failed: ' + e);
+        }
+    }
+</script>
+{% endblock %}
