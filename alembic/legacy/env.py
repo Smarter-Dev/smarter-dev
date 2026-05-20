@@ -27,7 +27,6 @@ LEGACY_TABLES: frozenset[str] = frozenset({
     "api_keys",
     "attachment_filter_configs",
     "audit_log_configs",
-    "blog_posts",
     "bytes_balances",
     "bytes_configs",
     "bytes_transactions",
