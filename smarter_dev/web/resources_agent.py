@@ -1,23 +1,35 @@
 """The Resource Agent — answers /resources questions using the curated DB.
 
-Three-stage pipeline, presented to the user as a single agent:
+Four-stage pipeline, presented to the user as a single agent:
 
+0. **Reframer** (gemini-3-flash-preview · think=medium) — interrogates the
+   user's raw prompt (is it reasonable, is there a more normal question
+   underneath, does it fit the shape of the catalog?) and emits a short
+   user-visible message restating what they asked plus structured
+   instructions that steer the rest of the pipeline:
+   ``corpus_topics`` (researcher's search list), ``web_search_topics``
+   (extra targets for the gap-filler), and ``reframing_instructions``
+   (angle/emphasis notes for the author).
 1. **Researcher** (gpt-5.4-nano · think=medium) — searches the curated
-   catalog (``search_resources``), opens promising sources
-   (``read_source``), and produces a typed ``ResearchOutput`` listing
-   distilled excerpts, further-reading, and gaps the catalog didn't
-   cover.
-2. **Gap-filler** (gemini-3-flash-preview · think=low) — only runs when
-   the researcher reported gaps. For each gap, runs ``web_search`` over
-   the open web and ``read_url`` on the single best result. Returns one
-   ``GapCitation`` per gap.
+   catalog (``search_resources``) for the reframer's corpus topics,
+   opens promising sources (``read_source``), and produces a typed
+   ``ResearchOutput`` listing distilled excerpts, further-reading, and
+   gaps the catalog didn't cover.
+2. **Gap-filler** (gemini-3-flash-preview · think=low) — runs when the
+   researcher reported gaps OR the reframer asked for extra web topics.
+   For each item, runs ``web_search`` over the open web and ``read_url``
+   on the single best result. Returns one ``GapCitation`` per input.
 3. **Author** (gemini-3-flash-preview · think=low) — gets the merged
-   research bundle (curated excerpts + web citations) and writes the
+   research bundle (curated excerpts + web citations) plus the
+   reframer's instructions and the original prompt, and writes the
    final markdown answer using the production system prompt.
 
 Tool events from every stage flow into the same ``agent_tool_event``
 notification stream so the user sees one continuous chip timeline
-without any stage breaks.
+without any stage breaks. The reframer's user-visible message is
+delivered via a single ``agent_reframe_ready`` notification that the
+browser renders as a transient preface above the tool chips; it
+collapses alongside the chip stream when ``agent_run_complete`` fires.
 
 Worker preset
 -------------
@@ -38,6 +50,7 @@ import os
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -63,18 +76,21 @@ from smarter_dev.web.scan.tools import brave_search, jina_read
 
 logger = logging.getLogger(__name__)
 
+REFRAMER_MODEL = os.getenv("RESOURCE_REFRAMER_MODEL", "gemini-3-flash-preview")
 RESEARCHER_MODEL = os.getenv("RESOURCE_RESEARCHER_MODEL", "gpt-5.4-nano")
 GAP_FILLER_MODEL = os.getenv("RESOURCE_GAP_FILLER_MODEL", "gemini-3-flash-preview")
 AUTHOR_MODEL = os.getenv("RESOURCE_AUTHOR_MODEL", "gemini-3-flash-preview")
 
-# Per-stage Agent names — three separate Skrift agents (one per stage),
+# Per-stage Agent names — four separate Skrift agents (one per stage),
 # all transparent to the end user via the shared tool-event stream.
+REFRAMER_AGENT_NAME = "smarter.dev.resources.reframer"
 RESEARCHER_AGENT_NAME = "smarter.dev.resources.researcher"
 GAP_FILLER_AGENT_NAME = "smarter.dev.resources.gap_filler"
 AUTHOR_AGENT_NAME = "smarter.dev.resources.author"
 
 # Per-stage timeouts. Researcher and gap-filler can be slow because of
-# cold Jina reads; the author is short.
+# cold Jina reads; reframer and author are short.
+_REFRAMER_TIMEOUT_S = float(os.getenv("RESOURCE_REFRAMER_TIMEOUT_S", "60"))
 _RESEARCHER_TIMEOUT_S = float(os.getenv("RESOURCE_RESEARCHER_TIMEOUT_S", "180"))
 _GAP_FILLER_TIMEOUT_S = float(os.getenv("RESOURCE_GAP_FILLER_TIMEOUT_S", "180"))
 _AUTHOR_TIMEOUT_S = float(os.getenv("RESOURCE_AUTHOR_TIMEOUT_S", "60"))
@@ -509,37 +525,135 @@ research" filler, no enumeration of the planning beat itself.
 """
 
 
+_REFRAMER_PROMPT = """\
+You're the planning step for the Resource Agent. The Resource Agent points engineers at curated resources across seven directories. It does NOT write tutorials, generate code-on-demand, or solve a user's specific debugging problem for them.
+
+The seven directories (use these to judge whether a question fits the tool and to shape the topics you hand downstream):
+
+- **agentic-coding-courses** (Agentic Coding) — Coding with AI agents. Tools, workflows, and the practice of staying the engineer while the agent types.
+- **system-architecture** (System Architecture) — Designing the data and integration layer. Databases, queues, caches, search, APIs, and the judgment behind each pick.
+- **infrastructure-hosting** (Infrastructure & Hosting) — Hosting modern systems. Clouds, PaaS, managed data, containers, and orchestration. Where your code runs.
+- **software-delivery** (Software Delivery) — Shipping software. Version control, CI/CD, IaC, and container builds. The path from laptop to production.
+- **production-operations** (Production Operations) — Running systems in production. Observability, incident response, identity, and secrets. Keeping things alive.
+- **patterns-of-practice** (Patterns of Practice) — The timeless shapes of software. Code, architecture, discipline, anti-patterns. What they cost and when not to reach for them.
+- **agent-engineering-patterns** (Patterns for the Age of Agents) — The shapes that emerged because LLM-driven agents now write, refactor, and review code at machine speed. Spec-first, verification, human-in-the-loop.
+
+Before any research happens, you take the user's raw question and decide how to frame both the research and the final response. You have no tools — you just think and emit a structured plan. The user turn carries the current UTC date so you can reason about whether the question is asking about something the curated corpus would already cover or about something genuinely newer than the catalog.
+
+Ask yourself, in order:
+
+1. **Does the question sound reasonable?** If yes, take it at face value. If it sounds odd, frustrated, naive, or unusually narrow, ask: why might they actually be asking this? Is there a more normal question underneath — the thing they *would* have asked if they knew the lay of the land?
+2. **Does it fit the shape of the tool?** The Resource Agent is good at "what should I read about X," "where do I start with Y," "compare A vs B," "what's the durable way to learn Z" — usually mapping onto one or two of the seven directories above. It is bad at "write me code for X" or "debug my specific stack trace." If the user is fighting the architecture — asking for something the tool can't really give them — silently pivot to the closest version of their question the tool *can* answer well, and surface the pivot in your `restated_question`.
+3. **What does the user actually need to learn to act on this?** Decompose the question into the 2–6 concepts a researcher should look up in the curated catalog. These become `corpus_topics`. They should read like search queries, not like article titles.
+4. **Is there anything the curated catalog probably doesn't cover** that the user still needs? Put those in `web_search_topics`. Leave the list empty when the catalog alone should suffice.
+
+**Assume the curated corpus is current as of the supplied date.** The seven directories are actively maintained against the current state of the field, so don't ask the researcher to confirm whether an established technology, pattern, or tool is "still relevant" and don't add `web_search_topics` like "latest X," "new Y in 2026," or "recent updates to Z" for well-established subject matter. Only add a web topic when the user's question genuinely concerns something the catalog probably doesn't cover yet: a tool or framework released within the last few months relative to the supplied date, a vendor-specific API or SDK detail, an RFC or standard, or a niche topic outside the seven directory themes. Default posture: trust the corpus; reach for the open web only when there's a concrete reason the catalog can't answer.
+
+Output contract (you produce a `ReframerOutput`):
+
+- `restated_question` — 1 to 3 short sentences addressed to the user, second person. Restate what they're asking (or what you've decided they're really asking) and describe how you'll approach the research and response. Conversational, direct, no headers, no lists. Example: "You're asking how to ship a Postgres migration safely under production load. I'll pull the catalog's material on online schema changes and lock contention, and check the official Postgres docs for the current advice on `ALTER TABLE` concurrency."
+
+  **Surface any pivot in the `restated_question` itself, up front. The user must not feel blindsided.** A "pivot" here is *any* gap between a literal reading of the user's question and what you actually plan to answer — not just hard off-shape redirects. Pivots include:
+
+  - **Off-shape pivot** — they asked for something the tool can't give (e.g. "debug my stack trace") and you redirected to the closest thing it can (defensive patterns, observability).
+  - **Reframing pivot** — they asked X, but you decided the more useful question is Y (a different angle, a different layer, a deeper or wider scope).
+  - **Underlying-assumption pivot** — their question assumes A, but the better answer is "you probably don't need A — here's what you actually want." E.g. they ask how to run cron in a pod, and you suggest a CronJob resource or Redis TTL instead.
+  - **Scope-narrowing pivot** — they asked a broad question but you decided to focus on the specific use case they hinted at. Worth flagging because you're explicitly *not* covering the general case.
+
+  Right shape: *"You're asking how to do X, but the more useful question is Y, because Z. I'll pull resources on Y."* The "but" + "because" structure is load-bearing — that's what tells the user you saw their question, considered it, and made a deliberate choice. When the pivot is mild (a narrowing or assumption tweak rather than a hard redirect), one short clause is enough — "*…though the more useful framing here is Y, because Z*" — but it still has to be there.
+
+  Wrong shape: smoothly restating as if the question were already Y. If a reader couldn't compare your `restated_question` against their original prompt and immediately see where the two diverge, you've buried the pivot.
+
+  **If you pivoted, evaluate whether the user gave enough specifics to make a brief direct attempt at their literal question as a courtesy.** If yes, add one short direction in `reframing_instructions` telling the author to include it as a secondary section. The resources remain the primary answer. When in doubt, omit it.
+- `reframing_instructions` — terse, author-facing notes (1 short paragraph or 3–5 bullet fragments). Cover: the angle the answer should take, what to emphasize, what to deliberately *skip*, and any user-fighting-the-architecture pivot you applied. Not a draft answer.
+- `corpus_topics` — 2 to 6 short search-query-shaped strings the researcher will run through `search_resources`. Keep them concrete and concept-shaped ("logical replication", "Postgres MVCC and lock contention"), not full sentences.
+- `web_search_topics` — 0 to 4 short topic strings the gap-filler should hit on the open web regardless of what the catalog returns. Use sparingly — only when authoritative external sources are clearly needed.
+
+Voice: match the Resource Agent — direct, opinionated, no hedging filler, no em-dashes, no "great question." In `restated_question`, never lecture the user about why you reframed; if you pivoted, just briefly own the reframe in the same conversational tone."""
+
+
 _RESEARCHER_PROMPT = """\
 You're a novice tasked with researching a topic using the Smarter Dev document corpus. Each document is represented by a URL that you can use to get the full document content. You must carefully copy the URLs provided by the search tool to read the documents you want; guessing URLs only wastes time and can return errors.
 
-You should look for documents you can cite. For each citation, you must have read the document, then provide a brief (single sentence) purpose for the citation, the verbatim excerpt (1-4 sentences), and the exact (copy carefully) URL for reference. Each source can be cited multiple times. You'll want to shoot for 4-8 citations in total.
+You should look for documents you can cite. For each citation, you must have read the document, then provide a brief (single sentence) purpose for the citation, the verbatim excerpt (1-4 sentences), and the exact (copy carefully) URL for reference. Each source can be cited multiple times. You'll want to shoot for 4-6 citations in total.
 
 You'll also want to note down further reading that would likely add depth but wasn't directly within the scope of the topic. For each, carefully copy over the URL and provide a blurb explaining why you think it would be relevant for further reading. Shoot for 2 to 5 uncited further reading entries.
 
 If, after at least two distinct search queries for a particular concept, you can't find a relevant document in the corpus, report the gap in `gaps` (with the missing `concept`, the `tried_queries` you ran, and what kind of source would be `needed`) and move on. Do not keep searching endlessly, and do not invent citations to paper over a gap.
 
-**Aim for at most 5 `search_resources` calls and at most 5 `read_source` calls per run.** Plan your queries before firing them — quality over quantity. The one exception: **we want to avoid reporting more than 2 gaps.** If you'd otherwise finalize with 3+ gaps, spend extra searches and reads beyond the 5-budget to try to fill them down to ≤2. Run out of catalog options for a concept after a couple of distinct queries → that one stays a gap; move on.
+**Aim for at most 5 `search_resources` calls and at most 6 `read_source` calls per run.** Plan your queries before firing them — quality over quantity. The one exception: **we want to avoid reporting more than 2 gaps.** If you'd otherwise finalize with 3+ gaps, spend extra searches and reads beyond the budget to try to fill them down to ≤2. Run out of catalog options for a concept after a couple of distinct queries → that one stays a gap; move on.
 
 **[CRITICAL] URLs NOT PRESENT IN search_resources RESULTS WILL NOT OPEN**
 All URLs passed to `read_source` must have been present in the `search_resources` results or it will return an error. This is to prevent abuse."""
 
 
 _GAP_FILLER_PROMPT = """\
-You are filling specific gaps in a curated document corpus. The user turn lists `gaps`, each describing a concept the corpus didn't cover. For each gap, your job is:
+You are filling specific gaps in a curated document corpus. The user turn lists items to research — each is either a `gap` the researcher reported (the corpus didn't cover the concept) or an `additional topic` the planning step asked you to web-search regardless of catalog coverage. Treat them identically. For each item:
 
-1. Run exactly 2 `web_search` queries targeting **primary or authoritative** sources for the gap's concept. Prefer official documentation (e.g., postgresql.org/docs, kubernetes.io/docs), RFCs, canonical academic papers, or domain-expert deep-dives. Avoid SEO blogspam, vendor marketing, and listicles.
-2. Skim the search results and pick the **single highest-quality** URL that genuinely fills the gap.
-3. Read that URL with `read_url`, then write one `GapCitation` for that gap. The `excerpt` must be a verbatim 1-4 sentence quote from the source you actually read.
+1. Run **one** `web_search` query targeting **primary or authoritative** sources for the item's concept.
+2. Apply the **quality bar** to the results (below). If at least one URL clears it, pick the single highest-quality URL, read it with `read_url`, and write one `GapCitation`.
+3. If no URL clears the bar, run **one** more `web_search` with a different angle. Apply the bar again. If a URL clears it now, cite it.
+4. If after two searches no URL clears the bar, **skip this item — produce no citation for it**. Better to return nothing than to cite something weak.
 
-Return exactly one `GapCitation` per input gap.
+**Quality bar.** Keep sources that are at least one of:
+- Official documentation (e.g., postgresql.org/docs, kubernetes.io/docs, MDN).
+- An IETF/W3C RFC, canonical academic paper, or standards body publication.
+- A deep-dive by a recognised domain authority (e.g., Martin Kleppmann, Dan Abramov, Adrian Colyer, Brendan Gregg, the CockroachDB engineering blog, Jepsen, LWN). When in doubt: is this person/org cited by other authorities? Then probably yes.
+
+**Drop on sight (unless the byline is one of the recognised authorities above):**
+- Medium and Medium-network publications (Better Programming, Level Up Coding, etc.).
+- dev.to, hashnode, freecodecamp tutorials.
+- Stack Overflow / Stack Exchange answers (use the linked official docs they cite instead, if anything).
+- W3Schools, GeeksforGeeks, TutorialsPoint, Programiz, Javatpoint.
+- Vendor marketing pages, listicles ("Top 10 …"), Quora answers, Reddit threads.
+- AI-generated content farms.
+
+Write the citation only when you've actually read the page with `read_url` and the `excerpt` is a verbatim 1-4 sentence quote from it. Use the item's `concept` (for gaps) or the topic string (for additional topics) as the `gap_concept` field.
+
+The output list may have **fewer entries than the input** — that's fine and expected when nothing on the open web clears the bar.
 
 **[CRITICAL] URLs NOT PRESENT IN web_search RESULTS WILL NOT READ**
 All URLs passed to `read_url` must have been returned by `web_search` in this run. URLs you didn't get from `web_search` will error. Do not guess URLs."""
 
 
 # ---------------------------------------------------------------------------
-# Typed schemas (researcher + gap-filler outputs)
+# Typed schemas (reframer + researcher + gap-filler outputs)
 # ---------------------------------------------------------------------------
+
+
+class ReframerOutput(BaseModel):
+    """Planning-step output that steers the rest of the pipeline."""
+
+    restated_question: str = Field(
+        ...,
+        description=(
+            "1 to 3 short sentences addressed to the user, second person, "
+            "restating what they're asking (or what they're really asking, "
+            "if pivoted) and how the agent will frame the research and "
+            "response. Conversational, no headers, no lists."
+        ),
+    )
+    reframing_instructions: str = Field(
+        ...,
+        description=(
+            "Terse author-facing notes on angle, emphasis, and what to "
+            "skip. Not a draft answer."
+        ),
+    )
+    corpus_topics: list[str] = Field(
+        default_factory=list,
+        description=(
+            "2 to 6 short search-query-shaped strings the researcher will "
+            "run through `search_resources`."
+        ),
+    )
+    web_search_topics: list[str] = Field(
+        default_factory=list,
+        description=(
+            "0 to 4 short topic strings the gap-filler should web-search "
+            "regardless of catalog coverage."
+        ),
+    )
 
 
 class Excerpt(BaseModel):
@@ -702,6 +816,12 @@ def _build_openai_model(model_id: str) -> OpenAIResponsesModel:
     return OpenAIResponsesModel(model_id, provider=OpenAIProvider(api_key=api_key))
 
 
+def _reframer_model_settings() -> GoogleModelSettings:
+    return GoogleModelSettings(
+        google_thinking_config={"thinking_level": "MEDIUM"},
+    )
+
+
 def _researcher_model_settings() -> OpenAIResponsesModelSettings:
     return OpenAIResponsesModelSettings(openai_reasoning_effort="medium")
 
@@ -744,6 +864,16 @@ def _build_deps(ctx: ResumeContext) -> RunDeps:
 # Skrift agents — one per pipeline stage
 # ---------------------------------------------------------------------------
 
+
+reframer_agent = skrift.Agent(
+    _build_google_model(REFRAMER_MODEL),
+    name=REFRAMER_AGENT_NAME,
+    system_prompt=_REFRAMER_PROMPT,
+    output_type=ReframerOutput,
+    model_settings=_reframer_model_settings(),
+    deps_type=RunDeps,
+    deps_factory=_build_deps,
+)
 
 researcher_agent = skrift.Agent(
     _build_openai_model(RESEARCHER_MODEL),
@@ -1282,29 +1412,86 @@ async def read_url(ctx: RunContext[RunDeps], url: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _format_gap_payload(
-    question: str, gaps: list[Gap]
+def _build_reframer_user_turn(question: str) -> str:
+    """Format the user turn for the reframer.
+
+    Prepends the current UTC date so the reframer can reason about
+    whether the user is asking about something the curated corpus would
+    already cover or about something genuinely newer than the catalog.
+    """
+    today = datetime.now(timezone.utc).date().isoformat()
+    return (
+        f"Current UTC date: {today}\n\n"
+        "User question:\n\n"
+        f"{question}"
+    )
+
+
+def _build_researcher_user_turn(
+    question: str,
+    reframing_instructions: str,
+    corpus_topics: list[str],
 ) -> str:
-    """Format the researcher's gaps into a user turn for the gap-filler."""
+    """Format the user turn the researcher sees — original question +
+    reframer's framing + the explicit corpus topic list."""
+    if corpus_topics:
+        topic_lines = "\n".join(f"- {t}" for t in corpus_topics)
+    else:
+        topic_lines = "- (none — search using the question itself)"
     return (
         "Original user question:\n\n"
         f"{question}\n\n"
-        "Curated-corpus gaps to fill (one citation each):\n\n"
-        "```json\n"
-        f"{json.dumps([g.model_dump() for g in gaps], indent=2, ensure_ascii=False)}\n"
-        "```\n"
+        "Framing from the planning step (use this to interpret intent, "
+        "not as the literal search query):\n\n"
+        f"{reframing_instructions}\n\n"
+        "Search the curated catalog for these topics — these are the "
+        "queries to actually run through `search_resources` (you can "
+        "rephrase, but the topic list is the focus):\n\n"
+        f"{topic_lines}"
     )
+
+
+def _format_gap_payload(
+    question: str,
+    gaps: list[Gap],
+    extra_web_topics: list[str],
+) -> str:
+    """Format the researcher's gaps + the reframer's extra web topics
+    into a user turn for the gap-filler."""
+    parts: list[str] = [
+        "Original user question:\n\n",
+        f"{question}\n\n",
+    ]
+    if gaps:
+        parts.append(
+            "Curated-corpus gaps to fill (one citation each):\n\n```json\n"
+        )
+        parts.append(
+            json.dumps([g.model_dump() for g in gaps], indent=2, ensure_ascii=False)
+        )
+        parts.append("\n```\n\n")
+    if extra_web_topics:
+        parts.append(
+            "Additional topics the planning step asked you to web-search "
+            "(one citation each — use the topic string as `gap_concept`):\n\n"
+        )
+        for t in extra_web_topics:
+            parts.append(f"- {t}\n")
+    return "".join(parts)
 
 
 def _build_author_payload(
     research: ResearchOutput,
     web_citations: list[GapCitation],
+    reframing_instructions: str,
 ) -> dict:
     """Merge curated excerpts + web citations into the author payload.
 
     The author sees a unified shape: every excerpt has a `purpose`,
     `excerpt`, `source_url`. Web citations become additional excerpts
     keyed by their gap concept. Further-reading flows through unchanged.
+    The reframer's instructions ride alongside so the author can adopt
+    the planned angle.
     """
     excerpts: list[dict] = []
     for ex in research.excerpts:
@@ -1324,14 +1511,21 @@ def _build_author_payload(
         {"source_url": fr.source_url, "blurb": fr.blurb}
         for fr in research.further_reading
     ]
-    return {"excerpts": excerpts, "further_reading": further_reading}
+    return {
+        "reframing_instructions": reframing_instructions,
+        "excerpts": excerpts,
+        "further_reading": further_reading,
+    }
 
 
 def _build_author_user_turn(question: str, payload: dict) -> str:
     return (
-        "Pre-fetched research (cite using these URLs only — every URL "
-        "is from the verified catalog or a vetted web source; do not "
-        "invent any):\n\n"
+        "Pre-fetched research and a planning note (cite using these URLs "
+        "only — every URL is from the verified catalog or a vetted web "
+        "source; do not invent any):\n\n"
+        "- `reframing_instructions`: how the planning step wants you to "
+        "frame the response. Treat this as load-bearing — adopt the "
+        "angle and emphasis it specifies.\n"
         "- `excerpts`: passages with citations that directly answer "
         "the question. `purpose` is why the citation matters; "
         "`excerpt` is the verbatim supporting text.\n"
@@ -1376,12 +1570,19 @@ async def run_resources_pipeline(
     conversation_id: str,
     owner_user_id: str,
 ) -> str:
-    """Run the three-stage pipeline (researcher → gap-filler → author)
-    as a single user-visible agent run. Tool events from every stage
-    are emitted into the same `agent_tool_event` stream so the user
-    sees one continuous chip timeline. Returns the author's markdown.
+    """Run the four-stage pipeline (reframer → researcher → gap-filler
+    → author) as a single user-visible agent run. Tool events from
+    every stage are emitted into the same `agent_tool_event` stream so
+    the user sees one continuous chip timeline. The reframer also
+    pushes its user-visible `restated_question` over a one-shot
+    `agent_reframe_ready` notification — the browser renders that as a
+    transient preface above the chip stream. Returns the author's
+    markdown.
 
     Behavior on failure:
+    - Reframer failure: re-raised so the caller fires `agent_run_error`.
+      The rest of the pipeline depends on its structured output, so
+      there's no useful degradation path.
     - Researcher failure: re-raised so the caller fires `agent_run_error`.
     - Gap-filler failure: logged + a degraded `tool="gap_filler"` chip
       is emitted; pipeline continues to the author with curated-only
@@ -1399,10 +1600,45 @@ async def run_resources_pipeline(
         owner_user_id=owner_user_id,
     )
 
+    # ── Stage 0: Reframer ────────────────────────────────────────────────
+    reframer_session = await asyncio.wait_for(
+        reframer_agent.run(
+            _build_reframer_user_turn(question),
+            message_history=message_history,
+            actor=actor,
+            deps_ref=deps_ref,
+        ),
+        timeout=_REFRAMER_TIMEOUT_S,
+    )
+    reframe = await _await_typed_result(reframer_session, ReframerOutput)
+
+    # Push the user-visible restated_question to the open browser tab.
+    # The frontend renders this as a transient preface above the tool
+    # stream; `agent_run_complete` collapses both preface + stream
+    # together. Notification failures are non-fatal — the pipeline
+    # still finishes and the user gets the answer, just without the
+    # preface.
+    try:
+        await notify_user(
+            owner_user_id,
+            "agent_reframe_ready",
+            conversation_id=conversation_id,
+            message=reframe.restated_question,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "agent_reframe_ready notify_user failed; pipeline continues"
+        )
+
     # ── Stage 1: Researcher ──────────────────────────────────────────────
+    researcher_input = _build_researcher_user_turn(
+        question,
+        reframe.reframing_instructions,
+        reframe.corpus_topics,
+    )
     researcher_session = await asyncio.wait_for(
         researcher_agent.run(
-            question,
+            researcher_input,
             message_history=message_history,
             actor=actor,
             deps_ref=deps_ref,
@@ -1411,13 +1647,15 @@ async def run_resources_pipeline(
     )
     research = await _await_typed_result(researcher_session, ResearchOutput)
 
-    # ── Stage 2: Gap-filler (only if the researcher reported gaps) ──────
+    # ── Stage 2: Gap-filler (gaps OR reframer-requested web topics) ─────
     web_citations: list[GapCitation] = []
-    if research.gaps:
+    if research.gaps or reframe.web_search_topics:
         try:
             gap_session = await asyncio.wait_for(
                 gap_filler_agent.run(
-                    _format_gap_payload(question, research.gaps),
+                    _format_gap_payload(
+                        question, research.gaps, reframe.web_search_topics
+                    ),
                     actor=actor,
                     deps_ref=deps_ref,
                 ),
@@ -1429,18 +1667,20 @@ async def run_resources_pipeline(
             web_citations = list(gap_output.citations)
         except Exception:  # noqa: BLE001
             logger.exception("gap_filler stage failed; continuing without web cites")
+            total = len(research.gaps) + len(reframe.web_search_topics)
             await _emit_tool_event(
                 orchestrator_deps,
                 tool="gap_filler",
                 label=(
-                    f"{len(research.gaps)} gap"
-                    + ("s" if len(research.gaps) != 1 else "")
+                    f"{total} item" + ("s" if total != 1 else "")
                 ),
                 summary="skipped (error)",
             )
 
     # ── Stage 3: Author ──────────────────────────────────────────────────
-    author_payload = _build_author_payload(research, web_citations)
+    author_payload = _build_author_payload(
+        research, web_citations, reframe.reframing_instructions
+    )
     author_session = await asyncio.wait_for(
         author_agent.run(
             _build_author_user_turn(question, author_payload),

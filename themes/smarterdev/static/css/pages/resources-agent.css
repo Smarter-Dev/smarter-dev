@@ -796,6 +796,24 @@ body.rsa-history-open { overflow: hidden; }
   50%, 100% { opacity: 0; }
 }
 
+/* Reframer preface — transient message above the tool stream. Lands
+   on `agent_reframe_ready`, collapses alongside `.ai-tools-stream` on
+   `agent_run_complete`. Reads like normal message text, just slightly
+   muted with a thin cyan accent so it doesn't compete with the final
+   answer prose. Not persisted — never appears on reload. */
+.ai-reframe-preface[hidden] { display: none; }
+.ai-reframe-preface {
+  font-family: var(--body);
+  font-size: .98rem;
+  line-height: 1.7;
+  color: var(--light);
+  border-left: 2px solid var(--cyan);
+  padding: .35rem 0 .35rem .85rem;
+  margin: 0 0 .9rem;
+  white-space: pre-wrap;
+  overflow: hidden;
+}
+
 /* Tools stream — vertical list of `agent_tool_event` chips that fill
    the assistant turn body while the run is in flight, then collapse
    when `agent_run_complete` lands. */
