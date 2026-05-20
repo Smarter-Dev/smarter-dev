@@ -22,10 +22,6 @@ from smarter_dev.web.admin.views import (
     conversations_list,
     conversation_detail,
     cleanup_expired_conversations,
-    blog_list,
-    blog_create,
-    blog_edit,
-    blog_delete,
     forum_agents_list,
     forum_agent_create,
     forum_agent_edit,
@@ -207,26 +203,6 @@ admin_routes = [
         "/campaign-signups",
         admin_required(campaign_signups_list),
         name="admin_campaign_signups",
-    ),
-    # Blog management
-    Route("/blogs", admin_required(blog_list), name="admin_blogs"),
-    Route(
-        "/blogs/create",
-        admin_required(blog_create),
-        methods=["GET", "POST"],
-        name="admin_blog_create",
-    ),
-    Route(
-        "/blogs/{blog_id}/edit",
-        admin_required(blog_edit),
-        methods=["GET", "POST"],
-        name="admin_blog_edit",
-    ),
-    Route(
-        "/blogs/{blog_id}/delete",
-        admin_required(blog_delete),
-        methods=["POST"],
-        name="admin_blog_delete",
     ),
     # Campaign management
     Route(
