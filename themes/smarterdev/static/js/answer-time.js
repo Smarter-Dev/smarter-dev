@@ -203,6 +203,19 @@
     stream.appendChild(chip);
   }
 
+  function collapseAndRemove(el) {
+    if (!el) return;
+    el.setAttribute('data-collapsing', '1');
+    el.style.transition = 'opacity .35s ease, max-height .35s ease, margin .35s ease, padding .35s ease';
+    el.style.opacity = '0';
+    el.style.maxHeight = '0';
+    el.style.marginTop = '0';
+    el.style.marginBottom = '0';
+    el.style.paddingTop = '0';
+    el.style.paddingBottom = '0';
+    setTimeout(function () { if (el.parentNode) el.remove(); }, 380);
+  }
+
   // ── Final answer reveal ──────────────────────────────────────────────
   function revealAnswer(thread, data) {
     var assistant = thread.querySelector('.ai-turn-assistant[data-ai-assistant-turn]')
@@ -213,18 +226,10 @@
       assistant.setAttribute('data-turn-id', data.assistant_message_id);
     }
     var stream = assistant.querySelector('[data-ai-tools-stream]');
+    var preface = assistant.querySelector('[data-ai-reframe-preface]');
     var prose = assistant.querySelector('[data-ai-answer-prose]');
-    if (stream) {
-      stream.setAttribute('data-collapsing', '1');
-      stream.style.transition = 'opacity .35s ease, max-height .35s ease, margin .35s ease, padding .35s ease';
-      stream.style.opacity = '0';
-      stream.style.maxHeight = '0';
-      stream.style.marginTop = '0';
-      stream.style.marginBottom = '0';
-      stream.style.paddingTop = '0';
-      stream.style.paddingBottom = '0';
-      setTimeout(function () { if (stream.parentNode) stream.remove(); }, 380);
-    }
+    collapseAndRemove(stream);
+    collapseAndRemove(preface);
     var content = data.content_html || '';
     var hasBlocks = Array.isArray(data.sdanswer_blocks) && data.sdanswer_blocks.length > 0;
 
@@ -291,6 +296,8 @@
     if (!assistant) return;
     var stream = assistant.querySelector('[data-ai-tools-stream]');
     if (stream) stream.remove();
+    var preface = assistant.querySelector('[data-ai-reframe-preface]');
+    if (preface) preface.remove();
     var prose = assistant.querySelector('[data-ai-answer-prose]');
     if (prose) {
       prose.hidden = false;
@@ -309,6 +316,23 @@
       if (!newTitle) return true;
       typewriteTitle(newTitle);
       document.title = newTitle + ' · Smarter Dev';
+      return true;
+    }
+    if (data.type === 'agent_reframe_ready') {
+      var threadR = matchThread(data);
+      if (!threadR) return false;
+      var assistantR = threadR.querySelector('.ai-turn-assistant[data-ai-assistant-turn]')
+                    || threadR.querySelector('.ai-turn-assistant');
+      var prefaceR = assistantR && assistantR.querySelector('[data-ai-reframe-preface]');
+      if (prefaceR) {
+        prefaceR.textContent = (data.message || '').trim();
+        prefaceR.hidden = false;
+        prefaceR.style.opacity = '0';
+        requestAnimationFrame(function () {
+          prefaceR.style.transition = 'opacity .35s ease';
+          prefaceR.style.opacity = '1';
+        });
+      }
       return true;
     }
     if (data.type === 'agent_tool_event') {

@@ -78,6 +78,7 @@
         '<time class="ai-turn-time" datetime="' + escapeAttr(nowIso()) + '">' + clockNow() + '</time>' +
       '</header>' +
       '<div class="ai-turn-body ai-turn-answer" data-ai-assistant-body>' +
+        '<div class="ai-reframe-preface" data-ai-reframe-preface hidden></div>' +
         '<div class="ai-tools-stream" data-ai-tools-stream></div>' +
         '<div class="ai-answer-prose" data-ai-answer-prose hidden></div>' +
       '</div>';
