@@ -1,0 +1,6 @@
+# Round-2 prompts 2, 3, 5 — now with concrete specifics so the reframer
+# can decide whether to ask the author for a brief direct-attempt section
+# alongside the curated-resource answer.
+How do I share state between AWS Lambda invocations? I'm building an API rate limiter and need request counts visible across all my Lambda containers running the handler.
+Help me debug this stack trace: TypeError: 'NoneType' object is not iterable at line 47 of my Flask app. The line is for item in cart.items: and it happens on the /checkout endpoint.
+How do I run cron jobs inside my Kubernetes pods? I need to clean up expired sessions from Redis every 10 minutes.

@@ -1,0 +1,9 @@
+# Round-2 eval prompts — mix of canonical fits, off-shape requests, and
+# things the catalog probably can't cover (forcing the reframer pivot +
+# gap-filler quality-bar logic).
+# One prompt per line. `#` lines are skipped.
+What are the trade-offs between REST and GraphQL?
+How do I share state between AWS Lambda invocations?
+Help me debug this stack trace: TypeError: 'NoneType' object is not iterable at line 47 of my Flask app
+How do I build an agent that doesn't hallucinate tool arguments?
+How do I run cron jobs inside my Kubernetes pods?
