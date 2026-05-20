@@ -76,8 +76,8 @@ partials:
 
 # Page types — auto-generates admin CRUD, public listing, and detail routes
 page_types:
-  - name: post
-    plural: posts
+  - name: blog
+    plural: blog
     icon: pen-tool
 
 storage:

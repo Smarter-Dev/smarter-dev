@@ -41,7 +41,7 @@
         </div>
         <div class="related-grid" style="margin-top:2rem">
             {% for page in pages %}
-            <a href="/post/{{ page.slug }}" class="related-card reveal">
+            <a href="/blog/{{ page.slug }}" class="related-card reveal">
                 <div class="r-title">{{ page.title }}</div>
                 <div class="r-meta">{% if page.published_at %}{{ page.published_at.strftime('%b %d, %Y') }}{% endif %}</div>
             </a>
