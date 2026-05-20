@@ -1,0 +1,1345 @@
+[
+  {
+    "prompt": "I'm new to event-driven architecture and want a 30-minute intro that's not a vendor pitch.",
+    "researchers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "high",
+        "label": "gpt-5.4-nano · think=high",
+        "research": {
+          "excerpts": [
+            {
+              "purpose": "Shows the core decoupling idea behind event-driven systems: external inputs arrive at a port and adapters translate them into the app’s message/procedure calls.",
+              "excerpt": "As events arrive from the outside world at a port, a technology-specific adapter converts it into a usable procedure call or message and passes it to the application. The application is blissfully ignorant of the nature of the input device. When the application has something to send out, it sends it out through a port to an adapter, which creates the appropriate signals needed by the receiving technology (human or automated).",
+              "document_id": "doc_cb3b79"
+            },
+            {
+              "purpose": "Explains the mental model of async work distribution: schedule work for later, send a message to a queue, and let background workers pop and execute tasks.",
+              "excerpt": "The main idea behind Work Queues (aka: _Task Queues_) is to avoid doing a resource-intensive task immediately and having to wait for it to complete. Instead we schedule the task to be done later. We encapsulate a _task_ as a message and send it to the queue. A worker process running in the background will pop the tasks and eventually execute the job.",
+              "document_id": "doc_f902fb"
+            },
+            {
+              "purpose": "Illustrates overload handling for async systems: move excess load to a spillover queue so other work isn’t crowded out, approximating a priority queue.",
+              "excerpt": "However, if processing the message is relatively expensive or time consuming, it may still be worthwhile to be able to move messages to a separate, spillover queue. In some systems in Amazon, the consumer service implements distributed throttling, and when they dequeue messages for a customer that has gone over a configured rate, they enqueue those excess messages into separate spillover queues, and delete the messages from the primary queue. The system still works on the messages in the spillover queue as soon as resources are available. In essence, this approximates a priority queue.",
+              "document_id": "doc_d11ea5"
+            },
+            {
+              "purpose": "Connects backpressure to async reliability: when backlog grows, reject work upstream more aggressively and scale throttles based on queue depth/backlog size.",
+              "excerpt": "If a workload is driving an unreasonable backlog that the consumer is unable to keep up with, many of our systems automatically start rejecting work more aggressively in the producer. It is easy to build up a day-long backlog for a workload. Even if that workload is isolated, it may be accidental, and expensive to churn through. An implementation of this approach could be as simple as occasionally measuring the queue depth of a workload (assuming a workload is on its own queue), and scaling an inbound throttle limit (inversely) proportionally to backlog size.",
+              "document_id": "doc_d11ea5"
+            },
+            {
+              "purpose": "Highlights why consumers must be safe to run more than once: idempotency keys prevent harmful effects from repeated/duplicated requests.",
+              "excerpt": "`idempotency_error` Idempotency errors occur when an `Idempotency-Key` is re-used on a request that does not match the first request’s API endpoint and parameters.",
+              "document_id": "doc_d76611"
+            },
+            {
+              "purpose": "Gives a useful cautionary frame for architecture quality: without discipline, systems tend to become haphazard spaghetti.",
+              "excerpt": "A [BIG BALL OF MUD] is a casually, even haphazardly, structured system. Its organization, if one can call it that, is dictated more by expediency than design.",
+              "document_id": "doc_384a15"
+            },
+            {
+              "purpose": "Provides a concise ‘what this style is for’ definition, emphasizing resilient, back-pressured processing and at-least-once delivery.",
+              "excerpt": "Bento is a declarative data streaming service that solves a wide range of data engineering problems with simple, chained, stateless [processing steps](https://warpstreamlabs.github.io/bento/docs/components/processors/about). It implements transaction based resiliency with back pressure, so when connecting to at-least-once sources and sinks it's able to guarantee at-least-once delivery without needing to persist messages during transit.",
+              "document_id": "doc_780020"
+            }
+          ],
+          "further_reading": [
+            {
+              "document_id": "doc_f86803",
+              "blurb": "Useful for thinking in recurring architectural structures (patterns/language) so you can describe event-driven systems as a set of forces and tradeoffs."
+            },
+            {
+              "document_id": "doc_6e0f1a",
+              "blurb": "A resilience perspective on structuring systems under load/failure, which complements event-driven reliability and backpressure topics."
+            },
+            {
+              "document_id": "doc_6faa16",
+              "blurb": "Deepens the idea of isolation so that failures or overload in one part of an async system don’t cascade everywhere."
+            },
+            {
+              "document_id": "doc_8c8269",
+              "blurb": "Gives a practical messaging vocabulary around integration styles (including request/response vs async messaging) that pairs well with an EDA mental model."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "event-driven architecture introduction event-driven design concepts event sourcing messaging pub/sub idempotency retries dead-letter queues",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.09331612498499453
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "event-driven architecture CDC pub/sub domain events outbox pattern idempotent consumers at-least-once exactly-once",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.060344250057823956
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "\"event-driven\" architecture document",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.05385675001889467
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_d11ea5"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.09188570803962648
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_9b8e0f"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.10777283296920359
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_384a15"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.10262758401222527
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_cb3b79"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 5.0793215410085395
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_d76611"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 12.7310428339988
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "SQS dead-letter queue redrive receive and delete visibility timeout at-least-once delivery",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.1200294999871403
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_7ce3a2"
+            },
+            "result": "ok · 9998 chars",
+            "elapsed_s": 0.06171316700056195
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_abe7f9"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.06067525001708418
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_2a527e"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.0629212079802528
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_60616d"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.062158624990843236
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "Amazon SQS at-least-once delivery visibility timeout redrive dead-letter queue content",
+              "limit": 8
+            },
+            "result": "7 hits",
+            "elapsed_s": 0.07319791591726243
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "asynchronous message processing at-least-once idempotent consumer retry dead letter queue document",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06350979104172438
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_f902fb"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.06342549994587898
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_8c8269"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 1.500535583938472
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_780020"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 3.146455332986079
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_d76611"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.03480091691017151
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_d11ea5"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.030471541918814182
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "Enterprise Integration Patterns Event-Driven Consumer Idempotent Receiver excerpt",
+              "limit": 5
+            },
+            "result": "5 hits",
+            "elapsed_s": 0.07157987495884299
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_8c8269"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.029822667012922466
+          }
+        ],
+        "input_tokens": 351426,
+        "output_tokens": 10775,
+        "elapsed_s": 109.16948466701433,
+        "cost_usd": 0.08375395000000001,
+        "error": ""
+      }
+    ],
+    "authors": [
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3.1-flash-lite · think=low",
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "low",
+        "output": "Event-driven architecture is fundamentally about shifting from synchronous \"request-reply\" chains to asynchronous, message-based workflows. It separates *what* needs to happen from *when* it happens, allowing your system to buffer load and handle failures without crashing the entire request flow.\n\nTo get the core mental model in about 30–45 minutes, follow this path. It moves from the basic concept (queuing) to how you structure your code to avoid a \"big ball of mud,\" and finally to how you keep it running in production.\n\n```sdanswer\n{ \"type\": \"path\", \"links\": [\n  { \"url\": \"https://www.rabbitmq.com/tutorials/tutorial-two-python\",\n    \"description\": \"Start here—this is the purest look at the 'work queue' pattern: decoupling producers from consumers so you don't have to wait for heavy tasks to finish.\",\n    \"estimate\": \"15m\" },\n  { \"url\": \"https://alistair.cockburn.us/hexagonal-architecture/\",\n    \"description\": \"Learn why your business logic should be 'blissfully ignorant' of message brokers. This is your defense against creating a tangled, unmaintainable mess.\",\n    \"estimate\": \"10m\" },\n  { \"url\": \"https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/\",\n    \"description\": \"The reality check—what happens when your queues get too big. Essential reading on backpressure and how to stop one slow service from breaking everything.\",\n    \"estimate\": \"20m\" }\n] }\n```\n\nAs you dig into these, keep one rule in mind: **idempotency is the hidden cost.** In any async system, messages *will* eventually be delivered more than once. Read this guide on [API Idempotency](https://stripe.com/docs/api/idempotent_requests) to understand how to design your consumers so that processing the same message twice doesn't create corrupt state or duplicate data.",
+        "input_tokens": 7229,
+        "output_tokens": 1405,
+        "elapsed_s": 5.585059375036508,
+        "cost_usd": 0.00391475,
+        "error": ""
+      },
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3.1-flash-lite · think=high",
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "high",
+        "output": "To get a solid, non-vendor-specific handle on event-driven architecture, focus on the decoupling mental model, the mechanic of queuing, and the reality of backpressure.\n\nThis path covers the shift in thinking required for asynchronous systems without getting bogged down in any specific product's feature set.\n\n```sdanswer\n{ \"type\": \"path\", \"links\": [\n  { \"url\": \"https://alistair.cockburn.us/hexagonal-architecture/\",\n    \"description\": \"Start here: understand the core mental model of separating your application logic from the input/output adapters.\",\n    \"estimate\": \"5m\" },\n  { \"url\": \"https://www.rabbitmq.com/tutorials/tutorial-two-python\",\n    \"description\": \"The canonical 'do it later' pattern: learn how to decouple execution by passing tasks to a background worker queue.\",\n    \"estimate\": \"15m\" },\n  { \"url\": \"https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/\",\n    \"description\": \"The reality check: understand how to handle load and backpressure so your system doesn't collapse when queues get backed up.\",\n    \"estimate\": \"10m\" }\n] }\n```\n\nAs you dig into these, remember that async systems *will* inevitably retry tasks that fail or time out; you must design every consumer to be idempotent, or you will eventually find yourself troubleshooting duplicate side effects in production.",
+        "input_tokens": 7229,
+        "output_tokens": 2240,
+        "elapsed_s": 8.102255792007782,
+        "cost_usd": 0.00516725,
+        "error": ""
+      },
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3-flash-preview · think=minimal",
+        "model": "gemini-3-flash-preview",
+        "thinking": "minimal",
+        "output": "Start with the mental model of **decoupling**: instead of making a request and waiting for a response, your application translates external inputs into messages and hands them off to a queue to be processed whenever resources are available.\n\nThe core benefit is that the application stays \"blissfully ignorant\" of the underlying technology or the immediate availability of the consumer, as laid out in the [Hexagonal Architecture](https://alistair.cockburn.us/hexagonal-architecture/) pattern. To see this in practice without the vendor fluff, you should focus on how [Work Queues](https://www.rabbitmq.com/tutorials/tutorial-two-python) allow you to encapsulate a task as a message and move heavy lifting into the background.\n\nOnce you move to async, your biggest hurdles aren't syntax—they're reliability and load management. You'll need to understand how to handle backpressure and [avoiding insurmountable queue backlogs](https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/) by rejecting work or using spillover queues when your consumers are overwhelmed. Finally, because messages can be retried or duplicated, [API Idempotency](https://stripe.com/docs/api/idempotent_requests) is a mandatory requirement to ensure that running the same task twice doesn't corrupt your data.\n\n```sdanswer\n{ \"type\": \"path\", \"links\": [\n  { \"url\": \"https://alistair.cockburn.us/hexagonal-architecture/\",\n    \"description\": \"The foundational concept of ports and adapters that makes event-driven systems possible by decoupling your logic from external triggers.\",\n    \"estimate\": \"45m\" },\n  { \"url\": \"https://www.rabbitmq.com/tutorials/tutorial-two-python\",\n    \"description\": \"A practical look at the 'Work Queue' pattern: how to distribute tasks among multiple workers and ensure messages aren't lost.\",\n    \"estimate\": \"30m\" },\n  { \"url\": \"https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/\",\n    \"description\": \"The reality of production: what happens when your queue grows too large and how to use backpressure to keep the system alive.\",\n    \"estimate\": \"40m\" },\n  { \"url\": \"https://stripe.com/docs/api/idempotent_requests\",\n    \"description\": \"Essential safety: why every async consumer needs a way to safely handle the same message twice.\",\n    \"estimate\": \"20m\" }\n] }\n```\n\nAs you dive in, keep an eye on how you'll track a single request across multiple services—debugging a distributed flow is much harder than following a single stack trace.",
+        "input_tokens": 7229,
+        "output_tokens": 598,
+        "elapsed_s": 3.6144342500483617,
+        "cost_usd": 0.0054085,
+        "error": ""
+      }
+    ],
+    "total_cost_usd": 0.09824445000000001
+  },
+  {
+    "prompt": "We're picking between Postgres SKIP LOCKED and a managed SQS for a 10k-events/min burst workload — what are the trade-offs and where should I read up?",
+    "researchers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "high",
+        "label": "gpt-5.4-nano · think=high",
+        "research": {
+          "excerpts": [
+            {
+              "purpose": "Shows the core pitfall of “queueing from inside a DB transaction” (workers can run before data is committed), which matters when using the DB as your work queue with concurrent consumers.",
+              "excerpt": "“if your queue is fast, the job enqueued by `queue_job()` is likely to fail. A worker starts running it before its enclosing transaction is committed, and it fails to access data that it expected to be available.”",
+              "document_id": "doc_6ccd20"
+            },
+            {
+              "purpose": "Highlights that database-backed queues can degrade badly under load because many workers contend for locks, which is directly relevant to SKIP LOCKED-style approaches.",
+              "excerpt": "“This is workable at modest to medium scale, but the frantic pace at which workers try to lock jobs doesn’t scale very well for a database that’s experiencing considerable load. For Postgres in particular, long-running transactions greatly increase the amount of time it takes for workers to find a job that they can lock, and this can lead to the job queue spiraling out of control.”",
+              "document_id": "doc_6ccd20"
+            },
+            {
+              "purpose": "Explains an SQS-specific scaling limit: how many messages can be in-flight at once (i.e., being processed), and how VisibilityTimeout interacts with bugs that prevent deletion.",
+              "excerpt": "“Some queue services like SQS have limits as to how many in-flight messages can be delivered to the consumer of the queue. This is different from the number of messages that can be in the queue (for which there is no practical limit), but rather is the number of messages that the consumer fleet is working on at once.”\n\n“…the message remains in-flight from the perspective of SQS for the[_VisibilityTimeout_](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html)of the message.”",
+              "document_id": "doc_7d21bc"
+            },
+            {
+              "purpose": "Describes how managed queue systems help with load spikes using delay/surge strategies (useful for bursty 10k/min workloads).",
+              "excerpt": "“When we process a message and decide to save it for later, we sometimes re-enqueue that message into a separate surge queue, but set the delay parameter so that the message stays hidden on the delay queue for several minutes.”",
+              "document_id": "doc_7d21bc"
+            },
+            {
+              "purpose": "Gives the general “competing consumers” advantage that you’d also get from SQS: adding workers increases parallel throughput when there’s a backlog.",
+              "excerpt": "“One of the advantages of using a Task Queue is the ability to easily parallelise work. If we are building up a backlog of work, we can just add more workers and that way, scale easily.”",
+              "document_id": "doc_8fcebb"
+            },
+            {
+              "purpose": "Clarifies the important at-least-once-style behavior you must design around in async work systems: if a worker dies before ack, the message will be redelivered to another worker.",
+              "excerpt": "“If a consumer dies (its channel is closed, connection is closed, or TCP connection is lost) without sending an ack, RabbitMQ will understand that a message wasn't processed fully and will re-queue it. If there are other consumers online at the same time, it will then quickly redeliver it to another consumer.”",
+              "document_id": "doc_8fcebb"
+            }
+          ],
+          "further_reading": [
+            {
+              "document_id": "doc_bea12d",
+              "blurb": "A broad, trade-off-focused reference for choosing among data/coordination technologies (including buffering and consistency/availability concerns) so you can reason about SQS vs DB-queue design beyond vendor specifics."
+            },
+            {
+              "document_id": "doc_b8c712",
+              "blurb": "A checklist-style framework for evaluating reliability, performance, and operational risk of the overall architecture (useful when you compare “managed SQS” vs “rolling your own queue on Postgres”)."
+            },
+            {
+              "document_id": "doc_ac5714",
+              "blurb": "Empirical safety/consistency testing under failure modes; helpful if you want confidence about what can go wrong with queues and databases under partitions, crashes, and other real-world faults."
+            },
+            {
+              "document_id": "doc_02914f",
+              "blurb": "A concrete, code-oriented guide to another queueing model (BullMQ) that can help you translate “worker pools + retries + concurrency” ideas into implementation details."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "Postgres SKIP LOCKED trade-offs SELECT FOR UPDATE SKIP LOCKED workload concurrency managed SQS comparison event processing burst throughput visibility timeout ordering",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.07093349995557219
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "SKIP LOCKED postgres advisory lock FOR UPDATE SKIP LOCKED documentation queue pattern contention throughput",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06773074995726347
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "\"SKIP LOCKED\" document_id",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.05324012506753206
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "database-backed queue workers SKIP LOCKED queue table lock rows safe concurrent consumers",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06647208298090845
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_6ccd20"
+            },
+            "result": "ok · 7573 chars",
+            "elapsed_s": 0.10131691698916256
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_f6e46e"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.10071845806669444
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_8fcebb"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.10227204207330942
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_7d21bc"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.10249724995810539
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_dd27a7"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.10422175005078316
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_bea12d"
+            },
+            "result": "ok · 6519 chars",
+            "elapsed_s": 0.10234654194209725
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_ac5714"
+            },
+            "result": "ok · 6054 chars",
+            "elapsed_s": 0.1156701659783721
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_b8c712"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 6.68228941608686
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "SQS best practices VisibilityTimeout idempotent delete message dead-letter queue standard queue at-least-once delivery quote",
+              "limit": 8
+            },
+            "result": "7 hits",
+            "elapsed_s": 0.060843707993626595
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_dd27a7"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.05561433301772922
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_fe99c9"
+            },
+            "result": "ok · 9998 chars",
+            "elapsed_s": 0.05750241701025516
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_6d79d7"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.059209125000052154
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "\"VisibilityTimeout\" SQS developer guide quote",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.062005833024159074
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "\"at-least-once delivery\" \"Amazon SQS\" document_id",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06006962503306568
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "\"Amazon SQS at-least-once delivery\" document_id",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06381066690664738
+          }
+        ],
+        "input_tokens": 175806,
+        "output_tokens": 6921,
+        "elapsed_s": 72.0472730830079,
+        "cost_usd": 0.043812449999999996,
+        "error": ""
+      }
+    ],
+    "authors": [
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3.1-flash-lite · think=low",
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "low",
+        "output": "For a bursty 10k/min workload, the choice isn't just about the syntax; it’s about whether you want to manage queue throughput as a database scaling problem or an architectural isolation problem.\n\nPostgres `SKIP LOCKED` is a powerful, low-overhead pattern for modest volumes, but as [this deep dive on job drains](https://brandur.org/job-drain) highlights, it directly couples your job processing health to your primary database's lock contention. At 10k events per minute, your database becomes the bottleneck for the queue itself, and you risk spiraling performance degradation when things back up—the exact opposite of what a buffer is supposed to do. Managed queues like SQS offload that pressure by isolating your workers from your DB, but you inherit the complexity of managing \"in-flight\" limits and visibility timeouts, which the [AWS Builder's Library on backlogs](https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/) explains in detail.\n\n```sdanswer\n{ \"type\": \"tradeoff\", \"title\": \"Postgres Queue vs. Managed Queue\", \"options\": [\n  { \"label\": \"Postgres (SKIP LOCKED)\", \"bullets\": [ \"Single-stack simplicity\", \"Transactional atomicity\", \"High DB contention risk\", \"Vacuum/bloat management overhead\" ] },\n  { \"label\": \"Managed (SQS)\", \"bullets\": [ \"Total architectural isolation\", \"Infinite scale (effectively)\", \"Distributed system complexity\", \"Visibility timeout management\" ] }\n] }\n```\n\nRegardless of your path, you are implementing a \"competing consumers\" pattern; [this walkthrough](https://www.rabbitmq.com/tutorials/tutorial-two-python) is the best way to understand how that pattern forces you to think about message acknowledgment and what happens when a worker crashes mid-task. Before you commit to either, ask your team: if your throughput spikes by 5x tomorrow, is the database the piece of infrastructure you want to be troubleshooting under fire?",
+        "input_tokens": 7045,
+        "output_tokens": 1928,
+        "elapsed_s": 7.185263083083555,
+        "cost_usd": 0.00465325,
+        "error": ""
+      },
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3.1-flash-lite · think=high",
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "high",
+        "output": "For a bursty 10k events/minute workload, you should default to a managed queue like SQS rather than building your own on top of Postgres.\n\nWhile `SKIP LOCKED` is an elegant way to handle queues within a relational database, it is prone to performance degradation as contention scales. As noted in [Transactionally Staged Job Drains in Postgres](https://brandur.org/job-drain), the primary risk is that as your database experiences load, the time it takes for workers to find and lock jobs increases, creating a feedback loop that can throttle your entire database—not just the queue. If you use Postgres for this, you’re also fighting the \"transactional trap,\" where workers start processing jobs before the enclosing transaction has actually committed.\n\nManaged queues like SQS offload that locking and retry logic entirely. They handle bursts gracefully and isolate your database from the churn of job status updates. The trade-off is architectural: you move from a transactional, local-state model to an \"at-least-once\" delivery model, which means your application code *must* be idempotent, as [Work Queues](https://www.rabbitmq.com/tutorials/tutorial-two-python) explains.\n\n```sdanswer\n{\n  \"type\": \"tradeoff\",\n  \"title\": \"Postgres SKIP LOCKED vs. Managed SQS\",\n  \"options\": [\n    {\n      \"label\": \"Postgres SKIP LOCKED\",\n      \"bullets\": [\n        \"Simple, unified schema\",\n        \"Strong ACID guarantees\",\n        \"High locking contention risk\",\n        \"Tied to DB throughput\"\n      ]\n    },\n    {\n      \"label\": \"Managed SQS\",\n      \"bullets\": [\n        \"Scales independently of DB\",\n        \"Built-in burst handling\",\n        \"At-least-once complexity\",\n        \"Requires idempotent workers\"\n      ]\n    }\n  ]\n}\n```\n\nIf you decide to go with SQS, pay close attention to the [in-flight message limits and visibility timeouts](https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/) mentioned in the AWS Builders Library; that’s where the most common operational bugs in queue-based systems hide. Regardless of which you choose, the real hurdle isn't the enqueueing—it's ensuring your consumer logic doesn't choke when the service that *receives* the message slows down.",
+        "input_tokens": 7045,
+        "output_tokens": 1876,
+        "elapsed_s": 7.047767875017598,
+        "cost_usd": 0.00457525,
+        "error": ""
+      },
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3-flash-preview · think=minimal",
+        "model": "gemini-3-flash-preview",
+        "thinking": "minimal",
+        "output": "Go with **SQS** if your priority is surviving the 10k/min bursts without manual scaling; go with **Postgres SKIP LOCKED** only if you strictly need atomic job creation (the job and the data that triggered it must be saved together or not at all).\n\nAt 10,000 events per minute, Postgres starts to feel the friction of a \"competing consumers\" model. As explained in [Transactionally Staged Job Drains in Postgres](https://brandur.org/job-drain), the \"frantic pace\" at which workers try to lock rows can degrade performance under heavy load, potentially leading to a queue spiral if transactions run long. You also face the \"visibility race\": a fast worker might try to pick up a job before the transaction that created it has actually committed, causing immediate, avoidable failures.\n\nSQS is built for exactly this \"bursty\" profile. In [Avoiding insurmountable queue backlogs](https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/), Amazon describes using \"surge queues\" and visibility timeouts to handle massive spikes without falling over. However, you must design your workers for \"at-least-once\" delivery—if a worker crashes before deleting the message, SQS will eventually hand it to another worker. This means your job processing must be idempotent, a pattern outlined in the [RabbitMQ Work Queues tutorial](https://www.rabbitmq.com/tutorials/tutorial-two-python).\n\n```sdanswer\n{\n  \"type\": \"tradeoff\",\n  \"title\": \"Postgres vs. Managed SQS\",\n  \"options\": [\n    {\n      \"label\": \"Postgres (SKIP LOCKED)\",\n      \"bullets\": [\n        \"Transactional atomicity\",\n        \"No extra infrastructure\",\n        \"Contention issues at scale\",\n        \"Manual worker scaling\"\n      ]\n    },\n    {\n      \"label\": \"Managed SQS\",\n      \"bullets\": [\n        \"Infinite horizontal scale\",\n        \"Native 'surge' handling\",\n        \"No atomic DB commits\",\n        \"Mandatory idempotency\"\n      ]\n    }\n  ]\n}\n```\n\nIf you choose Postgres, your next challenge will be tuning `autovacuum` to handle the high-churn \"delete-as-you-go\" pattern typical of database queues.",
+        "input_tokens": 7045,
+        "output_tokens": 507,
+        "elapsed_s": 3.5622342919232324,
+        "cost_usd": 0.005043499999999999,
+        "error": ""
+      }
+    ],
+    "total_cost_usd": 0.058084449999999996
+  },
+  {
+    "prompt": "What's the right way to think about transactional outbox vs change data capture for an agentic email platform on Kubernetes?",
+    "researchers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "high",
+        "label": "gpt-5.4-nano · think=high",
+        "research": {
+          "excerpts": [
+            {
+              "purpose": "Defines the core reliability problem that transactional outbox solves when you need atomic DB updates plus event publication without 2PC.",
+              "excerpt": "The command must atomically update the database and send messages/events to a message broker. However, it is not viable to use a traditional distributed transaction (2PC) that spans the database and the message broker The database and/or the message broker might not support 2PC. And even if they do, it’s often undesirable to couple the service to both the database and the message broker.\n\nBut without using 2PC, sending a message in the middle of a transaction is not reliable. There’s no guarantee that the transaction will commit.",
+              "document_id": "doc_1b3149"
+            },
+            {
+              "purpose": "States the transactional outbox solution: persist an outbox record in the same DB transaction, then relay it asynchronously.",
+              "excerpt": "The solution is for the service that sends the message to first store the message in the database as part of the transaction that updates the business entities. A separate process then sends the messages to the message broker.",
+              "document_id": "doc_1b3149"
+            },
+            {
+              "purpose": "Highlights the key semantic guarantee of outbox: messages are sent iff the DB transaction commits.",
+              "excerpt": "Messages are guaranteed to be sent if and only if the database transaction commits",
+              "document_id": "doc_1b3149"
+            },
+            {
+              "purpose": "Explains the main operational implication: outbox relays are at-least-once and consumers must be idempotent.",
+              "excerpt": "The Message relay might publish a message more than once. It might, for example, crash after publishing a message but before recording the fact that it has done so. When it restarts, it will then publish the message again. As a result, a message consumer must be idempotent, perhaps by tracking the IDs of the messages that it has already processed.",
+              "document_id": "doc_1b3149"
+            },
+            {
+              "purpose": "Connects the pattern to practical “agentic email” workflows: write the “email intent” event to an outbox table in the same transaction, then let an asynchronous process publish it reliably.",
+              "excerpt": "The idea of this approach is to have an \"outbox\" table in the service’s database. When receiving a request for placing a purchase order, not only an `INSERT` into the `PurchaseOrder` table is done, but, as part of the the same transaction, also a record representing the event to be sent is inserted into that outbox table.\n\nAn asynchronous process monitors that table for new entries. If there are any, it propagates the events as messages to Apache Kafka.",
+              "document_id": "doc_fdbb0f"
+            },
+            {
+              "purpose": "Gives a useful mental model for Kubernetes workers: stage work in a DB table so it stays invisible until commit, then have a secondary enqueuer/relay process pick it up.",
+              "excerpt": "With this pattern, jobs aren’t immediately sent to the job queue. Instead, they’re staged in a table within the relational database itself, and the ACID properties of the running transaction keep them invisible until they’re ready to be worked.\n\nA secondary **_enqueuer_** process reads the table and sends any jobs it finds to the job queue before removing their rows.\n\nTransactional isolation means that the enqueuer is unable to see jobs that aren’t yet commmitted (even if they’ve been inserted into `staged_jobs` by an uncommitted transaction), so jobs are never worked too early.",
+              "document_id": "doc_2b490d"
+            },
+            {
+              "purpose": "Reframes “outside data” as message-driven across service boundaries—useful when deciding what should be emitted via outbox vs CDC.",
+              "excerpt": "Services communicate with each other exclusively through messages. \n\nData on the Outside refers to the information that flows between these independent services. Since we defined services as being connected by messaging, it is reasonable to consider all outside data as being transmitted with a message",
+              "document_id": "doc_709a81"
+            }
+          ],
+          "further_reading": [
+            {
+              "document_id": "doc_ecb7fb",
+              "blurb": "Hexagonal Architecture helps you design clear “ports/adapters” boundaries between your email domain logic and the infrastructure that emits/consumes outbox or CDC events."
+            },
+            {
+              "document_id": "doc_67b1e0",
+              "blurb": "Ports and Adapters offers a practical approach to wiring adapters (outbox relay, CDC consumers) without leaking database/log details into the email domain."
+            },
+            {
+              "document_id": "doc_b74d21",
+              "blurb": "CQRS material is often paired with outbox/CDC choices because it clarifies when you want event streams to build read models vs when you need strongly consistent write-side intent."
+            },
+            {
+              "document_id": "doc_4d2e5f",
+              "blurb": "Kubernetes tutorials can be a quick refresher for deploying stateful components (e.g., DB, Kafka) and understanding operational knobs that affect relay workers."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "transactional outbox vs change data capture CDC Kubernetes architecture email platform",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06803712493274361
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "agentic email platform transactional outbox email notifications Kubernetes",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.09234279207885265
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "change data capture CDC vs outbox pattern exactly once Kubernetes",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.09318858408369124
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "Debezium outbox pattern reliable microservices data exchange Debezium blog excerpt outbox table",
+              "limit": 8
+            },
+            "result": "7 hits",
+            "elapsed_s": 0.09443670802284032
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "change data capture CDC Debezium document_id curated",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.05910025001503527
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_fdbb0f"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.09538987500127405
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_eefbbe"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.09478345804382116
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_1b3149"
+            },
+            "result": "ok · 6001 chars",
+            "elapsed_s": 0.09669037500862032
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_709a81"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.09559654199983925
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_2b490d"
+            },
+            "result": "ok · 7573 chars",
+            "elapsed_s": 0.09530708403326571
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_da35b7"
+            },
+            "result": "ok · 3685 chars",
+            "elapsed_s": 9.76387645804789
+          }
+        ],
+        "input_tokens": 23681,
+        "output_tokens": 4757,
+        "elapsed_s": 46.273304375004955,
+        "cost_usd": 0.01068245,
+        "error": ""
+      }
+    ],
+    "authors": [
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3.1-flash-lite · think=low",
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "low",
+        "output": "Think of the transactional outbox as an **application-level decision** (you explicitly write your intent to send an email) and CDC as an **infrastructure-level observation** (you passively record that state changed).\n\nThe [Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html) pattern is your best bet when you need strict \"intent\" control. Because your email agent needs to trigger a specific action (sending an email) that must succeed if and only if the business transaction commits, staging that \"email intent\" in an outbox table ensures atomic consistency. This [staged job](https://brandur.org/job-drain) approach keeps the email work invisible until the transaction finishes, so you never accidentally fire off an email for a transaction that rolls back.\n\nCDC is better when you want to stream raw state changes to downstream services without tightly coupling your application code to those events. If you use CDC, you are essentially asking your database to emit events based on what happened, rather than asking your code to emit events based on what it *intended* to do.\n\n```sdanswer\n{\n  \"type\": \"tradeoff\",\n  \"title\": \"Outbox vs. CDC\",\n  \"options\": [\n    {\n      \"label\": \"Transactional Outbox\",\n      \"bullets\": [\n        \"Explicitly defines event intent\",\n        \"Couples code to event schema\",\n        \"Zero extra infrastructure required\"\n      ]\n    },\n    {\n      \"label\": \"Change Data Capture (CDC)\",\n      \"bullets\": [\n        \"Captures raw state transitions\",\n        \"Decoupled from application logic\",\n        \"Requires dedicated infrastructure\"\n      ]\n    }\n  ]\n}\n```\n\nSince both patterns are inherently \"at-least-once\" delivery mechanisms—the relay process might crash and restart after publishing an event—your consumer must handle idempotency. Before you ship, verify that your email-sending service tracks processed message IDs, or your users will eventually receive the same \"agentic\" notification twice.",
+        "input_tokens": 7232,
+        "output_tokens": 1813,
+        "elapsed_s": 7.495343583985232,
+        "cost_usd": 0.004527499999999999,
+        "error": ""
+      },
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3.1-flash-lite · think=high",
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "high",
+        "output": "Think of this as a trade-off between *business intent* and *database state replication*.\n\nThe [Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html) pattern treats event emission as a core business concern. Your code explicitly inserts an \"intent\" record (like `SendEmailCommand`) into an outbox table as part of the same transaction as your state update, guaranteeing atomicity without distributed transactions. As noted in [Transactionally Staged Job Drains in Postgres](https://brandur.org/job-drain), this gives you a clean mental model where tasks remain invisible until the transaction commits, preventing premature execution.\n\nChange Data Capture (CDC) shifts this into the infrastructure layer. By tailing database logs (e.g., Postgres WAL), CDC captures every state change automatically. It is excellent for high-volume replication where you want to avoid \"polluting\" your domain models with infrastructure concerns, but as [Reliable Microservices Data Exchange](https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/) highlights, it inherently couples your event stream to your database schema. For an agentic platform where your \"email intent\" might change frequently or differ from the underlying table schema, the outbox pattern gives you an abstraction layer that CDC lacks.\n\n```sdanswer\n{ \"type\": \"tradeoff\", \"title\": \"Outbox vs. CDC for Agentic Flows\", \"options\": [\n  { \"label\": \"Transactional Outbox\", \"bullets\": [\n    \"Captures business intent, not just state\",\n    \"Decouples events from DB schema\",\n    \"Requires application-level integration\"\n  ] },\n  { \"label\": \"Change Data Capture (CDC)\", \"bullets\": [\n    \"Captures raw state changes\",\n    \"Zero application-code impact\",\n    \"Events tied to DB schema evolution\"\n  ] }\n] }\n```\n\nWhen deciding, ask yourself if your events represent *commands* (intent) or *updates* (state); if you’re building an agent that needs to orchestrate complex sequences of email actions, favor the outbox pattern to keep your event contract stable even when your database schema shifts.",
+        "input_tokens": 7232,
+        "output_tokens": 2310,
+        "elapsed_s": 9.15407041599974,
+        "cost_usd": 0.005273,
+        "error": ""
+      },
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3-flash-preview · think=minimal",
+        "model": "gemini-3-flash-preview",
+        "thinking": "minimal",
+        "output": "Use **Transactional Outbox** when you need to capture the *intent* of the user (e.g., \"SendWelcomeEmail\"), and use **Change Data Capture (CDC)** when you want to broadcast the *result* of a state change (e.g., \"UserEmailAddressUpdated\").\n\nThe [Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html) pattern solves the dual-write problem by treating your database as the temporary queue. By inserting an \"intent\" record into an outbox table within the same ACID transaction as your business logic, you guarantee that the email is only queued if the database update actually commits. This is critical for agentic workflows where an uncommitted \"phantom\" email could trigger a downstream chain of automated actions that can't be easily rolled back.\n\n[Reliable Microservices Data Exchange With the Outbox Pattern](https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/) highlights that while Outbox requires you to explicitly write events in your code, CDC (via tools like Debezium) can \"mine\" these events from your database logs without changing your application logic. On Kubernetes, this usually means a trade-off: Outbox is easier to reason about at the application level, while CDC reduces \"boilerplate\" code but requires managing more complex infrastructure like Kafka Connect.\n\n```sdanswer\n{\n  \"type\": \"tradeoff\",\n  \"title\": \"Outbox vs. CDC for Agentic Workflows\",\n  \"options\": [\n    {\n      \"label\": \"Transactional Outbox\",\n      \"bullets\": [\n        \"Captures explicit 'intent' and command context\",\n        \"Couples event logic to your business code\",\n        \"Guarantees atomicity via standard ACID transactions\",\n        \"Easiest to implement without extra infra\"\n      ]\n    },\n    {\n      \"label\": \"Change Data Capture\",\n      \"bullets\": [\n        \"Captures 'what happened' from the DB log\",\n        \"Zero impact on your application code\",\n        \"Harder to reconstruct 'why' a change happened\",\n        \"Requires log-mining infra (e.g., Debezium)\"\n      ]\n    }\n  ]\n}\n```\n\nIf you go the Outbox route, remember that the relay process is \"at-least-once.\" As noted in [Transactionally Staged Job Drains in Postgres](https://brandur.org/job-drain), your downstream email consumers must be idempotent because the relay might crash after sending an email but before marking it as \"sent\" in your database.\n\nBefore you choose, ask yourself if your agents need to know *why* a record changed or just *that* it changed; if the \"why\" matters, Outbox is almost always the safer bet.",
+        "input_tokens": 7232,
+        "output_tokens": 623,
+        "elapsed_s": 3.9705151250818744,
+        "cost_usd": 0.005485,
+        "error": ""
+      }
+    ],
+    "total_cost_usd": 0.02596795
+  },
+  {
+    "prompt": "I want to deeply understand database internals — index structures, write-ahead logging, MVCC — and I have a free weekend. What should I read first?",
+    "researchers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "high",
+        "label": "gpt-5.4-nano · think=high",
+        "research": {
+          "excerpts": [
+            {
+              "purpose": "Gives you a vendor-agnostic mental model for index structure (especially B-trees) before you worry about storage-engine specifics.",
+              "excerpt": "SQL indexing is the most effective tuning method—yet it is often neglected during development. _Use The Index, Luke_ explains SQL indexing from grounds up and doesn’t stop at ORM tools like Hibernate.",
+              "document_id": "doc_56fc0d"
+            },
+            {
+              "purpose": "Points you directly at the index primitive you’ll see throughout DB internals: the balanced B-tree.",
+              "excerpt": "_The B-Tree_ — It’s a balanced tree",
+              "document_id": "doc_56fc0d"
+            },
+            {
+              "purpose": "Shows concretely that common indexes are implemented as B-trees (via the `btree (...)` index type) and therefore what “index structure” means in practice.",
+              "excerpt": "Indexes:\n    \"users_pkey\" PRIMARY KEY, btree (user_id)\n    \"users_email_key\" UNIQUE CONSTRAINT, btree (email)\n    \"users_username_key\" UNIQUE CONSTRAINT, btree (username)",
+              "document_id": "doc_090e8c"
+            },
+            {
+              "purpose": "Anchors the transactional vocabulary you’ll need later when you map MVCC/WAL behavior to “what a transaction guarantees”.",
+              "excerpt": "In Postgres, when we want our queries to be done in a transaction, we need to wrap it with `BEGIN` and `COMMIT` commands.",
+              "document_id": "doc_090e8c"
+            },
+            {
+              "purpose": "Provides intuition for why isolation exists: uncommitted changes remain invisible (a conceptual stepping stone to MVCC).",
+              "excerpt": "With this pattern, jobs aren’t immediately sent to the job queue. Instead, they’re staged in a table within the relational database itself, and the ACID properties of the running transaction keep them invisible until they’re ready to be worked.",
+              "document_id": "doc_49aa42"
+            },
+            {
+              "purpose": "Explains isolation in terms of visibility rules, which is exactly the kind of reasoning MVCC builds on.",
+              "excerpt": "Transactional isolation means that the enqueuer is unable to see jobs that aren’t yet commmitted (even if they’ve been inserted into `staged_jobs` by an uncommitted transaction), so jobs are never worked too early.",
+              "document_id": "doc_49aa42"
+            }
+          ],
+          "further_reading": [
+            {
+              "document_id": "doc_d64fbd",
+              "blurb": "Useful if you want a structured, free course track around MongoDB indexing and query behavior while you deepen internals knowledge elsewhere."
+            },
+            {
+              "document_id": "doc_a82c18",
+              "blurb": "Good for complementing database internals with data-structure depth (Redis streams/queues/ordering) even though it’s not a WAL+MVCC system."
+            },
+            {
+              "document_id": "doc_fbd628",
+              "blurb": "Not internals-focused, but helpful once you start thinking about how real databases evolve over time (schema/index changes) alongside their low-level mechanics."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "database internals MVCC write-ahead logging WAL index structures reading guide",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.07599970803130418
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "B-tree index structure write-ahead logging MVCC document",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06297804100904614
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "MVCC",
+              "limit": 8
+            },
+            "result": "0 hits",
+            "elapsed_s": 0.07004379096906632
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "\"write-ahead logging\" WAL",
+              "limit": 8
+            },
+            "result": "2 hits",
+            "elapsed_s": 0.055519458022899926
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "transaction log concurrency control index structure database internals",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.05374349991325289
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "WAL",
+              "limit": 8
+            },
+            "result": "2 hits",
+            "elapsed_s": 0.0841501250397414
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_fbd628"
+            },
+            "result": "ok · 9726 chars",
+            "elapsed_s": 0.07522479095496237
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_d64fbd"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.0886990410508588
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_49aa42"
+            },
+            "result": "ok · 7573 chars",
+            "elapsed_s": 0.08808150002732873
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_3f80e6"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 2.161076791002415
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_90e0be"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 8.439371792017482
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "Postgres MVCC internals",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06065849994774908
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_989971"
+            },
+            "result": "ok · 8195 chars",
+            "elapsed_s": 1.3898871659766883
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_090e8c"
+            },
+            "result": "ok · 7350 chars",
+            "elapsed_s": 5.97372633300256
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_0dfcb5"
+            },
+            "result": "ok · 6859 chars",
+            "elapsed_s": 6.881556040956639
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_31cd63"
+            },
+            "result": "error · jina fetch failed for https://www.postgresqltutorial.com/",
+            "elapsed_s": 30.187501666950993
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "PostgreSQL WAL write ahead log",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.0605771669652313
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_31cd63"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 2.4303488340228796
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "btree index",
+              "limit": 8
+            },
+            "result": "1 hit",
+            "elapsed_s": 0.06294949993025512
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_56fc0d"
+            },
+            "result": "ok · 9696 chars",
+            "elapsed_s": 0.035225541912950575
+          }
+        ],
+        "input_tokens": 179704,
+        "output_tokens": 5626,
+        "elapsed_s": 96.92074112500995,
+        "cost_usd": 0.0429733,
+        "error": ""
+      }
+    ],
+    "authors": [
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3.1-flash-lite · think=low",
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "low",
+        "output": "If you have a weekend to master internals, skip the \"how-to\" tutorials and focus exclusively on the mechanics of storage and isolation.\n\nStart with [Use The Index, Luke!](https://use-the-index-luke.com/). It is the gold standard for understanding B-trees and how they map to index structures—it’s not about specific syntax, it’s about how storage engines actually locate and retrieve data. Once you have that mental model, layer on transactionality with [Transactionally Staged Job Drains in Postgres](https://brandur.org/job-drain). While the title sounds like an application pattern, the post is actually a masterclass on MVCC and visibility rules, showing exactly how databases keep uncommitted data invisible to concurrent readers without drowning you in C code.\n\n```sdanswer\n{ \"type\": \"path\", \"links\": [\n  { \"url\": \"https://use-the-index-luke.com/\",\n    \"description\": \"Master the balanced B-tree. This is the foundational mental model for almost every relational database index.\",\n    \"estimate\": \"4h\" },\n  { \"url\": \"https://brandur.org/job-drain\",\n    \"description\": \"A high-leverage walkthrough of MVCC and visibility rules—how isolation actually works under the hood.\",\n    \"estimate\": \"2h\" }\n] }\n```\n\nOnce you finish these, you'll start looking at `EXPLAIN` plans not as a wall of confusing text, but as a map of the specific data structures the engine is traversing to find your records.",
+        "input_tokens": 6685,
+        "output_tokens": 1979,
+        "elapsed_s": 7.096054165973328,
+        "cost_usd": 0.00463975,
+        "error": ""
+      },
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3.1-flash-lite · think=high",
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "high",
+        "output": "For a weekend deep dive into database internals, [Use The Index, Luke!](https://use-the-index-luke.com/) is your mandatory starting point.\n\nIt cuts through ORM noise to explain the fundamental data structures—specifically the balanced B-tree—that power query performance in almost every relational database. Once you understand the index structure, you need to understand the isolation guarantees that make those databases safe; [Transactionally Staged Job Drains in Postgres](https://brandur.org/job-drain) is a fantastic, grounded look at how transactional isolation (and by extension, MVCC) works in real-world scenarios. While these resources don't deep-dive into Write-Ahead Logging (WAL) internals—which usually require reading the specific architecture docs for your engine of choice—they provide the essential mental models for indices and isolation that make the rest of the database documentation actually click.\n\n```sdanswer\n{ \"type\": \"path\", \"links\": [\n  { \"url\": \"https://use-the-index-luke.com/\",\n    \"description\": \"Start here: the B-tree chapters are the gold standard for understanding how data is actually retrieved.\",\n    \"estimate\": \"3h\" },\n  { \"url\": \"https://github.com/golang-migrate/migrate/blob/master/database/postgres/TUTORIAL.md\",\n    \"description\": \"Practice identifying indexes in real DDL and see how transactions are opened and committed.\",\n    \"estimate\": \"1h\" },\n  { \"url\": \"https://brandur.org/job-drain\",\n    \"description\": \"The best practical study on MVCC and transactional visibility—it explains what happens when processes can't see each other's uncommitted work.\",\n    \"estimate\": \"1h 30m\" }\n] }\n```\n\nDon't just read the theory: as you go, run `EXPLAIN` on your own queries to see if the execution plan matches the B-tree structure you’re learning about, as seeing it in your own logs is the fastest way to verify you’ve actually grasped the material.",
+        "input_tokens": 6685,
+        "output_tokens": 2365,
+        "elapsed_s": 8.059329458046705,
+        "cost_usd": 0.005218749999999999,
+        "error": ""
+      },
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3-flash-preview · think=minimal",
+        "model": "gemini-3-flash-preview",
+        "thinking": "minimal",
+        "output": "Start with [Use The Index, Luke!](https://use-the-index-luke.com/); it’s the most effective way to build a vendor-agnostic mental model of B-trees and index traversal before you dive into storage engine specifics. While many devs treat indexes as magic \"go-fast\" buttons, this resource treats them as balanced tree structures you can reason about, which is the necessary foundation for understanding why certain queries scale and others crawl.\n\nOnce you have the indexing primitives down, you need to bridge the gap between \"how data is stored\" and \"how data is safely modified.\" Understanding transactional isolation—the idea that uncommitted changes remain invisible to other workers—is your entry point into Multi-Version Concurrency Control (MVCC). [Transactionally Staged Job Drains in Postgres](https://brandur.org/job-drain) provides a fantastic concrete example of this by showing how ACID properties keep staged jobs invisible until a `COMMIT` is issued.\n\n```sdanswer\n{\n  \"type\": \"path\",\n  \"links\": [\n    {\n      \"url\": \"https://use-the-index-luke.com/\",\n      \"description\": \"Focus on the 'Anatomy of an Index' section to internalize how B-trees actually look on disk and in memory.\",\n      \"estimate\": \"2h 30m\"\n    },\n    {\n      \"url\": \"https://brandur.org/job-drain\",\n      \"description\": \"Read this to see how transactional visibility and atomicity work in a high-stakes production pattern.\",\n      \"estimate\": \"1h\"\n    },\n    {\n      \"url\": \"https://github.com/golang-migrate/migrate/blob/master/database/postgres/TUTORIAL.md\",\n      \"description\": \"Scan the schema definitions to see how Postgres explicitly defaults to B-tree indexes for primary keys and constraints.\",\n      \"estimate\": \"45m\"\n    }\n  ]\n}\n```\n\nAs you work through these, keep an eye on the \"Write-Ahead Log\" (WAL) concept: it's the mechanism that ensures your B-tree updates survive a crash even before they're fully flushed to the main data files.",
+        "input_tokens": 6685,
+        "output_tokens": 484,
+        "elapsed_s": 3.551426582969725,
+        "cost_usd": 0.0047945,
+        "error": ""
+      }
+    ],
+    "total_cost_usd": 0.0576263
+  },
+  {
+    "prompt": "How do I instrument an agent's tool calls so I can debug a runaway loop without losing the production trace?",
+    "researchers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "high",
+        "label": "gpt-5.4-nano · think=high",
+        "research": {
+          "excerpts": [
+            {
+              "purpose": "Frames the core agent behavior you’re trying to observe (tool calls inside an iterative loop), which is the source of runaway risk.",
+              "excerpt": "My preferred definition of an LLM agent is something that [runs tools in a loop to achieve a goal](https://simonwillison.net/2025/Sep/18/agents/). The art of using them well is to carefully design the tools and loop for them to use.",
+              "document_id": "doc_05d82f"
+            },
+            {
+              "purpose": "Highlights why runaway tool loops are dangerous—so instrumentation should let you inspect tool-call decisions and inputs/outputs to debug safely.",
+              "excerpt": "Agents are inherently dangerous—they can make poor decisions or fall victim to malicious [prompt injection attacks](https://simonwillison.net/tags/prompt-injection/), either of which can result in harmful results from tool calls.",
+              "document_id": "doc_05d82f"
+            },
+            {
+              "purpose": "Gives a concise description of the runaway-loop failure mode so your spans can be organized around “loop iterations” and termination reasons.",
+              "excerpt": "> **An AI agent is an LLM wrecking its environment in a loop.**",
+              "document_id": "doc_05d82f"
+            },
+            {
+              "purpose": "Supports the tracing goal: you want to follow one request/trace through the system so you can correlate repeated tool calls back to the production request that triggered the agent.",
+              "excerpt": "Distributed tracing allows you to follow a single request as it travels through all the different microservices and components of your system.",
+              "document_id": "doc_2988bd"
+            },
+            {
+              "purpose": "Supports using trace visualization to pinpoint where the runaway starts and what path it takes (e.g., repeated tool calls).",
+              "excerpt": "By visualizing the entire journey of a request in one place, you can instantly pinpoint performance bottlenecks, identify errors, and understand the complex interactions within your application.",
+              "document_id": "doc_2988bd"
+            },
+            {
+              "purpose": "Supports the “don’t lose production trace” requirement by correlating spans with logs/metrics from the same request for full context.",
+              "excerpt": "Better Stack unifies logs, metrics, and traces**, the three pillars of observability, into a single platform.",
+              "document_id": "doc_2988bd"
+            },
+            {
+              "purpose": "Supports the workflow for debugging a runaway loop: jump from the problematic trace to the exact logs/metrics produced during that same request.",
+              "excerpt": "This means you can seamlessly navigate from a slow trace to the exact logs and metrics generated during that request, giving you the full context you need to resolve issues faster.",
+              "document_id": "doc_2988bd"
+            },
+            {
+              "purpose": "Supports using OpenTelemetry/OTLP-compatible tracing so your tool-call spans are emitted without breaking end-to-end tracing.",
+              "excerpt": "Better Stack ingests trace data using the OpenTelemetry Protocol (OTLP), the open standard for telemetry data. The easiest way to send traces is by using the [Better Stack collector](https://betterstack.com/docs/logs/collector/) or configuring [OpenTelemetry](https://betterstack.com/docs/logs/open-telemetry/) directly.",
+              "document_id": "doc_2988bd"
+            }
+          ],
+          "further_reading": [
+            {
+              "document_id": "doc_d48e7b",
+              "blurb": "General OpenTelemetry setup guidance for instrumenting applications with traces/metrics/logs so you can ensure your agent spans stay correlated end-to-end."
+            },
+            {
+              "document_id": "doc_38710f",
+              "blurb": "Logfire documentation for LLM/agent observability patterns (useful if you want structured tool-call tracing alongside app traces/logs)."
+            },
+            {
+              "document_id": "doc_0cd649",
+              "blurb": "Datadog APM documentation entry point, helpful if you’re aligning your OpenTelemetry spans with a vendor backend or trace correlation workflow."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "instrument agent tool calls debug runaway loop without losing production trace",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06410999991931021
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_f554d5"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.0836160829057917
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_0f4f00"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.08424008300062269
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_38710f"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.08326829201541841
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_d48e7b"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.08671633305493742
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_0cd649"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.08645441709086299
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_05d82f"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.08549433399457484
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "OpenTelemetry context propagation create spans manual instrumentation sampling tail sampling",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06476479093544185
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "Logfire suppress spans metrics sampling strategy runaway loop tool calls",
+              "limit": 8
+            },
+            "result": "2 hits",
+            "elapsed_s": 0.06060845800675452
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "tail sampling preserve trace runaway loop spans suppress spans metrics open telemetry collector",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06385608308482915
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "Logfire Suppress Spans and Metrics document_id",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.052217917051166296
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "\"Suppress Spans\" Logfire instrument",
+              "limit": 8
+            },
+            "result": "5 hits",
+            "elapsed_s": 0.06600391701795161
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_56a0be"
+            },
+            "result": "error · url not in catalog: https://pydantic.dev/logfire",
+            "elapsed_s": 0.08555854205042124
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_d43a8f"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.08747499994933605
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_2ef74f"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.08840816700831056
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_209ca5"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.08981720800511539
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_906071"
+            },
+            "result": "error · url not in catalog: https://opentelemetry.io/",
+            "elapsed_s": 0.08908483304549009
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_2988bd"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.09178891603369266
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "Better Stack \"Sampling in OpenTelemetry\" document_id",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.054177582962438464
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "logfire manual tracing add manual tracing document_id",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.059299333952367306
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "OpenTelemetry context propagation trace tool call child span active span",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.0560562500031665
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "instrument tool calls spans child span iterate agent loop observability",
+              "limit": 4
+            },
+            "result": "4 hits",
+            "elapsed_s": 0.07505424995906651
+          }
+        ],
+        "input_tokens": 303522,
+        "output_tokens": 8689,
+        "elapsed_s": 70.65741525008343,
+        "cost_usd": 0.07156565000000001,
+        "error": ""
+      }
+    ],
+    "authors": [
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3.1-flash-lite · think=low",
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "low",
+        "output": "To debug runaway agent loops without dropping your production trace, wrap each agent \"step\" as a child span within your parent request context, rather than treating tool calls as standalone events.\n\nBy nesting these loop iterations as spans, you maintain a continuous trace ID that connects the initial request all the way down to the specific, likely problematic, tool call. If the agent enters a recursive loop, you can use your distributed tracing dashboard—refer to [Distributed Tracing with Better Stack](https://betterstack.com/docs/logs/tracing/) to see how to properly organize these—and visually pinpoint the exact chain of tool inputs that triggered the behavior. [Designing agentic loops](https://simonwillison.net/2025/Sep/30/designing-agentic-loops/) is the key read here; it frames the agent's failure mode as a series of environmental interactions, making it much easier to reason about the loop structure you need to instrument.\n\nBefore you finalize this, ask yourself if your agent has an explicit, non-LLM-driven \"max_iterations\" check. Tracing will tell you *that* the loop ran away, but if you don't have a hard-stop mechanism outside the LLM's own logic, you'll still be chasing down infinite recursion regardless of how well-instrumented your spans are.\n\n```sdanswer\n{ \"type\": \"links\",\n  \"title\": \"Related Implementation Patterns\",\n  \"links\": [\n    { \"label\": \"OpenTelemetry Getting Started\", \"url\": \"https://opentelemetry.io/docs/getting-started/\", \"description\": \"Fundamentals for ensuring your agent spans align with standard telemetry.\" },\n    { \"label\": \"Pydantic Logfire Docs\", \"url\": \"https://logfire.pydantic.dev/docs/\", \"description\": \"Specific patterns for structured tracing of tool calls.\" },\n    { \"label\": \"Datadog APM Tracing\", \"url\": \"https://docs.datadoghq.com/tracing/\", \"description\": \"If you're aligning spans with a specific vendor backend.\" }\n  ]\n}\n```",
+        "input_tokens": 6956,
+        "output_tokens": 1960,
+        "elapsed_s": 7.352138667018153,
+        "cost_usd": 0.004679,
+        "error": ""
+      },
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3.1-flash-lite · think=high",
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "high",
+        "output": "You need to treat each agentic loop iteration as a nested child span within your existing distributed trace, using OpenTelemetry to ensure the tool call activity links back to the original production request.\n\nA runaway loop is effectively an agent \"wrecking its environment\" until it hits a terminal state, as described in [Designing agentic loops](https://simonwillison.net/2025/Sep/30/designing-agentic-loops/). To debug this, propagate your parent trace context into the agent's tool-execution layer. Using [Distributed Tracing with Better Stack](https://betterstack.com/docs/logs/tracing/) or any OTLP-compliant backend, you can then visualize the request flow end-to-end. This approach allows you to jump from a high-level trace directly to the logs and metrics for the specific iteration that went rogue, letting you see the exact input/output that caused the agent to loop rather than terminate.\n\nBefore you wire this up, implement a hard iteration limit or a circuit breaker inside your agent loop; tracing will show you exactly *why* it's looping, but it won't stop the agent from burning through your API budget or rate limits while you're still debugging.\n\n```sdanswer\n{ \"type\": \"links\", \"title\": \"Instrumentation references\", \"links\": [\n  { \"label\": \"OpenTelemetry Getting Started\", \"url\": \"https://opentelemetry.io/docs/getting-started/\", \"description\": \"Fundamentals for ensuring agent spans stay correlated end-to-end.\" },\n  { \"label\": \"Pydantic Logfire Documentation\", \"url\": \"https://logfire.pydantic.dev/docs/\", \"description\": \"Agent-specific observability patterns for tracing tool calls.\" },\n  { \"label\": \"Datadog APM Documentation\", \"url\": \"https://docs.datadoghq.com/tracing/\", \"description\": \"Aligning your spans with backend trace correlation workflows.\" }\n] }\n```",
+        "input_tokens": 6956,
+        "output_tokens": 2173,
+        "elapsed_s": 7.8718116249656305,
+        "cost_usd": 0.0049985,
+        "error": ""
+      },
+      {
+        "researcher": "gpt-5.4-nano · think=high",
+        "author": "gemini-3-flash-preview · think=minimal",
+        "model": "gemini-3-flash-preview",
+        "thinking": "minimal",
+        "output": "To catch a runaway loop without losing context, you need to instrument your agent's reasoning loop as a series of nested spans within your existing production trace. By using OpenTelemetry, you can ensure that every iterative tool call is linked to the original request that triggered the agent, allowing you to visualize the \"wreckage\" in real-time.\n\n[Distributed Tracing with Better Stack](https://betterstack.com/docs/logs/tracing/) explains that tracing allows you to follow a single request through every component it touches. For an agent, this means your \"reasoning loop\" should be a parent span, and every individual tool call or LLM completion should be a child span. This structure lets you \"instantly pinpoint\" exactly where a loop starts to spiral or why a termination condition isn't being met.\n\n[Designing agentic loops](https://simonwillison.net/2025/Sep/30/designing-agentic-loops/) frames the problem clearly: agents are effectively [running tools in a loop to achieve a goal](https://simonwillison.net/2025/Sep/18/agents/). To debug this safely, your instrumentation must capture the inputs and outputs of every tool call. If an agent hits a prompt injection or a logic error, seeing the raw tool arguments inside the trace is the only way to differentiate a valid high-frequency loop from a \"runaway\" failure.\n\n```sdanswer\n{\n  \"type\": \"gotcha\",\n  \"title\": \"Don't ignore the loop iteration count\",\n  \"wrong\": \"for task in tasks:\\n  # Missing context in traces\\n  result = agent.call_tool(task)\\n  send_trace(result)\",\n  \"description\": \"If you don't explicitly pass the trace context and an iteration attribute, individual tool calls look like disconnected noise.\",\n  \"right\": \"Wrap the entire loop in a parent span and add an 'iteration_count' attribute to each child tool-call span.\",\n  \"language\": \"python\"\n}\n```\n\nOnce you have the traces flowing, ensure your logging is correlated; being able to \"seamlessly navigate from a slow trace to the exact logs\" is what makes it possible to see the internal \"thought\" process of the LLM right as it starts to loop.\n\nBefore you ship the next iteration, decide on a hard \"max_iterations\" limit that emits a specific error attribute in your trace when hit—it makes runaway loops searchable in your observability backend.",
+        "input_tokens": 6956,
+        "output_tokens": 534,
+        "elapsed_s": 4.006267875083722,
+        "cost_usd": 0.00508,
+        "error": ""
+      }
+    ],
+    "total_cost_usd": 0.08632315000000002
+  }
+]

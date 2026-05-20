@@ -1,0 +1,1032 @@
+[
+  {
+    "prompt": "How do I share state between AWS Lambda invocations? I'm building an API rate limiter and need request counts visible across all my Lambda containers running the handler.",
+    "total_cost_usd": 0.03887115,
+    "stages": [
+      {
+        "stage": "reframer",
+        "model": "gemini-3-flash-preview",
+        "thinking": "medium",
+        "input_tokens": 1726,
+        "output_tokens": 670,
+        "elapsed_s": 4.9410282500321046,
+        "cost_usd": 0.002873,
+        "error": "",
+        "tool_calls": [],
+        "output": {
+          "restated_question": "You're asking how to maintain a shared request count across ephemeral Lambda invocations to implement rate limiting. I'll gather resources on managing distributed state in serverless environments and compare using external stores like Redis or DynamoDB for this specific use case.",
+          "reframing_instructions": "Focus on the architectural necessity of an external store for distributed state in serverless. Emphasize the trade-offs between low-latency caching (Redis/ElastiCache) and persistent storage (DynamoDB). Briefly mention that while local in-memory caching exists for warm containers, it is insufficient for accurate global rate limiting. Skip specific code implementations; focus on the selection criteria for the state store and rate-limiting algorithms.",
+          "corpus_topics": [
+            "serverless rate limiting patterns",
+            "AWS Lambda distributed state management",
+            "external stores for serverless state",
+            "distributed counters consistency trade-offs",
+            "ElastiCache vs DynamoDB for rate limiting"
+          ],
+          "web_search_topics": [
+            "AWS API Gateway native rate limiting vs Lambda implementation",
+            "Momento serverless cache rate limiting patterns"
+          ]
+        }
+      },
+      {
+        "stage": "researcher",
+        "model": "gpt-5.4-nano",
+        "thinking": "medium",
+        "input_tokens": 27477,
+        "output_tokens": 4309,
+        "elapsed_s": 92.45633925998118,
+        "cost_usd": 0.010881650000000001,
+        "error": "",
+        "tool_calls": [
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "serverless rate limiting patterns AWS Lambda shared state external store",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.08315157098695636
+          },
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "AWS Lambda distributed state management external store DynamoDB Redis ElastiCache",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.07160831894725561
+          },
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "ElastiCache vs DynamoDB distributed counters consistency rate limiting",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.07101681095082313
+          },
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "Redis rate limiter distributed counters atomic increment Lua script",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06826940702740103
+          },
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "AWS Lambda rate limiter DynamoDB conditional writes TTL shared state",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06957392208278179
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://university.redis.io/"
+            },
+            "result": "ok · 8924 chars",
+            "elapsed_s": 0.08235895400866866
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://docs.aws.amazon.com/lambda/latest/dg/welcome.html"
+            },
+            "result": "ok · 10021 chars",
+            "elapsed_s": 0.08456711797043681
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://www.ics.uci.edu/~cs223/papers/cidr07p15.pdf"
+            },
+            "result": "ok · 10038 chars",
+            "elapsed_s": 0.0865424940129742
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GettingStartedDynamoDB.html"
+            },
+            "result": "ok · 10031 chars",
+            "elapsed_s": 0.08859931898768991
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://sre.google/sre-book/monitoring-distributed-systems/"
+            },
+            "result": "ok · 10032 chars",
+            "elapsed_s": 0.952647118945606
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://developers.cloudflare.com/waf/"
+            },
+            "result": "ok · 10025 chars",
+            "elapsed_s": 1.7370569659397006
+          }
+        ],
+        "output": {
+          "excerpts": [
+            {
+              "purpose": "Supports the architectural idea that scalable apps typically cannot rely on global atomic transactions across many machines, so distributed state must be managed via partitioned entities and careful consistency choices.",
+              "excerpt": "Instead, we assume multiple disjoint scopes of transactional serializability . Consider each computer to be a separate scope of transactional serializability  . . . You cannot perform atomic transactions across these disjoint scopes of transactional serializability. That’s what makes them disjoint!",
+              "source_url": "https://www.ics.uci.edu/~cs223/papers/cidr07p15.pdf"
+            },
+            {
+              "purpose": "Provides motivation for instrumentation/visibility: a monitoring system should track quantitative request metrics (e.g., query counts/types) needed to validate and operate a global rate limiter.",
+              "excerpt": "Collecting, processing, aggregating, and displaying real-time quantitative data about a system, such as query counts and types, error counts and types, processing times, and server lifetimes.",
+              "source_url": "https://sre.google/sre-book/monitoring-distributed-systems/"
+            },
+            {
+              "purpose": "Shows that “rate limiting rules” are typically implemented by computing request rates, which aligns with how a global limiter needs shared state (counters) plus time-window logic.",
+              "excerpt": "Rate limiting rules\n\n* Overview\n\n* Request rate calculation",
+              "source_url": "https://developers.cloudflare.com/waf/"
+            },
+            {
+              "purpose": "Indicates that DynamoDB explicitly discusses read/write behavior and read consistency, which is a key selection criterion when you use DynamoDB as the shared backing store for rate-limiting counters.",
+              "excerpt": "[Reads and writes]\n\n* DynamoDB read consistency",
+              "source_url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GettingStartedDynamoDB.html"
+            }
+          ],
+          "further_reading": [
+            {
+              "source_url": "https://upstash.com/docs",
+              "blurb": "A good place to compare serverless Redis-style managed offerings (latency/cost trade-offs) that are often used for distributed counters and rate limiting."
+            },
+            {
+              "source_url": "https://microservices.io/patterns/data/transactional-outbox.html",
+              "blurb": "Useful background if your rate limiter needs to record audit/metrics reliably alongside counter updates in a distributed system."
+            },
+            {
+              "source_url": "https://docs.aws.amazon.com/lambda/latest/dg/welcome.html",
+              "blurb": "Helpful for revisiting Lambda execution model constraints (scaling, retries, and environment behavior) when deciding what can and cannot live in memory between invocations."
+            }
+          ],
+          "gaps": [
+            {
+              "concept": "ElastiCache (Redis) vs DynamoDB trade-offs specifically for distributed rate-limiting counters and their consistency/atomicity properties",
+              "tried_queries": [
+                "ElastiCache vs DynamoDB distributed counters consistency rate limiting",
+                "AWS Lambda rate limiter DynamoDB conditional writes TTL shared state",
+                "Redis rate limiter distributed counters atomic increment Lua script"
+              ],
+              "needed": "A curated AWS/serverless guide or an architecture note comparing Redis vs DynamoDB for rate-limit counters (e.g., atomic increment, TTL/expiry, throughput/cost, and failure modes under concurrency)."
+            },
+            {
+              "concept": "Serverless API rate-limiting algorithms (fixed window vs sliding window vs token bucket/leaky bucket) and guidance for choosing between them under distributed contention",
+              "tried_queries": [
+                "serverless rate limiting patterns AWS Lambda shared state external store",
+                "serverless rate limiting patterns",
+                "distributed counters consistency trade-offs"
+              ],
+              "needed": "A curated document that maps rate-limiting algorithm choice to consistency requirements and the behavior of external stores in serverless."
+            }
+          ]
+        },
+        "seen_source_urls": [
+          "https://aws.amazon.com/lambda/",
+          "https://betterstack.com/docs/logs/tracing/",
+          "https://betterstack.com/incident-management",
+          "https://cqrs.files.wordpress.com/2010/11/cqrs_documents.pdf",
+          "https://developers.cloudflare.com/waf/",
+          "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html",
+          "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GettingStartedDynamoDB.html",
+          "https://docs.aws.amazon.com/lambda/latest/dg/welcome.html",
+          "https://docs.fastly.com/products/compute",
+          "https://grafana.com/docs/tempo/latest/getting-started/docker-example/",
+          "https://microservices.io/patterns/data/transactional-outbox.html",
+          "https://min.io/docs/minio/linux/index.html",
+          "https://neon.com/docs",
+          "https://refactoring.com/catalog/replaceConditionalWithPolymorphism.html",
+          "https://refactoring.guru/design-patterns/strategy",
+          "https://sre.google/sre-book/monitoring-distributed-systems/",
+          "https://university.redis.io/",
+          "https://upstash.com/docs",
+          "https://workos.com/docs",
+          "https://www.ics.uci.edu/~cs223/papers/cidr07p15.pdf",
+          "https://www.jimmybogard.com/avoiding-the-distributed-monolith/",
+          "https://www.oreilly.com/library/view/database-in-depth/0596100124/",
+          "https://www.patternlanguage.com/aptl/aplsample/aplsample.htm",
+          "https://www.youtube.com/playlist?list=PLeKd45zvjcDFUEv_ohr_HdUFe97RItdiB"
+        ]
+      },
+      {
+        "stage": "gap_filler",
+        "model": "gemini-3-flash-preview",
+        "thinking": "low",
+        "input_tokens": 31480,
+        "output_tokens": 1124,
+        "elapsed_s": 63.82465892098844,
+        "cost_usd": 0.019112,
+        "error": "",
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "serverless rate limiting algorithms fixed window vs sliding window vs token bucket distributed contention"
+            },
+            "result": "5 hits",
+            "elapsed_s": 14.598780527012423
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "Momento serverless cache rate limiting patterns examples"
+            },
+            "result": "5 hits",
+            "elapsed_s": 18.148863557027653
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "AWS API Gateway native rate limiting vs Lambda implementation architecture guide"
+            },
+            "result": "5 hits",
+            "elapsed_s": 19.498959849006496
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "AWS DynamoDB vs ElastiCache Redis rate limiting consistency atomicity trade-offs"
+            },
+            "result": "5 hits",
+            "elapsed_s": 20.860293225036003
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://docs.momentohq.com/cache/how-to/rate-limiter"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.410946790012531
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://www.dragonflydb.io/guides/when-to-use-elasticache-vs-dynamodb"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.39937399700284004
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://aws.amazon.com/blogs/architecture/rate-limiting-strategies-for-serverless-applications/"
+            },
+            "result": "ok · 9772 chars",
+            "elapsed_s": 4.105307340971194
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/distributed-rate-limiter"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 7.007328687002882
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "site:aws.amazon.com API Gateway vs Lambda rate limiting trade-offs architecture"
+            },
+            "result": "5 hits",
+            "elapsed_s": 9.679274945054203
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "site:aws.amazon.com \"DynamoDB\" vs \"ElastiCache\" rate limiting performance consistency trade-offs"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.56236720108427
+          }
+        ],
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "AWS API Gateway native rate limiting vs Lambda implementation",
+              "source_title": "Rate Limiting Strategies for Serverless Applications | Amazon Web Services",
+              "source_url": "https://aws.amazon.com/blogs/architecture/rate-limiting-strategies-for-serverless-applications/",
+              "excerpt": "When you want to expose your Lambda function, you can create a web API with an HTTP endpoint for your Lambda function. You can configure rate limiting to your API through API Gateway throttles. This prevents your API from being overwhelmed by too many requests. Amazon API Gateway provides two basic types of throttling-related settings: Server-side throttling limits are applied across all clients... Per-client throttling limits are applied to clients that use API keys associated with your usage policy.",
+              "rationale": "Official AWS Architecture Blog detailing the use of API Gateway throttling versus manual implementation in Lambda for serverless applications."
+            },
+            {
+              "gap_concept": "Momento serverless cache rate limiting patterns",
+              "source_title": "Implement a distributed rate-limiter using Momento | Momento Docs",
+              "source_url": "https://docs.momentohq.com/cache/how-to/rate-limiter",
+              "excerpt": "The rate limiter increments the value of the unique key for each user when they make a request, setting a time-to-live (TTL) for the first request of the minute to 60 seconds... Increment the value of user_id-current_minute. If the returned value is 1, that indicates that this was the first request... Momento's increment API is guaranteed to be atomic.",
+              "rationale": "Official Momento documentation providing a specific architectural pattern and code implementation for a serverless distributed rate limiter."
+            },
+            {
+              "gap_concept": "Serverless API rate-limiting algorithms (fixed window vs sliding window vs token bucket/leaky bucket) and guidance for choosing between them under distributed contention",
+              "source_title": "Design a Distributed Rate Limiter | Hello Interview System Design in a Hurry",
+              "source_url": "https://www.hellointerview.com/learn/system-design/problem-breakdowns/distributed-rate-limiter",
+              "excerpt": "Fixed window: Simple to implement but allows bursts of 2x the limit at window boundaries. Sliding Window: More accurate as it tracks individual request timestamps or uses weighted averages of the current and previous windows to smooth out the limit enforcement. Token Bucket: Allows for bursts while maintaining a steady average rate; ideal for handling temporary traffic spikes without immediate rejection.",
+              "rationale": "Deep-dive system design resource mapping algorithm choices to specific traffic behaviors and consistency needs."
+            },
+            {
+              "gap_concept": "ElastiCache (Redis) vs DynamoDB trade-offs specifically for distributed rate-limiting counters and their consistency/atomicity properties",
+              "source_title": "Redis vs DynamoDB vs ElastiCache vs Dragonfly Cloud: Head to Head [2026]",
+              "source_url": "https://www.dragonflydb.io/guides/when-to-use-elasticache-vs-dynamodb",
+              "excerpt": "Redis provides a rich set of capabilities... including atomic operations, ensuring consistent state without external locking mechanisms. DynamoDB maintains low-latency performance with on-demand scaling... it lacks native support for advanced data structures [like Redis's sorted sets used for sliding windows]. Redis’s in-memory design prioritizes speed but requires careful configuration [whereas] DynamoDB handles scaling, patching, and replication with no user intervention.",
+              "rationale": "A detailed comparison of Redis and DynamoDB specifically focused on their performance and architectural trade-offs for caching and counter-like operations."
+            }
+          ]
+        },
+        "seen_web_urls": [
+          "https://aerospike.com/blog/redis-vs-dynamodb/",
+          "https://aws.amazon.com/blogs/apn/enabling-tiering-and-throttling-in-a-multi-tenant-amazon-eks-saas-solution-using-amazon-api-gateway/",
+          "https://aws.amazon.com/blogs/architecture/rate-limiting-strategies-for-serverless-applications/",
+          "https://aws.amazon.com/blogs/compute/operating-lambda-application-design-scaling-and-concurrency-part-2/",
+          "https://aws.amazon.com/blogs/compute/optimizing-network-footprint-in-serverless-applications/",
+          "https://aws.amazon.com/blogs/database/choose-the-right-throughput-strategy-for-amazon-dynamodb-applications/",
+          "https://aws.amazon.com/blogs/database/groundtruth-reduces-costs-by-45-and-improves-reliability-migrating-from-aerospike-to-amazon-elasticache-for-valkey/",
+          "https://aws.amazon.com/blogs/database/know-before-you-go-amazon-dynamodb-sessions-at-aws-reinvent-2023/",
+          "https://aws.amazon.com/blogs/database/lower-cost-and-latency-for-ai-using-amazon-elasticache-as-a-semantic-cache-with-amazon-bedrock/",
+          "https://aws.amazon.com/builders-library/fairness-in-multi-tenant-systems/",
+          "https://bytebytego.com/courses/system-design-interview/design-a-rate-limiter",
+          "https://dev.to/aws-builders/serverless-challenge-is-scaling-achievable-using-momento-as-a-cache-aside-pattern-48cg",
+          "https://docs.aws.amazon.com/lambda/latest/dg/concepts-event-driven-architectures.html",
+          "https://docs.aws.amazon.com/prescriptive-guidance/latest/choosing-the-right-aws-service-for-your-microservice-endpoints/api-gateway.html",
+          "https://docs.momentohq.com/cache/how-to/rate-limiter",
+          "https://github.com/alexdebrie/rate-limit-momento",
+          "https://medium.com/@m-elbably/rate-limiting-the-sliding-window-algorithm-daa1d91e6196",
+          "https://repost.aws/questions/QUCYlmPsciQeKl-pyJoACobw/how-api-gateway-rate-limiting-works",
+          "https://stackoverflow.com/questions/65868274/token-bucket-vs-fixed-window-traffic-burst",
+          "https://www.dragonflydb.io/guides/when-to-use-elasticache-vs-dynamodb",
+          "https://www.gomomento.com/",
+          "https://www.hellointerview.com/learn/system-design/problem-breakdowns/distributed-rate-limiter",
+          "https://www.jeremydaly.com/serverless-caching-with-momento-and-mongodb/",
+          "https://www.quora.com/How-does-one-choose-DynamoDB-versus-Redis-ElastiCache-on-AWS",
+          "https://www.reddit.com/r/aws/comments/s145tp/redis_vs_memchache_vs_elasticache_vs_dynamodb/",
+          "https://www.solo.io/topics/api-gateway/aws-api-gateway",
+          "https://www.youtube.com/watch?v=YXkOdWBwqaA",
+          "https://www.youtube.com/watch?v=f-Dvk2R6NUU"
+        ]
+      },
+      {
+        "stage": "author",
+        "model": "gemini-3-flash-preview",
+        "thinking": "low",
+        "input_tokens": 7881,
+        "output_tokens": 688,
+        "elapsed_s": 5.385274723987095,
+        "cost_usd": 0.0060045,
+        "error": "",
+        "tool_calls": [],
+        "output": "For a distributed rate limiter, you must use an external state store because Lambda containers are ephemeral and have no shared memory. While you can keep a local counter in a global variable for a single \"warm\" container, it won't see traffic hitting other concurrent executions, making it impossible to enforce a global limit without a centralized backbone.\n\nThe choice of store depends on how you trade off latency for persistence. **Redis (ElastiCache or Momento)** is the standard for high-throughput rate limiting because its in-memory nature provides sub-millisecond response times. It also supports atomic operations like `INCR`, which [Implement a distributed rate-limiter using Momento](https://docs.momentohq.com/cache/how-to/rate-limiter) notes is critical for ensuring counters stay accurate without complex locking.\n\n**DynamoDB** is a viable alternative if you prefer a fully serverless, connectionless scaling model, but it comes with higher latency. If you go this route, you'll need to use conditional updates or atomic increments to handle [read consistency and write contention](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GettingStartedDynamoDB.html) as multiple Lambda functions hit the same user's counter simultaneously.\n\nBefore building your own, check if your entry point can handle it for you. [Rate Limiting Strategies for Serverless Applications](https://aws.amazon.com/blogs/architecture/rate-limiting-strategies-for-serverless-applications/) highlights that API Gateway has native throttling features that operate at the edge, which is often more cost-effective than running Lambda logic for every blocked request.\n\n```sdanswer\n{\n  \"type\": \"tradeoff\",\n  \"title\": \"State Store for Rate Limiting\",\n  \"options\": [\n    {\n      \"label\": \"Redis / Momento\",\n      \"bullets\": [\n        \"Sub-millisecond latency\",\n        \"Native atomic increments\",\n        \"Supports sliding windows via sorted sets\",\n        \"In-memory only (ephemeral state)\"\n      ]\n    },\n    {\n      \"label\": \"DynamoDB\",\n      \"bullets\": [\n        \"Zero-config serverless scaling\",\n        \"Persistent storage of quotas\",\n        \"Higher latency (5-10ms)\",\n        \"Conditional writes required for accuracy\"\n      ]\n    }\n  ]\n}\n```\n\nIf you decide to roll a custom implementation, the algorithm choice is your next pivot. A simple **Fixed Window** is easiest to implement with a key like `user:id:minute`, but it allows traffic bursts at the edge of the time window. For smoother enforcement, [Design a Distributed Rate Limiter](https://www.hellointerview.com/learn/system-design/problem-breakdowns/distributed-rate-limiter) suggests a **Sliding Window** or **Token Bucket**, which better handle temporary spikes without immediate rejections.\n\nKeep an eye on how you'll monitor these limits; you'll eventually want [real-time quantitative data](https://sre.google/sre-book/monitoring-distributed-systems/) on how many users are actually hitting these walls versus false positives."
+      }
+    ]
+  },
+  {
+    "prompt": "Help me debug this stack trace: TypeError: 'NoneType' object is not iterable at line 47 of my Flask app. The line is for item in cart.items: and it happens on the /checkout endpoint.",
+    "total_cost_usd": 0.03671895,
+    "stages": [
+      {
+        "stage": "reframer",
+        "model": "gemini-3-flash-preview",
+        "thinking": "medium",
+        "input_tokens": 1739,
+        "output_tokens": 874,
+        "elapsed_s": 6.005652643973008,
+        "cost_usd": 0.0034915000000000002,
+        "error": "",
+        "tool_calls": [],
+        "output": {
+          "restated_question": "I can't debug your specific code for you, but I can provide resources on the patterns that prevent these types of runtime failures. I'll look into defensive programming in Python, robust error handling for web applications, and how to use observability to catch state issues before they crash your checkout flow.",
+          "reframing_instructions": "Pivot from tactical debugging to architectural robustness. Focus on defensive programming, schema validation, and Null Object patterns to prevent runtime failures. Include a brief secondary section as a courtesy suggesting they check the data source or session logic that populates 'cart.items' to ensure it defaults to an empty list rather than None.",
+          "corpus_topics": [
+            "defensive programming patterns python",
+            "error handling web applications",
+            "observability and logging patterns",
+            "Null Object pattern architecture",
+            "input validation and schema enforcement"
+          ],
+          "web_search_topics": []
+        }
+      },
+      {
+        "stage": "researcher",
+        "model": "gpt-5.4-nano",
+        "thinking": "medium",
+        "input_tokens": 37846,
+        "output_tokens": 3415,
+        "elapsed_s": 89.94615296507254,
+        "cost_usd": 0.01183795,
+        "error": "",
+        "tool_calls": [
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "input validation schema enforcement Python web applications logging observability",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.08034154295455664
+          },
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "Null Object pattern architecture prevent None iterable Flask cart items",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.08128438796848059
+          },
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "defensive programming patterns python iterable NoneType error handling web applications Flask checkout cart.items",
+              "limit": 8
+            },
+            "result": "6 hits",
+            "elapsed_s": 0.0873999500181526
+          },
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "\"Null Object\" pattern architecture",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.06349838396999985
+          },
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "Flask input validation schema enforcement marshmallow pydantic",
+              "limit": 8
+            },
+            "result": "6 hits",
+            "elapsed_s": 0.06343759398441762
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://logfire.pydantic.dev/docs/"
+            },
+            "result": "ok · 10032 chars",
+            "elapsed_s": 0.06031859596259892
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://json-schema.org/"
+            },
+            "result": "error · url not in catalog: https://json-schema.org/",
+            "elapsed_s": 0.061216439004056156
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://www.honeycomb.io/observability-engineering-oreilly-book"
+            },
+            "result": "ok · 10027 chars",
+            "elapsed_s": 0.07022555393632501
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://docs.djangoproject.com/en/stable/topics/http/middleware/"
+            },
+            "result": "ok · 10026 chars",
+            "elapsed_s": 2.8413086920045316
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://docs.aws.amazon.com/wellarchitected/latest/reducing-scope-of-impact-with-cell-based-architecture/reducing-scope-of-impact-with-cell-based-architecture.html"
+            },
+            "result": "ok · 4210 chars",
+            "elapsed_s": 4.069930043071508
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://trpc.io/docs/quickstart"
+            },
+            "result": "ok · 9275 chars",
+            "elapsed_s": 0.6415921640582383
+          }
+        ],
+        "output": {
+          "excerpts": [
+            {
+              "purpose": "Shows how to enforce/normalize request processing with middleware so bad or missing input can be caught before your /checkout view iterates over cart.items.",
+              "excerpt": "Middleware is a framework of hooks into Django’s request/response processing. It’s a light, low-level “plugin” system for globally altering Django’s input or output.\n\nDuring the request phase, before calling the view, Django applies middleware in the order it’s defined in [`MIDDLEWARE`], top-down.",
+              "source_url": "https://docs.djangoproject.com/en/stable/topics/http/middleware/"
+            },
+            {
+              "purpose": "Provides architectural resilience framing (fault isolation boundaries) you can mirror in your app by preventing one bad cart state (None) from cascading into runtime 500s.",
+              "excerpt": "With the increasing use of cloud computing, sharing resources efficiently has become easier. The development of multi-tenant applications is increasing exponentially, but although the use of the cloud is more understood and customers are aware that they are in a multi-tenant environment, what they still want is the experience of a single-tenant environment.\n\nThis guidance aims to demonstrate how to increase the resilience of critical applications, bringing the same fault isolation concepts that AWS applies in its Availability Zones and Regions to the level of your workload architecture.",
+              "source_url": "https://docs.aws.amazon.com/wellarchitected/latest/reducing-scope-of-impact-with-cell-based-architecture/reducing-scope-of-impact-with-cell-based-architecture.html"
+            },
+            {
+              "purpose": "Supports adding context-rich, structured telemetry to make it obvious when cart.items becomes None (and why), speeding up debugging beyond the stack trace.",
+              "excerpt": "Follow its lineage through core concepts like distributed tracing, iterative verification of hypotheses, and debugging from first principles with the core analysis loop.\n\nFaster fixes with better telemetry: Leverage data-rich analytics to find answers quickly when maintaining site reliability.",
+              "source_url": "https://www.honeycomb.io/observability-engineering-oreilly-book"
+            },
+            {
+              "purpose": "Gives a concrete pattern for input/schema enforcement (validate + parse) so downstream code can assume shapes like cart.items is always an array (never None).",
+              "excerpt": "tRPC lets you define input parsers to validate and parse the input. You can define your own input parser or use a validation library of your choice, like zod.\n\nYou define your input parser on `publicProcedure.input()`, which can then be accessed on the resolver function as shown below:",
+              "source_url": "https://trpc.io/docs/quickstart"
+            }
+          ],
+          "further_reading": [
+            {
+              "source_url": "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/use-bulkhead-architectures-to-limit-scope-of-impact.html",
+              "blurb": "Bulkhead guidance complements the cell-based resilience idea with a concrete isolation approach you can adapt for cart/session failures."
+            },
+            {
+              "source_url": "https://statecharts.dev/",
+              "blurb": "If your checkout/cart has multiple states, making illegal transitions explicit can prevent “impossible” None-like states from being reachable."
+            },
+            {
+              "source_url": "https://grafana.com/docs/mimir/latest/",
+              "blurb": "Operational observability documentation useful if you want to track the frequency of these checkout exceptions over time."
+            }
+          ],
+          "gaps": [
+            {
+              "concept": "Null Object pattern (and how to apply it in Python/Flask for cart.items to default to an empty iterable)",
+              "tried_queries": [
+                "Null Object pattern architecture prevent None iterable Flask cart items",
+                "\"Null Object\" pattern architecture"
+              ],
+              "needed": "A curated document describing Null Object pattern (or defensive “empty iterable” defaults) with Python examples, ideally in web/session/cart contexts."
+            },
+            {
+              "concept": "Defensive programming patterns in Python specifically for preventing TypeError: 'NoneType' object is not iterable in Flask views",
+              "tried_queries": [
+                "defensive programming patterns python iterable NoneType error handling web applications Flask checkout cart.items",
+                "Flask input validation schema enforcement marshmallow pydantic"
+              ],
+              "needed": "A curated document with Python/Flask-focused defensive programming practices (e.g., data normalization, safe iteration helpers, schema validation with runtime guarantees) to prevent iterating over None."
+            }
+          ]
+        },
+        "seen_source_urls": [
+          "https://alistair.cockburn.us/hexagonal-architecture/",
+          "https://atlasgo.io/",
+          "https://atlasgo.io/docs",
+          "https://auth0.com/docs/get-started/architecture-scenarios",
+          "https://dataintensive.net/",
+          "https://doc.rust-lang.org/std/result/",
+          "https://docs.aws.amazon.com/wellarchitected/latest/reducing-scope-of-impact-with-cell-based-architecture/reducing-scope-of-impact-with-cell-based-architecture.html",
+          "https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/use-bulkhead-architectures-to-limit-scope-of-impact.html",
+          "https://docs.djangoproject.com/en/stable/topics/http/middleware/",
+          "https://docs.liquibase.com/",
+          "https://documentation.red-gate.com/fd",
+          "https://en.wikipedia.org/wiki/Design_Patterns",
+          "https://github.com/trimstray/nginx-admins-handbook",
+          "https://grafana.com/docs/mimir/latest/",
+          "https://jmgarridopaz.github.io/content/hexagonalarchitecture.html",
+          "https://json-schema.org/",
+          "https://learn.microsoft.com/en-us/azure/",
+          "https://logfire.pydantic.dev/docs/",
+          "https://martinfowler.com/eaaCatalog/gateway.html",
+          "https://signoz.io/",
+          "https://statecharts.dev/",
+          "https://trpc.io/docs/quickstart",
+          "https://www.honeycomb.io/",
+          "https://www.honeycomb.io/observability-engineering-oreilly-book",
+          "https://www.oreilly.com/library/view/distributed-systems-observability/9781492033431/",
+          "https://www.parca.dev/docs/overview/",
+          "https://www.patternlanguage.com/aptl/aplsample/aplsample.htm",
+          "https://www.pulumi.com/",
+          "https://www.wiley.com/en-us/Pattern+Oriented+Software+Architecture%2C+Volume+2%2C+Patterns+for+Concurrent+and+Networked+Objects-p-9780471606956"
+        ]
+      },
+      {
+        "stage": "gap_filler",
+        "model": "gemini-3-flash-preview",
+        "thinking": "low",
+        "input_tokens": 27538,
+        "output_tokens": 642,
+        "elapsed_s": 85.20617617398966,
+        "cost_usd": 0.015695,
+        "error": "",
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "Python Null Object pattern design pattern examples \"NoneType\" iterable"
+            },
+            "result": "5 hits",
+            "elapsed_s": 12.922687859972939
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "Flask defensive programming \"NoneType\" object is not iterable schema validation"
+            },
+            "result": "5 hits",
+            "elapsed_s": 26.879548233002424
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "site:sourcemaking.com \"Null Object\" pattern python"
+            },
+            "result": "5 hits",
+            "elapsed_s": 13.738713616970927
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "site:python.org defensive programming NoneType iterable schema validation"
+            },
+            "result": "1 hit",
+            "elapsed_s": 25.367520796018653
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://sourcemaking.com/design_patterns/null_object/python/1"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.35380947904195637
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "site:marshmallow.readthedocs.io \"NoneType\" iterable validation default"
+            },
+            "result": "0 hits",
+            "elapsed_s": 0.6633988569956273
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "Python \"TypeError\" \"NoneType\" object is not iterable defensive programming patterns site:realpython.com"
+            },
+            "result": "0 hits",
+            "elapsed_s": 0.8681677059503272
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "Flask marshmallow \"missing\" vs \"none\" validation best practices"
+            },
+            "result": "5 hits",
+            "elapsed_s": 22.37775950995274
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://marshmallow.readthedocs.io/en/stable/marshmallow.fields.html"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.4894273770041764
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "Python \"TypeError\" \"NoneType\" object is not iterable best practices site:docs.python-guide.org"
+            },
+            "result": "0 hits",
+            "elapsed_s": 0.6110594640485942
+          }
+        ],
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "Null Object pattern (and how to apply it in Python/Flask for cart.items to default to an empty iterable)",
+              "source_title": "Null Object Design Pattern in Python",
+              "source_url": "https://sourcemaking.com/design_patterns/null_object/python/1",
+              "excerpt": "Encapsulate the absence of an object by providing a substitutable alternative that offers suitable default do nothing behavior. ... Provide an interface identical to AbstractObject's so that a null object can be substituted for a real object.",
+              "rationale": "SourceMaking is a recognized authority on design patterns and provides the canonical definition and Python implementation of the Null Object pattern."
+            },
+            {
+              "gap_concept": "Defensive programming patterns in Python specifically for preventing TypeError: 'NoneType' object is not iterable in Flask views",
+              "source_title": "Fields — marshmallow 3.24.1 documentation",
+              "source_url": "https://marshmallow.readthedocs.io/en/stable/marshmallow.fields.html",
+              "excerpt": "allow_none (bool) – Set this to True if None should be considered a valid value during validation/deserialization. If set to False (the default), None is considered invalid input. ... load_default (Any) – Default deserialization value for the field if the field is not found in the input data.",
+              "rationale": "Official documentation for Marshmallow, the industry-standard library for data validation and schema enforcement in Flask applications."
+            }
+          ]
+        },
+        "seen_web_urls": [
+          "https://airflow.apache.org/docs/apache-airflow/2.5.3/release_notes.html",
+          "https://bugs.python.org/issue?@action=export_csv&@columns=title&@group=activity,type&@pagesize=50&@startwith=9150",
+          "https://gis.stackexchange.com/questions/345877/typeerror-cannot-unpack-non-iterable-nonetype-object-on-spatial-join",
+          "https://github.com/pydantic/pydantic/issues/1223",
+          "https://marshmallow.readthedocs.io/en/stable/marshmallow.fields.html",
+          "https://news.ycombinator.com/item?id=17048446",
+          "https://purpletutor.com/cannot-unpack-non-iterable-nonetype-object/",
+          "https://repository.library.northeastern.edu/files/neu:ms375p705/fulltext.pdf",
+          "https://sourcemaking.com/design_patterns/null_object",
+          "https://sourcemaking.com/design_patterns/null_object/java/1",
+          "https://sourcemaking.com/design_patterns/null_object/java/2",
+          "https://sourcemaking.com/design_patterns/null_object/python/1",
+          "https://sourcemaking.com/design_patterns/proxy/python/1",
+          "https://stackoverflow.com/questions/34690363/handling-optional-field-validation",
+          "https://stackoverflow.com/questions/3887381/typeerror-nonetype-object-is-not-iterable",
+          "https://weblibrary.mila.edu.my/upload/ebook/engineering/2019_Book_A%20Beginners%20Guide%20to%20Python%203%20Programming.pdf",
+          "https://www.cameronmacleod.com/blog/better-validation-flask-marshmallow",
+          "https://www.freecodecamp.org/news/typeerror-cannot-unpack-non-iterable-nonetype-object-how-to-fix-in-python/",
+          "https://www.reddit.com/r/Python/comments/kxsnvv/common_antipatterns_in_python/",
+          "https://www.scribd.com/document/707418193/Better-Python-Code",
+          "https://zuplo.com/learning-center/how-to-implement-validation-in-python-flask-rest-apis/"
+        ]
+      },
+      {
+        "stage": "author",
+        "model": "gemini-3-flash-preview",
+        "thinking": "low",
+        "input_tokens": 7621,
+        "output_tokens": 628,
+        "elapsed_s": 4.679402815992944,
+        "cost_usd": 0.0056945,
+        "error": "",
+        "tool_calls": [],
+        "output": "The `TypeError: 'NoneType' object is not iterable` happens because `cart.items` is `None` instead of a list or tuple. While you can patch this with a check like `for item in (cart.items or []):`, you're better off enforcing a [Null Object Design Pattern](https://sourcemaking.com/design_patterns/null_object/python/1) at the boundary so your view logic doesn't have to worry about the presence of data.\n\nTo stop these errors from reaching your business logic, use a validation layer like [marshmallow](https://marshmallow.readthedocs.io/en/stable/marshmallow.fields.html) to ensure your data shapes are guaranteed. By setting `load_default=[]` on your fields, you normalize the input before it ever hits the `/checkout` route. This creates a \"fault isolation boundary\" similar to the resilience concepts in [AWS Cell-Based Architecture](https://docs.aws.amazon.com/wellarchitected/latest/reducing-scope-of-impact-with-cell-based-architecture/reducing-scope-of-impact-with-cell-based-architecture.html), where one malformed state is prevented from cascading into a 500 error for the user.\n\nAs a quick tactical check, look at the code that populates the session or database record for the cart. If you're initializing the cart without an explicit `items=[]` default, or if a database query is returning `None` for a missing relation, that's where the `None` is leaking from. Adding structured telemetry from [Observability Engineering](https://www.honeycomb.io/observability-engineering-oreilly-book) can help you trace exactly which session state or user ID is producing these empty carts so you aren't guessing at the root cause.\n\n```sdanswer\n{\n  \"type\": \"tradeoff\",\n  \"title\": \"Handling Missing Collections\",\n  \"options\": [\n    {\n      \"label\": \"In-line Defaulting\",\n      \"bullets\": [\n        \"Fastest to implement\",\n        \"Scatters logic everywhere\",\n        \"Easy to miss one loop\"\n      ]\n    },\n    {\n      \"label\": \"Schema Validation\",\n      \"bullets\": [\n        \"Guarantees data shape\",\n        \"Centralizes error handling\",\n        \"Requires library setup\"\n      ]\n    },\n    {\n      \"label\": \"Null Object Pattern\",\n      \"bullets\": [\n        \"Safest for OO code\",\n        \"Eliminates if/else checks\",\n        \"Most architectural effort\"\n      ]\n    }\n  ]\n}\n```\n\nOnce you've fixed the immediate crash, consider if your checkout process should be modeled as a state machine using [Statecharts](https://statecharts.dev/) to prevent \"impossible\" states like checking out an uninitialized cart."
+      }
+    ]
+  },
+  {
+    "prompt": "How do I run cron jobs inside my Kubernetes pods? I need to clean up expired sessions from Redis every 10 minutes.",
+    "total_cost_usd": 0.02575965,
+    "stages": [
+      {
+        "stage": "reframer",
+        "model": "gemini-3-flash-preview",
+        "thinking": "medium",
+        "input_tokens": 1719,
+        "output_tokens": 622,
+        "elapsed_s": 4.644814471015707,
+        "cost_usd": 0.0027255,
+        "error": "",
+        "tool_calls": [],
+        "output": {
+          "restated_question": "You're asking how to schedule periodic tasks within your cluster to manage Redis sessions. I'll provide resources on the Kubernetes CronJob resource and architectural patterns for background workers, as using native orchestration is preferred over running cron daemons inside individual pods.",
+          "reframing_instructions": "Shift focus from running cron inside a container to the Kubernetes CronJob resource. Emphasize that Redis-specific session cleanup is often better handled via native TTLs; include resources on session management architecture. Skip cron daemon configuration in favor of K8s manifest patterns and concurrency policies.",
+          "corpus_topics": [
+            "Kubernetes CronJob resource",
+            "background worker patterns",
+            "Redis session management TTL vs cleanup",
+            "scheduled tasks in kubernetes"
+          ],
+          "web_search_topics": []
+        }
+      },
+      {
+        "stage": "researcher",
+        "model": "gpt-5.4-nano",
+        "thinking": "medium",
+        "input_tokens": 23772,
+        "output_tokens": 4067,
+        "elapsed_s": 43.1221378169721,
+        "cost_usd": 0.00983815,
+        "error": "",
+        "tool_calls": [
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "Kubernetes CronJob resource scheduled tasks in Kubernetes manifest",
+              "limit": 8
+            },
+            "result": "7 hits",
+            "elapsed_s": 0.06762122898362577
+          },
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "batch/v1 CronJob apiVersion schedule concurrencyPolicy kubernetes scheduled job manifest",
+              "limit": 8
+            },
+            "result": "5 hits",
+            "elapsed_s": 0.0504347519017756
+          },
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "Kubernetes CronJob documentation schedule concurrencyPolicy startingDeadlineSeconds successfulJobsHistoryLimit failedJobsHistoryLimit",
+              "limit": 8
+            },
+            "result": "1 hit",
+            "elapsed_s": 0.07225863495841622
+          },
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "Redis session management TTL expire keys cleanup expired sessions",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.04652034002356231
+          },
+          {
+            "tool": "search_resources",
+            "args": {
+              "query": "Redis EXPIRE TTL key expiration command documentation",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.07052345608826727
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://kubernetes.io/docs/tutorials/"
+            },
+            "result": "ok · 10022 chars",
+            "elapsed_s": 0.06245594995561987
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://learnk8s.io/production-best-practices"
+            },
+            "result": "ok · 10038 chars",
+            "elapsed_s": 0.06484936003107578
+          },
+          {
+            "tool": "read_source",
+            "args": {
+              "url": "https://redis.io/docs/latest/get-started/"
+            },
+            "result": "ok · 6977 chars",
+            "elapsed_s": 4.98225206695497
+          }
+        ],
+        "output": {
+          "excerpts": [
+            {
+              "purpose": "Supports building reliable Kubernetes workloads by handling graceful shutdown (important for short-lived job containers and cleanup scripts).",
+              "excerpt": "When a Pod is terminated, your application should shut down gracefully rather than exit abruptly.\nKubernetes starts stopping a Pod by sending a stop signal to the main process in the container and then waits for the set terminationGracePeriodSeconds before forcefully stopping any remaining processes.",
+              "source_url": "https://learnk8s.io/production-best-practices"
+            },
+            {
+              "purpose": "Supports configuring job/worker containers without baking connection strings into images (useful for passing Redis credentials).",
+              "excerpt": "Keep settings separate from your app’s code.\nThis lets you change the configuration without rebuilding the app image.\nKubernetes is designed for this model through the ConfigMap API, which lets Pods consume non-confidential configuration as environment variables, command-line arguments, or files in a volume.",
+              "source_url": "https://learnk8s.io/production-best-practices"
+            },
+            {
+              "purpose": "Explains why your cleanup job’s entrypoint should be signal-safe (so SIGTERM stops the cron/cleanup process promptly).",
+              "excerpt": "Kubernetes sends the stop signal to PID 1 inside the container.\nThat’s why the container entrypoint should start the app so signals are passed on correctly.",
+              "source_url": "https://learnk8s.io/production-best-practices"
+            },
+            {
+              "purpose": "Provides context for Redis as an in-memory store, which is what session-expiration/TTL behavior acts upon.",
+              "excerpt": "Redis is an in-memory data store used by millions of developers as a cache, vector database, document database, streaming engine, and message broker.",
+              "source_url": "https://redis.io/docs/latest/get-started/"
+            }
+          ],
+          "further_reading": [
+            {
+              "source_url": "https://kubernetes.io/docs/tutorials/",
+              "blurb": "Broad Kubernetes tutorials index that can help you find related workload patterns (Jobs, controllers, etc.) when wiring up a scheduled cleanup task."
+            },
+            {
+              "source_url": "https://kubernetes.io/",
+              "blurb": "Start page for navigating to the current Kubernetes concepts and API reference for workload scheduling and batch execution."
+            }
+          ],
+          "gaps": [
+            {
+              "concept": "Kubernetes CronJob resource (manifest fields like schedule, concurrencyPolicy) and the recommended way to schedule periodic work instead of running a cron daemon inside a Pod",
+              "tried_queries": [
+                "Kubernetes CronJob resource scheduled tasks in Kubernetes manifest",
+                "batch/v1 CronJob apiVersion schedule concurrencyPolicy kubernetes scheduled job manifest",
+                "Kubernetes CronJob documentation schedule concurrencyPolicy startingDeadlineSeconds successfulJobsHistoryLimit failedJobsHistoryLimit"
+              ],
+              "needed": "A curated document that directly documents Kubernetes CronJob (batch/v1) and its key spec fields / examples."
+            },
+            {
+              "concept": "Redis session management strategy: using native TTL/EXPIRE to avoid needing external cleanup, vs periodic key scanning/cleanup",
+              "tried_queries": [
+                "Redis session management TTL expire keys cleanup expired sessions",
+                "Redis EXPIRE TTL key expiration command documentation"
+              ],
+              "needed": "A curated Redis doc on key expiration/TTL for sessions (e.g., setting expiry at write time) and guidance on handling session lifecycle."
+            }
+          ]
+        },
+        "seen_source_urls": [
+          "https://aiven.io/",
+          "https://betterstack.com/incident-management",
+          "https://clerk.com/docs",
+          "https://cloud.google.com/",
+          "https://cloud.google.com/run/docs",
+          "https://coolify.io/docs",
+          "https://developer.hashicorp.com/nomad/tutorials",
+          "https://docs.cline.bot/home",
+          "https://docs.cloud.google.com/secret-manager/docs",
+          "https://docs.cribl.io/stream/",
+          "https://docs.turso.tech/",
+          "https://github.com/kelseyhightower/kubernetes-the-hard-way",
+          "https://go.dev/blog/pipelines",
+          "https://helm.sh/",
+          "https://incident.io/",
+          "https://infisical.com/docs/documentation/platform/secrets-mgmt/overview",
+          "https://kubernetes.io/",
+          "https://kubernetes.io/docs/tutorials/",
+          "https://learn.microsoft.com/en-us/azure/",
+          "https://learnk8s.io/production-best-practices",
+          "https://linkerd.io/2.13/getting-started/",
+          "https://podman.io/docs",
+          "https://redis.io/docs/latest/get-started/",
+          "https://render.com/docs",
+          "https://workos.com/docs",
+          "https://www.crossplane.io/",
+          "https://www.vaultproject.io/"
+        ]
+      },
+      {
+        "stage": "gap_filler",
+        "model": "gemini-3-flash-preview",
+        "thinking": "low",
+        "input_tokens": 11862,
+        "output_tokens": 523,
+        "elapsed_s": 34.39936937589664,
+        "cost_usd": 0.0075,
+        "error": "",
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "Kubernetes CronJob batch/v1 documentation spec fields schedule concurrencyPolicy"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.645939274923876
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "Redis documentation EXPIRE TTL session management best practices"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.649630342028104
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 1.0428950419882312
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://redis.io/docs/latest/commands/expire/"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 2.6165407299995422
+          }
+        ],
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "Kubernetes CronJob resource (manifest fields like schedule, concurrencyPolicy) and the recommended way to schedule periodic work instead of running a cron daemon inside a Pod",
+              "source_title": "CronJob | Kubernetes",
+              "source_url": "https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/",
+              "excerpt": "A CronJob creates Jobs on a repeating schedule. One CronJob object is like one line of a crontab (cron table) file. It runs a job periodically on a given schedule, written in Cron format. ... The concurrencyPolicy field is also optional. It specifies how to treat concurrent executions of a job that is created by this CronJob. The spec may specify only one of the following concurrency policies: Allow (default), Forbid, Replace.",
+              "rationale": "This is the official Kubernetes documentation for the CronJob resource, covering its purpose, API version (batch/v1), and key specification fields including schedule and concurrencyPolicy."
+            },
+            {
+              "gap_concept": "Redis session management strategy: using native TTL/EXPIRE to avoid needing external cleanup, vs periodic key scanning/cleanup",
+              "source_title": "EXPIRE | Redis",
+              "source_url": "https://redis.io/docs/latest/commands/expire/",
+              "excerpt": "Sets the expiration time of a key in seconds. ... Redis keys are expired in two ways: a passive way, and an active way. A key is passively expired when it is visited by some command and is found to be already expired. ... Redis also tests a few keys at random among keys with an expire set. All the keys that are expired are deleted from the keyspace.",
+              "rationale": "The official Redis command documentation for EXPIRE explains the native mechanism for key expiration, which is the standard way to manage session lifecycles without manual periodic cleanup."
+            }
+          ]
+        },
+        "seen_web_urls": [
+          "https://cronitor.io/guides/kubernetes-cron-job-recipes",
+          "https://docs.cloud.google.com/kubernetes-engine/docs/how-to/cronjobs",
+          "https://experienceleague.adobe.com/en/docs/commerce-operations/configuration-guide/cache/redis/redis-session",
+          "https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/",
+          "https://medium.com/@20011002nimeth/session-management-with-redis-a21d43ac7d5a",
+          "https://oneuptime.com/blog/post/2026-03-31-redis-data-expiration-strategy-best-practices/view",
+          "https://redis.io/docs/latest/commands/expire/",
+          "https://stackoverflow.com/questions/16741476/redis-session-expiration-and-reverse-lookup",
+          "https://stackoverflow.com/questions/48253009/setting-concurrency-kubernetes-cronjob",
+          "https://www.groundcover.com/learn/kubernetes/kubernetes-cronjob"
+        ]
+      },
+      {
+        "stage": "author",
+        "model": "gemini-3-flash-preview",
+        "thinking": "low",
+        "input_tokens": 7378,
+        "output_tokens": 669,
+        "elapsed_s": 4.9773103629704565,
+        "cost_usd": 0.005696,
+        "error": "",
+        "tool_calls": [],
+        "output": "Use the **CronJob** resource in Kubernetes rather than running a `cron` daemon inside your application container. Instead of keeping a pod alive to manage its own schedule, a [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) lets the cluster controller handle the timing and spin up a fresh pod only when it's time to work.\n\nFor Redis session cleanup, the most resilient path is actually to stop running manual cleanup scripts entirely. Redis has native [EXPIRE](https://redis.io/docs/latest/commands/expire/) functionality that handles key eviction automatically. By setting a TTL (Time To Live) when you write the session key, Redis manages the memory and deletion for you, which eliminates the risk of a cleanup job failing and letting memory usage balloon.\n\nIf you must run a custom script—for example, to perform complex logic or notify other systems before deletion—configure your [CronJob](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) with a `concurrencyPolicy`. Setting this to `Forbid` prevents a new job from starting if the previous one is still running, which is a common failure mode when cleanup tasks take longer than the 10-minute interval.\n\n```sdanswer\n{\n  \"type\": \"cards\",\n  \"cards\": [\n    {\n      \"type\": \"snippet\",\n      \"title\": \"Kubernetes CronJob Manifest\",\n      \"description\": \"The standard way to run periodic tasks in a cluster. Use Forbid to prevent overlapping runs.\",\n      \"language\": \"yaml\",\n      \"snippet\": \"apiVersion: batch/v1\\nkind: CronJob\\nmetadata:\\n  name: session-cleanup\\nspec:\\n  schedule: \\\"*/10 * * * *\\\"\\n  concurrencyPolicy: Forbid\\n  jobTemplate:\\n    spec:\\n      template:\\n        spec:\\n          containers:\\n          - name: cleanup\\n            image: your-repo/cleanup-script:latest\\n          restartPolicy: OnFailure\",\n      \"category\": \"infrastructure-hosting\"\n    },\n    {\n      \"type\": \"tradeoff\",\n      \"title\": \"Cleanup Strategy\",\n      \"options\": [\n        {\n          \"label\": \"Redis TTLs\",\n          \"bullets\": [\n            \"No extra code\",\n            \"Automatic memory management\",\n            \"Built-in expiration\"\n          ]\n        },\n        {\n          \"label\": \"K8s CronJob\",\n          \"bullets\": [\n            \"Best for custom logic\",\n            \"External to database\",\n            \"Observable via cluster logs\"\n          ]\n        }\n      ]\n    },\n    {\n      \"type\": \"article\",\n      \"url\": \"https://learnk8s.io/production-best-practices\"\n    }\n  ]\n}\n```\n\nMake sure your cleanup script handles signals correctly; when the job finishes or is terminated, Kubernetes sends a SIGTERM that your entrypoint needs to pass to the process to ensure a graceful exit."
+      }
+    ]
+  }
+]

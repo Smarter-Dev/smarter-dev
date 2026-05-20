@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Full pipeline eval — 2026-05-20 03:25:43</title>
+<style>
+  :root {
+    --bg: #0e1115; --fg: #d8e0ea; --muted: #8d97a6;
+    --cyan: #4fb8ff; --green: #6ce6a0; --amber: #ffba6a;
+    --border: rgba(255,255,255,.08); --card: #161a21; --code: #1e242d;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px; background: var(--bg); color: var(--fg);
+         font: 15px/1.55 -apple-system, BlinkMacSystemFont, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { margin: 0 0 .25rem; font-size: 1.5rem; }
+  h2 { font-size: 1.05rem; margin: 1.25rem 0 .5rem; }
+  h3 { font-size: .82rem; margin: 1rem 0 .35rem;
+        text-transform: uppercase; letter-spacing: .12em;
+        color: var(--muted); }
+  .sub { color: var(--muted); font-size: .85rem; margin-bottom: 1rem; }
+  table { width: 100%; border-collapse: collapse; margin: .5rem 0 1.25rem;
+           font-size: .85rem; }
+  th, td { padding: .35rem .55rem; text-align: left;
+            border-bottom: 1px solid var(--border); }
+  th { font-weight: 600; color: var(--muted); font-size: .72rem;
+        text-transform: uppercase; letter-spacing: .12em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.total td { font-weight: 700; border-top: 2px solid var(--border); }
+  code { background: var(--code); padding: .1em .35em; border-radius: 3px;
+          font-size: .9em; }
+  pre { background: var(--code); padding: .75rem .85rem; border-radius: 4px;
+         overflow-x: auto; line-height: 1.45; font-size: .85rem; }
+  blockquote { border-left: 3px solid var(--cyan); margin: .5rem 0;
+                padding: .25rem 0 .25rem .8rem; color: var(--muted);
+                font-style: italic; }
+  a { color: var(--cyan); }
+  .prompt-card { background: var(--card); border: 1px solid var(--border);
+                  border-radius: 6px; padding: 1rem 1.25rem;
+                  margin-bottom: 1rem; }
+  details { border: 1px solid var(--border); border-radius: 6px;
+             margin: .35rem 0; background: var(--card); }
+  details > summary { cursor: pointer; padding: .55rem .8rem;
+                       font: 600 .82rem/1 -apple-system, sans-serif;
+                       list-style: none; display: flex; gap: .5rem;
+                       align-items: center; flex-wrap: wrap; }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: "▸"; color: var(--muted);
+                               transition: transform .15s; font-size: .75rem; }
+  details[open] > summary::before { transform: rotate(90deg);
+                                     display: inline-block; }
+  .pill { display: inline-block; padding: .12rem .45rem;
+           font: 600 .7rem/1.4 ui-monospace, "SF Mono", monospace;
+           border-radius: 3px; background: rgba(79,184,255,.15);
+           color: var(--cyan); }
+  .pill.reframer { background: rgba(255,186,106,.15); color: var(--amber); }
+  .pill.researcher { background: rgba(79,184,255,.15); color: var(--cyan); }
+  .pill.gap_filler { background: rgba(108,230,160,.15); color: var(--green); }
+  .pill.author    { background: rgba(216,184,90,.18); color: #e8c971; }
+  .pill.cost { background: transparent; color: var(--muted);
+                font-weight: 400; }
+  details > .body { padding: 0 .8rem .9rem;
+                     border-top: 1px solid var(--border); }
+  .md p:first-child { margin-top: .5rem; }
+  .md p:last-child { margin-bottom: 0; }
+  .md ul, .md ol { margin: .35rem 0 .6rem; padding-left: 1.4rem; }
+  .md li { margin: .15rem 0; }
+  .empty { color: var(--muted); font-style: italic; }
+  .res-section { font-size: .68rem; letter-spacing: .14em;
+                  text-transform: uppercase; color: var(--muted);
+                  margin: .85rem 0 .4rem; font-weight: 600; }
+  .excerpt-list { display: flex; flex-direction: column; gap: .55rem; }
+  .excerpt { padding: .55rem .75rem;
+              background: rgba(79,184,255,.04);
+              border-left: 2px solid rgba(79,184,255,.5);
+              border-radius: 0 4px 4px 0; }
+  .excerpt-point { font-weight: 600; color: var(--cyan);
+                    font-size: .82rem; margin-bottom: .25rem; }
+  .excerpt-text { font-size: .88rem; line-height: 1.5; margin: 0 0 .2rem; }
+  .excerpt-cite { font-size: .78rem; color: var(--muted); }
+  .excerpt-path-unresolved { color: #c54848; opacity: 1; }
+  ul.gap-list { list-style: none; padding: 0; margin: 0;
+                 display: flex; flex-direction: column; gap: .35rem; }
+  ul.gap-list li { font-size: .82rem; line-height: 1.45;
+                    border-left: 2px solid #c5a448; padding: .15rem .5rem;
+                    background: rgba(197, 164, 72, 0.06); }
+  .gap-concept { font-weight: 600; color: #d8b85a; }
+  .gap-needed { color: var(--text); margin: .1rem 0; }
+  .gap-queries { color: var(--muted); font-size: .76rem; }
+  ul.further-list, ul.topic-list { list-style: none; padding: 0; margin: 0;
+                                    display: flex; flex-direction: column;
+                                    gap: .25rem; }
+  ul.further-list li, ul.topic-list li { font-size: .85rem; line-height: 1.45; }
+  .further-blurb { color: var(--muted); }
+  .table tool-table { font-size: .8rem; margin: 0 0 .25rem; }
+  table.tool-table th { font-weight: 600; }
+  table.tool-table td { vertical-align: top; padding: .3rem .55rem; }
+  .res-section-count { color: var(--muted); font-weight: 400;
+                        text-transform: none; letter-spacing: 0;
+                        font-size: .68rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Full pipeline eval — reframer + researcher + gap-filler + author</h1>
+  <p class="sub">Generated 2026-05-20 03:25:43 · 5 prompt(s) · 5
+    model calls · prod model config<br>
+    Reframer <code>gemini-3-flash-preview · think=medium</code> →
+    Researcher <code>gpt-5.4-nano · think=medium</code> →
+    Gap-filler <code>gemini-3-flash-preview · think=low</code> →
+    Author <code>gemini-3-flash-preview · think=low</code></p>
+
+  <h2>Cost totals</h2>
+  <table>
+    <thead><tr>
+      <th>Model</th><th class="num">Input tok</th>
+      <th class="num">Output tok</th><th class="num">Cost (USD)</th>
+    </tr></thead>
+    <tbody>
+      <tr><td><code>gemini-3-flash-preview</code></td><td class='num'>10,311</td><td class='num'>3,607</td><td class='num'>$0.0160</td></tr>
+      <tr class="total">
+        <td>TOTAL</td>
+        <td class="num">10,311</td>
+        <td class="num">3,607</td>
+        <td class="num">$0.0160</td>
+      </tr>
+    </tbody>
+  </table>
+
+<div class='prompt-card'><h2>Prompt 1</h2><blockquote>What are the trade-offs between REST and GraphQL?</blockquote><p class='sub'>$0.0032 · 2,047 in / 742 out tok · 1 stage(s)</p><details open><summary><span class='pill reframer'>Reframer</span><span class='pill'>gemini-3-flash-preview · think=medium</span><span class='pill cost'>2,047 in / 742 out tok · $0.0032 · 5.6s</span></summary><div class='body'><h4 class='res-section'>Restated question (user-visible)</h4><blockquote>You&#x27;re asking for the trade-offs between REST and GraphQL. I&#x27;ll compare them across data-fetching efficiency, caching, and maintenance, while also looking at how they perform when AI agents are the primary consumers of your API.</blockquote><h4 class='res-section'>Reframing instructions (author-facing)</h4><div class='md'><p>Focus on the architectural implications rather than just a feature comparison. Contrast REST’s reliance on HTTP semantics and caching against GraphQL’s precision and query complexity. Include a perspective on how these styles affect AI agents—specifically regarding schema introspection and tool-calling efficiency. Skip basic ‘how-to’ syntax and focus on long-term maintenance and performance.</p>
+</div><h4 class='res-section'>Corpus topics (→ researcher)</h4><ul class='topic-list'><li><code>REST vs GraphQL trade-offs</code></li><li><code>API caching strategies REST vs GraphQL</code></li><li><code>schema evolution and versioning APIs</code></li><li><code>API design for LLMs and AI agents</code></li><li><code>BFF pattern GraphQL vs REST</code></li></ul><h4 class='res-section'>Web search topics (→ gap-filler)</h4><ul class='topic-list'><li class='empty'>(none)</li></ul></div></details></div>
+<div class='prompt-card'><h2>Prompt 2</h2><blockquote>How do I share state between AWS Lambda invocations? I&#x27;m building an API rate limiter and need request counts visible across all my Lambda containers running the handler.</blockquote><p class='sub'>$0.0032 · 2,069 in / 713 out tok · 1 stage(s)</p><details open><summary><span class='pill reframer'>Reframer</span><span class='pill'>gemini-3-flash-preview · think=medium</span><span class='pill cost'>2,069 in / 713 out tok · $0.0032 · 5.2s</span></summary><div class='body'><h4 class='res-section'>Restated question (user-visible)</h4><blockquote>You&#x27;re asking how to sync state between Lambda containers for a rate limiter, but since Lambda is stateless by design, the durable approach is using an external data store. I&#x27;ll find resources on distributed rate limiting patterns and the trade-offs between using Redis or DynamoDB for this specific use case.</blockquote><h4 class='res-section'>Reframing instructions (author-facing)</h4><div class='md'><p>Focus on the architectural trade-offs between Redis (low latency, ephemeral) and DynamoDB (durability, no-management) for stateful serverless tasks. Explain why global variables are insufficient for distributed concurrency. Skip basic Lambda tutorials; focus on high-concurrency state management patterns.</p>
+</div><h4 class='res-section'>Corpus topics (→ researcher)</h4><ul class='topic-list'><li><code>distributed rate limiting patterns serverless</code></li><li><code>DynamoDB atomic increments rate limiting</code></li><li><code>Redis for serverless state management</code></li><li><code>Lambda execution environment lifecycle state sharing</code></li><li><code>API Gateway vs Lambda-side rate limiting</code></li></ul><h4 class='res-section'>Web search topics (→ gap-filler)</h4><ul class='topic-list'><li class='empty'>(none)</li></ul></div></details></div>
+<div class='prompt-card'><h2>Prompt 3</h2><blockquote>Help me debug this stack trace: TypeError: &#x27;NoneType&#x27; object is not iterable at line 47 of my Flask app. The line is for item in cart.items: and it happens on the /checkout endpoint.</blockquote><p class='sub'>$0.0031 · 2,082 in / 676 out tok · 1 stage(s)</p><details open><summary><span class='pill reframer'>Reframer</span><span class='pill'>gemini-3-flash-preview · think=medium</span><span class='pill cost'>2,082 in / 676 out tok · $0.0031 · 4.9s</span></summary><div class='body'><h4 class='res-section'>Restated question (user-visible)</h4><blockquote>You&#x27;re asking for help debugging a specific error in your Flask checkout flow, but the more useful approach is to look at the patterns for resilient state management and defensive coding. I&#x27;ll provide resources on handling missing state gracefully and setting up the observability needed to catch these issues before they hit production.</blockquote><h4 class='res-section'>Reframing instructions (author-facing)</h4><div class='md'><p>Pivot from the specific stack trace to the underlying architectural issues: state consistency and defensive programming. Focus the response on how to handle potentially missing objects in web workflows and how to implement observability to catch these issues in production. Skip direct code fixes for the Flask app.</p>
+</div><h4 class='res-section'>Corpus topics (→ researcher)</h4><ul class='topic-list'><li><code>defensive coding patterns for web applications</code></li><li><code>handling null and none in python</code></li><li><code>state management for shopping carts</code></li><li><code>observability for python web apps</code></li><li><code>error handling and logging best practices</code></li></ul><h4 class='res-section'>Web search topics (→ gap-filler)</h4><ul class='topic-list'><li class='empty'>(none)</li></ul></div></details></div>
+<div class='prompt-card'><h2>Prompt 4</h2><blockquote>How do I build an agent that doesn&#x27;t hallucinate tool arguments?</blockquote><p class='sub'>$0.0037 · 2,051 in / 879 out tok · 1 stage(s)</p><details open><summary><span class='pill reframer'>Reframer</span><span class='pill'>gemini-3-flash-preview · think=medium</span><span class='pill cost'>2,051 in / 879 out tok · $0.0037 · 6.1s</span></summary><div class='body'><h4 class='res-section'>Restated question (user-visible)</h4><blockquote>You&#x27;re asking how to ensure LLM agents generate accurate and valid arguments when calling tools. I&#x27;ll pull resources on structured output enforcement, validation-correction loops, and spec-first engineering patterns that treat tool calls as verifiable data rather than just text.</blockquote><h4 class='res-section'>Reframing instructions (author-facing)</h4><div class='md'><p>Focus on the architectural shift from ‘hoping for accuracy’ to ‘enforcing validity.’ Emphasize patterns like structured outputs, schema-driven generation, and automated verification loops where the agent corrects itself based on validation errors. Skip basic prompt-engineering advice in favor of durable patterns like spec-first development and human-in-the-loop verification.</p>
+</div><h4 class='res-section'>Corpus topics (→ researcher)</h4><ul class='topic-list'><li><code>JSON schema for tool calling llms</code></li><li><code>Pydantic model enforcement agents</code></li><li><code>structured output validation patterns</code></li><li><code>tool call verification loops</code></li><li><code>spec-first agent development</code></li><li><code>few-shot prompting for tool arguments</code></li></ul><h4 class='res-section'>Web search topics (→ gap-filler)</h4><ul class='topic-list'><li><code>constrained decoding frameworks tool calling 2026</code></li></ul></div></details></div>
+<div class='prompt-card'><h2>Prompt 5</h2><blockquote>How do I run cron jobs inside my Kubernetes pods? I need to clean up expired sessions from Redis every 10 minutes.</blockquote><p class='sub'>$0.0028 · 2,062 in / 597 out tok · 1 stage(s)</p><details open><summary><span class='pill reframer'>Reframer</span><span class='pill'>gemini-3-flash-preview · think=medium</span><span class='pill cost'>2,062 in / 597 out tok · $0.0028 · 4.3s</span></summary><div class='body'><h4 class='res-section'>Restated question (user-visible)</h4><blockquote>You&#x27;re asking how to run cron inside a pod, but the better approach in Kubernetes is to use the native CronJob resource or leverage Redis TTLs for session management. I&#x27;ll pull resources on Kubernetes job patterns and Redis session expiration to show you the more reliable way to handle this.</blockquote><h4 class='res-section'>Reframing instructions (author-facing)</h4><div class='md'><p>Focus on the Kubernetes CronJob controller as the standard replacement for running cron inside a pod. Emphasize why internal crond processes are an anti-pattern (observability, logging, and signal handling). Briefly include Redis-native TTL and EXPIRE patterns as the most efficient way to handle session cleanup without external jobs. Skip tutorials on installing cron packages in Dockerfiles.</p>
+</div><h4 class='res-section'>Corpus topics (→ researcher)</h4><ul class='topic-list'><li><code>Kubernetes CronJob patterns</code></li><li><code>Redis session cleanup strategies</code></li><li><code>Kubernetes workload types and use cases</code></li><li><code>container lifecycle anti-patterns</code></li></ul><h4 class='res-section'>Web search topics (→ gap-filler)</h4><ul class='topic-list'><li class='empty'>(none)</li></ul></div></details></div>
+
+</div>
+</body>
+</html>

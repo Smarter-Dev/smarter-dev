@@ -1,0 +1,957 @@
+[
+  {
+    "prompt": "I'm new to event-driven architecture and want a 30-minute intro that's not a vendor pitch.",
+    "researchers": [],
+    "authors": [],
+    "gap_fillers": [],
+    "total_cost_usd": 0
+  },
+  {
+    "prompt": "We're picking between Postgres SKIP LOCKED and a managed SQS for a 10k-events/min burst workload — what are the trade-offs and where should I read up?",
+    "researchers": [],
+    "authors": [],
+    "gap_fillers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "medium",
+        "label": "gpt-5.4-nano · think=medium",
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "Postgres-specific semantics and operational trade-offs for SKIP LOCKED (claiming rows, lock contention, fairness, and how to build a robust lease/retry loop).",
+              "source_title": "Row locks, SKIP LOCKED, and transactions",
+              "source_url": "https://www.postgresql.org/message-id/E9FA92C2921F31408041863B74EE4C2001E7662416%40CCPMAILDAG03.cantab.local",
+              "excerpt": "However, even with just two worker processes, I quickly found that one worker process would be assigned a job id that had *very* recently been completed by the other worker.\n\n* If worker 2 begins querying for a new job id half a second before worker 1 commits then worker 2 will pick up the job id that worker 1 has just finished with.\n\n* I observe this even if I crank up the transaction isolation level to repeatable read and serializable.",
+              "rationale": "This is an authoritative PostgreSQL community thread centered on real SELECT … FOR UPDATE SKIP LOCKED worker-queue behavior and the resulting race/locking semantics under contention, including how transaction isolation affects it."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "\"SELECT ... FOR UPDATE\" \"SKIP LOCKED\" work queue pattern lease backoff retry"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.616487708990462
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "site:postgresql.org docs \"SKIP LOCKED\" \"FOR UPDATE\""
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.787780750077218
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://www.postgresql.org/message-id/E9FA92C2921F31408041863B74EE4C2001E7662416%40CCPMAILDAG03.cantab.local"
+            },
+            "result": "ok · 2964 chars",
+            "elapsed_s": 3.550916958018206
+          }
+        ],
+        "seen_urls": [
+          "https://crackingwalnuts.com/post/job-scheduler-system-design",
+          "https://dev.to/daniel_romitelli_44e77dc6/the-queue-was-a-table-how-i-built-claimunclaim-workers-with-skip-locked-stale-recovery-and-1ojm",
+          "https://medium.com/@mohamadshahkhajeh/taming-lock-contention-deadlocks-%EF%B8%8F-22e87921cb3d",
+          "https://news.ycombinator.com/item?id=45747018",
+          "https://www.linkedin.com/posts/mohamad-shahkhajeh-7675541b3_php-laravel-databaseengineering-activity-7395501858141839360-6Dib",
+          "https://www.postgresql.org/docs/current/sql-select.html",
+          "https://www.postgresql.org/docs/current/sql-update.html",
+          "https://www.postgresql.org/message-id/CADLWmXWakSyLGyYQPCM-Mob%3DtZDEWEfAJ-ghN6-SXozHbksTaA%40mail.gmail.com",
+          "https://www.postgresql.org/message-id/E9FA92C2921F31408041863B74EE4C2001E7662416%40CCPMAILDAG03.cantab.local",
+          "https://www.postgresql.org/message-id/E9FA92C2921F31408041863B74EE4C2001E766933B%40CCPMAILDAG03.cantab.local"
+        ],
+        "unresolved_citations": 0,
+        "input_tokens": 6935,
+        "output_tokens": 1684,
+        "elapsed_s": 43.401057875016704,
+        "cost_usd": 0.0034920000000000003,
+        "error": ""
+      },
+      {
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "medium",
+        "label": "gemini-3.1-flash-lite · think=medium",
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "Postgres-specific semantics and operational trade-offs for SKIP LOCKED (claiming rows, lock contention, fairness, and how to build a robust lease/retry loop).",
+              "source_title": "SELECT",
+              "source_url": "https://www.postgresql.org/docs/current/sql-select.html",
+              "excerpt": "FOR UPDATE, FOR NO KEY UPDATE, FOR SHARE and FOR KEY SHARE specify that the SELECT statement will acquire row-level locks on the rows returned by the query. [...] SKIP LOCKED is a clause that specifies that any rows that cannot be locked because they are already locked by another transaction should be skipped. This is useful for avoiding lock contention in multi-worker scenarios.",
+              "rationale": "The official PostgreSQL SELECT documentation defines the core semantics and intended use of SKIP LOCKED for handling row-level locks and contention."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "site:postgresql.org SELECT FOR UPDATE SKIP LOCKED"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.358903832966462
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "PostgreSQL documentation FOR UPDATE SKIP LOCKED"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.3816710410174
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://www.postgresql.org/docs/current/sql-select.html"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 1.0682808749843389
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "site:postgresql.org \"SKIP LOCKED\" FOR UPDATE"
+            },
+            "result": "5 hits",
+            "elapsed_s": 4.666478083934635
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "site:postgresql.org/docs \"SKIP LOCKED\" explained"
+            },
+            "result": "5 hits",
+            "elapsed_s": 6.58046354202088
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://www.postgresql.org/docs/9.5/release-9-5.html"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.4113180000567809
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "site:postgresql.org \"SKIP LOCKED\" \"FOR UPDATE\" \"SELECT\" documentation"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.37363883294165
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://wiki.postgresql.org/wiki/What's_new_in_PostgreSQL_9.5"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.37377441592980176
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "site:postgresql.org/docs \"SKIP LOCKED\" documentation SELECT FOR UPDATE"
+            },
+            "result": "5 hits",
+            "elapsed_s": 5.735617499914952
+          }
+        ],
+        "seen_urls": [
+          "https://wiki.postgresql.org/wiki/What's_new_in_PostgreSQL_9.5",
+          "https://www.inferable.ai/blog/posts/postgres-skip-locked",
+          "https://www.postgresql.org/docs/9.5/release-9-5.html",
+          "https://www.postgresql.org/docs/current/app-vacuumdb.html",
+          "https://www.postgresql.org/docs/current/fdw-callbacks.html",
+          "https://www.postgresql.org/docs/current/sql-select.html",
+          "https://www.postgresql.org/docs/current/sql-update.html",
+          "https://www.postgresql.org/docs/release/12.0/",
+          "https://www.postgresql.org/docs/release/13.5/",
+          "https://www.postgresql.org/docs/release/14.1/",
+          "https://www.postgresql.org/message-id/1b3a1a8.1930.150eede64b3.Coremail.digoal%40126.com",
+          "https://www.postgresql.org/message-id/550975CA.8020305%40boerngen-schmidt.de",
+          "https://www.postgresql.org/message-id/88d7b60d-045e-27c5-a2f4-c669371128c5%40iggland.com",
+          "https://www.postgresql.org/message-id/CAD1W9HVzrF3QRZ1npsxT9hxk__FVz3MqFSo80xFQ6eD-DQcrvg%40mail.gmail.com",
+          "https://www.postgresql.org/message-id/DB4PR05MB40084E4B7E141F20205230AC73A0@DB4PR05MB400.eurprd05.prod.outlook.com",
+          "https://www.postgresql.org/message-id/E9FA92C2921F31408041863B74EE4C2001E7662416%40CCPMAILDAG03.cantab.local",
+          "https://www.postgresql.org/message-id/c192f8bf-a747-6ad9-c54d-1bd6febafc4f%40talentstack.to",
+          "https://www.postgresql.org/message-id/eec4db8f-336a-8bb1-fc82-086abadec9bd%40gusw.net",
+          "https://www.sarvaha.com/deadlock-resolving-deadlocks-with-skip-locked-in-postgresql/"
+        ],
+        "unresolved_citations": 0,
+        "input_tokens": 64806,
+        "output_tokens": 756,
+        "elapsed_s": 79.4552677499596,
+        "cost_usd": 0.0173355,
+        "error": ""
+      },
+      {
+        "model": "gemini-3-flash-preview",
+        "thinking": "low",
+        "label": "gemini-3-flash-preview · think=low",
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "Postgres-specific semantics and operational trade-offs for SKIP LOCKED (claiming rows, lock contention, fairness, and how to build a robust lease/retry loop).",
+              "source_title": "SELECT",
+              "source_url": "https://www.postgresql.org/docs/current/sql-select.html",
+              "excerpt": "With SKIP LOCKED, any selected rows that cannot be immediately locked are skipped. Skipping locked rows provides an unfair view of the data, so this is not suitable for general purpose work, but can be used to avoid lock contention among multiple consumers accessing a queue-like table.",
+              "rationale": "Official PostgreSQL documentation for the SELECT statement, specifically detailing the Locking Clause behavior."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "postgresql documentation SELECT FOR UPDATE SKIP LOCKED official guide"
+            },
+            "result": "5 hits",
+            "elapsed_s": 9.404840291012079
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "PostgreSQL work queue pattern SKIP LOCKED lease retry loop deep dive"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.364130374975502
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://www.postgresql.org/docs/current/sql-select.html"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 1.1524614170193672
+          }
+        ],
+        "seen_urls": [
+          "https://aminediro.com/posts/pg_job_queue/",
+          "https://dev.to/daniel_romitelli_44e77dc6/the-queue-was-a-table-how-i-built-claimunclaim-workers-with-skip-locked-stale-recovery-and-1ojm",
+          "https://dgursoy.medium.com/select-for-update-in-postgres-1b21f0a1b8c3",
+          "https://medium.com/@the_atomic_architect/postgresql-replaced-my-message-queue-and-taught-me-skip-locked-along-the-way-87d59e5b9525",
+          "https://techcommunity.microsoft.com/blog/adforpostgresql/potential-consequences-of-using-postgres-as-a-job-queue/4514332",
+          "https://www.alexstoica.com/blog/postgres-select-for-update-perf",
+          "https://www.inferable.ai/blog/posts/postgres-skip-locked",
+          "https://www.postgresql.org/docs/current/sql-select.html",
+          "https://www.postgresql.org/message-id/DB4PR05MB40084E4B7E141F20205230AC73A0@DB4PR05MB400.eurprd05.prod.outlook.com"
+        ],
+        "unresolved_citations": 0,
+        "input_tokens": 7991,
+        "output_tokens": 248,
+        "elapsed_s": 30.185435083927587,
+        "cost_usd": 0.0047395,
+        "error": ""
+      }
+    ],
+    "total_cost_usd": 0.025567
+  },
+  {
+    "prompt": "What's the right way to think about transactional outbox vs change data capture for an agentic email platform on Kubernetes?",
+    "researchers": [],
+    "authors": [],
+    "gap_fillers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "medium",
+        "label": "gpt-5.4-nano · think=medium",
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "How change data capture (CDC) connectors (e.g., transaction-log-based streaming) differ from outbox semantics for correctness guarantees, ordering, and idempotency in an agentic workflow",
+              "source_title": "Revisiting the Outbox Pattern",
+              "source_url": "https://www.decodable.co/blog/revisiting-the-outbox-pattern",
+              "excerpt": "Note that, while the outbox pattern ensures atomicity of a local database update and sending out a message to external consumers, it does not provide complete [ACID transactional guarantees]. Specifically, the pattern provides eventual consistency semantics: changes to the local datastore of the writing service become visible immediately, while the notification of other services happens asynchronously.\n\nA much better solution is to retrieve the outbox events via log-based CDC. By tailing the database’s transaction log (e.g. the write-ahead log, WAL, in case of Postgres), events are emitted in the exact same order as transactions were committed to the database, ensuring consistency between internal and external representation of the data.\n\nBesides the actual event payload (often JSON, but you can use any format of your choosing) an outbox table typically has columns for message id (allowing consumers to identify messages sent more than once, more on that later) and event type, allowing you to route events of different types to different topics.",
+              "rationale": "This article directly explains outbox correctness/consistency (atomicity vs ACID), compares polling vs log-based CDC for commit-ordering, and describes outbox table fields (message id) used for consumer idempotency."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "database change data capture transaction log tailing versus outbox pattern publisher subscriber correctness guarantees idempotent consumers"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.451991667039692
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "transactional outbox pattern versus change data capture CDC ordering idempotency exactly-once semantics authoritative source"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.469807083019987
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://www.decodable.co/blog/revisiting-the-outbox-pattern"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 4.937478541978635
+          }
+        ],
+        "seen_urls": [
+          "https://debezium.io/blog/2020/02/10/event-sourcing-vs-cdc/",
+          "https://dev.to/airtruffle/event-driven-microservices-for-booking-systems-saga-patterns-and-eventual-consistency-in-travel-5g9i",
+          "https://medium.com/@luke.greene86/change-data-capture-vs-outbox-pattern-how-to-choose-the-right-tool-for-reliable-event-delivery-e8ee8f5f50bd",
+          "https://medium.com/@subodh.shetty87/designing-reliable-distributed-systems-transactional-outbox-change-data-capture-cdc-pattern-0461b00cf059",
+          "https://thebackenddevelopers.substack.com/p/change-data-capture-strategies-in",
+          "https://www.decodable.co/blog/revisiting-the-outbox-pattern",
+          "https://www.linkedin.com/posts/raul-junco_after-years-building-event-driven-systems-activity-7278770394046631936-zu3-",
+          "https://www.reddit.com/r/dotnet/comments/1kfh4iz/is_the_outbox_pattern_a_necessary_evil_or_just/"
+        ],
+        "unresolved_citations": 0,
+        "input_tokens": 7906,
+        "output_tokens": 1959,
+        "elapsed_s": 46.52519237506203,
+        "cost_usd": 0.004029949999999999,
+        "error": ""
+      },
+      {
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "medium",
+        "label": "gemini-3.1-flash-lite · think=medium",
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "How change data capture (CDC) connectors (e.g., transaction-log-based streaming) differ from outbox semantics for correctness guarantees, ordering, and idempotency in an agentic workflow",
+              "source_title": "CDC and Outbox Pattern — same same but different?",
+              "source_url": "https://www.lotharschulz.info/2022/12/08/cdc-and-outbox-pattern-same-same-but-different/",
+              "excerpt": "CDC and Outbox Pattern are different in how the message relay reads change data. The Outbox Pattern implements an additional outbox table that contains the changed events; CDC uses database (materialized) view(s) from which changes are read. While the additional outbox table adds additional complexity to manage change events, it’s also an additional database table to store change events of a database.",
+              "rationale": "This article by a technical consultant provides a clear, architectural comparison of how Outbox and CDC patterns handle state changes, which is fundamental to determining correct delivery semantics."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "microservices.io transactional outbox vs change data capture"
+            },
+            "result": "5 hits",
+            "elapsed_s": 8.799887750064954
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "transactional outbox vs change data capture pattern comparison reliability"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.31535674992483
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://www.lotharschulz.info/2022/12/08/cdc-and-outbox-pattern-same-same-but-different/"
+            },
+            "result": "ok · 3341 chars",
+            "elapsed_s": 16.0328132500872
+          }
+        ],
+        "seen_urls": [
+          "https://medium.com/@luke.greene86/change-data-capture-vs-outbox-pattern-how-to-choose-the-right-tool-for-reliable-event-delivery-e8ee8f5f50bd",
+          "https://medium.com/@subodh.shetty87/designing-reliable-distributed-systems-transactional-outbox-change-data-capture-cdc-pattern-0461b00cf059",
+          "https://medium.com/lotharschulz/cdc-and-outbox-pattern-same-same-but-different-c467c1be3cce",
+          "https://microservices.io/patterns/data/transactional-outbox.html",
+          "https://newsletter.systemdesigncodex.com/p/change-data-capture-and-microservices",
+          "https://stackoverflow.com/questions/72284628/comparing-cdc-vs-outbox-pattern-for-creating-event-streams",
+          "https://www.linkedin.com/posts/monsur-azeez-0b29588b_exploring-the-outbox-pattern-polling-vs-activity-7418581678513668097--X3P",
+          "https://www.lotharschulz.info/2022/12/08/cdc-and-outbox-pattern-same-same-but-different/",
+          "https://www.reddit.com/r/dotnet/comments/1kfh4iz/is_the_outbox_pattern_a_necessary_evil_or_just/"
+        ],
+        "unresolved_citations": 0,
+        "input_tokens": 6418,
+        "output_tokens": 800,
+        "elapsed_s": 45.78464595798869,
+        "cost_usd": 0.0028045,
+        "error": ""
+      },
+      {
+        "model": "gemini-3-flash-preview",
+        "thinking": "low",
+        "label": "gemini-3-flash-preview · think=low",
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "How change data capture (CDC) connectors (e.g., transaction-log-based streaming) differ from outbox semantics for correctness guarantees, ordering, and idempotency in an agentic workflow",
+              "source_title": "Reliable Microservices Data Exchange With the Outbox Pattern",
+              "source_url": "https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/",
+              "excerpt": "The idea of this approach is to have an 'outbox' table in the service’s database. When receiving a request... not only an INSERT into the PurchaseOrder table is done, but, as part of the same transaction, also a record representing the event to be sent is inserted into that outbox table... An asynchronous process monitors that table for new entries. If there are any, it propagates the events as messages to Apache Kafka. This gives us a very nice balance of characteristics: By synchronously writing to the PurchaseOrder table, the source service benefits from 'read your own writes' semantics... At the same time, we get reliable, asynchronous, eventually consistent data propagation to other services via Apache Kafka.",
+              "rationale": "Official Debezium (Red Hat) documentation comparing the trade-offs of the Outbox pattern versus standard CDC log-tailing for reliable event-driven architectures."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "transactional outbox vs change data capture CDC architectural comparison reliability ordering"
+            },
+            "result": "5 hits",
+            "elapsed_s": 18.55679095897358
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "Debezium documentation outbox pattern vs CDC transaction log tailing comparison"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.358475415967405
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 5.0213793750153854
+          }
+        ],
+        "seen_urls": [
+          "https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/",
+          "https://dev.to/onepoint/using-change-data-capture-or-outbox-pattern-in-microservices-for-decentralized-data-propagation-4fii",
+          "https://medium.com/@luke.greene86/change-data-capture-vs-outbox-pattern-how-to-choose-the-right-tool-for-reliable-event-delivery-e8ee8f5f50bd",
+          "https://medium.com/@subodh.shetty87/designing-reliable-distributed-systems-transactional-outbox-change-data-capture-cdc-pattern-0461b00cf059",
+          "https://medium.com/@vydrakanna/outbox-pattern-database-table-vs-cdc-39b0799083ff",
+          "https://stackoverflow.com/questions/72284628/comparing-cdc-vs-outbox-pattern-for-creating-event-streams",
+          "https://stackoverflow.com/questions/76234271/outbox-pattern-vs-debezium",
+          "https://www.decodable.co/blog/revisiting-the-outbox-pattern",
+          "https://www.linkedin.com/posts/monsur-azeez-0b29588b_exploring-the-outbox-pattern-polling-vs-activity-7418581678513668097--X3P"
+        ],
+        "unresolved_citations": 0,
+        "input_tokens": 8224,
+        "output_tokens": 421,
+        "elapsed_s": 34.75244899990503,
+        "cost_usd": 0.0053750000000000004,
+        "error": ""
+      }
+    ],
+    "total_cost_usd": 0.01220945
+  },
+  {
+    "prompt": "I want to deeply understand database internals — index structures, write-ahead logging, MVCC — and I have a free weekend. What should I read first?",
+    "researchers": [],
+    "authors": [],
+    "gap_fillers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "medium",
+        "label": "gpt-5.4-nano · think=medium",
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "Write-ahead logging (WAL) and crash recovery internals (redo/undo records, checkpoints)",
+              "source_title": "ARIES",
+              "source_url": "https://web.stanford.edu/class/cs345d-01/rl/aries.pdf",
+              "excerpt": "We introduce the paradigm of repeating history to redo all missing updates before performing the rollbacks of the loser transactions during restart after a system failure. ARIES uses a log sequence number in each page to correlate the state of a page with respect to logged updates of that page. The undo (respectively, redo) portion of a log record provides information on how to undo (respec-tively, redo) changes",
+              "rationale": "This is the original ARIES paper (ACM TODS), which is a canonical, primary technical source for WAL-based recovery including redo/undo log records, restart, and checkpoint/recovery mechanisms."
+            },
+            {
+              "gap_concept": "MVCC implementation details (snapshots, visibility rules, transaction IDs)",
+              "source_title": "MVCC in PostgreSQL — 4. Snapshots",
+              "source_url": "https://postgrespro.com/blog/pgsql/5967899",
+              "excerpt": "Isolation in PosgreSQL is based on snapshots: each transaction works with its own data snapshot, which \"contains\" data that were committed before the moment the snapshot was created and does not \"contain\" data that were not committed by that moment yet.\n\nWhether a tuple will be visible or not in a snapshot depends on two fields in the header, namely, `xmin` and `xmax`, that is, the IDs of the transactions that created and deleted the tuple.",
+              "rationale": "This detailed deep-dive explains MVCC snapshot semantics and the concrete tuple visibility fields (`xmin`/`xmax`) driven by transaction IDs, including an explicit walkthrough of how snapshots determine visibility."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "PostgreSQL WAL redo undo records checkpoints documentation pg_wal recovery"
+            },
+            "result": "5 hits",
+            "elapsed_s": 15.552419167011976
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "InnoDB consistent read MVCC snapshot transaction ID read view visibility rules"
+            },
+            "result": "5 hits",
+            "elapsed_s": 24.650723166996613
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "ARIES transaction recovery method supporting fine-granularity locking and partial rollbacks redo undo checkpoints log records"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.399624040932395
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "PostgreSQL documentation MVCC xmin xmax visibility rules transaction snapshots"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.41236758301966
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://web.stanford.edu/class/cs345d-01/rl/aries.pdf"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.5790519160218537
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://postgrespro.com/blog/pgsql/5967899"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.587340582977049
+          }
+        ],
+        "seen_urls": [
+          "http://muratbuffalo.blogspot.com/2023/04/aries-transaction-recovery-method.html",
+          "https://dev.to/markliu2013/mvcc-concept-the-no-lock-approach-for-high-concurrency-systems-ooj",
+          "https://jnidzwetzki.github.io/2024/04/03/postgres-and-snapshots.html",
+          "https://medium.com/@rahulhind/the-core-of-postgresql-understanding-transactions-isolation-and-mvcc-90247992f14e",
+          "https://mwhittaker.github.io/prelim_notes/html/aries-a-transaction-recovery-method-supporting-fine-granularity-locking-and-partial-rollbacks-using-write-ahead-logging.html",
+          "https://oneuptime.com/blog/post/2026-03-31-mysql-innodb-mvcc/view",
+          "https://pgdba.org/post/checkpoint_redo/",
+          "https://postgrespro.com/blog/pgsql/5967899",
+          "https://postgrespro.com/blog/pgsql/5967965",
+          "https://research.ibm.com/publications/aries-a-transaction-recovery-method-supporting-fine-granularity-locking-and-partial-rollbacks-using-write-ahead-logging",
+          "https://stackoverflow.com/questions/69034659/mvcc-the-atomicity-problem-of-consistent-reads",
+          "https://stackoverflow.com/questions/78895209/about-the-visibility-rules-of-postgres-mvcc",
+          "https://web.mit.edu/cygwin/cygwin_v1.3.2/usr/doc/postgresql-7.1.2/html/wal-configuration.html",
+          "https://web.stanford.edu/class/cs345d-01/rl/aries.pdf",
+          "https://www.postgresql.org/docs/12/functions-info.html",
+          "https://www.postgresql.org/docs/current/wal-configuration.html",
+          "https://www.postgresql.org/docs/current/wal-intro.html",
+          "https://www.red-gate.com/simple-talk/databases/mysql/exploring-mvcc-and-innodbs-multi-versioning-technique/",
+          "https://www.sh-reya.com/blog/aries/",
+          "https://xialeistudio.medium.com/understanding-mvcc-in-mysql-innodb-116100a27b65"
+        ],
+        "unresolved_citations": 0,
+        "input_tokens": 12726,
+        "output_tokens": 2449,
+        "elapsed_s": 44.84587341698352,
+        "cost_usd": 0.00560645,
+        "error": ""
+      },
+      {
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "medium",
+        "label": "gemini-3.1-flash-lite · think=medium",
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "Write-ahead logging (WAL) and crash recovery internals (redo/undo records, checkpoints)",
+              "source_title": "15-445/645 Database Systems (Fall 2025) - Lecture Notes - 22 Database Crash Recovery",
+              "source_url": "https://15445.courses.cs.cmu.edu/fall2025/notes/22-recovery.pdf",
+              "excerpt": "Algorithms for Recovery and Isolation Exploiting Semantics (ARIES) is a recovery algorithm developed at IBM research in early 1990s for the DB2 system. There are three key concepts in the ARIES recovery protocol: Write Ahead Logging: Any change is recorded in log on stable storage before the database change is written to disk (STEAL + NO-FORCE). Repeating History During Redo: On restart, retrace actions and restore database to exact state before crash. Logging Changes During Undo: Record undo actions to log to ensure action is not repeated in the event of repeated failures.",
+              "rationale": "This is a lecture note from Carnegie Mellon's database systems course (15-445/645), widely considered the gold standard for foundational database internals education."
+            },
+            {
+              "gap_concept": "MVCC implementation details (snapshots, visibility rules, transaction IDs)",
+              "source_title": "MVCC Concurrency Architecture: PostgreSQL way of implementation – II",
+              "source_url": "https://dbadataverse.com/tech/postgresql/2021/09/mvcc-concurrency-architecture-postgresql-way-of-implementation-ii",
+              "excerpt": "PostgreSQL assigns the current transaction id as a tuple identifier and names it as xmin when it got created. Whenever this tuple got updated, PostgreSQL does not update the record in place. It copies the entire tuple into a new location and in the same way, it assigns the current transaction id as xmin. When a delete is received by the database, it does not do anything but just update the tuple with xmax number which is again the current transaction id.",
+              "rationale": "This resource provides a clear technical breakdown of how PostgreSQL uses specific hidden columns (xmin/xmax) to manage transaction visibility and versioning, which is a canonical example of MVCC."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "\"ARIES\" recovery algorithm write-ahead logging redo undo checkpoints database internals"
+            },
+            "result": "5 hits",
+            "elapsed_s": 19.182493833941408
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "PostgreSQL MVCC implementation xmin xmax visibility rules documentation"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.410844499943778
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://15445.courses.cs.cmu.edu/fall2025/notes/22-recovery.pdf"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 2.4848482499364763
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://dbadataverse.com/tech/postgresql/2021/09/mvcc-concurrency-architecture-postgresql-way-of-implementation-ii"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.5028055830625817
+          }
+        ],
+        "seen_urls": [
+          "https://15445.courses.cs.cmu.edu/fall2025/notes/22-recovery.pdf",
+          "https://dbadataverse.com/tech/postgresql/2021/09/mvcc-concurrency-architecture-postgresql-way-of-implementation-ii",
+          "https://dev.to/headf1rst/postgresql-mvcc-internals-from-xminxmax-to-isolation-levels-2g6h",
+          "https://devcenter.heroku.com/articles/postgresql-concurrency",
+          "https://faculty.cc.gatech.edu/~jarulraj/courses/8803-s22/slides/07-recovery-1.pdf",
+          "https://medium.com/@jatinumamtora/a-deep-dive-into-write-ahead-logging-wal-in-database-engines-recovery-71f6d98f0e23",
+          "https://medium.com/@rahulhind/the-core-of-postgresql-understanding-transactions-isolation-and-mvcc-90247992f14e",
+          "https://stackoverflow.com/questions/78895209/about-the-visibility-rules-of-postgres-mvcc",
+          "https://web.stanford.edu/class/cs345d-01/rl/aries.pdf",
+          "https://www.linkedin.com/pulse/from-crash-recovery-power-aries-algorithm-manish-joshi-qetec"
+        ],
+        "unresolved_citations": 0,
+        "input_tokens": 15349,
+        "output_tokens": 657,
+        "elapsed_s": 54.17662799998652,
+        "cost_usd": 0.00482275,
+        "error": ""
+      },
+      {
+        "model": "gemini-3-flash-preview",
+        "thinking": "low",
+        "label": "gemini-3-flash-preview · think=low",
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "Write-ahead logging (WAL) and crash recovery internals (redo/undo records, checkpoints)",
+              "source_title": "15-445/645 Database Systems (Fall 2019) - Lecture Notes - 21 ARIES Database Crash Recovery Algorithms",
+              "source_url": "https://15445.courses.cs.cmu.edu/fall2019/notes/21-recovery.pdf",
+              "excerpt": "The ARIES protocol is comprised of three phases. Upon start-up after a crash, the DBMS will execute the following phases: 1. Analysis: Read the WAL to identify dirty pages in the buffer pool and active transactions at the time of the crash. 2. Redo: Repeat all actions starting from an appropriate point in the log. 3. Undo: Reverse the actions of transactions that did not commit before the crash.",
+              "rationale": "The CMU 15-445/645 (Database Systems) lecture notes by Andy Pavlo are a canonical academic resource detailing the ARIES recovery algorithm, which is the foundational logic for WAL and crash recovery in modern relational databases."
+            },
+            {
+              "gap_concept": "MVCC implementation details (snapshots, visibility rules, transaction IDs)",
+              "source_title": "MySQL :: MySQL 8.4 Reference Manual :: 17.3 InnoDB Multi-Versioning",
+              "source_url": "https://dev.mysql.com/doc/refman/8.4/en/innodb-multi-versioning.html",
+              "excerpt": "InnoDB adds three fields to each row stored in the database: A 6-byte DB_TRX_ID field indicates the transaction identifier for the last transaction that inserted or updated the row. ... A 7-byte DB_ROLL_PTR field called the roll pointer. The roll pointer points to an undo log record written to the undo log. If the row was updated, the undo log record contains the information necessary to rebuild the content of the row before it was updated.",
+              "rationale": "The official MySQL Reference Manual provides a primary-source deep dive into how InnoDB implements MVCC using hidden system columns (transaction IDs and roll pointers) and undo logs to provide consistent reads."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "Postgres MVCC internals xmin xmax visibility rules documentation"
+            },
+            "result": "5 hits",
+            "elapsed_s": 8.745577332912944
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "ARIES recovery algorithm database internals lecture notes or documentation"
+            },
+            "result": "5 hits",
+            "elapsed_s": 19.447808375000022
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "Postgres WAL internal format redo undo checkpoints recovery documentation"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.470441333018243
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "InnoDB MVCC internals implementation details transaction IDs snapshots"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.483357792021707
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://www.postgresql.org/docs/current/wal-internals.html"
+            },
+            "result": "ok · 3664 chars",
+            "elapsed_s": 0.42199775006156415
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://15445.courses.cs.cmu.edu/fall2019/notes/21-recovery.pdf"
+            },
+            "result": "ok · 8290 chars",
+            "elapsed_s": 0.4401319590397179
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://dev.mysql.com/doc/refman/8.4/en/innodb-multi-versioning.html"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.7877032910473645
+          }
+        ],
+        "seen_urls": [
+          "https://15445.courses.cs.cmu.edu/fall2019/notes/21-recovery.pdf",
+          "https://dba.stackexchange.com/questions/3792/how-does-postgresql-handle-checkpoints-in-the-middle-of-a-wal-enabled-backup",
+          "https://dbadataverse.com/tech/postgresql/2021/09/mvcc-concurrency-architecture-postgresql-way-of-implementation-ii",
+          "https://dev.mysql.com/doc/refman/8.4/en/innodb-multi-versioning.html",
+          "https://dev.to/headf1rst/postgresql-mvcc-internals-from-xminxmax-to-isolation-levels-2g6h",
+          "https://faculty.cc.gatech.edu/~jarulraj/courses/8803-s22/slides/07-recovery-1.pdf",
+          "https://medium.com/@moali314/database-logging-wal-redo-and-undo-mechanisms-58c076fbe36e",
+          "https://medium.com/@mon_vivre/mysql-lock-mechanism-under-mvcc-innodb-internals-0ae047625717",
+          "https://medium.com/@rahulhind/the-core-of-postgresql-understanding-transactions-isolation-and-mvcc-90247992f14e",
+          "https://oneuptime.com/blog/post/2026-03-31-mysql-mvcc-multi-version-concurrency-control/view",
+          "https://stackoverflow.com/questions/78895209/about-the-visibility-rules-of-postgres-mvcc",
+          "https://web.stanford.edu/class/cs345d-01/rl/aries.pdf",
+          "https://www.percona.com/blog/mvcc-transaction-ids-log-sequence-numbers-and-snapshots/",
+          "https://www.pgcon.org/2012/schedule/attachments/258_212_Internals%20Of%20PostgreSQL%20Wal.pdf",
+          "https://www.postgresql.org/docs/current/wal-internals.html",
+          "https://www.postgresql.org/docs/current/wal-intro.html",
+          "https://www.red-gate.com/simple-talk/databases/mysql/exploring-mvcc-and-innodbs-multi-versioning-technique/",
+          "https://www.scribd.com/document/840226979/21-Recovery-1",
+          "https://www.sh-reya.com/blog/aries/",
+          "https://www.weather.gov/media/owp/oh/hrl/docs/MVCC_and_Locks.pdf"
+        ],
+        "unresolved_citations": 0,
+        "input_tokens": 13223,
+        "output_tokens": 715,
+        "elapsed_s": 32.54246366699226,
+        "cost_usd": 0.0087565,
+        "error": ""
+      }
+    ],
+    "total_cost_usd": 0.0191857
+  },
+  {
+    "prompt": "How do I instrument an agent's tool calls so I can debug a runaway loop without losing the production trace?",
+    "researchers": [],
+    "authors": [],
+    "gap_fillers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "medium",
+        "label": "gpt-5.4-nano · think=medium",
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "OpenTelemetry context propagation mechanics for async/await tool calls (so trace/span context isn’t lost between agent iterations)",
+              "source_title": "asyncio context propagation in Python 3.5/3.6 · Issue #71 · open-telemetry/opentelemetry-python",
+              "source_url": "https://github.com/open-telemetry/opentelemetry-python/issues/71",
+              "excerpt": "The contextvars approach to context propagation requires copying current context on asyncio task creation.",
+              "rationale": "This is from the OpenTelemetry Python project’s issue tracker and directly describes the core async/context propagation behavior (copying the active context at asyncio task creation when using contextvars)."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "OpenTelemetry Python context propagation async await contextvars ScopeManager instrumentation tool calls preserve current span"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.56872558395844
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "OpenTelemetry context propagation across async boundaries documentation trace contextvars asyncio"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.555603624903597
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://opentelemetry.io/docs/concepts/context-propagation/"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.9033617919776589
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://github.com/open-telemetry/opentelemetry-python/issues/71"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 3.6339071659604087
+          }
+        ],
+        "seen_urls": [
+          "https://dev.to/ymtdzzz/opentelemetry-observability-of-async-processes-with-custom-propagator-2043",
+          "https://github.com/open-telemetry/opentelemetry-python/discussions/3653",
+          "https://github.com/open-telemetry/opentelemetry-python/issues/71",
+          "https://oneuptime.com/blog/post/2026-02-06-instrument-python-asyncio-coroutines-opentelemetry/view",
+          "https://oneuptime.com/blog/post/2026-02-06-propagate-trace-context-async-boundaries/view",
+          "https://opentelemetry.io/docs/concepts/context-propagation/",
+          "https://stackoverflow.com/questions/70700163/opentelemetry-context-propagation-test"
+        ],
+        "unresolved_citations": 0,
+        "input_tokens": 15407,
+        "output_tokens": 1889,
+        "elapsed_s": 45.251046249992214,
+        "cost_usd": 0.00544265,
+        "error": ""
+      },
+      {
+        "model": "gemini-3.1-flash-lite",
+        "thinking": "medium",
+        "label": "gemini-3.1-flash-lite · think=medium",
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "OpenTelemetry context propagation mechanics for async/await tool calls (so trace/span context isn’t lost between agent iterations)",
+              "source_title": "OpenTelemetry Python Documentation - Propagation",
+              "source_url": "https://opentelemetry.io/docs/languages/python/propagation/",
+              "excerpt": "OpenTelemetry’s Python SDK uses contextvars to ensure that trace context is correctly propagated across asynchronous boundaries in applications using asyncio. By utilizing contextvars, the SDK maintains the current span context within the execution flow of individual coroutines, which is essential for preserving trace continuity during complex tool-call sequences in AI agents.",
+              "rationale": "This is the authoritative approach for Python-based OpenTelemetry instrumentation to handle async context propagation as defined in the OpenTelemetry Python SDK's design."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "opentelemetry python context propagation async contextvars"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.537171124946326
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "OpenTelemetry trace context propagation across async boundaries python"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.554807791952044
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://opentelemetry.io/docs/concepts/context-propagation/"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 1.096604749909602
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://opentelemetry-python.readthedocs.io/en/stable/examples/basic_context/README.html"
+            },
+            "result": "ok · 5848 chars",
+            "elapsed_s": 2.020227333996445
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "site:opentelemetry.io \"contextvars\" async propagation python"
+            },
+            "result": "0 hits",
+            "elapsed_s": 0.6887152909766883
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "opentelemetry python manual instrumentation context propagation contextvars"
+            },
+            "result": "5 hits",
+            "elapsed_s": 25.40860270895064
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://opentelemetry.io/docs/languages/python/propagation/"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.49725883395876735
+          }
+        ],
+        "seen_urls": [
+          "https://dev.to/lightstep/opentelemetry-for-python-the-hard-way-2hb8",
+          "https://github.com/a2aproject/a2a-python/issues/281",
+          "https://github.com/open-telemetry/opentelemetry-ebpf-instrumentation/issues/931",
+          "https://github.com/open-telemetry/opentelemetry-python/discussions/3653",
+          "https://github.com/open-telemetry/opentelemetry-python/issues/71",
+          "https://oneuptime.com/blog/post/2026-02-06-debug-context-propagation-async-applications/view",
+          "https://oneuptime.com/blog/post/2026-02-06-propagate-trace-context-async-boundaries/view",
+          "https://oneuptime.com/blog/post/2026-02-09-otel-context-propagation/view",
+          "https://opentelemetry-python.readthedocs.io/en/stable/examples/basic_context/README.html",
+          "https://opentelemetry.io/docs/concepts/context-propagation/",
+          "https://opentelemetry.io/docs/languages/python/propagation/",
+          "https://www.cncf.io/blog/2025/10/09/testing-asynchronous-workflows-using-opentelemetry-and-istio/",
+          "https://www.reddit.com/r/golang/comments/1d1srg3/tracing_async_jobs_across_multiple_go_components/"
+        ],
+        "unresolved_citations": 0,
+        "input_tokens": 41860,
+        "output_tokens": 1277,
+        "elapsed_s": 64.58447225007694,
+        "cost_usd": 0.012380500000000001,
+        "error": ""
+      },
+      {
+        "model": "gemini-3-flash-preview",
+        "thinking": "low",
+        "label": "gemini-3-flash-preview · think=low",
+        "output": {
+          "citations": [
+            {
+              "gap_concept": "OpenTelemetry context propagation mechanics for async/await tool calls (so trace/span context isn’t lost between agent iterations)",
+              "source_title": "Context | OpenTelemetry",
+              "source_url": "https://opentelemetry.io/docs/specs/otel/context/",
+              "excerpt": "Context is a propagation mechanism which carries execution-scoped values across API boundaries and between logically associated execution units. . . Depending on the language, its usage may be either explicit or implicit. . . For example, in Python, the context is stored in a ThreadLocal or ContextVar.",
+              "rationale": "Official OpenTelemetry specification document defining the core behavior of Context as an immutable propagation mechanism across execution boundaries."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "OpenTelemetry Python context propagation async task documentation"
+            },
+            "result": "5 hits",
+            "elapsed_s": 16.2430114580784
+          },
+          {
+            "tool": "web_search",
+            "args": {
+              "query": "OpenTelemetry context propagation async await contextvars ScopeManager documentation"
+            },
+            "result": "5 hits",
+            "elapsed_s": 19.192524540936574
+          },
+          {
+            "tool": "read_url",
+            "args": {
+              "url": "https://opentelemetry-python.readthedocs.io/en/stable/examples/basic_context/README.html"
+            },
+            "result": "ok · 5848 chars",
+            "elapsed_s": 0.2710862079402432
+          }
+        ],
+        "seen_urls": [
+          "https://github.com/open-telemetry/opentelemetry-js/issues/1733",
+          "https://github.com/open-telemetry/opentelemetry-python/blob/main/docs/examples/basic_context/async_context.py",
+          "https://oneuptime.com/blog/post/2026-01-25-context-management-opentelemetry/view",
+          "https://oneuptime.com/blog/post/2026-02-06-propagate-trace-context-async-boundaries/view",
+          "https://opentelemetry-python.readthedocs.io/en/stable/examples/basic_context/README.html",
+          "https://opentelemetry.io/docs/concepts/context-propagation/",
+          "https://opentelemetry.io/docs/languages/js/context/",
+          "https://opentelemetry.io/docs/languages/python/propagation/",
+          "https://opentelemetry.io/docs/specs/otel/context/"
+        ],
+        "unresolved_citations": 0,
+        "input_tokens": 6102,
+        "output_tokens": 258,
+        "elapsed_s": 23.40433900000062,
+        "cost_usd": 0.003825,
+        "error": ""
+      }
+    ],
+    "total_cost_usd": 0.02164815
+  }
+]

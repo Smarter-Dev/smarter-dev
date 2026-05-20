@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pipeline eval — 2026-05-15 20:03:56</title>
+<style>
+  :root {
+    --bg: #0e1115;
+    --fg: #d8e0ea;
+    --muted: #8d97a6;
+    --cyan: #4fb8ff;
+    --green: #6ce6a0;
+    --amber: #ffba6a;
+    --border: rgba(255,255,255,.08);
+    --card: #161a21;
+    --code: #1e242d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    background: var(--bg); color: var(--fg);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { margin: 0 0 .25rem; font-size: 1.5rem; }
+  h2 { font-size: 1.05rem; margin: 1.25rem 0 .5rem; }
+  h3 { font-size: .82rem; margin: 1rem 0 .35rem;
+        text-transform: uppercase; letter-spacing: .12em;
+        color: var(--muted); }
+  .sub { color: var(--muted); font-size: .85rem; margin-bottom: 1rem; }
+  table { width: 100%; border-collapse: collapse; margin: .5rem 0 1.25rem;
+           font-size: .85rem; }
+  th, td { padding: .35rem .55rem; text-align: left;
+            border-bottom: 1px solid var(--border); }
+  th { font-weight: 600; color: var(--muted); font-size: .72rem;
+        text-transform: uppercase; letter-spacing: .12em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.total td { font-weight: 700; border-top: 2px solid var(--border); }
+  code { background: var(--code); padding: .1em .35em; border-radius: 3px;
+          font-size: .9em; }
+  pre { background: var(--code); padding: .75rem .85rem; border-radius: 4px;
+         overflow-x: auto; line-height: 1.45; font-size: .85rem; }
+  blockquote { border-left: 3px solid var(--cyan); margin: .5rem 0;
+                padding: .25rem 0 .25rem .8rem;
+                color: var(--muted); font-style: italic; }
+  a { color: var(--cyan); }
+  .prompt-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1rem;
+  }
+  details { border: 1px solid var(--border); border-radius: 6px;
+             margin: .35rem 0; background: var(--card); }
+  details > summary {
+    cursor: pointer; padding: .55rem .8rem;
+    font: 600 .82rem/1 -apple-system, sans-serif;
+    list-style: none;
+    display: flex; gap: .5rem; align-items: center; flex-wrap: wrap;
+  }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before {
+    content: "▸"; color: var(--muted); transition: transform .15s;
+    font-size: .75rem;
+  }
+  details[open] > summary::before { transform: rotate(90deg);
+    display: inline-block; }
+  .pill {
+    display: inline-block; padding: .12rem .45rem;
+    font: 600 .7rem/1.4 ui-monospace, "SF Mono", monospace;
+    border-radius: 3px;
+    background: rgba(79,184,255,.15); color: var(--cyan);
+  }
+  .pill.author { background: rgba(108,230,160,.15); color: var(--green); }
+  .pill.cost { background: transparent; color: var(--muted);
+                font-weight: 400; }
+  details > .body { padding: 0 .8rem .9rem;
+                     border-top: 1px solid var(--border); }
+  details > .body > .md { padding-top: .8rem; }
+  .md p:first-child { margin-top: 0; }
+  .md p:last-child  { margin-bottom: 0; }
+  .md ul, .md ol { margin: .35rem 0 .6rem; padding-left: 1.4rem; }
+  .md li { margin: .15rem 0; }
+  .empty { color: var(--muted); font-style: italic; }
+  .res-section {
+    font-size: .68rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--muted); margin: .85rem 0 .4rem; font-weight: 600;
+  }
+  .excerpt-list { display: flex; flex-direction: column; gap: .55rem; }
+  .excerpt {
+    padding: .55rem .75rem;
+    background: rgba(79,184,255,.04);
+    border-left: 2px solid rgba(79,184,255,.5);
+    border-radius: 0 4px 4px 0;
+  }
+  .excerpt-point {
+    font-weight: 600; color: var(--cyan); font-size: .82rem;
+    margin-bottom: .25rem;
+  }
+  .excerpt-text { font-size: .88rem; line-height: 1.5; margin: 0 0 .2rem; }
+  .excerpt-cite { font-size: .78rem; color: var(--muted); }
+  .excerpt-path { font-size: .72rem; color: var(--muted); opacity: .75; }
+  .excerpt-path-unresolved { color: #c54848; opacity: 1; }
+  ul.further-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: .25rem;
+  }
+  ul.further-list li { font-size: .85rem; line-height: 1.45; }
+  .further-blurb { color: var(--muted); }
+  table.tool-table { font-size: .8rem; margin: 0 0 .25rem; }
+  table.tool-table th { font-weight: 600; }
+  table.tool-table td { vertical-align: top; padding: .3rem .55rem; }
+  table.tool-table code { font-size: .8em; }
+  .res-section-count { color: var(--muted); font-weight: 400;
+    text-transform: none; letter-spacing: 0; font-size: .68rem; }
+  .row-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+  @media (max-width: 800px) { .row-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Researcher × Author pipeline eval</h1>
+  <p class="sub">Generated 2026-05-15 20:03:56 · 5 prompt(s) · 19 model calls</p>
+
+  <h2>Cost totals</h2>
+  <table>
+    <thead><tr>
+      <th>Model</th><th class="num">Input tok</th>
+      <th class="num">Output tok</th><th class="num">Cost (USD)</th>
+    </tr></thead>
+    <tbody>
+      <tr><td><code>gemini-3-flash-preview</code></td><td class='num'>56,704</td><td class='num'>4,608</td><td class='num'>$0.0422</td></tr>
+      <tr><td><code>gemini-3.1-flash-lite</code></td><td class='num'>163,685</td><td class='num'>12,783</td><td class='num'>$0.0601</td></tr>
+      <tr class="total">
+        <td>TOTAL</td>
+        <td class="num">220,389</td>
+        <td class="num">17,391</td>
+        <td class="num">$0.1023</td>
+      </tr>
+    </tbody>
+  </table>
+
+<div class='prompt-card'><h2>Prompt 1</h2><blockquote>I&#x27;m new to event-driven architecture and want a 30-minute intro that&#x27;s not a vendor pitch.</blockquote><p class='sub'>$0.0174 · 42,418 in / 2,983 out tok · 2 researchers × 1 authors</p><h3>Researcher outputs</h3><details open><summary><span class='pill'>gemini-3.1-flash-lite · think=low</span> <span class='pill cost'>1 calls · 0 excerpts · 0 further · 2,661 in / 343 out tok · $0.0012 · 2.8s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(1)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>introduction to event-driven architecture principles patterns</code> · limit=8</td><td>8 hits</td><td class='num'>0.10s</td></tr></tbody></table><p class='empty'>(empty research)</p></div></details><details open><summary><span class='pill'>gemini-3.1-flash-lite · think=high</span> <span class='pill cost'>6 calls · 4 excerpts · 2 further · 33,421 in / 2,146 out tok · $0.0116 · 11.9s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(6)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>event-driven architecture</code> · limit=8</td><td>8 hits</td><td class='num'>0.06s</td></tr><tr><td><code>search_curated</code></td><td><code>event-driven</code> · limit=8</td><td>8 hits</td><td class='num'>0.06s</td></tr><tr><td><code>search_curated</code></td><td><code>messaging patterns</code> · limit=8</td><td>8 hits</td><td class='num'>0.06s</td></tr><tr><td><code>search_curated</code></td><td><code>distributed systems architecture</code> · limit=8</td><td>8 hits</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_44052c</code></td><td>ok · 10000 chars</td><td class='num'>0.04s</td></tr><tr><td><code>open_document</code></td><td><code>doc_1fa41c</code></td><td>ok · 9181 chars</td><td class='num'>0.02s</td></tr></tbody></table><h4 class='res-section'>Excerpts</h4><div class='excerpt-list'><div class='excerpt'><div class='excerpt-point'>This defines the core mechanism of event-driven systems: capturing state changes as immutable events.</div><div class='excerpt-text'>The fundamental idea of Event Sourcing is that of ensuring every change to the state of an application is captured in an event object, and that these event objects are themselves stored in the sequence they were applied for the same lifetime as the application state itself.</div><div class='excerpt-cite'>— <a href='https://martinfowler.com/eaaDev/EventSourcing.html' target='_blank' rel='noopener'>Event Sourcing</a> <code class='excerpt-path'>doc_44052c</code></div></div><div class='excerpt'><div class='excerpt-point'>This explains the primary benefit of EDA: creating an audit log of system history, not just the final state.</div><div class='excerpt-text'>The most obvious thing we&#x27;ve gained by using Event Sourcing is that we now have a log of all the changes. Not just can we see where each ship is, we can see where it&#x27;s been.</div><div class='excerpt-cite'>— <a href='https://martinfowler.com/eaaDev/EventSourcing.html' target='_blank' rel='noopener'>Event Sourcing</a> <code class='excerpt-path'>doc_44052c</code></div></div><div class='excerpt'><div class='excerpt-point'>This explains how EDA handles complex, multi-service operations without traditional distributed transactions.</div><div class='excerpt-text'>Implement each business transaction that spans multiple services as a saga. A saga is a sequence of local transactions. Each local transaction updates the database and publishes a message or event to trigger the next local transaction in the saga.</div><div class='excerpt-cite'>— <a href='https://microservices.io/patterns/data/saga.html' target='_blank' rel='noopener'>Pattern: Saga</a> <code class='excerpt-path'>doc_1fa41c</code></div></div><div class='excerpt'><div class='excerpt-point'>This highlights the critical challenge of distributed systems: handling failures without ACID guarantees.</div><div class='excerpt-text'>Lack of automatic rollback - a developer must design compensating transactions that explicitly undo changes made earlier in a saga rather than relying on the automatic rollback feature of ACID transactions.</div><div class='excerpt-cite'>— <a href='https://microservices.io/patterns/data/saga.html' target='_blank' rel='noopener'>Pattern: Saga</a> <code class='excerpt-path'>doc_1fa41c</code></div></div></div><h4 class='res-section'>Further reading</h4><ul class='further-list'><li><a href='https://microservices.io/patterns/data/transactional-outbox.html' target='_blank' rel='noopener'>Outbox Pattern</a> <code class='excerpt-path'>doc_3eaddc</code> — <span class='further-blurb'>A foundational pattern for ensuring that database updates and event publishing happen atomically, solving the &quot;dual write&quot; problem.</span></li><li><a href='https://refactoring.guru/design-patterns/command' target='_blank' rel='noopener'>Command Pattern</a> <code class='excerpt-path'>doc_f723b7</code> — <span class='further-blurb'>A pattern for encapsulating requests as objects, which is often used as the mechanism to trigger events in a system.</span></li></ul></div></details><h3>Author outputs (per researcher source)</h3><details open><summary><span class='pill author'>gemini-3-flash-preview · think=minimal</span> ← research from <span class='pill'>gemini-3.1-flash-lite · think=high</span><span class='pill cost'>6,336 in / 494 out tok · $0.0046 · 3.1s</span></summary><div class='body'><div class='md'><p>Start with <a href="https://martinfowler.com/eaaDev/EventSourcing.html">Event Sourcing</a> by Martin Fowler. It’s the most durable entry point because it focuses on the data model—capturing every change as an immutable event—rather than the specific message broker you’re using.</p>
+<p>Instead of just storing the current “snapshot” of your database, you store the sequence of things that happened. As Fowler explains, this gives you a built-in audit log; you don’t just see the current state, you see the entire history of how the system arrived there. This shift is what enables features like “time travel” debugging and high-scale read models.</p>
+<p>When you move beyond a single service, you’ll need to understand the <a href="https://microservices.io/patterns/data/saga.html">Pattern: Saga</a>. Since you lose traditional ACID transactions in a distributed system, sagas coordinate multi-step workflows by chaining local transactions together. If a step fails, you trigger “compensating transactions” to undo the previous work manually.</p>
+<pre><code class="language-sdanswer">{
+  &quot;type&quot;: &quot;path&quot;,
+  &quot;links&quot;: [
+    {
+      &quot;url&quot;: &quot;https://martinfowler.com/eaaDev/EventSourcing.html&quot;,
+      &quot;description&quot;: &quot;The foundational read. Focus on the 'Heart of the Pattern' section to understand how state is built from events.&quot;,
+      &quot;estimate&quot;: &quot;15m&quot;
+    },
+    {
+      &quot;url&quot;: &quot;https://microservices.io/patterns/data/saga.html&quot;,
+      &quot;description&quot;: &quot;The reality of distributed logic. Learn why you need compensating transactions instead of rollbacks.&quot;,
+      &quot;estimate&quot;: &quot;10m&quot;
+    },
+    {
+      &quot;url&quot;: &quot;https://microservices.io/patterns/data/transactional-outbox.html&quot;,
+      &quot;description&quot;: &quot;The 'Outbox Pattern' solves the most common first bug: making sure your database update and your event message actually happen together.&quot;,
+      &quot;estimate&quot;: &quot;5m&quot;
+    }
+  ]
+}
+</code></pre>
+<p>As you dig in, watch out for “dual writes”—it’s tempting to just update your DB and send an event in the same function, but one will eventually fail while the other succeeds, leaving your system inconsistent.</p>
+</div></div></details></div>
+<div class='prompt-card'><h2>Prompt 2</h2><blockquote>We&#x27;re picking between Postgres SKIP LOCKED and a managed SQS for a 10k-events/min burst workload — what are the trade-offs and where should I read up?</blockquote><p class='sub'>$0.0170 · 30,318 in / 3,141 out tok · 2 researchers × 1 authors</p><h3>Researcher outputs</h3><details open><summary><span class='pill'>gemini-3.1-flash-lite · think=low</span> <span class='pill cost'>2 calls · 2 excerpts · 2 further · 6,624 in / 913 out tok · $0.0030 · 4.9s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(2)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>Postgres SKIP LOCKED vs SQS queueing trade-offs</code> · limit=8</td><td>8 hits</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_deacfd</code></td><td>ok · 7573 chars</td><td class='num'>0.03s</td></tr></tbody></table><h4 class='res-section'>Excerpts</h4><div class='excerpt-list'><div class='excerpt'><div class='excerpt-point'>Explains why using Postgres as a high-concurrency queue can cause performance degradation and contention issues under load.</div><div class='excerpt-text'>This is workable at modest to medium scale, but the frantic pace at which workers try to lock jobs doesn’t scale very well for a database that’s experiencing considerable load. For Postgres in particular, long-running transactions greatly increase the amount of time it takes for workers to find a job that they can lock, and this can lead to the job queue spiraling out of control.</div><div class='excerpt-cite'>— <a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_deacfd</code></div></div><div class='excerpt'><div class='excerpt-point'>Suggests a compromise pattern where you stage jobs in Postgres for atomicity but move them to a dedicated queueing system for execution.</div><div class='excerpt-text'>The transactionally-staged job drain avoids this problem by selecting primed jobs in bulk and feeding them into another store like Redis that’s better-suited for distributing jobs to competing workers.</div><div class='excerpt-cite'>— <a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_deacfd</code></div></div></div><h4 class='res-section'>Further reading</h4><ul class='further-list'><li><a href='https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html' target='_blank' rel='noopener'>Amazon SQS Dead-Letter Queues</a> <code class='excerpt-path'>doc_44a3ec</code> — <span class='further-blurb'>Official guide on using Dead-Letter Queues (DLQs) in SQS, which is crucial for handling failed background events at scale.</span></li><li><a href='https://brandur.org/idempotency-keys' target='_blank' rel='noopener'>Implementing Stripe-like idempotency keys in Postgres</a> <code class='excerpt-path'>doc_53ee01</code> — <span class='further-blurb'>Provides deeper insight into implementing idempotency keys, which is critical if you choose to move work from a database to an external queue.</span></li></ul></div></details><details open><summary><span class='pill'>gemini-3.1-flash-lite · think=high</span> <span class='pill cost'>4 calls · 3 excerpts · 2 further · 11,199 in / 1,169 out tok · $0.0046 · 5.5s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(4)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>Postgres SKIP LOCKED queueing</code> · limit=8</td><td>8 hits</td><td class='num'>0.06s</td></tr><tr><td><code>search_curated</code></td><td><code>SQS vs Postgres queueing trade-offs</code> · limit=8</td><td>8 hits</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_e77d5e</code></td><td>ok · 7573 chars</td><td class='num'>0.04s</td></tr><tr><td><code>open_document</code></td><td><code>doc_f52f30</code></td><td>ok · 9998 chars</td><td class='num'>0.04s</td></tr></tbody></table><h4 class='res-section'>Excerpts</h4><div class='excerpt-list'><div class='excerpt'><div class='excerpt-point'>Highlighting the scalability limitations and potential performance degradation of using Postgres directly as a high-concurrency queue.</div><div class='excerpt-text'>This is workable at modest to medium scale, but the frantic pace at which workers try to lock jobs doesn’t scale very well for a database that’s experiencing considerable load. For Postgres in particular, long-running transactions greatly increase the amount of time it takes for workers to find a job that they can lock, and this can lead to the job queue spiraling out of control.</div><div class='excerpt-cite'>— <a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_e77d5e</code></div></div><div class='excerpt'><div class='excerpt-point'>Suggesting the &#x27;transactionally-staged&#x27; pattern as a more robust alternative to direct DB-backed queueing when contention becomes an issue.</div><div class='excerpt-text'>The transactionally-staged job drain avoids this problem by selecting primed jobs in bulk and feeding them into another store like Redis that’s better-suited for distributing jobs to competing workers.</div><div class='excerpt-cite'>— <a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_e77d5e</code></div></div><div class='excerpt'><div class='excerpt-point'>Pointing to the necessity of handling failed messages, which SQS simplifies with built-in Dead-Letter Queue support.</div><div class='excerpt-text'>The mechanism reference: how DLQs are configured, when messages move there, and how to drain them.</div><div class='excerpt-cite'>— <a href='https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html' target='_blank' rel='noopener'>Amazon SQS Dead-Letter Queues</a> <code class='excerpt-path'>doc_f52f30</code></div></div></div><h4 class='res-section'>Further reading</h4><ul class='further-list'><li><a href='https://brandur.org/idempotency-keys' target='_blank' rel='noopener'>Implementing Stripe-like idempotency keys in Postgres</a> <code class='excerpt-path'>doc_e24646</code> — <span class='further-blurb'>Covers the crucial aspect of maintaining data integrity when systems span both a database and a queue.</span></li><li><a href='https://www.postgresqltutorial.com/' target='_blank' rel='noopener'>PostgreSQL Tutorial (third-party)</a> <code class='excerpt-path'>doc_893d03</code> — <span class='further-blurb'>Deep dive into Postgres transactions, indexing, and performance, which are critical when using Postgres for any queueing mechanism.</span></li></ul></div></details><h3>Author outputs (per researcher source)</h3><details open><summary><span class='pill author'>gemini-3-flash-preview · think=minimal</span> ← research from <span class='pill'>gemini-3.1-flash-lite · think=low</span><span class='pill cost'>6,204 in / 544 out tok · $0.0047 · 3.6s</span></summary><div class='body'><div class='md'><p>Use <strong>Postgres <code>FOR UPDATE SKIP LOCKED</code></strong> if your primary concern is atomic consistency between your database state and your job creation; choose <strong>Amazon SQS</strong> if your 10k/min bursts are likely to scale higher or if you need to decouple worker pressure from your primary database performance.</p>
+<p>At 10,000 events per minute, Postgres is still well within its comfort zone, but it’s the “frantic pace” of workers polling for jobs that creates the real risk. As detailed in <a href="https://brandur.org/job-drain">Transactionally Staged Job Drains in Postgres</a>, high-concurrency locking in Postgres can lead to performance degradation, especially if you have long-running transactions that keep the visibility map from being updated, forcing workers to scan through dead rows.</p>
+<p>SQS handles the “thundering herd” of workers much more gracefully and includes primitives like <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html">Dead-Letter Queues</a> out of the box. The trade-off is that you lose the “Outbox Pattern” benefits: you can’t wrap a database update and an SQS message in a single transaction. To bridge this gap, you’ll need to implement <a href="https://brandur.org/idempotency-keys">idempotency keys</a> so your workers can safely retry operations without side effects when the network or the queue inevitably hiccups.</p>
+<pre><code class="language-sdanswer">{
+  &quot;type&quot;: &quot;tradeoff&quot;,
+  &quot;title&quot;: &quot;Postgres vs. SQS for Bursty Loads&quot;,
+  &quot;options&quot;: [
+    {
+      &quot;label&quot;: &quot;Postgres (Skip Locked)&quot;,
+      &quot;bullets&quot;: [
+        &quot;Atomic: job + data save together&quot;,
+        &quot;Zero extra infrastructure to manage&quot;,
+        &quot;Contention risk during high bursts&quot;,
+        &quot;Polled workers can stress DB CPU&quot;
+      ]
+    },
+    {
+      &quot;label&quot;: &quot;Managed SQS&quot;,
+      &quot;bullets&quot;: [
+        &quot;Scales to massive throughput easily&quot;,
+        &quot;Built-in retries and DLQ support&quot;,
+        &quot;Requires idempotency handling&quot;,
+        &quot;No transactional atomicity with DB&quot;
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>If you want the best of both worlds, consider staging the jobs in a Postgres table and using a “drain” process to move them to SQS in bulk, which keeps your application logic atomic while offloading the worker-polling stress.</p>
+</div></div></details><details open><summary><span class='pill author'>gemini-3-flash-preview · think=minimal</span> ← research from <span class='pill'>gemini-3.1-flash-lite · think=high</span><span class='pill cost'>6,291 in / 515 out tok · $0.0047 · 3.3s</span></summary><div class='body'><div class='md'><p>Use <strong>SQS</strong> if your priority is surviving the bursts without tuning your primary database; use <strong>Postgres <code>SKIP LOCKED</code></strong> if transaction integrity between your data and your queue is worth the extra management overhead.</p>
+<p>At 10k events per minute, Postgres can handle the load, but the “frantic pace” of workers competing for locks can cause performance to spiral, especially if you have long-running transactions elsewhere in your DB. <a href="https://brandur.org/job-drain">Transactionally Staged Job Drains in Postgres</a> explains that while <code>SKIP LOCKED</code> is great for simple cases, heavy contention eventually forces a choice: either scale your DB vertically to handle the “noise” of the queue, or move the hot-path queueing to a tool like Redis or SQS.</p>
+<p>SQS removes the contention problem from your database entirely and provides mature primitives like <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html">Dead-Letter Queues</a> for handling the failures that inevitably spike during bursts. The trade-off is the “dual-write” problem: if your DB update succeeds but the SQS push fails, your system is out of sync.</p>
+<pre><code class="language-sdanswer">{
+  &quot;type&quot;: &quot;tradeoff&quot;,
+  &quot;title&quot;: &quot;Postgres vs. SQS for Burst Workloads&quot;,
+  &quot;options&quot;: [
+    {
+      &quot;label&quot;: &quot;Postgres SKIP LOCKED&quot;,
+      &quot;bullets&quot;: [
+        &quot;Atomic: Job + Data live in one transaction&quot;,
+        &quot;Zero extra infra to manage&quot;,
+        &quot;Contention can slow down your entire DB&quot;,
+        &quot;Must build your own retry/DLQ logic&quot;
+      ]
+    },
+    {
+      &quot;label&quot;: &quot;Managed SQS&quot;,
+      &quot;bullets&quot;: [
+        &quot;Infinite scaling for 10k+ bursts&quot;,
+        &quot;Built-in DLQs and visibility timeouts&quot;,
+        &quot;Risk of DB/Queue inconsistency&quot;,
+        &quot;Adds network latency to every job push&quot;
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>If you choose SQS, your next challenge will be ensuring you don’t process the same event twice after a network hiccup—read up on <a href="https://brandur.org/idempotency-keys">Implementing Stripe-like idempotency keys in Postgres</a> to handle those edge cases safely.</p>
+</div></div></details></div>
+<div class='prompt-card'><h2>Prompt 3</h2><blockquote>What&#x27;s the right way to think about transactional outbox vs change data capture for an agentic email platform on Kubernetes?</blockquote><p class='sub'>$0.0182 · 32,780 in / 3,399 out tok · 2 researchers × 1 authors</p><h3>Researcher outputs</h3><details open><summary><span class='pill'>gemini-3.1-flash-lite · think=low</span> <span class='pill cost'>3 calls · 3 excerpts · 2 further · 8,155 in / 907 out tok · $0.0034 · 4.9s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(3)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>transactional outbox vs change data capture event driven architecture</code> · limit=8</td><td>8 hits</td><td class='num'>0.07s</td></tr><tr><td><code>open_document</code></td><td><code>doc_b2360b</code></td><td>ok · 10000 chars</td><td class='num'>0.04s</td></tr><tr><td><code>open_document</code></td><td><code>doc_10ff5a</code></td><td>ok · 6001 chars</td><td class='num'>0.04s</td></tr></tbody></table><h4 class='res-section'>Excerpts</h4><div class='excerpt-list'><div class='excerpt'><div class='excerpt-point'>Defines the core of the Transactional Outbox pattern as an atomic local operation.</div><div class='excerpt-text'>The solution is for the service that sends the message to first store the message in the database as part of the transaction that updates the business entities. A separate process then sends the messages to the message broker.</div><div class='excerpt-cite'>— <a href='https://microservices.io/patterns/data/transactional-outbox.html' target='_blank' rel='noopener'>Pattern: Transactional outbox</a> <code class='excerpt-path'>doc_10ff5a</code></div></div><div class='excerpt'><div class='excerpt-point'>Explains how CDC acts as the implementation mechanism for the Message Relay component of the Outbox pattern.</div><div class='excerpt-text'>The idea of this approach is to have an &#x27;outbox&#x27; table in the service&#x27;s database... An asynchronous process monitors that table for new entries. If there are any, it propagates the events as messages to Apache Kafka.</div><div class='excerpt-cite'>— <a href='https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/' target='_blank' rel='noopener'>Reliable Microservices Data Exchange With the Outbox Pattern</a> <code class='excerpt-path'>doc_b2360b</code></div></div><div class='excerpt'><div class='excerpt-point'>Highlights the &#x27;dual write&#x27; problem that both patterns are designed to solve in distributed systems.</div><div class='excerpt-text'>Simply issuing these two requests [writing to DB and messaging system] may lead to potential inconsistencies, though. The reason being that we cannot have one shared transaction that would span the service&#x27;s database as well as Apache Kafka, as the latter doesn&#x27;t support to be enlisted in distributed (XA) transactions.</div><div class='excerpt-cite'>— <a href='https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/' target='_blank' rel='noopener'>Reliable Microservices Data Exchange With the Outbox Pattern</a> <code class='excerpt-path'>doc_b2360b</code></div></div></div><h4 class='res-section'>Further reading</h4><ul class='further-list'><li><a href='https://www.snowflake.com/guides/oltp-vs-olap/' target='_blank' rel='noopener'>OLTP vs. OLAP</a> <code class='excerpt-path'>doc_03bc78</code> — <span class='further-blurb'>Since you are building on Kubernetes, understanding the constraints of distributed state is key; this document explains the trade-offs between transactional/OLTP and analytical/OLAP stores.</span></li><li><a href='https://docs.aws.amazon.com/wellarchitected/latest/reducing-scope-of-impact-with-cell-based-architecture/reducing-scope-of-impact-with-cell-based-architecture.html' target='_blank' rel='noopener'>Cell-based Architecture</a> <code class='excerpt-path'>doc_652c7a</code> — <span class='further-blurb'>To scale your agentic platform, this framework for cell-based architecture provides useful context on isolating failures and managing state at scale.</span></li></ul></div></details><details open><summary><span class='pill'>gemini-3.1-flash-lite · think=high</span> <span class='pill cost'>3 calls · 4 excerpts · 3 further · 11,752 in / 1,371 out tok · $0.0050 · 7.3s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(3)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>transactional outbox vs change data capture</code> · limit=8</td><td>6 hits</td><td class='num'>0.07s</td></tr><tr><td><code>open_document</code></td><td><code>doc_8499aa</code></td><td>ok · 6001 chars</td><td class='num'>0.03s</td></tr><tr><td><code>open_document</code></td><td><code>doc_1a6e95</code></td><td>ok · 10000 chars</td><td class='num'>0.03s</td></tr></tbody></table><h4 class='res-section'>Excerpts</h4><div class='excerpt-list'><div class='excerpt'><div class='excerpt-point'>Defines the fundamental mechanic of the transactional outbox pattern to achieve atomic state and event updates.</div><div class='excerpt-text'>The solution is for the service that sends the message to first store the message in the database as part of the transaction that updates the business entities. A separate process then sends the messages to the message broker.</div><div class='excerpt-cite'>— <a href='https://microservices.io/patterns/data/transactional-outbox.html' target='_blank' rel='noopener'>Pattern: Transactional outbox</a> <code class='excerpt-path'>doc_8499aa</code></div></div><div class='excerpt'><div class='excerpt-point'>Explains the practical implementation of the outbox pattern to solve the dual-write problem.</div><div class='excerpt-text'>The idea of this approach is to have an &quot;outbox&quot; table in the service’s database. When receiving a request for placing a purchase order, not only an INSERT into the PurchaseOrder table is done, but, as part of the same transaction, also a record representing the event to be sent is inserted into that outbox table.</div><div class='excerpt-cite'>— <a href='https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/' target='_blank' rel='noopener'>Reliable Microservices Data Exchange With the Outbox Pattern</a> <code class='excerpt-path'>doc_1a6e95</code></div></div><div class='excerpt'><div class='excerpt-point'>Identifies the role of the Message Relay process in consuming the outbox and bridging to a broker.</div><div class='excerpt-text'>An asynchronous process monitors that table for new entries. If there are any, it propagates the events as messages to Apache Kafka.</div><div class='excerpt-cite'>— <a href='https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/' target='_blank' rel='noopener'>Reliable Microservices Data Exchange With the Outbox Pattern</a> <code class='excerpt-path'>doc_1a6e95</code></div></div><div class='excerpt'><div class='excerpt-point'>Highlights that CDC (specifically transaction log tailing) is a specific implementation choice for the message relay component of an outbox pattern.</div><div class='excerpt-text'>There are two patterns for implementing the Message relay: The Transaction log tailing pattern, The Polling publisher pattern.</div><div class='excerpt-cite'>— <a href='https://microservices.io/patterns/data/transactional-outbox.html' target='_blank' rel='noopener'>Pattern: Transactional outbox</a> <code class='excerpt-path'>doc_8499aa</code></div></div></div><h4 class='res-section'>Further reading</h4><ul class='further-list'><li><a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_c3ab4b</code> — <span class='further-blurb'>Explains how to use PostgreSQL to manage background job execution within a transaction, an application-specific variation of the outbox pattern.</span></li><li><a href='https://www.ics.uci.edu/~cs223/papers/cidr07p15.pdf' target='_blank' rel='noopener'>Life Beyond Distributed Transactions</a> <code class='excerpt-path'>doc_2f9758</code> — <span class='further-blurb'>Discusses why distributed systems should prioritize idempotent messages over complex distributed transactions to maintain scalability.</span></li><li><a href='https://www.cidrdb.org/cidr2005/papers/P12.pdf' target='_blank' rel='noopener'>Data on the Outside vs. Data on the Inside</a> <code class='excerpt-path'>doc_6815db</code> — <span class='further-blurb'>Classic context on why separating internal state consistency (inside) from external communication (outside) is critical in distributed systems.</span></li></ul></div></details><h3>Author outputs (per researcher source)</h3><details open><summary><span class='pill author'>gemini-3-flash-preview · think=minimal</span> ← research from <span class='pill'>gemini-3.1-flash-lite · think=low</span><span class='pill cost'>6,370 in / 552 out tok · $0.0048 · 3.8s</span></summary><div class='body'><div class='md'><p>Think of <strong>Transactional Outbox</strong> as the pattern for how your application handles intent, and <strong>Change Data Capture (CDC)</strong> as the infrastructure that implements it reliably.</p>
+<p>For an agentic platform where an agent’s “decision” to send an email must be durable, you cannot rely on a simple dual-write (updating your database and calling an email API/Kafka in one go). As <a href="https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/">Reliable Microservices Data Exchange With the Outbox Pattern</a> points out, you can’t wrap a database and a message broker in a single transaction; if one fails after the other succeeds, your agent’s state and its actual output will diverge.</p>
+<p>The <a href="https://microservices.io/patterns/data/transactional-outbox.html">Transactional outbox</a> pattern solves this by making the “send” an atomic part of your local database transaction—you write the email content to an <code>outbox</code> table in the same heartbeat that you update the agent’s internal state. CDC is then the most robust way to get those messages out of the table. Instead of your app code polling the database (which adds load and latency), a CDC tool like Debezium tailors the database’s write-ahead log (WAL) to stream those events to Kubernetes-hosted workers or a broker like Kafka.</p>
+<pre><code class="language-sdanswer">{
+  &quot;type&quot;: &quot;tradeoff&quot;,
+  &quot;title&quot;: &quot;Outbox Implementation Strategies&quot;,
+  &quot;options&quot;: [
+    {
+      &quot;label&quot;: &quot;Application Polling&quot;,
+      &quot;bullets&quot;: [
+        &quot;Easy to implement&quot;,
+        &quot;Adds query load to DB&quot;,
+        &quot;Higher latency for emails&quot;
+      ]
+    },
+    {
+      &quot;label&quot;: &quot;CDC (Log-based)&quot;,
+      &quot;bullets&quot;: [
+        &quot;Near-zero DB overhead&quot;,
+        &quot;Sub-second latency&quot;,
+        &quot;Requires infrastructure (Debezium)&quot;
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>By using CDC on Kubernetes, you decouple the agent’s execution from the delivery infrastructure, ensuring that once an agent “decides” to send an email, it’s guaranteed to happen even if a pod restarts or a network partition occurs.</p>
+<p>Before you commit to this, consider if your agents need to react to <em>any</em> change in state or just specific “send” events; CDC on every table can quickly turn into a firehose that’s harder to manage than a dedicated outbox table.</p>
+</div></div></details><details open><summary><span class='pill author'>gemini-3-flash-preview · think=minimal</span> ← research from <span class='pill'>gemini-3.1-flash-lite · think=high</span><span class='pill cost'>6,503 in / 569 out tok · $0.0050 · 3.8s</span></summary><div class='body'><div class='md'><p>Think of the <strong>Transactional Outbox</strong> as the architectural pattern and <strong>Change Data Capture (CDC)</strong> as one specific way to implement it. For an agentic email platform, you use the Outbox pattern to ensure that when your agent updates its internal state (like marking a draft as “ready to send”), the corresponding event (sending the email) is guaranteed to happen.</p>
+<p>The <a href="https://microservices.io/patterns/data/transactional-outbox.html">Transactional outbox</a> solves the “dual-write” problem by inserting your event into a dedicated <code>outbox</code> table within the same database transaction as your business logic. This makes the state change and the event emission atomic—one cannot succeed without the other. You then need a “Message Relay” to pick up those records and push them to your broker.</p>
+<p>When deciding how that relay works on Kubernetes, you have a choice between <strong>Polling</strong> and <strong>CDC</strong>:</p>
+<ul>
+<li><strong>CDC (Log Tailing):</strong> Tools like Debezium tail the database’s transaction log (e.g., Postgres WAL) to stream changes. This is the gold standard for high-throughput systems because it’s low-latency and doesn’t put extra query load on your database.</li>
+<li><strong>Polling:</strong> A simple worker queries the outbox table for unsent rows. This is easier to get running on K8s without specialized infrastructure, but it adds load and lag.</li>
+</ul>
+<p>For an agentic platform, where reliability is usually more critical than millisecond latency, starting with an application-level relay—like <a href="https://brandur.org/job-drain">Transactionally Staged Job Drains</a>—gives you the most control over retry logic and backpressure before you commit to the operational overhead of a full CDC stack.</p>
+<pre><code class="language-sdanswer">{
+  &quot;type&quot;: &quot;tradeoff&quot;,
+  &quot;title&quot;: &quot;Choosing your Message Relay&quot;,
+  &quot;options&quot;: [
+    {
+      &quot;label&quot;: &quot;CDC (Log Tailing)&quot;,
+      &quot;bullets&quot;: [
+        &quot;Near-zero database overhead&quot;,
+        &quot;Sub-second event latency&quot;,
+        &quot;Higher infra complexity (Debezium/Kafka)&quot;
+      ]
+    },
+    {
+      &quot;label&quot;: &quot;Polling Publisher&quot;,
+      &quot;bullets&quot;: [
+        &quot;No extra infra required&quot;,
+        &quot;Dead-simple to debug&quot;,
+        &quot;Interval-based lag (e.g. 1s+)&quot;
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>Once you move past the “send” event, you’ll need to ensure your email service is idempotent so that if the relay sends the same outbox entry twice during a network flicker, your agent doesn’t spam the recipient.</p>
+</div></div></details></div>
+<div class='prompt-card'><h2>Prompt 4</h2><blockquote>I want to deeply understand database internals — index structures, write-ahead logging, MVCC — and I have a free weekend. What should I read first?</blockquote><p class='sub'>$0.0181 · 30,953 in / 3,771 out tok · 2 researchers × 1 authors</p><h3>Researcher outputs</h3><details open><summary><span class='pill'>gemini-3.1-flash-lite · think=low</span> <span class='pill cost'>2 calls · 3 excerpts · 2 further · 8,004 in / 1,397 out tok · $0.0041 · 6.9s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(2)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>database internals index structures write-ahead logging MVCC</code> · limit=8</td><td>8 hits</td><td class='num'>0.07s</td></tr><tr><td><code>open_document</code></td><td><code>doc_686a59</code></td><td>ok · 10000 chars</td><td class='num'>0.02s</td></tr></tbody></table><h4 class='res-section'>Excerpts</h4><div class='excerpt-list'><div class='excerpt'><div class='excerpt-point'>This is a foundational text to ground your understanding of the relational model, which is the logical prerequisite for understanding why physical implementations like indices and MVCC are necessary.</div><div class='excerpt-text'>Database in Depth... C. J. Date&#x27;s relational primer, the through-line back to Codd&#x27;s 1970 paper that still shapes how we think about data shape.</div><div class='excerpt-cite'>— <a href='https://www.oreilly.com/library/view/database-in-depth/0596100124/' target='_blank' rel='noopener'>Database in Depth</a> <code class='excerpt-path'>doc_686a59</code></div></div><div class='excerpt'><div class='excerpt-point'>Once you understand the relational theory, these courses provide a practical look at how indexing is applied in real-world databases like MongoDB.</div><div class='excerpt-text'>Free structured courses on data modeling, indexing, aggregation, and operational topics.</div><div class='excerpt-cite'>— <a href='https://learn.mongodb.com/' target='_blank' rel='noopener'>MongoDB University</a> <code class='excerpt-path'>doc_29eead</code></div></div><div class='excerpt'><div class='excerpt-point'>Redis University’s focus on data structures and caching will help you bridge the gap between abstract database concepts and the actual data structures (like hash maps or skip lists) that underlie efficient storage engines.</div><div class='excerpt-text'>Free structured courses on data structures, caching patterns, and Redis Stack modules.</div><div class='excerpt-cite'>— <a href='https://university.redis.io/' target='_blank' rel='noopener'>Redis University</a> <code class='excerpt-path'>doc_c33893</code></div></div></div><h4 class='res-section'>Further reading</h4><ul class='further-list'><li><a href='https://www.oreilly.com/library/view/database-in-depth/0596100124/' target='_blank' rel='noopener'>Database in Depth</a> <code class='excerpt-path'>doc_686a59</code> — <span class='further-blurb'>If you are specifically hunting for the &quot;internals&quot; (WAL, MVCC, B-Trees) in detail, this is generally considered the industry-standard starting point for engineers who want to build, not just use, database systems.</span></li><li><a href='https://learn.mongodb.com/' target='_blank' rel='noopener'>MongoDB University</a> <code class='excerpt-path'>doc_29eead</code> — <span class='further-blurb'>For a more operational understanding of how databases behave under load, these courses are useful, though they operate at a higher abstraction layer than what you might be looking for in pure internals.</span></li></ul></div></details><details open><summary><span class='pill'>gemini-3.1-flash-lite · think=high</span> <span class='pill cost'>3 calls · 3 excerpts · 2 further · 10,449 in / 1,353 out tok · $0.0046 · 7.6s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(3)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>database internals index WAL MVCC</code> · limit=8</td><td>5 hits</td><td class='num'>0.06s</td></tr><tr><td><code>search_curated</code></td><td><code>write-ahead logging MVCC internals</code> · limit=8</td><td>1 hit</td><td class='num'>0.05s</td></tr><tr><td><code>open_document</code></td><td><code>doc_78420a</code></td><td>ok · 9696 chars</td><td class='num'>0.03s</td></tr></tbody></table><h4 class='res-section'>Excerpts</h4><div class='excerpt-list'><div class='excerpt'><div class='excerpt-point'>To provide a foundational understanding of the B-Tree structure, which is central to database indexing performance.</div><div class='excerpt-text'>The B-Tree is a balanced tree. In a balanced tree, all leaf nodes are at the same depth, which means that any record can be found in the same number of steps.</div><div class='excerpt-cite'>— <a href='https://use-the-index-luke.com/' target='_blank' rel='noopener'>Use The Index, Luke!</a> <code class='excerpt-path'>doc_78420a</code></div></div><div class='excerpt'><div class='excerpt-point'>To explain how the structure of B-Tree leaf nodes supports efficient query execution beyond simple point lookups.</div><div class='excerpt-text'>The leaf nodes of a B-Tree index form a doubly linked list, which allows the database to perform efficient range scans.</div><div class='excerpt-cite'>— <a href='https://use-the-index-luke.com/' target='_blank' rel='noopener'>Use The Index, Luke!</a> <code class='excerpt-path'>doc_78420a</code></div></div><div class='excerpt'><div class='excerpt-point'>To illustrate a key optimization technique that leverages index structure to reduce I/O.</div><div class='excerpt-text'>An index-only scan allows the database to retrieve the requested data directly from the index, avoiding the need to access the table itself.</div><div class='excerpt-cite'>— <a href='https://use-the-index-luke.com/' target='_blank' rel='noopener'>Use The Index, Luke!</a> <code class='excerpt-path'>doc_78420a</code></div></div></div><h4 class='res-section'>Further reading</h4><ul class='further-list'><li><a href='https://www.oreilly.com/library/view/database-in-depth/0596100124/' target='_blank' rel='noopener'>Database in Depth</a> <code class='excerpt-path'>doc_44e81b</code> — <span class='further-blurb'>While not in the corpus, I highly recommend finding &quot;Database Internals&quot; by Alex Petrov as a primary resource for bridging the gap between high-level concepts and deep architectural implementation of WAL, B-Trees, and LSM-trees.</span></li><li><a href='https://use-the-index-luke.com/' target='_blank' rel='noopener'>Use The Index, Luke!</a> <code class='excerpt-path'>doc_78420a</code> — <span class='further-blurb'>Understanding how indexes affect DML statements is crucial for performance. This document provides a great practical extension to understanding the trade-offs of index maintenance during inserts, updates, and deletes.</span></li></ul></div></details><h3>Author outputs (per researcher source)</h3><details open><summary><span class='pill author'>gemini-3-flash-preview · think=minimal</span> ← research from <span class='pill'>gemini-3.1-flash-lite · think=low</span><span class='pill cost'>6,256 in / 505 out tok · $0.0046 · 3.2s</span></summary><div class='body'><div class='md'><p>Start with the “Red Book” (Readings in Database Systems) if you want the high-level architecture, but since you’re looking to spend a weekend on the actual mechanics of how data hits the disk, start with <a href="https://www.oreilly.com/library/view/database-in-depth/0596100124/">Database in Depth</a>. While many guides jump straight to B-Trees, this resource grounds you in the relational model first—understanding the logical constraints of data makes it much clearer why physical implementations like Write-Ahead Logging (WAL) and Multiversion Concurrency Control (MVCC) have to exist the way they do.</p>
+<p>If you want to see how these theories translate into specific data structures, <a href="https://university.redis.io/">Redis University</a> offers a focused look at how structures like skip lists and hash maps operate in memory. For the “storage engine” side of your weekend, <a href="https://learn.mongodb.com/">MongoDB University</a> has tracks on indexing and operational internals that explain how a database manages the trade-off between write throughput and read performance under load.</p>
+<pre><code class="language-sdanswer">{
+  &quot;type&quot;: &quot;path&quot;,
+  &quot;links&quot;: [
+    {
+      &quot;url&quot;: &quot;https://www.oreilly.com/library/view/database-in-depth/0596100124/&quot;,
+      &quot;description&quot;: &quot;The logical starting point: understand the relational model so you can see the 'why' behind the physical storage engine.&quot;,
+      &quot;estimate&quot;: &quot;4h&quot;
+    },
+    {
+      &quot;url&quot;: &quot;https://university.redis.io/&quot;,
+      &quot;description&quot;: &quot;Focus on the 'data structures' half of internals; specifically how in-memory structures handle fast lookups.&quot;,
+      &quot;estimate&quot;: &quot;3h&quot;
+    },
+    {
+      &quot;url&quot;: &quot;https://learn.mongodb.com/&quot;,
+      &quot;description&quot;: &quot;Practical application of indexing and aggregation—good for seeing how internals dictate real-world performance limits.&quot;,
+      &quot;estimate&quot;: &quot;3h 30m&quot;
+    }
+  ]
+}
+</code></pre>
+<p>Once you’ve got the primitives down, try to trace a single <code>INSERT</code> statement in your head through the buffer pool, the WAL, and the B-Tree—it’s the classic “aha” moment for database internals.</p>
+</div></div></details><details open><summary><span class='pill author'>gemini-3-flash-preview · think=minimal</span> ← research from <span class='pill'>gemini-3.1-flash-lite · think=high</span><span class='pill cost'>6,244 in / 516 out tok · $0.0047 · 3.7s</span></summary><div class='body'><div class='md'><p>Start with <a href="https://use-the-index-luke.com/">Use The Index, Luke!</a> to build a solid mental model of the B-Tree before diving into heavier architectural internals. It’s the most effective way to bridge the gap between “writing SQL” and “understanding the engine” because it focuses on how the physical structure of a balanced tree dictates query performance.</p>
+<p>You’ll want to focus on how the B-Tree maintains its balance so that leaf nodes—the actual data pointers—stay at a consistent depth, ensuring predictable lookup times. The real “aha” moment for most devs is realizing that these leaf nodes form a doubly linked list; this is exactly what makes range scans efficient and why index order matters so much for <code>ORDER BY</code> clauses. Once you grasp that, look into the “index-only scan” pattern, which is a massive performance win where the database skips the table heap entirely because the index already holds the necessary values.</p>
+<p>If you have the full weekend, transition from index structures to the broader storage engine by picking up <a href="https://www.oreilly.com/library/view/database-in-depth/0596100124/">Database Internals</a> (or specifically Alex Petrov’s work). It’s the definitive guide for understanding the trade-offs between B-Trees and LSM-trees, and how Write-Ahead Logging (WAL) ensures your data survives a crash without sacrificing write throughput.</p>
+<pre><code class="language-sdanswer">{
+  &quot;type&quot;: &quot;path&quot;,
+  &quot;links&quot;: [
+    {
+      &quot;url&quot;: &quot;https://use-the-index-luke.com/&quot;,
+      &quot;description&quot;: &quot;Master the B-Tree fundamentals, leaf node structures, and why index-only scans are the ultimate optimization.&quot;,
+      &quot;estimate&quot;: &quot;4h&quot;
+    },
+    {
+      &quot;url&quot;: &quot;https://www.oreilly.com/library/view/database-in-depth/0596100124/&quot;,
+      &quot;description&quot;: &quot;Deep dive into the storage engine level: WAL, concurrency control (MVCC), and the architecture of modern disk-based storage.&quot;,
+      &quot;estimate&quot;: &quot;8h&quot;
+    }
+  ]
+}
+</code></pre>
+<p>As you read, pay close attention to how index maintenance impacts write operations—every new index you add makes reads faster but forces the database to do extra work for every <code>INSERT</code> and <code>UPDATE</code>.</p>
+</div></div></details></div>
+<div class='prompt-card'><h2>Prompt 5</h2><blockquote>How do I instrument an agent&#x27;s tool calls so I can debug a runaway loop without losing the production trace?</blockquote><p class='sub'>$0.0316 · 83,920 in / 4,097 out tok · 2 researchers × 1 authors</p><h3>Researcher outputs</h3><details open><summary><span class='pill'>gemini-3.1-flash-lite · think=low</span> <span class='pill cost'>4 calls · 2 excerpts · 2 further · 13,392 in / 964 out tok · $0.0048 · 14.2s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(4)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>instrument agent tool calls observability runaway loop</code> · limit=8</td><td>8 hits</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_863009</code></td><td>ok · 10000 chars</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_c63a2c</code></td><td>ok · 4627 chars</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_5aadbd</code></td><td>ok · 10000 chars</td><td class='num'>8.53s</td></tr></tbody></table><h4 class='res-section'>Excerpts</h4><div class='excerpt-list'><div class='excerpt'><div class='excerpt-point'>Debugging runaway agent loops requires moving beyond simple logs to structured events and distributed tracing, which allow you to verify your hypotheses about why an agent is stuck.</div><div class='excerpt-text'>The book bridges both the theoretical and practical to provide examples of structured events to demonstrate the building blocks necessary for observability. Follow its lineage through core concepts like distributed tracing, iterative verification of hypotheses, and debugging from first principles with the core analysis loop.</div><div class='excerpt-cite'>— <a href='https://www.honeycomb.io/observability-engineering-oreilly-book' target='_blank' rel='noopener'>Observability Engineering</a> <code class='excerpt-path'>doc_5aadbd</code></div></div><div class='excerpt'><div class='excerpt-point'>APM traces help you identify which specific tool calls are contributing to latency or runaway loops by mapping the service and call dependencies.</div><div class='excerpt-text'>Detailed transaction traces show exactly where slowdowns occur... Entity relationships showing how your services connect and depend on each other.</div><div class='excerpt-cite'>— <a href='https://docs.newrelic.com/docs/apm/new-relic-apm/getting-started/introduction-apm/' target='_blank' rel='noopener'>Introduction to New Relic APM</a> <code class='excerpt-path'>doc_c63a2c</code></div></div></div><h4 class='res-section'>Further reading</h4><ul class='further-list'><li><a href='https://www.honeycomb.io/observability-engineering-oreilly-book' target='_blank' rel='noopener'>Observability Engineering</a> <code class='excerpt-path'>doc_5aadbd</code> — <span class='further-blurb'>An essential resource on applying observability principles—like structured events and high-cardinality debugging—to complex systems, which is critical for debugging non-deterministic agent loops.</span></li><li><a href='https://www.oreilly.com/library/view/distributed-systems-observability/9781492033431/' target='_blank' rel='noopener'>Distributed Systems Observability</a> <code class='excerpt-path'>doc_4aede1</code> — <span class='further-blurb'>Focuses on the practical, operational side of observability for on-call engineers, which will help you structure your agent&#x27;s instrumentation so it provides actionable alerts rather than just noise.</span></li></ul></div></details><details open><summary><span class='pill'>gemini-3.1-flash-lite · think=high</span> <span class='pill cost'>6 calls · 3 excerpts · 2 further · 58,028 in / 2,220 out tok · $0.0178 · 20.1s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(6)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>instrumenting agent tool calls debugging runaway loops</code> · limit=8</td><td>8 hits</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_4a84aa</code></td><td>ok · 10000 chars</td><td class='num'>0.03s</td></tr><tr><td><code>open_document</code></td><td><code>doc_cce0cf</code></td><td>ok · 4627 chars</td><td class='num'>0.03s</td></tr><tr><td><code>open_document</code></td><td><code>doc_3fc453</code></td><td>ok · 10000 chars</td><td class='num'>0.03s</td></tr><tr><td><code>open_document</code></td><td><code>doc_3be140</code></td><td>ok · 10000 chars</td><td class='num'>5.39s</td></tr><tr><td><code>open_document</code></td><td><code>doc_97caf7</code></td><td>ok · 7620 chars</td><td class='num'>2.46s</td></tr></tbody></table><h4 class='res-section'>Excerpts</h4><div class='excerpt-list'><div class='excerpt'><div class='excerpt-point'>Defines agentic loops as a series of tool executions, establishing why tracing the tool lifecycle is central to debugging their behavior.</div><div class='excerpt-text'>My preferred definition of an LLM agent is something that runs tools in a loop to achieve a goal. The art of using them well is to carefully design the tools and loop for them to use.</div><div class='excerpt-cite'>— <a href='https://simonwillison.net/2025/Sep/30/designing-agentic-loops/' target='_blank' rel='noopener'>Designing agentic loops</a> <code class='excerpt-path'>doc_4a84aa</code></div></div><div class='excerpt'><div class='excerpt-point'>Highlights that instrumentation should ideally be low-overhead and automated to ensure production traces are captured reliably even during runaway loops.</div><div class='excerpt-text'>APM monitoring is simpler than you might think: Install lightweight agents - Add a small library to your application that automatically instruments your code without requiring changes. Automatic data collection - Agents track performance metrics, errors, and user interactions with minimal overhead (&lt; 3% performance impact).</div><div class='excerpt-cite'>— <a href='https://docs.newrelic.com/docs/apm/new-relic-apm/getting-started/introduction-apm/' target='_blank' rel='noopener'>Introduction to New Relic APM</a> <code class='excerpt-path'>doc_cce0cf</code></div></div><div class='excerpt'><div class='excerpt-point'>Explains how transaction traces are essential for identifying the specific tool call (the &quot;hotspot&quot;) causing an infinite or runaway loop.</div><div class='excerpt-text'>Pinpoint problems in minutes, not hours: Detailed transaction traces show exactly where slowdowns occur. Database query analysis identifies bottlenecks. Code-level insights reveal performance hotspots.</div><div class='excerpt-cite'>— <a href='https://docs.newrelic.com/docs/apm/new-relic-apm/getting-started/introduction-apm/' target='_blank' rel='noopener'>Introduction to New Relic APM</a> <code class='excerpt-path'>doc_cce0cf</code></div></div></div><h4 class='res-section'>Further reading</h4><ul class='further-list'><li><a href='https://learn.microsoft.com/en-us/azure/architecture/patterns/bulkhead' target='_blank' rel='noopener'>Bulkhead (code-level)</a> <code class='excerpt-path'>doc_3be140</code> — <span class='further-blurb'>While focused on architecture, this document provides the critical pattern for isolating failing components—a key strategy for handling runaway agents without taking down the whole system.</span></li><li><a href='https://simonwillison.net/2025/Sep/30/designing-agentic-loops/' target='_blank' rel='noopener'>Designing agentic loops</a> <code class='excerpt-path'>doc_4a84aa</code> — <span class='further-blurb'>Provides essential context on the risks of agentic loops and how to design them, including safe handling of tool execution and shell command permissions.</span></li></ul></div></details><h3>Author outputs (per researcher source)</h3><details open><summary><span class='pill author'>gemini-3-flash-preview · think=minimal</span> ← research from <span class='pill'>gemini-3.1-flash-lite · think=low</span><span class='pill cost'>6,180 in / 397 out tok · $0.0043 · 2.7s</span></summary><div class='body'><div class='md'><p>You need to move past simple logging and adopt structured events and distributed tracing to capture the non-deterministic nature of agent loops. By treating each tool call as a span in a larger trace, you can use the “core analysis loop” described in <a href="https://www.honeycomb.io/observability-engineering-oreilly-book">Observability Engineering</a> to iteratively verify hypotheses about why the agent is stuck or repeating itself.</p>
+<p>Standard <a href="https://docs.newrelic.com/docs/apm/new-relic-apm/getting-started/introduction-apm/">APM traces</a> are useful for mapping service dependencies, but for agents, you specifically need high-cardinality metadata—like the exact prompt version, the tool’s return value, and the sequence index—attached to those traces. This allows you to differentiate between a healthy recursive search and a broken runaway loop by looking at the relationship between the entities and the data they pass.</p>
+<pre><code class="language-sdanswer">{ &quot;type&quot;: &quot;prereq&quot;, &quot;items&quot;: [
+  { &quot;label&quot;: &quot;Structured Events vs Logs&quot;, &quot;url&quot;: &quot;https://www.honeycomb.io/observability-engineering-oreilly-book&quot; },
+  { &quot;label&quot;: &quot;Trace Context Propagation&quot;, &quot;url&quot;: &quot;https://docs.newrelic.com/docs/apm/new-relic-apm/getting-started/introduction-apm/&quot; },
+  { &quot;label&quot;: &quot;Instrumentation for On-Call&quot;, &quot;url&quot;: &quot;https://www.oreilly.com/library/view/distributed-systems-observability/9781492033431/&quot; }
+], &quot;title&quot;: &quot;Before you instrument tool calls&quot;}
+</code></pre>
+<p>Once you have the traces, your next hurdle will be defining a “kill switch” that uses this telemetry to break the loop automatically when a depth or cost threshold is exceeded.</p>
+</div></div></details><details open><summary><span class='pill author'>gemini-3-flash-preview · think=minimal</span> ← research from <span class='pill'>gemini-3.1-flash-lite · think=high</span><span class='pill cost'>6,320 in / 516 out tok · $0.0047 · 3.3s</span></summary><div class='body'><div class='md'><p>You’ll want to use automated transaction tracing that captures each tool execution as a discrete span within the larger agentic loop. Since an agent is essentially <a href="https://simonwillison.net/2025/Sep/30/designing-agentic-loops/">running tools in a loop</a> to reach a goal, debugging a “runaway” state requires seeing the sequence of tool inputs and outputs that triggered the next iteration.</p>
+<p>Standard APM tools like those described in the <a href="https://docs.newrelic.com/docs/apm/new-relic-apm/getting-started/introduction-apm/">Introduction to New Relic APM</a> are effective here because they provide low-overhead, automatic instrumentation. By treating each tool call as a “transaction,” you can pinpoint exactly where the loop logic starts to drift or which specific “hotspot” is failing to return a terminating condition. This ensures that even if the agent enters an infinite loop, the individual traces are streamed to your collector rather than being lost when the process eventually hits a timeout or memory limit.</p>
+<pre><code class="language-sdanswer">{
+  &quot;type&quot;: &quot;path&quot;,
+  &quot;links&quot;: [
+    {
+      &quot;url&quot;: &quot;https://simonwillison.net/2025/Sep/30/designing-agentic-loops/&quot;,
+      &quot;description&quot;: &quot;Understand the loop-and-tool mental model so you know exactly which 'tool exit' points need instrumentation.&quot;,
+      &quot;estimate&quot;: &quot;45m&quot;
+    },
+    {
+      &quot;url&quot;: &quot;https://docs.newrelic.com/docs/apm/new-relic-apm/getting-started/introduction-apm/&quot;,
+      &quot;description&quot;: &quot;Learn how to use transaction traces to isolate performance hotspots and runaway tool calls in production.&quot;,
+      &quot;estimate&quot;: &quot;1h&quot;
+    },
+    {
+      &quot;url&quot;: &quot;https://learn.microsoft.com/en-us/azure/architecture/patterns/bulkhead&quot;,
+      &quot;description&quot;: &quot;Apply the Bulkhead pattern to isolate agent execution, preventing a runaway loop from consuming all system resources.&quot;,
+      &quot;estimate&quot;: &quot;1h 30m&quot;
+    }
+  ]
+}
+</code></pre>
+<p>Once your tracing is live, look for “chatter”—sequences where the agent calls the same tool with near-identical parameters—as this is the most common signature of a loop that’s lost its way.</p>
+</div></div></details></div>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,149 @@
+[
+  {
+    "prompt": "What are the trade-offs between REST and GraphQL?",
+    "total_cost_usd": 0.0032495000000000002,
+    "stages": [
+      {
+        "stage": "reframer",
+        "model": "gemini-3-flash-preview",
+        "thinking": "medium",
+        "input_tokens": 2047,
+        "output_tokens": 742,
+        "elapsed_s": 5.64988171600271,
+        "cost_usd": 0.0032495000000000002,
+        "error": "",
+        "tool_calls": [],
+        "output": {
+          "restated_question": "You're asking for the trade-offs between REST and GraphQL. I'll compare them across data-fetching efficiency, caching, and maintenance, while also looking at how they perform when AI agents are the primary consumers of your API.",
+          "reframing_instructions": "Focus on the architectural implications rather than just a feature comparison. Contrast REST's reliance on HTTP semantics and caching against GraphQL's precision and query complexity. Include a perspective on how these styles affect AI agents—specifically regarding schema introspection and tool-calling efficiency. Skip basic 'how-to' syntax and focus on long-term maintenance and performance.",
+          "corpus_topics": [
+            "REST vs GraphQL trade-offs",
+            "API caching strategies REST vs GraphQL",
+            "schema evolution and versioning APIs",
+            "API design for LLMs and AI agents",
+            "BFF pattern GraphQL vs REST"
+          ],
+          "web_search_topics": []
+        }
+      }
+    ]
+  },
+  {
+    "prompt": "How do I share state between AWS Lambda invocations? I'm building an API rate limiter and need request counts visible across all my Lambda containers running the handler.",
+    "total_cost_usd": 0.0031735,
+    "stages": [
+      {
+        "stage": "reframer",
+        "model": "gemini-3-flash-preview",
+        "thinking": "medium",
+        "input_tokens": 2069,
+        "output_tokens": 713,
+        "elapsed_s": 5.178839719970711,
+        "cost_usd": 0.0031735,
+        "error": "",
+        "tool_calls": [],
+        "output": {
+          "restated_question": "You're asking how to sync state between Lambda containers for a rate limiter, but since Lambda is stateless by design, the durable approach is using an external data store. I'll find resources on distributed rate limiting patterns and the trade-offs between using Redis or DynamoDB for this specific use case.",
+          "reframing_instructions": "Focus on the architectural trade-offs between Redis (low latency, ephemeral) and DynamoDB (durability, no-management) for stateful serverless tasks. Explain why global variables are insufficient for distributed concurrency. Skip basic Lambda tutorials; focus on high-concurrency state management patterns.",
+          "corpus_topics": [
+            "distributed rate limiting patterns serverless",
+            "DynamoDB atomic increments rate limiting",
+            "Redis for serverless state management",
+            "Lambda execution environment lifecycle state sharing",
+            "API Gateway vs Lambda-side rate limiting"
+          ],
+          "web_search_topics": []
+        }
+      }
+    ]
+  },
+  {
+    "prompt": "Help me debug this stack trace: TypeError: 'NoneType' object is not iterable at line 47 of my Flask app. The line is for item in cart.items: and it happens on the /checkout endpoint.",
+    "total_cost_usd": 0.0030689999999999997,
+    "stages": [
+      {
+        "stage": "reframer",
+        "model": "gemini-3-flash-preview",
+        "thinking": "medium",
+        "input_tokens": 2082,
+        "output_tokens": 676,
+        "elapsed_s": 4.930909561924636,
+        "cost_usd": 0.0030689999999999997,
+        "error": "",
+        "tool_calls": [],
+        "output": {
+          "restated_question": "You're asking for help debugging a specific error in your Flask checkout flow, but the more useful approach is to look at the patterns for resilient state management and defensive coding. I'll provide resources on handling missing state gracefully and setting up the observability needed to catch these issues before they hit production.",
+          "reframing_instructions": "Pivot from the specific stack trace to the underlying architectural issues: state consistency and defensive programming. Focus the response on how to handle potentially missing objects in web workflows and how to implement observability to catch these issues in production. Skip direct code fixes for the Flask app.",
+          "corpus_topics": [
+            "defensive coding patterns for web applications",
+            "handling null and none in python",
+            "state management for shopping carts",
+            "observability for python web apps",
+            "error handling and logging best practices"
+          ],
+          "web_search_topics": []
+        }
+      }
+    ]
+  },
+  {
+    "prompt": "How do I build an agent that doesn't hallucinate tool arguments?",
+    "total_cost_usd": 0.0036625,
+    "stages": [
+      {
+        "stage": "reframer",
+        "model": "gemini-3-flash-preview",
+        "thinking": "medium",
+        "input_tokens": 2051,
+        "output_tokens": 879,
+        "elapsed_s": 6.13460239500273,
+        "cost_usd": 0.0036625,
+        "error": "",
+        "tool_calls": [],
+        "output": {
+          "restated_question": "You're asking how to ensure LLM agents generate accurate and valid arguments when calling tools. I'll pull resources on structured output enforcement, validation-correction loops, and spec-first engineering patterns that treat tool calls as verifiable data rather than just text.",
+          "reframing_instructions": "Focus on the architectural shift from 'hoping for accuracy' to 'enforcing validity.' Emphasize patterns like structured outputs, schema-driven generation, and automated verification loops where the agent corrects itself based on validation errors. Skip basic prompt-engineering advice in favor of durable patterns like spec-first development and human-in-the-loop verification.",
+          "corpus_topics": [
+            "JSON schema for tool calling llms",
+            "Pydantic model enforcement agents",
+            "structured output validation patterns",
+            "tool call verification loops",
+            "spec-first agent development",
+            "few-shot prompting for tool arguments"
+          ],
+          "web_search_topics": [
+            "constrained decoding frameworks tool calling 2026"
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "prompt": "How do I run cron jobs inside my Kubernetes pods? I need to clean up expired sessions from Redis every 10 minutes.",
+    "total_cost_usd": 0.002822,
+    "stages": [
+      {
+        "stage": "reframer",
+        "model": "gemini-3-flash-preview",
+        "thinking": "medium",
+        "input_tokens": 2062,
+        "output_tokens": 597,
+        "elapsed_s": 4.329392030020244,
+        "cost_usd": 0.002822,
+        "error": "",
+        "tool_calls": [],
+        "output": {
+          "restated_question": "You're asking how to run cron inside a pod, but the better approach in Kubernetes is to use the native CronJob resource or leverage Redis TTLs for session management. I'll pull resources on Kubernetes job patterns and Redis session expiration to show you the more reliable way to handle this.",
+          "reframing_instructions": "Focus on the Kubernetes CronJob controller as the standard replacement for running cron inside a pod. Emphasize why internal crond processes are an anti-pattern (observability, logging, and signal handling). Briefly include Redis-native TTL and EXPIRE patterns as the most efficient way to handle session cleanup without external jobs. Skip tutorials on installing cron packages in Dockerfiles.",
+          "corpus_topics": [
+            "Kubernetes CronJob patterns",
+            "Redis session cleanup strategies",
+            "Kubernetes workload types and use cases",
+            "container lifecycle anti-patterns"
+          ],
+          "web_search_topics": []
+        }
+      }
+    ]
+  }
+]
