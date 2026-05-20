@@ -1,0 +1,1465 @@
+[
+  {
+    "prompt": "I'm new to event-driven architecture and want a 30-minute intro that's not a vendor pitch.",
+    "researchers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "medium",
+        "label": "gpt-5.4-nano · think=medium",
+        "id_to_url": {
+          "doc_261871": "https://www.parca.dev/docs/overview/",
+          "doc_ed47f4": "https://github.com/sidekiq/sidekiq/wiki/Best-Practices",
+          "doc_c6118c": "https://agents.md/",
+          "doc_770acf": "https://sre.google/sre-book/table-of-contents/",
+          "doc_356a6f": "https://auth0.com/docs/get-started/architecture-scenarios",
+          "doc_7fb74f": "https://cloud.google.com/docs",
+          "doc_10008f": "https://www.datacamp.com/tutorial/roo-code",
+          "doc_91e21b": "https://stripe.com/docs/api/idempotent_requests",
+          "doc_dc3ebb": "http://www.laputan.org/mud/",
+          "doc_cce42a": "https://axiom.co/docs/introduction",
+          "doc_f4ce94": "https://connectrpc.com/docs/introduction/",
+          "doc_18f302": "https://support.bolt.new/building/intro-bolt",
+          "doc_f305e8": "https://docs.djangoproject.com/en/stable/topics/http/middleware/",
+          "doc_b53282": "https://signoz.io/docs/introduction/",
+          "doc_b2d964": "https://kafka.apache.org/quickstart",
+          "doc_26b6e2": "https://martinfowler.com/eaaDev/EventSourcing.html",
+          "doc_d2a4da": "https://microservices.io/patterns/data/transactional-outbox.html",
+          "doc_5b6bf2": "https://microservices.io/patterns/data/saga.html",
+          "doc_3cd6be": "https://docs.logto.io/introduction",
+          "doc_cda9cc": "https://valkey.io/topics/introduction/",
+          "doc_ed789e": "https://sre.google/sre-book/being-on-call/"
+        },
+        "id_to_title": {
+          "doc_261871": "Parca Overview",
+          "doc_ed47f4": "Sidekiq Best Practices",
+          "doc_c6118c": "AGENTS.md",
+          "doc_770acf": "Site Reliability Engineering",
+          "doc_356a6f": "Auth0 Architecture Scenarios",
+          "doc_7fb74f": "Google Cloud documentation",
+          "doc_10008f": "Roo Code: A Guide With 7 Practical Examples",
+          "doc_91e21b": "API Idempotency",
+          "doc_dc3ebb": "Big Ball of Mud",
+          "doc_cce42a": "Axiom Docs",
+          "doc_f4ce94": "Connect Introduction",
+          "doc_18f302": "Introduction to Bolt",
+          "doc_f305e8": "Architecture: Middleware",
+          "doc_b53282": "Introduction to SigNoz",
+          "doc_b2d964": "Apache Kafka Quickstart",
+          "doc_26b6e2": "Event Sourcing",
+          "doc_d2a4da": "Pattern: Transactional outbox",
+          "doc_5b6bf2": "Pattern: Saga",
+          "doc_3cd6be": "Logto Introduction",
+          "doc_cda9cc": "Valkey: Introduction",
+          "doc_ed789e": "On-Call as Pattern"
+        },
+        "research": {
+          "excerpts": [
+            {
+              "purpose": "Defines the core reliability problem with publishing messages alongside DB updates and why a special pattern is needed.",
+              "excerpt": "A service command typically needs to create/update/delete [aggregates] in the database **and** send messages/events to a message broker. For example, a service that participates in a [saga] needs to update business entities and send messages/events. Similarly, a service that publishes a [domain event] must update an [aggregate] and publish an event.\n\nThe command must atomically update the database and send messages in order to avoid data inconsistencies and bugs.",
+              "document_id": "doc_d2a4da"
+            },
+            {
+              "purpose": "Explains the transactional outbox mechanism used to make message publishing reliable without 2PC.",
+              "excerpt": "The solution is for the service that sends the message to first store the message in the database as part of the transaction that updates the business entities. A separate process then sends the messages to the message broker.\n\nThe participants in this pattern are:\n\n*   Sender - the service that sends the message",
+              "document_id": "doc_d2a4da"
+            },
+            {
+              "purpose": "Highlights the consequence of retries/duplicate delivery and the requirement that consumers handle idempotency.",
+              "excerpt": "The Message relay might publish a message more than once. It might, for example, crash after publishing a message but before recording the fact that it has done so. When it restarts, it will then publish the message again. As a result, a message consumer must be idempotent, perhaps by tracking the IDs of the messages that it has already processed.",
+              "document_id": "doc_d2a4da"
+            },
+            {
+              "purpose": "Provides a simple definition of a saga and how it achieves cross-service consistency via compensation.",
+              "excerpt": "Implement each business transaction that spans multiple services as a saga. A saga is a sequence of local transactions. Each local transaction updates the database and publishes a message or event to trigger the next local transaction in the saga. If a local transaction fails because it violates a business rule then the saga executes a series of compensating transactions that undo the changes that were made by the preceding local transactions.",
+              "document_id": "doc_5b6bf2"
+            },
+            {
+              "purpose": "Summarizes two coordination styles for sagas (choreography vs orchestration).",
+              "excerpt": "There are two ways of coordination sagas:\n\n*   Choreography - each local transaction publishes domain events that trigger local transactions in other services\n*   Orchestration - an orchestrator (object) tells the participants what local transactions to execute",
+              "document_id": "doc_5b6bf2"
+            },
+            {
+              "purpose": "Introduces event sourcing as persisting state changes as an event log that can rebuild past state.",
+              "excerpt": "Event Sourcing ensures that all changes to application state are stored as a sequence of events. Not just can we query these events, we can also use the event log to reconstruct past states, and as a foundation to automatically adjust the state to cope with retroactive changes.\n\nThe fundamental idea of Event Sourcing is that of ensuring every change to the state of an application is captured in an event object, and that these event objects are themselves stored in the sequence they were applied",
+              "document_id": "doc_26b6e2"
+            },
+            {
+              "purpose": "Gives a neutral “what is Kafka” mental model: durable event log with topics and replay by consumers.",
+              "excerpt": "Kafka is a distributed _event streaming platform_ that lets you read, write, store, and process [_events_](https://kafka.apache.org/documentation/#messages) (also called _records_ or _messages_ in the documentation) across many machines.\n\nA Kafka client communicates with the Kafka brokers via the network for writing (or reading) events. Once received, the brokers will store the events in a durable and fault-tolerant manner for as long as you need—even forever.",
+              "document_id": "doc_b2d964"
+            }
+          ],
+          "further_reading": [
+            {
+              "document_id": "doc_ed47f4",
+              "blurb": "Useful if you’ll use an async job queue in addition to event streams—covers practical guidance like keeping job parameters small and handling retries safely."
+            },
+            {
+              "document_id": "doc_91e21b",
+              "blurb": "Good reinforcement for the general idea of idempotency keys—how clients avoid harmful effects from repeating requests."
+            },
+            {
+              "document_id": "doc_dc3ebb",
+              "blurb": "A classic “what to avoid” reference; helps you recognize how distributed systems can become tangled without deliberate architectural structure."
+            }
+          ],
+          "gaps": []
+        },
+        "tool_calls": [
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "event-driven architecture intro concepts events commands pub sub reliability ordering idempotency",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.07982487499248236
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "\"event-driven\" architecture publish subscribe message broker introduction",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.05240787495858967
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "event sourcing outbox pattern saga introduction",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.04912612494081259
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_5b6bf2"
+            },
+            "result": "ok · 9181 chars",
+            "elapsed_s": 0.07648887496907264
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_26b6e2"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.07631250005215406
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_b2d964"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.07584895798936486
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_d2a4da"
+            },
+            "result": "ok · 6001 chars",
+            "elapsed_s": 0.0777252500411123
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_91e21b"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.07574745791498572
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_770acf"
+            },
+            "result": "ok · 9515 chars",
+            "elapsed_s": 0.07595399999991059
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_ed47f4"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.03366483305580914
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_dc3ebb"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.033067041891627014
+          }
+        ],
+        "input_tokens": 48103,
+        "output_tokens": 2963,
+        "elapsed_s": 36.391860542004,
+        "cost_usd": 0.01332435,
+        "error": ""
+      }
+    ],
+    "authors": [],
+    "total_cost_usd": 0.01332435
+  },
+  {
+    "prompt": "We're picking between Postgres SKIP LOCKED and a managed SQS for a 10k-events/min burst workload — what are the trade-offs and where should I read up?",
+    "researchers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "medium",
+        "label": "gpt-5.4-nano · think=medium",
+        "id_to_url": {
+          "doc_16e520": "https://brooker.co.za/blog/",
+          "doc_b90af0": "https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/",
+          "doc_1f8989": "https://sre.google/sre-book/table-of-contents/",
+          "doc_c675a1": "https://sre.google/workbook/table-of-contents/",
+          "doc_c1ae93": "https://refactoring.guru/design-patterns/chain-of-responsibility",
+          "doc_45df20": "https://www.rabbitmq.com/tutorials/tutorial-two-python",
+          "doc_d4be50": "https://supabase.com/docs",
+          "doc_5c7490": "https://databaserefactoring.com/",
+          "doc_5a60db": "https://www.twingate.com/docs",
+          "doc_cd8347": "https://www.erlang.org/doc/system/sup_princ.html",
+          "doc_097c85": "https://fly.io/blog/",
+          "doc_9f4179": "https://docs.github.com/",
+          "doc_95de99": "https://podman.io/docs",
+          "doc_b761f1": "https://docs.cribl.io/stream/",
+          "doc_ad1807": "https://coolify.io/docs",
+          "doc_c8b4df": "https://upstash.com/docs",
+          "doc_5eee19": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-best-practices.html",
+          "doc_3baea6": "https://dora.dev/research/2025/",
+          "doc_8a5257": "https://aws.amazon.com/sqs/",
+          "doc_e1b4d0": "https://auth0.com/",
+          "doc_57b2d7": "https://docs.sentry.io/",
+          "doc_6460a6": "https://vector.dev/docs/",
+          "doc_e92310": "https://docs.docker.com/docker-hub/",
+          "doc_2c6cc6": "https://ubuntu.com/server/docs",
+          "doc_e8350a": "https://fly.io/docs/",
+          "doc_71eb1f": "https://docs.crunchybridge.com/",
+          "doc_b0c105": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html",
+          "doc_6b8077": "https://www.microsoft.com/en-us/research/wp-content/uploads/1983/10/HintsForComputerSystemDesign.pdf",
+          "doc_dafaed": "https://code.claude.com/docs/en/best-practices",
+          "doc_4862cc": "https://gobyexample.com/channels",
+          "doc_4e4b82": "https://jepsen.io/analyses",
+          "doc_6e837b": "https://github.com/iovisor/bpftrace",
+          "doc_a67fba": "https://github.com/sidekiq/sidekiq/wiki/Best-Practices",
+          "doc_96e59a": "https://protobuf.dev/best-practices/dos-donts/",
+          "doc_2b603c": "https://denibertovic.com/posts/celery-best-practices/",
+          "doc_acc663": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html",
+          "doc_92fbe4": "https://docs.devin.ai/get-started/best-practices",
+          "doc_9d77a9": "https://learnk8s.io/production-best-practices",
+          "doc_8831fc": "https://response.pagerduty.com/getting_started/",
+          "doc_f77f4e": "https://stripe.com/docs/api/idempotent_requests",
+          "doc_eb2ccf": "https://openai.com/index/practices-for-governing-agentic-ai-systems/",
+          "doc_1e8fa1": "https://letsencrypt.org/docs/",
+          "doc_627398": "https://docs.aws.amazon.com/ecr/",
+          "doc_097a73": "https://brandur.org/idempotency-keys",
+          "doc_7ef49a": "https://www.ory.sh/docs/",
+          "doc_9999bc": "https://aiven.io/docs"
+        },
+        "id_to_title": {
+          "doc_16e520": "Marc Brooker's Blog",
+          "doc_b90af0": "Reliable Microservices Data Exchange With the Outbox Pattern",
+          "doc_1f8989": "Site Reliability Engineering",
+          "doc_c675a1": "The Site Reliability Workbook",
+          "doc_c1ae93": "Chain of Responsibility Pattern",
+          "doc_45df20": "Work Queues",
+          "doc_d4be50": "Supabase documentation",
+          "doc_5c7490": "Refactoring Databases",
+          "doc_5a60db": "Twingate documentation",
+          "doc_cd8347": "Supervision Principles",
+          "doc_097c85": "The Fly.io Blog",
+          "doc_9f4179": "GitHub Docs",
+          "doc_95de99": "Podman documentation",
+          "doc_b761f1": "Cribl Stream Documentation",
+          "doc_ad1807": "Coolify documentation",
+          "doc_c8b4df": "Upstash documentation",
+          "doc_5eee19": "SQS Best Practices",
+          "doc_3baea6": "DORA Research 2025",
+          "doc_8a5257": "Amazon SQS",
+          "doc_e1b4d0": "Auth0",
+          "doc_57b2d7": "Sentry Documentation",
+          "doc_6460a6": "Vector Documentation",
+          "doc_e92310": "Docker Hub documentation",
+          "doc_2c6cc6": "Ubuntu Server documentation",
+          "doc_e8350a": "Fly.io documentation",
+          "doc_71eb1f": "Crunchy Bridge documentation",
+          "doc_b0c105": "Amazon SQS Dead-Letter Queues",
+          "doc_6b8077": "Hints for Computer System Design",
+          "doc_dafaed": "Best practices for Claude Code",
+          "doc_4862cc": "Channels in Go",
+          "doc_4e4b82": "Jepsen Analyses",
+          "doc_6e837b": "BCC / bpftrace",
+          "doc_a67fba": "Sidekiq Best Practices",
+          "doc_96e59a": "Proto Best Practices",
+          "doc_2b603c": "Celery Best Practices",
+          "doc_acc663": "S3 Performance Best Practices",
+          "doc_92fbe4": "Best practices for delegating to Devin",
+          "doc_9d77a9": "Kubernetes Production Best Practices",
+          "doc_8831fc": "PagerDuty Incident Response: Getting Started",
+          "doc_f77f4e": "API Idempotency",
+          "doc_eb2ccf": "Practices for Governing Agentic AI Systems",
+          "doc_1e8fa1": "Let's Encrypt Documentation",
+          "doc_627398": "Amazon Elastic Container Registry documentation",
+          "doc_097a73": "Implementing Stripe-like idempotency keys in Postgres",
+          "doc_7ef49a": "Ory Documentation",
+          "doc_9999bc": "Aiven documentation"
+        },
+        "research": {
+          "excerpts": [
+            {
+              "purpose": "Explains why a DB-backed “outbox”/queue pattern is often used to safely bridge state changes and asynchronous delivery (relevant when pairing Postgres with a queue-like table).",
+              "excerpt": "The outbox pattern describes an approach for letting services execute these two tasks in a safe and consistent manner; it provides source services with instant \"read your own writes\" semantics, while offering reliable, eventually consistent data exchange across service boundaries.",
+              "document_id": "doc_b90af0"
+            },
+            {
+              "purpose": "Shows the concrete mechanism of the outbox table: emitting the event record in the same DB transaction as the state change (useful to compare against Postgres SKIP LOCKED claiming rows).",
+              "excerpt": "The idea of this approach is to have an \"outbox\" table in the service’s database. When receiving a request for placing a purchase order, not only an `INSERT` into the `PurchaseOrder` table is done, but, as part of the same transaction, also a record representing the event to be sent is inserted into that outbox table.",
+              "document_id": "doc_b90af0"
+            },
+            {
+              "purpose": "Describes the worker-pool motivation and why durable queues exist: push work to consumers and let many workers share tasks—core to the SQS comparison for burst handling.",
+              "excerpt": "The main idea behind Work Queues (aka: _Task Queues_) is to avoid doing a resource-intensive task immediately and having to wait for it to complete. We encapsulate a _task_ as a message and send it to the queue. A worker process running in the background will pop the tasks and eventually execute the job. When you run many workers the tasks will be shared between them.",
+              "document_id": "doc_45df20"
+            },
+            {
+              "purpose": "Highlights at-least-once/retry behavior under consumer failure (key for designing idempotency for both SQS and DB-claim strategies).",
+              "excerpt": "If a consumer dies (its channel is closed, connection is closed, or TCP connection is lost) without sending an ack, RabbitMQ will understand that a message wasn't processed fully and will re-queue it. If there are other consumers online at the same time, it will then quickly redeliver it to another consumer.",
+              "document_id": "doc_45df20"
+            },
+            {
+              "purpose": "Provides an explicit warning against using a database as the broker under high concurrency/polling—directly relevant to the trade-off of Postgres SKIP LOCKED as a “queue in a table”.",
+              "excerpt": "A database is not built for doing the things a proper AMQP broker like RabbitMQ is designed for. It will break down at one point, probably in production with not that much traffic/user base.",
+              "document_id": "doc_2b603c"
+            },
+            {
+              "purpose": "Further details the failure mode: excessive polling/worker concurrency can overload the DB and impact the user-facing workload—central to burst trade-offs.",
+              "excerpt": "Suddenly your database starts falling apart due to the huge number of workers polling the database for new tasks, your disk IO goes through the roof and your webapp starts being affected by this slow down because the workers are basically DDOS-ing the database.",
+              "document_id": "doc_2b603c"
+            },
+            {
+              "purpose": "Offers a correctness/safety lens: Jepsen explicitly targets queues and finds issues like lock conflicts and data loss under faults, informing how to think about failure modes (important for both approaches).",
+              "excerpt": "Since 2013, Jepsen has analyzed over two dozen databases, coordination services, and queues—and we’ve found replica divergence, data loss, stale reads, read skew, lock conflicts, and much more.",
+              "document_id": "doc_4e4b82"
+            },
+            {
+              "purpose": "Emphasizes testing under failure modes (partial failure, clock skew, faulty networks), which is exactly where queue semantics (visibility/leases, retries) get tricky.",
+              "excerpt": "Testing under distributed systems failure modes: faulty networks, unsynchronized clocks, and partial failure. Many test suites only evaluate the behavior of healthy clusters, but production systems experience pathological failure modes. Jepsen shows behavior under strain.",
+              "document_id": "doc_4e4b82"
+            }
+          ],
+          "further_reading": [
+            {
+              "document_id": "doc_5eee19",
+              "blurb": "AWS’s SQS best-practices page is the most direct place to review visibility timeout, polling, idempotency, and throughput tuning."
+            },
+            {
+              "document_id": "doc_b0c105",
+              "blurb": "The SQS dead-letter queue (DLQ) doc is useful for designing retry exhaustion and inspecting poison-message handling."
+            },
+            {
+              "document_id": "doc_b761f1",
+              "blurb": "If you’ll route/transform events, Cribl Stream docs can help with operational patterns for high-throughput pipelines (monitoring, processing, routing), complementing queue design."
+            },
+            {
+              "document_id": "doc_1f8989",
+              "blurb": "SRE principles (SLOs/error budgets/on-call) help you decide what failure modes you can tolerate for burst workloads and how to set alerting/guardrails."
+            }
+          ],
+          "gaps": [
+            {
+              "concept": "Postgres-specific semantics and operational trade-offs for SKIP LOCKED (claiming rows, lock contention, fairness, and how to build a robust lease/retry loop).",
+              "tried_queries": [
+                "Postgres FOR UPDATE SKIP LOCKED PostgreSQL documentation",
+                "Postgres SKIP LOCKED deadlocks competing consumers work queue table pattern",
+                "SELECT FOR UPDATE SKIP LOCKED PostgreSQL documentation",
+                "SKIP LOCKED"
+              ],
+              "needed": "PostgreSQL documentation/manpages and/or a deep-dive article describing SELECT ... FOR UPDATE SKIP LOCKED worker patterns (lease columns, retry/backoff, and correctness properties)."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "work queue pattern database vs message queue reliability ordering backoff",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.08005062490701675
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "Postgres FOR UPDATE SKIP LOCKED trade-offs concurrency locking documentation",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.08162816695403308
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "AWS SQS managed queue visibility timeout at-least-once exactly-once duplicate delivery burst throughput",
+              "limit": 8
+            },
+            "result": "5 hits",
+            "elapsed_s": 0.08211108297109604
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "SELECT FOR UPDATE SKIP LOCKED PostgreSQL documentation",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.07869237510021776
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "Postgres SKIP LOCKED deadlocks competing consumers work queue table pattern",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.0817265419755131
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "database-backed work queue SELECT FOR UPDATE SKIP LOCKED visibility timeout equivalent",
+              "limit": 8
+            },
+            "result": "4 hits",
+            "elapsed_s": 0.08266762504354119
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "SKIP LOCKED",
+              "limit": 8
+            },
+            "result": "0 hits",
+            "elapsed_s": 0.05082987493369728
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_5eee19"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.07586516696028411
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_b0c105"
+            },
+            "result": "ok · 9998 chars",
+            "elapsed_s": 0.07537179195787758
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_b90af0"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.07501925004180521
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_4e4b82"
+            },
+            "result": "ok · 6054 chars",
+            "elapsed_s": 0.07581154094077647
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_16e520"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.07693395798560232
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_45df20"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.07707562507130206
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "visibility timeout idempotency SQS best practices excerpt",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.20027816691435874
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_a67fba"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.053119666990824044
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_2b603c"
+            },
+            "result": "ok · 8225 chars",
+            "elapsed_s": 0.05199170799460262
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_8a5257"
+            },
+            "result": "error · url not in catalog: https://aws.amazon.com/sqs/",
+            "elapsed_s": 0.05135412502568215
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "SQS visibility timeout idempotency \"queue\" \"best practices\"",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.051191332982853055
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_8a5257"
+            },
+            "result": "error · url not in catalog: https://aws.amazon.com/sqs/",
+            "elapsed_s": 0.042738292017020285
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "site: docs visibility timeout polling idempotency Amazon SQSDeveloperGuide sqs visibility timeout best practices document_id",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.0599900420056656
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "Amazon SQS at-least-once delivery visibility timeout idempotency documentation excerpt",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.07292391697410494
+          }
+        ],
+        "input_tokens": 187096,
+        "output_tokens": 6408,
+        "elapsed_s": 57.38486925000325,
+        "cost_usd": 0.0454292,
+        "error": ""
+      }
+    ],
+    "authors": [],
+    "total_cost_usd": 0.0454292
+  },
+  {
+    "prompt": "What's the right way to think about transactional outbox vs change data capture for an agentic email platform on Kubernetes?",
+    "researchers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "medium",
+        "label": "gpt-5.4-nano · think=medium",
+        "id_to_url": {
+          "doc_858680": "https://kubernetes.io/docs/tutorials/",
+          "doc_fa3703": "https://github.com/kelseyhightower/kubernetes-the-hard-way",
+          "doc_d5f8b0": "https://martinfowler.com/eaaDev/EventSourcing.html",
+          "doc_b683f1": "https://signoz.io/docs/install/",
+          "doc_6f18e1": "https://www.anthropic.com/engineering",
+          "doc_e11ba6": "https://docs.digitalocean.com/",
+          "doc_ec0988": "https://university.redis.io/",
+          "doc_4c73ac": "https://developer.hashicorp.com/terraform/tutorials",
+          "doc_a0e2d3": "https://microservices.io/patterns/data/transactional-outbox.html",
+          "doc_4082d8": "https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/",
+          "doc_b52956": "https://learnk8s.io/production-best-practices",
+          "doc_cfbc4a": "https://www.cs.cornell.edu/andru/cs711/2002fa/reading/sagas.pdf",
+          "doc_4adf19": "https://brandur.org/job-drain",
+          "doc_223c06": "https://www.ics.uci.edu/~cs223/papers/cidr07p15.pdf",
+          "doc_000910": "https://www.snowflake.com/guides/oltp-vs-olap/",
+          "doc_8b26ee": "https://docs.px.dev/about-pixie/what-is-pixie/",
+          "doc_fdae30": "https://docs.replit.com/core-concepts/agent",
+          "doc_5bce42": "https://martinfowler.com/eaaCatalog/gateway.html",
+          "doc_a5e50b": "https://learn.microsoft.com/en-us/azure/architecture/patterns/anti-corruption-layer",
+          "doc_8b997a": "https://martinfowler.com/articles/injection.html",
+          "doc_064f03": "https://www.manning.com/books/dependency-injection-principles-practices-patterns",
+          "doc_9ea4f9": "https://www.youtube.com/playlist?list=PLS_o2ayVCKvBR3jawG9JFIzJ1vXffi8fS",
+          "doc_739b22": "https://docs.fluentd.org/quickstart",
+          "doc_a04f3a": "https://www.twingate.com/docs",
+          "doc_7845da": "https://logfire.pydantic.dev/docs/"
+        },
+        "id_to_title": {
+          "doc_858680": "Kubernetes Tutorials",
+          "doc_fa3703": "Kubernetes The Hard Way",
+          "doc_d5f8b0": "Event Sourcing",
+          "doc_b683f1": "Get Started with SigNoz",
+          "doc_6f18e1": "Demystifying evals for AI agents",
+          "doc_e11ba6": "DigitalOcean documentation",
+          "doc_ec0988": "Redis University",
+          "doc_4c73ac": "Terraform Tutorials",
+          "doc_a0e2d3": "Pattern: Transactional outbox",
+          "doc_4082d8": "Reliable Microservices Data Exchange With the Outbox Pattern",
+          "doc_b52956": "Kubernetes Production Best Practices",
+          "doc_cfbc4a": "Sagas",
+          "doc_4adf19": "Transactionally Staged Job Drains in Postgres",
+          "doc_223c06": "Life Beyond Distributed Transactions",
+          "doc_000910": "OLTP vs. OLAP",
+          "doc_8b26ee": "Pixie Overview",
+          "doc_fdae30": "Replit Agent docs",
+          "doc_5bce42": "Gateway",
+          "doc_a5e50b": "Anti-Corruption Layer pattern",
+          "doc_8b997a": "Inversion of Control Containers and the Dependency Injection pattern",
+          "doc_064f03": "Dependency Injection Principles, Practices, and Patterns",
+          "doc_9ea4f9": "Claude Code Deep Mastery",
+          "doc_739b22": "Fluentd Quickstart",
+          "doc_a04f3a": "Twingate documentation",
+          "doc_7845da": "Pydantic Logfire Documentation"
+        },
+        "research": {
+          "excerpts": [
+            {
+              "purpose": "Defines why outbox exists: atomic DB update + reliable publication without 2PC.",
+              "excerpt": "A service command typically needs to create/update/delete [aggregates] in the database and send messages/events to a message broker.\n\nThe command must atomically update the database and send messages in order to avoid data inconsistencies and bugs. However, it is not viable to use a traditional distributed transaction (2PC) that spans the database and the message broker.",
+              "document_id": "doc_a0e2d3"
+            },
+            {
+              "purpose": "States the core outbox mechanism: store the outgoing event in the same DB transaction, then relay asynchronously.",
+              "excerpt": "The solution is for the service that sends the message to first store the message in the database as part of the transaction that updates the business entities. A separate process then sends the messages to the message broker.",
+              "document_id": "doc_a0e2d3"
+            },
+            {
+              "purpose": "Explains the dual-write inconsistency problem and how the outbox balances 'read your own writes' with reliable async propagation.",
+              "excerpt": "Simply issuing these two requests may lead to potential inconsistencies, though. The reason being that we cannot have one shared transaction that would span the service’s database as well as Apache Kafka, as the latter doesn’t support to be enlisted in distributed (XA) transactions.\n\nNow how would things look like when only writing to the database synchronously and driving the export of a message to Apache Kafka based on that? This is where the outbox pattern comes in.\n\nThe idea of this approach is to have an \"outbox\" table in the service’s database. When receiving a request for placing a purchase order, not only an `INSERT` into the `PurchaseOrder` table is done, but, as part of the same transaction, also a record representing the event to be sent is inserted into that outbox table.",
+              "document_id": "doc_4082d8"
+            },
+            {
+              "purpose": "Shows how a CDC tool (Debezium) can be used in the outbox pipeline by routing outbox-table changes into Kafka topics.",
+              "excerpt": "_Update (13 Sept. 2019):_ To simplify usage of the outbox pattern, Debezium now provides a ready-to-use [SMT for routing outbox events](https://debezium.io/documentation/reference/0.9/configuration/outbox-event-router.html). The custom SMT discussed in this blog post is not needed any longer.",
+              "document_id": "doc_4082d8"
+            },
+            {
+              "purpose": "Gives an implementation analogy for 'don’t fire background work until the transaction commits'—relevant to outbox relay/email job dispatch.",
+              "excerpt": "It’s not easy to spot, but if your queue is fast, the job enqueued by `queue_job()` is likely to fail. A worker starts running it before its enclosing transaction is committed, and it fails to access data that it expected to be available.\n\n…\n\nWith this pattern, jobs aren’t immediately sent to the job queue. Instead, they’re staged in a table within the relational database itself, and the ACID properties of the running transaction keep them invisible until they’re ready to be worked.",
+              "document_id": "doc_4adf19"
+            },
+            {
+              "purpose": "Clarifies the broader design stance: scalable systems typically avoid distributed transactions and instead rely on message-delivery patterns.",
+              "excerpt": "Instead, applications are built using different techniques which do not provide the same transactional guarantees but still meet the needs of their businesses. This paper explores and names some of the practical approaches used in the implementations of large-scale mission-critical applications in a world which rejects distributed transactions.",
+              "document_id": "doc_223c06"
+            },
+            {
+              "purpose": "Provides a contrast point: event sourcing treats changes as an event log (different from 'CDC for integration' or 'outbox for reliable commands').",
+              "excerpt": "Event Sourcing ensures that all changes to application state are stored as a sequence of events.",
+              "document_id": "doc_d5f8b0"
+            }
+          ],
+          "further_reading": [
+            {
+              "document_id": "doc_b52956",
+              "blurb": "Kubernetes production best-practices checklist can help you operationalize the outbox relay/worker components (resources, observability, rollout strategy)."
+            },
+            {
+              "document_id": "doc_cfbc4a",
+              "blurb": "Sagas are often the next step after outbox for long-running, multi-step agentic workflows (e.g., compose → consent → send → retries/compensation)."
+            },
+            {
+              "document_id": "doc_d5f8b0",
+              "blurb": "Event sourcing is a related but distinct persistence model; reading it alongside outbox/CDC helps decide what should be the system of record."
+            }
+          ],
+          "gaps": [
+            {
+              "concept": "How change data capture (CDC) connectors (e.g., transaction-log-based streaming) differ from outbox semantics for correctness guarantees, ordering, and idempotency in an agentic workflow",
+              "tried_queries": [
+                "transactional outbox vs change data capture CDC Kubernetes agentic email platform",
+                "change data capture CDC Kubernetes event streaming",
+                "transaction log tailing pattern outbox CDC Debezium polling publisher curated document_id"
+              ],
+              "needed": "A curated document that directly compares outbox vs CDC/transaction-log tailing (not just implementing one) with guidance on when to use each for reliable command-driven workflows."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "change data capture CDC Kubernetes event streaming",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.0943977499846369
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "transactional outbox pattern reliable messaging Kubernetes",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.09690879203844815
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "transactional outbox vs change data capture CDC Kubernetes agentic email platform",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.10008129093330353
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_a0e2d3"
+            },
+            "result": "ok · 6001 chars",
+            "elapsed_s": 0.06455020804423839
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_4adf19"
+            },
+            "result": "ok · 7573 chars",
+            "elapsed_s": 0.06360449991188943
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_d5f8b0"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.06298391602467746
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_223c06"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.06463687494397163
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_4082d8"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.06541158398613334
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "Debezium outbox pattern SMT outbox event router CDC transaction log tailing",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.05113083403557539
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "transaction log tailing pattern outbox CDC Debezium polling publisher curated document_id",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.059551999904215336
+          }
+        ],
+        "input_tokens": 43169,
+        "output_tokens": 3267,
+        "elapsed_s": 24.87403704202734,
+        "cost_usd": 0.012717550000000001,
+        "error": ""
+      }
+    ],
+    "authors": [],
+    "total_cost_usd": 0.012717550000000001
+  },
+  {
+    "prompt": "I want to deeply understand database internals — index structures, write-ahead logging, MVCC — and I have a free weekend. What should I read first?",
+    "researchers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "medium",
+        "label": "gpt-5.4-nano · think=medium",
+        "id_to_url": {
+          "doc_9075f1": "https://learn.mongodb.com/",
+          "doc_dac9eb": "https://university.redis.io/",
+          "doc_70d889": "https://refactoring.guru/design-patterns/visitor",
+          "doc_583103": "https://github.com/golang-migrate/migrate/blob/master/database/postgres/TUTORIAL.md",
+          "doc_59aa2c": "https://clickhouse.com/docs/getting-started/quick-start",
+          "doc_1db5b0": "https://databaserefactoring.com/",
+          "doc_c7cb56": "https://redis.io/",
+          "doc_b7a0c4": "https://www.pinecone.io/",
+          "doc_03da03": "https://vercel.com/docs/functions",
+          "doc_bc977d": "https://www.twingate.com/docs",
+          "doc_c279b5": "https://cloud.google.com/run/docs",
+          "doc_3e50f6": "https://mise.jdx.dev/getting-started.html",
+          "doc_678d7f": "https://logfire.pydantic.dev/docs/",
+          "doc_524214": "https://docs.turso.tech/",
+          "doc_dbf895": "https://docs.gitea.com/",
+          "doc_0dbcfd": "https://docs.sentry.io/",
+          "doc_c6b7bb": "https://www.patternlanguage.com/aptl/aplsample/aplsample.htm",
+          "doc_dbf145": "https://coolify.io/",
+          "doc_b6e8d0": "https://docs.postgrest.org/en/latest/tutorials/tut0.html",
+          "doc_a0fee4": "https://www.postgresql.org/docs/current/tutorial.html",
+          "doc_ae6752": "https://www.postgresqltutorial.com/",
+          "doc_547d90": "https://www.prisma.io/docs/getting-started/setup-prisma/start-from-scratch/relational-databases/using-prisma-migrate-typescript-postgresql",
+          "doc_c934d8": "https://brandur.org/idempotency-keys",
+          "doc_266919": "https://www.postgresql.org/",
+          "doc_b8254b": "https://docs.liquibase.com/start/home.html",
+          "doc_7c27d4": "https://lovable.dev/videos/tutorial",
+          "doc_e89082": "https://simonwillison.net/2025/Sep/30/designing-agentic-loops/",
+          "doc_ec12f5": "https://microservices.io/patterns/data/transactional-outbox.html",
+          "doc_75fd14": "https://gojko.net/books/specification-by-example/",
+          "doc_1bf578": "https://www.youtube.com/watch?v=8rABwKRsec4",
+          "doc_d9dca6": "https://fly.io/blog/",
+          "doc_965457": "https://www.backblaze.com/docs/cloud-storage-getting-started-with-backblaze-b2",
+          "doc_bdf564": "https://www.brianstorti.com/the-actor-model/",
+          "doc_819d2f": "https://www.oreilly.com/library/view/implementation-patterns/9780321413093/",
+          "doc_e4fef6": "https://cqrs.files.wordpress.com/2010/11/cqrs_documents.pdf",
+          "doc_8d334f": "https://neon.com/docs",
+          "doc_c85673": "https://www.ory.sh/docs/",
+          "doc_aa5013": "https://aider.chat/docs/",
+          "doc_34c75d": "https://aiven.io/docs",
+          "doc_512864": "https://block.github.io/goose/",
+          "doc_7b6d21": "https://learn.microsoft.com/en-us/azure/",
+          "doc_032557": "https://atlasgo.io/docs",
+          "doc_75fb0b": "https://use-the-index-luke.com/",
+          "doc_0e29b8": "https://www.oreilly.com/library/view/database-in-depth/0596100124/",
+          "doc_04d931": "https://martinfowler.com/articles/evodb.html",
+          "doc_21aee6": "https://ampcode.com/AGENTS.md",
+          "doc_4c5aab": "https://jestjs.io/docs/snapshot-testing",
+          "doc_3e7e70": "https://aws.amazon.com/builders-library/workload-isolation-using-shuffle-sharding/"
+        },
+        "id_to_title": {
+          "doc_9075f1": "MongoDB University",
+          "doc_dac9eb": "Redis University",
+          "doc_70d889": "Visitor Pattern",
+          "doc_583103": "golang-migrate Postgres Tutorial",
+          "doc_59aa2c": "ClickHouse Quick Start",
+          "doc_1db5b0": "Refactoring Databases",
+          "doc_c7cb56": "Redis",
+          "doc_b7a0c4": "Pinecone",
+          "doc_03da03": "Vercel Functions documentation",
+          "doc_bc977d": "Twingate documentation",
+          "doc_c279b5": "Cloud Run documentation",
+          "doc_3e50f6": "mise Documentation",
+          "doc_678d7f": "Pydantic Logfire Documentation",
+          "doc_524214": "Turso documentation",
+          "doc_dbf895": "Gitea Documentation",
+          "doc_0dbcfd": "Sentry Documentation",
+          "doc_c6b7bb": "A Pattern Language",
+          "doc_dbf145": "Coolify",
+          "doc_b6e8d0": "PostgREST Tutorial 0: Get it Running",
+          "doc_a0fee4": "PostgreSQL Tutorial (official)",
+          "doc_ae6752": "PostgreSQL Tutorial (third-party)",
+          "doc_547d90": "Prisma Migrate with TypeScript and PostgreSQL",
+          "doc_c934d8": "Implementing Stripe-like idempotency keys in Postgres",
+          "doc_266919": "PostgreSQL",
+          "doc_b8254b": "Get Started with Liquibase",
+          "doc_7c27d4": "Lovable Tutorials: Build Apps with AI",
+          "doc_e89082": "Designing agentic loops",
+          "doc_ec12f5": "Pattern: Transactional outbox",
+          "doc_75fd14": "Specification by Example",
+          "doc_1bf578": "The New Code",
+          "doc_d9dca6": "The Fly.io Blog",
+          "doc_965457": "Backblaze B2 Getting Started",
+          "doc_bdf564": "The Actor Model in 10 Minutes",
+          "doc_819d2f": "Implementation Patterns",
+          "doc_e4fef6": "CQRS Documents",
+          "doc_8d334f": "Neon documentation",
+          "doc_c85673": "Ory Documentation",
+          "doc_aa5013": "Aider Documentation",
+          "doc_34c75d": "Aiven documentation",
+          "doc_512864": "Goose Documentation",
+          "doc_7b6d21": "Azure documentation",
+          "doc_032557": "Atlas Documentation",
+          "doc_75fb0b": "Use The Index, Luke!",
+          "doc_0e29b8": "Database in Depth",
+          "doc_04d931": "Evolutionary Database Design",
+          "doc_21aee6": "How to write AGENTS.md",
+          "doc_4c5aab": "Snapshot Testing",
+          "doc_3e7e70": "Workload Isolation Using Shuffle-Sharding"
+        },
+        "research": {
+          "excerpts": [
+            {
+              "purpose": "Gives you a practical, vendor-agnostic foundation for index anatomy (e.g., B-trees) so you understand the “index structures” side before deeper internals.",
+              "excerpt": "SQL indexing is the most effective tuning method—yet it is often neglected during development. _Use The Index, Luke_ explains SQL indexing from grounds up and doesn’t stop at ORM tools like Hibernate.\n\n## Table of Contents\n\n2.   _[Anatomy of an Index](https://use-the-index-luke.com/sql/anatomy)_ — What does an index look like?\n\n    2.   _[The B-Tree](https://use-the-index-luke.com/sql/anatomy/the-tree)_ — It’s a balanced tree",
+              "document_id": "doc_75fb0b"
+            },
+            {
+              "purpose": "Helps you round out the “transactions” conceptual vocabulary you’ll need when MVCC/WAL topics come next.",
+              "excerpt": "Welcome to the PostgreSQL Tutorial. The tutorial is intended to give an introduction to PostgreSQL, relational database concepts, and the SQL language.\n\nThis tutorial is intended to provide hands-on experience with important aspects of the PostgreSQL system. It makes no attempt to be a comprehensive treatment of the topics it covers.",
+              "document_id": "doc_a0fee4"
+            },
+            {
+              "purpose": "Provides a quick path through transaction-related learning sections in a structured tutorial (useful before you dive into MVCC implementation details).",
+              "excerpt": "*   Transactions \n    *   [PostgreSQL Transaction](https://www.postgresqltutorial.com/postgresql/tutorial/transaction)",
+              "document_id": "doc_ae6752"
+            },
+            {
+              "purpose": "Adds a way to think about evolving schema and database design choices—useful context when internals (indexes, logging, MVCC) affect how you change systems safely.",
+              "excerpt": "Refactoring Databases: Evolutionary Database Design\n\nA collection of database refactoring patterns and database development practices to enable evolutionary database development & Continuous Delivery\n\n### What is Database Refactoring\n\n*   Database refactoring is a technique which enables [Continuous Delivery](http://continuousdelivery.com/).",
+              "document_id": "doc_1db5b0"
+            }
+          ],
+          "further_reading": [
+            {
+              "document_id": "doc_9075f1",
+              "blurb": "If you want a structured (free) course-style approach next, MongoDB University can help you build operational intuition alongside core concepts like indexing."
+            },
+            {
+              "document_id": "doc_59aa2c",
+              "blurb": "ClickHouse quick start is good for comparative intuition about different storage/execution models, even though it won’t teach MVCC/WAL details directly."
+            },
+            {
+              "document_id": "doc_e4fef6",
+              "blurb": "CQRS reading can complement your transaction/internals study by showing why some systems avoid or isolate transactional consistency needs."
+            }
+          ],
+          "gaps": [
+            {
+              "concept": "Write-ahead logging (WAL) and crash recovery internals (redo/undo records, checkpoints)",
+              "tried_queries": [
+                "write ahead logging WAL checkpoints redo undo log records database internals",
+                "\"MVCC\" \"write-ahead logging\""
+              ],
+              "needed": "A curated resource or tutorial specifically about WAL record formats and recovery procedures (e.g., ARIES-style recovery or Postgres/MySQL WAL internals)."
+            },
+            {
+              "concept": "MVCC implementation details (snapshots, visibility rules, transaction IDs)",
+              "tried_queries": [
+                "MVCC documentation transactions snapshots visibility rules transaction timestamp",
+                "MVCC snapshot isolation serializable implementation visibility rules transaction timestamp"
+              ],
+              "needed": "A curated deep-dive on MVCC mechanics—ideally with a concrete example (e.g., Postgres MVCC with xmin/xmax, or InnoDB consistent read) and a timeline walkthrough."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "database internals index structures B-tree LSM write ahead logging WAL MVCC",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.09959154203534126
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "write ahead logging WAL recovery checkpoints redo undo log records",
+              "limit": 8
+            },
+            "result": "0 hits",
+            "elapsed_s": 0.0967584999743849
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "MVCC documentation transactions snapshots visibility rules write transaction log",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.09955849999096245
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "index structures B-tree radix tree hash index range scan internal page format",
+              "limit": 8
+            },
+            "result": "3 hits",
+            "elapsed_s": 0.09952170902397484
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "B-tree index structure page header slot array heap tuple database internals",
+              "limit": 8
+            },
+            "result": "4 hits",
+            "elapsed_s": 0.10248404205776751
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "PostgreSQL WAL MVCC indexes vacuum HOT tuple pruning",
+              "limit": 8
+            },
+            "result": "7 hits",
+            "elapsed_s": 0.10579254198819399
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "write-ahead logging WAL checkpoints redo undo log records database internals",
+              "limit": 8
+            },
+            "result": "5 hits",
+            "elapsed_s": 0.11278945801313967
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "LSM-tree compaction memtable SSTable write amplification WAL segment",
+              "limit": 8
+            },
+            "result": "6 hits",
+            "elapsed_s": 0.11242158303502947
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "MVCC snapshot isolation serializable implementation visibility rules transaction timestamp",
+              "limit": 8
+            },
+            "result": "2 hits",
+            "elapsed_s": 0.11498141707852483
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "MVCC document",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.08531520899850875
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "write ahead logging WAL document",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.08459266601130366
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "B-tree index page split WAL MVCC",
+              "limit": 8
+            },
+            "result": "1 hit",
+            "elapsed_s": 0.0841634999960661
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "undo log redo log recovery database internals",
+              "limit": 8
+            },
+            "result": "5 hits",
+            "elapsed_s": 0.0850637499243021
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_1db5b0"
+            },
+            "result": "ok · 9726 chars",
+            "elapsed_s": 0.05647129099816084
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_9075f1"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.0555765830213204
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_75fb0b"
+            },
+            "result": "ok · 9696 chars",
+            "elapsed_s": 0.057402916019782424
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_0e29b8"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.05656091601122171
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "\"MVCC\" \"write-ahead logging\"",
+              "limit": 8
+            },
+            "result": "1 hit",
+            "elapsed_s": 0.05195316707249731
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "MVCC snapshot isolation visibility",
+              "limit": 8
+            },
+            "result": "2 hits",
+            "elapsed_s": 0.05607995798345655
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_ae6752"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.04595529194921255
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_a0fee4"
+            },
+            "result": "ok · 8195 chars",
+            "elapsed_s": 0.04502812505234033
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_59aa2c"
+            },
+            "result": "ok · 9997 chars",
+            "elapsed_s": 0.044926874921657145
+          }
+        ],
+        "input_tokens": 91213,
+        "output_tokens": 4022,
+        "elapsed_s": 36.437553375028074,
+        "cost_usd": 0.023270100000000002,
+        "error": ""
+      }
+    ],
+    "authors": [],
+    "total_cost_usd": 0.023270100000000002
+  },
+  {
+    "prompt": "How do I instrument an agent's tool calls so I can debug a runaway loop without losing the production trace?",
+    "researchers": [
+      {
+        "model": "gpt-5.4-nano",
+        "thinking": "medium",
+        "label": "gpt-5.4-nano · think=medium",
+        "id_to_url": {
+          "doc_55b0a6": "https://docs.datadoghq.com/tracing/",
+          "doc_b10994": "https://docs.newrelic.com/docs/apm/new-relic-apm/getting-started/introduction-apm/",
+          "doc_485125": "https://logfire.pydantic.dev/docs/",
+          "doc_0aaa55": "https://docs.datadoghq.com/getting_started/tracing/",
+          "doc_dd0a50": "https://docs.fluentd.org/",
+          "doc_154d77": "https://www.youtube.com/watch?v=I82j7AzMU80",
+          "doc_958eb6": "https://redis.io/docs/latest/develop/data-types/streams/",
+          "doc_f6d416": "https://opentelemetry.io/docs/getting-started/",
+          "doc_2c04fb": "https://opentelemetry.io/docs/demo/",
+          "doc_72994d": "https://docs.honeycomb.io/get-started/",
+          "doc_e51d58": "https://axiom.co/docs/introduction",
+          "doc_e267da": "https://signoz.io/docs/introduction/",
+          "doc_39e165": "https://www.coursera.org/specializations/vibe-coding-for-developers",
+          "doc_673ee7": "https://docs.fluentbit.io/manual",
+          "doc_d2f410": "https://developer.hashicorp.com/vault/tutorials/operations/production-hardening",
+          "doc_55ed2c": "https://cloud.google.com/run/docs",
+          "doc_43c5b7": "https://docs.railway.com/",
+          "doc_e8a9b2": "https://www.polarsignals.com/docs/overview",
+          "doc_e946f7": "https://docs.opnsense.org/index.html",
+          "doc_2c0bff": "https://documentation.red-gate.com/fd",
+          "doc_8b704c": "https://docs.px.dev/about-pixie/what-is-pixie/",
+          "doc_7f54f8": "https://betterstack.com/docs/logs/tracing/",
+          "doc_f42d3a": "https://zed.dev/docs/ai/agent-panel",
+          "doc_46b39b": "https://openfeature.dev/specification/",
+          "doc_807eef": "https://www.ics.uci.edu/~cs223/papers/cidr07p15.pdf",
+          "doc_a98623": "https://grafana.com/docs/tempo/latest/getting-started/docker-example/",
+          "doc_a269a3": "https://sre.google/sre-book/monitoring-distributed-systems/",
+          "doc_44a01c": "https://www.jimmybogard.com/avoiding-the-distributed-monolith/",
+          "doc_0622c7": "https://docs.haproxy.org/3.0/configuration.html",
+          "doc_e23ae2": "https://code.claude.com/docs/en/best-practices",
+          "doc_a39077": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html"
+        },
+        "id_to_title": {
+          "doc_55b0a6": "Datadog APM Documentation",
+          "doc_b10994": "Introduction to New Relic APM",
+          "doc_485125": "Pydantic Logfire Documentation",
+          "doc_0aaa55": "Getting Started with Datadog APM",
+          "doc_dd0a50": "Fluentd Documentation",
+          "doc_154d77": "How does Claude Code actually work?",
+          "doc_958eb6": "Introduction to Redis Streams",
+          "doc_f6d416": "OpenTelemetry Getting Started",
+          "doc_2c04fb": "OpenTelemetry Demo",
+          "doc_72994d": "Honeycomb Get Started",
+          "doc_e51d58": "Axiom Docs",
+          "doc_e267da": "Introduction to SigNoz",
+          "doc_39e165": "Vibe Coding for Developers",
+          "doc_673ee7": "Fluent Bit Manual",
+          "doc_d2f410": "Vault Production Hardening",
+          "doc_55ed2c": "Cloud Run documentation",
+          "doc_43c5b7": "Railway documentation",
+          "doc_e8a9b2": "Polar Signals Overview",
+          "doc_e946f7": "OPNsense Documentation",
+          "doc_2c0bff": "Flyway Documentation",
+          "doc_8b704c": "Pixie Overview",
+          "doc_7f54f8": "Distributed Tracing with Better Stack",
+          "doc_f42d3a": "Zed Agent Panel",
+          "doc_46b39b": "OpenFeature Specification",
+          "doc_807eef": "Life Beyond Distributed Transactions",
+          "doc_a98623": "Tempo Quick Start (Docker)",
+          "doc_a269a3": "Monitoring Distributed Systems",
+          "doc_44a01c": "Avoiding the Distributed Monolith",
+          "doc_0622c7": "HAProxy Configuration Manual",
+          "doc_e23ae2": "Best practices for Claude Code",
+          "doc_a39077": "What is Amazon CloudFront?"
+        },
+        "research": {
+          "excerpts": [
+            {
+              "purpose": "Supports the idea of using trace-based debugging with high-cardinality telemetry when an agent loops.",
+              "excerpt": "Instrument your app, send telemetry to Honeycomb, and start debugging with high-cardinality observability.",
+              "document_id": "doc_72994d"
+            },
+            {
+              "purpose": "Supports the approach of keeping a single end-to-end trace so you can correlate repeating tool-call spans with the originating request.",
+              "excerpt": "Distributed tracing allows you to follow a single request as it travels through all the different microservices and components of your system.",
+              "document_id": "doc_7f54f8"
+            },
+            {
+              "purpose": "Supports correlating traces with logs/metrics so you can inspect what happened during each repeated iteration without losing the production context.",
+              "excerpt": "Better Stack unifies logs, metrics, and traces, the three pillars of observability, into a single platform. This means you can seamlessly navigate from a slow trace to the exact logs and metrics generated during that request, giving you the full context you need to resolve issues faster.",
+              "document_id": "doc_7f54f8"
+            },
+            {
+              "purpose": "Supports the idea of using OTLP-based tracing so your agent and any tool-internal HTTP calls can be part of the same trace graph.",
+              "excerpt": "Better Stack ingests trace data using the OpenTelemetry Protocol (OTLP), the open standard for telemetry data.",
+              "document_id": "doc_7f54f8"
+            },
+            {
+              "purpose": "Supports recording detailed span-level telemetry without adding heavy manual instrumentation everywhere (useful when adding spans for agent tool calls).",
+              "excerpt": "Pixie uses eBPF to automatically capture telemetry data without the need for manual instrumentation.",
+              "document_id": "doc_8b704c"
+            },
+            {
+              "purpose": "Supports using APM transaction traces as the debugging primitive to identify where time is spent in nested calls.",
+              "excerpt": "Detailed transaction traces show exactly where slowdowns occur.",
+              "document_id": "doc_b10994"
+            }
+          ],
+          "further_reading": [
+            {
+              "document_id": "doc_2c04fb",
+              "blurb": "The OpenTelemetry Demo shows end-to-end instrumentation patterns across services, which can help you map the agent trace structure onto a real traced request flow."
+            },
+            {
+              "document_id": "doc_f6d416",
+              "blurb": "OpenTelemetry Getting Started is a starting point for setting up traces/metrics/logs with the Collector and SDKs before you add per-tool-call spans."
+            },
+            {
+              "document_id": "doc_485125",
+              "blurb": "Pydantic Logfire’s docs are likely useful if you want higher-level agent/LLM observability plus manual/distributed tracing utilities."
+            },
+            {
+              "document_id": "doc_e267da",
+              "blurb": "SigNoz’s overview is a good option if you want an open-source UI for exploring trace/span graphs and correlating logs while you chase a runaway loop."
+            }
+          ],
+          "gaps": [
+            {
+              "concept": "OpenTelemetry context propagation mechanics for async/await tool calls (so trace/span context isn’t lost between agent iterations)",
+              "tried_queries": [
+                "instrument agent tool calls debug runaway loop production trace",
+                "OpenTelemetry context propagation baggage traceparent span links manual instrumentation"
+              ],
+              "needed": "A documentation section specifically describing context propagation across async boundaries and how to keep the current span as you instrument tool-call wrappers (e.g., contextvars/ScopeManager, traceparent/linking, or async context propagation guarantees)."
+            }
+          ]
+        },
+        "tool_calls": [
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "instrument agent tool calls debug runaway loop production trace",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.0899537920486182
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "agent tool call tracing OpenTelemetry production",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.08826120896264911
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "runaway loop detection instrumentation agent tool calls",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.08759954199194908
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_f6d416"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.07744087500032037
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_b10994"
+            },
+            "result": "ok · 4627 chars",
+            "elapsed_s": 0.0751217498909682
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_55b0a6"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.07714920898433775
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_72994d"
+            },
+            "result": "ok · 4546 chars",
+            "elapsed_s": 0.0767532919999212
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_485125"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.07637899997644126
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_2c04fb"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.07755766599439085
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "OpenTelemetry context propagation baggage traceparent span links manual instrumentation",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.051321374950930476
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_7f54f8"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.04930408298969269
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_e267da"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.061397708021104336
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_8b704c"
+            },
+            "result": "ok · 3564 chars",
+            "elapsed_s": 2.7031190829584375
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "\"context propagation\" \"traceparent\" OpenTelemetry span",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.059490125044249
+          },
+          {
+            "tool": "search_curated",
+            "args": {
+              "query": "Logfire manual tracing distributed tracing context propagation spans",
+              "limit": 8
+            },
+            "result": "8 hits",
+            "elapsed_s": 0.051629875088110566
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_e23ae2"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.032654708018526435
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_154d77"
+            },
+            "result": "ok · 10000 chars",
+            "elapsed_s": 0.05114825000055134
+          },
+          {
+            "tool": "open_document",
+            "args": {
+              "document_id": "doc_f42d3a"
+            },
+            "result": "ok · 861 chars",
+            "elapsed_s": 0.049963625031523407
+          }
+        ],
+        "input_tokens": 176925,
+        "output_tokens": 4483,
+        "elapsed_s": 47.59974566695746,
+        "cost_usd": 0.04098875,
+        "error": ""
+      }
+    ],
+    "authors": [],
+    "total_cost_usd": 0.04098875
+  }
+]

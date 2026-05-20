@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pipeline eval — 2026-05-15 18:38:08</title>
+<style>
+  :root {
+    --bg: #0e1115;
+    --fg: #d8e0ea;
+    --muted: #8d97a6;
+    --cyan: #4fb8ff;
+    --green: #6ce6a0;
+    --amber: #ffba6a;
+    --border: rgba(255,255,255,.08);
+    --card: #161a21;
+    --code: #1e242d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px;
+    background: var(--bg); color: var(--fg);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { margin: 0 0 .25rem; font-size: 1.5rem; }
+  h2 { font-size: 1.05rem; margin: 1.25rem 0 .5rem; }
+  h3 { font-size: .82rem; margin: 1rem 0 .35rem;
+        text-transform: uppercase; letter-spacing: .12em;
+        color: var(--muted); }
+  .sub { color: var(--muted); font-size: .85rem; margin-bottom: 1rem; }
+  table { width: 100%; border-collapse: collapse; margin: .5rem 0 1.25rem;
+           font-size: .85rem; }
+  th, td { padding: .35rem .55rem; text-align: left;
+            border-bottom: 1px solid var(--border); }
+  th { font-weight: 600; color: var(--muted); font-size: .72rem;
+        text-transform: uppercase; letter-spacing: .12em; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr.total td { font-weight: 700; border-top: 2px solid var(--border); }
+  code { background: var(--code); padding: .1em .35em; border-radius: 3px;
+          font-size: .9em; }
+  pre { background: var(--code); padding: .75rem .85rem; border-radius: 4px;
+         overflow-x: auto; line-height: 1.45; font-size: .85rem; }
+  blockquote { border-left: 3px solid var(--cyan); margin: .5rem 0;
+                padding: .25rem 0 .25rem .8rem;
+                color: var(--muted); font-style: italic; }
+  a { color: var(--cyan); }
+  .prompt-card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1rem;
+  }
+  details { border: 1px solid var(--border); border-radius: 6px;
+             margin: .35rem 0; background: var(--card); }
+  details > summary {
+    cursor: pointer; padding: .55rem .8rem;
+    font: 600 .82rem/1 -apple-system, sans-serif;
+    list-style: none;
+    display: flex; gap: .5rem; align-items: center; flex-wrap: wrap;
+  }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before {
+    content: "▸"; color: var(--muted); transition: transform .15s;
+    font-size: .75rem;
+  }
+  details[open] > summary::before { transform: rotate(90deg);
+    display: inline-block; }
+  .pill {
+    display: inline-block; padding: .12rem .45rem;
+    font: 600 .7rem/1.4 ui-monospace, "SF Mono", monospace;
+    border-radius: 3px;
+    background: rgba(79,184,255,.15); color: var(--cyan);
+  }
+  .pill.author { background: rgba(108,230,160,.15); color: var(--green); }
+  .pill.cost { background: transparent; color: var(--muted);
+                font-weight: 400; }
+  details > .body { padding: 0 .8rem .9rem;
+                     border-top: 1px solid var(--border); }
+  details > .body > .md { padding-top: .8rem; }
+  .md p:first-child { margin-top: 0; }
+  .md p:last-child  { margin-bottom: 0; }
+  .md ul, .md ol { margin: .35rem 0 .6rem; padding-left: 1.4rem; }
+  .md li { margin: .15rem 0; }
+  .empty { color: var(--muted); font-style: italic; }
+  .res-section {
+    font-size: .68rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--muted); margin: .85rem 0 .4rem; font-weight: 600;
+  }
+  .excerpt-list { display: flex; flex-direction: column; gap: .55rem; }
+  .excerpt {
+    padding: .55rem .75rem;
+    background: rgba(79,184,255,.04);
+    border-left: 2px solid rgba(79,184,255,.5);
+    border-radius: 0 4px 4px 0;
+  }
+  .excerpt-point {
+    font-weight: 600; color: var(--cyan); font-size: .82rem;
+    margin-bottom: .25rem;
+  }
+  .excerpt-text { font-size: .88rem; line-height: 1.5; margin: 0 0 .2rem; }
+  .excerpt-cite { font-size: .78rem; color: var(--muted); }
+  .excerpt-path { font-size: .72rem; color: var(--muted); opacity: .75; }
+  .excerpt-path-unresolved { color: #c54848; opacity: 1; }
+  ul.further-list {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: .25rem;
+  }
+  ul.further-list li { font-size: .85rem; line-height: 1.45; }
+  .further-blurb { color: var(--muted); }
+  table.tool-table { font-size: .8rem; margin: 0 0 .25rem; }
+  table.tool-table th { font-weight: 600; }
+  table.tool-table td { vertical-align: top; padding: .3rem .55rem; }
+  table.tool-table code { font-size: .8em; }
+  .res-section-count { color: var(--muted); font-weight: 400;
+    text-transform: none; letter-spacing: 0; font-size: .68rem; }
+  .row-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+  @media (max-width: 800px) { .row-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Researcher × Author pipeline eval</h1>
+  <p class="sub">Generated 2026-05-15 18:38:08 · 1 prompt(s) · 12 model calls</p>
+
+  <h2>Cost totals</h2>
+  <table>
+    <thead><tr>
+      <th>Model</th><th class="num">Input tok</th>
+      <th class="num">Output tok</th><th class="num">Cost (USD)</th>
+    </tr></thead>
+    <tbody>
+      <tr><td><code>gemini-3-flash-preview</code></td><td class='num'>27,603</td><td class='num'>7,076</td><td class='num'>$0.0350</td></tr>
+      <tr><td><code>gemini-3.1-flash-lite</code></td><td class='num'>63,973</td><td class='num'>5,663</td><td class='num'>$0.0245</td></tr>
+      <tr><td><code>gpt-5.4-nano</code></td><td class='num'>221,833</td><td class='num'>10,355</td><td class='num'>$0.0573</td></tr>
+      <tr class="total">
+        <td>TOTAL</td>
+        <td class="num">313,409</td>
+        <td class="num">23,094</td>
+        <td class="num">$0.1168</td>
+      </tr>
+    </tbody>
+  </table>
+
+<div class='prompt-card'><h2>Prompt 1</h2><blockquote>We&#x27;re picking between Postgres SKIP LOCKED and a managed SQS for a 10k-events/min burst workload — what are the trade-offs and where should I read up?</blockquote><p class='sub'>$0.1168 · 313,409 in / 23,094 out tok · 4 researchers × 2 authors</p><h3>Researcher outputs</h3><details open><summary><span class='pill'>gpt-5.4-nano · think=low</span> <span class='pill cost'>12 calls · 5 excerpts · 3 further · 72,042 in / 2,340 out tok · $0.0173 · 42.3s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(12)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>Postgres SKIP LOCKED trade-offs concurrency queue pattern documentation</code> · limit=8</td><td>8 hits</td><td class='num'>0.08s</td></tr><tr><td><code>search_curated</code></td><td><code>SKIP LOCKED Postgres documentation FOR UPDATE SKIP LOCKED queue workers</code> · limit=8</td><td>8 hits</td><td class='num'>0.07s</td></tr><tr><td><code>search_curated</code></td><td><code>&quot;SKIP LOCKED&quot;</code> · limit=8</td><td>0 hits</td><td class='num'>0.07s</td></tr><tr><td><code>search_curated</code></td><td><code>SQS managed message queue visibility timeout at-least-once documentation</code> · limit=8</td><td>8 hits</td><td class='num'>0.07s</td></tr><tr><td><code>search_curated</code></td><td><code>Postgres &quot;FOR UPDATE&quot; skip locked worker pattern documentation</code> · limit=8</td><td>8 hits</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_3c2009</code></td><td>ok · 10000 chars</td><td class='num'>0.04s</td></tr><tr><td><code>open_document</code></td><td><code>doc_b34e6c</code></td><td>ok · 10000 chars</td><td class='num'>6.16s</td></tr><tr><td><code>search_curated</code></td><td><code>doc_3c2009 visibility timeout polling delete message batching idempotent best practices excerpt</code> · limit=5</td><td>5 hits</td><td class='num'>0.08s</td></tr><tr><td><code>open_document</code></td><td><code>doc_bbe953</code></td><td>ok · 10000 chars</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_1f5243</code></td><td>ok · 8225 chars</td><td class='num'>1.79s</td></tr><tr><td><code>search_curated</code></td><td><code>SQS visibility timeout polling best practices at-least-once delivery idempotent</code> · limit=6</td><td>6 hits</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_3c2009</code></td><td>ok · 10000 chars</td><td class='num'>0.03s</td></tr></tbody></table><h4 class='res-section'>Excerpts</h4><div class='excerpt-list'><div class='excerpt'><div class='excerpt-point'>Explains why using an internal outbox (DB table + async publisher) is a common way to get reliable event propagation and replayability—useful when comparing DB-backed vs queue-backed burst handling.</div><div class='excerpt-text'>The outbox pattern describes an approach for letting services execute these two tasks in a safe and consistent manner; it provides source services with instant &quot;read your own writes&quot; semantics, while offering reliable, eventually consistent data exchange across service boundaries.</div><div class='excerpt-cite'>— <a href='https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/' target='_blank' rel='noopener'>Reliable Microservices Data Exchange With the Outbox Pattern</a> <code class='excerpt-path'>doc_b34e6c</code></div></div><div class='excerpt'><div class='excerpt-point'>Gives the concrete mechanics of the outbox table + asynchronous monitor process, which mirrors the idea behind a “pull” worker model (like SKIP LOCKED) but with durable publication semantics.</div><div class='excerpt-text'>The idea of this approach is to have an &quot;outbox&quot; table in the service’s database. When receiving a request for placing a purchase order, not only an `INSERT` into the `PurchaseOrder` table is done, but, as part of the same transaction, also a record representing the event to be sent is inserted into that outbox table.
+
+An asynchronous process monitors that table for new entries. If there are any, it propagates the events as messages to Apache Kafka.</div><div class='excerpt-cite'>— <a href='https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/' target='_blank' rel='noopener'>Reliable Microservices Data Exchange With the Outbox Pattern</a> <code class='excerpt-path'>doc_b34e6c</code></div></div><div class='excerpt'><div class='excerpt-point'>Highlights a key risk of using the database as the broker for workers: too many polling consumers can overload the DB and interfere with the user-facing workload—central to DB+SKIP LOCKED trade-offs at high burst rates.</div><div class='excerpt-text'>A database is not built for doing the things a proper AMQP broker like RabbitMQ is designed for. It will break down at one point, probably in production with not that much traffic/user base.</div><div class='excerpt-cite'>— <a href='https://denibertovic.com/posts/celery-best-practices/' target='_blank' rel='noopener'>Celery Best Practices</a> <code class='excerpt-path'>doc_1f5243</code></div></div><div class='excerpt'><div class='excerpt-point'>Provides an example of an operational guideline for async job consumers: keep message/job parameters small and use identifiers instead of passing stateful objects—important for at-least-once delivery patterns typical of managed queues.</div><div class='excerpt-text'>Sidekiq persists the arguments to `perform_async` to Redis as JSON. Sometimes people are tempted to make the following kind of mistake:
+
+undefinedruby
+# MISTAKE
+quote = Quote.find(quote_id)
+SomeJob.perform_async(quote)</div><div class='excerpt-cite'>— <a href='https://github.com/sidekiq/sidekiq/wiki/Best-Practices' target='_blank' rel='noopener'>Sidekiq Best Practices</a> <code class='excerpt-path'>doc_bbe953</code></div></div><div class='excerpt'><div class='excerpt-point'>Links back to the core mitigation for at-least-once/duplicate processing: don’t persist complex state in the queued payload; re-fetch by ID in the worker.</div><div class='excerpt-text'>The arguments you pass to `perform_async`**must** be composed of simple JSON datatypes: **string**, **integer**, **float**, **boolean**, **null(nil)**, **array** and **hash**. This means you **must not** use ruby symbols as arguments. The Sidekiq client API uses `JSON.dump` to send the data to Redis.</div><div class='excerpt-cite'>— <a href='https://github.com/sidekiq/sidekiq/wiki/Best-Practices' target='_blank' rel='noopener'>Sidekiq Best Practices</a> <code class='excerpt-path'>doc_bbe953</code></div></div></div><h4 class='res-section'>Further reading</h4><ul class='further-list'><li><a href='https://learn.microsoft.com/en-us/azure/architecture/patterns/sidecar' target='_blank' rel='noopener'>Sidecar pattern</a> <code class='excerpt-path'>doc_1759fc</code> — <span class='further-blurb'>The sidecar pattern can help structure worker/poller components and separate concerns (ingestion vs processing) when you choose between DB polling and external queues.</span></li><li><a href='https://gojko.net/books/specification-by-example/' target='_blank' rel='noopener'>Specification by Example</a> <code class='excerpt-path'>doc_a254c1</code> — <span class='further-blurb'>Specification-by-example can be useful for defining the correct semantics (ordering, retries, idempotency) before implementing either SKIP LOCKED workers or SQS consumers.</span></li><li><a href='https://www.tigerdata.com/docs/' target='_blank' rel='noopener'>Tiger Data (TimescaleDB) documentation</a> <code class='excerpt-path'>doc_06a718</code> — <span class='further-blurb'>If your events touch time-series/state, this TimescaleDB-focused doc may help think through schema/performance implications for bursty event writes.</span></li></ul></div></details><details open><summary><span class='pill'>gpt-5.4-nano · think=high</span> <span class='pill cost'>20 calls · 7 excerpts · 4 further · 149,791 in / 8,015 out tok · $0.0400 · 63.9s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(20)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>SKIP LOCKED trade-offs Postgres row locking concurrency workload</code> · limit=8</td><td>8 hits</td><td class='num'>0.06s</td></tr><tr><td><code>search_curated</code></td><td><code>Postgres FOR UPDATE SKIP LOCKED work queue documentation</code> · limit=8</td><td>8 hits</td><td class='num'>0.07s</td></tr><tr><td><code>search_curated</code></td><td><code>Amazon SQS trade-offs vs database queue visibility timeout at-least-once</code> · limit=8</td><td>8 hits</td><td class='num'>0.07s</td></tr><tr><td><code>search_curated</code></td><td><code>database-backed queue skip locked idempotency outbox</code> · limit=8</td><td>8 hits</td><td class='num'>0.07s</td></tr><tr><td><code>search_curated</code></td><td><code>SKIP LOCKED Postgres job queue competing consumers FOR UPDATE SKIP LOCKED document</code> · limit=8</td><td>8 hits</td><td class='num'>0.05s</td></tr><tr><td><code>open_document</code></td><td><code>doc_6ef6ad</code></td><td>ok · 7573 chars</td><td class='num'>0.08s</td></tr><tr><td><code>open_document</code></td><td><code>doc_7a214d</code></td><td>ok · 10000 chars</td><td class='num'>0.08s</td></tr><tr><td><code>open_document</code></td><td><code>doc_ddb661</code></td><td>ok · 10000 chars</td><td class='num'>0.08s</td></tr><tr><td><code>open_document</code></td><td><code>doc_b0b4bb</code></td><td>ok · 10000 chars</td><td class='num'>0.08s</td></tr><tr><td><code>open_document</code></td><td><code>doc_1c08a0</code></td><td>ok · 9998 chars</td><td class='num'>0.08s</td></tr><tr><td><code>open_document</code></td><td><code>doc_0a60d3</code></td><td>ok · 10000 chars</td><td class='num'>0.08s</td></tr><tr><td><code>search_curated</code></td><td><code>visibility timeout SQS best practices delete message idempotent</code> · limit=8</td><td>8 hits</td><td class='num'>0.07s</td></tr><tr><td><code>search_curated</code></td><td><code>SQS visibility timeout at-least-once delivery semantics receipt handle delete message</code> · limit=8</td><td>5 hits</td><td class='num'>0.07s</td></tr><tr><td><code>search_curated</code></td><td><code>&quot;dead-letter queue&quot; &quot;SQS&quot; messages&quot; After&quot; move&quot; document</code> · limit=8</td><td>7 hits</td><td class='num'>0.09s</td></tr><tr><td><code>search_curated</code></td><td><code>&quot;SQS&quot; &quot;at-least-once&quot; delivery semantics documentation excerpt</code> · limit=8</td><td>8 hits</td><td class='num'>0.10s</td></tr><tr><td><code>search_curated</code></td><td><code>&quot;visibility timeout&quot; &quot;SQS&quot; &quot;message remains&quot; document_id</code> · limit=8</td><td>6 hits</td><td class='num'>0.10s</td></tr><tr><td><code>search_curated</code></td><td><code>site: Amazon SQS visibility timeout in-flight messages remain visible visibility timeout of the message quotes</code> · limit=8</td><td>8 hits</td><td class='num'>0.10s</td></tr><tr><td><code>open_document</code></td><td><code>doc_3c7185</code></td><td>ok · 10000 chars</td><td class='num'>0.05s</td></tr><tr><td><code>open_document</code></td><td><code>doc_845a67</code></td><td>ok · 6054 chars</td><td class='num'>0.62s</td></tr><tr><td><code>open_document</code></td><td><code>doc_668a53</code></td><td>ok · 10000 chars</td><td class='num'>0.03s</td></tr></tbody></table><h4 class='res-section'>Excerpts</h4><div class='excerpt-list'><div class='excerpt'><div class='excerpt-point'>Explains a key failure mode of DB-backed queues when workers can run before the transaction that enqueued the work commits.</div><div class='excerpt-text'>It’s not easy to spot, but if your queue is fast, the job enqueued by `queue_job()` is likely to fail. A worker starts running it before its enclosing transaction is committed, and it fails to access data that it expected to be available.</div><div class='excerpt-cite'>— <a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_6ef6ad</code></div></div><div class='excerpt'><div class='excerpt-point'>Shows the core idea behind transactionally-staged job drains, which can be used to avoid early visibility / coordination issues in a relational-queue approach.</div><div class='excerpt-text'>With this pattern, jobs aren’t immediately sent to the job queue. Instead, they’re staged in a table within the relational database itself, and the ACID properties of the running transaction keep them invisible until they’re ready to be worked. A secondary **_enqueuer_** process reads the table and sends any jobs it finds to the job queue before removing their rows.</div><div class='excerpt-cite'>— <a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_6ef6ad</code></div></div><div class='excerpt'><div class='excerpt-point'>Clarifies the delivery semantics you should design for when building “queue in/around the DB” systems (at-least-once).</div><div class='excerpt-text'>The enqueuer is also totally resistant to job loss. Jobs are only removed _after_ they’re successfully transmitted to the queue, so even if the worker dies partway through, it will pick back up again and send along any jobs that it missed. _At least once_ delivery semantics are guaranteed.</div><div class='excerpt-cite'>— <a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_6ef6ad</code></div></div><div class='excerpt'><div class='excerpt-point'>Highlights why in-DB competing-worker queues based on locking can become problematic under load (relevant to SELECT … FOR UPDATE SKIP LOCKED designs).</div><div class='excerpt-text'>This is workable at modest to medium scale, but the frantic pace at which workers try to lock jobs doesn’t scale very well for a database that’s experiencing considerable load. For Postgres in particular, [long-running transactions](https://brandur.org/postgres-queues) greatly increase the amount of time it takes for workers to find a job that they can lock, and this can lead to the job queue spiraling out of control.</div><div class='excerpt-cite'>— <a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_6ef6ad</code></div></div><div class='excerpt'><div class='excerpt-point'>Calls out an important SQS operational/throughput consideration: visibility timeout effectively caps the number of concurrent in-flight messages your consumer fleet can process.</div><div class='excerpt-text'>Some queue services like SQS have limits as to how many in-flight messages can be delivered to the consumer of the queue. This is different from the number of messages that can be in the queue (for which there is no practical limit), but rather is the number of messages that the consumer fleet is working on at once. This number can be inflated if a system dequeues messages, but then fails to delete them. For example, we have seen bugs where code fails to catch an exception while processing a message and forgets to delete the message. In these cases, the message remains in-flight from the perspective of SQS for the[_VisibilityTimeout_](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html)of the message.</div><div class='excerpt-cite'>— <a href='https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/' target='_blank' rel='noopener'>Avoiding insurmountable queue backlogs</a> <code class='excerpt-path'>doc_7a214d</code></div></div><div class='excerpt'><div class='excerpt-point'>Provides the application-level mechanism you’ll need regardless of Postgres-vs-SQS: idempotency keys so retries/duplicates don’t cause double effects.</div><div class='excerpt-text'>An idempotency key is a unique value that’s generated by a client and sent to an API along with a request. The server stores the key to use for bookkeeping the status of that request on its end. If a request should fail partway through, the client retries with _the same_ idempotency key value, and the server uses it to look up the request’s state and continue from where it left off.</div><div class='excerpt-cite'>— <a href='https://brandur.org/idempotency-keys' target='_blank' rel='noopener'>Implementing Stripe-like idempotency keys in Postgres</a> <code class='excerpt-path'>doc_0a60d3</code></div></div><div class='excerpt'><div class='excerpt-point'>Shows how to safely bridge transactional DB writes to an external queue/event system (useful if you move from SKIP LOCKED to SQS).</div><div class='excerpt-text'>The idea of this approach is to have an &quot;outbox&quot; table in the service’s database. When receiving a request for placing a purchase order, not only an `INSERT` into the `PurchaseOrder` table is done, but, as part of the same transaction, also a record representing the event to be sent is inserted into that outbox table. An asynchronous process monitors that table for new entries. If there are any, it propagates the events as messages to Apache Kafka.</div><div class='excerpt-cite'>— <a href='https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/' target='_blank' rel='noopener'>Reliable Microservices Data Exchange With the Outbox Pattern</a> <code class='excerpt-path'>doc_668a53</code></div></div></div><h4 class='res-section'>Further reading</h4><ul class='further-list'><li><a href='https://www.rabbitmq.com/tutorials/tutorial-two-python' target='_blank' rel='noopener'>Work Queues</a> <code class='excerpt-path'>doc_b97355</code> — <span class='further-blurb'>Work Queues (RabbitMQ) is a good baseline for competing-consumer worker pools and how to reason about worker concurrency and durability patterns.</span></li><li><a href='https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html' target='_blank' rel='noopener'>Amazon SQS Dead-Letter Queues</a> <code class='excerpt-path'>doc_1c08a0</code> — <span class='further-blurb'>Amazon SQS Dead-Letter Queues digs into when and how poison messages are isolated, which is central to keeping throughput stable during failure spikes.</span></li><li><a href='https://jepsen.io/analyses' target='_blank' rel='noopener'>Jepsen Analyses</a> <code class='excerpt-path'>doc_845a67</code> — <span class='further-blurb'>Jepsen’s analyses index is a handy way to read about real failure modes (including lock conflicts) in distributed systems and queues under fault conditions.</span></li><li><a href='https://docs.datadoghq.com/tracing/' target='_blank' rel='noopener'>Datadog APM Documentation</a> <code class='excerpt-path'>doc_a75790</code> — <span class='further-blurb'>Datadog APM docs are useful for instrumentation/trace correlation so you can compare end-to-end latency and retry rates between the two designs in production.</span></li></ul></div></details><details open><summary><span class='pill'>gemini-3.1-flash-lite · think=low</span> <span class='pill cost'>7 calls · 5 excerpts · 4 further · 1 unresolved · 17,974 in / 2,023 out tok · $0.0075 · 14.2s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(7)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>Postgres SKIP LOCKED event queue performance</code> · limit=8</td><td>8 hits</td><td class='num'>0.09s</td></tr><tr><td><code>search_curated</code></td><td><code>Postgres SKIP LOCKED vs SQS queueing trade-offs</code> · limit=8</td><td>8 hits</td><td class='num'>0.10s</td></tr><tr><td><code>search_curated</code></td><td><code>managed SQS vs database table queueing</code> · limit=8</td><td>8 hits</td><td class='num'>0.09s</td></tr><tr><td><code>open_document</code></td><td><code>doc_f60f5f</code></td><td>ok · 7573 chars</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_53d345</code></td><td>ok · 10000 chars</td><td class='num'>0.07s</td></tr><tr><td><code>open_document</code></td><td><code>doc_1a927e</code></td><td>ok · 9998 chars</td><td class='num'>0.07s</td></tr><tr><td><code>open_document</code></td><td><code>doc_60a16b</code></td><td>ok · 9696 chars</td><td class='num'>3.02s</td></tr></tbody></table><h4 class='res-section'>Excerpts</h4><div class='excerpt-list'><div class='excerpt'><div class='excerpt-point'>This explains why staging jobs in a Postgres table provides strong consistency guarantees compared to a naive implementation.</div><div class='excerpt-text'>Transactional isolation means that the enqueuer is unable to see jobs that aren’t yet commmitted... so jobs are never worked too early. The enqueuer is also totally resistant to job loss. Jobs are only removed after they’re successfully transmitted to the queue, so even if the worker dies partway through, it will pick back up again and send along any jobs that it missed.</div><div class='excerpt-cite'>— <a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_f60f5f</code></div></div><div class='excerpt'><div class='excerpt-point'>This directly addresses the performance limitations of using Postgres as a queue for a high-volume burst workload.</div><div class='excerpt-text'>[In-database queues] are workable at modest to medium scale, but the frantic pace at which workers try to lock jobs doesn’t scale very well for a database that’s experiencing considerable load. For Postgres in particular, long-running transactions greatly increase the amount of time it takes for workers to find a job that they can lock, and this can lead to the job queue spiraling out of control.</div><div class='excerpt-cite'>— <a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_f60f5f</code></div></div><div class='excerpt'><div class='excerpt-point'>This highlights that managed queue services like SQS provide out-of-the-box infrastructure for error handling and observability, which Postgres does not.</div><div class='excerpt-text'>Dead-letter queues in Amazon SQS ... Configuring a dead-letter queue... Creating alarms for dead-letter queues using Amazon CloudWatch.</div><div class='excerpt-cite'>— <a href='https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html' target='_blank' rel='noopener'>Amazon SQS Dead-Letter Queues</a> <code class='excerpt-path'>doc_1a927e</code></div></div><div class='excerpt'><div class='excerpt-point'>This explains the architectural trade-off of using a database table to bridge the gap between transactional state and async event delivery.</div><div class='excerpt-text'>Simply issuing these two requests [to DB and Queue] may lead to potential inconsistencies, though. The reason being that we cannot have one shared transaction that would span the service’s database as well as Apache Kafka... The idea of this approach [outbox pattern] is to have an &#x27;outbox&#x27; table in the service’s database.</div><div class='excerpt-cite'>— <a href='https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/' target='_blank' rel='noopener'>Reliable Microservices Data Exchange With the Outbox Pattern</a> <code class='excerpt-path'>doc_53d345</code></div></div><div class='excerpt'><div class='excerpt-point'>If you choose a database-backed queue, proper indexing is critical to avoid the contention issues mentioned in the other documents.</div><div class='excerpt-text'>SQL indexing is the most effective tuning method—yet it is often neglected during development. Use The Index, Luke explains SQL indexing from grounds up and doesn’t stop at ORM tools.</div><div class='excerpt-cite'>— <a href='https://use-the-index-luke.com/' target='_blank' rel='noopener'>Use The Index, Luke!</a> <code class='excerpt-path'>doc_60a16b</code></div></div></div><h4 class='res-section'>Further reading</h4><ul class='further-list'><li><a href='https://use-the-index-luke.com/' target='_blank' rel='noopener'>Use The Index, Luke!</a> <code class='excerpt-path'>doc_60a16b</code> — <span class='further-blurb'>This discusses how to build system architectures that are horizontally scalable, which is the ultimate goal if you are seeing 10k+ events/min.</span></li><li><a href='https://supabase.com/docs' target='_blank' rel='noopener'>Supabase documentation</a> <code class='excerpt-path'>doc_0ec649</code> — <span class='further-blurb'>If you want to stay in the Postgres ecosystem but need better performance, this can provide an alternative managed approach to database infrastructure.</span></li><li><a href='https://aws.amazon.com/dynamodb/' target='_blank' rel='noopener'>DynamoDB</a> <code class='excerpt-path'>doc_6880cf</code> — <span class='further-blurb'>If you decide that SQS is the right path, you might eventually need more predictable key-value scaling, which this tool provides.</span></li><li><code class='excerpt-path excerpt-path-unresolved'>doc_f5ad0e}]} else {
+    
+  } final_result{excerpts:[{document_id: (unresolved)</code> — <span class='further-blurb'>For extremely high throughput event processing, this is a standard open-source alternative to consider alongside SQS.</span></li></ul></div></details><details open><summary><span class='pill'>gemini-3.1-flash-lite · think=high</span> <span class='pill cost'>6 calls · 4 excerpts · 4 further · 18,396 in / 1,745 out tok · $0.0072 · 9.1s</span></summary><div class='body'><h4 class='res-section'>Tool calls <span class='res-section-count'>(6)</span></h4><table class='tool-table'><thead><tr><th>Tool</th><th>Args</th><th>Result</th><th class='num'>Δ</th></tr></thead><tbody><tr><td><code>search_curated</code></td><td><code>Postgres SKIP LOCKED queue</code> · limit=8</td><td>8 hits</td><td class='num'>0.06s</td></tr><tr><td><code>search_curated</code></td><td><code>message queue versus database queue</code> · limit=8</td><td>8 hits</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_29c611</code></td><td>ok · 7573 chars</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_acaf44</code></td><td>ok · 10000 chars</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_856341</code></td><td>ok · 10000 chars</td><td class='num'>0.06s</td></tr><tr><td><code>open_document</code></td><td><code>doc_53f6bd</code></td><td>ok · 10000 chars</td><td class='num'>0.06s</td></tr></tbody></table><h4 class='res-section'>Excerpts</h4><div class='excerpt-list'><div class='excerpt'><div class='excerpt-point'>Explains the scalability limitations of directly queuing jobs in Postgres under high load.</div><div class='excerpt-text'>[Delayed_job], [que], and [queue_classic] use a similar transactional mechanic to keep jobs hidden, and take it even a step further by having workers dequeue jobs directly from within the database. This is workable at modest to medium scale, but the frantic pace at which workers try to lock jobs doesn’t scale very well for a database that’s experiencing considerable load. For Postgres in particular, long-running transactions greatly increase the amount of time it takes for workers to find a job that they can lock, and this can lead to the job queue spiraling out of control.</div><div class='excerpt-cite'>— <a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_29c611</code></div></div><div class='excerpt'><div class='excerpt-point'>Provides a better pattern for using Postgres to manage job queues, which is more robust than simple SKIP LOCKED.</div><div class='excerpt-text'>We can dequeue jobs gracefully by using a transactionally-staged job drain. With this pattern, jobs aren’t immediately sent to the job queue. Instead, they’re staged in a table within the relational database itself, and the ACID properties of the running transaction keep them invisible until they’re ready to be worked. A secondary enqueuer process reads the table and sends any jobs it finds to the job queue before removing their rows.</div><div class='excerpt-cite'>— <a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_29c611</code></div></div><div class='excerpt'><div class='excerpt-point'>This source is essential for understanding the broader architectural trade-offs of using databases as queues versus managed message queues.</div><div class='excerpt-text'>As an engineer at Amazon Web Services (AWS) in Seattle, where I work on databases, serverless, and serverless databases... [Marc Brooker&#x27;s Blog contains numerous posts on] databases, durability, queues, retries, and metastability.</div><div class='excerpt-cite'>— <a href='https://brooker.co.za/blog/' target='_blank' rel='noopener'>Marc Brooker&#x27;s Blog</a> <code class='excerpt-path'>doc_53f6bd</code></div></div><div class='excerpt'><div class='excerpt-point'>Highlights that regardless of the queue implementation, idempotency is critical for handling retries in a robust system.</div><div class='excerpt-text'>In APIs idempotency is a powerful concept. An idempotent endpoint is one that can be called any number of times while guaranteeing that the side effects will occur only once. In a messy world where clients and servers that may occasionally crash or have their connections drop partway through a request, it’s a huge help in making systems more robust to failure. Clients that are uncertain whether a request succeeded or failed can simply keep retrying it until they get a definitive response.</div><div class='excerpt-cite'>— <a href='https://brandur.org/idempotency-keys' target='_blank' rel='noopener'>Implementing Stripe-like idempotency keys in Postgres</a> <code class='excerpt-path'>doc_856341</code></div></div></div><h4 class='res-section'>Further reading</h4><ul class='further-list'><li><a href='https://brandur.org/job-drain' target='_blank' rel='noopener'>Transactionally Staged Job Drains in Postgres</a> <code class='excerpt-path'>doc_29c611</code> — <span class='further-blurb'>Deep dive into handling background job failures and maintaining transaction atomicity in Postgres.</span></li><li><a href='https://brooker.co.za/blog/' target='_blank' rel='noopener'>Marc Brooker&#x27;s Blog</a> <code class='excerpt-path'>doc_53f6bd</code> — <span class='further-blurb'>Covers concepts like retries, backoff, and metastability in large-scale systems.</span></li><li><a href='https://brandur.org/idempotency-keys' target='_blank' rel='noopener'>Implementing Stripe-like idempotency keys in Postgres</a> <code class='excerpt-path'>doc_856341</code> — <span class='further-blurb'>Practical advice on handling foreign state mutations using idempotency keys, which is crucial for distributed systems.</span></li><li><a href='https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-getting-started.html' target='_blank' rel='noopener'>Getting Started with Amazon SQS</a> <code class='excerpt-path'>doc_acaf44</code> — <span class='further-blurb'>Official documentation for understanding SQS queue types and at-least-once delivery semantics.</span></li></ul></div></details><h3>Author outputs (per researcher source)</h3><details open><summary><span class='pill author'>gemini-3.1-flash-lite</span> ← research from <span class='pill'>gpt-5.4-nano · think=low</span><span class='pill cost'>6,872 in / 561 out tok · $0.0026 · 2.5s</span></summary><div class='body'><div class='md'><p>For 10k events/min, you’re choosing between the operational simplicity of using your database as a queue and the predictable isolation of a dedicated message broker. Use the <a href="https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/">Outbox Pattern</a> if you need transactional guarantees (the event <em>must</em> ship if the DB record updates), but move to a managed queue like SQS if you want to avoid DB contention during bursts.</p>
+<p>The primary trade-off is resource interference: <a href="https://www.2ndquadrant.com/en/blog/what-is-select-for-update-skip-locked-in-postgresql-in-postgres-9-5/">SKIP LOCKED</a> allows you to build queues directly in Postgres, but high-frequency polling can bloat your transaction logs and spike IOPS, potentially starving user-facing queries <a href="https://denibertovic.com/posts/celery-best-practices/">as noted in common Celery/DB-as-queue warnings</a>. If you choose the DB path, keep your consumer logic extremely lean to minimize lock duration.</p>
+<p>If you opt for SQS, you gain natural backpressure and infinite scalability, but you move from “exactly-once” transactional updates to “at-least-once” delivery. This necessitates an idempotency strategy: <a href="https://github.com/sidekiq/sidekiq/wiki/Best-Practices">never pass full state objects</a> in your message payloads. Always pass the ID and force the worker to fetch the latest state from your DB, which handles potential retries or race conditions safely.</p>
+<pre><code class="language-sdanswer">{
+  &quot;type&quot;: &quot;tradeoff&quot;,
+  &quot;title&quot;: &quot;Postgres SKIP LOCKED vs. Managed Queue (SQS)&quot;,
+  &quot;options&quot;: [
+    {
+      &quot;label&quot;: &quot;Postgres SKIP LOCKED&quot;,
+      &quot;bullets&quot;: [
+        &quot;Transactional atomicity by default&quot;,
+        &quot;Zero infrastructure overhead&quot;,
+        &quot;Risk of DB IOPS contention&quot;,
+        &quot;Tied to DB scaling limits&quot;
+      ]
+    },
+    {
+      &quot;label&quot;: &quot;Managed Queue (SQS)&quot;,
+      &quot;bullets&quot;: [
+        &quot;High isolation from DB&quot;,
+        &quot;Infinite throughput scalability&quot;,
+        &quot;Requires idempotency logic&quot;,
+        &quot;Adds network hop complexity&quot;
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>Before you commit, ask yourself if your consumers can handle duplicates—if the answer is no, you’ll need to invest in idempotency keys regardless of which transport you choose.</p>
+</div></div></details><details open><summary><span class='pill author'>gemini-3-flash-preview</span> ← research from <span class='pill'>gpt-5.4-nano · think=low</span><span class='pill cost'>6,872 in / 1,056 out tok · $0.0066 · 5.7s</span></summary><div class='body'><div class='md'><p>For a 10k-events/min burst workload, the choice depends on whether you prioritize transactional atomicity or infrastructure decoupling. At this scale, Postgres can handle the throughput, but the polling overhead often creates contention with your primary application queries.</p>
+<p>If your events are generated as side effects of database changes, starting with a Postgres-backed outbox is the most reliable path. <a href="https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/">Reliable Microservices Data Exchange With the Outbox Pattern</a> explains how to use an outbox table to ensure your state changes and event emissions happen in a single transaction, providing “read your own writes” semantics that SQS can’t offer natively. However, as noted in <a href="https://denibertovic.com/posts/celery-best-practices/">Celery Best Practices</a>, using your database as a broker introduces a scaling ceiling; aggressive polling for new jobs can eventually starve your user-facing connections during bursts.</p>
+<p>If you move to SQS to decouple the load, you must shift your mental model to handle at-least-once delivery. A common mistake is passing full state objects in the message payload. <a href="https://github.com/sidekiq/sidekiq/wiki/Best-Practices">Sidekiq Best Practices</a> recommends passing only simple identifiers (like an ID string) so the worker can fetch the fresh state from the database, which prevents race conditions where a worker processes stale data during a burst.</p>
+<pre><code class="language-sdanswer">{
+  &quot;type&quot;: &quot;tradeoff&quot;,
+  &quot;title&quot;: &quot;Postgres SKIP LOCKED vs. Managed SQS&quot;,
+  &quot;options&quot;: [
+    {
+      &quot;label&quot;: &quot;Postgres (Outbox)&quot;,
+      &quot;bullets&quot;: [
+        &quot;Atomic: Event + DB write succeed or fail together&quot;,
+        &quot;Consistency: Zero delay between write and visibility&quot;,
+        &quot;Risk: Polling load can impact primary DB performance&quot;
+      ]
+    },
+    {
+      &quot;label&quot;: &quot;Managed SQS&quot;,
+      &quot;bullets&quot;: [
+        &quot;Scalable: Absorbs massive bursts without DB pressure&quot;,
+        &quot;Decoupled: Worker failures don't affect API uptime&quot;,
+        &quot;Risk: Requires idempotency for duplicate messages&quot;
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>Before you commit to SQS, verify if your workers can handle messages out of order—standard SQS doesn’t guarantee sequence, and FIFO queues have significantly lower throughput limits.</p>
+</div></div></details><details open><summary><span class='pill author'>gemini-3.1-flash-lite</span> ← research from <span class='pill'>gpt-5.4-nano · think=high</span><span class='pill cost'>7,350 in / 484 out tok · $0.0026 · 2.3s</span></summary><div class='body'><div class='md'><p>For a 10k-events/min burst, your primary trade-off is between the operational simplicity of keeping state local to your database and the throughput isolation provided by a dedicated message broker.</p>
+<p>If you stick with Postgres, the <a href="https://brandur.org/job-drain">Transactionally Staged Job Drains</a> pattern is the gold standard for avoiding race conditions where workers attempt to process records that haven’t been committed yet. Relying on <code>SELECT … FOR UPDATE SKIP LOCKED</code> is tempting for its low friction, but at that scale, lock contention can cause your transaction throughput to tank as workers fight for the same table rows. If you go this route, you must implement <a href="https://brandur.org/idempotency-keys">idempotency keys</a> to handle the inevitable “at-least-once” delivery retries that occur when a worker crashes or a lock times out.</p>
+<p>Moving to SQS decouples your queue capacity from your DB’s performance, but it shifts the challenge to managing <a href="https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/">visibility timeouts</a> and handling the latency of distributed event propagation. The most robust way to transition between these two is the <a href="https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/">Outbox Pattern</a>, which allows you to keep the transactional integrity of your DB writes while offloading the heavy lifting of message distribution to a managed service.</p>
+<pre><code class="language-sdanswer">{ &quot;type&quot;: &quot;tradeoff&quot;,
+  &quot;title&quot;: &quot;Postgres vs. Managed Queue (SQS)&quot;,
+  &quot;options&quot;: [
+    { &quot;label&quot;: &quot;Postgres (SKIP LOCKED)&quot;,
+      &quot;bullets&quot;: [&quot;Low complexity/latency&quot;, &quot;Shared DB resource contention&quot;, &quot;Vertical scaling limits&quot;] },
+    { &quot;label&quot;: &quot;Managed (SQS)&quot;,
+      &quot;bullets&quot;: [&quot;Infinite horizontal scaling&quot;, &quot;Distributed system complexity&quot;, &quot;Eventual consistency overhead&quot;] }
+  ]
+}
+</code></pre>
+<p>Before you settle on an architecture, ensure you have a strategy for “poison messages” that fail repeatedly; otherwise, your consumer fleet can stall regardless of whether your backing store is a table or an SQS queue.</p>
+</div></div></details><details open><summary><span class='pill author'>gemini-3-flash-preview</span> ← research from <span class='pill'>gpt-5.4-nano · think=high</span><span class='pill cost'>7,350 in / 1,744 out tok · $0.0089 · 8.7s</span></summary><div class='body'><div class='md'><p>Use Postgres if your jobs must be atomic with your data; use SQS if you need to scale past your database’s locking capacity or want to decouple your worker fleet’s scaling from your DB.</p>
+<p>Postgres <code>FOR UPDATE SKIP LOCKED</code> is excellent for transactional integrity, but it hits a ceiling when high-frequency locking creates contention. The most common footgun is the visibility race: a fast worker picks up a job before the transaction that enqueued it has actually committed, causing the worker to fail because it can’t see the related data yet. To solve this, you’ll want to look at <a href="https://brandur.org/job-drain">Transactionally Staged Job Drains in Postgres</a>, which uses an intermediate staging table to ensure jobs only become visible once they’re ready to be worked.</p>
+<p>SQS handles 10k/min bursts without breaking a sweat, but it forces you to solve the “dual write” problem—ensuring a message is sent only if your database transaction succeeds. You’ll likely need the <a href="https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/">Reliable Microservices Data Exchange With the Outbox Pattern</a> to bridge that gap safely. Also, keep an eye on your visibility timeouts; if workers fail to delete messages after processing, you can hit in-flight limits that stall your entire pipeline, as detailed in <a href="https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/">Avoiding insurmountable queue backlogs</a>.</p>
+<p>Regardless of the backend, “exactly-once” is a myth in distributed systems. You’ll need to build your workers to be idempotent. <a href="https://brandur.org/idempotency-keys">Implementing Stripe-like idempotency keys in Postgres</a> is the definitive guide for making sure retries and duplicate deliveries don’t result in duplicate side effects.</p>
+<pre><code class="language-sdanswer">{
+  &quot;type&quot;: &quot;tradeoff&quot;,
+  &quot;title&quot;: &quot;Postgres vs. Managed SQS&quot;,
+  &quot;options&quot;: [
+    {
+      &quot;label&quot;: &quot;Postgres (SKIP LOCKED)&quot;,
+      &quot;bullets&quot;: [
+        &quot;Atomic with DB writes&quot;,
+        &quot;Zero extra infrastructure&quot;,
+        &quot;Locking scales poorly&quot;,
+        &quot;Requires manual staging&quot;
+      ]
+    },
+    {
+      &quot;label&quot;: &quot;Managed SQS&quot;,
+      &quot;bullets&quot;: [
+        &quot;Elastic scaling for bursts&quot;,
+        &quot;Managed retries/DLQs&quot;,
+        &quot;Requires Outbox pattern&quot;,
+        &quot;Harder local dev loop&quot;
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>If you stick with Postgres, watch your <code>pg_stat_activity</code> for long-running transactions; they’re the silent killer of <code>SKIP LOCKED</code> performance at scale.</p>
+</div></div></details><details open><summary><span class='pill author'>gemini-3.1-flash-lite</span> ← research from <span class='pill'>gemini-3.1-flash-lite · think=low</span><span class='pill cost'>6,701 in / 526 out tok · $0.0025 · 2.6s</span></summary><div class='body'><div class='md'><p>For a 10k-events/min burst workload, Postgres <code>SKIP LOCKED</code> will likely become your primary bottleneck; you should lean toward SQS for the operational headroom it provides.</p>
+<p>Using Postgres as a queue offers strong transactional consistency—as detailed in <a href="https://brandur.org/job-drain">Transactionally Staged Job Drains in Postgres</a>—because it allows you to bind your work to the same database transaction that updates your domain state. However, the catch is that high-frequency row locking creates intense contention, causing your workers to spin and wait for index locks rather than processing events. If you stick with the database, you must master <a href="https://use-the-index-luke.com/">Use The Index, Luke!</a> to minimize the performance impact of those lookups.</p>
+<p>Managed services like SQS effectively shift that contention away from your database engine and provide built-in tooling for retries and visibility that you’d otherwise have to build yourself. As documented in <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html">Amazon SQS Dead-Letter Queues</a>, infrastructure for handling failures is non-trivial; if you stay in Postgres, ensure you have a plan for how to handle “poison pill” messages that crash your workers without needing to manually clear rows from your table.</p>
+<p>If you choose the database route, consider the <a href="https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/">Outbox Pattern</a> to decouple your database writes from your event delivery, as it helps mitigate the risk of distributed inconsistencies. Before committing to either, ask yourself whether you are more concerned about the overhead of managing a separate message broker or the technical debt of implementing your own queue observability inside Postgres.</p>
+<pre><code class="language-sdanswer">{ &quot;type&quot;: &quot;tradeoff&quot;, &quot;title&quot;: &quot;Postgres vs. Managed Queue (SQS)&quot;, &quot;options&quot;: [
+  { &quot;label&quot;: &quot;Postgres (SKIP LOCKED)&quot;, &quot;bullets&quot;: [
+    &quot;Strong transactional consistency&quot;,
+    &quot;Coupled with app state&quot;,
+    &quot;Scaling causes index contention&quot;
+  ] },
+  { &quot;label&quot;: &quot;Managed (SQS)&quot;, &quot;bullets&quot;: [
+    &quot;High throughput scaling&quot;,
+    &quot;Native retry/DLQ support&quot;,
+    &quot;Requires managing dual-writes&quot;
+  ] }
+] }
+</code></pre>
+</div></div></details><details open><summary><span class='pill author'>gemini-3-flash-preview</span> ← research from <span class='pill'>gemini-3.1-flash-lite · think=low</span><span class='pill cost'>6,701 in / 2,193 out tok · $0.0099 · 10.1s</span></summary><div class='body'><div class='md'><p>At 10k events/min, you’re approaching the scale where Postgres <code>FOR UPDATE SKIP LOCKED</code> begins to sweat under lock contention and row bloat. SQS is the safer pick for raw throughput and built-in failure handling, but you’ll likely want to use Postgres as a “transactional outbox” to keep your data consistent.</p>
+<p>The primary risk with Postgres at this volume is the “spiral of death” described in <a href="https://brandur.org/job-drain">Transactionally Staged Job Drains in Postgres</a>. As workers frantically scan for available rows, MVCC overhead and long-running transactions can make it increasingly difficult to find locks, eventually causing your database to buckle. If you stay on Postgres, you’ll need to be aggressive with indexing as outlined in <a href="https://use-the-index-luke.com/">Use The Index, Luke!</a> to minimize the scan surface area.</p>
+<p>Moving to SQS provides managed features like <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html">Amazon SQS Dead-Letter Queues</a>, but you lose the ability to commit a job and a data change in a single transaction. To bridge this, implement the <a href="https://debezium.io/blog/2019/02/19/reliable-microservices-data-exchange-with-the-outbox-pattern/">Reliable Microservices Data Exchange With the Outbox Pattern</a>: write your events to a local Postgres “outbox” table within your business transaction, then use a background worker to drain those rows into SQS.</p>
+<pre><code class="language-sdanswer">{
+  &quot;type&quot;: &quot;tradeoff&quot;,
+  &quot;title&quot;: &quot;Postgres vs. Managed SQS&quot;,
+  &quot;options&quot;: [
+    {
+      &quot;label&quot;: &quot;Postgres (SKIP LOCKED)&quot;,
+      &quot;bullets&quot;: [
+        &quot;Strong transactional consistency&quot;,
+        &quot;Zero extra infra cost&quot;,
+        &quot;Subject to MVCC bloat&quot;,
+        &quot;Harder to scale bursts&quot;
+      ]
+    },
+    {
+      &quot;label&quot;: &quot;Managed SQS&quot;,
+      &quot;bullets&quot;: [
+        &quot;Highly scalable throughput&quot;,
+        &quot;Built-in dead-letter queues&quot;,
+        &quot;Eventual consistency risk&quot;,
+        &quot;Network/API overhead&quot;
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>If you stick with the Postgres-only path, monitor your <code>autovacuum</code> health closely—at 10k/min, the churn of “deleted” job rows can quickly outpace the default cleanup settings and tank your query performance.</p>
+</div></div></details><details open><summary><span class='pill author'>gemini-3.1-flash-lite</span> ← research from <span class='pill'>gemini-3.1-flash-lite · think=high</span><span class='pill cost'>6,680 in / 324 out tok · $0.0022 · 2.2s</span></summary><div class='body'><div class='md'><p>For a 10k-events/min burst workload, your primary concern is preventing database contention; using Postgres as a queue for that volume often leads to <a href="https://brandur.org/job-drain">transactionally-staged job drains</a> becoming a performance bottleneck rather than a solution.</p>
+<p>While <code>SKIP LOCKED</code> is convenient for small-scale background tasks, it forces your workers to compete for locks within the database, which can quickly spiral into contention that slows down your primary application traffic. At 10k events/min, you’ll likely find that <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-getting-started.html">Amazon SQS</a> provides a cleaner decoupling of your producers and consumers, allowing them to scale independently without putting your database’s transaction log under unnecessary pressure.</p>
+<p>Regardless of which you choose, the most durable way to handle the inevitable “at-least-once” delivery failures is <a href="https://brandur.org/idempotency-keys">idempotency</a>; building your consumers to handle retries safely is more important than the specific queuing mechanism itself. When you’re ready to dig into the failure modes that come with this kind of distributed work, look into the systems thinking on <a href="https://brooker.co.za/blog/">Marc Brooker’s Blog</a>, specifically regarding metastability and retries.</p>
+<p>Before you finalize the architecture, ask yourself: if the consumer crashes mid-job, can your system detect that state and recover without manual intervention?</p>
+</div></div></details><details open><summary><span class='pill author'>gemini-3-flash-preview</span> ← research from <span class='pill'>gemini-3.1-flash-lite · think=high</span><span class='pill cost'>6,680 in / 2,083 out tok · $0.0096 · 10.4s</span></summary><div class='body'><div class='md'><p>At 10k events/min, Postgres can handle the throughput, but you’re choosing between the transactional integrity of the database and the operational decoupling of SQS. The decision hinges on whether your priority is ensuring a job is <em>always</em> enqueued when a record is saved, or if you’d rather offload the retry and scaling logic to a managed service.</p>
+<p>The primary friction with Postgres is contention. As <a href="https://brandur.org/job-drain">Transactionally Staged Job Drains in Postgres</a> explains, having workers constantly polling and locking rows using <code>SKIP LOCKED</code> creates a “frantic pace” that struggles under high database load, often leading to queue bloat and vacuum pressure. If you go this route, the “Outbox” pattern is your best bet: commit your job to a local table in the same transaction as your data, then use a secondary process to “drain” those jobs into a proper queue.</p>
+<p>SQS is built for this burstiness, but it introduces the “dual-write” problem—the risk that your database transaction commits but the network call to SQS fails. To handle this safely, you must lean on idempotency. <a href="https://brandur.org/idempotency-keys">Implementing Stripe-like idempotency keys in Postgres</a> provides the blueprint for making sure that when SQS delivers a message twice (as at-least-once systems do), your system remains consistent.</p>
+<pre><code class="language-sdanswer">{
+  &quot;type&quot;: &quot;tradeoff&quot;,
+  &quot;title&quot;: &quot;Postgres vs. Managed SQS&quot;,
+  &quot;options&quot;: [
+    {
+      &quot;label&quot;: &quot;Postgres (SKIP LOCKED)&quot;,
+      &quot;bullets&quot;: [
+        &quot;Atomic: Job + data save together&quot;,
+        &quot;Operational simplicity (one less service)&quot;,
+        &quot;Harder to scale workers linearly&quot;,
+        &quot;Significant MVCC/Vacuum overhead&quot;
+      ]
+    },
+    {
+      &quot;label&quot;: &quot;Managed SQS&quot;,
+      &quot;bullets&quot;: [
+        &quot;Infinite scaling for burst workloads&quot;,
+        &quot;Native DLQ and retry logic&quot;,
+        &quot;Risk of dual-write failures&quot;,
+        &quot;Requires strict worker idempotency&quot;
+      ]
+    }
+  ]
+}
+</code></pre>
+<p>If you need deeper theory on how these systems behave during failure, <a href="https://brooker.co.za/blog/">Marc Brooker’s Blog</a> is the gold standard for understanding retries, backoff, and the “metastability” issues that crop up when queues get backed up.</p>
+<p>Before you flip the switch, check if your workers are performing external side effects; if they aren’t idempotent yet, moving to SQS will eventually corrupt your state during a network blip.</p>
+</div></div></details></div>
+
+</div>
+</body>
+</html>
