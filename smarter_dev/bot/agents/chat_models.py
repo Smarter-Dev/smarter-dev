@@ -30,6 +30,13 @@ class Message(BaseModel):
     body: str
     reactions: list[str] = Field(default_factory=list)
     has_attachments: bool = False
+    sent_at: datetime | None = Field(
+        default=None,
+        description=(
+            "When the message was sent in UTC. Optional because some "
+            "synthetic / test paths may construct a Message without one."
+        ),
+    )
     mentions_bot: bool = Field(
         default=False,
         description=(

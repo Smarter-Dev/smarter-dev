@@ -164,6 +164,7 @@ async def _convert(
                 body=resolved_body,
                 reactions=reactions,
                 has_attachments=bool(msg.attachments),
+                sent_at=getattr(msg, "created_at", None) or getattr(msg, "timestamp", None),
                 mentions_bot=mentions_bot,
             )
         )
