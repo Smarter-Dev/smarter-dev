@@ -25,6 +25,9 @@ import smarter_dev.web.models  # noqa: F401  -- registers all models with Base.m
 MAIN_TABLES: frozenset[str] = frozenset({
     "agent_conversations",
     "agent_messages",
+    "author_profiles",
+    "blog_post_meta",
+    "blog_post_tags",
     "campaign_signups",
     "chat_agent_compaction_events",
     "chat_agent_engagements",
@@ -47,6 +50,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "resource_tools",
     "scan_service_usage",
     "scan_user_profiles",
+    "tags",
     "tracked_link_counters",
 })
 

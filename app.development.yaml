@@ -51,11 +51,7 @@ controllers:
   - smarter_dev.web.chat_conversations_admin:ChatConversationsAdminController
   - smarter_dev.web.mod_actions_admin:ModActionsAdminController
   - smarter_dev.web.scan.api_controller:ScanAPIController
-
-page_types:
-  - name: blog
-    plural: blog
-    icon: pen-tool
+  - smarter_dev.web.blog_controller:BlogController
 
 middleware:
   - smarter_dev.web.middleware.partial:create_partial_middleware
