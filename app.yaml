@@ -69,16 +69,11 @@ controllers:
   - smarter_dev.web.chat_conversations_admin:ChatConversationsAdminController
   - smarter_dev.web.mod_actions_admin:ModActionsAdminController
   - smarter_dev.web.scan.api_controller:ScanAPIController
+  - smarter_dev.web.blog_controller:BlogController
 
 # Partials system (SPA navigation)
 partials:
   enabled: true
-
-# Page types — auto-generates admin CRUD, public listing, and detail routes
-page_types:
-  - name: blog
-    plural: blog
-    icon: pen-tool
 
 storage:
   default: default

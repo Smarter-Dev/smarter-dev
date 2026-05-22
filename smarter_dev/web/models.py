@@ -3952,3 +3952,87 @@ class ChatAgentCompactionEvent(Base):
             f"<ChatAgentCompactionEvent(kind='{self.event_kind}', "
             f"{self.original_chars}c->{self.summary_chars}c)>"
         )
+
+
+# ---------------------------------------------------------------------------
+# Blog metadata — sidecar tables for Skrift's page-type=blog.
+#
+# Skrift's Page model lives on its own metadata, so we can't add columns to it
+# from this Base. Instead we keep blog-specific fields (agent-author flag,
+# reviewer, tags) on adjacent project-owned tables and join in the view layer.
+# ---------------------------------------------------------------------------
+
+
+class AuthorProfile(Base):
+    """Per-user blog publishing profile (extension of Skrift's User)."""
+
+    __tablename__ = "author_profiles"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    # FK to skrift.users(id); declared raw in the migration.
+    user_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False, unique=True
+    )
+    is_agent: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
+
+class BlogPostMeta(Base):
+    """Blog-specific sidecar fields for a Skrift page with type='blog'."""
+
+    __tablename__ = "blog_post_meta"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    # FK to skrift.pages(id); declared raw in the migration.
+    page_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False, unique=True
+    )
+    # FK to skrift.users(id); declared raw in the migration.
+    reviewed_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+
+
+class Tag(Base):
+    """A taxonomy tag, shared across blog posts (and reusable later)."""
+
+    __tablename__ = "tags"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    slug: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class BlogPostTag(Base):
+    """Many-to-many join between blog posts (pages) and tags."""
+
+    __tablename__ = "blog_post_tags"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    # FK to skrift.pages(id); declared raw in the migration.
+    page_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False
+    )
+    tag_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("tags.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "page_id", "tag_id", name="uq_blog_post_tags_page_tag"
+        ),
+        Index("ix_blog_post_tags_page_id", "page_id"),
+    )
