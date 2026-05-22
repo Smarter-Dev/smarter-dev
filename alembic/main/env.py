@@ -29,6 +29,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "blog_post_meta",
     "blog_post_tags",
     "campaign_signups",
+    "candidate_blog_topics",
     "chat_agent_compaction_events",
     "chat_agent_engagements",
     "chat_agent_turns",

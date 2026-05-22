@@ -108,6 +108,50 @@ class FollowupAgentInput(BaseModel):
     notes: str | None = None
 
 
+class BlogTopicCandidate(BaseModel):
+    """A blog-post idea shaken loose by this conversation.
+
+    The bar: would I want to publish this in three months? Skip charity
+    entries — if the topic isn't actually post-worthy, don't file it just
+    to please whoever asked. Filing one in a substantive engagement is
+    healthy; two is fine when the conversation produced two distinct
+    things worth writing.
+    """
+
+    headline: str = Field(
+        description=(
+            "One line — the title you'd actually publish. No marketing "
+            "fluff ('the ultimate guide to…'), no clickbait. Written for "
+            "a human reviewer skimming a queue."
+        ),
+    )
+    pitch: str = Field(
+        description=(
+            "Two to four sentences sketching the angle: what the post "
+            "would cover and what makes it worth reading. Include the "
+            "concrete moment from chat that sparked it — 'X said Y; "
+            "here's what's actually going on' lands harder than 'explain "
+            "Z'. When the idea came from a user request, attribute them "
+            "here ('@alice asked for this in #python')."
+        ),
+    )
+    category: Literal["concept", "misconception", "news"] | None = Field(
+        default=None,
+        description=(
+            "'concept' — a coding concept worth explaining ('Why CRDTs "
+            "aren't magic', 'What `await` actually does'). "
+            "'misconception' — a wrong mental model worth correcting; the "
+            "instructive part is showing *why* the wrong model breaks "
+            "('await makes things parallel', 'more indexes is always "
+            "better'). "
+            "'news' — recent coding news the chat had a real take on "
+            "('Why the latest Postgres release matters for pgbouncer "
+            "users'). Not rehashed headlines — a take. "
+            "Leave None if it doesn't cleanly fit."
+        ),
+    )
+
+
 class NoResponse(BaseModel):
     """Agent decided not to send a message this turn."""
 
@@ -122,6 +166,13 @@ class NoResponse(BaseModel):
     )
     topic: str = Field(
         description="1-2 sentence summary of the current conversation topic.",
+    )
+    blog_topic_candidates: list[BlogTopicCandidate] = Field(
+        default_factory=list,
+        description=(
+            "Blog-post ideas filed this turn. See the system prompt for the "
+            "rules; the schema doesn't bias the count."
+        ),
     )
 
 
@@ -201,6 +252,13 @@ class SendResponse(BaseModel):
             "write it for your future self to remember WHO is asking about WHAT, "
             "not to summarise what was said (your conversation history covers "
             "that)."
+        ),
+    )
+    blog_topic_candidates: list[BlogTopicCandidate] = Field(
+        default_factory=list,
+        description=(
+            "Blog-post ideas filed this turn. See the system prompt for the "
+            "rules; the schema doesn't bias the count."
         ),
     )
 

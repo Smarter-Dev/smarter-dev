@@ -1,0 +1,216 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ topic.headline }} - Blogging Agent - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<style nonce="{{ csp_nonce() }}">
+    .ba-detail-header {
+        margin-bottom: 1.5rem;
+    }
+    .ba-detail-back {
+        color: var(--sk-color-muted);
+        font-size: .85rem;
+        text-decoration: none;
+    }
+    .ba-detail-back:hover { color: var(--sk-color-text); }
+
+    .ba-detail-headline {
+        font-size: 1.6rem;
+        margin: .25rem 0 .75rem;
+        color: var(--sk-color-text);
+    }
+    .ba-detail-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: .5rem;
+        align-items: center;
+    }
+
+    .ba-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: .3rem;
+        padding: .2rem .65rem;
+        border-radius: 999px;
+        font-size: .72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        border: 1px solid var(--sk-color-border);
+        background: var(--sk-color-surface);
+        color: var(--sk-color-text);
+    }
+    .ba-pill-new       { color: #0ea5e9; border-color: #0ea5e9; }
+    .ba-pill-kept      { color: #22c55e; border-color: #22c55e; }
+    .ba-pill-drafted   { color: #eab308; border-color: #eab308; }
+    .ba-pill-discarded { color: var(--sk-color-muted); border-color: var(--sk-color-border); }
+    .ba-cat {
+        display: inline-block;
+        padding: .15rem .55rem;
+        border-radius: .25rem;
+        background: color-mix(in srgb, var(--sk-color-primary, #0ea5e9) 12%, transparent);
+        color: var(--sk-color-primary, #0ea5e9);
+        font-size: .72rem;
+        font-weight: 500;
+        text-transform: lowercase;
+    }
+
+    .ba-detail-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+        gap: 1.5rem;
+        align-items: start;
+    }
+    @media (max-width: 900px) {
+        .ba-detail-grid { grid-template-columns: 1fr; }
+    }
+
+    .ba-card {
+        background: var(--sk-color-surface);
+        border: 1px solid var(--sk-color-border);
+        border-radius: .5rem;
+        padding: 1.25rem 1.5rem;
+    }
+    .ba-card h3 {
+        font-size: .8rem;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: var(--sk-color-muted);
+        margin: 0 0 .75rem;
+        font-weight: 600;
+    }
+    .ba-card .pitch {
+        font-size: 1rem;
+        line-height: 1.65;
+        color: var(--sk-color-text);
+        white-space: pre-wrap;
+    }
+
+    .ba-meta-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: .4rem 0;
+        font-size: .9rem;
+        border-bottom: 1px dashed var(--sk-color-border);
+    }
+    .ba-meta-row:last-child { border-bottom: 0; }
+    .ba-meta-row .key {
+        color: var(--sk-color-muted);
+        text-transform: uppercase;
+        font-size: .7rem;
+        letter-spacing: .04em;
+    }
+    .ba-meta-row .val { color: var(--sk-color-text); text-align: right; }
+    .ba-meta-row .val a { color: var(--sk-color-primary, #0ea5e9); text-decoration: none; }
+
+    .ba-actions form { display: inline; }
+    .ba-actions {
+        display: flex;
+        gap: .5rem;
+        flex-wrap: wrap;
+        margin-top: .5rem;
+    }
+    .ba-actions button {
+        background: var(--sk-color-surface);
+        border: 1px solid var(--sk-color-border);
+        color: var(--sk-color-text);
+        padding: .45rem .8rem;
+        border-radius: .375rem;
+        font-size: .85rem;
+        cursor: pointer;
+    }
+    .ba-actions button.is-current {
+        border-color: var(--sk-color-primary, #0ea5e9);
+        box-shadow: inset 0 0 0 1px var(--sk-color-primary, #0ea5e9);
+    }
+    .ba-actions button[name="status"][value="kept"]:hover    { color: #22c55e; border-color: #22c55e; }
+    .ba-actions button[name="status"][value="drafted"]:hover { color: #eab308; border-color: #eab308; }
+    .ba-actions button[name="status"][value="discarded"]:hover { color: var(--sk-color-muted); }
+</style>
+
+<header class="ba-detail-header">
+    <a class="ba-detail-back" href="/admin/blogging-agent/topics">← Back to queue</a>
+    <h1 class="ba-detail-headline">{{ topic.headline }}</h1>
+    <div class="ba-detail-chips">
+        <span class="ba-pill ba-pill-{{ topic.status }}">{{ topic.status }}</span>
+        {% if topic.category %}<span class="ba-cat">{{ topic.category }}</span>{% endif %}
+        <span style="color: var(--sk-color-muted); font-size: .8rem;">
+            Surfaced {{ topic.surfaced_at.strftime('%Y-%m-%d %H:%M %Z') }} by {{ topic.surfaced_by }}
+        </span>
+    </div>
+</header>
+
+<div class="ba-detail-grid">
+    <section class="ba-card">
+        <h3>Pitch</h3>
+        <div class="pitch">{{ topic.pitch }}</div>
+    </section>
+
+    <aside>
+        <section class="ba-card" style="margin-bottom: 1rem;">
+            <h3>Source</h3>
+            {% if engagement %}
+            <div class="ba-meta-row">
+                <span class="key">Guild</span>
+                <span class="val">{{ engagement.guild_name or engagement.guild_id }}</span>
+            </div>
+            <div class="ba-meta-row">
+                <span class="key">Channel</span>
+                <span class="val">#{{ engagement.channel_name or engagement.channel_id }}</span>
+            </div>
+            <div class="ba-meta-row">
+                <span class="key">Activated by</span>
+                <span class="val">{{ engagement.activation_username or engagement.activation_user_id }}</span>
+            </div>
+            <div class="ba-meta-row">
+                <span class="key">Engagement</span>
+                <span class="val"><a href="/admin/chat-conversations/{{ engagement.id }}">View conversation →</a></span>
+            </div>
+            {% else %}
+            <p style="color: var(--sk-color-muted); margin: 0;">Source conversation is no longer available (engagement deleted).</p>
+            {% endif %}
+        </section>
+
+        <section class="ba-card">
+            <h3>Review</h3>
+            <div class="ba-meta-row">
+                <span class="key">Status</span>
+                <span class="val">{{ topic.status }}</span>
+            </div>
+            <div class="ba-meta-row">
+                <span class="key">Reviewed at</span>
+                <span class="val">
+                    {% if topic.reviewed_at %}{{ topic.reviewed_at.strftime('%Y-%m-%d %H:%M %Z') }}{% else %}—{% endif %}
+                </span>
+            </div>
+            <div class="ba-meta-row">
+                <span class="key">Reviewed by</span>
+                <span class="val">
+                    {% if reviewer %}{{ reviewer.name or reviewer.email }}{% else %}—{% endif %}
+                </span>
+            </div>
+        </section>
+    </aside>
+</div>
+
+<section class="ba-card" style="margin-top: 1.5rem;">
+    <h3>Move to status</h3>
+    <p style="color: var(--sk-color-muted); margin: 0 0 .5rem; font-size: .85rem;">
+        Captures who acted and when. Going back to <em>new</em> clears the review stamp.
+    </p>
+    <div class="ba-actions">
+        {% for status_name in valid_statuses %}
+        <form method="post" action="/admin/blogging-agent/topics/{{ topic.id }}/status">
+            <input type="hidden" name="status" value="{{ status_name }}">
+            <button type="submit"
+                    name="status"
+                    value="{{ status_name }}"
+                    {% if topic.status == status_name %}class="is-current" disabled aria-current="true"{% endif %}>
+                {{ status_name|capitalize }}
+            </button>
+        </form>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

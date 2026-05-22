@@ -4036,3 +4036,70 @@ class BlogPostTag(Base):
         ),
         Index("ix_blog_post_tags_page_id", "page_id"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Blogging-agent scout — candidate topics surfaced by the Discord chat agent.
+# ---------------------------------------------------------------------------
+
+
+class CandidateBlogTopic(Base):
+    """A blog-post idea filed by an agent (initially: the Discord chat agent).
+
+    Each row is one idea pitched by an agent in response to a chat turn. A
+    human triages the queue in the admin: kept → drafted → eventually
+    published, or discarded.
+    """
+
+    __tablename__ = "candidate_blog_topics"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+
+    # Origin. Engagement / turn FKs declared raw in the migration since
+    # they're on the same project Base but we keep the pattern for symmetry
+    # with the skrift.users / skrift.pages FKs below.
+    engagement_id: Mapped[Optional[UUID]] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+    turn_id: Mapped[Optional[UUID]] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+    surfaced_by: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default="chat-agent"
+    )
+    surfaced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    # Content
+    headline: Mapped[str] = mapped_column(String(255), nullable=False)
+    pitch: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+    # Lifecycle: new -> kept -> drafted -> discarded
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="new"
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # FK to skrift.users(id); declared raw in the migration.
+    reviewed_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+    # FK to skrift.pages(id); declared raw in the migration. Wired up in a
+    # later pass when the "promote to draft" action lands.
+    blog_page_id: Mapped[Optional[UUID]] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_candidate_blog_topics_status_surfaced",
+            "status",
+            "surfaced_at",
+        ),
+        Index("ix_candidate_blog_topics_engagement_id", "engagement_id"),
+    )
