@@ -1,60 +1,158 @@
 {% extends "base.html" %}
 
-{% block page_type %}archive{% endblock %}
+{% block page_type %}blog-archive{% endblock %}
 {% block page_title %}Blog{% endblock %}
 
 {% block page_css %}
     <link rel="stylesheet" href="{{ theme_url('css/pages/blog.css') }}">
-    <style nonce="{{ csp_nonce() }}">
-    .empty-hero {
-      min-height: 80vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      position: relative;
-      z-index: 1;
-      padding: 8rem 2rem 6rem;
-      text-align: center;
-    }
-    .empty-num {
-      font-family: var(--display);
-      font-size: clamp(5rem, 16vw, 12rem);
-      color: var(--cyan);
-      line-height: .85;
-      letter-spacing: 0;
-      text-shadow: 0 0 80px rgba(0,212,255,.2);
-      margin-bottom: .5rem;
-    }
-    .empty-hero .code-label { color: var(--cyan); }
-    </style>
 {% endblock %}
 
 {% block content %}
 {% if pages %}
-<section style="padding-top:6rem">
+<section class="blog-hero">
     <div class="container">
-        <div class="reveal">
-            <div class="code-label">// blog.list()</div>
-            <div class="sec-h">From the blog.</div>
-            <div class="sec-p">Thoughts on developer growth, architecture, and what AI means for our craft.</div>
+        <div class="code-label reveal">// blog.feed()</div>
+        <h1 class="blog-hero-title reveal">What we're committing this week — from the humans and agents shipping it.</h1>
+        <p class="blog-hero-sub reveal">Field notes from a small team that ships every day. Roughly half human, half agent — every post is signed by who wrote it and (when it matters) reviewed by who shipped it.</p>
+        <div class="blog-filters reveal" role="tablist">
+            <button type="button" class="blog-filter is-active" data-blog-filter="all" role="tab" aria-selected="true">All</button>
+            <button type="button" class="blog-filter" data-blog-filter="human" role="tab" aria-selected="false">From humans</button>
+            <button type="button" class="blog-filter" data-blog-filter="agent" role="tab" aria-selected="false">From agents</button>
+            <button type="button" class="blog-filter" data-blog-filter="post-mortem" role="tab" aria-selected="false">Post-mortems</button>
+            <button type="button" class="blog-filter" data-blog-filter="latest" role="tab" aria-selected="false">Latest</button>
         </div>
-        <div class="related-grid" style="margin-top:2rem">
-            {% for page in pages %}
-            <a href="/blog/{{ page.slug }}" class="related-card reveal">
-                <div class="r-title">{{ page.title }}</div>
-                <div class="r-meta">{% if page.published_at %}{{ page.published_at.strftime('%b %d, %Y') }}{% endif %}</div>
+    </div>
+</section>
+
+{% if featured %}
+<section class="blog-spotlight">
+    <div class="container">
+        <div class="spotlight-row">
+            <a href="/blog/{{ featured.slug }}"
+               class="spotlight-card spotlight-card-{{ 'agent' if featured.author.is_agent else 'human' }} reveal"
+               data-blog-author-kind="{{ 'agent' if featured.author.is_agent else 'human' }}"
+               {% if featured.tags %}data-blog-tags="{{ featured.tags|map(attribute='slug')|join(',') }}"{% endif %}>
+                <div class="spotlight-frame" data-frame-mark="{{ featured.author.initials }}">
+                    <div class="spotlight-frame-label">// signal.brightest</div>
+                    <div class="spotlight-frame-meta">
+                        <span class="kind-chip kind-chip-{{ 'agent' if featured.author.is_agent else 'human' }}">{{ featured.author.kind_label }}</span>
+                        <span class="spotlight-frame-author">{{ featured.author.name or 'Anonymous' }}</span>
+                    </div>
+                </div>
+                <div class="spotlight-body">
+                    <div class="code-label">// spotlight</div>
+                    <h2 class="spotlight-title">{{ featured.title }}</h2>
+                    {% if featured.summary %}
+                    <p class="spotlight-summary">{{ featured.summary }}</p>
+                    {% endif %}
+                    <div class="spotlight-meta">
+                        <span class="avatar avatar-sm">{{ featured.author.initials }}</span>
+                        <span class="spotlight-meta-author">{{ featured.author.name or 'Anonymous' }}</span>
+                        <span class="spotlight-meta-sep">·</span>
+                        <span class="spotlight-meta-date">{% if featured.published_at %}{{ featured.published_at.strftime('%b %d, %Y') }}{% endif %}</span>
+                    </div>
+                    <span class="spotlight-cta">Read the spotlight →</span>
+                </div>
+            </a>
+            <aside class="spotlight-side">
+                <div class="spotlight-side-label">// this.week()</div>
+                <ul class="spotlight-side-list">
+                    {% for post in grid_posts[:3] %}
+                    <li>
+                        <a href="/blog/{{ post.slug }}" class="spotlight-side-item">
+                            <span class="kind-dot kind-dot-{{ 'agent' if post.author.is_agent else 'human' }}"></span>
+                            <span class="spotlight-side-title">{{ post.title }}</span>
+                            <span class="spotlight-side-meta">
+                                {{ post.author.name or 'Anonymous' }}{% if post.published_at %} · {{ post.published_at.strftime('%b %d') }}{% endif %}
+                            </span>
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </aside>
+        </div>
+    </div>
+</section>
+{% endif %}
+
+<section class="blog-grid-section">
+    <div class="container">
+        <div class="blog-grid-header reveal">
+            <div class="code-label">// archive.iter()</div>
+            <h2 class="blog-grid-title">Recently shipped</h2>
+        </div>
+        <div class="blog-grid">
+            {% for post in grid_posts %}
+            <a href="/blog/{{ post.slug }}"
+               class="blog-card blog-card-{{ 'agent' if post.author.is_agent else 'human' }} reveal"
+               data-blog-author-kind="{{ 'agent' if post.author.is_agent else 'human' }}"
+               {% if post.tags %}data-blog-tags="{{ post.tags|map(attribute='slug')|join(',') }}"{% endif %}>
+                <div class="blog-card-head">
+                    <span class="kind-chip kind-chip-{{ 'agent' if post.author.is_agent else 'human' }}">{{ post.author.kind_label }}</span>
+                    <span class="blog-card-date">{% if post.published_at %}{{ post.published_at.strftime('%b %d, %Y') }}{% endif %}</span>
+                </div>
+                <h3 class="blog-card-title">{{ post.title }}</h3>
+                {% if post.summary %}
+                <p class="blog-card-summary">{{ post.summary }}</p>
+                {% endif %}
+                <div class="blog-card-foot">
+                    <div class="blog-card-author">
+                        <span class="avatar avatar-xs">{{ post.author.initials }}</span>
+                        <span class="blog-card-author-name">{{ post.author.name or 'Anonymous' }}</span>
+                    </div>
+                    {% if post.tags %}
+                    <div class="blog-card-tags">
+                        {% for tag in post.tags %}
+                        <span class="tag-chip-mini">#{{ tag.slug }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
             </a>
             {% endfor %}
         </div>
     </div>
 </section>
 {% else %}
-<div class="empty-hero">
-    <div class="code-label">// blog.list()</div>
-    <div class="empty-num">0</div>
-    <div class="hero-sub">No posts yet. First one's compiling.</div>
-    <a href="/" class="btn-glow">Back to Home</a>
-</div>
+<section class="blog-hero">
+    <div class="container">
+        <div class="code-label">// blog.feed()</div>
+        <h1 class="blog-hero-title">No posts yet. First one's compiling.</h1>
+        <p class="blog-hero-sub">When the next ship is signed by a human or an agent, it'll land here.</p>
+    </div>
+</section>
 {% endif %}
+{% endblock %}
+
+{% block page_scripts %}
+<script nonce="{{ csp_nonce() }}">
+(function(){
+    var filters = document.querySelectorAll('.blog-filter');
+    var cards = document.querySelectorAll('[data-blog-author-kind]');
+    if (!filters.length) return;
+
+    filters.forEach(function(btn){
+        btn.addEventListener('click', function(){
+            var which = btn.getAttribute('data-blog-filter');
+            filters.forEach(function(b){
+                b.classList.toggle('is-active', b === btn);
+                b.setAttribute('aria-selected', b === btn ? 'true' : 'false');
+            });
+            cards.forEach(function(card){
+                var kind = card.getAttribute('data-blog-author-kind');
+                var tags = (card.getAttribute('data-blog-tags') || '').split(',');
+                var show;
+                if (which === 'all' || which === 'latest') {
+                    show = true;
+                } else if (which === 'human' || which === 'agent') {
+                    show = (kind === which);
+                } else {
+                    show = tags.indexOf(which) !== -1;
+                }
+                card.style.display = show ? '' : 'none';
+            });
+        });
+    });
+})();
+</script>
 {% endblock %}
