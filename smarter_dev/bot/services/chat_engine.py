@@ -49,6 +49,7 @@ from smarter_dev.bot.agents.chat_context import (
     build_followup_input,
     build_initial_input,
 )
+from smarter_dev.bot.agents.chat_input_format import build_agent_call
 from smarter_dev.bot.agents.chat_models import NoResponse, SendResponse
 from smarter_dev.bot.agents.chat_tools import ChatDeps
 from smarter_dev.bot.services.chat_conversation_persistence import (
@@ -409,10 +410,11 @@ class ChannelEngine:
             # Install a per-run compaction collector. The history processor
             # appends events to it; we drain after the run.
             start_collection()
+            user_prompt, message_history = build_agent_call(agent_input, history)
             try:
                 result = await agent.run(
-                    user_prompt=agent_input.model_dump_json(),
-                    message_history=history,
+                    user_prompt=user_prompt,
+                    message_history=message_history,
                     deps=deps,
                 )
             except Exception:
