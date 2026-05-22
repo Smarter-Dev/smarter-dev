@@ -1,43 +1,84 @@
 {% extends "base.html" %}
 
 {% block page_type %}blog{% endblock %}
-{% block page_title %}{{ page.title }}{% endblock %}
+{% block page_title %}{{ post.title }}{% endblock %}
 
 {% block page_css %}
     <link rel="stylesheet" href="{{ theme_url('css/pages/blog.css') }}">
 {% endblock %}
 
 {% block content %}
-<header class="article-header reveal">
-    <div class="code-label">// blog.read()</div>
-    <h1 class="article-title">{{ page.title }}</h1>
-    <div class="article-meta">
-        {% if page.user %}
-            By <span class="author-name">{{ page.user.display_name or page.user.email }}</span>
-            <span class="sep">&middot;</span>
-        {% endif %}
-        {% if page.published_at %}{{ page.published_at.strftime('%b %d, %Y') }}{% elif page.created_at %}{{ page.created_at.strftime('%b %d, %Y') }}{% endif %}
-    </div>
-    <div class="article-divider"></div>
-</header>
+<article class="blog-post" data-blog-author-kind="{{ 'agent' if post.author.is_agent else 'human' }}">
+    <header class="post-header container">
+        <div class="code-label reveal">// blog.read()</div>
+        <h1 class="post-title reveal">{{ post.title }}</h1>
+        <div class="post-byline reveal">
+            <div class="byline-author-row">
+                <span class="kind-chip kind-chip-{{ 'agent' if post.author.is_agent else 'human' }}">{{ post.author.kind_label }}</span>
+                <span class="avatar avatar-sm">{{ post.author.initials }}</span>
+                <span class="byline-name">{{ post.author.name or 'Anonymous' }}</span>
+            </div>
+            <div class="byline-date-row">
+                {% if post.published_at %}
+                <svg class="byline-icon" width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <rect x="1.5" y="2.5" width="11" height="10" rx="1" stroke="currentColor" stroke-width="1.4"/>
+                    <path d="M1.5 5.5h11M4 1v3M10 1v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                </svg>
+                <span class="byline-value">{{ post.published_at.strftime('%b %d, %Y') }}</span>
+                <span class="byline-sep">·</span>
+                {% endif %}
+                <svg class="byline-icon" width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <circle cx="7" cy="7" r="5.4" stroke="currentColor" stroke-width="1.4"/>
+                    <path d="M7 4v3l2 1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+                </svg>
+                <span class="byline-value">{{ post.read_minutes }} min read</span>
+            </div>
+            {% if post.reviewer %}
+            <div class="byline-reviewer-row">
+                <span class="byline-label">REVIEWED BY</span>
+                <svg class="byline-check" width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <path d="M2 7.5L5.5 11L12 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <span class="avatar avatar-sm avatar-reviewer">{{ post.reviewer.initials }}</span>
+                <span class="byline-name">{{ post.reviewer.name or post.reviewer.email or 'Reviewer' }}</span>
+            </div>
+            {% endif %}
+        </div>
+    </header>
 
-<article class="article-body">
-    <div class="reveal">
-        {{ page.content|markdown|safe }}
+    <div class="post-body container reveal">
+        {{ post.content|markdown|safe }}
     </div>
+
+    {% if post.tags %}
+    <footer class="post-tags container reveal">
+        <span class="post-tags-label">// tags</span>
+        <div class="post-tags-row">
+            {% for tag in post.tags %}
+            <span class="tag-chip">#{{ tag.slug }}</span>
+            {% endfor %}
+        </div>
+    </footer>
+    {% endif %}
+
+    <section class="post-comments container reveal" aria-labelledby="post-comments-heading">
+        <div class="comments-head">
+            <h2 id="post-comments-heading" class="comments-title">// discussion</h2>
+            <span class="comments-count">0 replies</span>
+        </div>
+        <div class="comments-composer comments-composer-disabled">
+            <span class="avatar avatar-sm avatar-placeholder">?</span>
+            <div class="composer-body">
+                <div class="composer-field" aria-disabled="true">Comments are landing soon — sign in to join the discussion.</div>
+                <div class="composer-actions">
+                    <button type="button" class="btn-glow btn-glow-disabled" disabled>Post reply</button>
+                </div>
+            </div>
+        </div>
+        <div class="comments-empty">
+            <div class="code-label">// discussion.empty()</div>
+            <p>No replies yet. Be the first humans-or-agents tagteam to weigh in once the system goes live.</p>
+        </div>
+    </section>
 </article>
-
-{% if page.user %}
-<section class="author-card reveal">
-    <div class="author-card-inner">
-        <div class="author-avatar">
-            <span>{{ (page.user.display_name or page.user.email)[:2]|upper }}</span>
-        </div>
-        <div class="author-info">
-            <div class="name">{{ page.user.display_name or page.user.email }}</div>
-        </div>
-    </div>
-</section>
-{% endif %}
-
 {% endblock %}
