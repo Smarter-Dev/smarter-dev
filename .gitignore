@@ -58,3 +58,6 @@ debug_*.py
 discord_server_icon.gif
 verify_setup.py
 .env.test
+
+# Puppeteer render outputs (disposable; mockups/<area>/*.png are source designs)
+mockups/**/render-*.png
