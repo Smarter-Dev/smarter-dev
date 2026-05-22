@@ -1,0 +1,246 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Blogging Agent - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Blogging Agent</h1>
+    <p>{{ total }} candidate{{ 's' if total != 1 else '' }} in the queue</p>
+</hgroup>
+
+<style nonce="{{ csp_nonce() }}">
+    .ba-status-cards {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: .75rem;
+        margin: 0 0 1rem;
+    }
+    .ba-status-card {
+        background: var(--sk-color-surface);
+        border: 1px solid var(--sk-color-border);
+        border-radius: .5rem;
+        padding: .75rem 1rem;
+        text-decoration: none;
+        color: var(--sk-color-text);
+        display: flex;
+        flex-direction: column;
+        gap: .15rem;
+    }
+    .ba-status-card .label {
+        color: var(--sk-color-muted);
+        font-size: .75rem;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+    }
+    .ba-status-card .value {
+        color: var(--sk-color-text);
+        font-weight: 600;
+        font-size: 1.25rem;
+    }
+    .ba-status-card.is-active {
+        border-color: var(--sk-color-primary, #0ea5e9);
+        box-shadow: 0 0 0 2px var(--sk-color-primary, #0ea5e9);
+    }
+    @media (max-width: 900px) {
+        .ba-status-cards { grid-template-columns: 1fr 1fr; }
+    }
+
+    .ba-filter-form {
+        display: flex;
+        gap: .75rem;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+    }
+    .ba-filter-form .ba-filter-label {
+        display: block;
+        font-size: .8rem;
+        color: var(--sk-color-muted);
+        margin-bottom: .15rem;
+    }
+    .ba-filter-form select,
+    .ba-filter-form input[type="text"] {
+        background: var(--sk-color-surface);
+        color: var(--sk-color-text);
+        border: 1px solid var(--sk-color-border);
+        border-radius: .375rem;
+        padding: .4rem .6rem;
+    }
+
+    .ba-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+    .ba-table th,
+    .ba-table td {
+        padding: .65rem .75rem;
+        border-bottom: 1px solid var(--sk-color-border);
+        text-align: left;
+        vertical-align: top;
+    }
+    .ba-table th {
+        font-size: .75rem;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: var(--sk-color-muted);
+        background: var(--sk-color-surface);
+    }
+    .ba-table tr:hover td {
+        background: color-mix(in srgb, var(--sk-color-surface) 50%, transparent);
+    }
+    .ba-table .headline-cell a {
+        color: var(--sk-color-text);
+        text-decoration: none;
+        font-weight: 600;
+    }
+    .ba-table .headline-cell a:hover {
+        color: var(--sk-color-primary, #0ea5e9);
+    }
+    .ba-table .pitch-snippet {
+        color: var(--sk-color-muted);
+        font-size: .85rem;
+        margin-top: .15rem;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .ba-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: .3rem;
+        padding: .15rem .55rem;
+        border-radius: 999px;
+        font-size: .72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        border: 1px solid var(--sk-color-border);
+        background: var(--sk-color-surface);
+        color: var(--sk-color-text);
+    }
+    .ba-pill-new       { color: #0ea5e9; border-color: #0ea5e9; }
+    .ba-pill-kept      { color: #22c55e; border-color: #22c55e; }
+    .ba-pill-drafted   { color: #eab308; border-color: #eab308; }
+    .ba-pill-discarded { color: var(--sk-color-muted); border-color: var(--sk-color-border); }
+
+    .ba-cat {
+        display: inline-block;
+        padding: .1rem .4rem;
+        border-radius: .25rem;
+        background: color-mix(in srgb, var(--sk-color-primary, #0ea5e9) 12%, transparent);
+        color: var(--sk-color-primary, #0ea5e9);
+        font-size: .7rem;
+        font-weight: 500;
+        text-transform: lowercase;
+    }
+    .ba-cat-missing {
+        background: transparent;
+        color: var(--sk-color-muted);
+    }
+
+    .ba-empty {
+        padding: 3rem 1rem;
+        text-align: center;
+        color: var(--sk-color-muted);
+    }
+</style>
+
+<section class="ba-status-cards" aria-label="Topic queue summary">
+    {% for status_name in ['new', 'kept', 'drafted', 'discarded'] %}
+    <a class="ba-status-card{% if selected_status == status_name %} is-active{% endif %}"
+       href="?status={{ status_name }}{% if selected_category %}&category={{ selected_category }}{% endif %}">
+        <span class="label">{{ status_name }}</span>
+        <span class="value">{{ status_counts[status_name] }}</span>
+    </a>
+    {% endfor %}
+</section>
+
+<form method="get" class="ba-filter-form">
+    <div>
+        <span class="ba-filter-label">Status</span>
+        <select name="status">
+            <option value="">All</option>
+            {% for status_name in valid_statuses %}
+            <option value="{{ status_name }}" {% if selected_status == status_name %}selected{% endif %}>{{ status_name|capitalize }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div>
+        <span class="ba-filter-label">Category</span>
+        <select name="category">
+            <option value="">All</option>
+            {% for cat in valid_categories %}
+            <option value="{{ cat }}" {% if selected_category == cat %}selected{% endif %}>{{ cat|capitalize }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <button type="submit" class="sk-btn sk-btn-secondary">Filter</button>
+    {% if selected_status or selected_category %}
+    <a href="/admin/blogging-agent/topics" class="sk-btn sk-btn-ghost">Reset</a>
+    {% endif %}
+</form>
+
+{% if topics %}
+<table class="ba-table">
+    <thead>
+        <tr>
+            <th>Topic</th>
+            <th>Category</th>
+            <th>Status</th>
+            <th>Source channel</th>
+            <th>Surfaced</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in topics %}
+        <tr>
+            <td class="headline-cell">
+                <a href="/admin/blogging-agent/topics/{{ item.topic.id }}">{{ item.topic.headline }}</a>
+                <div class="pitch-snippet">{{ item.topic.pitch }}</div>
+            </td>
+            <td>
+                {% if item.topic.category %}
+                <span class="ba-cat">{{ item.topic.category }}</span>
+                {% else %}
+                <span class="ba-cat ba-cat-missing">—</span>
+                {% endif %}
+            </td>
+            <td>
+                <span class="ba-pill ba-pill-{{ item.topic.status }}">{{ item.topic.status }}</span>
+            </td>
+            <td>
+                {% if item.engagement %}
+                #{{ item.engagement.channel_name or item.engagement.channel_id }}
+                <div class="pitch-snippet">{{ item.engagement.guild_name or item.engagement.guild_id }}</div>
+                {% else %}
+                <span style="color: var(--sk-color-muted);">—</span>
+                {% endif %}
+            </td>
+            <td>{{ item.topic.surfaced_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if total_pages > 1 %}
+<nav class="sk-pagination" aria-label="Pagination">
+    {% if page > 1 %}
+    <a href="?page={{ page - 1 }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_category %}&category={{ selected_category }}{% endif %}" class="sk-btn sk-btn-ghost">← Prev</a>
+    {% endif %}
+    <span class="sk-pagination-pages">Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a href="?page={{ page + 1 }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% if selected_category %}&category={{ selected_category }}{% endif %}" class="sk-btn sk-btn-ghost">Next →</a>
+    {% endif %}
+</nav>
+{% endif %}
+
+{% else %}
+<div class="ba-empty">
+    <h3>No topics match this filter.</h3>
+    <p>The agent files candidates as it sees post-worthy moments in chat.</p>
+</div>
+{% endif %}
+{% endblock %}

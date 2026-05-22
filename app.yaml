@@ -70,6 +70,7 @@ controllers:
   - smarter_dev.web.mod_actions_admin:ModActionsAdminController
   - smarter_dev.web.scan.api_controller:ScanAPIController
   - smarter_dev.web.blog_controller:BlogController
+  - smarter_dev.web.blogging_agent_admin:BloggingAgentAdminController
 
 # Partials system (SPA navigation)
 partials:
