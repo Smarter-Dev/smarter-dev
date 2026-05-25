@@ -24,12 +24,12 @@ def _patch_provider(provider_id: str, model: types.ModelInfo) -> None:
         provider.models.append(model)
 
 
-# Gemini 3.1 Flash Lite Preview — not yet in genai-prices
+# Gemini 3.1 Flash Lite (GA + preview prefix) — not yet in genai-prices
 _patch_provider(
     "google",
     types.ModelInfo(
-        id="gemini-3.1-flash-lite-preview",
-        match=types.ClauseStartsWith(starts_with="gemini-3.1-flash-lite-preview"),
+        id="gemini-3.1-flash-lite",
+        match=types.ClauseStartsWith(starts_with="gemini-3.1-flash-lite"),
         prices=types.ModelPrice(
             input_mtok=Decimal("0.25"),
             output_mtok=Decimal("1.50"),

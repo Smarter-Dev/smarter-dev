@@ -29,7 +29,7 @@ from smarter_dev.bot.agents.chat_tools import ChatDeps, chat_tool_functions
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gemini-3.1-flash-lite-preview"
+DEFAULT_MODEL = "gemini-3.1-flash-lite"
 MODEL_ENV_VAR = "CHAT_AGENT_MODEL"
 
 SYSTEM_PROMPT = (

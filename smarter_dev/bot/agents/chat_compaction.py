@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 COMPACT_THRESHOLD_CHARS = 10_000
 MAX_SUMMARY_CHARS = 2_000
 
-DEFAULT_COMPACT_MODEL = "gemini-3.1-flash-lite-preview"
+DEFAULT_COMPACT_MODEL = "gemini-3.1-flash-lite"
 COMPACT_MODEL_ENV_VAR = "CHAT_AGENT_COMPACT_MODEL"
 
 

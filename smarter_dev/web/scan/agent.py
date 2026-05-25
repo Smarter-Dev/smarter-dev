@@ -42,7 +42,7 @@ EmitFn = Callable[..., Coroutine[Any, Any, None]]
 # Model configuration per mode
 # ---------------------------------------------------------------------------
 
-FLASH_LITE = "google-gla:gemini-3.1-flash-lite-preview"
+FLASH_LITE = "google-gla:gemini-3.1-flash-lite"
 FLASH = "google-gla:gemini-3-flash-preview"
 NANO = "openai:gpt-5.4-nano"
 
