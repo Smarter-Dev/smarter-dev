@@ -380,7 +380,7 @@ async def run_session_pipeline(
 
         # -- Stage 0: Meta analysis + mode detection --
         meta, meta_usage = await generate_session_meta(query)
-        all_usage.append((meta_usage, "google-gla:gemini-3.1-flash-lite-preview"))
+        all_usage.append((meta_usage, "google-gla:gemini-3.1-flash-lite"))
 
         # Override mode if explicitly requested
         research_mode = meta.research_mode
