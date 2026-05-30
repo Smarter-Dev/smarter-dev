@@ -1,7 +1,8 @@
 {# /resources — ASK THE RESOURCE AGENT block.
-   Renders the form when `is_authenticated`, otherwise a sign-in CTA. #}
+   Renders the form when `can_ask_agent` (sudo r--/rw-/rwx or admin), a
+   founder-access CTA for signed-in members, otherwise a sign-in CTA. #}
 
-{% if is_authenticated %}
+{% if can_ask_agent %}
 <section class="rsa reveal" aria-labelledby="rsa-title"
          data-rsa-form
          data-asker-name="{{ asker_name|default('You') }}">
@@ -69,6 +70,16 @@
     </form>
     {% endif %}
 </section>
+{% elif is_authenticated %}
+<section class="rsa rsa-anon reveal" aria-labelledby="rsa-anon-title">
+    <h2 class="rsa-anon-title" id="rsa-anon-title">// Ask Smarter Dev</h2>
+    <p class="rsa-anon-sub">
+        Asking requires a sudo subscription. Subscribe to unlock it.
+    </p>
+    <a class="rsa-anon-btn" href="/sudo">
+        Get a sudo subscription <span aria-hidden="true">→</span>
+    </a>
+</section>
 {% else %}
 <section class="rsa rsa-anon reveal" aria-labelledby="rsa-anon-title">
     <h2 class="rsa-anon-title" id="rsa-anon-title">// Ask Smarter Dev</h2>
@@ -91,11 +102,16 @@
     <p class="rsa-or-try-label" id="rsa-or-try-label">// or try</p>
     <div class="rsa-or-try-grid">
         {% for tag, prompt in try_examples %}
-            {% if is_authenticated %}
+            {% if can_ask_agent %}
             <button type="button" class="rsa-try-card" data-prefill="{{ prompt }}">
                 <span class="rsa-try-tag">{{ tag }}</span>
                 <span>{{ prompt }}</span>
             </button>
+            {% elif is_authenticated %}
+            <a class="rsa-try-card" href="/sudo">
+                <span class="rsa-try-tag">{{ tag }}</span>
+                <span>{{ prompt }}</span>
+            </a>
             {% else %}
             <a class="rsa-try-card" href="/auth/login?next=/resources">
                 <span class="rsa-try-tag">{{ tag }}</span>

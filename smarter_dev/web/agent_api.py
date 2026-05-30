@@ -92,7 +92,7 @@ def _enforce_rate(bucket: dict[str, list[float]], key: str, limit: int) -> None:
 #   sudo-rwx / administrator -> 50 questions/week, 10 follow-ups per answer
 #   sudo-rw                  -> 30 / 10
 #   sudo-r                   -> 20 / 10
-#   everyone else            ->  3 /  0
+#   everyone else            ->  0 /  0  (asking is a founder benefit)
 # ---------------------------------------------------------------------------
 
 
@@ -107,7 +107,7 @@ def resources_weekly_quota(perms) -> tuple[int, int]:
         return 30, 10
     if "sudo-r" in perms.roles:
         return 20, 10
-    return 3, 0
+    return 0, 0
 
 
 # Back-compat alias (the leading underscore version was the original name).
