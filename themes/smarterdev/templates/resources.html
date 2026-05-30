@@ -39,12 +39,16 @@
         </p>
     </header>
 
+    {% if request.state.get('sudo_launch') %}
     {% include "_partials/_resources-agent.html" %}
 
     {% include "_partials/_answer-history-sidebar.html" %}
+    {% endif %}
 
     <section class="vc-section reveal">
+        {% if request.state.get('sudo_launch') %}
         <p class="rsa-or-try-label">// or browse collections</p>
+        {% endif %}
         <div class="vc-people-grid">
             <a class="vc-person" href="/resources/agentic-coding-courses">
                 <span class="vc-person-name">Agentic Coding</span>
@@ -106,7 +110,7 @@
    so the morph can plug straight into them without a navigation. #}
 <script src="{{ theme_url('js/sdanswer.js') }}" defer></script>
 <script src="{{ theme_url('js/answer-time.js') }}" defer></script>
-{% if is_authenticated %}
+{% if request.state.get('sudo_launch') and can_ask_agent %}
 <script src="{{ theme_url('js/resources-agent.js') }}" defer></script>
 {% endif %}
 {% endblock %}

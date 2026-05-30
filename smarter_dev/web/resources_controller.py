@@ -39,6 +39,9 @@ def _asker_display_name(user) -> str:
 # Granted to every `sudo-*` tier in `smarter_dev/web/roles.py`; the Skrift
 # `Permission` guard also bypasses for anyone holding `administrator`.
 _HISTORY_PERMISSION = Permission("view-answer-history")
+# Marks the sudo r--/rw-/rwx tiers (and admins); plain members lack it, so
+# it gates the ask-agent form to founders only.
+_ASK_AGENT_PERMISSION = Permission("use-deep-scan")
 
 
 @get("/resources")
@@ -53,6 +56,7 @@ async def resources_index(
     asker_name = "You"
     recent_answers: list[dict] = []
     quota_state: dict | None = None
+    can_ask_agent = False
     if user_id_raw:
         try:
             user_uuid = UUID(str(user_id_raw))
@@ -65,6 +69,7 @@ async def resources_index(
             asker_name = _asker_display_name(owner)
             quota_state = await resources_quota_state(db_session, user_uuid)
         perms = await get_user_permissions(db_session, user_id_raw)
+        can_ask_agent = await _ASK_AGENT_PERMISSION.check(perms)
         if user_uuid is not None and await _HISTORY_PERMISSION.check(perms):
             stmt = (
                 select(AgentConversation.id, AgentConversation.title)
@@ -82,6 +87,7 @@ async def resources_index(
         "resources.html",
         context={
             "is_authenticated": is_authenticated,
+            "can_ask_agent": can_ask_agent,
             "asker_name": asker_name,
             "recent_answers": recent_answers,
             "quota_state": quota_state,
