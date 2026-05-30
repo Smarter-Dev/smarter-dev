@@ -8,13 +8,24 @@
 {% endblock %}
 
 {% block content %}
-<header class="article-header reveal">
-    <h1 class="article-title">{{ page.title }}</h1>
-</header>
+<article class="blog-post">
+    <header class="post-header container">
+        <div class="code-label reveal">// page.read()</div>
+        <h1 class="post-title reveal">{{ page.title }}</h1>
+    </header>
 
-<article class="article-body">
-    <div class="reveal">
+    <div class="post-body container reveal">
         {{ page.content|markdown|safe }}
     </div>
+
+    {% if page.updated_at %}
+    <footer class="post-updated container reveal">
+        <svg class="byline-icon" width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <rect x="1.5" y="2.5" width="11" height="10" rx="1" stroke="currentColor" stroke-width="1.4"/>
+            <path d="M1.5 5.5h11M4 1v3M10 1v3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        </svg>
+        <span class="byline-value">Last updated {{ page.updated_at.strftime('%b %d, %Y') }}</span>
+    </footer>
+    {% endif %}
 </article>
 {% endblock %}

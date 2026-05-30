@@ -643,6 +643,20 @@
   gap: .5rem;
 }
 
+/* ── Page: last-updated footer ──────────────────────── */
+
+.post-updated {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin-top: 1rem;
+  padding: 1.25rem 1.5rem 6rem;
+  border-top: 1px solid rgba(0,212,255,.08);
+}
+.post-updated .byline-value { color: var(--mid); }
+
 .post-comments {
   position: relative;
   z-index: 1;

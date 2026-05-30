@@ -11,8 +11,9 @@
         min-height: 60vh;
         padding: clamp(3rem, 8vw, 6rem) 1.5rem;
     }
-    .login-wrap { width: 100%; max-width: 460px; }
+    .login-wrap { width: 100%; max-width: 420px; }
     .login-card { background: var(--surface); border: var(--border-subtle); padding: 2.5rem 2rem; }
+
     .login-heading {
         font-family: var(--heading);
         font-size: .85rem;
@@ -21,46 +22,74 @@
         letter-spacing: .08em;
         margin-bottom: .5rem;
     }
-    .login-desc { font-size: .85rem; color: var(--mid); text-align: center; margin-bottom: 1.75rem; }
-    .pk-form { display: flex; flex-direction: column; gap: .85rem; }
+    .login-desc { font-size: .85rem; color: var(--mid); text-align: center; margin-bottom: 2rem; }
+
+    .pk-form { display: flex; flex-direction: column; gap: .75rem; }
+
+    .pk-field { display: flex; flex-direction: column; gap: .4rem; }
+    .pk-field label {
+        font-family: var(--heading);
+        font-size: .62rem;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: var(--mid);
+    }
     .pk-input {
         width: 100%;
         background: rgba(255,255,255,.02);
         border: 1px solid rgba(0,212,255,.18);
         color: var(--white);
-        padding: .75rem .9rem;
+        padding: .8rem .9rem;
         font-family: var(--mono);
-        font-size: .9rem;
+        font-size: .85rem;
+        transition: border-color .2s, box-shadow .2s;
     }
-    .pk-input:focus { outline: none; border-color: var(--cyan); }
+    .pk-input::placeholder { color: var(--gray); }
+    .pk-input:focus {
+        outline: none;
+        border-color: var(--cyan);
+        box-shadow: 0 0 0 3px rgba(0,212,255,.08);
+    }
+
     .pk-btn {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: .6rem;
         width: 100%;
+        margin-top: .25rem;
+        padding: .85rem 1.5rem;
         background: var(--cyan);
         color: #04141d;
         border: none;
-        padding: .85rem 1.5rem;
         font-family: var(--heading);
-        font-size: .72rem;
+        font-size: .7rem;
         letter-spacing: .06em;
         text-transform: uppercase;
+        white-space: nowrap;
         cursor: pointer;
+        transition: box-shadow .2s, background .2s;
     }
-    .pk-btn:hover { box-shadow: 0 0 20px rgba(0,212,255,.3); }
-    .pk-status { min-height: 1.3rem; margin-top: .75rem; font-size: .82rem; color: var(--mid); text-align: center; }
+    .pk-btn:hover { box-shadow: 0 0 20px rgba(0,212,255,.4); }
+    .pk-btn svg { width: 20px; height: 20px; flex-shrink: 0; fill: currentColor; }
+
+    .pk-status { min-height: 1.1rem; margin-top: .75rem; font-size: .8rem; color: var(--mid); text-align: center; }
+
     .pk-divider {
-        margin-top: 1.75rem;
-        padding-top: 1.75rem;
-        border-top: 1px solid rgba(0,212,255,.06);
+        margin-top: 2rem;
+        padding-top: 2rem;
+        border-top: 1px solid rgba(0,212,255,.08);
     }
     .pk-divider h2 {
         font-family: var(--heading);
-        font-size: .78rem;
+        font-size: .72rem;
         color: var(--white);
         letter-spacing: .06em;
         text-align: center;
-        margin: 0 0 .35rem;
+        margin: 0 0 .4rem;
     }
-    .pk-note { font-size: .78rem; color: var(--mid); text-align: center; margin-bottom: 1rem; }
+    .pk-note { font-size: .8rem; color: var(--mid); text-align: center; margin-bottom: 1.25rem; line-height: 1.5; }
+
     .login-flash {
         padding: 1rem 1.25rem;
         background: var(--surface);
@@ -71,6 +100,12 @@
     }
 </style>
 {% endblock %}
+
+{% set passkey_icon %}
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M10.5 11a4 4 0 1 1 4-4 4 4 0 0 1-4 4zm9.5.5a3 3 0 0 0-1.5 5.6V21l1.5 1.5L21.5 21l-1-1 1-1-1-1 1-1-1.3-1.3A3 3 0 0 0 20 11.5zm0 1.5a1 1 0 1 1-1 1 1 1 0 0 1 1-1zM3 20v-1.5C3 16 6.5 14.5 10.5 14.5c.97 0 1.9.09 2.76.26A4.5 4.5 0 0 0 13 17v3z"/>
+</svg>
+{% endset %}
 
 {% block content %}
 <section class="login-section">
@@ -86,24 +121,27 @@
             {% else %}
             <form id="passkey-login-form" class="pk-form">
                 {{ csrf_field() }}
-                <input type="email" id="passkey-login-email" class="pk-input" name="email"
-                       placeholder="Email (optional — autofill offers saved passkeys)"
-                       autocomplete="username webauthn">
-                <button type="submit" class="pk-btn">Continue with passkey</button>
+                <button type="submit" class="pk-btn">{{ passkey_icon }} Continue with Passkey</button>
             </form>
             <p id="passkey-login-status" class="pk-status"></p>
 
-            <section class="pk-divider">
+            <div class="pk-divider">
                 <h2>New here?</h2>
                 <p class="pk-note">Create an account and bind a passkey in one step.</p>
                 <form id="passkey-signup-form" class="pk-form">
                     {{ csrf_field() }}
-                    <input type="email" class="pk-input" name="email" placeholder="Email address" required>
-                    <input type="text" class="pk-input" name="name" placeholder="Display name">
-                    <button type="submit" class="pk-btn">Create account with passkey</button>
+                    <div class="pk-field">
+                        <label for="passkey-signup-email">Email</label>
+                        <input type="email" id="passkey-signup-email" class="pk-input" name="email" placeholder="you@example.com" required>
+                    </div>
+                    <div class="pk-field">
+                        <label for="passkey-signup-name">Display name</label>
+                        <input type="text" id="passkey-signup-name" class="pk-input" name="name" placeholder="How you'll appear">
+                    </div>
+                    <button type="submit" class="pk-btn">{{ passkey_icon }} Create Account</button>
                 </form>
                 <p id="passkey-signup-status" class="pk-status"></p>
-            </section>
+            </div>
             {% endif %}
         </div>
     </div>
@@ -171,8 +209,6 @@ function syncCsrf(payload) {
     document.querySelectorAll('input[name="_csrf"]').forEach(input => { input.value = payload.csrf_token; });
 }
 
-let conditionalAbort = null;
-
 async function fetchAuthOptions() {
     const csrfInput = loginForm.querySelector('input[name="_csrf"]');
     if (!csrfInput) return null;
@@ -196,30 +232,10 @@ async function completePasskeyLogin(credential, csrfToken) {
     return true;
 }
 
-async function startConditionalAuth() {
-    if (!loginForm || !window.PublicKeyCredential) return;
-    if (typeof PublicKeyCredential.isConditionalMediationAvailable !== "function") return;
-    try { if (!(await PublicKeyCredential.isConditionalMediationAvailable())) return; } catch { return; }
-    const options = await fetchAuthOptions();
-    if (!options) return;
-    conditionalAbort = new AbortController();
-    try {
-        const credential = await navigator.credentials.get({
-            publicKey: normalizeAuthenticationOptions(options.options),
-            mediation: "conditional",
-            signal: conditionalAbort.signal,
-        });
-        if (credential) await completePasskeyLogin(credential, options.csrf_token);
-    } catch (err) {
-        if (err?.name !== "AbortError") console.warn("Conditional passkey auth failed:", err);
-    } finally { conditionalAbort = null; }
-}
-
 if (loginForm) {
     loginForm.addEventListener("submit", async event => {
         event.preventDefault();
         if (!window.PublicKeyCredential) { loginStatus.textContent = "This browser does not support passkeys."; return; }
-        conditionalAbort?.abort();
         loginStatus.textContent = "Preparing passkey sign-in…";
         const options = await fetchAuthOptions();
         if (!options) { loginStatus.textContent = "Unable to start passkey sign-in."; return; }
@@ -228,7 +244,6 @@ if (loginForm) {
             await completePasskeyLogin(credential, options.csrf_token);
         } catch (error) { loginStatus.textContent = error?.message || "Passkey sign-in was cancelled."; }
     });
-    startConditionalAuth();
 }
 
 if (signupForm) {
