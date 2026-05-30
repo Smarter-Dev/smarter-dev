@@ -32,5 +32,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Run the web application
-CMD ["uv", "run", "hypercorn", "main:app", "--bind", "0.0.0.0:8000"]
+# Run the web application against the venv baked at build time. --no-sync keeps
+# `uv run` from re-resolving at startup (which would drop the `web` group and
+# pull in dev tooling, blowing past the liveness probe on a fresh pod).
+CMD ["uv", "run", "--no-sync", "hypercorn", "main:app", "--bind", "0.0.0.0:8000"]
