@@ -33,6 +33,22 @@ auth:
         - openid
         - email
         - profile
+  # Discoverable passkey sign-in. `factor_key: passkey` ties primary login to
+  # the `second_factors.passkey` enrollment store, so a passkey added from the
+  # account page (while logged in via OAuth) also works as a login method.
+  methods:
+    passkey:
+      type: passkey
+      label: Passkey
+      factor_key: passkey
+  second_factors:
+    enabled: true
+    # Keep OAuth logins unchallenged — passkeys are purely additive, never a
+    # forced second factor for users who already sign in with a provider.
+    challenge_on_enrolled: false
+    methods:
+      passkey:
+        type: passkey
 
 controllers:
   - skrift.admin.controller:AdminController

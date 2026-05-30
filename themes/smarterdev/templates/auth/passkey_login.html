@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+
+{% block title %}Passkey sign-in — Smarter Dev{% endblock %}
+
+{% block page_css %}
+<style nonce="{{ csp_nonce() }}">
+    .login-section {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 60vh;
+        padding: clamp(3rem, 8vw, 6rem) 1.5rem;
+    }
+    .login-wrap { width: 100%; max-width: 460px; }
+    .login-card { background: var(--surface); border: var(--border-subtle); padding: 2.5rem 2rem; }
+    .login-heading {
+        font-family: var(--heading);
+        font-size: .85rem;
+        color: var(--cyan);
+        text-align: center;
+        letter-spacing: .08em;
+        margin-bottom: .5rem;
+    }
+    .login-desc { font-size: .85rem; color: var(--mid); text-align: center; margin-bottom: 1.75rem; }
+    .pk-form { display: flex; flex-direction: column; gap: .85rem; }
+    .pk-input {
+        width: 100%;
+        background: rgba(255,255,255,.02);
+        border: 1px solid rgba(0,212,255,.18);
+        color: var(--white);
+        padding: .75rem .9rem;
+        font-family: var(--mono);
+        font-size: .9rem;
+    }
+    .pk-input:focus { outline: none; border-color: var(--cyan); }
+    .pk-btn {
+        width: 100%;
+        background: var(--cyan);
+        color: #04141d;
+        border: none;
+        padding: .85rem 1.5rem;
+        font-family: var(--heading);
+        font-size: .72rem;
+        letter-spacing: .06em;
+        text-transform: uppercase;
+        cursor: pointer;
+    }
+    .pk-btn:hover { box-shadow: 0 0 20px rgba(0,212,255,.3); }
+    .pk-status { min-height: 1.3rem; margin-top: .75rem; font-size: .82rem; color: var(--mid); text-align: center; }
+    .pk-divider {
+        margin-top: 1.75rem;
+        padding-top: 1.75rem;
+        border-top: 1px solid rgba(0,212,255,.06);
+    }
+    .pk-divider h2 {
+        font-family: var(--heading);
+        font-size: .78rem;
+        color: var(--white);
+        letter-spacing: .06em;
+        text-align: center;
+        margin: 0 0 .35rem;
+    }
+    .pk-note { font-size: .78rem; color: var(--mid); text-align: center; margin-bottom: 1rem; }
+    .login-flash {
+        padding: 1rem 1.25rem;
+        background: var(--surface);
+        border-left: 3px solid var(--amber);
+        margin-bottom: 1.5rem;
+        font-size: .8rem;
+        color: var(--light);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="login-section">
+    <div class="login-wrap">
+        <div class="login-card">
+            <div class="login-heading">{{ descriptor.name or "Passkey" }}</div>
+            <p class="login-desc">Sign in with a registered passkey — no provider redirect.</p>
+
+            {% if flash %}<div class="login-flash">{{ flash }}</div>{% endif %}
+
+            {% if not descriptor.is_available %}
+            <p class="pk-note">{{ descriptor.availability_note or "Passkey sign-in is not available in this environment." }}</p>
+            {% else %}
+            <form id="passkey-login-form" class="pk-form">
+                {{ csrf_field() }}
+                <input type="email" id="passkey-login-email" class="pk-input" name="email"
+                       placeholder="Email (optional — autofill offers saved passkeys)"
+                       autocomplete="username webauthn">
+                <button type="submit" class="pk-btn">Continue with passkey</button>
+            </form>
+            <p id="passkey-login-status" class="pk-status"></p>
+
+            <section class="pk-divider">
+                <h2>New here?</h2>
+                <p class="pk-note">Create an account and bind a passkey in one step.</p>
+                <form id="passkey-signup-form" class="pk-form">
+                    {{ csrf_field() }}
+                    <input type="email" class="pk-input" name="email" placeholder="Email address" required>
+                    <input type="text" class="pk-input" name="name" placeholder="Display name">
+                    <button type="submit" class="pk-btn">Create account with passkey</button>
+                </form>
+                <p id="passkey-signup-status" class="pk-status"></p>
+            </section>
+            {% endif %}
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block page_scripts %}
+<script nonce="{{ csp_nonce() }}">
+function base64urlToBuffer(value) {
+    const padding = "=".repeat((4 - value.length % 4) % 4);
+    const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(base64);
+    return Uint8Array.from(binary, char => char.charCodeAt(0));
+}
+function bufferToBase64url(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+function normalizeAuthenticationOptions(options) {
+    options.challenge = base64urlToBuffer(options.challenge);
+    options.allowCredentials = (options.allowCredentials || []).map(c => ({ ...c, id: base64urlToBuffer(c.id) }));
+    return options;
+}
+function serializeAssertion(credential) {
+    return {
+        id: credential.id,
+        rawId: bufferToBase64url(credential.rawId),
+        type: credential.type,
+        response: {
+            clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+            authenticatorData: bufferToBase64url(credential.response.authenticatorData),
+            signature: bufferToBase64url(credential.response.signature),
+            userHandle: credential.response.userHandle ? bufferToBase64url(credential.response.userHandle) : null,
+        },
+    };
+}
+function normalizeRegistrationOptions(options) {
+    options.challenge = base64urlToBuffer(options.challenge);
+    options.user.id = base64urlToBuffer(options.user.id);
+    options.excludeCredentials = (options.excludeCredentials || []).map(c => ({ ...c, id: base64urlToBuffer(c.id) }));
+    return options;
+}
+function serializeRegistrationCredential(credential) {
+    return {
+        id: credential.id,
+        rawId: bufferToBase64url(credential.rawId),
+        type: credential.type,
+        response: {
+            attestationObject: bufferToBase64url(credential.response.attestationObject),
+            clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+            transports: credential.response.getTransports ? credential.response.getTransports() : [],
+        },
+    };
+}
+
+const loginForm = document.getElementById("passkey-login-form");
+const loginStatus = document.getElementById("passkey-login-status");
+const signupForm = document.getElementById("passkey-signup-form");
+const signupStatus = document.getElementById("passkey-signup-status");
+
+function syncCsrf(payload) {
+    if (!payload || typeof payload.csrf_token !== "string" || !payload.csrf_token) return;
+    document.querySelectorAll('input[name="_csrf"]').forEach(input => { input.value = payload.csrf_token; });
+}
+
+let conditionalAbort = null;
+
+async function fetchAuthOptions() {
+    const csrfInput = loginForm.querySelector('input[name="_csrf"]');
+    if (!csrfInput) return null;
+    const body = new FormData();
+    body.append("_csrf", csrfInput.value);
+    const resp = await fetch("/auth/{{ method_key }}/options", { method: "POST", body, credentials: "same-origin" });
+    const payload = await resp.json();
+    syncCsrf(payload);
+    return resp.ok ? payload : null;
+}
+
+async function completePasskeyLogin(credential, csrfToken) {
+    const completionData = new FormData();
+    completionData.append("_csrf", csrfToken);
+    completionData.append("credential", JSON.stringify(serializeAssertion(credential)));
+    const resp = await fetch("/auth/{{ method_key }}/complete", { method: "POST", body: completionData, credentials: "same-origin" });
+    const payload = await resp.json();
+    syncCsrf(payload);
+    if (!resp.ok) { loginStatus.textContent = payload.error || "Passkey sign-in failed."; return false; }
+    window.location.href = payload.redirect || "/";
+    return true;
+}
+
+async function startConditionalAuth() {
+    if (!loginForm || !window.PublicKeyCredential) return;
+    if (typeof PublicKeyCredential.isConditionalMediationAvailable !== "function") return;
+    try { if (!(await PublicKeyCredential.isConditionalMediationAvailable())) return; } catch { return; }
+    const options = await fetchAuthOptions();
+    if (!options) return;
+    conditionalAbort = new AbortController();
+    try {
+        const credential = await navigator.credentials.get({
+            publicKey: normalizeAuthenticationOptions(options.options),
+            mediation: "conditional",
+            signal: conditionalAbort.signal,
+        });
+        if (credential) await completePasskeyLogin(credential, options.csrf_token);
+    } catch (err) {
+        if (err?.name !== "AbortError") console.warn("Conditional passkey auth failed:", err);
+    } finally { conditionalAbort = null; }
+}
+
+if (loginForm) {
+    loginForm.addEventListener("submit", async event => {
+        event.preventDefault();
+        if (!window.PublicKeyCredential) { loginStatus.textContent = "This browser does not support passkeys."; return; }
+        conditionalAbort?.abort();
+        loginStatus.textContent = "Preparing passkey sign-in…";
+        const options = await fetchAuthOptions();
+        if (!options) { loginStatus.textContent = "Unable to start passkey sign-in."; return; }
+        try {
+            const credential = await navigator.credentials.get({ publicKey: normalizeAuthenticationOptions(options.options) });
+            await completePasskeyLogin(credential, options.csrf_token);
+        } catch (error) { loginStatus.textContent = error?.message || "Passkey sign-in was cancelled."; }
+    });
+    startConditionalAuth();
+}
+
+if (signupForm) {
+    signupForm.addEventListener("submit", async event => {
+        event.preventDefault();
+        if (!window.PublicKeyCredential) { signupStatus.textContent = "This browser does not support passkeys."; return; }
+        signupStatus.textContent = "Preparing account creation…";
+        const formData = new FormData(signupForm);
+        const optionsResponse = await fetch("/auth/{{ method_key }}/register/options", { method: "POST", body: formData, credentials: "same-origin" });
+        const optionsPayload = await optionsResponse.json();
+        syncCsrf(optionsPayload);
+        if (!optionsResponse.ok) { signupStatus.textContent = optionsPayload.error || "Unable to start passkey signup."; return; }
+        try {
+            const credential = await navigator.credentials.create({ publicKey: normalizeRegistrationOptions(optionsPayload.options) });
+            const completionData = new FormData();
+            completionData.append("_csrf", optionsPayload.csrf_token || formData.get("_csrf"));
+            completionData.append("credential", JSON.stringify(serializeRegistrationCredential(credential)));
+            const completionResponse = await fetch("/auth/{{ method_key }}/register/complete", { method: "POST", body: completionData, credentials: "same-origin" });
+            const completionPayload = await completionResponse.json();
+            syncCsrf(completionPayload);
+            if (!completionResponse.ok) { signupStatus.textContent = completionPayload.error || "Passkey signup failed."; return; }
+            window.location.href = completionPayload.redirect || "/";
+        } catch (error) { signupStatus.textContent = error?.message || "Passkey signup was cancelled."; }
+    });
+}
+</script>
+{% endblock %}

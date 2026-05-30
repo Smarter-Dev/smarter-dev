@@ -15,6 +15,19 @@ auth:
   # OAuth providers; Skrift refuses to start with `dummy` configured in prod.
   providers:
     dummy: {}
+  # Mirror prod's passkey wiring so the flow can be exercised locally. WebAuthn
+  # treats http://localhost as a secure context, so passkeys work in dev.
+  methods:
+    passkey:
+      type: passkey
+      label: Passkey
+      factor_key: passkey
+  second_factors:
+    enabled: true
+    challenge_on_enrolled: false
+    methods:
+      passkey:
+        type: passkey
 
 controllers:
   - skrift.admin.controller:AdminController
