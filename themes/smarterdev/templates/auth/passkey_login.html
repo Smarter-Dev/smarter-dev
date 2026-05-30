@@ -199,6 +199,13 @@ function serializeRegistrationCredential(credential) {
     };
 }
 
+function passkeyErrorMessage(error, fallback) {
+    if (error && (error.name === "NotAllowedError" || error.name === "AbortError")) {
+        return fallback;
+    }
+    return error?.message || fallback;
+}
+
 const loginForm = document.getElementById("passkey-login-form");
 const loginStatus = document.getElementById("passkey-login-status");
 const signupForm = document.getElementById("passkey-signup-form");
@@ -242,7 +249,7 @@ if (loginForm) {
         try {
             const credential = await navigator.credentials.get({ publicKey: normalizeAuthenticationOptions(options.options) });
             await completePasskeyLogin(credential, options.csrf_token);
-        } catch (error) { loginStatus.textContent = error?.message || "Passkey sign-in was cancelled."; }
+        } catch (error) { loginStatus.textContent = passkeyErrorMessage(error, "Passkey sign-in was cancelled."); }
     });
 }
 
@@ -266,7 +273,7 @@ if (signupForm) {
             syncCsrf(completionPayload);
             if (!completionResponse.ok) { signupStatus.textContent = completionPayload.error || "Passkey signup failed."; return; }
             window.location.href = completionPayload.redirect || "/";
-        } catch (error) { signupStatus.textContent = error?.message || "Passkey signup was cancelled."; }
+        } catch (error) { signupStatus.textContent = passkeyErrorMessage(error, "Passkey signup was cancelled."); }
     });
 }
 </script>
