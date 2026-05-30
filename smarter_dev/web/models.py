@@ -81,6 +81,190 @@ class CampaignSignup(Base):
     )
 
 
+class UserProfile(Base):
+    """Project-side profile fields not tracked on Skrift's User model.
+
+    One row per user; `user_id` references `users(id)` via raw SQL FK in the
+    migration (Skrift's `users` table lives on a separate metadata).
+    """
+
+    __tablename__ = "user_profiles"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    handle: Mapped[Optional[str]] = mapped_column(
+        String(40),
+        nullable=True,
+        unique=True,
+    )
+    bio: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+    timezone: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class SudoMembership(Base):
+    """One row per sudo membership purchase.
+
+    Each membership is a one-time, one-year purchase via Stripe Checkout in
+    ``payment`` mode — not a subscription. `user_id` is unique: a user holds
+    at most one membership row at a time. ``expires_at`` is set to one year
+    from purchase. Founder seats (rwx 0day only) are recorded via
+    ``founder_seat_number`` (1..N); once assigned the seat number is never
+    cleared, even on refund, so the inventory cap stays honored against
+    historical purchases.
+    """
+
+    __tablename__ = "sudo_memberships"
+    __table_args__ = (
+        CheckConstraint(
+            "tier IN ('read', 'write', 'execute')",
+            name="ck_sudo_memberships_tier",
+        ),
+        Index("ix_sudo_memberships_stripe_customer_id", "stripe_customer_id"),
+        Index("ix_sudo_memberships_expires_at", "expires_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        nullable=False,
+        unique=True,
+    )
+    tier: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+    )
+    stripe_customer_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    stripe_checkout_session_id: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        unique=True,
+    )
+    stripe_payment_intent_id: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        nullable=True,
+        unique=True,
+    )
+    stripe_price_id: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    amount_paid_cents: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    purchased_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    refunded_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    founder_seat_number: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        nullable=True,
+        unique=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class FeatureFlag(Base):
+    """Database-backed feature flag with three operating modes.
+
+    Modes: 'enabled' (everyone), 'admin_only' (visible only to admins),
+    'disabled' (visible to nobody). Auto-created on first read of an
+    unknown key with `mode='disabled'`.
+    """
+
+    __tablename__ = "feature_flags"
+    __table_args__ = (
+        CheckConstraint(
+            "mode IN ('enabled', 'admin_only', 'disabled')",
+            name="ck_feature_flags_mode",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    key: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        unique=True,
+    )
+    mode: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="disabled",
+        server_default="disabled",
+    )
+    description: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class BytesBalance(Base):
     """User balance tracking for the bytes economy system.
     
@@ -4073,9 +4257,15 @@ class CandidateBlogTopic(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
-    # Content
+    # Content — hypothesis-driven pipeline shape (matches what Scout emits).
     headline: Mapped[str] = mapped_column(String(255), nullable=False)
-    pitch: Mapped[str] = mapped_column(Text, nullable=False)
+    observation: Mapped[str] = mapped_column(Text, nullable=False)
+    scope: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=""
+    )
+    evidence: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
+    )
     category: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
 
     # Lifecycle: new -> kept -> drafted -> discarded
@@ -4102,4 +4292,67 @@ class CandidateBlogTopic(Base):
             "surfaced_at",
         ),
         Index("ix_candidate_blog_topics_engagement_id", "engagement_id"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Authoring pipeline — admin-triggered multi-stage agent run that produces a
+# blog post. The actual audit log is owned by Skrift's per-agent event log
+# (stream `agents:run:{session_id}`); this row just carries the bookkeeping.
+# ---------------------------------------------------------------------------
+
+
+class AuthoringPipelineRun(Base):
+    """One admin-triggered execution of the 5-stage blogging pipeline."""
+
+    __tablename__ = "authoring_pipeline_runs"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+
+    # queued -> running -> completed | failed
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="queued"
+    )
+
+    # FK to skrift.users(id); declared raw in the migration.
+    kicked_off_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+
+    # Root Skrift Agent session for the lineage tree; each stage's session
+    # is a child of this. Stored on the run row so the admin can replay /
+    # subscribe via Skrift's event_log without a join.
+    root_session_id: Mapped[Optional[UUID]] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+
+    # Per-stage session ids populated as each stage completes:
+    # {"review": "<uuid>", "scout": "<uuid>", ...}
+    stage_session_ids: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+
+    # FK to skrift.pages(id); declared raw in the migration. Set by the
+    # Synthesis stage once the post lands.
+    result_page_id: Mapped[Optional[UUID]] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_authoring_pipeline_runs_status_created",
+            "status",
+            "created_at",
+        ),
     )

@@ -1,5 +1,5 @@
 <nav class="site-nav">
-    <a href="/" class="nav-logo">SMARTER <span class="dev">Dev</span></a>
+    <a href="/" class="nav-logo">SMARTER<span class="dev">.dev</span></a>
     <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
         <span></span><span></span><span></span>
     </button>
@@ -10,6 +10,11 @@
         <a href="/about">About</a>
         <a href="https://discord.gg/de8kajxbYS" target="_blank" data-sk-no-spa>Discord</a>
     </div>
+    {% if user %}
+    <a href="/account" class="btn-follow">Account</a>
+    {% else %}
+    <a href="/auth/login" class="btn-follow">Sign In</a>
+    {% endif %}
 </nav>
 <script nonce="{{ csp_nonce() }}">
 (function(){

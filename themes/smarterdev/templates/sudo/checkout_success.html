@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block page_type %}sudo{% endblock %}
+{% block page_title %}Welcome to sudo — Smarter Dev{% endblock %}
+
+{% block page_css %}
+<style nonce="{{ csp_nonce() }}">
+.sudo-success {
+    max-width: 640px;
+    margin: 0 auto;
+    padding: clamp(4rem, 10vw, 8rem) 1.5rem;
+    text-align: center;
+}
+.sudo-success h1 {
+    font-family: var(--display);
+    color: var(--cyan);
+    font-size: clamp(2rem, 4vw, 3rem);
+    margin: 0 0 1rem;
+}
+.sudo-success p {
+    color: var(--mid);
+    font-size: 1rem;
+    margin-bottom: 1.5rem;
+}
+.sudo-success .term {
+    background: rgba(0,0,0,.4);
+    border: var(--border-subtle);
+    text-align: left;
+    margin: 2rem auto;
+    max-width: 480px;
+}
+.sudo-success .term-bar {
+    border-bottom: 1px solid rgba(0,212,255,.18);
+    padding: .35rem .85rem;
+    font-family: var(--mono);
+    font-size: .75rem;
+    color: var(--mid);
+}
+.sudo-success .term-body { padding: 1rem 1.25rem; font-family: var(--mono); font-size: .85rem; color: var(--white); }
+.sudo-success .term-body .ok { color: var(--cyan); }
+.sudo-success a.cta {
+    display: inline-block;
+    margin-top: 1rem;
+    background: var(--cyan);
+    color: #04141d;
+    padding: .8rem 1.6rem;
+    font-family: var(--heading);
+    font-size: .8rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    text-decoration: none;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="sudo-success">
+    <h1>Permissions granted.</h1>
+    <p>You're in. Your founder seat is being provisioned — give it a moment, then refresh your account page.</p>
+
+    <div class="term">
+        <div class="term-bar">sudo · smarter-dev</div>
+        <div class="term-body">
+            <div>$ sudo smarter-dev --unlock</div>
+            <div class="ok">[ok] payment accepted</div>
+            <div class="ok">[ok] founder seat reserved</div>
+            <div class="ok">[ok] permissions granted</div>
+        </div>
+    </div>
+
+    <a href="/account/billing" class="cta">View your plan</a>
+</section>
+{% endblock %}

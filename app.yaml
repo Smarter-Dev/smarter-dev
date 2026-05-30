@@ -40,6 +40,9 @@ controllers:
   - skrift.controllers.web:WebController
   - smarter_dev.web.controllers:SudoController
   - smarter_dev.web.controllers:discord_redirect
+  - smarter_dev.web.account_controller:AccountController
+  - smarter_dev.web.account_controller:BillingController
+  - smarter_dev.web.feature_flags_admin:FeatureFlagsAdminController
   - smarter_dev.web.controllers:api_mount
   - smarter_dev.web.controllers:bot_admin_mount
   - smarter_dev.web.resources_controller:resources_index
@@ -76,6 +79,9 @@ controllers:
 partials:
   enabled: true
 
+middleware:
+  - smarter_dev.web.banner_middleware:SudoLaunchBannerMiddleware
+
 storage:
   default: default
   stores:
@@ -106,14 +112,51 @@ workers:
   preset: local
   queues:
     - agents
+  # Global claim-timeout for the worker pool. The blogging orchestrator
+  # job runs the whole 5-stage pipeline inside one claim and can take
+  # well over 10 minutes when Research dispatches a chatty sub-agent.
+  # If the claim expires mid-pipeline, another worker re-claims the
+  # same job → two orchestrator coroutines run in parallel for the same
+  # run_id, dropping each other's per-run cache mid-flight. 30 min
+  # gives every realistic pipeline run room to finish under one claim.
+  visibility_timeout: 1800
+  # Override the preset's default 'inline' execution. With 'inline', the
+  # submit() that the admin trigger button calls blocks until the entire
+  # pipeline finishes — the browser sees a multi-minute hang. With
+  # 'in_process', the worker runs the handler in a background task and
+  # submit() returns immediately.
+  execution: in_process
+  # The blogging orchestrator @handler runs the whole pipeline in one
+  # job and blocks on each stage agent's `session.result()`. With
+  # concurrency=1, the orchestrator would hold the only worker slot and
+  # nothing could pick up the stage agent jobs it enqueues — deadlock.
+  # Bumped so orchestrator + up to ~5 simultaneous stage / sub-agent /
+  # tool-call jobs can run side-by-side. In prod the same default holds
+  # whether workers run inside the web container or in a separate worker
+  # tier — what matters is that no worker is the only one in its pool.
+  concurrency: 8
+  backends:
+    # Override only the event log so per-run audit trails survive web
+    # restarts. State store + queue stay in-memory; preset 'local' fills
+    # those defaults in via the merge in WorkersConfig.apply_preset_defaults.
+    event_log: skrift.workers.sqlalchemy:SQLAlchemyEventLog
   imports:
     - smarter_dev.web.resources_agent
     - smarter_dev.web.title_agent
+    - smarter_dev.web.blogging_agent.pipeline
 
 agents:
   default_queue: agents
   tool_call_queue: agents
   blob_backend: skrift.agents.blob:InMemoryBlobStore
+  # The blogging orchestrator is itself a worker job — once a worker
+  # claims it, every stage / sub-agent / tool call should execute inside
+  # that same worker's coroutine. The orchestrator awaits each stage's
+  # session.result() inline; queuing them as separate worker jobs would
+  # just add hop latency (or deadlock with low concurrency) for no
+  # durability win — there's nothing to recover for an agent run that
+  # the parent is blocking on anyway.
+  default_subagent_dispatch: inline
 
 sites:
   scan:

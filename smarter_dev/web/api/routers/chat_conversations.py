@@ -183,22 +183,28 @@ async def create_turn(
             )
         )
 
-    # Blogging-agent scout: file any candidate blog topics the agent surfaced
-    # this turn. Each row links back to the engagement + turn that produced
-    # it. The agent emits an empty list (or omits the field) on most turns;
-    # only file when the model included real content.
+    # Blogging-agent capture: file any candidate blog topics the agent
+    # surfaced this turn. Same neutral {headline, observation, scope,
+    # evidence, category} shape Scout produces — Brainstorm forms
+    # hypotheses from these claims downstream.
     if isinstance(body.agent_output, dict):
         for cand in body.agent_output.get("blog_topic_candidates") or []:
             headline = (cand.get("headline") or "").strip()
-            pitch = (cand.get("pitch") or "").strip()
-            if not headline or not pitch:
+            observation = (cand.get("observation") or "").strip()
+            if not headline or not observation:
                 continue
+            scope = (cand.get("scope") or "").strip()
+            evidence = cand.get("evidence") or []
+            if not isinstance(evidence, list):
+                evidence = []
             db.add(
                 CandidateBlogTopic(
                     engagement_id=body.engagement_id,
                     turn_id=turn.id,
                     headline=headline[:255],
-                    pitch=pitch,
+                    observation=observation,
+                    scope=scope,
+                    evidence=[str(e) for e in evidence if e],
                     category=cand.get("category"),
                 )
             )

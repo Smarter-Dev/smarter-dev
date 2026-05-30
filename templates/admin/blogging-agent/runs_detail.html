@@ -1,0 +1,186 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Pipeline run {{ run.id }} - Blogging Agent - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<style nonce="{{ csp_nonce() }}">
+    .pr-back {
+        color: var(--sk-color-muted);
+        font-size: .85rem;
+        text-decoration: none;
+    }
+    .pr-back:hover { color: var(--sk-color-text); }
+
+    .pr-header {
+        margin-bottom: 1.5rem;
+    }
+    .pr-header-row {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: .5rem;
+    }
+    .ba-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: .2rem .65rem;
+        border-radius: 999px;
+        font-size: .72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        border: 1px solid var(--sk-color-border);
+        background: var(--sk-color-surface);
+    }
+    .ba-pill-queued    { color: #0ea5e9; border-color: #0ea5e9; }
+    .ba-pill-running   { color: #eab308; border-color: #eab308; }
+    .ba-pill-completed { color: #22c55e; border-color: #22c55e; }
+    .ba-pill-failed    { color: #ef4444; border-color: #ef4444; }
+
+    .pr-stage {
+        margin-bottom: 1.25rem;
+        border: 1px solid var(--sk-color-border);
+        border-radius: .5rem;
+        background: var(--sk-color-surface);
+    }
+    .pr-stage-head {
+        padding: .65rem 1rem;
+        font-family: var(--sk-font-mono, monospace);
+        font-size: .8rem;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: var(--sk-color-muted);
+        border-bottom: 1px solid var(--sk-color-border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .pr-events { padding: 0; }
+    .pr-event {
+        border-bottom: 1px dashed var(--sk-color-border);
+    }
+    .pr-event:last-child { border-bottom: 0; }
+    .pr-event-row {
+        padding: .55rem 1rem;
+        display: flex;
+        align-items: flex-start;
+        gap: .8rem;
+        cursor: pointer;
+        user-select: none;
+    }
+    .pr-event-row:hover {
+        background: color-mix(in srgb, var(--sk-color-surface) 50%, transparent);
+    }
+    .pr-event-icon {
+        font-size: 1rem;
+        min-width: 1.4rem;
+        text-align: center;
+        opacity: .85;
+    }
+    .pr-event-body {
+        flex: 1;
+        min-width: 0;
+    }
+    .pr-event-title {
+        font-size: .85rem;
+        color: var(--sk-color-text);
+    }
+    .pr-event-title .type {
+        color: var(--sk-color-muted);
+        font-family: var(--sk-font-mono, monospace);
+        font-size: .72rem;
+        margin-right: .35rem;
+    }
+    .pr-event-meta {
+        color: var(--sk-color-muted);
+        font-size: .72rem;
+        margin-top: .15rem;
+    }
+    .pr-event-preview {
+        color: var(--sk-color-muted);
+        font-size: .78rem;
+        margin-top: .25rem;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+    }
+    .pr-event-details {
+        display: none;
+        padding: 0 1rem 1rem 3.2rem;
+        background: rgba(0,0,0,.18);
+    }
+    .pr-event-details pre {
+        font-family: var(--sk-font-mono, monospace);
+        font-size: .72rem;
+        color: var(--sk-color-text);
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 30rem;
+        overflow: auto;
+        margin: 0;
+        padding: .75rem;
+        background: rgba(0,0,0,.25);
+        border-radius: .25rem;
+    }
+    .pr-event.is-open .pr-event-details { display: block; }
+    .pr-event.kind-tool    .pr-event-icon { color: #0ea5e9; }
+    .pr-event.kind-tool-ret .pr-event-icon { color: #22c55e; }
+    .pr-event.kind-subagent .pr-event-icon { color: #eab308; }
+    .pr-event.kind-error   .pr-event-icon { color: #ef4444; }
+    .pr-event.kind-error   .pr-event-title { color: #ef4444; }
+    .pr-event.kind-message .pr-event-icon { color: #a855f7; }
+
+    .pr-empty {
+        padding: 2rem 1rem;
+        text-align: center;
+        color: var(--sk-color-muted);
+        font-style: italic;
+    }
+</style>
+
+<a class="pr-back" href="/admin/blogging-agent/runs">← Back to pipeline runs</a>
+
+<header class="pr-header">
+    <h1>Pipeline run</h1>
+    <div class="pr-header-row">
+        <span class="ba-pill ba-pill-{{ run.status }}" id="pr-status-pill">{{ run.status }}</span>
+        <span style="color: var(--sk-color-muted); font-size: .85rem;">
+            Created {{ run.created_at.strftime('%Y-%m-%d %H:%M %Z') }}
+            {% if kicked_off_by %}
+            by {{ kicked_off_by.name or kicked_off_by.email }}
+            {% endif %}
+        </span>
+        {% if run.completed_at %}
+        <span style="color: var(--sk-color-muted); font-size: .85rem;">
+            · Completed {{ run.completed_at.strftime('%H:%M %Z') }}
+        </span>
+        {% endif %}
+        {% if page %}
+        <a href="/blog/{{ page.slug }}" target="_blank" class="sk-btn sk-btn-secondary">View post →</a>
+        {% endif %}
+        {% if page and (page.meta_robots or '')|lower|trim != '' %}
+        <form method="post" action="/admin/blogging-agent/runs/{{ run.id }}/publish" style="display:inline;">
+            <button type="submit" class="sk-btn sk-btn-primary">Publish for real (remove noindex)</button>
+        </form>
+        {% elif page %}
+        <span class="ba-pill ba-pill-completed">indexable</span>
+        {% endif %}
+    </div>
+    {% if run.error %}
+    <p style="color: #ef4444; margin-top: .5rem;"><strong>Error:</strong> {{ run.error }}</p>
+    {% endif %}
+</header>
+
+<section id="pr-timeline" data-run-id="{{ run.id }}" data-is-running="{{ 'true' if is_running else 'false' }}">
+    {% if not stages %}
+    <div class="pr-empty">
+        Pipeline hasn't emitted any events yet — first stage hasn't started.
+    </div>
+    {% endif %}
+</section>
+
+<script type="application/json" id="pr-initial-events" nonce="{{ csp_nonce() }}">
+{{ {"stages": stages, "events": stage_events} | tojson }}
+</script>
+<script src="{{ theme_url('js/pipeline-run.js') }}" nonce="{{ csp_nonce() }}"></script>
+{% endblock %}

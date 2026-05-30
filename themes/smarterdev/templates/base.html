@@ -57,6 +57,16 @@
         {% endblock %}
     </header>
 
+    {% block site_announcement %}
+    {% if request.state.get('sudo_launch') %}
+    <a class="founder-banner" href="/sudo">
+        <span class="fb-pulse"></span>
+        <span class="fb-msg"><b>Smarter Dev:</b> where developers learn to work alongside AI agents</span>
+        <span class="fb-cta">Reserve founder access <span class="arr">→</span></span>
+    </a>
+    {% endif %}
+    {% endblock %}
+
     <main data-sk-partial="content">
         {% block content %}{% endblock %}
     </main>

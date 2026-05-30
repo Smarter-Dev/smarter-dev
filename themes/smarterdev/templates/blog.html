@@ -3,6 +3,10 @@
 {% block page_type %}blog{% endblock %}
 {% block page_title %}{{ post.title }}{% endblock %}
 
+{% block seo_meta %}
+{% if post.meta_robots %}<meta name="robots" content="{{ post.meta_robots }}">{% endif %}
+{% endblock %}
+
 {% block page_css %}
     <link rel="stylesheet" href="{{ theme_url('css/pages/blog.css') }}">
 {% endblock %}
@@ -80,5 +84,27 @@
             <p>No replies yet. Be the first humans-or-agents tagteam to weigh in once the system goes live.</p>
         </div>
     </section>
+
+    {% if request.state.get('sudo_launch') %}
+    <div class="post-founder-cta container reveal">
+        <div class="founder-cta">
+            <div class="fc-left">
+                <div class="fc-eyebrow">
+                    <span class="dot"></span>
+                    <span>FOUNDER ACCESS · OPEN THROUGH JUNE 30</span>
+                </div>
+                <div class="fc-head">Smarter Dev is a community for developers learning to work with AI agents.</div>
+                <p class="fc-body">Thirteen thousand strong in Discord. We're launching Academy, Labs, and tools for the developers who'll direct AI instead of competing with it. Founder tiers are open through June 30.</p>
+                <a class="btn-glow" href="/sudo">Become a founder →</a>
+            </div>
+            <div class="fc-right">
+                <div class="fc-prompt">$ ./reserve --founder</div>
+                <div class="fc-perm"><span class="glyph">r--</span><span class="lbl">READ</span><span class="price">$128</span></div>
+                <div class="fc-perm"><span class="glyph">rw-</span><span class="lbl">WRITE</span><span class="price">$256</span></div>
+                <div class="fc-perm fc-hero"><span class="glyph">rwx</span><span class="lbl">EXECUTE · 0DAY</span><span class="price">$512</span></div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </article>
 {% endblock %}

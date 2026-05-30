@@ -1,6 +1,7 @@
 (function() {
     var logo = document.getElementById('sudo-logo');
     var rest = document.getElementById('sudo-hero-rest');
+    if (!logo || !rest) return;
     var spans = logo.querySelectorAll('span');
     var waits = [1200, 600, 600, 600];
     var current = 0;
@@ -70,6 +71,55 @@
             .finally(function() {
                 btn.disabled = false;
                 btn.textContent = 'Notify me';
+            });
+        });
+    });
+})();
+
+// Tier-card waitlist forms on the new pricing page. Each .sudo-waitlist-form
+// declares its campaign slug via data-campaign-slug; status renders into the
+// matching .sudo-waitlist-msg[data-msg-for=...] sibling.
+(function() {
+    var forms = document.querySelectorAll('.sudo-waitlist-form');
+    if (!forms.length) return;
+
+    forms.forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var slug = form.getAttribute('data-campaign-slug');
+            var emailInput = form.querySelector('input[name="email"]');
+            var email = emailInput.value;
+            var btn = form.querySelector('button');
+            var msgEl = document.querySelector(
+                '.sudo-waitlist-msg[data-msg-for="' + slug + '"]'
+            );
+
+            btn.disabled = true;
+            var prevLabel = btn.textContent;
+            btn.textContent = '...';
+            if (msgEl) { msgEl.textContent = ''; }
+
+            fetch('/v2/api/campaign-signups', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({campaign_slug: slug, email: email})
+            })
+            .then(function(r) { return r.json().then(function(d) { return {ok: r.ok, data: d}; }); })
+            .then(function(res) {
+                if (!msgEl) return;
+                if (res.ok) {
+                    msgEl.textContent = 'On the list. Check your inbox.';
+                    emailInput.value = '';
+                } else {
+                    msgEl.textContent = res.data.detail || 'Something went wrong.';
+                }
+            })
+            .catch(function() {
+                if (msgEl) msgEl.textContent = 'Network error. Try again.';
+            })
+            .finally(function() {
+                btn.disabled = false;
+                btn.textContent = prevLabel;
             });
         });
     });

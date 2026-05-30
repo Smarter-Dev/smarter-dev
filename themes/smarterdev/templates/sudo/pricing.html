@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+
+{% block page_type %}sudo{% endblock %}
+{% block page_title %}sudo — pay once, take the year, renew at the founder rate{% endblock %}
+
+{% block seo_meta %}
+<meta name="description" content="sudo founder access: $128 · $256 · $512 once for one year. Renew at 33% off the public rate. rwx 0day capped at {{ seats_total }} seats.">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://smarter.dev/sudo">
+{% endblock %}
+
+{% block page_css %}
+<link rel="stylesheet" href="{{ theme_url('css/pages/sudo-pricing.css') }}">
+{% endblock %}
+
+{% block content %}
+<section class="sp-shell">
+
+    {# ── Hero ───────────────────────────────────────── #}
+    <header class="sp-hero">
+        <div class="sp-status-live">
+            <span class="pulse"></span>
+            <span>FOUNDER ACCESS · ONE PAYMENT · ONE YEAR</span>
+        </div>
+
+        <h1>
+            Pay once. Take the year.<br>
+            Renew at the <span class="hl-rose">founder rate.</span>
+        </h1>
+
+        <p class="lede">
+            Smarter Dev has always been a free community, and that's not changing. But the world is, and what comes next takes more than we can do for free. Code is written by agents, questions are answered by AI, and the future belongs to developers who can direct it. We want to help developers like us get the skills to thrive in that world. We can't build it without your help.
+        </p>
+    </header>
+
+    {# ── Pricing ladder ─────────────────────────────── #}
+    <section class="sp-ladder">
+
+        {# axis header — tag per column #}
+        <div class="sp-ladder-axis">
+            {% for t in tiers %}
+            <div class="sp-ladder-axis-col {% if t.hero %}is-hero{% endif %}">
+                <div class="sp-ladder-axis-head">
+                    <span class="perm">{{ t.perm }}</span>
+                    <span class="tier-name">{{ t.tier }}</span>
+                </div>
+                <span class="tag">{{ t.tag }}</span>
+            </div>
+            {% endfor %}
+        </div>
+
+        {# Body grid: 6 rows × 3 tier columns #}
+        <div class="sp-ladder-body">
+            {% for t in tiers %}
+            <div class="sp-ladder-col {% if t.hero %}is-hero{% endif %}" data-tier="{{ t.id }}">
+                <div class="sp-ladder-cell sp-cell-price" style="--h: 76px;">
+                    <div class="price-num">
+                        <span class="dollar">$</span>{{ t.annual }}
+                    </div>
+                    <div class="price-meta">
+                        ONCE<br>
+                        <span class="eq">1 YEAR ACCESS</span>
+                    </div>
+                </div>
+
+                <div class="sp-ladder-cell sp-cell-vs" style="--h: 78px;">
+                    <div class="vs-line">
+                        <span class="strike">${{ t.public_annual }}/yr</span>
+                        <span class="muted">public price</span>
+                    </div>
+                    <div class="vs-save">SAVE ${{ t.public_annual - t.annual }} · RENEW AT 33% OFF</div>
+                </div>
+
+                <div class="sp-ladder-cell sp-cell-desc" style="--h: 110px;">{{ t.desc }}</div>
+
+                <div class="sp-ladder-cell sp-cell-feats" style="--h: 178px;">
+                    <ul>
+                        {% for f in t.feats %}
+                        <li><span class="bullet">›</span>{{ f }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+
+                <div class="sp-ladder-cell sp-cell-avail" style="--h: 70px;">
+                    {% if t.hero %}
+                    <div class="seat-grid" style="--seats: {{ seats_total }};">
+                        {% for s in seat_dots %}
+                        <span class="{% if s.claimed %}claimed{% else %}open{% endif %}"></span>
+                        {% endfor %}
+                    </div>
+                    <div class="cap-label rose">{{ seats_left }} of {{ seats_total }} seats left</div>
+                    {% else %}
+                    <div class="cap-line">
+                        <span class="dot"></span>
+                        <span>unlimited seats · open now</span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="sp-ladder-cell sp-cell-action" style="--h: 84px;">
+                    {% if t.hero and seats_left <= 0 %}
+                    <button type="button" class="btn-glow is-disabled" disabled>sold out</button>
+                    {% else %}
+                    <form method="post" action="/sudo/checkout" data-sk-no-spa>
+                        <input type="hidden" name="tier" value="{{ t.id }}">
+                        <button type="submit" class="btn-glow">{{ t.cta_label }} →</button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="sp-ladder-fineprint">
+            <div>// one seat per person · no subscription · 14-day full refund</div>
+            <div>// founder access closes when public monthly opens</div>
+        </div>
+    </section>
+
+    {# ── How founder pricing works ─────────────────── #}
+    <section class="sp-principles">
+        <div class="sp-principles-head">
+            <span class="cmd">$ cat /docs/founder-pricing.md</span>
+            <span class="rule" aria-hidden="true"></span>
+            <span class="step">03 / HOW IT WORKS</span>
+        </div>
+
+        <div class="sp-principles-grid">
+            {% for p in founder_principles %}
+            <article class="sp-principle">
+                <div class="num">0{{ loop.index }}</div>
+                <h3>{{ p.head }}</h3>
+                <p>{{ p.body }}</p>
+            </article>
+            {% endfor %}
+        </div>
+
+        <div class="sp-guest">
+            <span class="sp-guest-chip">---</span>
+            <div class="sp-guest-text">
+                <div class="sp-guest-head">GUEST · FREE FOREVER</div>
+                <div class="sp-guest-body">Discord access, limited RunHacks, Academy preview. A way in — no card required.</div>
+            </div>
+            <a href="https://discord.gg/de8kajxbYS" class="sp-guest-cta">JOIN AS GUEST →</a>
+        </div>
+    </section>
+
+    {# ── Roadmap ─────────────────────────────────────── #}
+    <section class="sp-roadmap">
+        <div class="sp-roadmap-head">
+            <span class="step">04 / ROADMAP</span>
+            <h2>What every founder's funding.</h2>
+            <p>Day one access lands when sudo opens. Academy and Labs ship next, with rwx 0day in the preview loop.</p>
+        </div>
+
+        <div class="sp-roadmap-grid">
+            {% for r in roadmap %}
+            <article class="sp-phase">
+                <div class="sp-phase-head">
+                    <span class="name">{{ r.head }}</span>
+                    <span class="eta">{{ r.eta }}</span>
+                </div>
+                <p>{{ r.body }}</p>
+                <ul>
+                    {% for b in r.bullets %}
+                    <li><span class="plus">+</span>{{ b }}</li>
+                    {% endfor %}
+                </ul>
+            </article>
+            {% endfor %}
+        </div>
+    </section>
+
+    {# ── FAQ ───────────────────────────────────────── #}
+    <section class="sp-faq-wrap">
+        <div class="sp-faq-head">
+            <span class="step">05 / FAQ</span>
+            <h2>The questions every founder asks.</h2>
+        </div>
+
+        <div class="sp-faq">
+            {% for f in faqs %}
+            <details>
+                <summary>{{ f.q }}<span class="ind">−</span></summary>
+                <div class="ans">{{ f.a | safe }}</div>
+            </details>
+            {% endfor %}
+        </div>
+    </section>
+
+    {# ── Final CTA — founder access last call ───────── #}
+    <section class="sp-footer-cta">
+        <div class="close-panel">
+            {# terminal bar #}
+            <div class="sp-cta-bar">
+                <span class="prompt">❯</span>
+                <span class="label">founder-access — last call</span>
+                <span class="seats-left">
+                    <span class="pulse"></span>
+                    {{ seats_left }} SEATS LEFT
+                </span>
+            </div>
+
+            {# body #}
+            <div class="sp-cta-body">
+                <div class="eyebrow">FINAL CALL</div>
+
+                <h2>
+                    {% if seats_left > 0 %}
+                    <span class="hl-rose nowrap">{{ seats_left }} seats</span> left in rwx 0day. When they're gone, so is founder pricing.
+                    {% else %}
+                    rwx 0day is <span class="hl-rose">sold out.</span> r-- and rw- founder access is still open.
+                    {% endif %}
+                </h2>
+
+                {# scarcity grid #}
+                <div class="sp-cta-scarcity">
+                    <div class="seat-grid" style="--seats: {{ seats_total }};">
+                        {% for s in seat_dots %}
+                        <div class="{% if s.claimed %}claimed{% else %}seat-cell open{% endif %}"></div>
+                        {% endfor %}
+                    </div>
+                    <div class="scarcity-meta">
+                        <span>{{ seats_claimed }} claimed</span>
+                        <span class="rose">{{ seats_left }} of {{ seats_total }} remaining</span>
+                    </div>
+                </div>
+
+                {# primary action #}
+                <div class="sp-cta-primary-wrap">
+                    {% if seats_left > 0 %}
+                    <form method="post" action="/sudo/checkout" data-sk-no-spa>
+                        <input type="hidden" name="tier" value="rwx">
+                        <button type="submit" class="cta-primary">
+                            <span class="lbl">Reserve rwx 0day</span>
+                            <span class="px">$512</span>
+                        </button>
+                    </form>
+                    {% else %}
+                    <span class="cta-primary is-disabled">
+                        <span class="lbl">rwx 0day · sold out</span>
+                    </span>
+                    {% endif %}
+                </div>
+
+                <p class="meta">1 year of access · renew at the founder rate · 14-day full refund</p>
+
+                {# secondary tiers #}
+                <div class="sp-cta-secondary">
+                    <span class="note">// or start lower:</span>
+                    <form method="post" action="/sudo/checkout" data-sk-no-spa>
+                        <input type="hidden" name="tier" value="r">
+                        <button type="submit" class="cta-secondary">Reserve r-- <span class="sp">$128</span> →</button>
+                    </form>
+                    <form method="post" action="/sudo/checkout" data-sk-no-spa>
+                        <input type="hidden" name="tier" value="rw">
+                        <button type="submit" class="cta-secondary">Reserve rw- <span class="sp">$256</span> →</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </section>
+</section>
+{% endblock %}
+
+{% block page_scripts %}
+<script src="{{ theme_url('js/sudo.js') }}"></script>
+{% endblock %}

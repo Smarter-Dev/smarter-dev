@@ -25,6 +25,7 @@ import smarter_dev.web.models  # noqa: F401  -- registers all models with Base.m
 MAIN_TABLES: frozenset[str] = frozenset({
     "agent_conversations",
     "agent_messages",
+    "authoring_pipeline_runs",
     "author_profiles",
     "blog_post_meta",
     "blog_post_tags",
@@ -34,6 +35,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "chat_agent_engagements",
     "chat_agent_turns",
     "daily_quests",
+    "feature_flags",
     "moderation_actions",
     "moderation_configs",
     "quest_inputs",
@@ -51,8 +53,10 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "resource_tools",
     "scan_service_usage",
     "scan_user_profiles",
+    "sudo_subscriptions",
     "tags",
     "tracked_link_counters",
+    "user_profiles",
 })
 
 SCHEMA = "skrift"

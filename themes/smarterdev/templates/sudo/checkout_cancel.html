@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block page_type %}sudo{% endblock %}
+{% block page_title %}No charge made — Smarter Dev{% endblock %}
+
+{% block page_css %}
+<style nonce="{{ csp_nonce() }}">
+.sudo-cancel {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: clamp(4rem, 10vw, 8rem) 1.5rem;
+    text-align: center;
+}
+.sudo-cancel h1 {
+    font-family: var(--display);
+    color: var(--white);
+    font-size: clamp(1.8rem, 3.5vw, 2.6rem);
+    margin: 0 0 1rem;
+}
+.sudo-cancel p { color: var(--mid); margin-bottom: 1.5rem; }
+.sudo-cancel a {
+    display: inline-block;
+    margin: .5rem;
+    padding: .8rem 1.6rem;
+    font-family: var(--heading);
+    font-size: .8rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    text-decoration: none;
+}
+.sudo-cancel a.primary { background: var(--cyan); color: #04141d; }
+.sudo-cancel a.outline { color: var(--mid); border: 1px solid rgba(255,255,255,.12); }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="sudo-cancel">
+    <h1>No charge made.</h1>
+    <p>You exited before completing checkout. Your founder seat is still reservable — when you're ready, head back to the pricing page.</p>
+    <div>
+        <a href="/sudo" class="primary">Back to pricing</a>
+        <a href="/" class="outline">Home</a>
+    </div>
+</section>
+{% endblock %}
