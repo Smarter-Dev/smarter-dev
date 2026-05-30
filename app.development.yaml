@@ -22,6 +22,9 @@ controllers:
   - skrift.controllers.web:WebController
   - smarter_dev.web.controllers:SudoController
   - smarter_dev.web.controllers:discord_redirect
+  - smarter_dev.web.account_controller:AccountController
+  - smarter_dev.web.account_controller:BillingController
+  - smarter_dev.web.feature_flags_admin:FeatureFlagsAdminController
   - smarter_dev.web.controllers:api_mount
   - smarter_dev.web.controllers:bot_admin_mount
   - smarter_dev.web.resources_controller:resources_index
@@ -56,6 +59,7 @@ controllers:
 
 middleware:
   - smarter_dev.web.middleware.partial:create_partial_middleware
+  - smarter_dev.web.banner_middleware:SudoLaunchBannerMiddleware
 
 security_headers:
   enabled: false
@@ -74,14 +78,21 @@ workers:
   preset: local
   queues:
     - agents
+  visibility_timeout: 1800
+  execution: in_process
+  concurrency: 8
+  backends:
+    event_log: skrift.workers.sqlalchemy:SQLAlchemyEventLog
   imports:
     - smarter_dev.web.resources_agent
     - smarter_dev.web.title_agent
+    - smarter_dev.web.blogging_agent.pipeline
 
 agents:
   default_queue: agents
   tool_call_queue: agents
   blob_backend: skrift.agents.blob:InMemoryBlobStore
+  default_subagent_dispatch: inline
 
 sites:
   scan:

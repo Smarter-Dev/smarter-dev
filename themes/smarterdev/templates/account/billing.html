@@ -1,0 +1,73 @@
+{% extends "account/_layout.html" %}
+
+{% block account_content %}
+<h1>Billing &amp; Plan</h1>
+<p class="account-meta">Your sudo membership and payment details.</p>
+
+{% if membership %}
+<div class="account-card">
+    <div class="form-row">
+        <label>Plan</label>
+        <div>
+            {% if membership.tier == 'execute' %}
+            <strong>sudo rwx · 0day founder</strong>
+            {% elif membership.tier == 'write' %}
+            <strong>sudo rw- · founder</strong>
+            {% elif membership.tier == 'read' %}
+            <strong>sudo r-- · founder</strong>
+            {% else %}
+            <strong>sudo {{ membership.tier }}</strong>
+            {% endif %}
+            <span class="account-meta">— one-time, one-year purchase</span>
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label>Status</label>
+        <div>
+            {% if membership.refunded_at %}
+            <code style="color:#ff7a7a;">refunded</code>
+            {% elif membership_expired %}
+            <code style="color:#ffb454;">expired — renew at founder rate</code>
+            {% else %}
+            <code>active</code>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="form-row">
+        <label>Purchased</label>
+        <div>{{ membership.purchased_at.strftime('%B %-d, %Y') }}</div>
+    </div>
+
+    <div class="form-row">
+        <label>Access ends</label>
+        <div>{{ membership.expires_at.strftime('%B %-d, %Y') }}</div>
+    </div>
+
+    {% if membership.founder_seat_number %}
+    <div class="form-row">
+        <label>Founder seat</label>
+        <div>#{{ membership.founder_seat_number }}</div>
+    </div>
+    {% endif %}
+
+    <div class="account-actions" style="margin-top:1.5rem;">
+        <form method="post" action="/account/billing/portal" data-sk-no-spa style="display:inline;">
+            <button type="submit" class="account-btn-primary">Manage billing</button>
+        </form>
+    </div>
+    <p class="account-meta" style="margin-top:.75rem;">
+        Invoices and refund history live in your Stripe billing portal. There is no auto-renewal — your year of access ends on the date above.
+    </p>
+</div>
+{% else %}
+<div class="account-card">
+    <p>You don't have a sudo membership yet.</p>
+    <p class="account-meta">One payment buys a year. rwx 0day founder seats are limited.</p>
+    <div class="account-actions" style="margin-top:1.5rem; justify-content: flex-start;">
+        <a href="/sudo" class="account-btn-primary" style="text-decoration:none;">See plans</a>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

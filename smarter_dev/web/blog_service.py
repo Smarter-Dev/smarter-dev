@@ -72,6 +72,7 @@ class BlogPost:
     author: BlogAuthor
     reviewer: BlogReviewer | None
     tags: list[BlogTag] = field(default_factory=list)
+    meta_robots: str | None = None
 
     @property
     def read_minutes(self) -> int:
@@ -84,6 +85,7 @@ _LIST_SQL = text(
     """
     SELECT
         p.id, p.slug, p.title, p.content, p.meta_description AS summary,
+        p.meta_robots,
         p.published_at, p.created_at,
         u.id AS author_id, u.name AS author_name, u.email AS author_email,
         COALESCE(ap.is_agent, false) AS author_is_agent,
@@ -114,6 +116,7 @@ _DETAIL_SQL = text(
     """
     SELECT
         p.id, p.slug, p.title, p.content, p.meta_description AS summary,
+        p.meta_robots,
         p.published_at, p.created_at,
         u.id AS author_id, u.name AS author_name, u.email AS author_email,
         COALESCE(ap.is_agent, false) AS author_is_agent,
@@ -166,6 +169,7 @@ def _row_to_post(row) -> BlogPost:
         author=author,
         reviewer=reviewer,
         tags=tags,
+        meta_robots=row.meta_robots,
     )
 
 

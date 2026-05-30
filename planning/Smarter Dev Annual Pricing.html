@@ -1,0 +1,1554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smarter.Dev — Founder Pricing (One-Time, 1 Year)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bungee+Hairline&family=Bruno+Ace+SC&family=Inter:wght@400;500;600;700&display=swap">
+<style data-src="css/framework.css">
+/* ══════════════════════════════════════════════════════
+   Smarter Dev — Design Framework
+   Variables, reset, base typography, layout utilities
+   ══════════════════════════════════════════════════════ */
+
+/* ── Reset ── */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+
+/* ── Design Tokens ── */
+:root {
+  /* Colors */
+  --bg: #020408;
+  --surface: #080c14;
+  --cyan: #00d4ff;
+  --green: #22c55e;
+  --amber: #eab308;
+  --rose: #ef4444;
+  --gray: #5a7a96;
+  --mid: #4a6078;
+  --light: #8098b0;
+  --white: #d4e0ec;
+
+  /* Typography */
+  --display: 'Bungee Hairline', sans-serif;
+  --heading: 'Bruno Ace SC', sans-serif;
+  --body: 'Inter', Arial, sans-serif;
+  --mono: 'Courier New', monospace;
+
+  /* Borders */
+  --border-subtle: 1px solid rgba(0,212,255,.06);
+  --border-hover: 1px solid rgba(0,212,255,.15);
+  --border-active: 1px solid var(--cyan);
+
+  /* Shadows */
+  --glow-sm: 0 0 15px rgba(0,212,255,.15);
+  --glow-md: 0 0 30px rgba(0,212,255,.03);
+  --inset-glow: inset 0 0 20px rgba(0,212,255,.05);
+}
+
+/* ── Base ── */
+html { scroll-behavior: smooth }
+
+body {
+  font-family: var(--body);
+  background: var(--bg);
+  color: var(--light);
+  overflow-x: hidden;
+  line-height: 1.7;
+}
+
+/* ── Typography ── */
+.code-label {
+  font-family: var(--heading);
+  font-size: .65rem;
+  color: var(--cyan);
+  margin-bottom: 1rem;
+  opacity: .75;
+  letter-spacing: .08em;
+}
+
+.sec-h {
+  font-family: var(--heading);
+  font-size: clamp(1.4rem, 2.8vw, 2rem);
+  color: var(--white);
+  line-height: 1.2;
+  margin-bottom: .5rem;
+  letter-spacing: .02em;
+}
+
+.sec-p {
+  font-size: .9rem;
+  color: var(--mid);
+  max-width: 480px;
+  margin-bottom: 2.5rem;
+  line-height: 1.75;
+}
+
+/* ── Pitch Row ── */
+.pitch-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  align-items: center;
+}
+.pitch-text .sec-p:last-child {
+  margin-bottom: 0;
+}
+.pitch-term {
+  width: 100%;
+}
+@media (max-width: 768px) {
+  .pitch-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Layout Utilities ── */
+section {
+  position: relative;
+  z-index: 1;
+  padding: clamp(50px, 7vw, 90px) clamp(2rem, 6vw, 8rem);
+}
+
+.container {
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+/* ── Footer ── */
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  font-family: var(--heading);
+  font-size: .55rem;
+  color: var(--gray);
+  border-top: 1px solid rgba(0,212,255,.04);
+  position: relative;
+  z-index: 1;
+  letter-spacing: .06em;
+}
+.foot a {
+  color: var(--mid);
+  text-decoration: none;
+  transition: color .2s;
+}
+.foot a:hover {
+  color: var(--cyan);
+}
+
+/* ── Responsive Breakpoints ── */
+@media (max-width: 900px) {
+  /* Tablet adjustments handled per-component */
+}
+@media (max-width: 600px) {
+  /* Small tablet */
+}
+@media (max-width: 520px) {
+  /* Mobile */
+}
+@media (max-width: 480px) {
+  /* Small mobile */
+}
+
+</style>
+<style data-src="css/background.css">
+/* ══════════════════════════════════════════════════════
+   Background — Hex warp canvas styles
+   ══════════════════════════════════════════════════════ */
+
+#bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+</style>
+<style data-src="css/animations.css">
+/* ══════════════════════════════════════════════════════
+   Animations — .reveal, transitions, keyframes
+   ══════════════════════════════════════════════════════ */
+
+/* ── Scroll Reveal ── */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: all .55s cubic-bezier(.25, .46, .45, .94);
+}
+.reveal.visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* ── SPA Loading State ── */
+.sk-partial-loading [data-sk-partial="content"] {
+  opacity: .6;
+  transition: opacity .15s;
+}
+
+/* ── Pulse ── */
+@keyframes pulse {
+  0%, 100% { opacity: 1 }
+  50% { opacity: .3 }
+}
+
+/* ── Hero ── */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+  padding: 7rem 2rem 8rem;
+  text-align: center;
+}
+.hero-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 18px;
+  border-radius: 100px;
+  font-family: var(--heading);
+  font-size: .6rem;
+  background: rgba(0,212,255,.04);
+  border: 1px solid rgba(0,212,255,.12);
+  color: var(--cyan);
+  margin-bottom: 2.5rem;
+  letter-spacing: .08em;
+}
+.hero-chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+  animation: pulse 2s infinite;
+}
+.hero-logo {
+  font-family: var(--display);
+  font-size: clamp(3.2rem, 8vw, 6.5rem);
+  color: var(--white);
+  line-height: 1;
+  margin-bottom: 2.5rem;
+  letter-spacing: .15em;
+  text-shadow: 0 0 40px rgba(0,212,255,.15);
+}
+.hero-logo .dev {
+  font-family: var(--heading);
+  color: var(--cyan);
+  letter-spacing: .06em;
+  font-size: .8em;
+  text-shadow: 0 0 30px rgba(0,212,255,.3);
+  vertical-align: 0.14em;
+}
+.hero-sub { font-family: var(--heading); font-size: clamp(.75rem, 1.3vw, .9rem); color: var(--mid); margin-bottom: 3.5rem; letter-spacing: .06em }
+.hero-p { font-size: 1rem; color: var(--mid); max-width: 480px; margin: 0 auto 4rem; line-height: 1.8 }
+.hero-p strong { color: var(--white); font-weight: 600 }
+.hero-btns { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap }
+.hero-proof { display: flex; gap: 2.5rem; margin-top: 4rem; flex-wrap: wrap; justify-content: center }
+.hp .n { font-family: var(--heading); font-size: .9rem; color: var(--white); letter-spacing: .04em; text-shadow: 0 0 10px rgba(0,212,255,.1) }
+.hp .l { font-size: .72rem; color: var(--gray); margin-top: 2px }
+
+/* ── Stats Bar ── */
+.stats { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2rem; padding: 3rem 0; border-top: 1px solid rgba(0,212,255,.06); border-bottom: 1px solid rgba(0,212,255,.06) }
+.stat { text-align: center; flex: 1; min-width: 100px }
+.stat .num { font-family: var(--display); font-size: clamp(2rem, 4vw, 3rem); color: var(--white); line-height: 1; text-shadow: 0 0 20px rgba(0,212,255,.1) }
+.stat .num .u { font-family: var(--heading); color: var(--cyan); font-size: .45em }
+.stat .lbl { font-size: .72rem; color: var(--gray); margin-top: .15rem }
+
+/* ── Quotes ── */
+.quotes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 2rem }
+.q { padding: 2rem; background: var(--surface); border: 1px solid rgba(0,212,255,.04); border-left: 2px solid transparent; transition: all .3s }
+.q:hover { border-left-color: var(--cyan); box-shadow: inset 0 0 15px rgba(0,212,255,.02) }
+.q blockquote { font-size: .85rem; color: var(--light); line-height: 1.8; margin-bottom: 1.25rem }
+.q .who { font-size: .7rem }
+.q .nm { color: var(--white); font-weight: 600 }
+.q .rl { color: var(--gray) }
+
+/* ── Bytes Grid ── */
+.bytes-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; max-width: 600px }
+.bg-item { display: flex; align-items: center; gap: 14px; padding: 1.15rem 1.5rem; background: var(--surface); border: 1px solid rgba(0,212,255,.04); transition: all .2s }
+.bg-item:hover { border-color: rgba(0,212,255,.15); box-shadow: inset 0 0 12px rgba(0,212,255,.03) }
+.bg-item .pts { font-family: var(--heading); font-size: .82rem; color: var(--cyan); min-width: 44px; letter-spacing: .03em; text-shadow: 0 0 6px rgba(0,212,255,.2) }
+.bg-item .nm { font-size: .85rem; font-weight: 600; color: var(--white) }
+.bg-item .ds { font-size: .7rem; color: var(--gray); margin-top: 1px }
+
+/* ── CTA ── */
+.cta { text-align: center; padding: clamp(70px, 10vw, 130px) 2rem; position: relative; z-index: 1 }
+.cta-h { font-family: var(--display); font-size: clamp(1.8rem, 4.5vw, 3.5rem); color: var(--white); line-height: 1.1; margin-bottom: 1rem; letter-spacing: .08em; text-shadow: 0 0 30px rgba(0,212,255,.1) }
+.cta-h2 { font-family: var(--heading); font-size: clamp(.85rem, 1.5vw, 1rem); color: var(--light); max-width: 520px; margin: 0 auto 2rem; line-height: 1.8; letter-spacing: .02em }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .quotes { grid-template-columns: 1fr }
+  .bytes-grid { grid-template-columns: 1fr }
+}
+@media (max-width: 600px) {
+  .stats { flex-direction: column; align-items: center }
+}
+
+</style>
+<style data-src="css/components/buttons.css">
+/* ══════════════════════════════════════════════════════
+   Buttons — .btn-glow, .btn-ghost, .btn-start, .btn-follow
+   ══════════════════════════════════════════════════════ */
+
+.btn-glow {
+  display: inline-block;
+  padding: 13px 34px;
+  font-family: var(--heading);
+  font-size: .7rem;
+  letter-spacing: .06em;
+  background: transparent;
+  color: var(--cyan);
+  border: 1.5px solid var(--cyan);
+  border-radius: 0;
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(0,212,255,.15), inset 0 0 15px rgba(0,212,255,.05);
+  transition: all .3s;
+  text-decoration: none;
+}
+.btn-glow:hover {
+  background: var(--cyan);
+  color: var(--bg);
+  box-shadow: 0 0 30px rgba(0,212,255,.3);
+}
+
+.btn-ghost {
+  display: inline-block;
+  padding: 13px 34px;
+  font-family: var(--heading);
+  font-size: .7rem;
+  letter-spacing: .06em;
+  background: transparent;
+  color: var(--mid);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 0;
+  cursor: pointer;
+  transition: all .25s;
+  text-decoration: none;
+}
+.btn-ghost:hover {
+  border-color: rgba(0,212,255,.2);
+  color: var(--light);
+}
+
+.btn-start {
+  display: inline-block;
+  padding: 11px 30px;
+  font-family: var(--heading);
+  font-size: .65rem;
+  letter-spacing: .06em;
+  background: transparent;
+  color: var(--cyan);
+  border: 1.5px solid var(--cyan);
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(0,212,255,.15), inset 0 0 15px rgba(0,212,255,.05);
+  transition: all .3s;
+  text-decoration: none;
+}
+.btn-start:hover {
+  background: var(--cyan);
+  color: var(--bg);
+  box-shadow: 0 0 30px rgba(0,212,255,.3);
+}
+
+.btn-follow {
+  padding: 8px 20px;
+  font-family: var(--heading);
+  font-size: .6rem;
+  letter-spacing: .06em;
+  background: transparent;
+  color: var(--cyan);
+  border: 1px solid rgba(0,212,255,.3);
+  cursor: pointer;
+  transition: all .25s;
+  text-decoration: none;
+}
+.btn-follow:hover {
+  background: rgba(0,212,255,.08);
+  border-color: var(--cyan);
+}
+
+.btn-rerun {
+  padding: 6px 18px;
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .06em;
+  background: transparent;
+  color: var(--cyan);
+  border: 1px solid rgba(0,212,255,.3);
+  cursor: pointer;
+  transition: all .25s;
+  margin-left: auto;
+}
+.btn-rerun:hover {
+  background: rgba(0,212,255,.08);
+  border-color: var(--cyan);
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .btn-glow, .btn-ghost { padding: 11px 22px; font-size: .62rem }
+}
+
+</style>
+<style data-src="css/components/cards.css">
+/* ══════════════════════════════════════════════════════
+   Cards — .dash-card, .stat-card, .pillar, .related-card, .repo-card, etc.
+   ══════════════════════════════════════════════════════ */
+
+/* ── Pillars ── */
+.pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px }
+.pillar {
+  padding: 2.25rem 2rem;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  border-top: 2px solid rgba(0,212,255,.08);
+  transition: all .3s;
+  position: relative;
+}
+.pillar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity .3s;
+  box-shadow: inset 0 0 20px rgba(0,212,255,.05);
+}
+.pillar:hover { border-color: rgba(0,212,255,.2); border-top-color: var(--cyan) }
+.pillar:hover::after { opacity: 1 }
+.pillar .idx { font-family: var(--heading); font-size: .55rem; color: var(--cyan); margin-bottom: 1rem; letter-spacing: .15em }
+.pillar h3 { font-family: var(--heading); font-size: .85rem; color: var(--white); margin-bottom: .5rem; letter-spacing: .03em }
+.pillar p { font-size: .82rem; color: var(--mid); line-height: 1.75 }
+.pillar.coming { overflow: hidden }
+.pillar.coming::before {
+  content: 'COMING';
+  position: absolute;
+  top: 12px;
+  left: -26px;
+  width: 90px;
+  text-align: center;
+  font-family: var(--heading);
+  font-size: .4rem;
+  letter-spacing: .1em;
+  color: var(--bg);
+  background: var(--cyan);
+  padding: 2px 0;
+  transform: rotate(-45deg);
+  z-index: 1;
+  box-shadow: 0 0 10px rgba(0,212,255,.3);
+}
+
+/* ── Dashboard Card ── */
+.dash-card {
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  margin-bottom: 24px;
+  transition: all .3s;
+  position: relative;
+}
+.dash-card:hover { border-color: rgba(0,212,255,.12) }
+.dash-card-header { padding: 16px 20px 0 }
+.dash-card-body { padding: 16px 20px 20px }
+
+/* ── Stat Card ── */
+.stat-card {
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  padding: 22px 20px;
+  transition: all .3s;
+  position: relative;
+}
+.stat-card::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity .3s;
+  box-shadow: inset 0 0 20px rgba(0,212,255,.05);
+}
+.stat-card:hover::after { opacity: 1 }
+.stat-card:hover { border-color: rgba(0,212,255,.2) }
+.stat-card .stat-value {
+  font-family: var(--display);
+  font-size: clamp(1.4rem, 2.5vw, 1.9rem);
+  color: var(--white);
+  line-height: 1;
+  margin-bottom: 4px;
+  text-shadow: 0 0 15px rgba(0,212,255,.1);
+}
+.stat-card .stat-value .unit {
+  font-family: var(--heading);
+  color: var(--cyan);
+  font-size: .5em;
+  margin-left: 3px;
+}
+.stat-card .stat-label {
+  font-family: var(--heading);
+  font-size: .58rem;
+  color: var(--gray);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+/* ── Related Card ── */
+.related-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px }
+.related-card {
+  padding: 1.75rem;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  border-top: 2px solid rgba(0,212,255,.06);
+  transition: all .3s;
+  cursor: pointer;
+  text-decoration: none;
+  display: block;
+}
+.related-card:hover {
+  border-top-color: var(--cyan);
+  border-color: rgba(0,212,255,.18);
+  box-shadow: inset 0 0 15px rgba(0,212,255,.03);
+}
+.related-card .r-tag { font-family: var(--heading); font-size: .5rem; color: var(--cyan); letter-spacing: .1em; margin-bottom: .75rem; opacity: .7 }
+.related-card .r-title { font-family: var(--heading); font-size: .78rem; color: var(--white); letter-spacing: .02em; line-height: 1.5; margin-bottom: .75rem }
+.related-card .r-meta { font-size: .7rem; color: var(--gray); letter-spacing: .02em }
+.related-card .r-desc { font-size: .7rem; color: var(--gray); line-height: 1.6 }
+
+/* ── Repo Card ── */
+.repo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-bottom: 24px }
+.repo-card {
+  padding: 1.25rem 1.5rem;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  transition: all .3s;
+  cursor: pointer;
+}
+.repo-card:hover { border-color: rgba(0,212,255,.18); box-shadow: inset 0 0 15px rgba(0,212,255,.03) }
+.repo-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: .5rem }
+.repo-name { font-family: var(--heading); font-size: .7rem; color: var(--white); letter-spacing: .03em; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.repo-status { font-family: var(--heading); font-size: .45rem; letter-spacing: .08em; padding: 2px 8px; border: 1px solid; flex-shrink: 0 }
+.repo-status.passing { color: var(--green); border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.06) }
+.repo-status.failing { color: var(--rose); border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.06) }
+.repo-status.running { color: var(--amber); border-color: rgba(234,179,8,.35); background: rgba(234,179,8,.06) }
+.repo-detail { font-size: .7rem; color: var(--mid); line-height: 1.5; margin-bottom: .5rem }
+.repo-detail code { font-family: var(--mono); font-size: .66rem; color: var(--cyan); background: rgba(0,212,255,.04); padding: 0 4px }
+.repo-detail .branch { color: var(--amber) }
+.repo-detail .duration { color: var(--gray); margin-left: 4px }
+.repo-bar-row { display: flex; align-items: center; gap: 8px }
+.repo-bar-label { font-family: var(--heading); font-size: .45rem; color: var(--gray); letter-spacing: .06em; white-space: nowrap }
+.repo-bar { flex: 1; height: 3px; background: rgba(0,212,255,.06); display: flex }
+.repo-bar .bar-pass { height: 100%; background: var(--green); opacity: .7 }
+.repo-bar .bar-fail { height: 100%; background: var(--rose); opacity: .7 }
+.repo-bar-pct { font-family: var(--heading); font-size: .48rem; color: var(--green); letter-spacing: .04em; min-width: 26px; text-align: right }
+
+/* ── Metric Card ── */
+.metric-card {
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  padding: 18px 16px;
+  transition: all .3s;
+  position: relative;
+  text-align: center;
+}
+.metric-card::after { content: ''; position: absolute; inset: 0; opacity: 0; transition: opacity .3s; box-shadow: inset 0 0 20px rgba(0,212,255,.05) }
+.metric-card:hover::after { opacity: 1 }
+.metric-card:hover { border-color: rgba(0,212,255,.2) }
+.metric-card .m-value { font-family: var(--display); font-size: clamp(1.2rem, 2vw, 1.6rem); color: var(--white); line-height: 1; margin-bottom: 3px; text-shadow: 0 0 15px rgba(0,212,255,.1) }
+.metric-card .m-value .unit { font-family: var(--heading); color: var(--cyan); font-size: .5em; margin-left: 2px }
+.metric-card .m-value.green { color: var(--green); text-shadow: 0 0 15px rgba(34,197,94,.15) }
+.metric-card .m-value.amber { color: var(--amber); text-shadow: 0 0 15px rgba(234,179,8,.15) }
+.metric-card .m-value.rose { color: var(--rose); text-shadow: 0 0 15px rgba(239,68,68,.15) }
+.metric-card .m-label { font-family: var(--heading); font-size: .5rem; color: var(--gray); letter-spacing: .08em; text-transform: uppercase }
+
+/* ── Source Card ── */
+.source-card {
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  transition: all .3s;
+  cursor: pointer;
+}
+.source-card:hover { border-color: rgba(0,212,255,.18) }
+.source-card .source-title { font-size: .82rem; color: var(--white); font-weight: 500; margin-bottom: .4rem; line-height: 1.4 }
+.source-card .source-url { font-size: .68rem; color: var(--cyan); margin-bottom: .6rem; opacity: .7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.source-card .relevance-bar { height: 3px; background: rgba(0,212,255,.08); margin-top: .5rem }
+.source-card .relevance-fill { height: 100%; background: var(--cyan); box-shadow: 0 0 6px rgba(0,212,255,.25) }
+.source-card .relevance-label { display: flex; justify-content: space-between; margin-top: .3rem }
+.source-card .relevance-label span { font-family: var(--heading); font-size: .48rem; color: var(--gray); letter-spacing: .06em }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .pillars, .related-grid, .repo-grid { grid-template-columns: 1fr }
+}
+
+</style>
+<style data-src="css/components/terminal.css">
+/* ══════════════════════════════════════════════════════
+   Terminal — .term, .term-bar, .term-body, syntax highlighting
+   ══════════════════════════════════════════════════════ */
+
+.term {
+  background: var(--surface);
+  overflow: hidden;
+  border: 1px solid rgba(0,212,255,.1);
+  box-shadow: 0 0 30px rgba(0,212,255,.03);
+}
+
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 11px 16px;
+  background: rgba(0,0,0,.3);
+  border-bottom: 1px solid rgba(0,212,255,.06);
+}
+
+.term-bar .p {
+  margin-left: auto;
+  font-family: var(--heading);
+  font-size: .55rem;
+  color: var(--gray);
+  letter-spacing: .05em;
+}
+
+.term-bar .lang-badge {
+  font-family: var(--heading);
+  font-size: .5rem;
+  color: var(--cyan);
+  letter-spacing: .06em;
+  padding: 2px 8px;
+  border: 1px solid rgba(0,212,255,.2);
+  background: rgba(0,212,255,.04);
+}
+
+.term-body {
+  padding: 1.5rem 1.75rem;
+  font-family: var(--mono);
+  font-size: .78rem;
+  line-height: 2.2;
+  overflow-x: auto;
+}
+
+.term-info {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid rgba(0,212,255,.06);
+}
+
+.ti {
+  padding: 1rem;
+  text-align: center;
+  border-right: 1px solid rgba(0,212,255,.04);
+}
+.ti:last-child { border-right: none }
+.ti strong {
+  display: block;
+  font-family: var(--heading);
+  font-size: .8rem;
+  color: var(--cyan);
+  margin-bottom: 1px;
+  letter-spacing: .03em;
+  text-shadow: 0 0 8px rgba(0,212,255,.2);
+}
+.ti span {
+  font-size: .6rem;
+  color: var(--gray);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+/* ── Syntax Highlighting ── */
+.cm { color: var(--mid) }
+.kw { color: var(--amber) }
+.fn { color: var(--cyan) }
+.st { color: var(--green) }
+.num { color: var(--rose) }
+.op { color: var(--mid) }
+.comment { color: #2a4a3e; font-style: italic }
+
+</style>
+<style data-src="css/components/badges.css">
+/* ══════════════════════════════════════════════════════
+   Badges — .difficulty-badge, .status-badge, .tag, .pr-label, .confidence-badge
+   ══════════════════════════════════════════════════════ */
+
+/* ── Difficulty Badge ── */
+.difficulty-badge {
+  display: inline-block;
+  padding: 3px 12px;
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .08em;
+  border: 1px solid;
+}
+.difficulty-badge.hard { color: var(--rose); border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.06) }
+.difficulty-badge.medium { color: var(--amber); border-color: rgba(234,179,8,.35); background: rgba(234,179,8,.06) }
+.difficulty-badge.easy { color: var(--green); border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.06) }
+
+/* ── Status Badge ── */
+.status-badge {
+  font-family: var(--heading);
+  font-size: .5rem;
+  letter-spacing: .08em;
+  padding: 3px 10px;
+  border: 1px solid;
+}
+.status-badge.completed { color: var(--green); border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.06) }
+.status-badge.in-progress { color: var(--amber); border-color: rgba(234,179,8,.35); background: rgba(234,179,8,.06) }
+.status-badge.failed { color: var(--rose); border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.06) }
+
+/* ── Tag ── */
+.tag {
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .06em;
+  padding: 5px 14px;
+  border: 1px solid rgba(0,212,255,.18);
+  color: var(--cyan);
+  background: rgba(0,212,255,.04);
+  transition: all .25s;
+}
+.tag:hover { background: rgba(0,212,255,.1); border-color: rgba(0,212,255,.35) }
+
+/* ── PR Label ── */
+.pr-label {
+  font-family: var(--heading);
+  font-size: .42rem;
+  letter-spacing: .06em;
+  padding: 2px 6px;
+  border: 1px solid;
+}
+.pr-label.review { color: var(--amber); border-color: rgba(234,179,8,.3); background: rgba(234,179,8,.04) }
+.pr-label.approved { color: var(--green); border-color: rgba(34,197,94,.3); background: rgba(34,197,94,.04) }
+.pr-label.changes { color: var(--rose); border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.04) }
+.pr-label.draft-label { color: var(--gray); border-color: rgba(90,122,150,.5); background: rgba(90,122,150,.15) }
+
+/* ── Confidence Badge ── */
+.confidence-badge {
+  font-family: var(--heading);
+  font-size: .48rem;
+  letter-spacing: .08em;
+  padding: 2px 8px;
+  border: 1px solid;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.confidence-badge.high { color: var(--green); border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.06) }
+.confidence-badge.medium { color: var(--amber); border-color: rgba(234,179,8,.35); background: rgba(234,179,8,.06) }
+
+/* ── Status Live ── */
+.status-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .08em;
+  padding: 4px 12px;
+  border: 1px solid rgba(34,197,94,.35);
+  color: var(--green);
+  background: rgba(34,197,94,.06);
+}
+.status-live .pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: pulse 2s infinite;
+}
+
+</style>
+<style data-src="css/components/forms.css">
+/* ══════════════════════════════════════════════════════
+   Forms — Textarea, dropdowns, source chips, char counter
+   ══════════════════════════════════════════════════════ */
+
+/* ── Research Textarea ── */
+.research-textarea {
+  width: 100%;
+  min-height: 120px;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: vertical;
+  font-family: var(--mono);
+  font-size: .85rem;
+  color: var(--white);
+  line-height: 2;
+  caret-color: var(--cyan);
+}
+.research-textarea::placeholder { color: var(--gray) }
+
+/* ── Character Counter ── */
+.char-counter {
+  text-align: right;
+  font-family: var(--heading);
+  font-size: .55rem;
+  color: var(--gray);
+  letter-spacing: .06em;
+  padding: 0 1.5rem .75rem;
+  transition: color .2s;
+}
+.char-counter.warn { color: var(--amber) }
+.char-counter.limit { color: var(--rose) }
+
+/* ── Sources Area ── */
+.sources-area {
+  max-width: 760px;
+  margin: 0 auto;
+  border: 1.5px dashed rgba(0,212,255,.1);
+  background: var(--surface);
+  transition: all .25s;
+  position: relative;
+}
+.sources-area.dragover { border-color: var(--cyan); background: rgba(0,212,255,.03) }
+.sources-area input[type="file"] { display: none }
+.sources-header { display: flex; align-items: center; gap: 10px; padding: 12px 18px 0 }
+.sources-label { font-family: var(--heading); font-size: .5rem; color: var(--gray); letter-spacing: .08em; text-transform: uppercase }
+.sources-body { padding: 8px 18px 14px }
+
+/* ── Source Add Button ── */
+.sources-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: transparent;
+  border: 1px solid rgba(0,212,255,.15);
+  color: var(--gray);
+  cursor: pointer;
+  transition: all .2s;
+  flex-shrink: 0;
+  padding: 0;
+}
+.sources-add-btn:hover { color: var(--cyan); border-color: var(--cyan); background: rgba(0,212,255,.04) }
+.sources-add-btn svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+
+/* ── Empty State ── */
+.sources-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 0 4px;
+  text-align: center;
+}
+.sources-empty-icon svg { width: 20px; height: 20px; fill: none; stroke: var(--gray); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; transition: stroke .2s }
+.sources-area:hover .sources-empty-icon svg, .sources-area.dragover .sources-empty-icon svg { stroke: var(--cyan) }
+.sources-empty-text { font-family: var(--heading); font-size: .52rem; color: var(--gray); letter-spacing: .06em; transition: color .2s }
+.sources-area:hover .sources-empty-text, .sources-area.dragover .sources-empty-text { color: var(--light) }
+
+/* ── Source Chips ── */
+.source-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center }
+.source-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-family: var(--heading);
+  font-size: .52rem;
+  letter-spacing: .06em;
+  color: var(--cyan);
+  border: 1px solid var(--cyan);
+  background: rgba(0,212,255,.06);
+  transition: all .2s;
+  animation: chipIn .2s ease;
+}
+@keyframes chipIn { from { opacity: 0; transform: scale(.9) } to { opacity: 1; transform: none } }
+.source-chip svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; cursor: pointer; opacity: .5; transition: opacity .15s }
+.source-chip svg:hover { opacity: 1 }
+
+/* ── Add Source Dropdown ── */
+.add-source-wrap { position: relative }
+.add-source-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 180px;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.15);
+  z-index: 20;
+  display: none;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.add-source-dropdown.visible { display: block }
+.add-source-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  font-size: .75rem;
+  color: var(--light);
+  cursor: pointer;
+  transition: all .15s;
+}
+.add-source-option:hover { background: rgba(0,212,255,.06); color: var(--white) }
+.add-source-option svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0 }
+.add-source-option.disabled { opacity: .35; pointer-events: none }
+.add-source-divider { height: 1px; background: rgba(0,212,255,.08); margin: 2px 0 }
+
+/* ── Split Submit Button ── */
+.submit-row { max-width: 760px; margin: 0 auto; display: flex; align-items: stretch }
+.split-btn { display: flex; align-items: stretch; flex: 1 }
+.split-btn-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 24px;
+  font-family: var(--heading);
+  font-size: .72rem;
+  letter-spacing: .06em;
+  background: transparent;
+  color: var(--cyan);
+  border: 1.5px solid var(--cyan);
+  border-right: none;
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(0,212,255,.15), inset 0 0 15px rgba(0,212,255,.05);
+  transition: all .3s;
+  white-space: nowrap;
+}
+.split-btn-main:hover { background: var(--cyan); color: var(--bg); box-shadow: 0 0 30px rgba(0,212,255,.3) }
+.split-btn-main svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+.split-btn-depth { position: relative }
+.split-btn-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 16px;
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .06em;
+  color: var(--cyan);
+  background: rgba(0,212,255,.04);
+  border: 1.5px solid var(--cyan);
+  cursor: pointer;
+  transition: all .2s;
+  white-space: nowrap;
+  height: 100%;
+}
+.split-btn-toggle:hover { background: rgba(0,212,255,.1) }
+.split-btn-toggle svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transition: transform .2s }
+.split-btn-toggle.open svg { transform: rotate(180deg) }
+.depth-dropdown {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  min-width: 200px;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.15);
+  z-index: 20;
+  display: none;
+  box-shadow: 0 -8px 24px rgba(0,0,0,.5);
+}
+.depth-dropdown.visible { display: block }
+.depth-option {
+  padding: 10px 14px;
+  font-size: .78rem;
+  color: var(--light);
+  cursor: pointer;
+  transition: all .15s;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.depth-option:hover { background: rgba(0,212,255,.06); color: var(--white) }
+.depth-option.selected { color: var(--cyan) }
+.depth-option .opt-time { font-size: .6rem; color: var(--gray); font-family: var(--heading); letter-spacing: .04em }
+
+/* ── Responsive ── */
+@media (max-width: 520px) {
+  .source-chips { gap: 4px }
+}
+
+</style>
+<style data-src="css/components/lists.css">
+/* ══════════════════════════════════════════════════════
+   Lists — .activity-item, .lb-item, .pr-item, .issue-item, .run-item
+   ══════════════════════════════════════════════════════ */
+
+/* ── Activity Feed ── */
+.activity-list { list-style: none }
+.activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(0,212,255,.04);
+}
+.activity-item:last-child { border-bottom: none }
+.activity-icon {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: rgba(0,212,255,.04);
+  border: 1px solid rgba(0,212,255,.08);
+  margin-top: 2px;
+}
+.activity-icon svg { width: 14px; height: 14px; fill: none; stroke: var(--cyan); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+.activity-icon.badge-icon svg { stroke: var(--amber) }
+.activity-icon.review-icon svg { stroke: var(--green) }
+.activity-icon.streak-icon svg { stroke: var(--rose) }
+.activity-text { font-size: .82rem; color: var(--light); line-height: 1.5 }
+.activity-text strong { color: var(--white); font-weight: 600 }
+.activity-text .bytes-earned { color: var(--cyan); font-family: var(--heading); font-size: .72rem }
+.activity-time { margin-left: auto; font-size: .68rem; color: var(--gray); white-space: nowrap; flex-shrink: 0; margin-top: 3px }
+
+/* ── Leaderboard ── */
+.lb-list { list-style: none }
+.lb-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 16px;
+  border-bottom: 1px solid rgba(0,212,255,.04);
+  transition: background .2s;
+}
+.lb-item:last-child { border-bottom: none }
+.lb-item:hover { background: rgba(0,212,255,.02) }
+.lb-item.lb-current { border-left: 2px solid var(--cyan); background: rgba(0,212,255,.03) }
+.lb-rank { font-family: var(--heading); font-size: .7rem; color: var(--gray); min-width: 22px; text-align: center; letter-spacing: .04em }
+.lb-item.lb-current .lb-rank { color: var(--cyan) }
+.lb-avatar {
+  width: 26px;
+  height: 26px;
+  background: rgba(0,212,255,.08);
+  border: 1px solid rgba(0,212,255,.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--heading);
+  font-size: .5rem;
+  color: var(--mid);
+  flex-shrink: 0;
+}
+.lb-item.lb-current .lb-avatar { border-color: rgba(0,212,255,.3); color: var(--cyan) }
+.lb-name { font-size: .8rem; color: var(--white); font-weight: 500; flex: 1 }
+.lb-item.lb-current .lb-name { color: var(--cyan) }
+.lb-bytes { font-family: var(--heading); font-size: .68rem; color: var(--mid); letter-spacing: .04em }
+.lb-item.lb-current .lb-bytes { color: var(--cyan); text-shadow: 0 0 6px rgba(0,212,255,.2) }
+
+/* ── Bytes Breakdown ── */
+.bytes-bar-list { list-style: none }
+.bytes-bar-item { margin-bottom: 14px }
+.bytes-bar-item:last-child { margin-bottom: 0 }
+.bytes-bar-label { display: flex; justify-content: space-between; margin-bottom: 5px }
+.bytes-bar-label span:first-child { font-size: .78rem; color: var(--light) }
+.bytes-bar-label span:last-child { font-family: var(--heading); font-size: .65rem; color: var(--cyan); letter-spacing: .04em }
+.bytes-bar-track { height: 4px; background: rgba(0,212,255,.06); position: relative }
+.bytes-bar-fill { height: 100%; background: var(--cyan); box-shadow: 0 0 8px rgba(0,212,255,.25); transition: width .6s cubic-bezier(.25,.46,.45,.94) }
+
+/* ── PR Items ── */
+.pr-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid rgba(0,212,255,.04) }
+.pr-item:last-child { border-bottom: none }
+.pr-icon { width: 20px; height: 20px; flex-shrink: 0; margin-top: 2px }
+.pr-icon svg { width: 16px; height: 16px; fill: none; stroke: var(--green); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+.pr-icon.draft svg { stroke: var(--gray) }
+.pr-info { flex: 1; min-width: 0 }
+.pr-title { font-size: .8rem; color: var(--white); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.pr-meta { font-size: .68rem; color: var(--mid) }
+.pr-meta .repo { color: var(--cyan); font-family: var(--heading); font-size: .58rem; letter-spacing: .03em }
+.pr-labels { display: flex; gap: 4px; margin-top: 3px }
+.pr-time { font-size: .65rem; color: var(--gray); flex-shrink: 0; margin-top: 2px }
+
+/* ── Issue Items ── */
+.issue-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid rgba(0,212,255,.04) }
+.issue-item:last-child { border-bottom: none }
+.issue-icon { width: 20px; height: 20px; flex-shrink: 0; margin-top: 2px }
+.issue-icon svg { width: 16px; height: 16px; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+.issue-icon.bug svg { stroke: var(--rose) }
+.issue-icon.feature svg { stroke: var(--cyan) }
+.issue-icon.question svg { stroke: var(--amber) }
+.issue-info { flex: 1; min-width: 0 }
+.issue-title { font-size: .8rem; color: var(--white); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.issue-meta { font-size: .68rem; color: var(--mid) }
+.issue-meta .repo { color: var(--cyan); font-family: var(--heading); font-size: .58rem; letter-spacing: .03em }
+.issue-time { font-size: .65rem; color: var(--gray); flex-shrink: 0; margin-top: 2px }
+
+/* ── Run Items ── */
+.runs-list { list-style: none }
+.run-item { border: 1px solid rgba(0,212,255,.06); border-bottom: none; background: var(--surface); transition: all .2s }
+.run-item:last-child { border-bottom: 1px solid rgba(0,212,255,.06) }
+.run-item:hover { border-color: rgba(0,212,255,.15) }
+.run-header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer; transition: background .15s }
+.run-header:hover { background: rgba(0,212,255,.02) }
+.run-status-icon { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0 }
+.run-status-icon svg { width: 14px; height: 14px; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+.run-status-icon.success svg { stroke: var(--green) }
+.run-status-icon.failed svg { stroke: var(--rose) }
+.run-status-icon.running svg { stroke: var(--amber) }
+.run-workflow { font-family: var(--heading); font-size: .62rem; color: var(--white); letter-spacing: .03em; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.run-branch { font-size: .66rem; color: var(--amber); font-family: var(--mono) }
+.run-commit { font-size: .66rem; color: var(--mid); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.run-duration { font-family: var(--heading); font-size: .52rem; color: var(--gray); letter-spacing: .04em; min-width: 48px; text-align: right }
+.run-time { font-size: .62rem; color: var(--gray); min-width: 55px; text-align: right }
+.run-expand { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--gray); transition: transform .2s, color .2s; cursor: pointer }
+.run-expand svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+.run-item.expanded .run-expand { transform: rotate(180deg); color: var(--cyan) }
+.run-details { max-height: 0; overflow: hidden; transition: max-height .3s ease; background: rgba(0,0,0,.15) }
+.run-item.expanded .run-details { max-height: 500px }
+.run-steps { list-style: none; padding: 8px 16px 12px 48px }
+.run-step { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid rgba(0,212,255,.03) }
+.run-step:last-child { border-bottom: none }
+.step-icon { width: 14px; height: 14px; display: flex; align-items: center; justify-content: center; flex-shrink: 0 }
+.step-icon svg { width: 10px; height: 10px; fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round }
+.step-icon.success svg { stroke: var(--green) }
+.step-icon.failed svg { stroke: var(--rose) }
+.step-icon.skipped svg { stroke: var(--gray) }
+.step-name { font-size: .72rem; color: var(--light); flex: 1 }
+.step-duration { font-family: var(--heading); font-size: .5rem; color: var(--gray); letter-spacing: .04em }
+
+/* ── Findings List ── */
+.findings-list { list-style: none; counter-reset: findings; margin: 1rem 0 2rem }
+.finding-item {
+  counter-increment: findings;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 1rem 1.25rem;
+  margin-bottom: .5rem;
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  transition: all .25s;
+}
+.finding-item:hover { border-color: rgba(0,212,255,.18) }
+.finding-num { font-family: var(--heading); font-size: .7rem; color: var(--cyan); min-width: 24px; letter-spacing: .04em; padding-top: 2px }
+.finding-body { flex: 1; min-width: 0 }
+.finding-body strong { color: var(--white); font-weight: 600; display: block; margin-bottom: .25rem; font-size: .88rem }
+.finding-body span { font-size: .82rem; color: var(--mid); line-height: 1.7 }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .run-commit { display: none }
+}
+@media (max-width: 520px) {
+  .run-branch { display: none }
+  .run-duration { display: none }
+}
+@media (max-width: 480px) {
+  .run-time { display: none }
+}
+
+</style>
+<style data-src="css/components/nav.css">
+/* ══════════════════════════════════════════════════════
+   Nav — Navbar, TOC sidebar, quick links, breadcrumb
+   ══════════════════════════════════════════════════════ */
+
+/* ── Site Navbar ── */
+.site-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 24px;
+  background: rgba(2,4,8,.92);
+  backdrop-filter: blur(24px);
+  border-bottom: 1px solid rgba(0,212,255,.06);
+}
+
+.nav-logo {
+  font-family: var(--display);
+  font-size: 1.3rem;
+  color: var(--white);
+  letter-spacing: .12em;
+  text-decoration: none;
+  flex-shrink: 0;
+  white-space: nowrap;
+  line-height: 1;
+}
+.nav-logo .dev {
+  font-family: var(--heading);
+  color: var(--cyan);
+  font-size: .8em;
+  letter-spacing: .06em;
+  vertical-align: 0.14em;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nav-links a {
+  color: var(--gray);
+  text-decoration: none;
+  padding: 5px 12px;
+  border: 1px solid transparent;
+  transition: all .2s;
+  white-space: nowrap;
+  font-family: var(--heading);
+  font-size: .62rem;
+  letter-spacing: .05em;
+}
+.nav-links a:hover { color: var(--cyan); border-color: rgba(0,212,255,.25) }
+.nav-links a.active { color: var(--cyan); border-color: var(--cyan); background: rgba(0,212,255,.06) }
+
+/* ── Dashboard Topbar ── */
+.dash-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 0 28px;
+  border-bottom: 1px solid rgba(0,212,255,.06);
+  margin-bottom: 28px;
+}
+.dash-logo {
+  font-family: var(--display);
+  font-size: 1.3rem;
+  color: var(--white);
+  letter-spacing: .12em;
+  text-decoration: none;
+}
+.dash-logo .dev { font-family: var(--heading); color: var(--cyan); font-size: .8em; letter-spacing: .06em; vertical-align: 0.14em }
+.dash-user { display: flex; align-items: center; gap: 14px }
+.dash-bell { position: relative; cursor: pointer; color: var(--mid); transition: color .2s }
+.dash-bell:hover { color: var(--cyan) }
+.dash-bell svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round }
+.dash-bell-badge { position: absolute; top: -4px; right: -5px; width: 16px; height: 16px; background: var(--rose); color: #fff; font-size: .55rem; font-weight: 700; display: flex; align-items: center; justify-content: center; border-radius: 50%; border: 2px solid var(--bg) }
+.dash-avatar { width: 34px; height: 34px; background: rgba(0,212,255,.12); border: 1.5px solid rgba(0,212,255,.25); display: flex; align-items: center; justify-content: center; font-family: var(--heading); font-size: .65rem; color: var(--cyan); letter-spacing: .04em }
+.dash-greeting { font-family: var(--heading); font-size: .72rem; color: var(--white); letter-spacing: .04em }
+.dash-greeting span { color: var(--cyan) }
+
+/* ── Quick Links ── */
+.quick-links { display: grid; grid-template-columns: 1fr 1fr; gap: 1px }
+.quick-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(0,212,255,.02);
+  border: 1px solid rgba(0,212,255,.04);
+  font-family: var(--heading);
+  font-size: .62rem;
+  color: var(--mid);
+  letter-spacing: .05em;
+  text-decoration: none;
+  transition: all .2s;
+}
+.quick-link:hover { color: var(--cyan); border-color: rgba(0,212,255,.2); background: rgba(0,212,255,.04) }
+.quick-link svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0 }
+
+/* ── TOC Sidebar ── */
+.toc-sidebar { position: sticky; top: 60px; align-self: start; max-height: calc(100vh - 80px); overflow-y: auto }
+.toc-list { list-style: none }
+.toc-item {
+  display: block;
+  padding: 8px 14px;
+  font-family: var(--heading);
+  font-size: .56rem;
+  color: var(--gray);
+  letter-spacing: .05em;
+  text-decoration: none;
+  border-left: 2px solid rgba(0,212,255,.06);
+  transition: all .2s;
+  cursor: pointer;
+}
+.toc-item:hover { color: var(--light); border-left-color: rgba(0,212,255,.25) }
+.toc-item.active { color: var(--cyan); border-left-color: var(--cyan); background: rgba(0,212,255,.03) }
+
+/* ── Breadcrumb ── */
+.breadcrumb {
+  font-family: var(--heading);
+  font-size: .6rem;
+  color: var(--gray);
+  letter-spacing: .06em;
+  margin-bottom: 1.25rem;
+}
+.breadcrumb a { color: var(--cyan); text-decoration: none; transition: color .2s }
+.breadcrumb a:hover { color: var(--white) }
+.breadcrumb .sep { margin: 0 .5rem; opacity: .5 }
+
+/* ── Mobile Nav Toggle ── */
+.nav-toggle {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  flex-direction: column;
+  gap: 4px;
+}
+.nav-toggle span {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: var(--gray);
+  transition: all .25s;
+}
+.nav-toggle[aria-expanded="true"] span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.nav-toggle[aria-expanded="true"] span:nth-child(2) { opacity: 0; }
+.nav-toggle[aria-expanded="true"] span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .quick-links { grid-template-columns: 1fr }
+  .toc-sidebar { display: none }
+}
+@media (max-width: 520px) {
+  .dash-topbar { flex-direction: column; gap: 14px; text-align: center }
+}
+@media (max-width: 600px) {
+  .site-nav { flex-wrap: wrap; }
+  .nav-toggle { display: flex; }
+  .nav-links {
+    display: none;
+    width: 100%;
+    flex-direction: column;
+    gap: 0;
+    padding-top: 8px;
+  }
+  .nav-links.open { display: flex; }
+  .nav-links a { padding: 10px 0; border: none; }
+  .nav-links .sk-connection-status { display: none; }
+}
+
+</style>
+<style data-src="css/components/charts.css">
+/* ══════════════════════════════════════════════════════
+   Charts — Sparklines, progress bars, build health chart
+   ══════════════════════════════════════════════════════ */
+
+/* ── Chart Metric Cards ── */
+.chart-metrics-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-bottom: 24px }
+.chart-metric {
+  background: var(--surface);
+  border: 1px solid rgba(0,212,255,.06);
+  padding: 16px 20px;
+  transition: all .3s;
+  position: relative;
+}
+.chart-metric:hover { border-color: rgba(0,212,255,.2) }
+.chart-metric-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 10px }
+.chart-metric-header .cm-value { font-family: var(--display); font-size: clamp(1.4rem, 2.2vw, 1.8rem); color: var(--white); line-height: 1; text-shadow: 0 0 15px rgba(0,212,255,.1) }
+.chart-metric-header .cm-value.green { color: var(--green); text-shadow: 0 0 15px rgba(34,197,94,.15) }
+.chart-metric-header .cm-value.rose { color: var(--rose); text-shadow: 0 0 15px rgba(239,68,68,.15) }
+.chart-metric-header .cm-value .unit { font-family: var(--heading); color: var(--cyan); font-size: .5em; margin-left: 2px }
+.chart-metric-header .cm-delta { font-family: var(--heading); font-size: .5rem; letter-spacing: .06em; padding: 2px 6px; border: 1px solid; margin-top: 4px }
+.cm-delta.up { color: var(--green); border-color: rgba(34,197,94,.3); background: rgba(34,197,94,.04) }
+.cm-delta.down { color: var(--rose); border-color: rgba(239,68,68,.3); background: rgba(239,68,68,.04) }
+.chart-metric .cm-label { font-family: var(--heading); font-size: .5rem; color: var(--gray); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px }
+
+/* ── Sparkline ── */
+.sparkline-wrap { height: 40px; position: relative }
+.sparkline-wrap svg { display: block; width: 100%; height: 100% }
+
+/* ── Chart Container ── */
+.chart-container { width: 100%; overflow-x: auto; position: relative }
+.chart-container svg { display: block; width: 100%; height: auto }
+.chart-container svg text { font-family: var(--heading); fill: var(--gray); font-size: 9px; letter-spacing: .04em }
+
+/* ── Chart Legend ── */
+.chart-legend { display: flex; gap: 20px; padding: 12px 16px 8px; justify-content: flex-end }
+.chart-legend-item { display: flex; align-items: center; gap: 6px; font-family: var(--heading); font-size: .52rem; color: var(--gray); letter-spacing: .06em }
+.chart-legend-item .swatch { width: 10px; height: 10px }
+.chart-legend-item .swatch.success { background: var(--green); opacity: .6 }
+.chart-legend-item .swatch.failed { background: var(--rose); opacity: .6 }
+
+/* ── Chart Tooltip ── */
+.chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(2,4,8,.95);
+  border: 1px solid rgba(0,212,255,.2);
+  padding: 8px 12px;
+  font-family: var(--heading);
+  font-size: .55rem;
+  color: var(--white);
+  letter-spacing: .04em;
+  opacity: 0;
+  transition: opacity .15s;
+  z-index: 50;
+  white-space: nowrap;
+}
+.chart-tooltip .tt-date { color: var(--cyan); margin-bottom: 4px }
+.chart-tooltip .tt-row { display: flex; align-items: center; gap: 6px; margin-top: 2px }
+.chart-tooltip .tt-dot { width: 6px; height: 6px; border-radius: 50% }
+.chart-tooltip .tt-dot.success { background: var(--green) }
+.chart-tooltip .tt-dot.failed { background: var(--rose) }
+
+/* ── Responsive ── */
+@media (max-width: 520px) {
+  .chart-metrics-row { grid-template-columns: 1fr }
+}
+
+</style>
+<style data-src="css/components/status.css">
+/* ══════════════════════════════════════════════════════
+   Status — SSE connection status indicator
+   ══════════════════════════════════════════════════════ */
+
+.sk-connection-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity .3s;
+  font-family: var(--heading);
+  font-size: .55rem;
+  letter-spacing: .06em;
+}
+
+/* Show when JS sets a status class */
+.sk-connection-status.sk-status--online,
+.sk-connection-status.sk-status--offline,
+.sk-connection-status.sk-status--linking {
+  opacity: 1;
+}
+
+.sk-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gray);
+  transition: all .3s;
+}
+
+.sk-status-label {
+  color: var(--gray);
+  transition: color .3s;
+}
+
+/* ── Online ── */
+.sk-status--online .sk-status-dot {
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+}
+.sk-status--online .sk-status-label {
+  color: var(--green);
+}
+
+/* ── Offline ── */
+.sk-status--offline .sk-status-dot {
+  background: var(--rose);
+}
+.sk-status--offline .sk-status-label {
+  color: var(--rose);
+}
+
+/* ── Linking (connecting/reconnecting) ── */
+.sk-status--linking .sk-status-dot {
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber);
+  animation: status-pulse 2s infinite;
+}
+.sk-status--linking .sk-status-label {
+  color: var(--amber);
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1 }
+  50% { opacity: .3 }
+}
+
+</style>
+<style data-src="css/page.css">
+/* Page shell — replaces the artboard wrapper used in the mockup canvas. */
+html, body {
+  background: #020408;
+  min-height: 100%;
+}
+body {
+  margin: 0;
+  overflow-x: hidden;
+}
+
+.screen-root {
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+  background: #020408;
+  color: var(--light);
+  font-family: var(--body);
+  overflow: hidden;
+}
+
+.screen-root::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(0, 212, 255, .06), transparent 50%),
+    radial-gradient(circle at 80% 100%, rgba(0, 212, 255, .04), transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.screen-root > * {
+  position: relative;
+  z-index: 1;
+}
+
+.screen-root .site-nav {
+  position: absolute !important;
+}
+
+.screen-root::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0, 212, 255, .025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 255, .025) 1px, transparent 1px);
+  background-size: 60px 60px;
+  pointer-events: none;
+  z-index: 0;
+  mask-image: radial-gradient(ellipse at center, #000 30%, transparent 80%);
+}
+
+</style>
+<style data-src="page.css">
+html, body { background: #020408; min-height: 100%; }
+body { margin: 0; overflow-x: hidden; }
+.screen-root {
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+  background: #020408;
+  color: var(--light);
+  font-family: var(--body);
+  overflow: hidden;
+}
+.screen-root::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(0, 212, 255, .06), transparent 50%),
+    radial-gradient(circle at 80% 100%, rgba(0, 212, 255, .04), transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+.screen-root > * { position: relative; z-index: 1; }
+.screen-root .site-nav { position: absolute !important; }
+.screen-root::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(0, 212, 255, .025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 255, .025) 1px, transparent 1px);
+  background-size: 60px 60px;
+  pointer-events: none;
+  z-index: 0;
+  mask-image: radial-gradient(ellipse at center, #000 30%, transparent 80%);
+}</style>
+</head>
+<body>
+<div class="screen-root"><nav class="site-nav" style="position: absolute;"><a class="nav-logo" href="#">SMARTER<span class="dev">.dev</span></a><div class="nav-links"><a href="#">Scan</a><a href="#">RunHacks</a><a href="#">Academy</a><a href="#">Labs</a><a href="#" class="active">Pricing</a></div><a class="btn-follow" href="#">Sign In</a></nav><section style="padding-top: 110px; padding-bottom: 28px; text-align: center;"><div class="status-live" style="margin-bottom: 24px; border-color: rgba(239, 68, 68, 0.4); color: var(--white); background: rgba(239, 68, 68, 0.06);"><span class="pulse" style="background: var(--rose); box-shadow: 0 0 8px var(--rose);"></span><span>FOUNDER ACCESS · ONE PAYMENT · ONE YEAR · PUBLIC OPENS NEXT WEEK</span></div><h1 style="font-family: var(--display); font-size: clamp(2.8rem, 7vw, 5.4rem); color: var(--white); letter-spacing: 0.04em; line-height: 1.02; margin-bottom: 22px; font-weight: 100;">Pay once. Take the year.<br>Renew at the <span style="color: var(--rose); text-shadow: rgba(239, 68, 68, 0.35) 0px 0px 30px;">founder rate.</span></h1><p style="font-size: 0.95rem; color: var(--light); max-width: 780px; margin: 0px auto; line-height: 1.8;">Smarter Dev has always been a free community, and that's not changing. But the world is, and what comes next takes more than we can do for free. Code is written by agents, questions are answered by AI, and the future belongs to developers who can direct it. We want to help developers like us get the skills to thrive in that world. We can't build it without your help.</p></section><section style="padding-top: 30px; padding-bottom: 50px;"><div class="container" style="max-width: 1180px;"><div style="display: grid; grid-template-columns: 1fr 1fr 1.15fr; gap: 1px; margin-bottom: 1px; background: rgba(0, 0, 0, 0.3);"><div style="padding: 14px 18px; background: var(--surface); border-top: 1px solid rgba(0, 212, 255, 0.18); display: flex; align-items: center; justify-content: space-between;"><div style="display: flex; align-items: center; gap: 12px;"><div style="font-family: var(--mono); font-size: 0.95rem; color: var(--cyan); padding: 2px 10px; border: 1px solid rgba(0, 212, 255, 0.35); background: rgba(0, 212, 255, 0.06); letter-spacing: 0.05em;">r--</div><div style="font-family: var(--heading); font-size: 0.78rem; color: var(--white); letter-spacing: 0.1em;">READ</div></div><div style="font-family: var(--heading); font-size: 0.5rem; color: var(--gray); letter-spacing: 0.14em;">FOUNDER · 1 YEAR</div></div><div style="padding: 14px 18px; background: var(--surface); border-top: 1px solid rgba(0, 212, 255, 0.18); display: flex; align-items: center; justify-content: space-between;"><div style="display: flex; align-items: center; gap: 12px;"><div style="font-family: var(--mono); font-size: 0.95rem; color: var(--cyan); padding: 2px 10px; border: 1px solid rgba(0, 212, 255, 0.35); background: rgba(0, 212, 255, 0.06); letter-spacing: 0.05em;">rw-</div><div style="font-family: var(--heading); font-size: 0.78rem; color: var(--white); letter-spacing: 0.1em;">WRITE</div></div><div style="font-family: var(--heading); font-size: 0.5rem; color: var(--gray); letter-spacing: 0.14em;">FOUNDER · 1 YEAR</div></div><div style="padding: 14px 18px; background: rgba(239, 68, 68, 0.05); border-top: 1px solid rgba(239, 68, 68, 0.35); display: flex; align-items: center; justify-content: space-between;"><div style="display: flex; align-items: center; gap: 12px;"><div style="font-family: var(--mono); font-size: 0.95rem; color: var(--rose); padding: 2px 10px; border: 1px solid var(--rose); background: rgba(239, 68, 68, 0.1); letter-spacing: 0.05em;">rwx</div><div style="font-family: var(--heading); font-size: 0.78rem; color: var(--white); letter-spacing: 0.1em;">EXECUTE</div></div><div style="font-family: var(--heading); font-size: 0.5rem; color: var(--rose); letter-spacing: 0.14em;">0DAY · 16 SEATS</div></div></div><div style="display: grid; grid-template-columns: 1fr 1fr 1.15fr; gap: 1px; background: rgba(0, 212, 255, 0.06);"><div style="display: flex; flex-direction: column; gap: 1px;"><div style="height: 76px; padding: 14px 22px; background: var(--surface); display: flex; align-items: center; gap: 10px;"><div style="font-family: var(--display); font-size: 3.4rem; color: var(--white); line-height: 1; font-weight: 100;"><span style="font-size: 1.05rem; vertical-align: 0.6em; color: var(--cyan);">$</span>128</div><div style="font-family: var(--heading); font-size: 0.55rem; color: var(--gray); letter-spacing: 0.1em; line-height: 1.5;">ONCE<br><span style="color: var(--cyan);">1 YEAR ACCESS</span></div></div><div style="height: 78px; padding: 12px 22px; background: var(--surface); display: flex; flex-direction: column; justify-content: center; gap: 4px;"><div style="font-family: var(--mono); font-size: 0.72rem; color: var(--mid); display: flex; gap: 8px; align-items: baseline;"><span style="text-decoration: line-through; color: var(--gray);">$192/yr</span><span style="color: var(--gray);">public price</span></div><div style="font-family: var(--heading); font-size: 0.62rem; color: var(--cyan); letter-spacing: 0.08em;">SAVE $64 · RENEW AT 33% OFF</div></div><div style="height: 110px; padding: 16px 22px; background: var(--surface); font-size: 0.82rem; color: var(--light); line-height: 1.65; display: flex; align-items: flex-start;">The starting line. Your year up front funds the build, and you ship with us as every piece of sudo lands.</div><div style="height: 178px; padding: 16px 22px; background: var(--surface);"><ul style="list-style: none; display: flex; flex-direction: column; gap: 9px;"><li style="font-size: 0.74rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--cyan); font-family: var(--mono); font-size: 0.7rem; margin-top: 1px;">›</span>Scan — answers from our curated library</li><li style="font-size: 0.74rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--cyan); font-family: var(--mono); font-size: 0.7rem; margin-top: 1px;">›</span>RunHacks — new challenges on a schedule</li><li style="font-size: 0.74rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--cyan); font-family: var(--mono); font-size: 0.7rem; margin-top: 1px;">›</span>Academy when it launches</li><li style="font-size: 0.74rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--cyan); font-family: var(--mono); font-size: 0.7rem; margin-top: 1px;">›</span>Founder role + members-only Discord</li></ul></div><div style="height: 70px; padding: 14px 22px; background: var(--surface); display: flex; flex-direction: column; justify-content: center; gap: 6px;"><div style="display: flex; align-items: center; gap: 10px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan);"></span><span style="font-family: var(--mono); font-size: 0.74rem; color: var(--light);">unlimited seats · open now</span></div></div><div style="height: 84px; padding: 18px 22px; background: var(--surface); border-top: 1px solid rgba(0, 212, 255, 0.06); display: flex; align-items: center;"><a href="#" class="btn-glow" style="color: var(--cyan); border-color: var(--cyan); box-shadow: rgba(0, 212, 255, 0.15) 0px 0px 14px, rgba(0, 212, 255, 0.04) 0px 0px 14px inset; padding: 13px 22px; font-size: 0.72rem; width: 100%; text-align: center; display: block;">./reserve --r-- →</a></div></div><div style="display: flex; flex-direction: column; gap: 1px;"><div style="height: 76px; padding: 14px 22px; background: var(--surface); display: flex; align-items: center; gap: 10px;"><div style="font-family: var(--display); font-size: 3.4rem; color: var(--white); line-height: 1; font-weight: 100;"><span style="font-size: 1.05rem; vertical-align: 0.6em; color: var(--cyan);">$</span>256</div><div style="font-family: var(--heading); font-size: 0.55rem; color: var(--gray); letter-spacing: 0.1em; line-height: 1.5;">ONCE<br><span style="color: var(--cyan);">1 YEAR ACCESS</span></div></div><div style="height: 78px; padding: 12px 22px; background: var(--surface); display: flex; flex-direction: column; justify-content: center; gap: 4px;"><div style="font-family: var(--mono); font-size: 0.72rem; color: var(--mid); display: flex; gap: 8px; align-items: baseline;"><span style="text-decoration: line-through; color: var(--gray);">$384/yr</span><span style="color: var(--gray);">public price</span></div><div style="font-family: var(--heading); font-size: 0.62rem; color: var(--cyan); letter-spacing: 0.08em;">SAVE $128 · RENEW AT 33% OFF</div></div><div style="height: 110px; padding: 16px 22px; background: var(--surface); font-size: 0.82rem; color: var(--light); line-height: 1.65; display: flex; align-items: flex-start;">For the developers who'll lean on it. Extended limits across every tool, and the support that pays for the headroom.</div><div style="height: 178px; padding: 16px 22px; background: var(--surface);"><ul style="list-style: none; display: flex; flex-direction: column; gap: 9px;"><li style="font-size: 0.74rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--cyan); font-family: var(--mono); font-size: 0.7rem; margin-top: 1px;">›</span>Everything in r--</li><li style="font-size: 0.74rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--cyan); font-family: var(--mono); font-size: 0.7rem; margin-top: 1px;">›</span>Extended limits across every tool</li><li style="font-size: 0.74rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--cyan); font-family: var(--mono); font-size: 0.7rem; margin-top: 1px;">›</span>Labs when it launches</li><li style="font-size: 0.74rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--cyan); font-family: var(--mono); font-size: 0.7rem; margin-top: 1px;">›</span>Priority support from the team</li></ul></div><div style="height: 70px; padding: 14px 22px; background: var(--surface); display: flex; flex-direction: column; justify-content: center; gap: 6px;"><div style="display: flex; align-items: center; gap: 10px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px var(--cyan);"></span><span style="font-family: var(--mono); font-size: 0.74rem; color: var(--light);">unlimited seats · open now</span></div></div><div style="height: 84px; padding: 18px 22px; background: var(--surface); border-top: 1px solid rgba(0, 212, 255, 0.06); display: flex; align-items: center;"><a href="#" class="btn-glow" style="color: var(--cyan); border-color: var(--cyan); box-shadow: rgba(0, 212, 255, 0.15) 0px 0px 14px, rgba(0, 212, 255, 0.04) 0px 0px 14px inset; padding: 13px 22px; font-size: 0.72rem; width: 100%; text-align: center; display: block;">./reserve --rw- →</a></div></div><div style="display: flex; flex-direction: column; gap: 1px;"><div style="height: 76px; padding: 14px 22px; background: rgba(239, 68, 68, 0.04); display: flex; align-items: center; gap: 10px;"><div style="font-family: var(--display); font-size: 3.4rem; color: var(--white); line-height: 1; font-weight: 100;"><span style="font-size: 1.05rem; vertical-align: 0.6em; color: var(--rose);">$</span>512</div><div style="font-family: var(--heading); font-size: 0.55rem; color: var(--gray); letter-spacing: 0.1em; line-height: 1.5;">ONCE<br><span style="color: var(--rose);">1 YEAR ACCESS</span></div></div><div style="height: 78px; padding: 12px 22px; background: rgba(239, 68, 68, 0.04); display: flex; flex-direction: column; justify-content: center; gap: 4px;"><div style="font-family: var(--mono); font-size: 0.72rem; color: var(--mid); display: flex; gap: 8px; align-items: baseline;"><span style="text-decoration: line-through; color: var(--gray);">$768/yr</span><span style="color: var(--gray);">public price</span></div><div style="font-family: var(--heading); font-size: 0.62rem; color: var(--rose); letter-spacing: 0.08em;">SAVE $256 · RENEW AT 33% OFF</div></div><div style="height: 110px; padding: 16px 22px; background: rgba(239, 68, 68, 0.04); font-size: 0.82rem; color: var(--light); line-height: 1.65; display: flex; align-items: flex-start;">The first 16. Early preview access to Academy and Labs while we shape them, because we need users in the loop to ship them right.</div><div style="height: 178px; padding: 16px 22px; background: rgba(239, 68, 68, 0.04);"><ul style="list-style: none; display: flex; flex-direction: column; gap: 9px;"><li style="font-size: 0.74rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--rose); font-family: var(--mono); font-size: 0.7rem; margin-top: 1px;">›</span>Everything in rw-</li><li style="font-size: 0.74rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--rose); font-family: var(--mono); font-size: 0.7rem; margin-top: 1px;">›</span>Academy preview access while we shape it</li><li style="font-size: 0.74rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--rose); font-family: var(--mono); font-size: 0.7rem; margin-top: 1px;">›</span>Labs preview access while we shape it</li><li style="font-size: 0.74rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--rose); font-family: var(--mono); font-size: 0.7rem; margin-top: 1px;">›</span>0day Founder role + dedicated channel</li></ul></div><div style="height: 70px; padding: 14px 22px; background: rgba(239, 68, 68, 0.04); display: flex; flex-direction: column; justify-content: center; gap: 6px;"><div style="display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px;"><div style="aspect-ratio: 1 / 1; background: rgba(90, 122, 150, 0.15); border: 1px solid rgba(90, 122, 150, 0.3); box-shadow: none;"></div><div style="aspect-ratio: 1 / 1; background: rgba(90, 122, 150, 0.15); border: 1px solid rgba(90, 122, 150, 0.3); box-shadow: none;"></div><div style="aspect-ratio: 1 / 1; background: rgba(90, 122, 150, 0.15); border: 1px solid rgba(90, 122, 150, 0.3); box-shadow: none;"></div><div style="aspect-ratio: 1 / 1; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--rose); box-shadow: rgba(239, 68, 68, 0.4) 0px 0px 4px;"></div><div style="aspect-ratio: 1 / 1; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--rose); box-shadow: rgba(239, 68, 68, 0.4) 0px 0px 4px;"></div><div style="aspect-ratio: 1 / 1; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--rose); box-shadow: rgba(239, 68, 68, 0.4) 0px 0px 4px;"></div><div style="aspect-ratio: 1 / 1; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--rose); box-shadow: rgba(239, 68, 68, 0.4) 0px 0px 4px;"></div><div style="aspect-ratio: 1 / 1; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--rose); box-shadow: rgba(239, 68, 68, 0.4) 0px 0px 4px;"></div><div style="aspect-ratio: 1 / 1; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--rose); box-shadow: rgba(239, 68, 68, 0.4) 0px 0px 4px;"></div><div style="aspect-ratio: 1 / 1; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--rose); box-shadow: rgba(239, 68, 68, 0.4) 0px 0px 4px;"></div><div style="aspect-ratio: 1 / 1; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--rose); box-shadow: rgba(239, 68, 68, 0.4) 0px 0px 4px;"></div><div style="aspect-ratio: 1 / 1; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--rose); box-shadow: rgba(239, 68, 68, 0.4) 0px 0px 4px;"></div><div style="aspect-ratio: 1 / 1; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--rose); box-shadow: rgba(239, 68, 68, 0.4) 0px 0px 4px;"></div><div style="aspect-ratio: 1 / 1; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--rose); box-shadow: rgba(239, 68, 68, 0.4) 0px 0px 4px;"></div><div style="aspect-ratio: 1 / 1; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--rose); box-shadow: rgba(239, 68, 68, 0.4) 0px 0px 4px;"></div><div style="aspect-ratio: 1 / 1; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--rose); box-shadow: rgba(239, 68, 68, 0.4) 0px 0px 4px;"></div></div><div style="font-family: var(--mono); font-size: 0.7rem; color: var(--rose);">13 of 16 seats left</div></div><div style="height: 84px; padding: 18px 22px; background: rgba(239, 68, 68, 0.04); border-top: 1px solid rgba(239, 68, 68, 0.18); display: flex; align-items: center;"><a href="#" class="btn-glow" style="color: var(--rose); border-color: var(--rose); box-shadow: rgba(239, 68, 68, 0.2) 0px 0px 20px, rgba(239, 68, 68, 0.06) 0px 0px 20px inset; padding: 13px 22px; font-size: 0.72rem; width: 100%; text-align: center; display: block;">./reserve --rwx --0day →</a></div></div></div><div style="margin-top: 18px; display: flex; gap: 22px; flex-wrap: wrap; justify-content: space-between; font-family: var(--mono); font-size: 0.7rem; color: var(--gray);"><div>// one seat per person · no subscription · 14-day full refund</div><div>// public monthly opens next week — founder access closes then</div></div></div></section><section style="padding-top: 30px; padding-bottom: 50px;"><div class="container" style="max-width: 1180px;"><div style="display: flex; align-items: baseline; gap: 14px; margin-bottom: 26px;"><div style="font-family: var(--mono); font-size: 0.72rem; color: var(--gray);">$ cat /docs/founder-pricing.md</div><div style="flex: 1 1 0%; height: 1px; background: rgba(90, 122, 150, 0.18);"></div><div style="font-family: var(--heading); font-size: 0.55rem; color: var(--gray); letter-spacing: 0.12em;">03 / HOW IT WORKS</div></div><div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;"><div style="background: var(--surface); border: 1px solid rgba(0, 212, 255, 0.08); padding: 26px 26px 28px;"><div style="font-family: var(--mono); font-size: 0.8rem; color: var(--cyan); margin-bottom: 14px;">01</div><div style="font-family: var(--heading); font-size: 0.85rem; color: var(--white); letter-spacing: 0.02em; line-height: 1.4; margin-bottom: 10px;">One payment buys the year</div><p style="font-size: 0.8rem; color: var(--mid); line-height: 1.7;">$128, $256, or $512 once — a year of access, no subscription, no auto-renewal. We don't touch the card again unless you ask us to.</p></div><div style="background: var(--surface); border: 1px solid rgba(0, 212, 255, 0.08); padding: 26px 26px 28px;"><div style="font-family: var(--mono); font-size: 0.8rem; color: var(--cyan); margin-bottom: 14px;">02</div><div style="font-family: var(--heading); font-size: 0.85rem; color: var(--white); letter-spacing: 0.02em; line-height: 1.4; margin-bottom: 10px;">Renew at the founder rate</div><p style="font-size: 0.8rem; color: var(--mid); line-height: 1.7;">When the year is up, renewing keeps you at 33% off the public price. The discount you bought in at is the discount you keep.</p></div><div style="background: var(--surface); border: 1px solid rgba(0, 212, 255, 0.08); padding: 26px 26px 28px;"><div style="font-family: var(--mono); font-size: 0.8rem; color: var(--cyan); margin-bottom: 14px;">03</div><div style="font-family: var(--heading); font-size: 0.85rem; color: var(--white); letter-spacing: 0.02em; line-height: 1.4; margin-bottom: 10px;">rwx 0day is capped at 16 seats</div><p style="font-size: 0.8rem; color: var(--mid); line-height: 1.7;">r-- and rw- stay open. rwx 0day is a one-time founder window — when the 16 seats are gone, the price and the preview access are gone with them.</p></div></div><div style="margin-top: 18px; padding: 18px 24px; background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(90, 122, 150, 0.22); display: grid; grid-template-columns: auto 1fr auto; gap: 22px; align-items: center;"><div style="font-family: var(--mono); font-size: 0.95rem; color: var(--gray); padding: 2px 10px; border: 1px solid rgba(90, 122, 150, 0.3); background: rgba(90, 122, 150, 0.06);">---</div><div><div style="font-family: var(--heading); font-size: 0.74rem; color: var(--white); letter-spacing: 0.08em; margin-bottom: 4px;">GUEST · FREE FOREVER</div><div style="font-size: 0.78rem; color: var(--mid); line-height: 1.6;">Discord access, limited RunHacks, Academy preview. A way in — no card required.</div></div><a href="#" style="font-family: var(--heading); font-size: 0.62rem; color: var(--gray); letter-spacing: 0.08em; text-decoration: none; border: 1px solid rgba(90, 122, 150, 0.3); padding: 10px 18px;">JOIN AS GUEST →</a></div></div></section><section style="padding-top: 30px; padding-bottom: 60px;"><div class="container" style="max-width: 1180px;"><div style="text-align: center; margin-bottom: 36px;"><div class="code-label" style="color: var(--rose);">04 / ROADMAP</div><h2 class="sec-h" style="margin-bottom: 10px;">What every founder's funding.</h2><p style="font-size: 0.85rem; color: var(--mid); max-width: 620px; margin: 0px auto; line-height: 1.7;">Day one access lands when sudo opens. Academy and Labs ship next, with rwx 0day in the preview loop.</p></div><div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;"><div style="background: var(--surface); border-top: 2px solid var(--rose); border-right: 1px solid rgba(239, 68, 68, 0.08); border-bottom: 1px solid rgba(239, 68, 68, 0.08); border-left: 1px solid rgba(239, 68, 68, 0.08); border-image: initial; padding: 26px 28px;"><div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px;"><div style="font-family: var(--display); font-size: 1.7rem; color: var(--white); letter-spacing: 0.06em; font-weight: 100;">DAY ONE</div><div style="font-family: var(--heading); font-size: 0.5rem; color: var(--gray); letter-spacing: 0.12em; text-align: right; max-width: 130px; line-height: 1.5;">live at sudo open</div></div><p style="font-size: 0.82rem; color: var(--light); line-height: 1.75; margin-bottom: 18px;">What every founder gets when sudo opens. Scan answers questions from our library of top resources, RunHacks drops new challenges on a regular schedule, and the founder role carries your access into everything we ship next.</p><ul style="list-style: none; display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid rgba(90, 122, 150, 0.15);"><li style="font-size: 0.76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>Scan answers using our selection of top resources</li><li style="font-size: 0.76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>RunHacks drops new challenges regularly</li><li style="font-size: 0.76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>Founder role and members-only Discord channels</li></ul></div><div style="background: var(--surface); border-top: 2px solid var(--rose); border-right: 1px solid rgba(239, 68, 68, 0.08); border-bottom: 1px solid rgba(239, 68, 68, 0.08); border-left: 1px solid rgba(239, 68, 68, 0.08); border-image: initial; padding: 26px 28px;"><div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px;"><div style="font-family: var(--display); font-size: 1.7rem; color: var(--white); letter-spacing: 0.06em; font-weight: 100;">ACADEMY</div><div style="font-family: var(--heading); font-size: 0.5rem; color: var(--gray); letter-spacing: 0.12em; text-align: right; max-width: 130px; line-height: 1.5;">shipping next</div></div><p style="font-size: 0.82rem; color: var(--light); line-height: 1.75; margin-bottom: 18px;">Lesson-based curriculum paired with an AI tutor that remembers you. It tracks where you've gotten stuck and adapts how it walks you through what's next.</p><ul style="list-style: none; display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid rgba(90, 122, 150, 0.15);"><li style="font-size: 0.76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>Tutor that remembers where you’ve struggled</li><li style="font-size: 0.76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>Stack-trace-first; no syntax tutorials</li><li style="font-size: 0.76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>Each lesson builds on the last</li></ul></div><div style="background: var(--surface); border-top: 2px solid var(--rose); border-right: 1px solid rgba(239, 68, 68, 0.08); border-bottom: 1px solid rgba(239, 68, 68, 0.08); border-left: 1px solid rgba(239, 68, 68, 0.08); border-image: initial; padding: 26px 28px;"><div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px;"><div style="font-family: var(--display); font-size: 1.7rem; color: var(--white); letter-spacing: 0.06em; font-weight: 100;">LABS</div><div style="font-family: var(--heading); font-size: 0.5rem; color: var(--gray); letter-spacing: 0.12em; text-align: right; max-width: 130px; line-height: 1.5;">after Academy</div></div><p style="font-size: 0.82rem; color: var(--light); line-height: 1.75; margin-bottom: 18px;">Guided agentic coding environments. Using real coding agents, run in cloud-hosted workspaces accessible from any browser, with the lesson sitting alongside the agent terminal.</p><ul style="list-style: none; display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid rgba(90, 122, 150, 0.15);"><li style="font-size: 0.76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>Cloud workspaces, no local setup</li><li style="font-size: 0.76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>Lesson + agent terminal, side-by-side</li><li style="font-size: 0.76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>First look at every platform feature</li></ul></div></div></div></section><section style="padding-top: 20px; padding-bottom: 60px;"><div class="container" style="max-width: 760px;"><div style="text-align: center; margin-bottom: 30px;"><div class="code-label" style="color: var(--rose);">05 / FAQ</div><h2 class="sec-h" style="margin-bottom: 8px;">The questions every founder asks.</h2></div><div><div style="border-bottom: 1px solid rgba(0, 212, 255, 0.06); padding: 1.1rem 0px;"><div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 16px;"><div style="font-family: var(--heading); font-size: 0.82rem; color: var(--white); letter-spacing: 0.02em; line-height: 1.5;">What is sudo, and why are you launching paid tiers now?</div><span style="font-family: var(--heading); font-size: 0.7rem; color: var(--cyan); flex-shrink: 0;">−</span></div><div style="font-size: 0.8rem; color: var(--mid); line-height: 1.75;">Smarter Dev has always been free, and the community side stays that way. sudo is how we ship the things we couldn't build for free: a tutor with memory, agentic learning environments, deeper tools for working alongside AI. The world has changed in a way that asks more of developers, and we want to help developers like us meet that. We're opening founder tiers now because that work takes more than we can do for free.</div></div><div style="border-bottom: 1px solid rgba(0, 212, 255, 0.06); padding: 1.1rem 0px;"><div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 16px;"><div style="font-family: var(--heading); font-size: 0.82rem; color: var(--white); letter-spacing: 0.02em; line-height: 1.5;">What happens to the free Smarter Dev community?</div><span style="font-family: var(--heading); font-size: 0.7rem; color: var(--cyan); flex-shrink: 0;">−</span></div><div style="font-size: 0.8rem; color: var(--mid); line-height: 1.75;">It stays free. Discord access, RunHacks basic challenges, and Academy previews stay open. sudo is a layer added on top, not a paywall pulled across.</div></div><div style="border-bottom: 1px solid rgba(0, 212, 255, 0.06); padding: 1.1rem 0px;"><div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 16px;"><div style="font-family: var(--heading); font-size: 0.82rem; color: var(--white); letter-spacing: 0.02em; line-height: 1.5;">Where does my annual tier's money actually go?</div><span style="font-family: var(--heading); font-size: 0.7rem; color: var(--cyan); flex-shrink: 0;">−</span></div><div style="font-size: 0.8rem; color: var(--mid); line-height: 1.75;">Cloud infrastructure to run the website, Discord bot, RunHacks, and the agentic workspaces in Labs. Development time on Academy curriculum and the Labs environments.</div></div><div style="border-bottom: 1px solid rgba(0, 212, 255, 0.06); padding: 1.1rem 0px;"><div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 16px;"><div style="font-family: var(--heading); font-size: 0.82rem; color: var(--white); letter-spacing: 0.02em; line-height: 1.5;">What if you can't ship Academy or Labs on time?</div><span style="font-family: var(--heading); font-size: 0.7rem; color: var(--cyan); flex-shrink: 0;">−</span></div><div style="font-size: 0.8rem; color: var(--mid); line-height: 1.75;">Honest answer: it's a risk we all take. We've scoped Academy and Labs to what we believe we can build in Q3 and Q4 with founder runway, but software ships when it's ready. If we slip, we slip publicly and your year of access keeps running. The refund policy applies for the first 14 days and prorates after that.</div></div><div style="border-bottom: 1px solid rgba(0, 212, 255, 0.06); padding: 1.1rem 0px;"><div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 16px;"><div style="font-family: var(--heading); font-size: 0.82rem; color: var(--white); letter-spacing: 0.02em; line-height: 1.5;">Is this a subscription?</div><span style="font-family: var(--heading); font-size: 0.7rem; color: var(--cyan); flex-shrink: 0;">−</span></div><div style="font-size: 0.8rem; color: var(--mid); line-height: 1.75;">No. Each year is a one-time purchase. No auto-renewal, no surprise charges. Public monthly, when it launches, is a normal subscription; founder is a deliberately different deal. One year up front, no recurring bill, and your founder pricing is waiting if you come back.</div></div><div style="border-bottom: 1px solid rgba(0, 212, 255, 0.06); padding: 1.1rem 0px;"><div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 16px;"><div style="font-family: var(--heading); font-size: 0.82rem; color: var(--white); letter-spacing: 0.02em; line-height: 1.5;">What happens at the end of my year?</div><span style="font-family: var(--heading); font-size: 0.7rem; color: var(--cyan); flex-shrink: 0;">−</span></div><div style="font-size: 0.8rem; color: var(--mid); line-height: 1.75;">Your access ends 12 months after you reserve your seat. Come back within 30 days and your founder pricing is waiting: same 33% off the public rate, same founder role and channel access. Wait longer than 30 days and you re-enter at the public rate.</div></div><div style="border-bottom: 1px solid rgba(0, 212, 255, 0.06); padding: 1.1rem 0px;"><div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 16px;"><div style="font-family: var(--heading); font-size: 0.82rem; color: var(--white); letter-spacing: 0.02em; line-height: 1.5;">What if I want to pay monthly?</div><span style="font-family: var(--heading); font-size: 0.7rem; color: var(--cyan); flex-shrink: 0;">−</span></div><div style="font-size: 0.8rem; color: var(--mid); line-height: 1.75;">Wait until the official launch. Currently, we're fundraising to prove we have the demand and cash to operate at a larger scale. Public monthly opens at $16, $32, and $64, no founder pricing. If saving a third on the year and keeping founder pricing when you come back sounds better, annual is open right now.</div></div><div style="border-bottom: 1px solid rgba(0, 212, 255, 0.06); padding: 1.1rem 0px;"><div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 16px;"><div style="font-family: var(--heading); font-size: 0.82rem; color: var(--white); letter-spacing: 0.02em; line-height: 1.5;">Refund policy?</div><span style="font-family: var(--heading); font-size: 0.7rem; color: var(--cyan); flex-shrink: 0;">−</span></div><div style="font-size: 0.8rem; color: var(--mid); line-height: 1.75;">14 days, no questions, full refund. After that, a prorated refund on the remaining months. Your seat releases back to the pool.</div></div><div style="border-bottom: 1px solid rgba(0, 212, 255, 0.06); padding: 1.1rem 0px;"><div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 16px;"><div style="font-family: var(--heading); font-size: 0.82rem; color: var(--white); letter-spacing: 0.02em; line-height: 1.5;">What if I want to support Smarter Dev beyond a membership?</div><span style="font-family: var(--heading); font-size: 0.7rem; color: var(--cyan); flex-shrink: 0;">−</span></div><div style="font-size: 0.8rem; color: var(--mid); line-height: 1.75;"><p style="margin-bottom: 10px;">sudo memberships are how most people support what we're building, but they fund a platform that's bigger than any single tier. Smarter Dev is the platform; sudo is the membership layer that pays for it. If you want to back Smarter Dev directly, beyond what a membership covers, email me at <a href="mailto:hello@smarter.dev" style="color: var(--cyan); text-decoration: none; border-bottom: 1px dashed rgba(0, 212, 255, 0.4);">hello@smarter.dev</a> and we'll work out what fits.</p><p>We shout out supporters who go above and beyond, on the Discord and the website, if they want the recognition. Plenty of people would rather keep it quiet, and that's just as welcome. Either way it goes straight into the build.</p></div></div></div></div></section><section style="padding-top: 10px; padding-bottom: 80px; text-align: center;"><div class="container"><div style="font-family: var(--mono); font-size: 0.8rem; color: var(--mid); margin-bottom: 16px;">$ ./reserve --tier=&lt;r--|rw-|rwx&gt; --1yr</div><div style="font-family: var(--display); font-size: clamp(2rem, 4.2vw, 3rem); color: var(--white); letter-spacing: 0.04em; line-height: 1.12; margin-bottom: 14px; font-weight: 100;">One week until public monthly opens.<br><span style="color: var(--rose);">13 seats</span> left in rwx 0day.</div><p style="font-size: 0.85rem; color: var(--mid); max-width: 520px; margin: 0px auto 28px;">$128 · $256 · $512 once · 1 year of access · renew at the founder rate · 14-day refund.</p><div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;"><a class="btn-glow" href="#" style="color: var(--cyan); border-color: var(--cyan); padding: 14px 28px; font-size: 0.74rem;">Reserve r-- · $128 →</a><a class="btn-glow" href="#" style="color: var(--cyan); border-color: var(--cyan); padding: 14px 28px; font-size: 0.74rem;">Reserve rw- · $256 →</a><a class="btn-glow" href="#" style="color: var(--rose); border-color: var(--rose); box-shadow: rgba(239, 68, 68, 0.2) 0px 0px 25px, rgba(239, 68, 68, 0.06) 0px 0px 20px inset; padding: 14px 28px; font-size: 0.74rem;">Reserve rwx 0day · $512 →</a></div></div></section><div class="foot">SMARTER<span style="color: var(--rose);">.DEV</span> · PRICING · FOUNDER ACCESS · PRELAUNCH 2026</div></div>
+</body>
+</html>

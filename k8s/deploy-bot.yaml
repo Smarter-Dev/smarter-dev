@@ -80,6 +80,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: jina-api-key
+                  - name: BRAVE_SEARCH_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: brave-search-api-key
                 resources:
                     requests:
                         cpu: 50m

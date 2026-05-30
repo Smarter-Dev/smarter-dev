@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block page_type %}account{% endblock %}
+{% block page_title %}Account — Smarter Dev{% endblock %}
+
+{% block page_css %}
+<style nonce="{{ csp_nonce() }}">
+.account-shell {
+    display: grid;
+    grid-template-columns: 240px 1fr;
+    gap: 2.5rem;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: clamp(2rem, 6vw, 4rem) 1.5rem 6rem;
+}
+@media (max-width: 720px) {
+    .account-shell { grid-template-columns: 1fr; }
+}
+.account-sidebar nav { display: flex; flex-direction: column; gap: .25rem; }
+.account-sidebar a {
+    display: block;
+    padding: .65rem .85rem;
+    font-family: var(--heading);
+    font-size: .8rem;
+    letter-spacing: .06em;
+    color: var(--mid);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+}
+.account-sidebar a.is-active {
+    color: var(--cyan);
+    border-left-color: var(--cyan);
+    background: rgba(0,212,255,.06);
+}
+.account-sidebar a:hover { color: var(--white); }
+.account-main h1 {
+    font-family: var(--display);
+    color: var(--cyan);
+    letter-spacing: .04em;
+    font-size: clamp(1.6rem, 3vw, 2.2rem);
+    margin: 0 0 1.5rem;
+}
+.account-card {
+    background: var(--surface);
+    border: var(--border-subtle);
+    padding: 2rem;
+    margin-bottom: 1.5rem;
+}
+.account-form .form-row { margin-bottom: 1.25rem; }
+.account-form label {
+    display: block;
+    font-family: var(--heading);
+    font-size: .75rem;
+    letter-spacing: .08em;
+    color: var(--mid);
+    margin-bottom: .35rem;
+    text-transform: uppercase;
+}
+.account-form input[type=text],
+.account-form input[type=email],
+.account-form textarea,
+.account-form select {
+    width: 100%;
+    background: rgba(255,255,255,.02);
+    border: 1px solid rgba(0,212,255,.18);
+    color: var(--white);
+    padding: .65rem .85rem;
+    font-family: var(--mono);
+    font-size: .9rem;
+}
+.account-form textarea { min-height: 6rem; resize: vertical; }
+.account-actions { display: flex; gap: .75rem; justify-content: flex-end; }
+.account-btn-primary {
+    background: var(--cyan);
+    color: #04141d;
+    border: none;
+    padding: .7rem 1.4rem;
+    font-family: var(--heading);
+    font-size: .75rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    cursor: pointer;
+}
+.account-btn-outline {
+    background: transparent;
+    color: var(--mid);
+    border: 1px solid rgba(255,255,255,.12);
+    padding: .7rem 1.4rem;
+    font-family: var(--heading);
+    font-size: .75rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    text-decoration: none;
+    cursor: pointer;
+}
+.account-flash {
+    background: rgba(0,212,255,.06);
+    border-left: 3px solid var(--cyan);
+    padding: .85rem 1rem;
+    margin-bottom: 1rem;
+    color: var(--white);
+    font-size: .85rem;
+}
+.account-flash.account-flash-error { border-color: var(--amber, #ffb454); }
+.account-meta { color: var(--mid); font-size: .85rem; }
+.account-meta code { color: var(--cyan); }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="account-shell">
+    <aside class="account-sidebar">
+        {% include "account/_sidebar.html" %}
+    </aside>
+    <div class="account-main">
+        {% if flash_messages %}
+        {% for msg in flash_messages %}
+        <div class="account-flash account-flash-{{ msg.type.value if msg.type else 'info' }}">{{ msg.message }}</div>
+        {% endfor %}
+        {% endif %}
+        {% block account_content %}{% endblock %}
+    </div>
+</section>
+{% endblock %}

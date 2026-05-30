@@ -1,0 +1,119 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Pipeline runs - Blogging Agent - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Pipeline runs</h1>
+    <p>{{ total }} run{{ 's' if total != 1 else '' }} — admin-triggered authoring jobs.</p>
+</hgroup>
+
+<style nonce="{{ csp_nonce() }}">
+    .ba-runs-actions {
+        margin-bottom: 1rem;
+        display: flex;
+        gap: .5rem;
+        justify-content: flex-end;
+    }
+    .ba-runs-table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+    .ba-runs-table th,
+    .ba-runs-table td {
+        padding: .65rem .75rem;
+        border-bottom: 1px solid var(--sk-color-border);
+        text-align: left;
+        vertical-align: middle;
+    }
+    .ba-runs-table th {
+        font-size: .75rem;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: var(--sk-color-muted);
+        background: var(--sk-color-surface);
+    }
+    .ba-runs-table .title-cell a {
+        color: var(--sk-color-text);
+        text-decoration: none;
+        font-weight: 600;
+    }
+    .ba-runs-table .title-cell a:hover {
+        color: var(--sk-color-primary, #0ea5e9);
+    }
+    .ba-runs-table .writing {
+        color: var(--sk-color-muted);
+        font-style: italic;
+    }
+    .ba-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: .15rem .55rem;
+        border-radius: 999px;
+        font-size: .72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        border: 1px solid var(--sk-color-border);
+        background: var(--sk-color-surface);
+    }
+    .ba-pill-queued    { color: #0ea5e9; border-color: #0ea5e9; }
+    .ba-pill-running   { color: #eab308; border-color: #eab308; }
+    .ba-pill-completed { color: #22c55e; border-color: #22c55e; }
+    .ba-pill-failed    { color: #ef4444; border-color: #ef4444; }
+    .ba-empty {
+        padding: 3rem 1rem;
+        text-align: center;
+        color: var(--sk-color-muted);
+    }
+</style>
+
+<div class="ba-runs-actions">
+    <form method="post" action="/admin/blogging-agent/runs">
+        <button type="submit" class="sk-btn sk-btn-primary">Trigger a new run</button>
+    </form>
+</div>
+
+{% if runs %}
+<table class="ba-runs-table">
+    <thead>
+        <tr>
+            <th>Started</th>
+            <th>Status</th>
+            <th>Post</th>
+            <th>Kicked off by</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in runs %}
+        <tr>
+            <td>
+                <a href="/admin/blogging-agent/runs/{{ item.run.id }}">
+                    {{ item.run.created_at.strftime('%Y-%m-%d %H:%M') }}
+                </a>
+            </td>
+            <td><span class="ba-pill ba-pill-{{ item.run.status }}">{{ item.run.status }}</span></td>
+            <td class="title-cell">
+                {% if item.page %}
+                <a href="/admin/blogging-agent/runs/{{ item.run.id }}">{{ item.page.title }}</a>
+                {% elif item.run.status in ('queued', 'running') %}
+                <span class="writing">Writing…</span>
+                {% elif item.run.status == 'failed' %}
+                <span class="writing">— ({{ item.run.error or 'failed' }})</span>
+                {% else %}
+                <span class="writing">—</span>
+                {% endif %}
+            </td>
+            <td>{{ item.user.name or item.user.email if item.user else '—' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="ba-empty">
+    <h3>No pipeline runs yet.</h3>
+    <p>Click "Trigger a new run" above to kick one off.</p>
+</div>
+{% endif %}
+{% endblock %}

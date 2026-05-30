@@ -116,44 +116,53 @@ class FollowupAgentInput(BaseModel):
 
 
 class BlogTopicCandidate(BaseModel):
-    """A blog-post idea shaken loose by this conversation.
+    """A claim shaken loose by this conversation that a post could be built on.
 
-    The bar: would I want to publish this in three months? Skip charity
-    entries — if the topic isn't actually post-worthy, don't file it just
-    to please whoever asked. Filing one in a substantive engagement is
-    healthy; two is fine when the conversation produced two distinct
-    things worth writing.
+    Strictly observational. You are NOT picking the angle, deciding on a
+    thesis, or pitching a take — you're filing what was said / asked /
+    observed so a downstream agent can form a falsifiable hypothesis
+    from it. Skip charity entries; the bar is "would this still be a
+    real question worth investigating in three months?".
     """
 
     headline: str = Field(
         description=(
-            "One line — the title you'd actually publish. No marketing "
-            "fluff ('the ultimate guide to…'), no clickbait. Written for "
-            "a human reviewer skimming a queue."
+            "One line — descriptive, not editorial. Names the topic; "
+            "doesn't pitch a take. No marketing fluff, no clickbait."
         ),
     )
-    pitch: str = Field(
+    observation: str = Field(
         description=(
-            "Two to four sentences sketching the angle: what the post "
-            "would cover and what makes it worth reading. Include the "
-            "concrete moment from chat that sparked it — 'X said Y; "
-            "here's what's actually going on' lands harder than 'explain "
-            "Z'. When the idea came from a user request, attribute them "
-            "here ('@alice asked for this in #python')."
+            "What was actually observed in chat. For a user question: "
+            "the question itself plus what they're tripping on. For a "
+            "misconception: the wrong belief, spelled out. For news: the "
+            "specific event / change someone surfaced. Two to four "
+            "sentences. Quote or paraphrase faithfully — do NOT add "
+            "interpretation or argue a side."
+        ),
+    )
+    scope: str = Field(
+        description=(
+            "Neutral surface-area description. One to three sentences: "
+            "what a post on this would cover. NOT 'the take' — just "
+            "the territory."
+        ),
+    )
+    evidence: list[str] = Field(
+        default_factory=list,
+        description=(
+            "References that ground the observation. Discord-message "
+            "links / message ids when the source is the conversation, "
+            "or URLs when someone shared a link. Empty list is OK if "
+            "the observation stands on its own ('Bob asked X')."
         ),
     )
     category: Literal["concept", "misconception", "news"] | None = Field(
         default=None,
         description=(
-            "'concept' — a coding concept worth explaining ('Why CRDTs "
-            "aren't magic', 'What `await` actually does'). "
-            "'misconception' — a wrong mental model worth correcting; the "
-            "instructive part is showing *why* the wrong model breaks "
-            "('await makes things parallel', 'more indexes is always "
-            "better'). "
-            "'news' — recent coding news the chat had a real take on "
-            "('Why the latest Postgres release matters for pgbouncer "
-            "users'). Not rehashed headlines — a take. "
+            "'concept' — a coding concept the conversation pointed at. "
+            "'misconception' — a wrong mental model someone is holding. "
+            "'news' — a current event / release / change. "
             "Leave None if it doesn't cleanly fit."
         ),
     )

@@ -174,6 +174,36 @@ class Settings(BaseSettings):
         description="Google Analytics Measurement ID (G-XXXXXXXXXX)",
     )
 
+    # Stripe / sudo membership billing
+    stripe_secret_key: Optional[str] = Field(
+        default=None,
+        description="Stripe API secret key (sk_live_xxx or sk_test_xxx)",
+    )
+    stripe_publishable_key: Optional[str] = Field(
+        default=None,
+        description="Stripe publishable key (pk_live_xxx or pk_test_xxx)",
+    )
+    stripe_webhook_secret: Optional[str] = Field(
+        default=None,
+        description="Stripe webhook signing secret (whsec_xxx)",
+    )
+    stripe_r_annual_price_id: Optional[str] = Field(
+        default=None,
+        description="Stripe Price ID for the sudo r-- annual founder subscription",
+    )
+    stripe_rw_annual_price_id: Optional[str] = Field(
+        default=None,
+        description="Stripe Price ID for the sudo rw- annual founder subscription",
+    )
+    stripe_rwx_annual_price_id: Optional[str] = Field(
+        default=None,
+        description="Stripe Price ID for the sudo rwx 0day annual founder subscription",
+    )
+    sudo_founder_seat_limit: int = Field(
+        default=16,
+        description="Maximum number of rwx 0day founder seats ever sold",
+    )
+
     # Quests
     quest_timezone: str = Field(
         default="UTC",

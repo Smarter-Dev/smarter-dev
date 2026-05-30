@@ -1,0 +1,62 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Feature Flags - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Feature Flags</h1>
+    <p>Toggle features on or off, or restrict them to admins while testing.</p>
+</hgroup>
+
+{% if flash_messages %}
+<div class="sk-flash-list">
+    {% for msg in flash_messages %}
+    <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if flags %}
+<table class="sk-admin-table">
+    <thead>
+        <tr>
+            <th>Key</th>
+            <th>Description</th>
+            <th>Mode</th>
+            <th>Updated</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for flag in flags %}
+        <tr>
+            <td><code>{{ flag.key }}</code></td>
+            <td>{{ flag.description or '—' }}</td>
+            <td>
+                <form method="post" action="/admin/feature-flags/{{ flag.key }}" style="display: flex; gap: .5rem; align-items: center;">
+                    <select name="mode">
+                        {% for m in modes %}
+                        <option value="{{ m }}" {% if flag.mode == m %}selected{% endif %}>{{ m }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="sk-btn-outline sk-btn-small">Save</button>
+                </form>
+            </td>
+            <td>{{ flag.updated_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>
+                {% if flag.mode == 'enabled' %}
+                <span class="sk-pill sk-pill-published">On</span>
+                {% elif flag.mode == 'admin_only' %}
+                <span class="sk-pill sk-pill-draft">Admin only</span>
+                {% else %}
+                <span class="sk-pill">Off</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="sk-no-items">No feature flags defined yet.</p>
+{% endif %}
+{% endblock %}

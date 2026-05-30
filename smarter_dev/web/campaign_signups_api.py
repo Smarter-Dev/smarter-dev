@@ -93,7 +93,7 @@ def _build_confirmation_html(confirm_url: str) -> str:
     </table></td></tr>
     <tr><td align="center" style="padding:32px 24px 16px">
       <p style="margin:0 0 8px;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#2a3a4e"><a href="https://discord.gg/de8kajxbYS" target="_blank" style="color:#4a6078;text-decoration:none">Discord</a>&nbsp;&middot;&nbsp;<a href="https://smarter.dev" target="_blank" style="color:#4a6078;text-decoration:none">smarter.dev</a></p>
-      <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#1a2836">&copy; 2026 Smarter Dev</p>
+      <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;color:#1a2836">&copy; 2026 Smarter Dev LLC</p>
     </td></tr>
   </table>
 </td></tr>

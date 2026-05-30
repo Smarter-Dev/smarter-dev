@@ -143,8 +143,22 @@
 
 <div class="ba-detail-grid">
     <section class="ba-card">
-        <h3>Pitch</h3>
-        <div class="pitch">{{ topic.pitch }}</div>
+        <h3>Observation</h3>
+        <div class="pitch">{{ topic.observation }}</div>
+
+        {% if topic.scope %}
+        <h3 style="margin-top: 1.25rem;">Scope</h3>
+        <div class="pitch">{{ topic.scope }}</div>
+        {% endif %}
+
+        {% if topic.evidence %}
+        <h3 style="margin-top: 1.25rem;">Evidence</h3>
+        <ul style="margin: 0; padding-left: 1.25rem; color: var(--sk-color-text); font-size: .9rem; line-height: 1.7;">
+            {% for ev in topic.evidence %}
+            <li><code style="font-size: .85rem;">{{ ev }}</code></li>
+            {% endfor %}
+        </ul>
+        {% endif %}
     </section>
 
     <aside>
