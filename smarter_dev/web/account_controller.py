@@ -12,7 +12,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.auth.guards import auth_guard
+from skrift.auth.second_factors.passkey_service import is_webauthn_available
+from skrift.auth.second_factors.services import (
+    deactivate_second_factor_enrollment,
+    list_second_factor_enrollments_for_factor,
+)
+from skrift.config import get_settings as get_skrift_settings
+from skrift.db.models.oauth_account import OAuthAccount
 from skrift.db.models.user import User
+from skrift.forms.core import verify_csrf
 from skrift.lib.flash import flash_error, flash_success, get_flash_messages
 
 from smarter_dev.shared.config import get_settings
@@ -20,6 +28,15 @@ from smarter_dev.web.billing.portal import create_portal_session
 from smarter_dev.web.models import SudoMembership, UserProfile
 
 logger = logging.getLogger(__name__)
+
+
+def _passkey_factor_key(skrift_settings) -> str | None:
+    """First configured passkey second-factor key, or None if none set."""
+    second_factors = skrift_settings.auth.second_factors
+    for key in second_factors.get_method_keys():
+        if second_factors.get_method_type(key) == "passkey":
+            return key
+    return None
 
 
 async def _current_user(request: Request, db_session: AsyncSession) -> User:
@@ -121,6 +138,56 @@ class AccountController(Controller):
         await db_session.commit()
         flash_success(request, "Profile saved.")
         return Redirect(path="/account")
+
+    @get("/security")
+    async def security_page(
+        self, request: Request, db_session: AsyncSession
+    ) -> TemplateResponse:
+        user = await _current_user(request, db_session)
+
+        oauth_result = await db_session.execute(
+            select(OAuthAccount)
+            .where(OAuthAccount.user_id == user.id)
+            .order_by(OAuthAccount.created_at)
+        )
+        linked_accounts = list(oauth_result.scalars().all())
+
+        skrift_settings = get_skrift_settings()
+        factor_key = _passkey_factor_key(skrift_settings)
+        passkeys: list = []
+        if factor_key:
+            passkeys = await list_second_factor_enrollments_for_factor(
+                db_session, str(user.id), factor_key
+            )
+
+        return TemplateResponse(
+            "account/security.html",
+            context={
+                "user": user,
+                "active_tab": "security",
+                "linked_accounts": linked_accounts,
+                "passkeys": passkeys,
+                "passkey_available": bool(factor_key) and is_webauthn_available(),
+                "flash_messages": get_flash_messages(request),
+            },
+        )
+
+    @post("/security/passkeys/{enrollment_id:uuid}/delete")
+    async def delete_passkey(
+        self, request: Request, db_session: AsyncSession, enrollment_id: UUID
+    ) -> Redirect:
+        user = await _current_user(request, db_session)
+        if not await verify_csrf(request):
+            flash_error(request, "Your session expired. Please try again.")
+            return Redirect(path="/account/security")
+
+        deactivated = await deactivate_second_factor_enrollment(
+            db_session, user_id=user.id, enrollment_id=enrollment_id
+        )
+        await db_session.commit()
+        if deactivated:
+            flash_success(request, "Passkey removed.")
+        return Redirect(path="/account/security")
 
 
 class BillingController(Controller):
