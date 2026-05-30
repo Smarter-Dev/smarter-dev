@@ -34,5 +34,7 @@ USER app
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD pgrep -f "smarter_dev.bot.client" || exit 1
 
-# Run the Discord bot
-CMD ["uv", "run", "python", "-m", "smarter_dev.bot.client"]
+# Run the Discord bot against the venv baked at build time. --no-sync keeps
+# `uv run` from re-resolving at startup (which would drop the `bot` group and
+# pull in dev tooling).
+CMD ["uv", "run", "--no-sync", "python", "-m", "smarter_dev.bot.client"]
