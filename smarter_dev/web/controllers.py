@@ -18,7 +18,7 @@ from skrift.db.models.user import User
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.web import feature_flags as flags_service
-from smarter_dev.web.billing import inventory
+from smarter_dev.web.billing import catalog, inventory
 from smarter_dev.web.billing.checkout import (
     CheckoutError,
     FounderSeatsExhausted,
@@ -93,62 +93,12 @@ class SudoController(Controller):
         seats_left = await inventory.seats_remaining(db_session)
         seats_claimed = max(0, seats_total - seats_left)
 
-        tiers = [
-            {
-                "id": "r",
-                "perm": "r--",
-                "tier": "READ",
-                "annual": 128,
-                "public_monthly": 16,
-                "public_annual": 192,
-                "desc": "The starting line. Your year up front funds the build, and you ship with us as every piece of sudo lands.",
-                "tag": "FOUNDER · 1 YEAR",
-                "feats": [
-                    "Scan — answers from our curated library",
-                    "RunHacks — new challenges on a schedule",
-                    "Academy when it launches",
-                    "Founder role + members-only Discord",
-                ],
-                "cta_label": "./reserve --r--",
-                "hero": False,
-            },
-            {
-                "id": "rw",
-                "perm": "rw-",
-                "tier": "WRITE",
-                "annual": 256,
-                "public_monthly": 32,
-                "public_annual": 384,
-                "desc": "For the developers who'll lean on it. Extended limits across every tool, and the support that pays for the headroom.",
-                "tag": "FOUNDER · 1 YEAR",
-                "feats": [
-                    "Everything in r--",
-                    "Extended limits across every tool",
-                    "Labs when it launches",
-                    "Priority support from the team",
-                ],
-                "cta_label": "./reserve --rw-",
-                "hero": False,
-            },
-            {
-                "id": "rwx",
-                "perm": "rwx",
-                "tier": "EXECUTE",
-                "annual": 512,
-                "public_monthly": 64,
-                "public_annual": 768,
-                "desc": "The first 16. Early preview access to Academy and Labs while we shape them, because we need users in the loop to ship them right.",
-                "tag": f"0DAY · {seats_total} SEATS",
-                "feats": [
-                    "Everything in rw-",
-                    "Academy preview access while we shape it",
-                    "Labs preview access while we shape it",
-                    "0day Founder role + dedicated channel",
-                ],
-                "cta_label": "./reserve --rwx --0day",
-                "hero": True,
-            },
-        ]
+        # Tiers come from Stripe (source of truth); the rwx tag carries a
+        # {seats} placeholder filled from the configured seat cap.
+        tiers = await catalog.get_tiers()
+        for tier in tiers:
+            if "{seats}" in tier["tag"]:
+                tier["tag"] = tier["tag"].format(seats=seats_total)
         # Pre-compute the seat dots for the rwx availability row so the
         # template doesn't have to do arithmetic.
         seat_dots = [

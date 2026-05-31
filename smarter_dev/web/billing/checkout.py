@@ -12,8 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.db.models.user import User
 
-from smarter_dev.shared.config import get_settings
-from smarter_dev.web.billing import inventory
+from smarter_dev.web.billing import catalog, inventory
 from smarter_dev.web.billing.client import get_stripe
 
 
@@ -29,14 +28,6 @@ class UnknownTier(CheckoutError):
     """Raised when an unrecognised tier slug is passed to checkout."""
 
 
-# Tier slug → (settings attribute holding the Stripe price ID, webhook tier label)
-_TIER_CONFIG: dict[str, tuple[str, str]] = {
-    "r":   ("stripe_r_annual_price_id",   "read"),
-    "rw":  ("stripe_rw_annual_price_id",  "write"),
-    "rwx": ("stripe_rwx_annual_price_id", "execute"),
-}
-
-
 async def create_founder_checkout_session(
     session: AsyncSession,
     user: User,
@@ -47,20 +38,18 @@ async def create_founder_checkout_session(
 ) -> str:
     """Create a one-time Stripe Checkout Session for the given founder tier.
 
+    Tier, price, and role all come from the Stripe catalog (source of truth).
     The webhook handler is the source of truth for inventory; this function
     performs a best-effort check for rwx so the user gets a fast 'sold out'
     response instead of paying and being refunded.
     """
-    if tier not in _TIER_CONFIG:
+    tiers = await catalog.get_tiers()
+    tier_data = catalog.get_tier(tiers, tier)
+    if tier_data is None:
         raise UnknownTier(f"Unknown founder tier: {tier!r}")
 
-    settings = get_settings()
-    settings_attr, webhook_tier = _TIER_CONFIG[tier]
-    price_id = getattr(settings, settings_attr)
-    if not price_id:
-        raise CheckoutError(
-            f"{settings_attr.upper()} is not configured; cannot create checkout."
-        )
+    price_id = tier_data["price_id"]
+    webhook_tier = tier_data["role"]
 
     if tier == "rwx":
         remaining = await inventory.seats_remaining(session)
