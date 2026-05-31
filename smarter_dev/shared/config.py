@@ -175,29 +175,16 @@ class Settings(BaseSettings):
     )
 
     # Stripe / sudo membership billing
+    # The tier catalog (products, prices, perks) lives in Stripe — see
+    # smarter_dev.web.billing.catalog. Only the secret key and webhook signing
+    # secret are configured here; price IDs are discovered from the API.
     stripe_secret_key: Optional[str] = Field(
         default=None,
         description="Stripe API secret key (sk_live_xxx or sk_test_xxx)",
     )
-    stripe_publishable_key: Optional[str] = Field(
-        default=None,
-        description="Stripe publishable key (pk_live_xxx or pk_test_xxx)",
-    )
     stripe_webhook_secret: Optional[str] = Field(
         default=None,
         description="Stripe webhook signing secret (whsec_xxx)",
-    )
-    stripe_r_annual_price_id: Optional[str] = Field(
-        default=None,
-        description="Stripe Price ID for the sudo r-- annual founder subscription",
-    )
-    stripe_rw_annual_price_id: Optional[str] = Field(
-        default=None,
-        description="Stripe Price ID for the sudo rw- annual founder subscription",
-    )
-    stripe_rwx_annual_price_id: Optional[str] = Field(
-        default=None,
-        description="Stripe Price ID for the sudo rwx 0day annual founder subscription",
     )
     sudo_founder_seat_limit: int = Field(
         default=16,
