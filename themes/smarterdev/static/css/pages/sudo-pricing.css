@@ -838,6 +838,7 @@
     .sp-ladder-body .sp-ladder-col:nth-child(3) { order: 6; }
     .sp-ladder-fineprint { order: 7; margin-top: 18px; }
     .sp-ladder-cell { height: auto !important; min-height: 0; }
+    .sp-roadmap-grid { grid-template-columns: 1fr; }
     .sp-principles-grid { grid-template-columns: 1fr; }
     .sp-money-grid { grid-template-columns: 1fr; }
     .sp-guest { grid-template-columns: 1fr; text-align: center; }
