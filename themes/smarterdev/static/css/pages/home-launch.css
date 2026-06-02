@@ -600,7 +600,7 @@
   transition: all .25s;}.hp .btn-submit:hover:not(:disabled){background: var(--cyan); color: var(--bg); box-shadow: 0 0 26px rgba(0,212,255,.3);}.hp .btn-submit:disabled{opacity: .3; cursor: not-allowed; border-color: rgba(0,212,255,.2); color: var(--gray); box-shadow: none;}.hp .gym-retry{padding: 9px 20px; cursor: pointer;
   font-family: var(--heading); font-size: .56rem; letter-spacing: .07em;
   background: transparent; color: var(--gray);
-  border: 1px solid rgba(255,255,255,.12); transition: all .2s;}.hp .gym-retry:hover{color: var(--light); border-color: rgba(0,212,255,.25);}.hp .gym-bridge{display: none;}@media (max-width: 760px){.hp .gym-cols{grid-template-columns: 1fr; height: auto;}.hp .gym-main{overflow-y: visible; padding: 20px 20px 22px;}.hp .gym-side{border-left: none; border-top: 1px solid rgba(0,212,255,.08); height: 72vh;}}/* ════════════════════════════════════════
+  border: 1px solid rgba(255,255,255,.12); transition: all .2s;}.hp .gym-retry:hover{color: var(--light); border-color: rgba(0,212,255,.25);}.hp .gym-bridge{display: none;}/* ════════════════════════════════════════
    PILLARS (what this is)
    ════════════════════════════════════════ */.hp .tri-pillars{display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 2.5rem;}.hp .tri-pillar{padding: 2rem 1.85rem 2.1rem;
   background: var(--surface);
@@ -781,7 +781,24 @@
   flex-wrap: wrap; gap: 1.5rem;}.hp .site-foot .fl{font-family: var(--display); font-size: 1.2rem; color: var(--white); letter-spacing: .12em;}.hp .site-foot .fl .dev{font-family: var(--heading); color: var(--cyan); font-size: .8em; vertical-align: .14em;}.hp .site-foot .fnav{display: flex; gap: 1.6rem; flex-wrap: wrap;}.hp .site-foot .fnav a{font-family: var(--heading); font-size: .56rem; letter-spacing: .08em;
   color: var(--gray); text-decoration: none; transition: color .2s;}.hp .site-foot .fnav a:hover{color: var(--cyan);}.hp .site-foot .fc{font-family: var(--heading); font-size: .5rem; color: var(--mid); letter-spacing: .08em;}/* ════════════════════════════════════════
    RESPONSIVE
-   ════════════════════════════════════════ */@media (max-width: 940px){.hp .hero-grid{grid-template-columns: 1fr; gap: 2.5rem;}.hp .hero-wrap{min-height: auto;}.hp .lab-shell{height: auto;}.hp .lab-cols{grid-template-columns: 1fr; height: auto;}.hp .lab-term{border-right: none; border-bottom: 1px solid rgba(0,212,255,.08); height: 64vh;}.hp .lab-coach{border-left: none; height: 60vh;}.hp .tri-pillars,.hp .roadmap,.hp .tiers{grid-template-columns: 1fr;}}@media (max-width: 560px){.hp .node{width: 96px;}.hp .node.payments{width: 130px;}}/* ══════════════════════════════════════════════════════
+   ════════════════════════════════════════ */@media (max-width: 940px){.hp .hero-grid{grid-template-columns: 1fr; gap: 2.5rem;}.hp .hero-wrap{min-height: auto;}.hp .tri-pillars,.hp .roadmap,.hp .tiers{grid-template-columns: 1fr;}}@media (max-width: 560px){.hp .node{width: 96px;}.hp .node.payments{width: 130px;}}
+/* ════════════════════════════════════════
+   MOBILE DEMO TABS — Gym + Lab collapse to a single tabbed pane
+   ════════════════════════════════════════ */
+.hp .demo-tabs{display: none;}
+.hp .demo-tab-badge{display: none;}
+@media (max-width: 768px){
+  .hp .demo-tabs{display: flex; background: rgba(0,0,0,.32); border-bottom: 1px solid rgba(0,212,255,.08);}
+  .hp .demo-tab{flex: 1; padding: 12px 10px; background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; font-family: var(--heading); font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--gray); transition: color .2s, border-color .2s;}
+  .hp .demo-tab.is-active{color: var(--cyan); border-bottom-color: var(--cyan);}
+  .hp .demo-tab-badge{display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; padding: 0 4px; margin-left: 7px; border-radius: 8px; background: var(--cyan); color: #02060c; font-family: var(--heading); font-size: .5rem; line-height: 1; vertical-align: middle;}
+  .hp .demo-tab-badge[hidden]{display: none;}
+  .hp .gym-cols,.hp .lab-cols{display: block; height: auto;}
+  .hp .gym-cols [data-tab-pane],.hp .lab-cols [data-tab-pane]{display: none; height: min(68vh, 560px);}
+  .hp .gym-main[data-tab-pane].is-active{display: block; overflow-y: auto; padding: 20px 20px 22px;}
+  .hp .gym-side[data-tab-pane].is-active,.hp .lab-term[data-tab-pane].is-active,.hp .lab-coach[data-tab-pane].is-active{display: flex; flex-direction: column;}
+  .hp .gym-side,.hp .lab-term,.hp .lab-coach{border-left: none; border-right: none; border-top: none;}
+}/* ══════════════════════════════════════════════════════
    DEMO SKIN — accent + surface treatments to explore (Tweaks)
    Both demos (.lab-shell card and .gym-rep card) take a shared
    skin: data-skin sets the accent hue (--ax), data-surf sets

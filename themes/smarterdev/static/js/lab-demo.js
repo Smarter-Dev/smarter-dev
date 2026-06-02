@@ -160,7 +160,7 @@
     // ── boot ──
     function boot() {
       setInput('busy');
-      coach('Ship gift cards on this checkout. The agent writes the code, the architectural calls are yours, and I\u2019ll flag what each one costs. First call: gift-card balances need a home. Use the terminal to choose where they live.', null, 'YOUR TASK');
+      coach('Ship gift cards on this checkout. The agent writes the code, the architectural calls are yours, and I\u2019ll flag what each one costs. First call: gift-card balances need a home. Tell the agent what to do.', null, 'YOUR TASK');
       var art = [
         '\u250c\u2500\u2510\u250c\u252c\u2510\u250c\u2500\u2510\u252c\u2500\u2510\u250c\u252c\u2510\u250c\u2500\u2510\u252c\u2500\u2510  \u250c\u252c\u2510\u250c\u2500\u2510\u252c  \u252c',
         '\u2514\u2500\u2510\u2502\u2502\u2502\u251c\u2500\u2524\u251c\u252c\u2518 \u2502 \u251c\u2524 \u251c\u252c\u2518   \u2502\u2502\u251c\u2524 \u2514\u2510\u250c\u2518',
