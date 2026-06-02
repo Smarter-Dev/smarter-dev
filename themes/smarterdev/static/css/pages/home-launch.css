@@ -615,7 +615,7 @@
    GYM COURSES — the three launch courses (scan ladder)
    ════════════════════════════════════════ */.hp .gym-courses{margin-top: 3.4rem; padding-top: 3rem;}.hp .gc-kicker{font-family: var(--heading); font-size: .52rem; letter-spacing: .14em;
   color: var(--cyan); opacity: .8; margin-bottom: .9rem;}.hp .gc-lead{font-family: var(--display); font-weight: 100;
-  font-size: clamp(1.15rem, 2vw, 1.6rem); color: var(--white);
+  font-size: clamp(1.3rem, 2.4vw, 1.6rem); color: var(--white);
   line-height: 1.35; letter-spacing: .02em; max-width: 760px; margin-bottom: 2.4rem;}.hp .gc-lead b{color: var(--cyan); font-weight: 100;}.hp .gc-grid{display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: rgba(0,212,255,.08);}.hp .gc-card{background: var(--surface); padding: 1.7rem 1.6rem 1.8rem;
   display: flex; flex-direction: column;
   border-top: 2px solid rgba(0,212,255,.18);
@@ -651,7 +651,7 @@
   transition: all .2s;}.hp .tui-prompt .tui-arr{color: rgba(0,212,255,.5); margin-right: 8px;}.hp .tui-prompt[disabled]{opacity: .6;}.hp .tui-prompt.ready{cursor: pointer; color: var(--light);
   border-color: var(--cyan);
   box-shadow: 0 0 18px rgba(0,212,255,.14), inset 0 0 14px rgba(0,212,255,.04);}.hp .tui-prompt.ready .tui-arr{color: var(--cyan);}.hp .tui-prompt.ready:hover{background: rgba(0,212,255,.07);}.hp .tui-prompt.open{border-color: var(--cyan); background: rgba(0,212,255,.08);}.hp .tui-prompt.typing{border-color: var(--cyan); color: var(--light);
-  box-shadow: 0 0 18px rgba(0,212,255,.16), inset 0 0 14px rgba(0,212,255,.05);}.hp .tui-typed{color: var(--light); white-space: pre;}.hp .tui-typed:not(:empty){margin-right: 2px;}.hp .tui-prompt.typing .tui-arr{color: var(--cyan);}.hp .tui-blink{width: 8px; height: 1.05em; background: var(--cyan); margin-left: 0; animation: blink 1s steps(1) infinite; box-shadow: 0 0 8px rgba(0,212,255,.5);}@keyframes blink{50%{opacity: 0;}}.hp .tui-foot{display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; font-family: var(--mono); font-size: .55rem; color: var(--gray);}.hp .tui-foot .tui-keys{opacity: .55; white-space: nowrap;}/* options menu — overlay floating over the terminal */.hp .tui-menu{position: absolute; inset: 0; z-index: 20;
+  box-shadow: 0 0 18px rgba(0,212,255,.16), inset 0 0 14px rgba(0,212,255,.05);}.hp .tui-line{flex: 1; min-width: 0; display: flex; align-items: center; overflow: hidden; white-space: pre;}.hp .tui-typed{color: var(--light); white-space: pre;}.hp .tui-typed:not(:empty){margin-right: 2px;}.hp .tui-prompt.typing .tui-arr{color: var(--cyan);}.hp .tui-blink{width: 8px; height: 1.05em; background: var(--cyan); margin-left: 0; animation: blink 1s steps(1) infinite; box-shadow: 0 0 8px rgba(0,212,255,.5);}@keyframes blink{50%{opacity: 0;}}.hp .tui-foot{display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; font-family: var(--mono); font-size: .55rem; color: var(--gray);}.hp .tui-foot .tui-keys{opacity: .55; white-space: nowrap;}/* options menu — overlay floating over the terminal */.hp .tui-menu{position: absolute; inset: 0; z-index: 20;
   background: rgba(2,5,10,.55);
   backdrop-filter: blur(1.5px);
   display: flex; flex-direction: column; justify-content: flex-end;
@@ -713,7 +713,24 @@
   color: var(--rose) !important; border-color: var(--rose) !important;
   box-shadow: 0 0 16px rgba(239,68,68,.16), inset 0 0 14px rgba(239,68,68,.04) !important;}.hp .pl-cta-single:hover{background: var(--rose) !important; color: var(--bg) !important; box-shadow: 0 0 26px rgba(239,68,68,.32) !important;}.hp .pl-reserve-note{font-family: var(--mono); font-size: .68rem; color: var(--gray); letter-spacing: .02em;
   order: 1; margin-right: auto;}/* fine print */.hp .pl-fine{margin-top: 18px; display: flex; gap: 22px; flex-wrap: wrap; justify-content: space-between;
-  font-family: var(--mono); font-size: .7rem; color: var(--gray);}@media (max-width: 820px){.hp .pl-head,.hp .pl-body{grid-template-columns: 1fr;}.hp .pl-desc,.hp .pl-feats,.hp .pl-price,.hp .pl-vs,.hp .pl-avail{min-height: 0;}}/* ════════════════════════════════════════
+  font-family: var(--mono); font-size: .7rem; color: var(--gray);}@media (max-width: 820px){
+  /* .pl-head and .pl-body are two separate grids; collapsing each to one
+     column independently stacks all three tier headers, then all three price
+     blocks, so a price detaches from its header. Promote both grids' children
+     into one shared grid on .price-ladder and interleave with `order` so each
+     tier reads header → price → … as a unit. */
+  .hp .price-ladder{display: grid; grid-template-columns: 1fr; gap: 1px; background: rgba(0,212,255,.08);}
+  .hp .pl-head,.hp .pl-body{display: contents;}
+  .hp .pl-head .pl-hcell:nth-child(1){order: 1;}
+  .hp .pl-body .pl-col:nth-child(1){order: 2;}
+  .hp .pl-head .pl-hcell:nth-child(2){order: 3;}
+  .hp .pl-body .pl-col:nth-child(2){order: 4;}
+  .hp .pl-head .pl-hcell:nth-child(3){order: 5;}
+  .hp .pl-body .pl-col:nth-child(3){order: 6;}
+  .hp .pl-reserve{order: 7;}
+  .hp .pl-fine{order: 8; margin-top: 18px;}
+  .hp .pl-desc,.hp .pl-feats,.hp .pl-price,.hp .pl-vs,.hp .pl-avail{min-height: 0;}
+}/* ════════════════════════════════════════
    TIERS (ground floor)
    ════════════════════════════════════════ */.hp .tiers{display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 2.5rem;}.hp .tier{padding: 2.1rem 1.9rem 2.2rem;
   background: var(--surface);

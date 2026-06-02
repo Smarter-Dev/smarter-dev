@@ -16,7 +16,16 @@
     var term = shell.querySelector('[data-term]');
     var inputBtn = shell.querySelector('[data-input]');
     var inputText = shell.querySelector('[data-input-text]');
+    var inputLine = shell.querySelector('[data-input-line]');
     var menu = shell.querySelector('[data-menu]');
+
+    // Keep the latest typed character (and the caret) in view: the input clips
+    // overflow, so scroll the line to its right edge after each text update.
+    function setTyped(s) {
+      if (!inputText) return;
+      inputText.textContent = s;
+      if (inputLine) inputLine.scrollLeft = inputLine.scrollWidth;
+    }
     var coachEl = shell.querySelector('[data-coach]');
 
     var state = { call1Clean: false, call2Clean: false, busy: false };
@@ -112,7 +121,7 @@
       inputBtn.classList.remove('ready');
       inputBtn.classList.add('typing');
       inputBtn.disabled = true;
-      if (inputText) inputText.textContent = '';
+      setTyped('');
       // Time-based typing: compute the character count from elapsed wall-clock
       // time rather than one setTimeout per character. Under timer throttling the
       // interval still fires (just late), and each tick catches up to the right
@@ -124,7 +133,7 @@
         if (finished) return;
         finished = true;
         inputBtn.classList.remove('typing');
-        if (inputText) inputText.textContent = '';
+        setTyped('');
         userMsg(text);
         done();
       }
@@ -132,11 +141,11 @@
         var t = (Date.now() - start) / dur;
         if (t >= 1) {
           clearInterval(iv);
-          if (inputText) inputText.textContent = text;
+          setTyped(text);
           later(finish, 300);
           return;
         }
-        if (inputText) inputText.textContent = text.slice(0, Math.max(0, Math.floor(t * text.length)));
+        setTyped(text.slice(0, Math.max(0, Math.floor(t * text.length))));
       }, 28);
       intervals.push(iv);
     }
