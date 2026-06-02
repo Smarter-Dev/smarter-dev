@@ -53,7 +53,7 @@ auth:
 controllers:
   - skrift.admin.controller:AdminController
   - skrift.controllers.auth:AuthController
-  - skrift.controllers.web:WebController
+  - smarter_dev.web.home_controller:HomeController
   - smarter_dev.web.controllers:SudoController
   - smarter_dev.web.controllers:discord_redirect
   - smarter_dev.web.account_controller:AccountController
