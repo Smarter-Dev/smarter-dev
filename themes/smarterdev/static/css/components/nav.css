@@ -170,6 +170,22 @@
     padding-top: 8px;
   }
   .nav-links.open { display: flex; }
-  .nav-links a { padding: 10px 0; border: none; }
+  .nav-links a {
+    padding: 12px 0;
+    border: none;
+    text-align: center;
+    font-size: .78rem;
+  }
   .nav-links .sk-connection-status { display: none; }
+  /* Fold the Sign In / Account button into the dropdown rather than leaving
+     it stranded beside the hamburger; reveal it only when the menu is open. */
+  .site-nav .btn-follow {
+    display: none;
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 6px;
+    padding: 12px 0;
+    text-align: center;
+  }
+  .nav-toggle[aria-expanded="true"] ~ .btn-follow { display: block; }
 }
