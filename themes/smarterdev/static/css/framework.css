@@ -173,16 +173,16 @@ section {
   position: sticky; top: 55px; z-index: 99;
   display: flex; align-items: center; gap: 16px;
   padding: 9px clamp(2rem, 6vw, 4rem);
-  /* Opaque dark base (matches .site-nav) so scrolling content doesn't show
-     through, with a faint rose tint layered on top. */
-  background: linear-gradient(90deg, rgba(239,68,68,.08), rgba(239,68,68,.03) 60%, rgba(239,68,68,.06)), rgba(2,4,8,.92);
+  /* Translucent red wash over a blur, so scrolling content reads through
+     while the strip stays clearly red. */
+  background: rgba(239,68,68,.1);
   backdrop-filter: blur(24px);
-  border-bottom: 1px solid rgba(239,68,68,.12);
+  border-bottom: 1px solid rgba(239,68,68,.18);
   text-decoration: none;
   transition: background .25s;
 }
 .founder-banner:hover {
-  background: linear-gradient(90deg, rgba(239,68,68,.13), rgba(239,68,68,.06) 60%, rgba(239,68,68,.1)), rgba(2,4,8,.92);
+  background: rgba(239,68,68,.16);
 }
 .founder-banner .fb-pulse {
   width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
@@ -285,6 +285,14 @@ section {
 @media (max-width: 720px) {
   .founder-cta { grid-template-columns: 1fr; }
   .founder-cta .fc-right { border-left: none; border-top: 1px solid rgba(239,68,68,.12); }
-  .founder-banner { flex-wrap: wrap; gap: 10px; }
-  .founder-banner .fb-cta { margin-left: 0; }
+  .founder-banner {
+    flex-wrap: wrap; gap: 8px 10px;
+    padding: 8px 1.25rem;
+  }
+  .founder-banner .fb-pulse { align-self: flex-start; margin-top: 7px; }
+  .founder-banner .fb-msg { flex: 1; min-width: 0; font-size: .74rem; line-height: 1.4; }
+  .founder-banner .fb-cta {
+    margin-left: 0; width: 100%; justify-content: center;
+    padding: 8px 14px;
+  }
 }

@@ -823,11 +823,21 @@
 
 /* ── Responsive ───────────────────────────────────── */
 @media (max-width: 900px) {
-    .sp-ladder-axis,
-    .sp-ladder-body {
-        grid-template-columns: 1fr;
-    }
-    .sp-ladder-cell { height: auto !important; min-height: 60px; }
+    /* The header band and the price body are two separate grids; collapsing
+       each to one column independently stacks all three tier headers, then
+       all three price blocks, detaching every price from its tier. Promote
+       both grids' children into one shared grid on .sp-ladder and interleave
+       them with `order` so each tier reads as header → price → … as a unit. */
+    .sp-ladder { display: grid; grid-template-columns: 1fr; gap: 1px; background: rgba(0,212,255,.08); }
+    .sp-ladder-axis, .sp-ladder-body { display: contents; }
+    .sp-ladder-axis-col:nth-child(1) { order: 1; }
+    .sp-ladder-body .sp-ladder-col:nth-child(1) { order: 2; }
+    .sp-ladder-axis-col:nth-child(2) { order: 3; }
+    .sp-ladder-body .sp-ladder-col:nth-child(2) { order: 4; }
+    .sp-ladder-axis-col:nth-child(3) { order: 5; }
+    .sp-ladder-body .sp-ladder-col:nth-child(3) { order: 6; }
+    .sp-ladder-fineprint { order: 7; margin-top: 18px; }
+    .sp-ladder-cell { height: auto !important; min-height: 0; }
     .sp-principles-grid { grid-template-columns: 1fr; }
     .sp-money-grid { grid-template-columns: 1fr; }
     .sp-guest { grid-template-columns: 1fr; text-align: center; }
