@@ -149,6 +149,16 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: openai-api-key
+                  - name: STRIPE_SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: stripe-secret-key
+                  - name: STRIPE_WEBHOOK_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: stripe-webhook-secret
                   - name: GITHUB_CLIENT_ID
                     valueFrom:
                       secretKeyRef:
