@@ -79,8 +79,13 @@
             <span class="rep-no">rep 01</span>
           </div>
 
+          <div class="demo-tabs" data-demo-tabs role="tablist" aria-label="Gym view">
+            <button class="demo-tab is-active" type="button" data-tab="lesson" aria-selected="true">Lesson</button>
+            <button class="demo-tab" type="button" data-tab="coach" aria-selected="false">Quiz</button>
+          </div>
+
           <div class="gym-cols">
-            <div class="gym-main">
+            <div class="gym-main is-active" data-tab-pane="lesson">
               <div class="gym-lesson">
                 <div class="lh">THE IDEA · READ FIRST</div>
                 <p>When you add a feature, what changes isn't decided by the feature. It's decided by where the related concerns already live. The set of things a change forces you to touch has a name: <b>the blast radius.</b> Your boundaries set it, not the work itself.</p>
@@ -134,7 +139,7 @@
               </div>
             </div>
 
-            <div class="gym-side">
+            <div class="gym-side" data-tab-pane="coach">
               <div class="chat-head">COACH</div>
               <div class="gym-chat" data-chat>
                 <div class="cmsg">
@@ -264,8 +269,13 @@
           <span class="label">THE LAB · <b>CHECKOUT</b></span>
           <span class="rep-no">live agent</span>
         </div>
+        <div class="demo-tabs" data-demo-tabs role="tablist" aria-label="Lab view">
+          <button class="demo-tab" type="button" data-tab="agent" aria-selected="false">Agent</button>
+          <button class="demo-tab is-active" type="button" data-tab="coach" aria-selected="true">Coach<span class="demo-tab-badge" data-unread hidden></span></button>
+        </div>
+
         <div class="lab-cols">
-          <div class="lab-term">
+          <div class="lab-term" data-tab-pane="agent">
             <div class="tui-scroll" data-term></div>
             <div class="tui-dock">
               <button class="tui-prompt" data-input type="button" disabled>
@@ -277,7 +287,7 @@
             <div class="tui-menu" data-menu hidden></div>
           </div>
 
-          <div class="lab-coach">
+          <div class="lab-coach is-active" data-tab-pane="coach">
             <div class="chat-head">COACH</div>
             <div class="gym-chat" data-coach></div>
           </div>
