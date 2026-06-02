@@ -167,47 +167,47 @@ section {
 
 /* ── Founder announcement banner + end-of-post CTA card ── */
 .founder-banner {
-  /* Clear the fixed .site-nav so the banner isn't tucked under it. */
-  margin-top: 60px;
-  /* Sit above the fixed #bg canvas (z-index:0) so the link is clickable. */
-  position: relative; z-index: 1;
+  /* Pin directly below the fixed .site-nav (top:0, ~55px tall) and keep it
+     there while the page scrolls. Sticky reserves its flow space so content
+     below isn't covered. */
+  position: sticky; top: 55px; z-index: 99;
   display: flex; align-items: center; gap: 16px;
-  padding: 13px clamp(2rem, 6vw, 4rem);
-  background: linear-gradient(90deg, rgba(239,68,68,.14), rgba(239,68,68,.06) 60%, rgba(239,68,68,.1));
-  border-top: 2px solid var(--rose);
-  border-bottom: 1px solid rgba(239,68,68,.22);
-  box-shadow: inset 0 12px 32px -16px rgba(239,68,68,.45);
+  padding: 9px clamp(2rem, 6vw, 4rem);
+  /* Opaque dark base (matches .site-nav) so scrolling content doesn't show
+     through, with a faint rose tint layered on top. */
+  background: linear-gradient(90deg, rgba(239,68,68,.08), rgba(239,68,68,.03) 60%, rgba(239,68,68,.06)), rgba(2,4,8,.92);
+  backdrop-filter: blur(24px);
+  border-bottom: 1px solid rgba(239,68,68,.12);
   text-decoration: none;
-  transition: background .25s, box-shadow .25s;
+  transition: background .25s;
 }
 .founder-banner:hover {
-  background: linear-gradient(90deg, rgba(239,68,68,.2), rgba(239,68,68,.1) 60%, rgba(239,68,68,.16));
-  box-shadow: inset 0 12px 32px -14px rgba(239,68,68,.6);
+  background: linear-gradient(90deg, rgba(239,68,68,.13), rgba(239,68,68,.06) 60%, rgba(239,68,68,.1)), rgba(2,4,8,.92);
 }
 .founder-banner .fb-pulse {
-  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-  background: var(--rose); box-shadow: 0 0 12px var(--rose), 0 0 4px var(--rose);
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  background: var(--rose); box-shadow: 0 0 8px rgba(239,68,68,.6);
   animation: pulse 2s infinite;
 }
 .founder-banner .fb-msg {
-  font-family: var(--body); font-size: .86rem; color: var(--white);
+  font-family: var(--body); font-size: .8rem; color: var(--light);
   letter-spacing: .01em; line-height: 1.5;
 }
-.founder-banner .fb-msg b { color: #fff; font-weight: 700; }
+.founder-banner .fb-msg b { color: var(--white); font-weight: 600; }
 .founder-banner .fb-cta {
   margin-left: auto; flex-shrink: 0;
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 7px 16px; border-radius: 4px;
-  border: 1px solid var(--rose);
-  background: rgba(239,68,68,.12);
-  font-family: var(--heading); font-size: .62rem; letter-spacing: .12em;
+  padding: 6px 14px; border-radius: 4px;
+  border: 1px solid rgba(239,68,68,.5);
+  background: rgba(239,68,68,.07);
+  font-family: var(--heading); font-size: .58rem; letter-spacing: .12em;
   color: #ff8a8a; white-space: nowrap; text-transform: uppercase;
   transition: background .25s, color .25s, box-shadow .25s;
 }
 .founder-banner .fb-cta .arr { transition: transform .25s; }
 .founder-banner:hover .fb-cta {
   background: var(--rose); color: #fff;
-  box-shadow: 0 0 18px rgba(239,68,68,.5);
+  box-shadow: 0 0 14px rgba(239,68,68,.4);
 }
 .founder-banner:hover .fb-cta .arr { transform: translateX(4px); }
 

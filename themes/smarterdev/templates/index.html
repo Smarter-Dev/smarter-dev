@@ -1,96 +1,434 @@
 {% extends "base.html" %}
 
 {% block page_type %}home{% endblock %}
-{% block page_title %}Build the skills AI can't replace{% endblock %}
+{% block page_title %}Build the judgment agents can't{% endblock %}
 
 {% block page_css %}
-    <link rel="stylesheet" href="{{ theme_url('css/pages/sudo.css') }}">
+    <link rel="stylesheet" href="{{ theme_url('css/pages/home-launch.css') }}">
 {% endblock %}
 
 {% block content %}
-<section class="hero">
-    <div class="hero-chip reveal"><span class="dot"></span> 13,000+ developers and growing</div>
-    <div class="hero-logo reveal">SMARTER <span class="dev">Dev</span></div>
-    <div class="hero-sub reveal">Build the skills AI can't replace.</div>
-    <p class="hero-p reveal">A community focused on what actually matters — <strong>critical thinking</strong>, <strong>architecture</strong>, and <strong>adversarial reasoning</strong>. No gatekeeping. No fluff. Just developers getting better, together.</p>
-    <div class="hero-btns reveal">
-        <a href="https://discord.gg/de8kajxbYS" class="btn-glow" target="_blank" data-sk-no-spa>Join on Discord</a>
-        <a href="/sudo" class="btn-ghost" data-sk-no-spa>Explore sudo &rarr;</a>
-    </div>
-    <div class="hero-proof reveal">
-        <div class="hp"><div class="n">13K+</div><div class="l">Developers</div></div>
-        <div class="hp"><div class="n">4.5★</div><div class="l">Disboard</div></div>
-        <div class="hp"><div class="n">6+</div><div class="l">Years</div></div>
-    </div>
-</section>
+<div class="hp">
 
-<section>
+  <!-- ══ 1 · HERO ══ -->
+  <section class="hero-wrap" id="top">
+    <div class="hero-pitch reveal">
+      <div class="status-live">
+        BUILD THE JUDGMENT AGENTS CAN'T
+      </div>
+      <h1 class="hero-headline">AI writes the code.<br><span class="accent">Can you still design the system?</span></h1>
+      <p class="hero-body">
+        Writing code stopped being the hard part. The job now is <strong>steering the system</strong>,
+        and it's the one skill nobody's teaching. We're building the place to train it, out in the
+        open, and <strong>you're early</strong>.
+      </p>
+    </div>
+
+    <div class="hero-paths reveal">
+      <div class="hero-path explore">
+        <div class="hp-top">
+          <span class="hp-kicker">No signup</span>
+          <h2 class="hp-head">See what's coming</h2>
+        </div>
+        <ul class="hp-list">
+          <li>No signup, no commitment</li>
+          <li>Walk the gym, the lab, and the roadmap</li>
+          <li>Meet the community already in the Discord</li>
+          <li>See exactly what you'd be backing first</li>
+        </ul>
+        <a class="hp-btn" href="#gym">See what's coming<span class="hp-arr">→</span></a>
+      </div>
+
+      <div class="hero-path sudo">
+        <div class="hp-top">
+          <span class="hp-kicker">Founding</span>
+          <h2 class="hp-head">Get sudo</h2>
+        </div>
+        <ul class="hp-list">
+          <li>Founding membership, claimed before launch</li>
+          <li>Lock founding pricing before public rates open</li>
+          <li>Every course and lab as it ships</li>
+          <li>A say in what we build first</li>
+        </ul>
+        <a class="hp-btn" href="/sudo">Get sudo<span class="hp-arr">→</span></a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 2 · THE GYM ══ -->
+  <section id="gym">
     <div class="container">
-        <div class="pitch-row reveal">
-            <div class="pitch-text">
-                <div class="code-label">// why.smarterdev()</div>
-                <div class="sec-h">Not another tutorial site.</div>
-                <p class="sec-p">Smarter Dev is a community of developers who already know how to code and want to keep getting sharper. We're focused on the skills that define the AI era — specification, architecture, security thinking, adversarial reasoning — not syntax basics.</p>
-                <p class="sec-p">This isn't a content dump. It's an active community where people show up, push each other, and build real skills together. 13,000+ developers across 6 years, still growing.</p>
-            </div>
-            <div class="term pitch-term">
-                <div class="term-bar"><div class="p">challenge_731.sh</div></div>
-                <div class="term-body">
-                    <div><span class="cm"># Distributed cache: 2% stale reads</span></div>
-                    <div><span class="cm"># Replication healthy. TTLs correct.</span></div>
-                    <div><span class="cm"># Difficulty: Hard | Reward: 150 Bytes</span></div>
-                    <div>&nbsp;</div>
-                    <div><span class="kw">function</span> <span class="fn">diagnose</span>() {</div>
-                    <div>&nbsp;&nbsp;<span class="cm"># What architectural assumption is wrong?</span></div>
-                    <div>&nbsp;&nbsp;<span class="kw">echo</span> <span class="st">"Think architecture, not code."</span></div>
-                    <div>}</div>
+      <div class="reveal sec-intro">
+        <div class="eyebrow">01 / The Gym</div>
+        <h2 class="big-h" style="font-size:clamp(1.9rem,3.6vw,3rem);margin-bottom:1.4rem;">we built the part nobody teaches.</h2>
+        <p class="lede muted">
+          The Gym is coached practice on the exact decisions that set whether a system holds:
+          <strong>where boundaries go, how the pieces talk, where state lives.</strong> You make a
+          call on a real system, you find out what it cost, and a coach shows you what you missed.
+          Then you do it again on something messier. That is how judgment gets built, the same way
+          it always has.
+        </p>
+      </div>
+
+      <div class="gym-tryit reveal">Try it out</div>
+
+      <div class="gym-rep-wrap reveal" data-skin="green" data-surf="panel">
+        <div class="gym-rep">
+          <div class="gym-rep-head">
+            <span class="label">THE GYM · <b>BOUNDARIES</b></span>
+            <span class="rep-no">rep 01</span>
+          </div>
+
+          <div class="gym-cols">
+            <div class="gym-main">
+              <div class="gym-lesson">
+                <div class="lh">THE IDEA · READ FIRST</div>
+                <p>When you add a feature, what changes isn't decided by the feature. It's decided by where the related concerns already live. The set of things a change forces you to touch has a name: <b>the blast radius.</b> Your boundaries set it, not the work itself.</p>
+                <p>Below is a checkout system, drawn as a map of who owns what. Each service owns a few concerns. Read it as responsibility rather than code, and look at where each piece sits.</p>
+
+                <div class="gym-map-pane">
+                  <div class="pane-label">CHECKOUT · WHAT EACH SERVICE OWNS</div>
+                  <div class="svc-map">
+                    <div class="svc">
+                      <span class="svc-name">ORDERS</span>
+                      <ul class="svc-domains">
+                        <li class="dom">checkout</li>
+                        <li class="dom">order history</li>
+                      </ul>
+                    </div>
+                    <div class="svc">
+                      <span class="svc-name">PAYMENTS</span>
+                      <ul class="svc-domains">
+                        <li class="dom">card processing</li>
+                        <li class="dom">refunds</li>
+                        <li class="dom">pricing</li>
+                      </ul>
+                    </div>
+                    <div class="svc">
+                      <span class="svc-name">INVENTORY</span>
+                      <ul class="svc-domains">
+                        <li class="dom">stock</li>
+                        <li class="dom">reservations</li>
+                      </ul>
+                    </div>
+                    <div class="svc">
+                      <span class="svc-name">NOTIFY</span>
+                      <ul class="svc-domains">
+                        <li class="dom">order emails</li>
+                        <li class="dom">receipts <span class="dom-note">reads pricing</span></li>
+                      </ul>
+                    </div>
+                    <div class="svc svc-wide">
+                      <span class="svc-name">ACCOUNTS</span>
+                      <ul class="svc-domains svc-domains-row">
+                        <li class="dom">profiles</li>
+                        <li class="dom">sessions</li>
+                      </ul>
+                    </div>
+                  </div>
                 </div>
-            </div>
-        </div>
-    </div>
-</section>
 
-<section>
+                <p>Most of these boundaries are clean. One isn't. Payments owns pricing. Payments should be about moving money, charging a card and issuing a refund. Pricing is a separate concern, what things cost and how that cost gets adjusted. It landed in Payments because that was the easy place to put it, and now anything that touches pricing has to route through the service that moves money. Notify already reaches across that line, reading pricing to build its receipts.</p>
+                <p>That placement is what a feature pays for later. A boundary in the right place keeps a change local, so you touch one service and you are done. A boundary in the wrong place taxes everything that comes near it, because the change has to go through whatever owns the concern. The feature never set the cost. The boundary did.</p>
+                <p>That is the skill in miniature, reading a system well enough to spot the misplaced concern and price the change before you write a line. <b>Now try it.</b></p>
+              </div>
+            </div>
+
+            <div class="gym-side">
+              <div class="chat-head">COACH</div>
+              <div class="gym-chat" data-chat>
+                <div class="cmsg">
+                  <div class="cbubble">
+                    <span class="cb-label">TEST YOURSELF</span>
+                    <b>Gift cards are the next feature to ship.</b> Before any code gets written, one call is yours to make: where should they live? Read the map, then pick the move you think keeps the blast radius smallest.
+                  </div>
+                </div>
+                <div class="composer" data-composer>
+                  <div class="gym-options">
+                    <button class="gym-opt" data-opt="A" type="button"><span class="key">A</span><span class="opt-text">Add gift-card logic to Payments, since pricing already lives there.</span></button>
+                    <button class="gym-opt" data-opt="B" type="button"><span class="key">B</span><span class="opt-text">Pull pricing out into its own boundary first, then build gift cards there.</span></button>
+                    <button class="gym-opt" data-opt="C" type="button"><span class="key">C</span><span class="opt-text">Put gift-card handling in Orders, since that is where checkout happens.</span></button>
+                  </div>
+                  <button class="btn-submit" type="button" disabled>Submit</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="gym-courses reveal">
+        <div class="gc-kicker">FIRST THREE COURSES</div>
+        <p class="gc-lead">One idea at three scales:<br><b>how far a change travels through a system.</b></p>
+
+        <div class="gc-grid">
+          <!-- 01 · Boundaries -->
+          <div class="gc-card">
+            <div class="gc-head"><span class="gc-num">01</span><span class="gc-name">Boundaries</span></div>
+            <div class="gc-sub">where things live</div>
+            <ul class="gc-gains">
+              <li class="gc-gain"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="6.5" height="12" rx="1"></rect><rect x="14.5" y="6" width="6.5" height="12" rx="1"></rect><line x1="12" y1="3" x2="12" y2="21" stroke-dasharray="2 2.5"></line></svg></span><span>Where to draw module and service lines</span></li>
+              <li class="gc-gain"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="1"></rect><path d="M8 12.5l2.5 2.5 5-5.5"></path></svg></span><span>What a part should and shouldn't own</span></li>
+              <li class="gc-gain"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="2.2"></circle><circle cx="12" cy="12" r="6.2"></circle><circle cx="12" cy="12" r="10"></circle></svg></span><span>Reading a change's blast radius before you make it</span></li>
+            </ul>
+            <div class="gc-tools">
+              <div class="gc-tools-label">REASONS ABOUT</div>
+              <div class="gc-logos">
+                <span class="tool"><span class="tname">DI · FastAPI</span></span>
+                <span class="tool"><span class="tmark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7.5" height="7.5"></rect><rect x="13.5" y="3" width="7.5" height="7.5"></rect><rect x="3" y="13.5" width="7.5" height="7.5"></rect><rect x="13.5" y="13.5" width="7.5" height="7.5"></rect></svg></span><span class="tname">Modules</span></span>
+                <span class="tool"><span class="tmark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 2.5l8.5 4.7v9.6L12 21.5 3.5 16.8V7.2z"></path><path d="M12 12l8.5-4.8M12 12v9.5M12 12L3.5 7.2"></path></svg></span><span class="tname">Packages</span></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 02 · Contracts -->
+          <div class="gc-card">
+            <div class="gc-head"><span class="gc-num">02</span><span class="gc-name">Contracts</span></div>
+            <div class="gc-sub">how the parts talk</div>
+            <ul class="gc-gains">
+              <li class="gc-gain"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"></path><path d="M11 7H6a2 2 0 00-2 2v6a2 2 0 002 2h5"></path><path d="M13 7h5a2 2 0 012 2v6a2 2 0 01-2 2h-5"></path></svg></span><span>Designing a seam so either side can change</span></li>
+              <li class="gc-gain"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="6" r="2.2"></circle><circle cx="7" cy="18" r="2.2"></circle><circle cx="17" cy="9" r="2.2"></circle><path d="M7 8.2v7.6"></path><path d="M9 16.5a6 6 0 016-6"></path></svg></span><span>Versioning an API without breaking its callers</span></li>
+              <li class="gc-gain"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h11"></path><path d="M10 7.5l5 4.5-5 4.5"></path><path d="M19 5v14"></path></svg></span><span>Knowing what each side is allowed to depend on</span></li>
+            </ul>
+            <div class="gc-tools">
+              <div class="gc-tools-label">REASONS ABOUT</div>
+              <div class="gc-logos">
+                <span class="tool"><span class="tname">FastAPI</span></span>
+                <span class="tool"><span class="tname">Pydantic</span></span>
+                <span class="tool"><span class="tname">OpenAPI</span></span>
+                <span class="tool"><span class="tmark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H6.5a2 2 0 00-2 2v3.5a2 2 0 01-2 2 2 2 0 012 2V18a2 2 0 002 2H9"></path><path d="M15 3h2.5a2 2 0 012 2v3.5a2 2 0 002 2 2 2 0 00-2 2V18a2 2 0 01-2 2H15"></path></svg></span><span class="tname">Protobuf</span></span>
+                <span class="tool"><span class="tmark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="12" r="2.5"></circle><circle cx="19" cy="12" r="2.5"></circle><path d="M7.5 12h8.5"></path><path d="M13.5 9l3 3-3 3"></path></svg></span><span class="tname">gRPC</span></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 03 · State -->
+          <div class="gc-card">
+            <div class="gc-head"><span class="gc-num">03</span><span class="gc-name">State</span></div>
+            <div class="gc-sub">where the truth lives</div>
+            <ul class="gc-gains">
+              <li class="gc-gain"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="7" ry="3"></ellipse><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6"></path><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3"></path></svg></span><span>Deciding where state belongs and who can change it</span></li>
+              <li class="gc-gain"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 12a8.5 8.5 0 11-2.6-6.1"></path><path d="M20.5 4.5V10H15"></path></svg></span><span>Idempotency: safe to retry, safe to reorder</span></li>
+              <li class="gc-gain"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 2.8v5.2c0 4-3 7.2-7 9-4-1.8-7-5-7-9V5.8z"></path><path d="M9 12l2 2 4-4"></path></svg></span><span>Staying correct when something fails</span></li>
+            </ul>
+            <div class="gc-tools">
+              <div class="gc-tools-label">REASONS ABOUT</div>
+              <div class="gc-logos">
+                <span class="tool"><span class="tname">Postgres</span></span>
+                <span class="tool"><span class="tname">Redis</span></span>
+                <span class="tool"><span class="tname">Kafka</span></span>
+                <span class="tool"><span class="tname">RabbitMQ</span></span>
+                <span class="tool"><span class="tname">SQLAlchemy</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 3 · WHY IT LASTS ══ -->
+  <section id="why">
     <div class="container">
-        <div class="reveal">
-            <div class="code-label">// community.ls()</div>
-            <div class="sec-h">What you'll find here.</div>
-        </div>
-        <div class="pillars">
-            <div class="pillar reveal">
-                <div class="idx">01</div>
-                <h3>The Community</h3>
-                <p>Active Discord with real conversations, tech help, code reviews, and squads you can join to work on things together.</p>
-            </div>
-            <div class="pillar coming reveal">
-                <div class="idx">02</div>
-                <h3>Learning Resources</h3>
-                <p>Challenges that train how you think, courses built around real tools, and curated paths that sequence it all into progression.</p>
-            </div>
-            <div class="pillar coming reveal">
-                <div class="idx">03</div>
-                <h3>Tools & Experiences</h3>
-                <p>AI-powered tools and interactive scenarios being built on the platform — things you use, not just read about.</p>
-            </div>
-        </div>
+      <div class="reveal prose-col">
+        <div class="eyebrow">02 / Why it lasts</div>
+        <h2 class="big-h" style="font-size:clamp(1.7rem,3.2vw,2.6rem);margin-bottom:1.4rem;">This is the skill that outlasts the tools.</h2>
+        <p class="lede">
+          Languages and frameworks come and go, and the models turn over every few months. <strong>The
+          ability to look at a system and know where it bends does not.</strong> That is the thing worth
+          getting good at, and it is the one thing the "learn AI" wave skips. You build it one rep at a
+          time, and six months or five years from now it is still the job.
+        </p>
+      </div>
     </div>
-</section>
+  </section>
 
-<div class="sudo-strip reveal">
-    <div class="sudo-strip-inner">
-        <div class="sudo-strip-cmd"><span class="kw">$</span> <span class="fn">sudo</span> smarter-dev --unlock <span class="cm"># something bigger is coming</span></div>
-        <a href="/sudo" class="sudo-strip-link" data-sk-no-spa>Explore sudo &rarr;</a>
+  <!-- ══ 4 · THE LAB ══ -->
+  <section id="lab">
+    <div class="container">
+      <div class="reveal sec-intro">
+        <div class="eyebrow">03 / The Lab</div>
+        <h2 class="big-h" style="font-size:clamp(1.9rem,3.6vw,3rem);margin-bottom:1.4rem;">When the system is real.</h2>
+        <p class="lede muted">
+          The Gym builds judgment on prepared problems. The Lab is where you take it to a real one.
+          Real systems, real agents doing the building, and feedback the moment something moves. It
+          is guided experimentation: <strong>you make the architectural calls, the agent writes the
+          code, and you watch what your decisions actually cost.</strong> You see the terminal, you
+          see the agent chat, and you see exactly what you are there to do.
+        </p>
+      </div>
+
+      <!-- lab TUI coding-agent demo — same chrome as the Gym rep -->
+      <div class="lab-shell reveal" data-lab data-skin="green" data-surf="panel">
+        <div class="gym-rep-head">
+          <span class="label">THE LAB · <b>CHECKOUT</b></span>
+          <span class="rep-no">live agent</span>
+        </div>
+        <div class="lab-cols">
+          <div class="lab-term">
+            <div class="tui-scroll" data-term></div>
+            <div class="tui-dock">
+              <button class="tui-prompt" data-input type="button" disabled>
+                <span class="tui-arr">❯</span>
+                <span class="tui-typed" data-input-text></span>
+                <span class="tui-blink"></span>
+              </button>
+            </div>
+            <div class="tui-menu" data-menu hidden></div>
+          </div>
+
+          <div class="lab-coach">
+            <div class="chat-head">COACH</div>
+            <div class="gym-chat" data-coach></div>
+          </div>
+        </div>
+      </div>
+
     </div>
+  </section>
+
+  <!-- ══ 5 · ROADMAP ══ -->
+  <section id="roadmap">
+    <div class="container">
+      <div class="reveal sec-intro">
+        <div class="eyebrow">04 / Roadmap</div>
+        <h2 class="big-h" style="font-size:clamp(1.9rem,3.6vw,3rem);margin-bottom:1.2rem;">Where this is going.</h2>
+        <p class="lede muted">
+          We would rather underpromise and overdeliver, so this is deliberately short, and the Lab
+          gets no date until we can run it well.
+        </p>
+      </div>
+      <div class="roadmap reveal">
+        <div class="road-col now">
+          <div class="when">Now</div>
+          <div class="ph">rolling out</div>
+          <ul>
+            <li>The Resources agent that builds answers from the best material on the topic.</li>
+            <li>The first RunHacks challenges, polishing before they go live.</li>
+          </ul>
+        </div>
+        <div class="road-col next">
+          <div class="when">Next</div>
+          <div class="ph">being built</div>
+          <ul>
+            <li>The Gym, starting with Boundaries, the course the Resources agent coaches.</li>
+            <li>More RunHacks challenges.</li>
+          </ul>
+        </div>
+        <div class="road-col then">
+          <div class="when">Then</div>
+          <div class="ph">no date yet</div>
+          <ul>
+            <li>The rest of the Gym, Contracts and then State.</li>
+            <li>The Lab, real agents on real systems, once we can run it well and not a day before.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="roadmap-coda reveal">
+        <span class="coda-line"></span>
+        <p class="coda-text">Targeting <b>real value</b>, not <s>features shipped</s>.</p>
+        <span class="coda-line"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ 6 · WHO IT'S FOR ══ -->
+  <section id="who">
+    <div class="container">
+      <div class="reveal prose-col">
+        <div class="eyebrow">05 / Who this is for</div>
+        <h2 class="big-h" style="font-size:clamp(1.7rem,3.2vw,2.6rem);margin-bottom:1.4rem;">Who this is for.</h2>
+        <p class="lede">
+          Developers who already ship and already use AI, and who can feel the gap between using it
+          and out-engineering it. <strong>If you've watched an agent confidently build the wrong thing
+          and couldn't quite say why, you're who we built this for.</strong>
+        </p>
+        <p class="lede muted">
+          It isn't a learn-to-code path, and it won't pretend the tools are the skill.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  {% if show_pricing %}
+  <!-- ══ 7 · THE GROUND FLOOR (pricing teaser, flag ON) ══ -->
+  <section id="ground-floor">
+    <div class="container">
+      <div class="reveal sec-intro">
+        <div class="eyebrow">06 / The ground floor</div>
+        <h2 class="big-h" style="font-size:clamp(1.9rem,3.6vw,3rem);margin-bottom:1.4rem;">You're early. That's the offer.</h2>
+        <p class="lede muted">
+          Pay once, take the year, and renew at the founder rate — 33% off the public price, locked in.
+          No subscription, no auto-renewal. <strong>rwx 0day is the first {{ seats_total }} seats</strong>, with preview
+          access to Academy and Labs while we shape them.
+        </p>
+      </div>
+
+      <div class="price-ladder reveal">
+        <div class="pl-head">
+          {% for tier in tiers %}
+          <div class="pl-hcell{% if tier.hero %} pl-hero{% endif %}">
+            <div class="pl-id"><span class="pl-perm">{{ tier.perm }}</span><span class="pl-tier">{{ tier.tier }}</span></div>
+            <span class="pl-tag">{{ tier.tag }}</span>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="pl-body">
+          {% for tier in tiers %}
+          <div class="pl-col{% if tier.hero %} pl-hero{% endif %}">
+            <div class="pl-cell pl-price"><div class="amt"><span class="cur">$</span>{{ tier.annual }}</div><div class="once">ONCE<br><b>1 YEAR ACCESS</b></div></div>
+            <div class="pl-cell pl-vs"><div class="pub"><s>${{ tier.base }}/yr</s><span>public price</span></div><div class="save">SAVE ${{ tier.base - tier.annual }} · RENEW AT 33% OFF</div></div>
+            <div class="pl-cell pl-avail">
+              {% if tier.hero %}
+              <div class="pl-seats">{% for s in seat_dots %}<span class="seat{% if s.claimed %} claimed{% endif %}"></span>{% endfor %}</div>
+              <div class="seatlabel">{{ seats_left }} of {{ seats_total }} seats left</div>
+              {% else %}
+              <div class="open">unlimited seats · open now</div>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="pl-reserve">
+          <a class="pl-cta pl-cta-single" href="/sudo" data-sk-no-spa>./reserve --founder →</a>
+          <span class="pl-reserve-note">full tiers, features, and checkout on the pricing page</span>
+        </div>
+
+        <div class="pl-fine">
+          <div>// one seat per person · no subscription · 14-day full refund</div>
+          <div>// founder access closes when public monthly opens</div>
+        </div>
+      </div>
+    </div>
+  </section>
+  {% else %}
+  <!-- ══ 7b · SUDO WAITLIST (flag OFF) ══ -->
+  <section id="sudo-waitlist">
+    <div class="container">
+      <div class="sudo-wl reveal">
+        <div class="sudo-wordmark">SUDO</div>
+        <h2 class="sudo-head">One membership. Elevated permissions.</h2>
+        <p class="sudo-notify">Get notified when it's ready.</p>
+
+        <form class="sudo-form" id="sudo-signup-form">
+          <input type="hidden" name="campaign_slug" value="sudo-launch">
+          <input class="sudo-input" type="email" name="email" placeholder="dev@example.com" aria-label="Email address" required>
+          <button class="sudo-btn" type="submit">Notify me</button>
+        </form>
+        <p class="sudo-signup-msg" id="sudo-signup-msg"></p>
+      </div>
+    </div>
+  </section>
+  {% endif %}
+
 </div>
+{% endblock %}
 
-<section class="cta">
-    <div class="reveal">
-        <div class="code-label">// ready.init()</div>
-        <div class="cta-h">Come build with us.</div>
-        <div class="cta-h2">The developers who thrive in the AI era aren't the ones consuming content &mdash; they're the ones sharpening each other.</div>
-        <div class="hero-btns" style="justify-content:center; margin-top: 2.5rem">
-            <a href="https://discord.gg/de8kajxbYS" class="btn-glow" style="padding:14px 36px" target="_blank" data-sk-no-spa>Join 13,000+ developers &rarr;</a>
-        </div>
-    </div>
-</section>
+{% block page_scripts %}
+    <script src="{{ theme_url('js/sudo.js') }}"></script>
+    <script src="{{ theme_url('js/home-launch.js') }}"></script>
+    <script src="{{ theme_url('js/gym-rep.js') }}"></script>
+    <script src="{{ theme_url('js/lab-demo.js') }}"></script>
 {% endblock %}

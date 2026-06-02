@@ -18,7 +18,7 @@ from skrift.db.models.user import User
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.web import feature_flags as flags_service
-from smarter_dev.web.billing import catalog, inventory
+from smarter_dev.web.billing.pricing_context import build_pricing_context
 from smarter_dev.web.billing.checkout import (
     CheckoutError,
     FounderSeatsExhausted,
@@ -78,7 +78,6 @@ class SudoController(Controller):
         everyone sees it when ``enabled``, and the original waitlist landing
         renders for everyone else.
         """
-        settings = get_settings()
         show_pricing = await flags_service.is_enabled(
             db_session,
             "sudo_launch",
@@ -89,31 +88,13 @@ class SudoController(Controller):
         if not show_pricing:
             return Template("page-sudo.html")
 
-        seats_total = settings.sudo_founder_seat_limit
-        seats_left = await inventory.seats_remaining(db_session)
-        seats_claimed = max(0, seats_total - seats_left)
-
-        # Tiers come from Stripe (source of truth); the rwx tag carries a
-        # {seats} placeholder filled from the configured seat cap.
-        tiers = await catalog.get_tiers()
-        for tier in tiers:
-            if "{seats}" in tier["tag"]:
-                tier["tag"] = tier["tag"].format(seats=seats_total)
-        # Pre-compute the seat dots for the rwx availability row so the
-        # template doesn't have to do arithmetic.
-        seat_dots = [
-            {"claimed": i < seats_claimed}
-            for i in range(seats_total)
-        ]
+        pricing_ctx = await build_pricing_context(db_session)
+        seats_total = pricing_ctx["seats_total"]
 
         return Template(
             "sudo/pricing.html",
             context={
-                "tiers": tiers,
-                "seats_total": seats_total,
-                "seats_left": seats_left,
-                "seats_claimed": seats_claimed,
-                "seat_dots": seat_dots,
+                **pricing_ctx,
                 "founder_principles": [
                     {
                         "head": "One payment buys the year",
