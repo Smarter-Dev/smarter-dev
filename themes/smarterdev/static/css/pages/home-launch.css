@@ -865,9 +865,11 @@
 .hp .demo-tab-badge{display: none;}
 .hp .lab-coach-alert{display: none;}
 @media (max-width: 768px){
-  .hp .demo-tabs{display: flex; background: rgba(0,0,0,.32); border-bottom: 1px solid rgba(0,212,255,.08);}
-  .hp .demo-tab{flex: 1; padding: 12px 10px; background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; font-family: var(--heading); font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--gray); transition: color .2s, border-color .2s;}
-  .hp .demo-tab.is-active{color: var(--cyan); border-bottom-color: var(--cyan);}
+  /* dock the tab bar to the bottom of each demo card */
+  .hp .gym-rep,.hp .lab-shell{display: flex; flex-direction: column;}
+  .hp .demo-tabs{order: 2; display: flex; background: rgba(0,0,0,.32); border-top: 1px solid rgba(0,212,255,.08);}
+  .hp .demo-tab{flex: 1; padding: 12px 10px; background: none; border: 0; border-top: 2px solid transparent; cursor: pointer; font-family: var(--heading); font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--gray); transition: color .2s, border-color .2s;}
+  .hp .demo-tab.is-active{color: var(--cyan); border-top-color: var(--cyan);}
   .hp .demo-tab-badge{display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; padding: 0 4px; margin-left: 7px; border-radius: 8px; background: var(--cyan); color: #02060c; font-family: var(--heading); font-size: .5rem; line-height: 1; vertical-align: middle;}
   .hp .demo-tab-badge[hidden]{display: none;}
   /* floating "coach replied" toast over the agent pane while coach is off-screen */
