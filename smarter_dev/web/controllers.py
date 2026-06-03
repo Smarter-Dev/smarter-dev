@@ -90,15 +90,27 @@ class SudoController(Controller):
 
         pricing_ctx = await build_pricing_context(db_session)
         seats_total = pricing_ctx["seats_total"]
+        tiers = pricing_ctx["tiers"]
+        tier_map = {t["id"]: t for t in tiers}
+
+        def _join_prices(values: list[int], conj: str) -> str:
+            parts = [f"${v}" for v in values]
+            if len(parts) <= 1:
+                return "".join(parts)
+            return f"{', '.join(parts[:-1])}, {conj} {parts[-1]}"
+
+        annual_list = _join_prices([t["annual"] for t in tiers], "or")
+        monthly_list = _join_prices([t["public_monthly"] for t in tiers], "and")
 
         return Template(
             "sudo/pricing.html",
             context={
                 **pricing_ctx,
+                "tier_map": tier_map,
                 "founder_principles": [
                     {
                         "head": "One payment buys the year",
-                        "body": "$128, $256, or $512 once — a year of access, no subscription, no auto-renewal. We don't touch the card again unless you ask us to.",
+                        "body": f"{annual_list} once — a year of access, no subscription, no auto-renewal. We don't touch the card again unless you ask us to.",
                     },
                     {
                         "head": "Renew at the founder rate",
@@ -168,7 +180,7 @@ class SudoController(Controller):
                     },
                     {
                         "q": "What if I want to pay monthly?",
-                        "a": "Wait until the official launch. Currently, we're fundraising to prove we have the demand and cash to operate at a larger scale. Public monthly opens at $16, $32, and $64, no founder pricing. If saving a third on the year and keeping founder pricing when you come back sounds better, annual is open right now.",
+                        "a": f"Wait until the official launch. Currently, we're fundraising to prove we have the demand and cash to operate at a larger scale. Public monthly opens at {monthly_list}, no founder pricing. If saving a third on the year and keeping founder pricing when you come back sounds better, annual is open right now.",
                     },
                     {
                         "q": "Refund policy?",

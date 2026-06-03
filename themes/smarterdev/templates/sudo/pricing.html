@@ -4,7 +4,7 @@
 {% block page_title %}sudo — pay once, take the year, renew at the founder rate{% endblock %}
 
 {% block seo_meta %}
-<meta name="description" content="sudo founder access: $128 · $256 · $512 once for one year. Renew at 33% off the public rate. rwx 0day capped at {{ seats_total }} seats.">
+<meta name="description" content="sudo founder access: {% for t in tiers %}${{ t.annual }}{% if not loop.last %} · {% endif %}{% endfor %} once for one year. Renew at 33% off the public rate. rwx 0day capped at {{ seats_total }} seats.">
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="https://smarter.dev/sudo">
 {% endblock %}
@@ -232,7 +232,7 @@
                         <input type="hidden" name="tier" value="rwx">
                         <button type="submit" class="cta-primary">
                             <span class="lbl">Reserve rwx 0day</span>
-                            <span class="px">$512</span>
+                            <span class="px">${{ tier_map['rwx'].annual }}</span>
                         </button>
                     </form>
                     {% else %}
@@ -249,11 +249,11 @@
                     <span class="note">// or start lower:</span>
                     <form method="post" action="/sudo/checkout" data-sk-no-spa>
                         <input type="hidden" name="tier" value="r">
-                        <button type="submit" class="cta-secondary">Reserve r-- <span class="sp">$128</span> →</button>
+                        <button type="submit" class="cta-secondary">Reserve r-- <span class="sp">${{ tier_map['r'].annual }}</span> →</button>
                     </form>
                     <form method="post" action="/sudo/checkout" data-sk-no-spa>
                         <input type="hidden" name="tier" value="rw">
-                        <button type="submit" class="cta-secondary">Reserve rw- <span class="sp">$256</span> →</button>
+                        <button type="submit" class="cta-secondary">Reserve rw- <span class="sp">${{ tier_map['rw'].annual }}</span> →</button>
                     </form>
                 </div>
             </div>
