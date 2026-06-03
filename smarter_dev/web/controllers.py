@@ -125,9 +125,9 @@ class SudoController(Controller):
                     {
                         "head": "DAY ONE",
                         "eta": "live at sudo open",
-                        "body": "What every founder gets when sudo opens. Scan answers questions from our library of top resources, RunHacks drops new challenges on a regular schedule, and the founder role carries your access into everything we ship next.",
+                        "body": "What every founder gets when sudo opens. The Resources Agent answers questions from our library of top resources, RunHacks drops new challenges on a regular schedule, and the founder role carries your access into everything we ship next.",
                         "bullets": [
-                            "Scan answers using our selection of top resources",
+                            "Resources Agent answers using our selection of top resources",
                             "RunHacks drops new challenges regularly",
                             "Founder role and members-only Discord channels",
                         ],

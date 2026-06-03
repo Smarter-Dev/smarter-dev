@@ -1,35 +1,4 @@
 (function() {
-    var logo = document.getElementById('sudo-logo');
-    var rest = document.getElementById('sudo-hero-rest');
-    if (!logo || !rest) return;
-    var spans = logo.querySelectorAll('span');
-    var waits = [1200, 600, 600, 600];
-    var current = 0;
-
-    function step() {
-        if (current > 0) {
-            spans[current - 1].classList.remove('cursor');
-            spans[current - 1].classList.add('show');
-        }
-        if (current < spans.length) {
-            spans[current].classList.add('cursor');
-            setTimeout(step, waits[current]);
-            current++;
-        } else {
-            setTimeout(function() {
-                var children = rest.children;
-                for (var j = 0; j < children.length; j++) {
-                    (function(el, delay) {
-                        setTimeout(function() { el.classList.add('show'); }, delay);
-                    })(children[j], j * 200);
-                }
-            }, 1200);
-        }
-    }
-    setTimeout(step, 500);
-})();
-
-(function() {
     var forms = [
         { form: document.getElementById('sudo-signup-form-hero'), msg: document.getElementById('sudo-signup-msg-hero') },
         { form: document.getElementById('sudo-signup-form'), msg: document.getElementById('sudo-signup-msg') }

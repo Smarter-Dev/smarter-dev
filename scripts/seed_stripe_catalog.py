@@ -40,7 +40,7 @@ _TIERS: dict[str, dict] = {
             "cta_label": "./reserve --r--",
         },
         "features": [
-            "Scan — answers from our curated library",
+            "Resources Agent — answers from our curated library",
             "RunHacks — new challenges on a schedule",
             "Gym when it launches",
             "Founder role + members-only Discord",
