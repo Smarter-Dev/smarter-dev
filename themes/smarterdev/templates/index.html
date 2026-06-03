@@ -275,18 +275,66 @@
         </div>
 
         <div class="lab-cols">
-          <div class="lab-term" data-tab-pane="agent">
-            <div class="tui-scroll" data-term></div>
-            <div class="tui-dock">
-              <button class="tui-prompt" data-input type="button" disabled>
-                <span class="tui-arr">❯</span>
-                <span class="tui-line" data-input-line>
-                  <span class="tui-typed" data-input-text></span>
-                  <span class="tui-blink"></span>
-                </span>
-              </button>
+          <div class="lab-term" data-tab-pane="agent" data-lab-left>
+            <div class="lab-left-tabs" role="tablist" aria-label="Left panel view">
+              <button class="ll-tab is-active" type="button" data-lab-view="terminal" aria-selected="true"><span class="ll-ic">❯_</span>terminal</button>
+              <button class="ll-tab" type="button" data-lab-view="files" aria-selected="false"><span class="ll-ic">⁝</span>files</button>
             </div>
-            <div class="tui-menu" data-menu hidden></div>
+
+            <div class="lab-left-pane is-active" data-lab-pane="terminal">
+              <div class="tui-scroll" data-term></div>
+              <div class="tui-dock">
+                <button class="tui-prompt" data-input type="button" disabled>
+                  <span class="tui-arr">❯</span>
+                  <span class="tui-line" data-input-line>
+                    <span class="tui-typed" data-input-text></span>
+                    <span class="tui-blink"></span>
+                  </span>
+                </button>
+              </div>
+              <div class="tui-menu" data-menu hidden></div>
+            </div>
+
+            <div class="lab-left-pane" data-lab-pane="files">
+              <div class="lab-files" aria-hidden="true">
+                <div class="lf-tree">
+                  <div class="lf-tree-head">checkout/</div>
+                  <ul>
+                    <li class="lf-file"><span class="lf-name">orders.py</span></li>
+                    <li class="lf-file is-active"><span class="lf-name">pricing.py</span><span class="lf-badge add">+24</span><span class="lf-badge del">−6</span></li>
+                    <li class="lf-file"><span class="lf-name">payments.py</span><span class="lf-badge del">−18</span></li>
+                    <li class="lf-file"><span class="lf-name">inventory.py</span></li>
+                    <li class="lf-file"><span class="lf-name">notify.py</span><span class="lf-badge add">+3</span></li>
+                    <li class="lf-file"><span class="lf-name">accounts.py</span></li>
+                  </ul>
+                </div>
+                <div class="lf-main">
+                  <div class="lf-diff-head">pricing.py</div>
+                  <div class="lf-diff">
+                    <div class="lf-hunk">@@ -1,6 +1,12 @@ class Pricing</div>
+                    <div class="lf-ln ctx"><span class="lf-no">1</span><span class="lf-tx">class Pricing:</span></div>
+                    <div class="lf-ln add"><span class="lf-no">2</span><span class="lf-tx">+    def quote(self, sku, qty):</span></div>
+                    <div class="lf-ln add"><span class="lf-no">3</span><span class="lf-tx">+        base = self.catalog[sku]</span></div>
+                    <div class="lf-ln del"><span class="lf-no">4</span><span class="lf-tx">-        return charge(sku)</span></div>
+                    <div class="lf-ln add"><span class="lf-no">5</span><span class="lf-tx">+        return base * qty</span></div>
+                    <div class="lf-ln ctx"><span class="lf-no">6</span><span class="lf-tx">        # …</span></div>
+                  </div>
+                  <div class="lf-log">
+                    <div class="lf-log-head">git log</div>
+                    <div class="lf-commit"><span class="lf-hash">a1f9c2e</span><span class="lf-msg">Pull pricing out of payments</span></div>
+                    <div class="lf-commit"><span class="lf-hash">7b3d0a4</span><span class="lf-msg">Add Pricing.quote boundary</span></div>
+                    <div class="lf-commit"><span class="lf-hash">e52c118</span><span class="lf-msg">Notify reads pricing via seam</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="lab-files-lock">
+                <div class="lfl-card">
+                  <span class="lfl-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2"></rect><path d="M8 10.5V7a4 4 0 018 0v3.5"></path></svg></span>
+                  <div class="lfl-title">Files, diffs &amp; git log</div>
+                  <p class="lfl-body">In a Labs exercise you'll browse the repo, read every diff, and walk the git log right here — alongside the agent. Coming when Labs launches.</p>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="lab-coach is-active" data-tab-pane="coach">

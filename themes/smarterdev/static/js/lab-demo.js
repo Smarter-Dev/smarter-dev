@@ -410,7 +410,31 @@
     tryStart();
   }
 
-  function bootAll() { document.querySelectorAll('[data-lab]').forEach(init); }
+  // ── left-column view toggle (terminal ⇄ files) ──
+  // Independent of the Agent/Coach mobile switcher; no shared selectors.
+  function wireLeftTabs(shell) {
+    var tabs = shell.querySelectorAll('[data-lab-view]');
+    if (!tabs.length) return;
+    var panes = shell.querySelectorAll('[data-lab-pane]');
+    tabs.forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        var view = tab.getAttribute('data-lab-view');
+        tabs.forEach(function (t) {
+          var on = t === tab;
+          t.classList.toggle('is-active', on);
+          t.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        panes.forEach(function (p) {
+          p.classList.toggle('is-active', p.getAttribute('data-lab-pane') === view);
+        });
+      });
+    });
+  }
+
+  function bootAll() {
+    document.querySelectorAll('[data-lab]').forEach(init);
+    document.querySelectorAll('[data-lab-left]').forEach(wireLeftTabs);
+  }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bootAll);
   else bootAll();
 })();
