@@ -3,6 +3,9 @@
 {% block page_type %}sudo{% endblock %}
 {% block page_title %}sudo — pay once, take the year, renew at the founder rate{% endblock %}
 
+{# Banner is redundant on the pricing page itself — suppress the site announcement. #}
+{% block site_announcement %}{% endblock %}
+
 {% block seo_meta %}
 <meta name="description" content="sudo founder access: {% for t in tiers %}${{ t.annual }}{% if not loop.last %} · {% endif %}{% endfor %} once for one year. Renew at 33% off the public rate. rwx 0day capped at {{ seats_total }} seats.">
 <meta name="robots" content="index, follow">
