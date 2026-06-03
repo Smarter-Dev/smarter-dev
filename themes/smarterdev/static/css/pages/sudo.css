@@ -23,32 +23,13 @@
 }
 .sudo-logo span {
   display: inline-block;
-  color: transparent;
+  color: var(--cyan);
   line-height: .85;
   letter-spacing: 0;
   margin-right: .15em;
 }
 .sudo-logo span:last-child {
   margin-right: 0;
-}
-.sudo-logo span.show {
-  color: var(--cyan);
-}
-.sudo-logo span.cursor {
-  border-bottom: .08em solid rgba(0,212,255,.5);
-  animation: cursorBlink .6s step-end infinite;
-}
-@keyframes cursorBlink {
-  50% { border-color: transparent }
-}
-.sudo-hero-rest > * {
-  opacity: 0;
-  transform: translateY(16px);
-  transition: opacity .5s ease, transform .5s ease;
-}
-.sudo-hero-rest > .show {
-  opacity: 1;
-  transform: none;
 }
 .sudo-hero .sudo-tagline {
   font-family: var(--heading);
