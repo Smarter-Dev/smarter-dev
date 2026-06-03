@@ -17,7 +17,7 @@
     C: { tone: 'warn', text: 'Tempting, since checkout lives in Orders, but you just spread pricing logic into a third place. Orders computes discounts, Payments still does too, and the receipt reads its own copy. The rule has no home, so every change has to track down all three.' }
   };
 
-  var BRIDGE = '<b>That was one rep.</b> The Gym is a few hundred of them, each system worse than the last, with a coach on every one, until reading a system this way is reflex. That was a slice of Boundaries, the first course.';
+  var BRIDGE = '<b>That was one rep.</b> The Gym is many of them, each system worse than the last, with a coach on every one, until reading a system this way is reflex. That was a slice of Boundaries, the first course.';
 
   function init(rep) {
     var chat = rep.querySelector('[data-chat]');
@@ -78,7 +78,7 @@
         var a = document.createElement('div');
         a.className = 'chat-actions';
         a.setAttribute('data-appended', '');
-        a.innerHTML = '<button class="gym-retry" type="button">Try another</button>';
+        a.innerHTML = '<button class="gym-retry" type="button">Try Again</button>';
         a.querySelector('.gym-retry').addEventListener('click', reset);
         chat.appendChild(a);
         toBottom();
