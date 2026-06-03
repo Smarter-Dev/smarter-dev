@@ -65,6 +65,7 @@
         var panes = root.querySelectorAll('[data-tab-pane]');
 
         var alert = root.querySelector('[data-coach-alert]');
+        var alertPreview = alert && alert.querySelector('[data-coach-alert-preview]');
         var alertTimer = null;
 
         function hideAlert() {
@@ -74,8 +75,9 @@
             alert.hidden = true;
         }
 
-        function showAlert() {
+        function showAlert(preview) {
             if (!alert) return;
+            if (alertPreview && preview) alertPreview.textContent = preview;
             if (alertTimer) { clearTimeout(alertTimer); alertTimer = null; }
             alert.classList.remove('is-leaving');
             alert.hidden = false;
@@ -128,9 +130,10 @@
             if (!mobile.matches) return;                      // tabs only exist on mobile
             if (coachBtn.classList.contains('is-active')) return; // already in view
             var added = 0;
+            var lastMsg = null;
             muts.forEach(function (m) {
                 m.addedNodes.forEach(function (n) {
-                    if (n.nodeType === 1 && n.classList.contains('cmsg')) added++;
+                    if (n.nodeType === 1 && n.classList.contains('cmsg')) { added++; lastMsg = n; }
                 });
             });
             if (!added) return;
@@ -138,7 +141,17 @@
             badge.dataset.count = String(count);
             badge.textContent = count > 9 ? '9+' : String(count);
             badge.hidden = false;
-            showAlert();                                       // floating toast, auto-dismisses in 5s
+            // preview the latest coach message in the toast
+            var preview = '';
+            if (lastMsg) {
+                var bubble = lastMsg.querySelector('.cbubble') || lastMsg;
+                var body = bubble.textContent || '';
+                var label = bubble.querySelector('.cb-label');   // strip the "YOUR TASK"-style tag
+                if (label) body = body.slice(label.textContent.length);
+                preview = body.replace(/\s+/g, ' ').trim();
+                if (preview.length > 90) preview = preview.slice(0, 89).trimEnd() + '…';
+            }
+            showAlert(preview);                                // floating toast, auto-dismisses in 5s
         });
         mo.observe(thread, { childList: true });
     });
