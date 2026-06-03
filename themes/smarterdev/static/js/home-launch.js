@@ -65,6 +65,29 @@
         var panes = root.querySelectorAll('[data-tab-pane]');
 
         var alert = root.querySelector('[data-coach-alert]');
+        var alertTimer = null;
+
+        function hideAlert() {
+            if (!alert) return;
+            if (alertTimer) { clearTimeout(alertTimer); alertTimer = null; }
+            alert.classList.remove('is-leaving');
+            alert.hidden = true;
+        }
+
+        function showAlert() {
+            if (!alert) return;
+            if (alertTimer) { clearTimeout(alertTimer); alertTimer = null; }
+            alert.classList.remove('is-leaving');
+            alert.hidden = false;
+            // auto-dismiss: fade out after 5s, then unmount once the transition ends
+            alertTimer = setTimeout(function () {
+                alert.classList.add('is-leaving');
+                setTimeout(function () {
+                    alert.hidden = true;
+                    alert.classList.remove('is-leaving');
+                }, 400);
+            }, 5000);
+        }
 
         function activate(name) {
             buttons.forEach(function (b) {
@@ -79,7 +102,7 @@
             panes.forEach(function (p) {
                 p.classList.toggle('is-active', p.getAttribute('data-tab-pane') === name);
             });
-            if (name === 'coach' && alert) alert.hidden = true;
+            if (name === 'coach') hideAlert();
         }
 
         buttons.forEach(function (b) {
@@ -115,7 +138,7 @@
             badge.dataset.count = String(count);
             badge.textContent = count > 9 ? '9+' : String(count);
             badge.hidden = false;
-            if (alert) alert.hidden = false;                  // prominent banner atop active pane
+            showAlert();                                       // floating toast, auto-dismisses in 5s
         });
         mo.observe(thread, { childList: true });
     });
