@@ -42,7 +42,7 @@ _TIERS: dict[str, dict] = {
         "features": [
             "Scan — answers from our curated library",
             "RunHacks — new challenges on a schedule",
-            "Academy when it launches",
+            "Gym when it launches",
             "Founder role + members-only Discord",
         ],
     },
@@ -70,7 +70,7 @@ _TIERS: dict[str, dict] = {
     },
     "rwx": {
         "description": (
-            "The first 16. Early preview access to Academy and Labs while we "
+            "The first 16. Early preview access to Gym and Labs while we "
             "shape them, because we need users in the loop to ship them right."
         ),
         "metadata": {
@@ -85,7 +85,7 @@ _TIERS: dict[str, dict] = {
         },
         "features": [
             "Everything in rw-",
-            "Academy preview access while we shape it",
+            "Gym preview access while we shape it",
             "Labs preview access while we shape it",
             "0day Founder role + dedicated channel",
         ],

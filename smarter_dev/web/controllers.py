@@ -133,7 +133,7 @@ class SudoController(Controller):
                         ],
                     },
                     {
-                        "head": "ACADEMY",
+                        "head": "GYM",
                         "eta": "shipping next",
                         "body": "Lesson-based curriculum paired with an AI tutor that remembers you. It tracks where you've gotten stuck and adapts how it walks you through what's next.",
                         "bullets": [
@@ -144,7 +144,7 @@ class SudoController(Controller):
                     },
                     {
                         "head": "LABS",
-                        "eta": "after Academy",
+                        "eta": "after Gym",
                         "body": "Guided agentic coding environments. Using real coding agents, run in cloud-hosted workspaces accessible from any browser, with the lesson sitting alongside the agent terminal.",
                         "bullets": [
                             "Cloud workspaces, no local setup",
@@ -160,15 +160,15 @@ class SudoController(Controller):
                     },
                     {
                         "q": "What happens to the free Smarter Dev community?",
-                        "a": "It stays free. Discord access, RunHacks basic challenges, and Academy previews stay open. sudo is a layer added on top, not a paywall pulled across.",
+                        "a": "It stays free. Discord access, RunHacks basic challenges, and Gym previews stay open. sudo is a layer added on top, not a paywall pulled across.",
                     },
                     {
                         "q": "Where does my annual tier's money actually go?",
-                        "a": "Cloud infrastructure to run the website, Discord bot, RunHacks, and the agentic workspaces in Labs. Development time on Academy curriculum and the Labs environments.",
+                        "a": "Cloud infrastructure to run the website, Discord bot, RunHacks, and the agentic workspaces in Labs. Development time on Gym curriculum and the Labs environments.",
                     },
                     {
-                        "q": "What if you can't ship Academy or Labs on time?",
-                        "a": "Honest answer: it's a risk we all take. We've scoped Academy and Labs to what we believe we can build in Q3 and Q4 with founder runway, but software ships when it's ready. If we slip, we slip publicly and your year of access keeps running. The refund policy applies for the first 14 days and prorates after that.",
+                        "q": "What if you can't ship Gym or Labs on time?",
+                        "a": "Honest answer: it's a risk we all take. We've scoped Gym and Labs to what we believe we can build in Q3 and Q4 with founder runway, but software ships when it's ready. If we slip, we slip publicly and your year of access keeps running. The refund policy applies for the first 14 days and prorates after that.",
                     },
                     {
                         "q": "Is this a subscription?",
