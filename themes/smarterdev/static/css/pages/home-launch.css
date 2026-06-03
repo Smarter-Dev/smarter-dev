@@ -686,6 +686,8 @@
   font-family: var(--mono); font-size: .62rem; letter-spacing: .04em; color: var(--gray);
   transition: color .15s, border-color .15s, background .15s;}
 .hp .ll-tab .ll-ic{font-size: .7rem; opacity: .8;}
+.hp .ll-tab .ll-ic-svg{display: inline-flex; align-items: center; opacity: .85;}
+.hp .ll-tab .ll-ic-svg svg{width: .95em; height: .95em;}
 .hp .ll-tab:hover{color: var(--light); background: color-mix(in oklab, var(--cyan) 5%, transparent);}
 .hp .ll-tab.is-active{color: var(--cyan); border-bottom-color: var(--cyan);}
 /* the two stacked left panes — exactly one shows at a time */
