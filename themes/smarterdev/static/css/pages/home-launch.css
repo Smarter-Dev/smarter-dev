@@ -863,12 +863,26 @@
    ════════════════════════════════════════ */
 .hp .demo-tabs{display: none;}
 .hp .demo-tab-badge{display: none;}
+.hp .lab-coach-alert{display: none;}
 @media (max-width: 768px){
   .hp .demo-tabs{display: flex; background: rgba(0,0,0,.32); border-bottom: 1px solid rgba(0,212,255,.08);}
   .hp .demo-tab{flex: 1; padding: 12px 10px; background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; font-family: var(--heading); font-size: .6rem; letter-spacing: .1em; text-transform: uppercase; color: var(--gray); transition: color .2s, border-color .2s;}
   .hp .demo-tab.is-active{color: var(--cyan); border-bottom-color: var(--cyan);}
   .hp .demo-tab-badge{display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; padding: 0 4px; margin-left: 7px; border-radius: 8px; background: var(--cyan); color: #02060c; font-family: var(--heading); font-size: .5rem; line-height: 1; vertical-align: middle;}
   .hp .demo-tab-badge[hidden]{display: none;}
+  /* prominent "coach replied" banner, shown atop the agent pane while coach is off-screen */
+  .hp .lab-coach-alert{display: flex; width: 100%; align-items: center; gap: 11px; padding: 12px 14px; text-align: left; cursor: pointer;
+    background: color-mix(in oklab, var(--cyan) 14%, #0d141e); border: 0; border-bottom: 1px solid color-mix(in oklab, var(--cyan) 38%, transparent);
+    box-shadow: inset 3px 0 0 var(--cyan), 0 6px 20px color-mix(in oklab, var(--cyan) 16%, transparent);
+    animation: lcaIn .26s ease both;}
+  .hp .lab-coach-alert[hidden]{display: none;}
+  .hp .lab-coach-alert .lca-dot{flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 0 color-mix(in oklab, var(--cyan) 70%, transparent); animation: lcaPulse 1.6s ease-out infinite;}
+  .hp .lab-coach-alert .lca-text{flex: 1; display: flex; flex-direction: column; gap: 2px; line-height: 1.25;}
+  .hp .lab-coach-alert .lca-text b{color: var(--white); font-size: .82rem; font-weight: 600;}
+  .hp .lab-coach-alert .lca-sub{color: var(--gray); font-size: .68rem;}
+  .hp .lab-coach-alert .lca-cta{flex: none; color: var(--cyan); font-family: var(--heading); font-size: .58rem; letter-spacing: .08em; text-transform: uppercase;}
+  @keyframes lcaIn{from{opacity: 0; transform: translateY(-6px);} to{opacity: 1; transform: translateY(0);}}
+  @keyframes lcaPulse{0%{box-shadow: 0 0 0 0 color-mix(in oklab, var(--cyan) 70%, transparent);} 70%{box-shadow: 0 0 0 7px transparent;} 100%{box-shadow: 0 0 0 0 transparent;}}
   .hp .gym-cols,.hp .lab-cols{display: block; height: auto;}
   .hp .gym-cols [data-tab-pane],.hp .lab-cols [data-tab-pane]{display: none; height: min(68vh, 560px);}
   .hp .gym-main[data-tab-pane].is-active{display: block; overflow-y: auto; padding: 20px 20px 22px;}

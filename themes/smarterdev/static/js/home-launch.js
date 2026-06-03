@@ -64,6 +64,8 @@
         var buttons = tabs.querySelectorAll('.demo-tab');
         var panes = root.querySelectorAll('[data-tab-pane]');
 
+        var alert = root.querySelector('[data-coach-alert]');
+
         function activate(name) {
             buttons.forEach(function (b) {
                 var on = b.getAttribute('data-tab') === name;
@@ -77,11 +79,15 @@
             panes.forEach(function (p) {
                 p.classList.toggle('is-active', p.getAttribute('data-tab-pane') === name);
             });
+            if (name === 'coach' && alert) alert.hidden = true;
         }
 
         buttons.forEach(function (b) {
             b.addEventListener('click', function () { activate(b.getAttribute('data-tab')); });
         });
+        if (alert) {
+            alert.addEventListener('click', function () { activate('coach'); });
+        }
 
         // Default to whichever tab the markup marks active (falls back to first).
         var initial = tabs.querySelector('.demo-tab.is-active') || buttons[0];
@@ -109,6 +115,7 @@
             badge.dataset.count = String(count);
             badge.textContent = count > 9 ? '9+' : String(count);
             badge.hidden = false;
+            if (alert) alert.hidden = false;                  // prominent banner atop active pane
         });
         mo.observe(thread, { childList: true });
     });
