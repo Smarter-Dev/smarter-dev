@@ -678,7 +678,64 @@
   border-top: 1px solid rgba(0,212,255,.06);
   background: rgba(0,212,255,.02);
   min-height: 96px;}.hp .lab-resources .rh{font-family: var(--heading); font-size: .46rem; letter-spacing: .1em;
-  color: var(--cyan); opacity: .8; margin-bottom: 7px;}.hp .lab-resources p{font-size: .76rem; color: var(--light); line-height: 1.66; margin: 0;}.hp .lab-resources .placeholder{color: var(--gray); font-style: italic; opacity: .6;}/* ════════════════════════════════════════
+  color: var(--cyan); opacity: .8; margin-bottom: 7px;}.hp .lab-resources p{font-size: .76rem; color: var(--light); line-height: 1.66; margin: 0;}.hp .lab-resources .placeholder{color: var(--gray); font-style: italic; opacity: .6;}/* ── left-column view toggle (terminal / files) ── */
+.hp .lab-left-tabs{display: flex; flex-shrink: 0; background: rgba(0,0,0,.22);
+  border-bottom: 1px solid color-mix(in oklab, var(--cyan) 12%, transparent);}
+.hp .ll-tab{display: inline-flex; align-items: center; gap: 7px; padding: 9px 16px;
+  background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer;
+  font-family: var(--mono); font-size: .62rem; letter-spacing: .04em; color: var(--gray);
+  transition: color .15s, border-color .15s, background .15s;}
+.hp .ll-tab .ll-ic{font-size: .7rem; opacity: .8;}
+.hp .ll-tab:hover{color: var(--light); background: color-mix(in oklab, var(--cyan) 5%, transparent);}
+.hp .ll-tab.is-active{color: var(--cyan); border-bottom-color: var(--cyan);}
+/* the two stacked left panes — exactly one shows at a time */
+.hp .lab-left-pane{display: none; position: relative; flex: 1; min-height: 0; min-width: 0;}
+.hp .lab-left-pane.is-active{display: flex; flex-direction: column;}
+/* ── file browser (static preview, locked) ── */
+.hp .lab-files{flex: 1; min-height: 0; display: grid; grid-template-columns: 148px 1fr;
+  overflow: hidden; font-family: var(--mono);}
+.hp .lf-tree{border-right: 1px solid color-mix(in oklab, var(--cyan) 10%, transparent);
+  padding: 12px 0; overflow: hidden; background: rgba(0,0,0,.14);}
+.hp .lf-tree-head{padding: 0 14px 9px; font-size: .58rem; letter-spacing: .04em; color: var(--cyan); opacity: .8;}
+.hp .lf-tree ul{list-style: none;}
+.hp .lf-file{display: flex; align-items: center; gap: 6px; padding: 5px 14px; font-size: .68rem; color: var(--mid);}
+.hp .lf-file.is-active{background: color-mix(in oklab, var(--cyan) 8%, transparent); color: var(--light);
+  border-left: 2px solid var(--cyan); padding-left: 12px;}
+.hp .lf-name{flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+.hp .lf-badge{font-size: .56rem;}
+.hp .lf-badge.add{color: var(--green);}
+.hp .lf-badge.del{color: var(--rose);}
+.hp .lf-main{display: flex; flex-direction: column; min-width: 0; overflow: hidden;}
+.hp .lf-diff-head{padding: 10px 14px 8px; font-size: .64rem; color: var(--light);
+  border-bottom: 1px solid color-mix(in oklab, var(--cyan) 8%, transparent);}
+.hp .lf-diff{flex: 1; min-height: 0; overflow: hidden; padding: 8px 0; font-size: .67rem; line-height: 1.6;}
+.hp .lf-hunk{padding: 2px 14px; color: var(--cyan); opacity: .65; font-size: .6rem;}
+.hp .lf-ln{display: flex; gap: 12px; padding: 0 14px;}
+.hp .lf-no{flex: 0 0 auto; width: 16px; text-align: right; color: var(--gray); opacity: .5;}
+.hp .lf-tx{white-space: pre; min-width: 0;}
+.hp .lf-ln.add{background: rgba(34,197,94,.08);}
+.hp .lf-ln.add .lf-tx{color: var(--green);}
+.hp .lf-ln.del{background: rgba(239,68,68,.08);}
+.hp .lf-ln.del .lf-tx{color: var(--rose);}
+.hp .lf-ln.ctx .lf-tx{color: var(--mid);}
+.hp .lf-log{border-top: 1px solid color-mix(in oklab, var(--cyan) 8%, transparent); padding: 10px 14px 12px;}
+.hp .lf-log-head{font-size: .58rem; letter-spacing: .04em; color: var(--cyan); opacity: .7; margin-bottom: 7px;}
+.hp .lf-commit{display: flex; gap: 10px; font-size: .64rem; padding: 2px 0; color: var(--mid);}
+.hp .lf-hash{color: var(--amber); flex: 0 0 auto;}
+.hp .lf-msg{min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+/* ── gentle "coming soon" blur overlay ── */
+.hp .lab-files-lock{position: absolute; inset: 0; z-index: 5; display: flex; align-items: center;
+  justify-content: center; padding: 24px; text-align: center;
+  backdrop-filter: blur(3.5px); -webkit-backdrop-filter: blur(3.5px); background: rgba(6,10,16,.5);}
+.hp .lfl-card{max-width: 320px; display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 22px 24px; background: rgba(8,13,20,.72);
+  border: 1px solid color-mix(in oklab, var(--cyan) 26%, transparent);
+  box-shadow: 0 0 40px color-mix(in oklab, var(--cyan) 12%, transparent);}
+.hp .lfl-icon{color: var(--cyan);}
+.hp .lfl-icon svg{width: 26px; height: 26px; display: block;}
+.hp .lfl-title{font-family: var(--heading); font-size: .8rem; letter-spacing: .04em; color: var(--white);}
+.hp .lfl-body{font-family: var(--mono); font-size: .72rem; line-height: 1.6; color: var(--mid); margin: 0;}
+/* ════════════════════════════════════════
    ROADMAP
    ════════════════════════════════════════ */.hp .roadmap{display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin-top: 2.5rem;}.hp .road-col{padding: 1.9rem 1.75rem;
   background: var(--surface);
