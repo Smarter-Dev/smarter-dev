@@ -93,19 +93,19 @@ async def resources_index(
             "quota_state": quota_state,
             "seo_meta": {
                 "description": (
-                    "Writing, courses, and tutorials from around the "
-                    "web for engineers working with modern dev tooling "
-                    "and AI-assisted software development."
+                    "Writing, courses, and tutorials from around the web "
+                    "for engineers building and running modern software "
+                    "systems."
                 ),
                 "canonical_url": "https://smarter.dev/resources",
                 "robots": "index,follow",
             },
             "og_meta": {
-                "title": "Resources: Smarter Dev",
+                "title": "Resources · Smarter Dev",
                 "description": (
-                    "Writing, courses, and tutorials from around the "
-                    "web for engineers working with modern dev tooling "
-                    "and AI-assisted software development."
+                    "Writing, courses, and tutorials from around the web "
+                    "for engineers building and running modern software "
+                    "systems."
                 ),
                 "url": "https://smarter.dev/resources",
                 "site_name": "Smarter Dev",
