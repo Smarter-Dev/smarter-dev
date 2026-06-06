@@ -10,7 +10,10 @@
         <a href="https://discord.gg/de8kajxbYS" target="_blank" data-sk-no-spa>Discord</a>
         <a href="/sudo">sudo</a>
     </div>
-    {% if user %}
+    {# Signed-in check falls back to the session so the nav stays correct on any page,
+       even when its controller doesn't pass `user` into the template context. #}
+    {% set _signed_in = user or (request.session and request.session.get('user_id')) %}
+    {% if _signed_in %}
     <a href="/account" class="btn-follow">Account</a>
     {% else %}
     <a href="/auth/login" class="btn-follow">Sign In</a>
