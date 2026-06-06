@@ -6,26 +6,36 @@
     <meta name="sk-partials" content="{% block partial_names %}masthead,content,footer{% endblock %}">
     <meta name="sk-page-type" content="{% block page_type %}{{ page_type|default('page') }}{% endblock %}">
 
+    {# Shared fallbacks for SEO + OG + Twitter, used when a page doesn't pass its own. #}
+    {% set _default_description = "Smarter Dev is the community for developers learning to direct AI, not compete with it. Become the trust layer." %}
+    {% set _default_og_image = "https://smarter.dev/static/site/og-default.png" %}
+    {# Capture the page_title block once so we can reuse it without re-rendering. #}
+    {% set _page_title_raw %}{% block page_title %}Smarter Dev{% endblock %}{% endset %}
+    {% set _page_title = _page_title_raw|trim %}
+
     {% block seo_meta %}
-    {% if seo_meta %}
-    {% if seo_meta.description %}<meta name="description" content="{{ seo_meta.description }}">{% endif %}
-    {% if seo_meta.robots %}<meta name="robots" content="{{ seo_meta.robots }}">{% endif %}
-    <link rel="canonical" href="{{ seo_meta.canonical_url }}">
-    {% endif %}
+    <meta name="description" content="{{ (seo_meta and seo_meta.description) or _default_description }}">
+    {% if seo_meta and seo_meta.robots %}<meta name="robots" content="{{ seo_meta.robots }}">{% endif %}
+    {% if seo_meta and seo_meta.canonical_url %}<link rel="canonical" href="{{ seo_meta.canonical_url }}">{% endif %}
     {% endblock %}
 
     {% block og_meta %}
-    {% if og_meta %}
-    <meta property="og:title" content="{{ og_meta.title }}">
-    {% if og_meta.description %}<meta property="og:description" content="{{ og_meta.description }}">{% endif %}
-    {% if og_meta.image %}<meta property="og:image" content="{{ og_meta.image }}">{% endif %}
-    <meta property="og:url" content="{{ og_meta.url }}">
-    <meta property="og:site_name" content="{{ og_meta.site_name }}">
-    <meta property="og:type" content="{{ og_meta.type }}">
-    {% endif %}
+    {% set _og_title = (og_meta and og_meta.title) or (_page_title if _page_title and _page_title != "Smarter Dev" else "Become the trust layer · Smarter Dev") %}
+    {% set _og_desc = (og_meta and og_meta.description) or _default_description %}
+    {% set _og_image = (og_meta and og_meta.image) or _default_og_image %}
+    <meta property="og:title" content="{{ _og_title }}">
+    <meta property="og:description" content="{{ _og_desc }}">
+    <meta property="og:image" content="{{ _og_image }}">
+    {% if og_meta and og_meta.url %}<meta property="og:url" content="{{ og_meta.url }}">{% endif %}
+    <meta property="og:site_name" content="{{ (og_meta and og_meta.site_name) or 'Smarter Dev' }}">
+    <meta property="og:type" content="{{ (og_meta and og_meta.type) or 'website' }}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ _og_title }}">
+    <meta name="twitter:description" content="{{ _og_desc }}">
+    <meta name="twitter:image" content="{{ _og_image }}">
     {% endblock %}
 
-    <title>{% block title %}{% block page_title %}Smarter Dev{% endblock %} — Smarter Dev{% endblock %}</title>
+    <title>{% block title %}{% if _page_title and _page_title != "Smarter Dev" %}{{ _page_title }} · {% endif %}Smarter Dev{% endblock %}</title>
 
     {% block head %}
     <link rel="icon" type="image/png" href="{{ static_url('site/favicon.png') }}">
