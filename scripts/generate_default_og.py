@@ -57,8 +57,17 @@ def load_font(path: str, size: int) -> ImageFont.FreeTypeFont:
         return ImageFont.load_default()
 
 
-def tile_background(img: Image.Image) -> None:
+def tile_background(img: Image.Image, scale: float = 2.6) -> None:
+    """Tile the hex background, scaled up so it reads at preview size.
+
+    Social cards display the OG image at ~500-600px wide; at the source
+    tile's native size the hex pattern compresses into noise. Scaling the
+    tile up (2-3x) keeps the cell count low enough to stay legible when
+    the image is shown small.
+    """
     tile = Image.open(EMAIL_HEX_BG).convert("RGBA")
+    tw, th = tile.size
+    tile = tile.resize((int(tw * scale), int(th * scale)), Image.Resampling.LANCZOS)
     tw, th = tile.size
     for y in range(0, H, th):
         for x in range(0, W, tw):
