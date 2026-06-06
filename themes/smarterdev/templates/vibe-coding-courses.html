@@ -7,17 +7,6 @@
 <link rel="stylesheet" href="{{ theme_url('css/pages/vibe-coding-courses.css') }}">
 {% endblock %}
 
-{% block og_meta %}
-{{ super() }}
-{% if og_meta %}
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="{{ og_meta.title }}">
-{% if og_meta.description %}<meta name="twitter:description" content="{{ og_meta.description }}">{% endif %}
-{% if og_meta.image %}<meta name="twitter:image" content="{{ og_meta.image }}">{% endif %}
-<meta name="twitter:site" content="@SmarterDev">
-{% endif %}
-{% endblock %}
-
 {% block content %}
 <div class="vc-wrap container">
 

@@ -7,7 +7,7 @@
     <meta name="sk-page-type" content="{% block page_type %}{{ page_type|default('page') }}{% endblock %}">
 
     {# Shared fallbacks for SEO + OG + Twitter, used when a page doesn't pass its own. #}
-    {% set _default_description = "Smarter Dev is the community for developers learning to direct AI, not compete with it. Become the trust layer." %}
+    {% set _default_description = "The job has changed: you deliver trust, not code. We teach you to decide what gets built and how it fits, no code required. 13,000+ already in the Discord, and you're early." %}
     {% set _default_og_image = "https://smarter.dev/static/site/og-default.png" %}
     {# Capture the page_title block once so we can reuse it without re-rendering. #}
     {% set _page_title_raw %}{% block page_title %}Smarter Dev{% endblock %}{% endset %}
@@ -33,6 +33,7 @@
     <meta name="twitter:title" content="{{ _og_title }}">
     <meta name="twitter:description" content="{{ _og_desc }}">
     <meta name="twitter:image" content="{{ _og_image }}">
+    <meta name="twitter:site" content="@SmarterDev">
     {% endblock %}
 
     <title>{% block title %}{% if _page_title and _page_title != "Smarter Dev" %}{{ _page_title }} · {% endif %}Smarter Dev{% endblock %}</title>
