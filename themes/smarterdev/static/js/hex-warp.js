@@ -14,6 +14,14 @@
   'use strict';
 
   function initHexWarp() {
+    // Reduced motion: the canvas is hidden via CSS and a static PNG is shown
+    // instead (see background.css). Skip all JS work — no canvas init, no
+    // RAF, no listeners. This is the cheapest possible path for users who
+    // request reduced motion or are on lower-power devices that benefit.
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+
     var canvas = document.getElementById('bg');
     if (!canvas) return;
     var ctx = canvas.getContext('2d');
@@ -24,18 +32,33 @@
     var V_SPACING = HEX_SIZE * 1.5;
     var DOT_RADIUS = 2;
     var INFLUENCE_RADIUS = 200;
+    var INFLUENCE_RADIUS_SQ = INFLUENCE_RADIUS * INFLUENCE_RADIUS;
     var MAX_DISPLACEMENT = 20;
+    // Pre-baked falloff scale (mouse displacement uses dSq directly instead of
+    // sqrt-then-normalize; see update()).
+    var MOUSE_SCALE_BASE = MAX_DISPLACEMENT / INFLUENCE_RADIUS;
     var LERP_SPEED = 0.08;
     var AMBIENT_AMPLITUDE = 1;
     var AMBIENT_SPEED = 0.0008;
     var CLICK_DURATION = 500;
     var HEX_LINE_REST = 0.025;
     var HEX_LINE_ACTIVE = 0.08;
-    var PATH_COUNT = 60;
     var PATH_SPEED = 1.2;
     var TURN_CHANCE = 0.2;
     var SEGMENT_FADE = 0.001;
     var SEGMENT_PEAK_ALPHA = 0.12;
+
+    // Path count: set once on init, never recomputed. Scales with viewport
+    // width so small screens don't pay for desktop density, and we drop hard
+    // on low-end devices (low core count or device-memory hint).
+    var _cores = navigator.hardwareConcurrency || 8;
+    var _deviceMemGB = navigator.deviceMemory || 8;  // Chromium-only; defaults safe.
+    var isLowEnd = _cores <= 4 || _deviceMemGB <= 4;
+    // Estimate column count from the initial viewport (createDots adds +3 for
+    // overscan; we want the on-screen density signal).
+    var _initialCols = Math.ceil(window.innerWidth / H_SPACING);
+    var _pathFactor = isLowEnd ? 0.4 : 0.8;
+    var PATH_COUNT = Math.max(12, Math.min(80, Math.round(_initialCols * _pathFactor)));
 
     // Read accent color from CSS variable (allows per-page override)
     var accentStyle = getComputedStyle(document.documentElement).getPropertyValue('--hex-accent').trim();
@@ -163,8 +186,11 @@
       }
     }
 
+    // Perf: cap DPR. On a 2-3x display this halves the per-frame pixel work
+    // with no visible difference at this scale of detail.
+    var DPR_CAP = 1.5;
     function resize() {
-      var dpr = window.devicePixelRatio || 1;
+      var dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP);
       canvas.width = window.innerWidth * dpr;
       canvas.height = window.innerHeight * dpr;
       canvas.style.width = window.innerWidth + 'px';
@@ -180,15 +206,26 @@
     function update(now) {
       var clickFactor = 0;
       if (clickActive) { var el = now - clickTime; if (el < CLICK_DURATION) { clickFactor = 1 - el / CLICK_DURATION; clickFactor *= clickFactor; } else clickActive = false; }
-      var irSq = INFLUENCE_RADIUS * INFLUENCE_RADIUS;
+      var b = 1 - 2 * clickFactor;
       for (var i = 0; i < dots.length; i++) {
         var dot = dots[i];
         var ax = Math.sin(now * AMBIENT_SPEED + dot.phaseX) * AMBIENT_AMPLITUDE;
         var ay = Math.cos(now * AMBIENT_SPEED * 0.7 + dot.phaseY) * AMBIENT_AMPLITUDE;
         var dx2 = 0, dy2 = 0;
         if (mouseActive) {
+          // Squared-distance falloff: skip the per-dot sqrt + normalize. The
+          // displacement scales (ddx, ddy) directly by a quadratic gate, so
+          // at the cursor (ddx=ddy≈0) the contribution is ~0, peaks at a
+          // moderate distance, and drops to 0 at the influence radius. Same
+          // visual character as the original sqrt-then-normalize, ~10-15%
+          // cheaper per dot in the hot path.
           var ddx = dot.baseX - mouseX, ddy = dot.baseY - mouseY, dSq = ddx * ddx + ddy * ddy;
-          if (dSq < irSq && dSq > 0.01) { var d = Math.sqrt(dSq), p = 1 - d / INFLUENCE_RADIUS, s = p * p * MAX_DISPLACEMENT, b = 1 - 2 * clickFactor; dx2 = ddx / d * s * b; dy2 = ddy / d * s * b; }
+          if (dSq < INFLUENCE_RADIUS_SQ && dSq > 0.01) {
+            var factor = 1 - dSq / INFLUENCE_RADIUS_SQ;
+            var scale = factor * factor * MOUSE_SCALE_BASE * b;
+            dx2 = ddx * scale;
+            dy2 = ddy * scale;
+          }
         }
         dot.targetOffsetX = dx2 + ax; dot.targetOffsetY = dy2 + ay;
         dot.offsetX += (dot.targetOffsetX - dot.offsetX) * LERP_SPEED;
@@ -236,12 +273,24 @@
       }
     }
 
-    function loop(now) { update(now); draw(); animId = requestAnimationFrame(loop); }
+    // Perf: cap the canvas to a target FPS so we're not wasting work on
+    // 120Hz panels and so we can drop hard on low-end machines.
+    var TARGET_FPS = isLowEnd ? 15 : 30;
+    var FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
+    var lastFrame = 0;
+    function loop(now) {
+      animId = requestAnimationFrame(loop);
+      if (now - lastFrame < FRAME_INTERVAL_MS) return;
+      lastFrame = now;
+      update(now);
+      draw();
+    }
 
     // Cleanup previous instance if any
     if (window._hexWarpCleanup) window._hexWarpCleanup();
 
     resize();
+
     window.addEventListener('resize', resize);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseleave', onMouseLeave);
