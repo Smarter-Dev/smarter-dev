@@ -108,6 +108,15 @@
 .sudo-philosophy { text-align: center }
 .sudo-philosophy-sub { max-width: 560px; margin: 0 auto }
 
+.cta-note {
+  max-width: 560px;
+  margin: 0.6rem auto 1.4rem;
+  text-align: center;
+  color: var(--muted, #8ca2b8);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
 /* ── Sudo Signup ── */
 .sudo-signup {
   max-width: 500px;
