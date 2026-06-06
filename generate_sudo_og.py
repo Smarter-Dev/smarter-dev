@@ -22,7 +22,7 @@ FONT_BUNGEE = str(FONT_DIR / "Bungee Hairline" / "BungeeHairline-Regular.ttf")
 FONT_BRUNO = str(FONT_DIR / "Bruno_Ace_SC" / "BrunoAceSC-Regular.ttf")
 EMAIL_HEX_BG = RESOURCE_DIR / "email-hex-bg.png"
 
-OUTPUT = RESOURCE_DIR / "sudo-og-preview.png"
+OUTPUT = PROJECT_ROOT / "static" / "sudo-og-preview.png"
 
 # ---------------------------------------------------------------------------
 # Dimensions & colors
@@ -44,9 +44,12 @@ def load_font(path: str, size: int) -> ImageFont.FreeTypeFont:
         return ImageFont.load_default()
 
 
-def tile_background(img: Image.Image) -> None:
-    """Tile the email hex background across the full image."""
+def tile_background(img: Image.Image, scale: float = 2.6) -> None:
+    """Tile the email hex background, scaled up so the pattern reads at
+    preview size (social previews show the OG image at ~500-600px wide)."""
     tile = Image.open(EMAIL_HEX_BG).convert("RGBA")
+    tw, th = tile.size
+    tile = tile.resize((int(tw * scale), int(th * scale)), Image.Resampling.LANCZOS)
     tw, th = tile.size
     for y in range(0, H, th):
         for x in range(0, W, tw):
