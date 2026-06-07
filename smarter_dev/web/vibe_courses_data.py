@@ -1,4 +1,4 @@
-"""Curated content for /vibe-coding-courses.
+"""Content for /vibe-coding-courses.
 
 Hand-maintained: edit and redeploy. Each outbound link carries a stable
 ``track_key`` so the click counter survives URL changes.
@@ -539,7 +539,7 @@ COURSES: list[Course] = [
         "vibe:course:lovable-tutorials",
         tools=("lovable",),
         first_indexed_at=_INDEXED,
-        blurb="Curated video library walking through auth, databases, payments, and deploys in Lovable.",
+        blurb="A video library walking through auth, databases, payments, and deploys in Lovable.",
     ),
     Course(
         "Lovable AI: How to Build an App & Upload to App Store",
@@ -806,7 +806,7 @@ COURSES: list[Course] = [
         "vibe:course:aider-tutorial-videos",
         tools=("aider",),
         first_indexed_at=_INDEXED,
-        blurb="Curated community videos showing real refactors, test-writing, and multi-file edits with Aider.",
+        blurb="Community videos showing real refactors, test-writing, and multi-file edits with Aider.",
     ),
 
     # Cline

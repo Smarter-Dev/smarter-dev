@@ -1,6 +1,6 @@
 """Controller for /resources/software-delivery.
 
-Renders the curated content loaded from the DB (see ``resources_data``).
+Renders the content loaded from the DB (see ``resources_data``).
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ async def software_delivery(db_session: AsyncSession) -> Template:
         raise NotFoundException()
 
     description = (
-        "A curated index of writing, courses, and tutorials on shipping "
+        "An index of writing, courses, and tutorials on shipping "
         "software: version control, CI/CD, infrastructure-as-code, "
         "deployment, container builds, local dev, database migrations, "
         "and feature flags."
@@ -43,7 +43,7 @@ async def software_delivery(db_session: AsyncSession) -> Template:
                 "robots": "index,follow",
             },
             "og_meta": {
-                "title": "Shipping Modern Systems: A Curated Index",
+                "title": "Shipping Modern Systems: An Index",
                 "description": description,
                 "url": "https://smarter.dev/resources/software-delivery",
                 "site_name": "Smarter Dev",
