@@ -1,0 +1,83 @@
+---
+# Daily sudo membership sweep:
+#   - expire memberships whose expires_at has passed (revokes role + converges)
+#   - re-converge every active membership (drift restore — heals manual role
+#     pulls, missed webhooks, bot downtime)
+#
+# Lives in its own CronJob so it doesn't share lifecycle with the web
+# Deployment. Image is pinned to the same web image so the codebase / venv
+# match exactly.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: smarter-dev-sudo-sweep
+    namespace: smarter-dev
+    labels:
+        app: smarter-dev-sudo-sweep
+spec:
+    # 09:13 UTC daily — outside the business-hours window for prod traffic.
+    schedule: "13 9 * * *"
+    timeZone: "UTC"
+    concurrencyPolicy: Forbid
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 5
+    jobTemplate:
+        spec:
+            # Each Job retries the Pod up to twice before giving up; the next
+            # daily run will heal anything that's still drifted.
+            backoffLimit: 2
+            activeDeadlineSeconds: 1800
+            ttlSecondsAfterFinished: 86400
+            template:
+                metadata:
+                    labels:
+                        app: smarter-dev-sudo-sweep
+                spec:
+                    restartPolicy: OnFailure
+                    containers:
+                      - name: sweep
+                        image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+                        command:
+                          - /app/.venv/bin/python
+                          - /app/scripts/sudo_daily_sweep.py
+                        envFrom:
+                          - configMapRef:
+                              name: smarter-dev-config
+                        env:
+                          - name: DATABASE_URL
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: database-url
+                          - name: LEGACY_DATABASE_URL
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: legacy-database-url
+                          - name: REDIS_URL
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: redis-url
+                          - name: STRIPE_SECRET_KEY
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: stripe-secret-key
+                          - name: DISCORD_BOT_TOKEN
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: discord-bot-token
+                          - name: BOT_API_KEY
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: bot-api-key
+                        resources:
+                            requests:
+                                cpu: "100m"
+                                memory: "256Mi"
+                            limits:
+                                cpu: "500m"
+                                memory: "512Mi"
