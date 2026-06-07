@@ -343,20 +343,28 @@ async def drift_restore_active(session: AsyncSession) -> int:
     return len(user_ids)
 
 
-async def run_daily_sweep(session: AsyncSession) -> dict[str, int]:
-    """Expire lapsed memberships + drift-restore the active set.
+async def run_daily_sweep(session: AsyncSession) -> dict[str, Any]:
+    """Expire lapsed memberships + drift-restore + send renewal reminders.
 
     Returns a small summary dict for logging. Safe to run repeatedly: the
-    expiry path is idempotent (revoked_reason becomes set), and converge
-    is idempotent for already-correct members.
+    expiry path is idempotent (revoked_reason becomes set), converge is
+    idempotent for already-correct members, and the reminder sender
+    relies on a unique constraint per (membership, threshold).
     """
+    from smarter_dev.web.billing.reminders import send_renewal_reminders
+
     expired = await expire_lapsed_memberships(session)
     converged = await drift_restore_active(session)
+    reminders = await send_renewal_reminders(session)
     logger.info(
-        "sudo daily sweep done: expired=%d, drift-restored=%d",
-        expired, converged,
+        "sudo daily sweep done: expired=%d, drift-restored=%d, reminders=%s",
+        expired, converged, reminders,
     )
-    return {"expired": expired, "drift_restored": converged}
+    return {
+        "expired": expired,
+        "drift_restored": converged,
+        "reminders": reminders,
+    }
 
 
 _HANDLERS = {

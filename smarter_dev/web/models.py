@@ -258,6 +258,44 @@ class SudoMembership(Base):
     )
 
 
+class SudoMembershipReminder(Base):
+    """Per-membership renewal-reminder ledger.
+
+    Each row is "reminder for membership X at threshold T (30 / 7 / 1
+    days before expiry) was sent." UNIQUE(membership_id, days_before)
+    lets the daily sweep blindly try-insert; on duplicate the IntegrityError
+    means we already sent that threshold.
+    """
+
+    __tablename__ = "sudo_membership_reminders"
+    __table_args__ = (
+        UniqueConstraint(
+            "membership_id", "days_before",
+            name="uq_sudo_membership_reminders_membership_id_days_before",
+        ),
+        Index("ix_sudo_membership_reminders_membership_id", "membership_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    membership_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        nullable=False,
+    )
+    days_before: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
 class StripeEventProcessed(Base):
     """Dedupe ledger for Stripe webhook events.
 
