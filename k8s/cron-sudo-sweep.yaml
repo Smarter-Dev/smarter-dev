@@ -74,6 +74,11 @@ spec:
                                 secretKeyRef:
                                     name: smarter-dev-secrets
                                     key: bot-api-key
+                          - name: RESEND_API_KEY
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: resend-api-key
                         resources:
                             requests:
                                 cpu: "100m"
