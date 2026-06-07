@@ -40,7 +40,6 @@
     var LERP_SPEED = 0.08;
     var AMBIENT_AMPLITUDE = 1;
     var AMBIENT_SPEED = 0.0008;
-    var CLICK_DURATION = 500;
     var HEX_LINE_REST = 0.025;
     var HEX_LINE_ACTIVE = 0.08;
     var PATH_SPEED = 1.2;
@@ -75,8 +74,6 @@
     var mouseX = -9999;
     var mouseY = -9999;
     var mouseActive = false;
-    var clickTime = 0;
-    var clickActive = false;
     var animId = null;
     var traces = [];
 
@@ -201,12 +198,8 @@
 
     function onMouseMove(e) { mouseX = e.clientX; mouseY = e.clientY; mouseActive = true; }
     function onMouseLeave() { mouseActive = false; mouseX = -9999; mouseY = -9999; }
-    function onBgClick() { clickTime = performance.now(); clickActive = true; }
 
     function update(now) {
-      var clickFactor = 0;
-      if (clickActive) { var el = now - clickTime; if (el < CLICK_DURATION) { clickFactor = 1 - el / CLICK_DURATION; clickFactor *= clickFactor; } else clickActive = false; }
-      var b = 1 - 2 * clickFactor;
       for (var i = 0; i < dots.length; i++) {
         var dot = dots[i];
         var ax = Math.sin(now * AMBIENT_SPEED + dot.phaseX) * AMBIENT_AMPLITUDE;
@@ -222,7 +215,7 @@
           var ddx = dot.baseX - mouseX, ddy = dot.baseY - mouseY, dSq = ddx * ddx + ddy * ddy;
           if (dSq < INFLUENCE_RADIUS_SQ && dSq > 0.01) {
             var factor = 1 - dSq / INFLUENCE_RADIUS_SQ;
-            var scale = factor * factor * MOUSE_SCALE_BASE * b;
+            var scale = factor * factor * MOUSE_SCALE_BASE;
             dx2 = ddx * scale;
             dy2 = ddy * scale;
           }
@@ -294,7 +287,6 @@
     window.addEventListener('resize', resize);
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseleave', onMouseLeave);
-    window.addEventListener('click', onBgClick);
     animId = requestAnimationFrame(loop);
 
     // Store cleanup function
@@ -303,7 +295,6 @@
       window.removeEventListener('resize', resize);
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseleave', onMouseLeave);
-      window.removeEventListener('click', onBgClick);
     };
   }
 
