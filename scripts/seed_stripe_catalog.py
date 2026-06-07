@@ -100,13 +100,23 @@ _TIER_TO_DISCORD_ROLE_ENV = {
     "rwx": "SUDO_DISCORD_X_ROLE_ID",
 }
 
+# Which "extra" role envs apply to which tier. Every founder gets the
+# generic Founder role; the rwx tier additionally gets the 0day Founder
+# role.
+_EXTRA_ROLE_ENVS_BY_TIER = {
+    "r":   ("SUDO_DISCORD_FOUNDER_ROLE_ID",),
+    "rw":  ("SUDO_DISCORD_FOUNDER_ROLE_ID",),
+    "rwx": ("SUDO_DISCORD_FOUNDER_ROLE_ID", "SUDO_DISCORD_0DAY_FOUNDER_ROLE_ID"),
+}
+
 
 def _discord_metadata(slug: str) -> dict[str, str]:
     """Pull the Discord guild + role IDs for this tier from env, if present.
 
-    All four are optional independently — converge will skip the Discord
-    projection until they're all populated. Empty values are omitted so we
-    don't clobber existing metadata on Stripe with blanks.
+    All values are optional independently — converge will skip the Discord
+    projection until the required ones (guild, base, all three tier roles)
+    are populated. Empty values are omitted so we don't clobber existing
+    metadata on Stripe with blanks.
     """
     out: dict[str, str] = {}
     guild = os.environ.get("SUDO_DISCORD_GUILD_ID", "").strip()
@@ -119,6 +129,17 @@ def _discord_metadata(slug: str) -> dict[str, str]:
         out["discord_base_role_id"] = base
     if tier_role:
         out["discord_role_id"] = tier_role
+
+    # Extras (Founder, 0day Founder) — CSV of role IDs that converge
+    # grants alongside the tier role. Skip entirely if none configured so
+    # we don't blank out an existing field.
+    extras: list[str] = []
+    for env_name in _EXTRA_ROLE_ENVS_BY_TIER.get(slug, ()):
+        v = os.environ.get(env_name, "").strip()
+        if v:
+            extras.append(v)
+    if extras:
+        out["discord_extra_role_ids"] = ",".join(extras)
     return out
 
 
@@ -146,7 +167,12 @@ def main() -> int:
             marketing_features=[{"name": f} for f in spec["features"]],
         )
         discord_keys = ", ".join(
-            k for k in ("discord_guild_id", "discord_base_role_id", "discord_role_id")
+            k for k in (
+                "discord_guild_id",
+                "discord_base_role_id",
+                "discord_role_id",
+                "discord_extra_role_ids",
+            )
             if k in metadata
         ) or "(no Discord metadata set)"
         print(f"seeded {slug:>3} → {product.id} ({amount/100:.0f} USD) [{discord_keys}]")

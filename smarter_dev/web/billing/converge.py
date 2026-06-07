@@ -152,7 +152,12 @@ async def converge(session: AsyncSession, user_id: UUID) -> dict[str, list[str]]
     guild_id = cfg["guild_id"]
     base_role_id = cfg["base_role_id"]
     role_ids_by_tier: dict[str, str] = cfg["role_ids_by_tier"]
-    managed_ids = {base_role_id, *role_ids_by_tier.values()}
+    extras_by_tier: dict[str, list[str]] = cfg.get("extra_role_ids_by_tier") or {}
+    # Managed set = base + every tier role + every extra. Roles outside
+    # this set are never touched by converge.
+    managed_ids: set[str] = {base_role_id, *role_ids_by_tier.values()}
+    for extras in extras_by_tier.values():
+        managed_ids.update(extras)
 
     discord_user_id = await _get_discord_user_id(session, user_id)
     if not discord_user_id:
@@ -165,12 +170,15 @@ async def converge(session: AsyncSession, user_id: UUID) -> dict[str, list[str]]
     desired: set[str] = set()
     reason_parts: list[str] = []
     if entitlement is not None:
-        # Base role for "any active sudo member", plus the tier role.
+        # Base role for "any active sudo member", plus the tier role,
+        # plus any extras the tier bundles (Founder, 0day Founder).
         desired.add(base_role_id)
         tier_role = role_ids_by_tier.get(entitlement.tier)
         if tier_role is not None:
             desired.add(tier_role)
             reason_parts.append(f"tier={entitlement.tier}")
+        for extra in extras_by_tier.get(entitlement.tier, ()):
+            desired.add(extra)
         reason_parts.append(f"expires={entitlement.expires_at.isoformat()}")
     else:
         reason_parts.append("no active entitlement")

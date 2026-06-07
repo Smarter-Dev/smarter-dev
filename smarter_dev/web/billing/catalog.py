@@ -83,9 +83,16 @@ def _fetch_catalog_sync() -> list[dict[str, Any]]:
                 "price_id": price["id"],
                 # Discord projection IDs. Each product carries the same
                 # guild + base, redundantly, so any one read is sufficient.
+                # ``discord_extra_role_ids`` is a CSV that converge grants
+                # alongside the tier role (e.g. Founder for all tiers,
+                # 0day Founder for rwx).
                 "discord_guild_id": meta.get("discord_guild_id", "") or None,
                 "discord_base_role_id": meta.get("discord_base_role_id", "") or None,
                 "discord_role_id": meta.get("discord_role_id", "") or None,
+                "discord_extra_role_ids": [
+                    p.strip() for p in (meta.get("discord_extra_role_ids") or "").split(",")
+                    if p.strip()
+                ],
             }
         )
 
@@ -109,6 +116,7 @@ async def get_discord_config() -> dict[str, Any] | None:
     # ``role`` on the catalog dict ("read" / "write" / "execute") matches
     # the SudoMembership.tier value, while ``id`` is the perm slug.
     role_ids_by_tier: dict[str, str] = {}
+    extra_role_ids_by_tier: dict[str, list[str]] = {}
     guild_id: str | None = None
     base_role_id: str | None = None
     for tier in tiers:
@@ -118,6 +126,8 @@ async def get_discord_config() -> dict[str, Any] | None:
             base_role_id = tier["discord_base_role_id"]
         if tier.get("discord_role_id") and tier.get("role"):
             role_ids_by_tier[tier["role"]] = tier["discord_role_id"]
+        if tier.get("role"):
+            extra_role_ids_by_tier[tier["role"]] = list(tier.get("discord_extra_role_ids") or [])
 
     if not guild_id or not base_role_id:
         return None
@@ -127,6 +137,7 @@ async def get_discord_config() -> dict[str, Any] | None:
         "guild_id": guild_id,
         "base_role_id": base_role_id,
         "role_ids_by_tier": role_ids_by_tier,
+        "extra_role_ids_by_tier": extra_role_ids_by_tier,
     }
 
 
