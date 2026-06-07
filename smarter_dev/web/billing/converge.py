@@ -30,18 +30,10 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from smarter_dev.shared.config import get_settings
+from smarter_dev.web.billing import catalog
 from smarter_dev.web.models import SudoMembership
 
 logger = logging.getLogger(__name__)
-
-
-# Tier slug → settings key that holds the Discord role ID.
-TIER_TO_ROLE_SETTING = {
-    "read": "sudo_discord_r_role_id",
-    "write": "sudo_discord_w_role_id",
-    "execute": "sudo_discord_x_role_id",
-}
 
 
 # Per-Discord-user lock registry, so two concurrent converges for the
@@ -57,22 +49,6 @@ async def _lock_for(discord_user_id: str) -> asyncio.Lock:
             lock = asyncio.Lock()
             _USER_LOCKS[discord_user_id] = lock
         return lock
-
-
-def _managed_role_ids() -> Optional[dict[str, str]]:
-    """Return ``{tier: role_id}`` for the managed set including the base
-    role under key ``"_base"``. Returns None if any required ID is missing
-    (in which case converge skips the Discord step entirely)."""
-    s = get_settings()
-    cfg = {
-        "_base":   s.sudo_discord_base_role_id,
-        "read":    s.sudo_discord_r_role_id,
-        "write":   s.sudo_discord_w_role_id,
-        "execute": s.sudo_discord_x_role_id,
-    }
-    if not all(cfg.values()):
-        return None
-    return cfg  # type: ignore[return-value]
 
 
 async def _get_active_entitlement(
@@ -167,13 +143,16 @@ async def converge(session: AsyncSession, user_id: UUID) -> dict[str, list[str]]
     role IDs touched, for tests and logging. Never raises on Discord
     failures — the next trigger heals.
     """
-    settings = get_settings()
-    managed = _managed_role_ids()
-    guild_id = settings.sudo_discord_guild_id
+    cfg = await catalog.get_discord_config()
     token = _bot_token()
-    if managed is None or not guild_id or not token:
+    if cfg is None or not token:
         logger.info("converge: Discord projection not configured; skipping.")
         return {"added": [], "removed": []}
+
+    guild_id = cfg["guild_id"]
+    base_role_id = cfg["base_role_id"]
+    role_ids_by_tier: dict[str, str] = cfg["role_ids_by_tier"]
+    managed_ids = {base_role_id, *role_ids_by_tier.values()}
 
     discord_user_id = await _get_discord_user_id(session, user_id)
     if not discord_user_id:
@@ -187,8 +166,8 @@ async def converge(session: AsyncSession, user_id: UUID) -> dict[str, list[str]]
     reason_parts: list[str] = []
     if entitlement is not None:
         # Base role for "any active sudo member", plus the tier role.
-        desired.add(managed["_base"])
-        tier_role = managed.get(entitlement.tier)
+        desired.add(base_role_id)
+        tier_role = role_ids_by_tier.get(entitlement.tier)
         if tier_role is not None:
             desired.add(tier_role)
             reason_parts.append(f"tier={entitlement.tier}")
@@ -218,7 +197,6 @@ async def converge(session: AsyncSession, user_id: UUID) -> dict[str, list[str]]
                 # re-trigger converge when they join. No-op for now.
                 return {"added": [], "removed": []}
 
-            managed_ids = {r for r in managed.values() if r}
             current_managed = current & managed_ids
             to_add = (desired - current_managed) & managed_ids
             to_remove = current_managed - desired

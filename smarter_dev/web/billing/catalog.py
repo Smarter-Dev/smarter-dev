@@ -81,11 +81,53 @@ def _fetch_catalog_sync() -> list[dict[str, Any]]:
                 "public_monthly": monthly,
                 "public_annual": annual,
                 "price_id": price["id"],
+                # Discord projection IDs. Each product carries the same
+                # guild + base, redundantly, so any one read is sufficient.
+                "discord_guild_id": meta.get("discord_guild_id", "") or None,
+                "discord_base_role_id": meta.get("discord_base_role_id", "") or None,
+                "discord_role_id": meta.get("discord_role_id", "") or None,
             }
         )
 
     tiers.sort(key=lambda t: t["order"])
     return tiers
+
+
+async def get_discord_config() -> dict[str, Any] | None:
+    """Return the Discord projection config derived from product metadata.
+
+    Shape: ``{"guild_id": str, "base_role_id": str, "role_ids_by_tier":
+    {"read": str, "write": str, "execute": str}}``. Returns ``None`` if
+    any required field is missing on any tier — converge then skips the
+    Discord step entirely (the Skrift role projection still runs).
+    """
+    tiers = await get_tiers()
+    if not tiers:
+        return None
+
+    # Map our internal tier slugs (sudo_membership.tier) to the catalog ids.
+    # ``role`` on the catalog dict ("read" / "write" / "execute") matches
+    # the SudoMembership.tier value, while ``id`` is the perm slug.
+    role_ids_by_tier: dict[str, str] = {}
+    guild_id: str | None = None
+    base_role_id: str | None = None
+    for tier in tiers:
+        if tier.get("discord_guild_id") and not guild_id:
+            guild_id = tier["discord_guild_id"]
+        if tier.get("discord_base_role_id") and not base_role_id:
+            base_role_id = tier["discord_base_role_id"]
+        if tier.get("discord_role_id") and tier.get("role"):
+            role_ids_by_tier[tier["role"]] = tier["discord_role_id"]
+
+    if not guild_id or not base_role_id:
+        return None
+    if not all(t in role_ids_by_tier for t in ("read", "write", "execute")):
+        return None
+    return {
+        "guild_id": guild_id,
+        "base_role_id": base_role_id,
+        "role_ids_by_tier": role_ids_by_tier,
+    }
 
 
 async def _refresh() -> None:
