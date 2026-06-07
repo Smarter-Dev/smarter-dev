@@ -171,9 +171,11 @@
                 Active through <b>{{ membership.expires_at.strftime('%-d %B %Y') }}</b>.
             </p>
         </div>
+        {% if _state != 'active' %}
         <span class="bc-status is-{{ _state }}">
             <span class="bc-status-dot"></span>{{ _state }}
         </span>
+        {% endif %}
     </div>
 
     <div class="bc-rule"></div>
