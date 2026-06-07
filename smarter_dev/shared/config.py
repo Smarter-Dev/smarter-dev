@@ -191,6 +191,31 @@ class Settings(BaseSettings):
         description="Maximum number of rwx 0day founder seats ever sold",
     )
 
+    # Sudo Discord role projection (converge).
+    # The Discord guild + the four managed role IDs that converge owns.
+    # When any of these are unset, converge skips the Discord step (the
+    # Skrift role projection still runs).
+    sudo_discord_guild_id: Optional[str] = Field(
+        default=None,
+        description="Discord guild ID where sudo roles are projected",
+    )
+    sudo_discord_base_role_id: Optional[str] = Field(
+        default=None,
+        description="Discord role granted to every active sudo member",
+    )
+    sudo_discord_r_role_id: Optional[str] = Field(
+        default=None,
+        description="Discord role for the r-- (read) tier",
+    )
+    sudo_discord_w_role_id: Optional[str] = Field(
+        default=None,
+        description="Discord role for the rw- (write) tier",
+    )
+    sudo_discord_x_role_id: Optional[str] = Field(
+        default=None,
+        description="Discord role for the rwx (execute) tier",
+    )
+
     # Quests
     quest_timezone: str = Field(
         default="UTC",

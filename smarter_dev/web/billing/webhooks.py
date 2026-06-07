@@ -31,6 +31,7 @@ from skrift.auth.services import assign_role_to_user, remove_role_from_user
 
 from smarter_dev.web.billing import inventory
 from smarter_dev.web.billing.client import get_stripe
+from smarter_dev.web.billing.converge import converge
 from smarter_dev.web.models import SudoMembership
 
 logger = logging.getLogger(__name__)
@@ -180,6 +181,13 @@ async def handle_checkout_session_completed(
     await _grant_role_for_tier(session, user_id, tier)
     await session.commit()
 
+    # Project to Discord. Failures are logged inside converge and do not
+    # block the response — the daily sweep + GUILD_MEMBER_ADD heal drift.
+    try:
+        await converge(session, user_id)
+    except Exception:
+        logger.exception("converge failed after fulfillment for user %s", user_id)
+
 
 async def handle_charge_refunded(
     session: AsyncSession, event_data: dict[str, Any]
@@ -209,6 +217,11 @@ async def handle_charge_refunded(
     await _revoke_role_for_tier(session, record.user_id, record.tier)
     await session.commit()
 
+    try:
+        await converge(session, record.user_id)
+    except Exception:
+        logger.exception("converge failed after refund for user %s", record.user_id)
+
 
 async def expire_lapsed_memberships(session: AsyncSession) -> int:
     """Revoke roles for any memberships whose ``expires_at`` has passed.
@@ -224,14 +237,23 @@ async def expire_lapsed_memberships(session: AsyncSession) -> int:
         )
     )
     expired = 0
+    expired_user_ids: list[UUID] = []
     for membership in result.scalars():
         role_name = TIER_TO_ROLE.get(membership.tier)
         if role_name is None:
             continue
         await remove_role_from_user(session, membership.user_id, role_name)
+        expired_user_ids.append(membership.user_id)
         expired += 1
     if expired:
         await session.commit()
+    # Project the lapse to Discord too. Inline serial calls — fine at
+    # launch-cohort scale (a few dozen a day at most).
+    for uid in expired_user_ids:
+        try:
+            await converge(session, uid)
+        except Exception:
+            logger.exception("converge failed during sweep for user %s", uid)
     return expired
 
 
