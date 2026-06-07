@@ -64,10 +64,16 @@ async def stripe_webhook(
             detail="Invalid signature.",
         )
 
+    # Stripe SDK >=8 no longer inherits StripeObject from dict, so .get(...)
+    # raises KeyError on the API objects. Convert the verified event to a
+    # plain nested dict at the boundary — downstream handlers can use normal
+    # dict semantics without caring about the SDK surface.
+    event_dict = event.to_dict()
+
     try:
-        await billing_webhooks.dispatch(db_session, event)
+        await billing_webhooks.dispatch(db_session, event_dict)
     except Exception:
-        logger.exception("Unhandled error dispatching Stripe event %s", event.get("id"))
+        logger.exception("Unhandled error dispatching Stripe event %s", event_dict.get("id"))
         # Bubble up as 500 so Stripe will retry — we'd rather receive the
         # event again than drop a paid checkout silently.
         raise
