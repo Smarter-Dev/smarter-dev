@@ -1,68 +1,219 @@
 {% extends "account/_layout.html" %}
 
+{% block page_css %}
+{{ super() }}
+<style nonce="{{ csp_nonce() }}">
+.billing-card {
+    background: linear-gradient(180deg, rgba(0,212,255,.05), rgba(0,212,255,.015) 40%, transparent), var(--surface);
+    border: 1px solid rgba(0,212,255,.22);
+    border-left: 3px solid var(--cyan);
+    padding: clamp(1.5rem, 4vw, 2.25rem);
+    margin-bottom: 1.5rem;
+    position: relative;
+    overflow: hidden;
+}
+.billing-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        radial-gradient(circle at 90% -20%, rgba(0,212,255,.12), transparent 45%);
+}
+
+.bc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap; }
+
+.bc-mark {
+    display: inline-flex;
+    align-items: baseline;
+    gap: .55rem;
+}
+.bc-perm {
+    font-family: var(--mono);
+    font-size: clamp(2.4rem, 6vw, 3.4rem);
+    line-height: 1;
+    letter-spacing: .02em;
+    color: var(--cyan);
+    text-shadow: 0 0 24px color-mix(in oklab, var(--cyan) 35%, transparent);
+}
+.bc-tier-label {
+    font-family: var(--heading);
+    font-size: .72rem;
+    letter-spacing: .14em;
+    color: var(--mid);
+    text-transform: uppercase;
+}
+
+.bc-status {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .4rem .75rem;
+    font-family: var(--heading);
+    font-size: .65rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    border-radius: 999px;
+    border: 1px solid currentColor;
+    align-self: flex-start;
+}
+.bc-status.is-active   { color: #6dffb4; background: rgba(109,255,180,.06); }
+.bc-status.is-expired  { color: #ffb454; background: rgba(255,180,84,.06); }
+.bc-status.is-refunded { color: #ff7a7a; background: rgba(255,122,122,.06); }
+.bc-status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 0 currentColor;
+}
+.bc-status.is-active .bc-status-dot { animation: bc-pulse 1.8s ease-out infinite; }
+@keyframes bc-pulse {
+    0%   { box-shadow: 0 0 0 0 color-mix(in oklab, #6dffb4 60%, transparent); }
+    70%  { box-shadow: 0 0 0 7px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.bc-summary {
+    margin-top: .5rem;
+    color: var(--white);
+    font-size: 1.02rem;
+    line-height: 1.45;
+}
+.bc-summary b { color: var(--cyan); font-weight: 600; }
+
+.bc-rule {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(0,212,255,.28), transparent);
+    margin: 1.75rem 0 1.25rem;
+}
+
+.bc-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 1.25rem 2rem;
+}
+.bc-grid dt {
+    font-family: var(--heading);
+    font-size: .65rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--mid);
+    margin-bottom: .35rem;
+}
+.bc-grid dd {
+    margin: 0;
+    color: var(--white);
+    font-family: var(--mono);
+    font-size: 1.05rem;
+}
+
+.bc-seat dd .bc-seat-num { color: var(--cyan); }
+.bc-seat dd .bc-seat-of { color: var(--mid); margin-left: .25rem; font-size: .85rem; }
+
+.bc-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-top: 1.75rem;
+}
+.bc-foot-note {
+    color: var(--mid);
+    font-size: .82rem;
+    line-height: 1.5;
+    max-width: 38ch;
+    margin: 0;
+}
+.bc-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .75rem 1.25rem;
+    background: var(--cyan);
+    color: #04141d;
+    border: none;
+    font-family: var(--heading);
+    font-size: .72rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: box-shadow .18s, transform .18s;
+}
+.bc-cta:hover { box-shadow: 0 0 28px color-mix(in oklab, var(--cyan) 35%, transparent); transform: translateY(-1px); }
+
+/* Empty state when no membership */
+.bc-empty {
+    background: var(--surface);
+    border: var(--border-subtle);
+    padding: 2rem;
+    margin-bottom: 1.5rem;
+}
+</style>
+{% endblock %}
+
 {% block account_content %}
 <h1>Billing &amp; Plan</h1>
 <p class="account-meta">Your sudo membership and payment details.</p>
 
 {% if membership %}
-<div class="account-card">
-    <div class="form-row">
-        <label>Plan</label>
+{% set _tier_perm = {'execute': 'rwx', 'write': 'rw-', 'read': 'r--'}.get(membership.tier, membership.tier) %}
+{% set _tier_label = {'execute': '0day · founder', 'write': 'write · founder', 'read': 'read · founder'}.get(membership.tier, 'founder') %}
+{% set _state = 'refunded' if membership.refunded_at else ('expired' if membership_expired else 'active') %}
+<div class="billing-card">
+    <div class="bc-head">
         <div>
-            {% if membership.tier == 'execute' %}
-            <strong>sudo rwx · 0day founder</strong>
-            {% elif membership.tier == 'write' %}
-            <strong>sudo rw- · founder</strong>
-            {% elif membership.tier == 'read' %}
-            <strong>sudo r-- · founder</strong>
-            {% else %}
-            <strong>sudo {{ membership.tier }}</strong>
-            {% endif %}
-            <span class="account-meta">— one-time, one-year purchase</span>
+            <div class="bc-mark">
+                <span class="bc-perm">{{ _tier_perm }}</span>
+                <span class="bc-tier-label">{{ _tier_label }}</span>
+            </div>
+            <p class="bc-summary">
+                One year of access, paid once.
+                Active through <b>{{ membership.expires_at.strftime('%-d %B %Y') }}</b>.
+            </p>
         </div>
+        <span class="bc-status is-{{ _state }}">
+            <span class="bc-status-dot"></span>{{ _state }}
+        </span>
     </div>
 
-    <div class="form-row">
-        <label>Status</label>
+    <div class="bc-rule"></div>
+
+    <dl class="bc-grid">
         <div>
-            {% if membership.refunded_at %}
-            <code style="color:#ff7a7a;">refunded</code>
-            {% elif membership_expired %}
-            <code style="color:#ffb454;">expired — renew at founder rate</code>
-            {% else %}
-            <code>active</code>
-            {% endif %}
+            <dt>Purchased</dt>
+            <dd>{{ membership.purchased_at.strftime('%-d %b %Y') }}</dd>
         </div>
-    </div>
+        <div>
+            <dt>Access ends</dt>
+            <dd>{{ membership.expires_at.strftime('%-d %b %Y') }}</dd>
+        </div>
+        <div>
+            <dt>Amount paid</dt>
+            <dd>${{ '%.0f' | format(membership.amount_paid_cents / 100) }} USD</dd>
+        </div>
+        {% if membership.founder_seat_number %}
+        <div class="bc-seat">
+            <dt>Founder seat</dt>
+            <dd>
+                <span class="bc-seat-num">#{{ membership.founder_seat_number }}</span>{% if seats_total %}<span class="bc-seat-of">of {{ seats_total }}</span>{% endif %}
+            </dd>
+        </div>
+        {% endif %}
+    </dl>
 
-    <div class="form-row">
-        <label>Purchased</label>
-        <div>{{ membership.purchased_at.strftime('%B %-d, %Y') }}</div>
-    </div>
+    <div class="bc-rule"></div>
 
-    <div class="form-row">
-        <label>Access ends</label>
-        <div>{{ membership.expires_at.strftime('%B %-d, %Y') }}</div>
-    </div>
-
-    {% if membership.founder_seat_number %}
-    <div class="form-row">
-        <label>Founder seat</label>
-        <div>#{{ membership.founder_seat_number }}</div>
-    </div>
-    {% endif %}
-
-    <div class="account-actions" style="margin-top:1.5rem;">
-        <form method="post" action="/account/billing/portal" data-sk-no-spa style="display:inline;">
-            <button type="submit" class="account-btn-primary">Manage billing</button>
+    <div class="bc-foot">
+        <p class="bc-foot-note">
+            Invoices, refunds, and payment method live in your Stripe billing portal. No auto-renewal.
+        </p>
+        <form method="post" action="/account/billing/portal" data-sk-no-spa style="margin:0;">
+            <button type="submit" class="bc-cta">Manage billing <span aria-hidden="true">→</span></button>
         </form>
     </div>
-    <p class="account-meta" style="margin-top:.75rem;">
-        Invoices and refund history live in your Stripe billing portal. There is no auto-renewal — your year of access ends on the date above.
-    </p>
 </div>
 {% else %}
-<div class="account-card">
+<div class="bc-empty">
     <p>You don't have a sudo membership yet.</p>
     <p class="account-meta">One payment buys a year. rwx 0day founder seats are limited.</p>
     <div class="account-actions" style="margin-top:1.5rem; justify-content: flex-start;">
