@@ -12,11 +12,13 @@ from typing import Annotated
 
 import stripe
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_skrift_db_session
 from smarter_dev.web.billing import webhooks as billing_webhooks
+from smarter_dev.web.models import StripeEventProcessed
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +71,32 @@ async def stripe_webhook(
     # plain nested dict at the boundary — downstream handlers can use normal
     # dict semantics without caring about the SDK surface.
     event_dict = event.to_dict()
+    event_id = event_dict.get("id")
+    event_type = event_dict.get("type") or ""
+
+    # Dedupe: Stripe delivers at-least-once. If we've already processed this
+    # event_id, return 200 fast — never run the side-effect handler twice.
+    if event_id:
+        record = StripeEventProcessed(event_id=event_id, type=event_type)
+        db_session.add(record)
+        try:
+            await db_session.flush()
+        except IntegrityError:
+            await db_session.rollback()
+            logger.info(
+                "Stripe event %s already processed; acknowledging duplicate.",
+                event_id,
+            )
+            return {"status": "ok", "duplicate": "true"}
 
     try:
         await billing_webhooks.dispatch(db_session, event_dict)
     except Exception:
-        logger.exception("Unhandled error dispatching Stripe event %s", event_dict.get("id"))
+        logger.exception("Unhandled error dispatching Stripe event %s", event_id)
         # Bubble up as 500 so Stripe will retry — we'd rather receive the
-        # event again than drop a paid checkout silently.
+        # event again than drop a paid checkout silently. The processed-row
+        # we inserted above rolls back with the session on the 500, so the
+        # retry will be allowed to attempt the handler again.
         raise
 
     return {"status": "ok"}

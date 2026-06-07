@@ -164,6 +164,7 @@ async def handle_checkout_session_completed(
     membership = SudoMembership(
         user_id=user_id,
         tier=tier,
+        source="one_time",
         stripe_customer_id=stripe_customer_id,
         stripe_checkout_session_id=checkout_session_id,
         stripe_payment_intent_id=payment_intent_id,
@@ -202,6 +203,7 @@ async def handle_charge_refunded(
         return
 
     record.refunded_at = datetime.now(tz=timezone.utc)
+    record.revoked_reason = "refund"
     await session.commit()
 
     await _revoke_role_for_tier(session, record.user_id, record.tier)

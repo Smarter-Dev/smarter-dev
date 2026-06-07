@@ -128,15 +128,31 @@ class UserProfile(Base):
 
 
 class SudoMembership(Base):
-    """One row per sudo membership purchase.
+    """One row per sudo membership lifecycle event for a user.
 
-    Each membership is a one-time, one-year purchase via Stripe Checkout in
-    ``payment`` mode — not a subscription. `user_id` is unique: a user holds
-    at most one membership row at a time. ``expires_at`` is set to one year
-    from purchase. Founder seats (rwx 0day only) are recorded via
-    ``founder_seat_number`` (1..N); once assigned the seat number is never
-    cleared, even on refund, so the inventory cap stays honored against
-    historical purchases.
+    Despite the name, this is now an append-only history table: a user can
+    have multiple rows over time (renewals, resubscribes after lapse,
+    comps). The "current" membership for a user is the latest non-revoked
+    row with ``expires_at > now()``; this invariant is enforced in app code,
+    not the DB, so revoked / lapsed history can coexist for the same
+    ``user_id``.
+
+    Sources:
+      - ``one_time``: Stripe Checkout ``mode=payment`` — the founder model.
+        ``expires_at`` advances on stacked renewals; ``stripe_subscription_id``
+        and ``will_renew`` are null.
+      - ``subscription``: Stripe Checkout ``mode=subscription``. ``expires_at``
+        mirrors ``current_period_end`` from the latest paid invoice;
+        ``will_renew`` mirrors ``cancel_at_period_end`` (messaging only).
+      - ``comp``: hand-issued. No Stripe IDs required.
+
+    ``revoked_reason`` distinguishes refund / dispute / admin clamps from
+    natural lapse (which has no reason set). ``refunded_at`` stays as a
+    timestamp companion specifically for refunds.
+
+    Founder seats (rwx 0day only) are recorded via ``founder_seat_number``
+    (1..N); once assigned the seat number is never cleared, even on refund,
+    so the inventory cap stays honored against historical purchases.
     """
 
     __tablename__ = "sudo_memberships"
@@ -145,6 +161,15 @@ class SudoMembership(Base):
             "tier IN ('read', 'write', 'execute')",
             name="ck_sudo_memberships_tier",
         ),
+        CheckConstraint(
+            "source IN ('one_time', 'subscription', 'comp')",
+            name="ck_sudo_memberships_source",
+        ),
+        CheckConstraint(
+            "revoked_reason IS NULL OR revoked_reason IN ('refund', 'dispute', 'admin')",
+            name="ck_sudo_memberships_revoked_reason",
+        ),
+        Index("ix_sudo_memberships_user_id", "user_id"),
         Index("ix_sudo_memberships_stripe_customer_id", "stripe_customer_id"),
         Index("ix_sudo_memberships_expires_at", "expires_at"),
     )
@@ -157,11 +182,15 @@ class SudoMembership(Base):
     user_id: Mapped[UUID] = mapped_column(
         PostgresUUID(as_uuid=True),
         nullable=False,
-        unique=True,
     )
     tier: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
+    )
+    source: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        server_default="one_time",
     )
     stripe_customer_id: Mapped[str] = mapped_column(
         String(64),
@@ -177,6 +206,11 @@ class SudoMembership(Base):
         nullable=True,
         unique=True,
     )
+    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(
+        String(128),
+        nullable=True,
+        unique=True,
+    )
     stripe_price_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
@@ -184,6 +218,10 @@ class SudoMembership(Base):
     amount_paid_cents: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
+    )
+    will_renew: Mapped[Optional[bool]] = mapped_column(
+        Boolean,
+        nullable=True,
     )
     purchased_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -196,6 +234,10 @@ class SudoMembership(Base):
     )
     refunded_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
+        nullable=True,
+    )
+    revoked_reason: Mapped[Optional[str]] = mapped_column(
+        String(16),
         nullable=True,
     )
     founder_seat_number: Mapped[Optional[int]] = mapped_column(
@@ -213,6 +255,37 @@ class SudoMembership(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class StripeEventProcessed(Base):
+    """Dedupe ledger for Stripe webhook events.
+
+    Stripe delivers webhooks at-least-once, so the router records every
+    successfully-verified event's ``id`` in this table before dispatching;
+    a duplicate ``event_id`` short-circuits the handler with a 200. Keeps
+    the table small by garbage-collecting old rows out-of-band (Stripe
+    will not retry events older than ~3 days).
+    """
+
+    __tablename__ = "stripe_events_processed"
+
+    event_id: Mapped[str] = mapped_column(
+        String(128),
+        primary_key=True,
+    )
+    type: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+    )
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        Index("ix_stripe_events_processed_processed_at", "processed_at"),
     )
 
 

@@ -68,8 +68,30 @@ async def _get_or_create_profile(
 async def _get_active_membership(
     db_session: AsyncSession, user_id: UUID
 ) -> SudoMembership | None:
+    """Return the currently-active membership for ``user_id`` (or the
+    most-recent non-revoked one if none is unexpired), else None.
+
+    ``sudo_memberships`` is now an append-only history table: a user can
+    accumulate rows from renewals / resubscribes / comps. The "active row"
+    invariant lives here, not in a DB constraint.
+
+    Preference order, all filtered by ``revoked_reason IS NULL``:
+      1. Latest row with ``expires_at > now()``.
+      2. Otherwise the most recently expired row (so the billing page can
+         show "expired — renew at founder rate" instead of looking empty).
+    """
+    from datetime import datetime, timezone
+
+    now = datetime.now(tz=timezone.utc)
     result = await db_session.execute(
-        select(SudoMembership).where(SudoMembership.user_id == user_id)
+        select(SudoMembership)
+        .where(SudoMembership.user_id == user_id)
+        .where(SudoMembership.revoked_reason.is_(None))
+        .order_by(
+            (SudoMembership.expires_at > now).desc(),
+            SudoMembership.expires_at.desc(),
+        )
+        .limit(1)
     )
     return result.scalar_one_or_none()
 
