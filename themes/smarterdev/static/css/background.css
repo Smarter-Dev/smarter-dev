@@ -6,6 +6,14 @@
   position: fixed;
   inset: 0;
   z-index: 0;
+  /* Decorative only — never the right-click target. Without this, browsers
+     treat the static PNG (under prefers-reduced-motion) as an image and offer
+     "Save Image As / Copy Image" on right-click. With pointer-events:none, the
+     bg is invisible to pointer interaction and right-clicks fall through to
+     the page underneath. mousemove warp still works because the canvas
+     listeners are bound to `window`, not to #bg. */
+  pointer-events: none;
+  user-select: none;
 }
 
 /* Reduced motion: paint the pre-rendered hex-warp PNG on the #bg element
