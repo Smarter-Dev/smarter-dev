@@ -236,3 +236,57 @@ async def converge(session: AsyncSession, user_id: UUID) -> dict[str, list[str]]
                     user_id, discord_user_id, added, removed,
                 )
             return {"added": added, "removed": removed}
+
+
+async def strip_discord_roles(discord_user_id: str) -> dict[str, list[str]]:
+    """Strip every managed sudo role from a Discord member.
+
+    Used by the unlink flow: when a user disconnects their Discord
+    account, we don't have a site user to converge against any more, so
+    we forcibly remove all managed roles from the abandoned Discord ID.
+    Roles outside the managed set are untouched. Returns ``{"removed": [...]}``.
+    """
+    cfg = await catalog.get_discord_config()
+    token = _bot_token()
+    if cfg is None or not token:
+        return {"removed": []}
+
+    guild_id = cfg["guild_id"]
+    managed_ids: set[str] = {cfg["base_role_id"], *cfg["role_ids_by_tier"].values()}
+    for extras in (cfg.get("extra_role_ids_by_tier") or {}).values():
+        managed_ids.update(extras)
+
+    reason = _audit_reason("sudo converge: link unlinked")
+    async with await _lock_for(discord_user_id):
+        async with httpx.AsyncClient(
+            base_url="https://discord.com/api/v10",
+            headers={"Authorization": f"Bot {token}"},
+            timeout=10.0,
+        ) as client:
+            try:
+                current = await _fetch_member_roles(client, guild_id, discord_user_id)
+            except httpx.HTTPError as exc:
+                logger.warning(
+                    "strip_discord_roles: failed to fetch member %s: %s",
+                    discord_user_id, exc,
+                )
+                return {"removed": []}
+            if current is None:
+                return {"removed": []}
+
+            removed: list[str] = []
+            for role_id in current & managed_ids:
+                try:
+                    await _remove_role(client, guild_id, discord_user_id, role_id, reason)
+                    removed.append(role_id)
+                except httpx.HTTPError as exc:
+                    logger.warning(
+                        "strip_discord_roles: remove %s from %s failed: %s",
+                        role_id, discord_user_id, exc,
+                    )
+            if removed:
+                logger.info(
+                    "strip_discord_roles: discord=%s removed=%s",
+                    discord_user_id, removed,
+                )
+            return {"removed": removed}

@@ -124,6 +124,50 @@
     max-width: 38ch;
     margin: 0;
 }
+
+/* "Connect your Discord" banner — only shown when the user has an
+   active sudo membership but no linked Discord OAuth account. */
+.bc-discord-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-top: 1.25rem;
+    padding: 1rem 1.15rem;
+    background: rgba(88,101,242,.08);
+    border: 1px solid rgba(88,101,242,.32);
+    border-left: 3px solid #5865F2;
+}
+.bc-discord-link .bdl-body {
+    color: var(--white);
+    font-size: .9rem;
+    line-height: 1.45;
+    margin: 0;
+    max-width: 46ch;
+}
+.bc-discord-link .bdl-body em {
+    color: var(--mid);
+    font-style: normal;
+    font-size: .8rem;
+    display: block;
+    margin-top: .25rem;
+}
+.bc-discord-link .bdl-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .65rem 1.1rem;
+    background: #5865F2;
+    color: #fff;
+    border: none;
+    font-family: var(--heading);
+    font-size: .68rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    text-decoration: none;
+}
+.bc-discord-link .bdl-cta:hover { background: #4651c4; }
 .bc-cta {
     display: inline-flex;
     align-items: center;
@@ -204,6 +248,18 @@
     </dl>
 
     <div class="bc-rule"></div>
+
+    {% if _state == 'active' and not has_discord_link %}
+    <div class="bc-discord-link" role="status">
+        <p class="bdl-body">
+            Connect your Discord to receive your sudo roles in the server.
+            <em>Sign in with Discord once — we'll grant the founder roles automatically.</em>
+        </p>
+        <a class="bdl-cta" href="/auth/discord/login?next=/account/billing" data-sk-no-spa>
+            Connect Discord <span aria-hidden="true">→</span>
+        </a>
+    </div>
+    {% endif %}
 
     <div class="bc-foot">
         <p class="bc-foot-note">
