@@ -1638,6 +1638,18 @@ async def run_bot() -> None:
                 f"Failed to cleanup stale data for user {user_id} in guild {guild_id}: {e}"
             )
 
+        # Trigger sudo converge so any active membership re-projects its
+        # Discord roles for this user. No-op (linked=False) if the joining
+        # member has no linked site account.
+        try:
+            await api_client.post(
+                "/sudo/converge", json_data={"discord_user_id": user_id}
+            )
+        except Exception as e:
+            logger.warning(
+                f"sudo converge call failed for user {user_id}: {e}"
+            )
+
     # Audit log event listeners
     @bot.listen()
     async def on_ban_create(event: hikari.BanCreateEvent) -> None:

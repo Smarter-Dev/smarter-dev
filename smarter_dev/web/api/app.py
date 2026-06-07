@@ -415,6 +415,9 @@ api.include_router(advent_of_code_router, tags=["Advent of Code"])
 
 api.include_router(stripe_webhooks_router)
 
+from smarter_dev.web.api.routers.sudo_converge import router as sudo_converge_router  # noqa: E402
+api.include_router(sudo_converge_router, tags=["Sudo Converge"])
+
 
 
 
