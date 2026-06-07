@@ -29,6 +29,7 @@ from smarter_dev.web.feature_flags_admin import SEEDED_FLAGS
 from smarter_dev.web.models import CampaignSignup
 
 import smarter_dev.web.roles  # noqa: F401  — registers custom Skrift roles at import time
+import smarter_dev.web.hooks_sudo  # noqa: F401  — registers Skrift action hooks for sudo converge
 
 logger = logging.getLogger(__name__)
 

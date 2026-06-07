@@ -228,6 +228,16 @@ class BillingController(Controller):
         if membership and membership.expires_at:
             from datetime import datetime, timezone as _tz
             membership_expired = membership.expires_at < datetime.now(_tz.utc)
+        # Has the user linked a Discord OAuth account? Drives a small
+        # "connect your Discord to receive in-server roles" prompt on the
+        # billing card when they have an active membership but no link.
+        discord_link_q = await db_session.execute(
+            select(OAuthAccount.provider_account_id)
+            .where(OAuthAccount.user_id == user.id)
+            .where(OAuthAccount.provider == "discord")
+            .limit(1)
+        )
+        has_discord_link = discord_link_q.first() is not None
         settings = get_settings()
         return TemplateResponse(
             "account/billing.html",
@@ -235,6 +245,7 @@ class BillingController(Controller):
                 "user": user,
                 "membership": membership,
                 "membership_expired": membership_expired,
+                "has_discord_link": has_discord_link,
                 "seats_total": settings.sudo_founder_seat_limit,
                 "active_tab": "billing",
                 "flash_messages": get_flash_messages(request),
