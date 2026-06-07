@@ -206,12 +206,14 @@ class BillingController(Controller):
         if membership and membership.expires_at:
             from datetime import datetime, timezone as _tz
             membership_expired = membership.expires_at < datetime.now(_tz.utc)
+        settings = get_settings()
         return TemplateResponse(
             "account/billing.html",
             context={
                 "user": user,
                 "membership": membership,
                 "membership_expired": membership_expired,
+                "seats_total": settings.sudo_founder_seat_limit,
                 "active_tab": "billing",
                 "flash_messages": get_flash_messages(request),
             },
