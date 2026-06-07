@@ -93,6 +93,35 @@ _TIERS: dict[str, dict] = {
 }
 
 
+# Tier slug → env var holding that tier's Discord role ID.
+_TIER_TO_DISCORD_ROLE_ENV = {
+    "r":   "SUDO_DISCORD_R_ROLE_ID",
+    "rw":  "SUDO_DISCORD_W_ROLE_ID",
+    "rwx": "SUDO_DISCORD_X_ROLE_ID",
+}
+
+
+def _discord_metadata(slug: str) -> dict[str, str]:
+    """Pull the Discord guild + role IDs for this tier from env, if present.
+
+    All four are optional independently — converge will skip the Discord
+    projection until they're all populated. Empty values are omitted so we
+    don't clobber existing metadata on Stripe with blanks.
+    """
+    out: dict[str, str] = {}
+    guild = os.environ.get("SUDO_DISCORD_GUILD_ID", "").strip()
+    base = os.environ.get("SUDO_DISCORD_BASE_ROLE_ID", "").strip()
+    tier_env = _TIER_TO_DISCORD_ROLE_ENV.get(slug, "")
+    tier_role = os.environ.get(tier_env, "").strip() if tier_env else ""
+    if guild:
+        out["discord_guild_id"] = guild
+    if base:
+        out["discord_base_role_id"] = base
+    if tier_role:
+        out["discord_role_id"] = tier_role
+    return out
+
+
 def main() -> int:
     key = os.environ.get("STRIPE_SECRET_KEY")
     if not key:
@@ -109,13 +138,18 @@ def main() -> int:
         if slug is None:
             continue
         spec = _TIERS[slug]
+        metadata = {**spec["metadata"], **_discord_metadata(slug)}
         stripe.Product.modify(
             product.id,
             description=spec["description"],
-            metadata=spec["metadata"],
+            metadata=metadata,
             marketing_features=[{"name": f} for f in spec["features"]],
         )
-        print(f"seeded {slug:>3} → {product.id} ({amount/100:.0f} USD)")
+        discord_keys = ", ".join(
+            k for k in ("discord_guild_id", "discord_base_role_id", "discord_role_id")
+            if k in metadata
+        ) or "(no Discord metadata set)"
+        print(f"seeded {slug:>3} → {product.id} ({amount/100:.0f} USD) [{discord_keys}]")
         seeded += 1
 
     print(f"done — {seeded}/3 tiers seeded")
