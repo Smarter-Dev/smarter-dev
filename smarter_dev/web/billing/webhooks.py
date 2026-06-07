@@ -223,6 +223,66 @@ async def handle_charge_refunded(
         logger.exception("converge failed after refund for user %s", record.user_id)
 
 
+async def handle_charge_dispute_created(
+    session: AsyncSession, event_data: dict[str, Any]
+) -> None:
+    """Handle ``charge.dispute.created`` — clamp access immediately.
+
+    A chargeback dispute means the cardholder is challenging the charge.
+    Per spec we clamp ``expires_at`` to now, mark the row with
+    ``revoked_reason='dispute'``, and converge to strip Discord roles
+    before the outcome is decided. If we ultimately win the dispute, the
+    restore is a manual support action.
+    """
+    dispute = event_data["object"]
+    payment_intent_id = dispute.get("payment_intent")
+    if not payment_intent_id:
+        return
+
+    record = await _get_by_payment_intent(session, payment_intent_id)
+    if record is None:
+        logger.info(
+            "charge.dispute.created for unknown payment_intent %s; ignoring.",
+            payment_intent_id,
+        )
+        return
+
+    if record.revoked_reason == "dispute":
+        return  # already handled
+
+    record.revoked_reason = "dispute"
+    record.expires_at = datetime.now(tz=timezone.utc)
+    await session.commit()
+
+    await _revoke_role_for_tier(session, record.user_id, record.tier)
+    await session.commit()
+
+    try:
+        await converge(session, record.user_id)
+    except Exception:
+        logger.exception("converge failed after dispute for user %s", record.user_id)
+
+
+async def handle_charge_dispute_closed(
+    session: AsyncSession, event_data: dict[str, Any]
+) -> None:
+    """Handle ``charge.dispute.closed`` — log only.
+
+    Spec: dispute outcomes are a judgment call. A "won" dispute means we
+    keep the money, but restoring access for a customer who disputed and
+    lost is a manual decision; an automation that auto-restored would
+    re-grant roles to bad-faith disputers. Log here so support can act
+    on it from the dashboard.
+    """
+    dispute = event_data["object"]
+    status_ = dispute.get("status")
+    pi = dispute.get("payment_intent")
+    logger.info(
+        "charge.dispute.closed status=%s payment_intent=%s — manual review.",
+        status_, pi,
+    )
+
+
 async def expire_lapsed_memberships(session: AsyncSession) -> int:
     """Revoke roles for any memberships whose ``expires_at`` has passed.
 
@@ -234,6 +294,7 @@ async def expire_lapsed_memberships(session: AsyncSession) -> int:
         select(SudoMembership).where(
             SudoMembership.expires_at < now,
             SudoMembership.refunded_at.is_(None),
+            SudoMembership.revoked_reason.is_(None),
         )
     )
     expired = 0
@@ -257,9 +318,55 @@ async def expire_lapsed_memberships(session: AsyncSession) -> int:
     return expired
 
 
+async def drift_restore_active(session: AsyncSession) -> int:
+    """Re-converge every active membership.
+
+    This is the drift-heal loop: if anyone manually pulled a sudo role off
+    a Discord member, if the bot was down when a webhook fired, or if the
+    Skrift role got rolled back, converge will re-apply the desired set on
+    the next sweep. Idempotent for already-correct members (no-op writes).
+    Returns the number of user_ids converged.
+    """
+    now = datetime.now(tz=timezone.utc)
+    result = await session.execute(
+        select(SudoMembership.user_id)
+        .where(SudoMembership.expires_at > now)
+        .where(SudoMembership.revoked_reason.is_(None))
+        .distinct()
+    )
+    user_ids = [row[0] for row in result.all()]
+    for uid in user_ids:
+        try:
+            await converge(session, uid)
+        except Exception:
+            logger.exception("drift-restore converge failed for user %s", uid)
+    return len(user_ids)
+
+
+async def run_daily_sweep(session: AsyncSession) -> dict[str, int]:
+    """Expire lapsed memberships + drift-restore the active set.
+
+    Returns a small summary dict for logging. Safe to run repeatedly: the
+    expiry path is idempotent (revoked_reason becomes set), and converge
+    is idempotent for already-correct members.
+    """
+    expired = await expire_lapsed_memberships(session)
+    converged = await drift_restore_active(session)
+    logger.info(
+        "sudo daily sweep done: expired=%d, drift-restored=%d",
+        expired, converged,
+    )
+    return {"expired": expired, "drift_restored": converged}
+
+
 _HANDLERS = {
     "checkout.session.completed": handle_checkout_session_completed,
+    # Async-payment methods (ACH etc.) deliver this when the funds clear.
+    # Same handler — the fulfillment path is keyed on the checkout session.
+    "checkout.session.async_payment_succeeded": handle_checkout_session_completed,
     "charge.refunded": handle_charge_refunded,
+    "charge.dispute.created": handle_charge_dispute_created,
+    "charge.dispute.closed": handle_charge_dispute_closed,
 }
 
 

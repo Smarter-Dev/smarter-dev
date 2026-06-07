@@ -21,6 +21,7 @@ jobs:
         TAG=$(echo $GITHUB_SHA | head -c7)
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-bot.yaml
+        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/cron-sudo-sweep.yaml
 
     - name: Install doctl
       uses: digitalocean/action-doctl@v2
@@ -59,6 +60,7 @@ jobs:
         kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy-bot.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/site.yaml
+        kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-sudo-sweep.yaml
 
     - name: Verify web deployment
       run: kubectl rollout status deployment/smarter-dev-website
