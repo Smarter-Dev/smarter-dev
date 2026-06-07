@@ -76,10 +76,10 @@ async def vibe_courses(db_session: AsyncSession) -> Template:
     stay_current = [p for p in payload.people if p.platform in _STAY_CURRENT_PLATFORMS]
 
     description = (
-        "Tutorials, courses, and notes on building software with AI coding "
-        "agents. Covers Claude Code, Cursor, Codex, Copilot, Lovable, and "
-        "more. Also known as AI-assisted development, pair programming, "
-        "agent mode, or vibe coding."
+        "Tutorials, courses, and notes on Claude Code, Cursor, Codex, "
+        "Copilot, Lovable, and the rest of this generation of coding "
+        "tools. Also known as pair programming, agent mode, or vibe "
+        "coding."
     )
 
     return Template(
@@ -104,7 +104,7 @@ async def vibe_courses(db_session: AsyncSession) -> Template:
                 "robots": "index,follow",
             },
             "og_meta": {
-                "title": "Building Software with AI Agents: A Curated Index",
+                "title": "Building Software with AI Agents: An Index",
                 "description": description,
                 "url": "https://smarter.dev/resources/agentic-coding-courses",
                 "site_name": "Smarter Dev",

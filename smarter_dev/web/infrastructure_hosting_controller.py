@@ -1,6 +1,6 @@
 """Controller for /resources/infrastructure-hosting.
 
-Renders the curated content loaded from the DB (see ``resources_data``).
+Renders the content loaded from the DB (see ``resources_data``).
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ async def infrastructure_hosting(db_session: AsyncSession) -> Template:
         raise NotFoundException()
 
     description = (
-        "A curated index of writing, courses, and tutorials on hosting "
+        "An index of writing, courses, and tutorials on hosting "
         "modern systems: cloud providers, PaaS, managed data services, "
         "containers, orchestration, networking, and the rest of the "
         "production substrate."
@@ -43,7 +43,7 @@ async def infrastructure_hosting(db_session: AsyncSession) -> Template:
                 "robots": "index,follow",
             },
             "og_meta": {
-                "title": "Hosting Modern Systems: A Curated Index",
+                "title": "Hosting Modern Systems: An Index",
                 "description": description,
                 "url": "https://smarter.dev/resources/infrastructure-hosting",
                 "site_name": "Smarter Dev",

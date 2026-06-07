@@ -144,7 +144,7 @@ class SudoController(Controller):
                         ],
                     },
                     {
-                        "head": "LABS",
+                        "head": "THE LAB",
                         "eta": "after Gym",
                         "body": "Guided agentic coding environments. Using real coding agents, run in cloud-hosted workspaces accessible from any browser, with the lesson sitting alongside the agent terminal.",
                         "bullets": [
@@ -165,11 +165,11 @@ class SudoController(Controller):
                     },
                     {
                         "q": "Where does my annual tier's money actually go?",
-                        "a": "Cloud infrastructure to run the website, Discord bot, RunHacks, and the agentic workspaces in Labs. Development time on Gym curriculum and the Labs environments.",
+                        "a": "Cloud infrastructure to run the website, Discord bot, RunHacks, and the agentic workspaces in the Lab. Development time on Gym curriculum and the Lab environments.",
                     },
                     {
-                        "q": "What if you can't ship Gym or Labs on time?",
-                        "a": "Honest answer: it's a risk we all take. We've scoped Gym and Labs to what we believe we can build in Q3 and Q4 with founder runway, but software ships when it's ready. If we slip, we slip publicly and your year of access keeps running. The refund policy applies for the first 14 days and prorates after that.",
+                        "q": "What if you can't ship Gym or the Lab on time?",
+                        "a": "Honest answer: it's a risk we all take. We've scoped Gym and the Lab to what we believe we can build in Q3 and Q4 with founder runway, but software ships when it's ready. If we slip, we slip publicly and your year of access keeps running. The refund policy applies for the first 14 days and prorates after that.",
                     },
                     {
                         "q": "Is this a subscription?",

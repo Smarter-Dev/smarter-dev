@@ -1,6 +1,6 @@
 """Controller for /resources/production-operations.
 
-Renders the curated content loaded from the DB (see ``resources_data``).
+Renders the content loaded from the DB (see ``resources_data``).
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ async def production_operations(db_session: AsyncSession) -> Template:
         raise NotFoundException()
 
     description = (
-        "A curated index of writing, courses, and tutorials on running "
+        "An index of writing, courses, and tutorials on running "
         "modern systems in production: observability, incident response, "
         "performance, identity, secrets, and network security."
     )
@@ -42,7 +42,7 @@ async def production_operations(db_session: AsyncSession) -> Template:
                 "robots": "index,follow",
             },
             "og_meta": {
-                "title": "Running Modern Systems: A Curated Index",
+                "title": "Running Modern Systems: An Index",
                 "description": description,
                 "url": "https://smarter.dev/resources/production-operations",
                 "site_name": "Smarter Dev",

@@ -1,6 +1,6 @@
 """Controller for /resources/system-architecture.
 
-Renders the curated content loaded from the DB (see ``resources_data``).
+Renders the content loaded from the DB (see ``resources_data``).
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ async def system_architecture(db_session: AsyncSession) -> Template:
         raise NotFoundException()
 
     description = (
-        "A curated index of writing, courses, and tutorials on architecting "
+        "An index of writing, courses, and tutorials on architecting "
         "modern systems: how to choose between databases, queues, caches, "
         "search engines, APIs, and the rest of the data and integration stack."
     )
@@ -42,7 +42,7 @@ async def system_architecture(db_session: AsyncSession) -> Template:
                 "robots": "index,follow",
             },
             "og_meta": {
-                "title": "Architecting Modern Systems: A Curated Index",
+                "title": "Architecting Modern Systems: An Index",
                 "description": description,
                 "url": "https://smarter.dev/resources/system-architecture",
                 "site_name": "Smarter Dev",
