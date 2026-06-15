@@ -17,8 +17,9 @@ from smarter_dev.bot.agents.chat_models import (
     FollowupAgentInput,
     InitialAgentInput,
     Message,
-    NoResponse,
-    SendResponse,
+    MessageScore,
+    ResponseBody,
+    TurnDecision,
 )
 from smarter_dev.bot.agents.chat_tools import ChatDeps
 from smarter_dev.bot.agents.forum_agent import ForumMonitorAgent
@@ -36,8 +37,9 @@ __all__ = [
     "Author",
     "ChannelInfo",
     "Message",
-    "NoResponse",
-    "SendResponse",
+    "MessageScore",
+    "ResponseBody",
+    "TurnDecision",
     "HelpAgent",
     "TLDRAgent",
     "ForumMonitorAgent",

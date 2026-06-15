@@ -50,7 +50,7 @@ from smarter_dev.bot.agents.chat_context import (
     build_initial_input,
 )
 from smarter_dev.bot.agents.chat_input_format import build_agent_call
-from smarter_dev.bot.agents.chat_models import NoResponse, SendResponse
+from smarter_dev.bot.agents.chat_models import ResponseBody, TurnDecision
 from smarter_dev.bot.agents.chat_tools import ChatDeps
 from smarter_dev.bot.services.chat_conversation_persistence import (
     end_engagement,
@@ -434,10 +434,12 @@ class ChannelEngine:
             output = result.output
             tokens = _extract_tokens(result.usage())
             logger.info(
-                "[%s] Chat agent returned kind=%s continue_watching=%s tokens=%s",
+                "[%s] Chat agent returned response=%s continue_watching=%s "
+                "max_score=%s tokens=%s",
                 request_id,
-                output.kind,
+                "yes" if output.response is not None else "no",
                 output.continue_watching,
+                max((r.score for r in output.rankings), default=None),
                 tokens,
             )
 
@@ -483,7 +485,7 @@ class ChannelEngine:
                         turn_kind="initial" if first_activation else "followup",
                         output_kind=(
                             "send_response"
-                            if isinstance(output, SendResponse)
+                            if output.response is not None
                             else "no_response"
                         ),
                         triggering_messages=triggering,
@@ -526,7 +528,7 @@ class ChannelEngine:
         await self._maybe_refire()
 
     async def _apply_output(
-        self, output: NoResponse | SendResponse
+        self, output: TurnDecision
     ) -> _TurnDispatchOutcome:
         """Write memory + dispatch sends. Returns the dispatch outcome so the
         engine can persist the turn BEFORE finalising any deactivation."""
@@ -534,17 +536,18 @@ class ChannelEngine:
         outcome = _TurnDispatchOutcome()
 
         await memory.write_topic(self.channel_id, output.topic)
-
-        if isinstance(output, SendResponse):
-            self.consecutive_no_response = 0
-            self.last_sent_at = datetime.now(UTC)
+        if output.notes is not None:
             try:
                 await memory.write_notes(self.channel_id, output.notes)
             except Exception:
                 logger.exception(
                     "Failed to persist chat notes for channel %s", self.channel_id
                 )
-            outcome.voice = await self._send(output)
+
+        if output.response is not None:
+            self.consecutive_no_response = 0
+            self.last_sent_at = datetime.now(UTC)
+            outcome.voice = await self._send(output.response)
         else:
             self.consecutive_no_response += 1
             if self.consecutive_no_response >= MAX_NO_RESPONSE_TURNS:
@@ -556,18 +559,22 @@ class ChannelEngine:
 
         return outcome
 
-    async def _send(self, output: SendResponse) -> _VoiceOutcome | None:
+    async def _send(self, body: ResponseBody) -> _VoiceOutcome | None:
         """Dispatch the agent's send outputs.
 
         Returns the voice outcome (sent_ok + usage + error) when voice was
         attempted, None otherwise — so the engine can record it on the turn.
         """
         reply_to: int | None = None
-        if output.reply_to_message_id and output.reply_to_message_id.isdigit():
-            reply_to = int(output.reply_to_message_id)
+        if (
+            body.reply_directly
+            and body.target_message_id
+            and body.target_message_id.isdigit()
+        ):
+            reply_to = int(body.target_message_id)
 
-        has_text = bool(output.message and output.message.strip())
-        has_voice = bool(output.voice_summary and output.voice_summary.strip())
+        has_text = bool(body.message and body.message.strip())
+        has_voice = bool(body.voice_summary and body.voice_summary.strip())
 
         text_ok = True
         voice_outcome: _VoiceOutcome | None = None
@@ -577,11 +584,11 @@ class ChannelEngine:
 
         # Dispatch in parallel; capture each result independently.
         async def _text_runner() -> bool:
-            return await self._send_text(output.message, reply_to)
+            return await self._send_text(body.message, reply_to)
 
         async def _voice_runner() -> _VoiceOutcome:
             return await self._send_voice(
-                output.voice_summary, reply_to, output.voice_instruction
+                body.voice_summary, reply_to, body.voice_instruction
             )
 
         tasks: dict[str, asyncio.Task] = {}

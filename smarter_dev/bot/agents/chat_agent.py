@@ -10,7 +10,7 @@ Usage:
         user_prompt=render_input_xml(agent_input),
         deps=ChatDeps(bot=bot, channel_id=ch, guild_id=g),
     )
-    output = result.output  # NoResponse | SendResponse
+    output = result.output  # TurnDecision (response: ResponseBody | None)
 """
 
 from __future__ import annotations

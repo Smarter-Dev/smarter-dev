@@ -266,23 +266,36 @@
     {% endif %}
 
     {# agent output #}
+    {% if turn.agent_output.rankings %}
+    <div class="cc-rankings">
+        🧮 <strong>rankings</strong>:
+        {% for r in turn.agent_output.rankings %}
+        <span class="cc-tag" title="{{ r.reasoning }}">msg {{ r.message_id }} → {{ r.score }}/10</span>
+        {% endfor %}
+    </div>
+    {% endif %}
     {% if turn.output_kind == 'no_response' %}
     <div class="cc-no-response">
-        🔇 <strong>NoResponse</strong> · topic: "{{ turn.agent_output.topic }}"
+        🔇 <strong>No response</strong> · topic: "{{ turn.agent_output.topic }}"
         {% if not turn.agent_output.continue_watching %}· <em>continue_watching=False</em>{% endif %}
     </div>
     {% else %}
     <div class="cc-agent-msg">
-        <div class="cc-meta">🤖 <strong>agent</strong> · {{ turn.chat_model_name or '—' }}</div>
-        {% if turn.agent_output.message %}
-        <div class="cc-body">{{ turn.agent_output.message }}</div>
+        <div class="cc-meta">🤖 <strong>agent</strong> · {{ turn.chat_model_name or '—' }}
+            {% if turn.agent_output.response and turn.agent_output.response.target_message_id %}
+            · target: msg {{ turn.agent_output.response.target_message_id }}
+            {% if turn.agent_output.response.reply_directly %}(as reply){% endif %}
+            {% endif %}
+        </div>
+        {% if turn.agent_output.response and turn.agent_output.response.message %}
+        <div class="cc-body">{{ turn.agent_output.response.message }}</div>
         {% endif %}
 
-        {% if turn.agent_output.voice_summary %}
+        {% if turn.agent_output.response and turn.agent_output.response.voice_summary %}
         <div class="cc-voice">
-            🔊 <strong>voice_summary</strong>: <span class="quote">"{{ turn.agent_output.voice_summary }}"</span>
-            {% if turn.agent_output.voice_instruction %}
-            <div class="cc-meta">instruction: {{ turn.agent_output.voice_instruction }}</div>
+            🔊 <strong>voice_summary</strong>: <span class="quote">"{{ turn.agent_output.response.voice_summary }}"</span>
+            {% if turn.agent_output.response.voice_instruction %}
+            <div class="cc-meta">instruction: {{ turn.agent_output.response.voice_instruction }}</div>
             {% endif %}
             <div class="cc-meta">
                 {% if turn.voice_sent_ok %}sent OK{% elif turn.voice_sent_ok is false %}send failed: {{ turn.voice_send_error or 'unknown' }}{% endif %}

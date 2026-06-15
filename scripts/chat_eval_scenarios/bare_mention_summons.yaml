@@ -1,0 +1,29 @@
+# Alice asks a question in the channel; Bob doesn't know but @mentions the bot
+# (with no other content) to summon it. Expected: SendResponse that answers
+# Alice's original question — the bot has to infer from context that Bob is
+# pointing it at the unanswered question above.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "dev-help"
+
+authors:
+  - user_id: "1"
+    username: "alice"
+  - user_id: "2"
+    username: "bob"
+
+history:
+  - id: "50"
+    from: "1"
+    body: "what's the right way to handle CancelledError inside a TaskGroup? do I re-raise or swallow it?"
+
+trigger:
+  id: "51"
+  from: "2"
+  body: "@smarterbot"
+  mentions_bot: true

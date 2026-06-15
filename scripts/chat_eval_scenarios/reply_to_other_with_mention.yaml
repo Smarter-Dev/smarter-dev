@@ -1,0 +1,40 @@
+# Bob and Alice are debating async patterns. Carol Discord-replies to Bob's
+# claim AND @mentions the bot, asking the bot to weigh in on Bob's specific
+# message. Expected: SendResponse — the @-mention directs attention to Bob's
+# message even though the reply target is another user, not the bot.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "dev-help"
+
+authors:
+  - user_id: "1"
+    username: "alice"
+  - user_id: "2"
+    username: "bob"
+  - user_id: "3"
+    username: "carol"
+
+history:
+  - id: "40"
+    from: "1"
+    body: "I always reach for asyncio.gather for fan-out"
+  - id: "41"
+    from: "2"
+    body: "gather is fine but TaskGroup is the modern answer — better cancellation semantics, structured concurrency"
+    reply_to: "40"
+  - id: "42"
+    from: "1"
+    body: "is that true though? gather works for everything I've needed"
+    reply_to: "41"
+
+trigger:
+  id: "43"
+  from: "3"
+  body: "@smarterbot is that right?"
+  reply_to: "41"
+  mentions_bot: true

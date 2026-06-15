@@ -7,7 +7,7 @@ Input and output shapes for the single chat agent that handles all
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Literal, Union
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -183,129 +183,236 @@ class BlogTopicCandidate(BaseModel):
     )
 
 
-class NoResponse(BaseModel):
-    """Agent decided not to send a message this turn."""
+class MessageScore(BaseModel):
+    """Per-message engagement score for a single new `<message>` this turn.
 
-    kind: Literal["no_response"] = "no_response"
-    continue_watching: bool = Field(
-        default=True,
-        description=(
-            "Stay engaged so future messages will trigger you. Set False only "
-            "if the engagement is genuinely over (user dismissed you, "
-            "conversation ran its course)."
-        ),
-    )
-    topic: str = Field(
-        description="1-2 sentence summary of the current conversation topic.",
-    )
-    blog_topic_candidates: list[BlogTopicCandidate] = Field(
-        default_factory=list,
-        description=(
-            "Blog-post ideas filed this turn. See the system prompt for the "
-            "rules; the schema doesn't bias the count."
-        ),
-    )
-
-
-class SendResponse(BaseModel):
-    """Agent decided to send something this turn.
-
-    Text and voice are independent channels — set ``message`` for a Discord text
-    message, ``voice_summary`` for a voice message, or both for both. At least
-    one must be non-empty.
+    Forces the agent to explicitly classify each new message before
+    deciding whether (and what) to respond. Without this step the model
+    tends to chime in on conversations it wasn't invited to.
     """
 
-    kind: Literal["send_response"] = "send_response"
-    reply_to_message_id: str | None = Field(
-        default=None,
+    message_id: str = Field(
+        description="Discord message id this score refers to. Must match a `<message>` in this turn's input.",
+    )
+    score: int = Field(
+        ge=1,
+        le=10,
         description=(
-            "Only set when answering a message that is NOT the most recent one "
-            "or two in your input. Setting it on the latest message just renders "
-            "a redundant reply pointer back to the message right above yours, "
-            "which looks noisy. Use it to disambiguate when you're answering an "
-            "older question that's drifted up in the channel; leave None for "
-            "replies to the freshest message."
+            "1-10 score for how strongly this message was intended for "
+            "YOU to respond to. Anchor points: "
+            "10 = explicit direct address (@mention, reply-to-self with a "
+            "clear question); "
+            "7-9 = clearly your turn (continuation of an exchange you were "
+            "having, or @mention without a direct question); "
+            "5-6 = arguably for you, you could go either way; "
+            "3-4 = related to your context but not actually addressed to "
+            "you (a user replying to another user about a topic you helped "
+            "with); "
+            "1-2 = clearly NOT for you (unrelated banter, two users "
+            "talking to each other, bystander observation)."
+        ),
+    )
+    reasoning: str = Field(
+        description=(
+            "ONE sentence justifying the score in plain language. Cite the "
+            "attribute(s) you used (e.g. 'has mentions-bot=true', "
+            "'reply-to-user-id=2, not me', 'continues exchange with the "
+            "self=true message above')."
+        ),
+    )
+
+
+class ResponseBody(BaseModel):
+    """The actual message the agent wants to send this turn.
+
+    Populated on a `TurnDecision` only when the agent decides to respond
+    (at least one `MessageScore.score >= 5`). At least one of
+    ``message`` or ``voice_summary`` must be non-empty.
+    """
+
+    target_message_id: str = Field(
+        description=(
+            "The message id this response is answering. MUST be the id of "
+            "a `MessageScore` entry in this turn's rankings with "
+            "`score >= 5`. Pick the highest-scoring one when several "
+            "qualify."
+        ),
+    )
+    reply_directly: bool = Field(
+        default=False,
+        description=(
+            "True → send as a Discord reply that points at "
+            "`target_message_id` (a visible reply pointer in the UI). "
+            "Use this when the conversation has drifted and a plain "
+            "channel message would lose the connection (e.g. several "
+            "messages have arrived since the one you're answering). "
+            "Default False: send as a regular channel message — clean "
+            "and natural when you're answering the freshest message and "
+            "your reply will land directly under it anyway."
         ),
     )
     message: str | None = Field(
         default=None,
         description=(
-            "Plain-text message body to post to Discord. Leave None if the user "
-            "only wanted a voice reply."
+            "Plain-text message body to post to Discord. Leave None if "
+            "the user only wanted a voice reply."
         ),
     )
     voice_summary: str | None = Field(
         default=None,
         description=(
-            "Short, spoken-style SUMMARY to send as a Discord voice message via "
-            "TTS. Default to None. Only set when ONE of these is true: (a) the "
-            "user explicitly asked for voice in the message you're responding to "
-            "RIGHT NOW (a previous voice exchange does NOT carry forward), (b) "
-            "voice is genuinely the best medium for this specific answer (e.g. "
-            "pronouncing a word, demonstrating intonation), or (c) the bit lands "
-            "better spoken — a one-line zinger / punchline where the surprise "
-            "IS the audio; in that case send ONLY voice_summary, no message. "
-            "Otherwise leave None and use `message`. Voice should be a few "
-            "sentences max, never paragraphs / code / long-form. If the reply "
-            "needs detail AND voice was requested, set BOTH: `message` for the "
-            "full text, `voice_summary` for a 1-3 sentence spoken digest."
+            "Short, spoken-style SUMMARY to send as a Discord voice "
+            "message via TTS. Default to None. Only set when ONE of "
+            "these is true: (a) the user explicitly asked for voice in "
+            "the message you're responding to RIGHT NOW (a previous "
+            "voice exchange does NOT carry forward), (b) voice is "
+            "genuinely the best medium for this specific answer (e.g. "
+            "pronouncing a word, demonstrating intonation), or (c) the "
+            "bit lands better spoken — a one-line zinger / punchline "
+            "where the surprise IS the audio; in that case send ONLY "
+            "voice_summary, no message. Otherwise leave None and use "
+            "`message`. Voice should be a few sentences max, never "
+            "paragraphs / code / long-form. If the reply needs detail "
+            "AND voice was requested, set BOTH: `message` for the full "
+            "text, `voice_summary` for a 1-3 sentence spoken digest."
         ),
     )
     voice_instruction: str | None = Field(
         default=None,
         description=(
-            "Stage direction passed to the TTS model to shape HOW the voice "
-            "sounds — tone, pace, energy, emotion, accent, persona. Only "
-            "meaningful alongside voice_summary. Examples: \"mock-serious "
-            "deadpan delivery\", \"excitedly, like sharing good news\", \"slow "
-            "and considered with a pause before the punch line\", \"overly-"
-            "caffeinated tech-bro persona, slightly frantic\". Leave None for "
-            "the default warm, casual, peer-developer voice."
+            "Stage direction passed to the TTS model to shape HOW the "
+            "voice sounds — tone, pace, energy, emotion, accent, "
+            "persona. Only meaningful alongside voice_summary. Examples: "
+            "\"mock-serious deadpan delivery\", \"excitedly, like "
+            "sharing good news\", \"slow and considered with a pause "
+            "before the punch line\", \"overly-caffeinated tech-bro "
+            "persona, slightly frantic\". Leave None for the default "
+            "warm, casual, peer-developer voice."
+        ),
+    )
+    not_cs_topic_brief_answer: bool = Field(
+        default=False,
+        description=(
+            "Set True when the user is asking about something OUTSIDE "
+            "software / computer science (life advice, sports, trivia, "
+            "recipe help, banter, hellos, opinions on movies, random "
+            "shower thoughts, etc.). When True, your `message` MUST be "
+            "**at most 2 sentences** — friendly and in-and-out, no "
+            "paragraph essays. Leave False for coding / debugging / "
+            "tooling / architecture / AI / dev-ops / language / library "
+            "questions, where you answer with the depth the question "
+            "warrants. Borderline (community process questions, "
+            "career-shaped questions): default True and stay short."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _require_message_or_voice(self) -> "ResponseBody":
+        if not (self.message and self.message.strip()) and not (
+            self.voice_summary and self.voice_summary.strip()
+        ):
+            raise ValueError(
+                "ResponseBody requires at least one of `message` or "
+                "`voice_summary` to be a non-empty string."
+            )
+        return self
+
+
+class TurnDecision(BaseModel):
+    """The agent's full decision for one turn.
+
+    Always carries `rankings` — one MessageScore per new `<message>` this
+    turn. `response` is populated ONLY if at least one ranking scored
+    >= 5; otherwise this is effectively a no-response turn.
+    """
+
+    rankings: list[MessageScore] = Field(
+        description=(
+            "One MessageScore per NEW `<message>` in this turn's input "
+            "(activation_message on first turn, every new_message on "
+            "follow-up turns). Rank each one before deciding whether to "
+            "respond. The act of scoring is mandatory — the schema "
+            "rejects responses without it."
+        ),
+    )
+    response: ResponseBody | None = Field(
+        default=None,
+        description=(
+            "The message you want to send, OR None to stay silent. "
+            "REQUIRED to be None when every ranking scored < 5. "
+            "REQUIRED to be populated when you want to send anything. "
+            "When populated, `target_message_id` must match a ranking "
+            "with `score >= 5`."
         ),
     )
     continue_watching: bool = Field(
         default=True,
         description=(
-            "Stay engaged for follow-ups. Set False only when the conversation "
-            "is genuinely done, the user dismissed you, or continuing would be "
-            "intrusive."
+            "Stay engaged for follow-ups. Set False only when the "
+            "engagement is genuinely over (user dismissed you, "
+            "conversation ran its course, continuing would be "
+            "intrusive)."
         ),
     )
     topic: str = Field(
         description="1-2 sentence summary of the current conversation topic.",
     )
-    notes: str = Field(
+    notes: str | None = Field(
+        default=None,
         description=(
-            "Per-person thread tracker. Format: 'alice: <thread + status>; "
-            "bob: <thread + status>; carol: <thread + status>'. Accumulate as "
-            "new threads emerge — don't replace. Drop a thread only when it has "
-            "clearly concluded. This is durable memory across engagements; "
-            "write it for your future self to remember WHO is asking about WHAT, "
-            "not to summarise what was said (your conversation history covers "
-            "that)."
+            "Per-person thread tracker. Format: 'alice: <thread + "
+            "status>; bob: <thread + status>; carol: <thread + status>'. "
+            "Accumulate as new threads emerge — don't replace. Drop a "
+            "thread only when it has clearly concluded. This is durable "
+            "memory across engagements; write it for your future self to "
+            "remember WHO is asking about WHAT, not to summarise what "
+            "was said (your conversation history covers that). Leave "
+            "None to preserve the existing notes unchanged when nothing "
+            "needs updating."
         ),
     )
     blog_topic_candidates: list[BlogTopicCandidate] = Field(
         default_factory=list,
         description=(
-            "Blog-post ideas filed this turn. See the system prompt for the "
-            "rules; the schema doesn't bias the count."
+            "Blog-post ideas filed this turn. See the system prompt for "
+            "the rules; the schema doesn't bias the count."
         ),
     )
 
     @model_validator(mode="after")
-    def _require_message_or_voice(self) -> "SendResponse":
-        if not (self.message and self.message.strip()) and not (
-            self.voice_summary and self.voice_summary.strip()
-        ):
+    def _validate_response_against_rankings(self) -> "TurnDecision":
+        if not self.rankings:
             raise ValueError(
-                "SendResponse requires at least one of `message` or `voice_summary` "
-                "to be a non-empty string."
+                "TurnDecision.rankings must contain at least one entry — "
+                "every turn delivers at least one new <message> to score."
+            )
+        max_score = max(r.score for r in self.rankings)
+        if self.response is None:
+            return self
+        if max_score < 5:
+            raise ValueError(
+                f"TurnDecision.response is populated but every ranking "
+                f"scored below 5 (max={max_score}). Respond only when a "
+                f"new message scored >= 5."
+            )
+        target_id = self.response.target_message_id
+        match = next(
+            (r for r in self.rankings if r.message_id == target_id),
+            None,
+        )
+        if match is None:
+            raise ValueError(
+                f"TurnDecision.response.target_message_id={target_id!r} "
+                f"does not match any MessageScore.message_id in this "
+                f"turn's rankings."
+            )
+        if match.score < 5:
+            raise ValueError(
+                f"TurnDecision.response.target_message_id={target_id!r} "
+                f"refers to a message scored {match.score} (<5). Pick a "
+                f"target that scored >= 5, or set response=None."
             )
         return self
 
 
-AgentReturn = Annotated[
-    Union[NoResponse, SendResponse],
-    Field(discriminator="kind"),
-]
+AgentReturn = TurnDecision

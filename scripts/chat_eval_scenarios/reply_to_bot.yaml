@@ -1,0 +1,29 @@
+# Alice asked the bot something; bot answered; Alice Discord-replies to the bot.
+# Expected: SendResponse (Alice is engaging with the bot directly).
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "dev-help"
+
+authors:
+  - user_id: "1"
+    username: "alice"
+
+history:
+  - id: "20"
+    from: "1"
+    body: "@smarterbot what's the difference between asyncio.gather and asyncio.wait?"
+    mentions_bot: true
+  - id: "21"
+    from: "999"  # bot's reply
+    body: "gather returns results in order and re-raises the first exception; wait gives you (done, pending) sets and lets you choose return_when. Use gather when you want results, wait when you want fine-grained control."
+
+trigger:
+  id: "22"
+  from: "1"
+  body: "what does return_when do exactly?"
+  reply_to: "21"
