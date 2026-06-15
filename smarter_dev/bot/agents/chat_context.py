@@ -146,21 +146,28 @@ async def _convert(
         resolved_body = await resolve_mentions(body, bot, guild_id)
         ref = getattr(msg, "referenced_message", None)
         reply_to = str(ref.id) if ref else None
+        ref_author = getattr(ref, "author", None) if ref is not None else None
+        reply_to_author_id = str(ref_author.id) if ref_author else None
+        reply_to_is_self = (
+            bot_user_id is not None
+            and ref_author is not None
+            and ref_author.id == bot_user_id
+        )
         reactions = [
             (reaction.emoji.name if hasattr(reaction.emoji, "name") else str(reaction.emoji))
             for reaction in (msg.reactions or [])
         ]
-        mentions_bot = False
-        if bot_user_id is not None:
-            if bot_user_id in (msg.user_mentions_ids or []):
-                mentions_bot = True
-            elif ref is not None and getattr(ref, "author", None) and ref.author.id == bot_user_id:
-                mentions_bot = True
+        mentions_bot = bool(
+            bot_user_id is not None
+            and bot_user_id in (msg.user_mentions_ids or [])
+        )
         messages.append(
             Message(
                 message_id=str(msg.id),
                 author_id=str(msg.author.id),
                 reply_to_message_id=reply_to,
+                reply_to_author_id=reply_to_author_id,
+                reply_to_is_self=reply_to_is_self,
                 body=resolved_body,
                 reactions=reactions,
                 has_attachments=bool(msg.attachments),

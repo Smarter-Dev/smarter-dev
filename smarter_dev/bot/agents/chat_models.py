@@ -27,6 +27,22 @@ class Message(BaseModel):
     message_id: str
     author_id: str
     reply_to_message_id: str | None = None
+    reply_to_author_id: str | None = Field(
+        default=None,
+        description=(
+            "Discord user id of the author of the message being Discord-replied "
+            "to, when this message is a Discord reply. None for plain channel "
+            "posts. Lets the renderer emit reply-to-self / reply-to-user-id "
+            "without forcing the model to cross-reference ids in history."
+        ),
+    )
+    reply_to_is_self: bool = Field(
+        default=False,
+        description=(
+            "True when this message is a Discord reply specifically to one of "
+            "the bot's messages."
+        ),
+    )
     body: str
     reactions: list[str] = Field(default_factory=list)
     has_attachments: bool = False
@@ -40,9 +56,8 @@ class Message(BaseModel):
     mentions_bot: bool = Field(
         default=False,
         description=(
-            "True if this message either @mentions the bot or is a Discord "
-            "reply to one of the bot's messages — i.e. a direct attempt to "
-            "engage with you."
+            "True if this message @mentions the bot. Discord-replies to the "
+            "bot are tracked separately via reply_to_is_self."
         ),
     )
 
