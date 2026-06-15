@@ -208,10 +208,11 @@
 
     {# what the agent saw on this turn #}
     {% for msg in turn.triggering_messages %}
-    <div class="cc-user-msg {% if msg.mentions_bot %}cc-mention{% endif %}">
+    <div class="cc-user-msg {% if msg.mentions_bot or msg.reply_to_is_self %}cc-mention{% endif %}">
         <div class="cc-meta">
             👤 <span class="cc-author">{{ msg.author_id }}</span>
             {% if msg.mentions_bot %}<span class="cc-tag" title="mentions_bot=True">📣 mentioned</span>{% endif %}
+            {% if msg.reply_to_is_self %}<span class="cc-tag" title="reply_to_is_self=True">↩ replied to bot</span>{% endif %}
             <span class="cc-tag">msg {{ msg.message_id }}</span>
             {% if msg.has_attachments %}<span class="cc-tag">📎 attachments (not visible)</span>{% endif %}
         </div>

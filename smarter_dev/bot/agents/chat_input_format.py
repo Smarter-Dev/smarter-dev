@@ -96,6 +96,13 @@ def _render_message(msg: Message, *, me: Me, authors_by_id: dict[str, Author]) -
                 attrs["roles"] = ",".join(author.role_names)
     if msg.reply_to_message_id:
         attrs["reply-to"] = msg.reply_to_message_id
+    if msg.reply_to_is_self:
+        attrs["reply-to-self"] = True
+    elif msg.reply_to_author_id and msg.reply_to_author_id != me.user_id:
+        attrs["reply-to-user-id"] = msg.reply_to_author_id
+        target = authors_by_id.get(msg.reply_to_author_id)
+        if target is not None:
+            attrs["reply-to-username"] = target.username
     if msg.reactions:
         attrs["reactions"] = ",".join(msg.reactions)
     if msg.has_attachments:
