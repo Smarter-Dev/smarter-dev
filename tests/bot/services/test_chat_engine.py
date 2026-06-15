@@ -31,9 +31,69 @@ from smarter_dev.bot.agents.chat_models import (
     InitialAgentInput,
     Me,
     Message,
-    NoResponse,
-    SendResponse,
+    MessageScore,
+    ResponseBody,
+    TurnDecision,
 )
+
+
+def _send(
+    message: str | None = None,
+    *,
+    topic: str = "t",
+    notes: str | None = "n",
+    target_message_id: str = "9001",
+    reply_directly: bool = False,
+    voice_summary: str | None = None,
+    voice_instruction: str | None = None,
+    continue_watching: bool = True,
+) -> TurnDecision:
+    """Build a TurnDecision that carries a populated response.
+
+    Replaces the old ``SendResponse(...)`` test fixture shorthand. Defaults
+    score the target at 10/10 so the validators are satisfied without the
+    test having to think about rankings.
+    """
+    return TurnDecision(
+        rankings=[
+            MessageScore(
+                message_id=target_message_id,
+                score=10,
+                reasoning="test fixture: assumed direct engagement",
+            )
+        ],
+        response=ResponseBody(
+            target_message_id=target_message_id,
+            reply_directly=reply_directly,
+            message=message,
+            voice_summary=voice_summary,
+            voice_instruction=voice_instruction,
+        ),
+        topic=topic,
+        notes=notes,
+        continue_watching=continue_watching,
+    )
+
+
+def _no_send(
+    *,
+    topic: str = "nothing to add",
+    target_message_id: str = "9001",
+    continue_watching: bool = True,
+) -> TurnDecision:
+    """Build a TurnDecision with no response — every score below 5."""
+    return TurnDecision(
+        rankings=[
+            MessageScore(
+                message_id=target_message_id,
+                score=2,
+                reasoning="test fixture: assumed bystander",
+            )
+        ],
+        response=None,
+        topic=topic,
+        continue_watching=continue_watching,
+    )
 from smarter_dev.bot.services.chat_engine import (
     MAX_NO_RESPONSE_TURNS,
     QUEUE_FIRE_THRESHOLD,
@@ -183,9 +243,7 @@ async def test_initial_activation_fires_agent_exactly_once(fake_bot, fake_memory
 
     async def fake_run(*, user_prompt, message_history, deps):
         runs.append(True)
-        return _result(
-            SendResponse(message="hi there", topic="greeting", notes="user said hi")
-        )
+        return _result(_send("hi there", topic="greeting", notes="user said hi"))
 
     patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
     with patches[0], patches[1], patches[2], patches[3]:
@@ -206,7 +264,7 @@ async def test_initial_activation_calls_initial_builder(fake_bot, fake_memory):
     async def fake_run(*, user_prompt, message_history, deps):
         captured["history"] = message_history
         return _result(
-            SendResponse(message="hi", topic="greeting", notes="user said hi"),
+            _send("hi", topic="greeting", notes="user said hi"),
             all_messages=["fake_msg_a", "fake_msg_b"],
         )
 
@@ -246,7 +304,7 @@ async def test_followup_turn_loads_history_and_uses_followup_builder(
     async def fake_run(*, user_prompt, message_history, deps):
         history_calls.append(list(message_history))
         return _result(
-            SendResponse(message="ack", topic="ongoing", notes="tracking thread"),
+            _send("ack", topic="ongoing", notes="tracking thread"),
             all_messages=["msg1", "msg2"],
         )
 
@@ -279,7 +337,7 @@ async def test_queue_threshold_fires_agent(fake_bot, fake_memory):
 
     async def fake_run(*, user_prompt, message_history, deps):
         runs.append(True)
-        return _result(NoResponse(topic="nothing to add"))
+        return _result(_no_send(topic="nothing to add"))
 
     patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
     with patches[0], patches[1], patches[2], patches[3]:
@@ -305,7 +363,7 @@ async def test_no_response_deactivates_after_three_turns(
     monkeypatch.setattr("smarter_dev.bot.services.chat_engine.IDLE_FIRE_SECONDS", 0)
 
     async def fake_run(*, user_prompt, message_history, deps):
-        return _result(NoResponse(topic="quiet channel"))
+        return _result(_no_send(topic="quiet channel"))
 
     patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
     with patches[0], patches[1], patches[2], patches[3]:
@@ -329,8 +387,8 @@ async def test_no_response_deactivates_after_three_turns(
 async def test_continue_watching_false_deactivates(fake_bot, fake_memory):
     async def fake_run(*, user_prompt, message_history, deps):
         return _result(
-            SendResponse(
-                message="bye",
+            _send(
+                "bye",
                 topic="farewell",
                 notes="user said bye",
                 continue_watching=False,
@@ -364,9 +422,7 @@ async def test_stop_phrase_in_observe_deactivates_and_arms_cooldown(
     )
 
     async def fake_run(*, user_prompt, message_history, deps):
-        return _result(
-            SendResponse(message="hello", topic="greeting", notes="starting up")
-        )
+        return _result(_send("hello", topic="greeting", notes="starting up"))
 
     patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
     with patches[0], patches[1], patches[2], patches[3]:
@@ -388,11 +444,12 @@ async def test_stop_phrase_in_observe_deactivates_and_arms_cooldown(
 async def test_send_response_reply_to_message_id_passes_through(fake_bot, fake_memory):
     async def fake_run(*, user_prompt, message_history, deps):
         return _result(
-            SendResponse(
-                message="here you go",
+            _send(
+                "here you go",
                 topic="answered",
                 notes="answered question",
-                reply_to_message_id="9999",
+                target_message_id="9999",
+                reply_directly=True,
             )
         )
 
@@ -417,7 +474,7 @@ async def test_voice_only_response_sends_voice_not_text(fake_bot, fake_memory):
 
     async def fake_run(*, user_prompt, message_history, deps):
         return _result(
-            SendResponse(
+            _send(
                 voice_summary="async/await lets you write concurrent code that reads like sync",
                 topic="async basics",
                 notes="user wanted a voice explainer",
@@ -447,8 +504,8 @@ async def test_text_and_voice_dispatched_in_parallel(fake_bot, fake_memory):
 
     async def fake_run(*, user_prompt, message_history, deps):
         return _result(
-            SendResponse(
-                message="Here's the long explanation with code...\n\n```python\nimport asyncio\n```",
+            _send(
+                "Here's the long explanation with code...\n\n```python\nimport asyncio\n```",
                 voice_summary="check the message — there's a Python example",
                 topic="explained async with code",
                 notes="user wanted both audio and code",
@@ -479,7 +536,7 @@ async def test_fire_now_re_triggers_an_active_engine(fake_bot, fake_memory):
     async def fake_run(*, user_prompt, message_history, deps):
         runs.append(user_prompt)
         return _result(
-            SendResponse(message="ack", topic="t", notes="n"),
+            _send("ack", topic="t", notes="n"),
             all_messages=["m1", "m2"],
         )
 
@@ -515,7 +572,7 @@ async def test_voice_instruction_forwarded_to_voice_send(fake_bot, fake_memory):
 
     async def fake_run(*, user_prompt, message_history, deps):
         return _result(
-            SendResponse(
+            _send(
                 voice_summary="bazinga",
                 voice_instruction="Say this with mock-serious deadpan delivery",
                 topic="t",
@@ -546,7 +603,7 @@ async def test_voice_only_failure_posts_fallback(fake_bot, fake_memory):
 
     async def fake_run(*, user_prompt, message_history, deps):
         return _result(
-            SendResponse(
+            _send(
                 voice_summary="here you go",
                 topic="t",
                 notes="n",
@@ -578,8 +635,8 @@ async def test_voice_failure_with_text_does_not_post_extra_fallback(fake_bot, fa
 
     async def fake_run(*, user_prompt, message_history, deps):
         return _result(
-            SendResponse(
-                message="here's the text",
+            _send(
+                "here's the text",
                 voice_summary="and a voice version",
                 topic="t",
                 notes="n",
@@ -621,10 +678,45 @@ async def test_agent_run_failure_posts_error_message(fake_bot, fake_memory):
     assert "couldn't" in posted.lower() or "could not" in posted.lower()
 
 
-@pytest.mark.asyncio
-async def test_send_response_requires_message_or_voice():
+def test_response_body_requires_message_or_voice():
     """Validator: dropping both channels raises at construction time."""
     with pytest.raises(ValueError):
-        SendResponse(topic="x", notes="y")
+        ResponseBody(target_message_id="1")
     with pytest.raises(ValueError):
-        SendResponse(message="", voice_summary=None, topic="x", notes="y")
+        ResponseBody(target_message_id="1", message="", voice_summary=None)
+
+
+def test_turn_decision_rejects_response_without_qualifying_score():
+    """response populated but no ranking >=5 must fail at construction."""
+    with pytest.raises(ValueError):
+        TurnDecision(
+            rankings=[
+                MessageScore(message_id="1", score=2, reasoning="bystander")
+            ],
+            response=ResponseBody(target_message_id="1", message="hi"),
+            topic="x",
+        )
+
+
+def test_turn_decision_rejects_response_pointing_at_unscored_message():
+    """target_message_id must match an actual ranking entry."""
+    with pytest.raises(ValueError):
+        TurnDecision(
+            rankings=[
+                MessageScore(message_id="1", score=10, reasoning="direct")
+            ],
+            response=ResponseBody(target_message_id="999", message="hi"),
+            topic="x",
+        )
+
+
+def test_turn_decision_allows_no_response():
+    """Every ranking <5 + response=None must construct cleanly."""
+    decision = TurnDecision(
+        rankings=[
+            MessageScore(message_id="1", score=3, reasoning="not for me")
+        ],
+        response=None,
+        topic="x",
+    )
+    assert decision.response is None

@@ -1,0 +1,40 @@
+# Alice and Bob are talking. Alice Discord-replies to Bob's message.
+# Expected: NoResponse (reply targets another user, bot not engaged).
+
+# Followup: the bot is still watching from a different engagement with Carol
+# about regex. Alice and Bob's Stripe sidebar is unrelated to anything the
+# bot is tracking, so it should stay quiet.
+kind: followup
+
+topic: "Carol's regex backtracking question."
+notes: "carol: regex backtracking on alt branches; answered with possessive quantifier pattern."
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "dev-help"
+  description: "general dev questions"
+
+authors:
+  - user_id: "1"
+    username: "alice"
+  - user_id: "2"
+    username: "bob"
+
+history:
+  - id: "10"
+    from: "1"
+    body: "anyone know why my stripe webhook keeps returning 400?"
+  - id: "11"
+    from: "2"
+    body: "probably signature mismatch — are you using the raw body?"
+    reply_to: "10"
+
+trigger:
+  id: "12"
+  from: "1"
+  body: "good call, I was parsing JSON first. fixed it"
+  reply_to: "11"

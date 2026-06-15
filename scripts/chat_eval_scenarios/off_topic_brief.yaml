@@ -1,0 +1,21 @@
+# Alice @mentions the bot to ask something completely off-topic (recipe).
+# Expected: SendResponse with not_cs_topic_brief_answer=True and a message
+# that's at most 2 sentences.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "general"
+
+authors:
+  - user_id: "1"
+    username: "alice"
+
+trigger:
+  id: "60"
+  from: "1"
+  body: "@smarterbot what's the best way to roast brussels sprouts?"
+  mentions_bot: true

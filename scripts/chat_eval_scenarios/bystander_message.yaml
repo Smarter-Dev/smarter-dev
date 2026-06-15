@@ -1,0 +1,38 @@
+# Bot is tracking a thread with Alice. Bob posts an unrelated message — no
+# reply, no mention, different topic. Expected: NoResponse (bystander).
+
+# Followup: this scenario only happens mid-engagement. Discord's upstream
+# activation logic wouldn't wake the bot on Bob's CI message; it only reaches
+# the agent because the agent is already engaged with Alice.
+kind: followup
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "dev-help"
+
+topic: "Alice is debugging a Stripe webhook signature mismatch."
+notes: "alice: stripe webhook 400, suspected signature mismatch, mid-debug"
+
+authors:
+  - user_id: "1"
+    username: "alice"
+  - user_id: "2"
+    username: "bob"
+
+history:
+  - id: "30"
+    from: "1"
+    body: "@smarterbot stripe webhook is returning 400 — any ideas?"
+    mentions_bot: true
+  - id: "31"
+    from: "999"
+    body: "most common cause is signature mismatch — Stripe signs the raw bytes, so if your framework parses JSON before you verify, the signature won't match. Show me how you're reading the body?"
+
+trigger:
+  id: "32"
+  from: "2"
+  body: "ugh, my CI is flaky again"
