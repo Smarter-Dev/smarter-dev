@@ -184,11 +184,14 @@ class BlogTopicCandidate(BaseModel):
 
 
 class MessageScore(BaseModel):
-    """Per-message engagement score for a single new `<message>` this turn.
+    """Per-message DIRECTEDNESS score for a single new `<message>` this turn.
 
-    Forces the agent to explicitly classify each new message before
-    deciding whether (and what) to respond. Without this step the model
-    tends to chime in on conversations it wasn't invited to.
+    This is a cheap structural classification — "was this message aimed at
+    me?" — NOT a judgement about whether the content is interesting or
+    deserves an answer. Keep the two separate: score direction here, decide
+    what (if anything) to say in `response`. Mixing the two is what makes
+    the agent talk itself into a reply it then forgets to send, or score a
+    direct ping a 10 and stay silent anyway.
     """
 
     message_id: str = Field(
@@ -198,26 +201,28 @@ class MessageScore(BaseModel):
         ge=1,
         le=10,
         description=(
-            "1-10 score for how strongly this message was intended for "
-            "YOU to respond to. Anchor points: "
-            "10 = explicit direct address (@mention, reply-to-self with a "
-            "clear question); "
+            "1-10: how directly was this message aimed at YOU, judged from "
+            "its structural attributes alone (mentions-bot, reply-to-self, "
+            "reply-to-user-id, whether it continues an exchange you were in). "
+            "This measures DIRECTION, not how good a reply you could write. "
+            "Anchor points: "
+            "10 = explicit direct address (@mention, or reply-to-self); "
             "7-9 = clearly your turn (continuation of an exchange you were "
-            "having, or @mention without a direct question); "
-            "5-6 = arguably for you, you could go either way; "
-            "3-4 = related to your context but not actually addressed to "
-            "you (a user replying to another user about a topic you helped "
-            "with); "
-            "1-2 = clearly NOT for you (unrelated banter, two users "
-            "talking to each other, bystander observation)."
+            "having, or an @mention without a pointed question); "
+            "5-6 = arguably for you, could go either way; "
+            "3-4 = related to your context but addressed to someone else (a "
+            "user replying to another user about a topic you helped with); "
+            "1-2 = clearly NOT for you (unrelated banter, two users talking "
+            "to each other, bystander observation)."
         ),
     )
     reasoning: str = Field(
         description=(
-            "ONE sentence justifying the score in plain language. Cite the "
-            "attribute(s) you used (e.g. 'has mentions-bot=true', "
-            "'reply-to-user-id=2, not me', 'continues exchange with the "
-            "self=true message above')."
+            "ONE sentence, structural only: cite the attribute(s) that set "
+            "the score — 'has mentions-bot=true', 'reply-to-user-id=2, not "
+            "me', 'continues exchange with the self=true message above'. Do "
+            "NOT describe what you would say back or whether the topic is "
+            "worth a reply — that decision belongs in `response`, not here."
         ),
     )
 
@@ -319,30 +324,43 @@ class ResponseBody(BaseModel):
 
 
 class TurnDecision(BaseModel):
-    """The agent's full decision for one turn.
+    """The agent's full decision for one turn — a single funnel, not two
+    independent judgements.
 
-    Always carries `rankings` — one MessageScore per new `<message>` this
-    turn. `response` is populated ONLY if at least one ranking scored
-    >= 5; otherwise this is effectively a no-response turn.
+    Step 1: `rankings` classifies each new message's DIRECTION (was it aimed
+    at me?). Step 2: `response` is the one place you decide whether and what
+    to say. The two steps are sequential, not parallel — don't re-litigate
+    in step 2 whether the message was "really" for you; that's settled by
+    the score. If the top-scoring new message is directed at you (>= 5) and
+    it's something you'd actually weigh in on, you respond. Otherwise you
+    stay silent. Silence is a choice you MAKE here, never a field you let
+    default by forgetting to fill `response`.
     """
 
     rankings: list[MessageScore] = Field(
         description=(
             "One MessageScore per NEW `<message>` in this turn's input "
             "(activation_message on first turn, every new_message on "
-            "follow-up turns). Rank each one before deciding whether to "
-            "respond. The act of scoring is mandatory — the schema "
-            "rejects responses without it."
+            "follow-up turns). Score DIRECTION only — who the message was "
+            "aimed at. Scoring is mandatory and comes first; the response "
+            "decision flows from it."
         ),
     )
     response: ResponseBody | None = Field(
         default=None,
         description=(
-            "The message you want to send, OR None to stay silent. "
-            "REQUIRED to be None when every ranking scored < 5. "
-            "REQUIRED to be populated when you want to send anything. "
-            "When populated, `target_message_id` must match a ranking "
-            "with `score >= 5`."
+            "The turn's one decisive output, and the ONLY place you decide "
+            "what to say. Populate it to speak; set it to None to stay "
+            "silent. This is where the turn's thinking lives — don't talk "
+            "yourself into a reply in the rankings and then leave this "
+            "empty. "
+            "RULES: must be None when every ranking scored < 5 (nothing was "
+            "aimed at you — staying silent is correct). When the highest "
+            "ranked NEW message scored >= 5, that message was directed at "
+            "you: respond unless it's non-CS chatter or banter you're "
+            "deliberately letting pass (see the system prompt). When you do "
+            "respond, `target_message_id` must match a ranking with "
+            "`score >= 5` (pick the highest)."
         ),
     )
     continue_watching: bool = Field(

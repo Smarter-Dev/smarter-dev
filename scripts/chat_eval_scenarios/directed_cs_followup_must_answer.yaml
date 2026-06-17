@@ -1,0 +1,43 @@
+# Regression for the 2026-06-16 silent-drop incident: on a follow-up turn a
+# user @mentions the bot with a real coding question (continuing an active
+# debugging thread). The agent used to score this a 10 ("directed at me"),
+# write reply-shaped reasoning in the ranking ("I need to explain X"), then
+# leave `response` empty — three in a row tripped no_response_quota and tore
+# the engine down, so a help-channel ping got silence.
+#
+# Expected NOW: TurnDecision(response) — a SendResponse that actually answers.
+# A directed (>=5) coding question is the bot's to take; silence here is the
+# bug. not_cs_topic_brief_answer should be False (it's a coding topic, answer
+# with real depth).
+
+kind: followup
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "dev-help"
+  description: "Need help with apk logs (crashing) [GRADLE, XML, CSS3, HTML5, JSON]"
+
+authors:
+  - user_id: "1"
+    username: "cosmic0wl"
+
+topic: >-
+  Troubleshooting a GitHub Actions Android build failure and Node.js 20
+  deprecation warnings.
+
+notes: >-
+  cosmic0wl: moved from Termux to GitHub Actions; hitting Node.js 20
+  deprecation warnings and a failed Gradle build (exit code 1).
+
+trigger:
+  id: "300"
+  from: "1"
+  body: >-
+    @smarterbot the error log is like 3-4k lines, way too big to paste here.
+    the node deprecation warning is at the top — is that what's killing the
+    build? how do I even find the actual failure in something this huge?
+  mentions_bot: true
