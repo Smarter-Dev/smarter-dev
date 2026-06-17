@@ -1,6 +1,8 @@
 # Alice @mentions the bot to ask something completely off-topic (recipe).
-# Expected: SendResponse with not_cs_topic_brief_answer=True and a message
-# that's at most 2 sentences.
+# Directed (>=5) but NOT a coding topic, so under the "lean quiet" policy
+# EITHER is acceptable: a no-response turn (silence on off-topic chatter,
+# even when pinged) OR a SendResponse with not_cs_topic_brief_answer=True
+# capped at 2 sentences. What's NOT acceptable: a long paragraph reply.
 
 me:
   user_id: "999"
