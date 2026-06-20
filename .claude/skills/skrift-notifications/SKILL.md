@@ -10,10 +10,10 @@ Real-time notification system delivered via Server-Sent Events (SSE). Notificati
 ## Delivery Scopes
 
 ```python
-from skrift.lib.notifications import notify_session, notify_user, notify_broadcast, _ensure_nid
+from skrift.notifications import notify_session, notify_user, notify_broadcast, ensure_nid
 
 # Session-scoped — stored, replayed on reconnect
-nid = _ensure_nid(request)
+nid = ensure_nid(request)
 await notify_session(nid, "generic", title="Saved", message="Your draft was saved.")
 
 # User-scoped — stored, delivered to all sessions of a user
@@ -37,7 +37,7 @@ All three functions accept an optional `group` keyword. A new notification with 
 
 ```python
 # Progress updates — each replaces the previous toast
-nid = _ensure_nid(request)
+nid = ensure_nid(request)
 await notify_session(nid, "generic", group="deploy", title="Deploying…", message="Step 1/3")
 await notify_session(nid, "generic", group="deploy", title="Deploying…", message="Step 2/3")
 await notify_session(nid, "generic", group="deploy", title="Deployed!", message="Done")
@@ -53,7 +53,7 @@ await notify_broadcast("generic", group="maintenance", title="Maintenance", mess
 ## Dismissing by Group Key (Backend)
 
 ```python
-from skrift.lib.notifications import dismiss_session_group, dismiss_user_group
+from skrift.notifications import dismiss_session_group, dismiss_user_group
 
 # Dismiss the active "deploy" notification without knowing its UUID
 await dismiss_session_group(nid, "deploy")
@@ -71,7 +71,7 @@ await dismiss_user_group(str(user.id), "upload-status")
 ## Controller Pattern — Notify on Action
 
 ```python
-from skrift.lib.notifications import notify_user
+from skrift.notifications import notify_user
 
 @post("/{item_id:uuid}/comment", guards=[auth_guard])
 async def comment(self, request: Request, db_session: AsyncSession, item_id: UUID) -> Redirect:

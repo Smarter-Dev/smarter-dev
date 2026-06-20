@@ -15,7 +15,7 @@ from litestar import Controller, Request, post
 from litestar.response.sse import ServerSentEvent, ServerSentEventMessage
 from pydantic import BaseModel, Field
 from skrift.auth.guards import APIKeyOnly, auth_guard
-from skrift.lib.notifications import notifications as notification_service
+from skrift.notifications import notifications as notification_service
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.scan.crud import ResearchSessionOperations

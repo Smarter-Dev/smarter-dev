@@ -35,7 +35,7 @@ from skrift.admin.navigation import ADMIN_NAV_TAG
 from skrift.auth.guards import Permission, auth_guard
 from skrift.db.models.user import User
 from skrift.db.models.page import Page
-from skrift.lib.flash import flash_error, flash_success, get_flash_messages
+from skrift.flash import flash_error, flash_success, get_flash_messages
 from skrift.workers import submit as worker_submit
 from skrift.workers.runtime import get_runtime
 

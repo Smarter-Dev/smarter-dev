@@ -27,7 +27,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skrift.lib.markdown import render_markdown
+from skrift.markdown import render_markdown
 
 from smarter_dev.web.models import ResourceSource
 

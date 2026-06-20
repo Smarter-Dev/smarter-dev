@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from skrift.lib.hooks import action
+from skrift.hooks import action
 
 logger = logging.getLogger(__name__)
 

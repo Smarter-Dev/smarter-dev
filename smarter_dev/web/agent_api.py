@@ -39,8 +39,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.auth.services import get_user_permissions
 from skrift.auth.session_keys import SESSION_USER_ID
-from skrift.lib.markdown import render_markdown
-from skrift.lib.notifications import notify_user
+from skrift.markdown import render_markdown
+from skrift.notifications import notify_user
 
 from smarter_dev.shared.database import get_skrift_db_session_context
 from smarter_dev.web.models import (

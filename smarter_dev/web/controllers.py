@@ -30,6 +30,7 @@ from smarter_dev.web.models import CampaignSignup
 
 import smarter_dev.web.roles  # noqa: F401  — registers custom Skrift roles at import time
 import smarter_dev.web.hooks_sudo  # noqa: F401  — registers Skrift action hooks for sudo converge
+import smarter_dev.web.account_hooks  # noqa: F401  — registers account page section hooks
 
 logger = logging.getLogger(__name__)
 

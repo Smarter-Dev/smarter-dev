@@ -22,7 +22,7 @@ from skrift.auth.guards import Permission
 from skrift.auth.services import get_user_permissions
 from skrift.auth.session_keys import SESSION_USER_ID
 from skrift.db.models.user import User
-from skrift.lib.markdown import render_markdown
+from skrift.markdown import render_markdown
 
 from smarter_dev.web.agent_api import resources_quota_state
 from smarter_dev.web.models import AgentConversation
