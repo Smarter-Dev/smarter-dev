@@ -70,7 +70,7 @@ from pydantic_ai.models.openai import OpenAIResponsesModelSettings
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from skrift.agents.models import ResumeContext
-from skrift.lib.notifications import notify_user
+from skrift.notifications import notify_user
 
 from smarter_dev.web.scan.tools import brave_search, jina_read
 

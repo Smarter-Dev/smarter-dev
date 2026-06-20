@@ -28,7 +28,7 @@ from sqlalchemy.orm import selectinload
 from skrift.admin.helpers import get_admin_context
 from skrift.admin.navigation import ADMIN_NAV_TAG
 from skrift.auth.guards import Permission, auth_guard
-from skrift.lib.flash import get_flash_messages
+from skrift.flash import get_flash_messages
 
 # Note: ``smarter_dev.bot.services.discord_voice`` (used in the
 # voice-replay handler) pulls in ``google.genai`` + ``aiohttp`` which are

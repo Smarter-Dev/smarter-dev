@@ -21,7 +21,7 @@ from uuid import UUID
 
 import httpx
 from pydantic_ai.usage import RunUsage
-from skrift.lib.notifications import NotificationMode, notify_user
+from skrift.notifications import NotificationMode, notify_user
 from sqlalchemy import select, update
 
 from smarter_dev.shared.database import get_skrift_db_session_context

@@ -14,7 +14,7 @@ from skrift.auth.guards import auth_guard
 from skrift.auth.services import get_user_permissions
 from skrift.db.models.user import User
 from sqlalchemy import delete
-from skrift.lib.markdown import render_markdown
+from skrift.markdown import render_markdown
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 

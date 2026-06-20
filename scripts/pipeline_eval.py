@@ -1297,7 +1297,7 @@ def _md_to_html(md: str) -> str:
     """Render markdown via Skrift's renderer (the same one /ai/answer
     uses) so links + lists + code fences come through."""
     try:
-        from skrift.lib.markdown import render_markdown
+        from skrift.markdown import render_markdown
         return render_markdown(md or "")
     except Exception:  # noqa: BLE001
         # Fallback: <pre> the raw text.

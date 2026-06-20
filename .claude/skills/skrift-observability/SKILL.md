@@ -132,7 +132,7 @@ if lf:
 The `logfire_configured` action fires after instrumentation is complete:
 
 ```python
-from skrift.lib.hooks import action
+from skrift.hooks import action
 from skrift.lib.observability import get_logfire
 
 @action("logfire_configured")
@@ -166,7 +166,7 @@ When logfire is not installed or `logfire.enabled` is `false`:
 ## Hook Constants
 
 ```python
-from skrift.lib.hooks import LOGFIRE_CONFIGURED
+from skrift.hooks import LOGFIRE_CONFIGURED
 
 # LOGFIRE_CONFIGURED = "logfire_configured"
 ```

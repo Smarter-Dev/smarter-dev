@@ -220,7 +220,7 @@ async def create_item(db_session: AsyncSession, name: str) -> MyModel:
 WordPress-style hierarchy with fallbacks and optional theme support:
 
 ```python
-from skrift.lib.template import Template
+from skrift.template import Template
 
 # Tries: page-about.html -> page.html
 template = Template("page", "about")

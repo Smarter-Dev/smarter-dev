@@ -10,7 +10,7 @@ Skrift provides a WordPress-inspired hook system for extensibility. **Actions** 
 ## Core API
 
 ```python
-from skrift.lib.hooks import hooks, action, filter
+from skrift.hooks import hooks, action, filter
 ```
 
 ### Registration — Decorators (auto-register on import)
@@ -104,7 +104,7 @@ async def save_thing(db_session: AsyncSession, data: dict) -> Thing:
 ### Service with Hooks
 
 ```python
-from skrift.lib.hooks import hooks
+from skrift.hooks import hooks
 
 BEFORE_ITEM_SAVE = "before_item_save"
 AFTER_ITEM_SAVE = "after_item_save"
@@ -134,7 +134,7 @@ async def add_global_vars(context: dict) -> dict:
 ### Testing Hooks
 
 ```python
-from skrift.lib.hooks import hooks
+from skrift.hooks import hooks
 
 async def test_hook_called(db_session):
     called_with = []

@@ -519,7 +519,7 @@ def _html_escape(s: str) -> str:
 
 def _md_to_html(md: str) -> str:
     try:
-        from skrift.lib.markdown import render_markdown
+        from skrift.markdown import render_markdown
 
         return render_markdown(md or "")
     except Exception:  # noqa: BLE001

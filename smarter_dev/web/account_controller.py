@@ -21,7 +21,7 @@ from skrift.config import get_settings as get_skrift_settings
 from skrift.db.models.oauth_account import OAuthAccount
 from skrift.db.models.user import User
 from skrift.forms.core import verify_csrf
-from skrift.lib.flash import flash_error, flash_success, get_flash_messages
+from skrift.flash import flash_error, flash_success, get_flash_messages
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.web.billing.portal import create_portal_session
@@ -102,23 +102,13 @@ class AccountController(Controller):
     path = "/account"
     guards = [auth_guard]
 
-    @get("/")
-    async def profile(
-        self, request: Request, db_session: AsyncSession
-    ) -> TemplateResponse:
-        user = await _current_user(request, db_session)
-        profile = await _get_or_create_profile(db_session, user.id)
-        return TemplateResponse(
-            "account/profile.html",
-            context={
-                "user": user,
-                "profile": profile,
-                "active_tab": "profile",
-                "flash_messages": get_flash_messages(request),
-            },
-        )
+    # /account itself is owned by Skrift's built-in account page (Skrift 0.2.0+),
+    # including its auto-generated OPTIONS handler, so this controller must not
+    # register anything at the root path. The profile editor is rendered on the
+    # core page via the account_page_* hooks in account_hooks.py and submits to
+    # /account/profile below; the security/billing sub-pages are unaffected.
 
-    @post("/")
+    @post("/profile")
     async def update_profile(
         self, request: Request, db_session: AsyncSession
     ) -> Redirect:

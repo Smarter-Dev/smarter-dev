@@ -91,7 +91,7 @@ from skrift.app_factory import (
 WordPress-style template resolver with theme support:
 
 ```python
-from skrift.lib.template import Template
+from skrift.template import Template
 
 # Tries: page-about.html -> page.html
 # Searches each directory in the resolution order
@@ -112,7 +112,7 @@ Resolves and returns a `TemplateResponse`.
 The `RESOLVE_THEME` filter hook in `skrift/lib/hooks.py` allows overriding the theme per-request:
 
 ```python
-from skrift.lib.hooks import RESOLVE_THEME  # = "resolve_theme"
+from skrift.hooks import RESOLVE_THEME  # = "resolve_theme"
 ```
 
 Applied in `WebController` before template resolution:
@@ -126,7 +126,7 @@ theme_name = await apply_filters(RESOLVE_THEME, theme_name, request)
 ### Plugin Examples
 
 ```python
-from skrift.lib.hooks import filter
+from skrift.hooks import filter
 
 # Per-user theme preference via session
 @filter("resolve_theme")
