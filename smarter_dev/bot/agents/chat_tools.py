@@ -8,15 +8,64 @@ Pydantic AI Agent as its tool surface.
 from __future__ import annotations
 
 import logging
+import mimetypes
 from dataclasses import dataclass
 from typing import Any
 
 import hikari
 import httpx
+import pydantic_monty as monty
 from pydantic_ai import RunContext
 
+from smarter_dev.bot.agents.media_reader import describe_media
+from smarter_dev.bot.agents.web_summarizer import summarize_web_content
 from smarter_dev.bot.utils import web_fetch
 from smarter_dev.web.scan.tools import brave_search
+
+# Reads longer than this are truncated before summarization to bound the
+# summarizer's input; shorter reads are passed through whole.
+MAX_READ_CHARS = 100_000
+
+# Resource limits for the sandboxed run_code tool. No network/filesystem access
+# is exposed, and max_duration_secs bounds runaway loops so a turn can't hang.
+MONTY_LIMITS: dict[str, Any] = {
+    "max_memory": 256 * 1024 * 1024,
+    "max_recursion_depth": 500,
+    "max_duration_secs": 10.0,
+}
+# Cap run_code output fed back to the agent so a big print can't flood context.
+MAX_CODE_OUTPUT_CHARS = 10_000
+
+# URL extensions routed to the multimodal media reader instead of text
+# extraction, mapped to the media type we hand the model. We trust the
+# extension over the server's Content-Type, which is unreliable for these
+# (e.g. Discord/CDNs serve .ogg as "video/ogg", which the model then rejects).
+_EXT_MEDIA_TYPE = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".m4a": "audio/mp4",
+    ".flac": "audio/flac",
+    ".aac": "audio/aac",
+}
+IMAGE_EXTS = tuple(e for e, mt in _EXT_MEDIA_TYPE.items() if mt.startswith("image/"))
+AUDIO_EXTS = tuple(e for e, mt in _EXT_MEDIA_TYPE.items() if mt.startswith("audio/"))
+
+
+def _url_extension(url: str) -> str:
+    """Lowercase file extension from a URL path, ignoring query/fragment."""
+    path = url.split("?", 1)[0].split("#", 1)[0]
+    last = path.rsplit("/", 1)[-1]
+    dot = last.rfind(".")
+    return last[dot:].lower() if dot != -1 else ""
 
 logger = logging.getLogger(__name__)
 
@@ -73,39 +122,100 @@ async def web_search(ctx: RunContext[ChatDeps], query: str) -> list[dict[str, st
     return results
 
 
-async def web_read(ctx: RunContext[ChatDeps], url: str) -> dict[str, str]:
-    """Fetch a URL and return its readable text content.
+async def web_read(
+    ctx: RunContext[ChatDeps], url: str, instruction: str
+) -> dict[str, str]:
+    """Fetch a URL and return an instruction-guided summary of its content.
 
-    Returns a dict with ``title``, ``description``, ``content``, and ``url``.
-    PDF URLs are extracted via pdfplumber; YouTube URLs return video metadata.
+    Works for web pages, PDFs, YouTube links, and image/audio files (e.g. the
+    URLs surfaced on a message's ``<attachment>`` tags). The content is fetched
+    — readable page text, PDF text, YouTube metadata, or an image/audio file —
+    and then condensed by a fast model according to ``instruction``. You get the
+    summary/description back, NOT the raw file, so the instruction must carry
+    the intent. In ``instruction`` tell the reader:
+    - what to look for (the specific facts or answer you need from this page),
+    - what to ignore (navigation, ads, unrelated sections, comment threads),
+    - whether to include exact quotations or just paraphrase, and
+    - how much detail you want (e.g. "a couple of sentences", "one paragraph") —
+      keep it small; summaries max out around 5 paragraphs.
+
+    If the page can't be summarized, or doesn't contain what you asked for, the
+    summary will say so instead of guessing. Returns a dict with ``url``,
+    ``title``, and ``summary`` (or ``error`` on fetch failure).
     """
-    logger.info("web_read: %r (channel=%s)", url, ctx.deps.channel_id)
+    logger.info(
+        "web_read: %r instruction=%r (channel=%s)",
+        url,
+        instruction,
+        ctx.deps.channel_id,
+    )
     await _post_status(ctx, f"Reading <{url}>")
 
+    # Image / audio URLs: download the bytes and read them with the multimodal
+    # media reader instead of trying to extract text.
+    ext = _url_extension(url)
+    if ext in IMAGE_EXTS or ext in AUDIO_EXTS:
+        kind = "image" if ext in IMAGE_EXTS else "audio"
+        fetched = await web_fetch.fetch_bytes(url)
+        if fetched is None:
+            logger.warning("web_read: media fetch_failed for %r", url)
+            return {"url": url, "kind": kind, "summary": "", "error": "fetch_failed"}
+        data, content_type = fetched
+        # Prefer the extension-derived type; the server's Content-Type is
+        # unreliable for media (e.g. .ogg served as video/ogg).
+        media_type = (
+            _EXT_MEDIA_TYPE.get(ext)
+            or content_type
+            or mimetypes.guess_type(url)[0]
+            or ""
+        )
+        if not media_type:
+            return {"url": url, "kind": kind, "summary": "", "error": "unknown_media_type"}
+        try:
+            summary = await describe_media(
+                instruction=instruction,
+                data=data,
+                media_type=media_type,
+                url=url,
+                kind=kind,
+            )
+        except Exception as e:
+            logger.warning("web_read: could not read %s media %r: %s", kind, url, e)
+            return {"url": url, "kind": kind, "summary": "", "error": "media_read_failed"}
+        return {"url": url, "kind": kind, "summary": summary}
+
+    title = ""
     if web_fetch.is_youtube_url(url):
         meta = await web_fetch.fetch_youtube_metadata(url)
-        return {
-            "url": url,
-            "title": meta.get("title", ""),
-            "description": meta.get("description", ""),
-            "content": meta.get("description", ""),
-            "author": meta.get("author", ""),
-        }
+        title = meta.get("title", "")
+        content = meta.get("description", "")
+    elif url.lower().endswith(".pdf"):
+        content = await web_fetch.fetch_pdf_text(url, max_chars=MAX_READ_CHARS) or ""
+    else:
+        data = await web_fetch.fetch_via_jina(url)
+        if data is None:
+            logger.warning("web_read: fetch_failed for %r", url)
+            return {"url": url, "title": "", "summary": "", "error": "fetch_failed"}
+        title = data.get("title", "")
+        content = data.get("content", "")
 
-    if url.lower().endswith(".pdf"):
-        text = await web_fetch.fetch_pdf_text(url)
-        return {
-            "url": url,
-            "title": "",
-            "description": "",
-            "content": text or "",
-        }
+    if not content.strip():
+        return {"url": url, "title": title, "summary": "", "error": "no_content"}
 
-    data = await web_fetch.fetch_via_jina(url)
-    if data is None:
-        logger.warning("web_read: fetch_failed for %r", url)
-        return {"url": url, "title": "", "description": "", "content": "", "error": "fetch_failed"}
-    return data
+    # Only truncate genuinely huge reads — bound the summarizer's input.
+    if len(content) > MAX_READ_CHARS:
+        logger.info(
+            "web_read: truncating %d chars to %d for %r",
+            len(content),
+            MAX_READ_CHARS,
+            url,
+        )
+        content = content[:MAX_READ_CHARS]
+
+    summary = await summarize_web_content(
+        instruction=instruction, content=content, title=title, url=url
+    )
+    return {"url": url, "title": title, "summary": summary}
 
 
 # -- reactions -----------------------------------------------------------
@@ -217,6 +327,66 @@ async def report_behavior(
     }
 
 
+# -- code execution (sandboxed) ------------------------------------------
+
+
+async def run_code(ctx: RunContext[ChatDeps], reason: str, code: str) -> str:
+    """Run Python in a secure sandbox (Pydantic Monty) and return its output.
+
+    Use this for any real computation instead of working it out in your head:
+    arithmetic, date/time math, regex checks, parsing or transforming data,
+    counting, sorting, etc. You get back stdout plus the value of the final
+    expression (like a notebook cell), or the error if it fails.
+
+    ``reason`` is a short, plain-language note (5-10 words) shown to the channel
+    as a status message explaining why you're running code (e.g. "Calculating
+    the 30-day total"). Write it for a human, not as a code comment.
+
+    The sandbox is a RESTRICTED subset of Python:
+    - Allowed stdlib only (import if needed): sys, os, typing, asyncio, re,
+      datetime, json. No third-party packages, no ``class``, no ``match``.
+    - def / async def, loops, comprehensions, f-strings, and the built-in
+      containers all work. There is NO filesystem, network, or env access, and
+      a few seconds of runtime — keep it to pure computation.
+
+    Surface results with the final expression or ``print()``.
+    """
+    await _post_status(ctx, reason)
+    logger.info(
+        "run_code: reason=%r (channel=%s)", reason, ctx.deps.channel_id
+    )
+
+    collector = monty.CollectStreams()
+    try:
+        compiled = monty.Monty(code)
+    except monty.MontyError as e:  # syntax / typing failure at compile time
+        return f"COMPILE ERROR — {type(e).__name__}: {e}"
+
+    try:
+        value = await compiled.run_async(
+            limits=MONTY_LIMITS, print_callback=collector
+        )
+    except monty.MontyError as e:
+        stdout = "".join(t for s, t in collector.output if s == "stdout")
+        tail = f"\n--- stdout before error ---\n{stdout}" if stdout else ""
+        return f"RUNTIME ERROR — {type(e).__name__}: {e}{tail}"
+    except Exception as e:  # defensive: never let the sandbox crash the turn
+        logger.exception(
+            "run_code unexpected failure (channel=%s)", ctx.deps.channel_id
+        )
+        return f"ERROR — {type(e).__name__}: {e}"
+
+    stdout = "".join(t for s, t in collector.output if s == "stdout")
+    parts: list[str] = []
+    if stdout:
+        parts.append(f"stdout:\n{stdout}")
+    parts.append(f"return value: {value!r}")
+    out = "\n".join(parts)
+    if len(out) > MAX_CODE_OUTPUT_CHARS:
+        out = out[:MAX_CODE_OUTPUT_CHARS] + "\n…(output truncated)"
+    return out
+
+
 def chat_tool_functions() -> list:
     """Return the list of tool callables to register with the chat agent."""
     return [
@@ -225,4 +395,5 @@ def chat_tool_functions() -> list:
         list_available_reactions,
         add_reaction,
         report_behavior,
+        run_code,
     ]

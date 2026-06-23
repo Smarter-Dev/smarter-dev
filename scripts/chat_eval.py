@@ -68,8 +68,32 @@ from smarter_dev.bot.agents.chat_models import (  # noqa: E402
     InitialAgentInput,
     Me,
     Message,
+    MessageAttachment,
 )
 from smarter_dev.bot.agents.chat_tools import ChatDeps  # noqa: E402
+
+
+def _parse_attachments(raw: Any) -> list[MessageAttachment]:
+    """Parse a scenario's ``attachments`` entry.
+
+    Accepts a list of URL strings or dicts ({url, media_type, filename}). A
+    bool/None (legacy ``attachments: false``) yields no attachments.
+    """
+    if not raw or not isinstance(raw, list):
+        return []
+    out: list[MessageAttachment] = []
+    for item in raw:
+        if isinstance(item, str):
+            out.append(MessageAttachment(url=item))
+        elif isinstance(item, dict):
+            out.append(
+                MessageAttachment(
+                    url=item["url"],
+                    media_type=item.get("media_type"),
+                    filename=item.get("filename"),
+                )
+            )
+    return out
 
 
 class _StubRest:
@@ -169,7 +193,7 @@ def _parse_scenario(path: Path) -> _ParsedScenario:
             reply_to_is_self=reply_to_is_self,
             body=entry.get("body", ""),
             reactions=list(entry.get("reactions") or []),
-            has_attachments=bool(entry.get("attachments", False)),
+            attachments=_parse_attachments(entry.get("attachments")),
             sent_at=base_time + timedelta(seconds=seq * 30),
             mentions_bot=bool(entry.get("mentions_bot", False)),
         )

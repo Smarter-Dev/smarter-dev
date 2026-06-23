@@ -105,12 +105,20 @@ def _render_message(msg: Message, *, me: Me, authors_by_id: dict[str, Author]) -
             attrs["reply-to-username"] = target.username
     if msg.reactions:
         attrs["reactions"] = ",".join(msg.reactions)
-    if msg.has_attachments:
-        attrs["has-attachments"] = True
     if msg.mentions_bot:
         attrs["mentions-bot"] = True
 
-    return _text_tag("message", attrs, msg.body)
+    if not msg.attachments:
+        return _text_tag("message", attrs, msg.body)
+
+    # Surface attachment URLs as child tags so the agent can read them with the
+    # web_read tool (images, audio, PDFs, etc.).
+    attachment_tags = "\n".join(
+        _empty_tag("attachment", {"kind": att.kind, "url": att.url})
+        for att in msg.attachments
+    )
+    inner = f"{xml_escape(msg.body)}\n{attachment_tags}"
+    return _xml_tag("message", attrs, inner)
 
 
 def _render_messages(messages: Iterable[Message], *, me: Me, authors_by_id: dict[str, Author]) -> str:
