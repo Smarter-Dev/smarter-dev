@@ -18,6 +18,7 @@ import pydantic_monty as monty
 from pydantic_ai import RunContext
 
 from smarter_dev.bot.agents.media_reader import describe_media
+from smarter_dev.bot.agents.url_registry import resolve_escaped_url
 from smarter_dev.bot.agents.web_summarizer import summarize_web_content
 from smarter_dev.bot.utils import web_fetch
 from smarter_dev.web.scan.tools import brave_search
@@ -66,6 +67,8 @@ def _url_extension(url: str) -> str:
     last = path.rsplit("/", 1)[-1]
     dot = last.rfind(".")
     return last[dot:].lower() if dot != -1 else ""
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +146,12 @@ async def web_read(
     summary will say so instead of guessing. Returns a dict with ``url``,
     ``title``, and ``summary`` (or ``error`` on fetch failure).
     """
+    # Attachment URLs are rendered into XML attributes (``&`` -> ``&amp;``), and
+    # the model copies them back escaped. Resolve only URLs we actually escaped
+    # back to their exact original — URLs from search/users pass through
+    # untouched so a legitimate ``&amp;`` in them is never mangled.
+    url = resolve_escaped_url(url)
+
     logger.info(
         "web_read: %r instruction=%r (channel=%s)",
         url,

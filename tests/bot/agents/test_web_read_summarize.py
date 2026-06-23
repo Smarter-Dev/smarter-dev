@@ -171,6 +171,54 @@ async def test_web_read_pdf_passes_limit_and_summarizes():
 
 
 @pytest.mark.asyncio
+async def test_web_read_resolves_registered_escaped_url():
+    """A URL we escaped when rendering resolves back to its exact original."""
+    from smarter_dev.bot.agents.url_registry import register_escaped_url
+
+    ctx = _ctx()
+    captured: dict = {}
+
+    async def fake_fetch(u, **kw):
+        captured["url"] = u
+        return (b"AUD", "audio/ogg")
+
+    original = "https://cdn.discordapp.com/a/voice.ogg?ex=1&is=2&hm=abc"
+    escaped = "https://cdn.discordapp.com/a/voice.ogg?ex=1&amp;is=2&amp;hm=abc"
+    register_escaped_url(original)
+
+    with (
+        patch.object(chat_tools.web_fetch, "fetch_bytes", fake_fetch),
+        patch.object(chat_tools, "describe_media", AsyncMock(return_value="ok")),
+    ):
+        out = await web_read(ctx, escaped, "transcribe")
+
+    assert captured["url"] == original
+    assert out["url"] == original
+
+
+@pytest.mark.asyncio
+async def test_web_read_passes_unregistered_url_through_untouched():
+    """A URL we never escaped (e.g. from search) is fetched verbatim — a
+    legitimate &amp; in it must not be mangled."""
+    ctx = _ctx()
+    captured: dict = {}
+
+    async def fake_fetch(u, **kw):
+        captured["url"] = u
+        return (b"IMG", "image/png")
+
+    # Never registered — contains a literal &amp; that is part of the real URL.
+    weird = "https://example.com/img.png?a=1&amp;b=2"
+    with (
+        patch.object(chat_tools.web_fetch, "fetch_bytes", fake_fetch),
+        patch.object(chat_tools, "describe_media", AsyncMock(return_value="ok")),
+    ):
+        await web_read(ctx, weird, "describe")
+
+    assert captured["url"] == weird
+
+
+@pytest.mark.asyncio
 async def test_web_read_image_routes_to_media_reader():
     ctx = _ctx()
     with (
