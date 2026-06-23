@@ -18,7 +18,7 @@ The agent run itself is patched out — these tests verify the *plumbing*:
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -95,6 +95,7 @@ def _no_send(
         continue_watching=continue_watching,
     )
 from smarter_dev.bot.services.chat_engine import (
+    INACTIVITY_TIMEOUT,
     MAX_NO_RESPONSE_TURNS,
     QUEUE_FIRE_THRESHOLD,
     ChannelEngine,
@@ -232,6 +233,16 @@ def _result(output, all_messages=None, new_messages=None):
         all_messages=lambda: all_messages or [],
         new_messages=lambda: new_messages or [],
     )
+
+
+@pytest.mark.asyncio
+async def test_is_expired_reflects_inactivity_window(fake_bot):
+    """``is_expired`` flips once last_sent_at is older than the timeout — the
+    signal the registry uses to replace a stale engine instead of reusing it."""
+    engine, _ = await _build_engine(fake_bot)
+    assert engine.is_expired is False
+    engine.last_sent_at = datetime.now(UTC) - INACTIVITY_TIMEOUT - timedelta(seconds=1)
+    assert engine.is_expired is True
 
 
 @pytest.mark.asyncio
