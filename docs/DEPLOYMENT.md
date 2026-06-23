@@ -72,6 +72,25 @@ The CI/CD pipeline requires these GitHub Secrets:
 
 Configure these in your GitHub repository settings under Secrets and Variables.
 
+### Automatic deployment on push to `main`
+
+Every push to `main` triggers `.github/workflows/deploy.yaml`, which deploys
+**both** services — there is no separate manual step for the bot:
+
+1. Builds `smarter-dev-website` and `smarter-dev-bot` images, each tagged with
+   the 7-char commit SHA.
+2. Pushes both images to Docker Hub.
+3. Runs `kubectl apply` on `k8s/deploy.yaml` (web) and `k8s/deploy-bot.yaml`
+   (bot). Because the image tag in each manifest changes on every commit, the
+   pod template changes, so Kubernetes performs a **rolling restart of both the
+   web and the bot Deployments**.
+4. Blocks on `kubectl rollout status` for both `deployment/smarter-dev-website`
+   and `deployment/smarter-dev-bot`.
+
+**The bot is restarted automatically by a push to `main` in production.** Manual
+restarts (`pkill`/re-run) are only needed in *local* development, where the bot
+process does not watch for file changes the way the web server does.
+
 ## Manual Deployment
 
 If deploying manually without GitHub Actions:
