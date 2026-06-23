@@ -21,6 +21,30 @@ class Author(BaseModel):
     role_names: list[str] = Field(default_factory=list)
 
 
+class MessageAttachment(BaseModel):
+    """A file attached to a Discord message, surfaced so the agent can read it.
+
+    The agent never receives the bytes inline — it sees the ``url`` (and a
+    coarse ``kind``) and can call the ``web_read`` tool to read/summarize it.
+    """
+
+    url: str
+    media_type: str | None = None  # e.g. "image/png", "audio/ogg"
+    filename: str | None = None
+
+    @property
+    def kind(self) -> str:
+        """Coarse category for rendering: image | audio | pdf | file."""
+        mt = (self.media_type or "").lower()
+        if mt.startswith("image/"):
+            return "image"
+        if mt.startswith("audio/"):
+            return "audio"
+        if mt == "application/pdf" or (self.filename or "").lower().endswith(".pdf"):
+            return "pdf"
+        return "file"
+
+
 class Message(BaseModel):
     """A single Discord message in the conversation."""
 
@@ -45,7 +69,7 @@ class Message(BaseModel):
     )
     body: str
     reactions: list[str] = Field(default_factory=list)
-    has_attachments: bool = False
+    attachments: list[MessageAttachment] = Field(default_factory=list)
     sent_at: datetime | None = Field(
         default=None,
         description=(

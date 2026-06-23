@@ -68,9 +68,12 @@ PYTHON CODE and execute it with the `run_code` tool, then report the result. Do 
 not do arithmetic, date math, parsing, or data crunching in your head — compute \
 it with code.
 
-`run_code(code: str)` runs your code in a secure sandbox (Pydantic Monty) and \
-returns its stdout plus the value of the final expression (like a notebook \
-cell).
+`run_code(reason: str, code: str)` runs your code in a secure sandbox (Pydantic \
+Monty) and returns its stdout plus the value of the final expression (like a \
+notebook cell). ``reason`` is a short, plain-language note (5-10 words) about \
+why you're running this code — it is shown to the channel as a status message, \
+so write it for a human (e.g. "Calculating the 30-day compound total", \
+"Checking the latest Python version"), not as a code comment.
 
 The sandbox is a RESTRICTED subset of Python:
 - Allowed stdlib only (import if needed): sys, os, typing, asyncio, re, \
@@ -90,7 +93,7 @@ surface results.
 
 Workflow:
 1. Write code that computes the answer; call web_search / web_read for live info.
-2. Call run_code.
+2. Call run_code with a short human-readable `reason` and your `code`.
 3. If it errors, read the error, fix the code, and run again.
 4. Once you have the result, reply in plain language with the final answer.
 Keep code minimal and correct."""
@@ -127,6 +130,7 @@ HOST_FUNCTIONS = {"web_search": host_web_search, "web_read": host_web_read}
 class _CodeRun:
     code: str
     ok: bool
+    reason: str = ""
     result_repr: str | None = None
     stdout: str = ""
     error: str | None = None
@@ -144,14 +148,24 @@ class CodeModeDeps:
     recorder: Recorder
 
 
-async def run_code(ctx: RunContext[CodeModeDeps], code: str) -> str:
-    """Execute Python in the Monty sandbox; return stdout + final value, or the error."""
+async def run_code(ctx: RunContext[CodeModeDeps], reason: str, code: str) -> str:
+    """Execute Python in the Monty sandbox; return stdout + final value, or the error.
+
+    ``reason`` is a short, user-facing explanation of WHY you're running this
+    code (e.g. "Calculating the 30-day compound total"). It is shown to the
+    channel as a status message — in production this maps to ``_post_status``,
+    the same mechanism web_search/web_read use.
+    """
+    # Mimic the production status post (``> -# {reason}``) so the eval shows
+    # exactly what the channel would see.
+    print(f"   status> -# {reason}", file=sys.stderr)
+
     collector = monty.CollectStreams()
     try:
         compiled = monty.Monty(code)
     except monty.MontyError as e:  # syntax / typing failure at compile time
         ctx.deps.recorder.runs.append(
-            _CodeRun(code=code, ok=False, error=f"{type(e).__name__}: {e}")
+            _CodeRun(code=code, ok=False, reason=reason, error=f"{type(e).__name__}: {e}")
         )
         return f"COMPILE ERROR — {type(e).__name__}: {e}"
 
@@ -164,7 +178,13 @@ async def run_code(ctx: RunContext[CodeModeDeps], code: str) -> str:
     except monty.MontyError as e:
         stdout = "".join(text for stream, text in collector.output if stream == "stdout")
         ctx.deps.recorder.runs.append(
-            _CodeRun(code=code, ok=False, stdout=stdout, error=f"{type(e).__name__}: {e}")
+            _CodeRun(
+                code=code,
+                ok=False,
+                reason=reason,
+                stdout=stdout,
+                error=f"{type(e).__name__}: {e}",
+            )
         )
         tail = f"\n--- stdout before error ---\n{stdout}" if stdout else ""
         return f"RUNTIME ERROR — {type(e).__name__}: {e}{tail}"
@@ -172,7 +192,9 @@ async def run_code(ctx: RunContext[CodeModeDeps], code: str) -> str:
     stdout = "".join(text for stream, text in collector.output if stream == "stdout")
     result_repr = repr(value)
     ctx.deps.recorder.runs.append(
-        _CodeRun(code=code, ok=True, result_repr=result_repr, stdout=stdout)
+        _CodeRun(
+            code=code, ok=True, reason=reason, result_repr=result_repr, stdout=stdout
+        )
     )
     parts = []
     if stdout:
@@ -308,6 +330,7 @@ async def run_case(agent: Agent, case: dict, timeout: float) -> dict[str, Any]:
             {
                 "code": r.code,
                 "ok": r.ok,
+                "reason": r.reason,
                 "result": r.result_repr,
                 "stdout": r.stdout,
                 "error": r.error,
@@ -334,6 +357,7 @@ def print_case(res: dict) -> None:
     for i, run in enumerate(res["code_runs"], 1):
         flag = "OK" if run["ok"] else "FAIL"
         print(f"\n--- run #{i} [{flag}] ---")
+        print(f"  status> -# {run.get('reason', '')}")
         print(run["code"])
         if run["stdout"]:
             print(f"  stdout> {run['stdout'].rstrip()}")

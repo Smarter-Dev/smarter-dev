@@ -27,6 +27,7 @@ from smarter_dev.bot.agents.chat_models import (
     InitialAgentInput,
     Me,
     Message,
+    MessageAttachment,
 )
 from smarter_dev.bot.services.chat_memory import ChatMemory
 from smarter_dev.bot.utils.messages import (
@@ -128,6 +129,27 @@ async def build_followup_input(
     )
 
 
+def _build_attachments(
+    msg: hikari.Message, *, is_self: bool
+) -> list[MessageAttachment]:
+    """Surface a message's attachments as readable URLs for the agent.
+
+    Attachments on the bot's *own* messages are hidden entirely — the bot
+    shouldn't try to read files it posted itself (e.g. its own .ogg voice
+    replies).
+    """
+    if is_self:
+        return []
+    return [
+        MessageAttachment(
+            url=att.url,
+            media_type=(getattr(att, "media_type", None) or None),
+            filename=(getattr(att, "filename", "") or None),
+        )
+        for att in msg.attachments or []
+    ]
+
+
 async def _convert(
     *,
     bot: hikari.GatewayBot,
@@ -161,6 +183,7 @@ async def _convert(
             bot_user_id is not None
             and bot_user_id in (msg.user_mentions_ids or [])
         )
+        is_self = bot_user_id is not None and msg.author.id == bot_user_id
         messages.append(
             Message(
                 message_id=str(msg.id),
@@ -170,7 +193,7 @@ async def _convert(
                 reply_to_is_self=reply_to_is_self,
                 body=resolved_body,
                 reactions=reactions,
-                has_attachments=bool(msg.attachments),
+                attachments=_build_attachments(msg, is_self=is_self),
                 sent_at=getattr(msg, "created_at", None) or getattr(msg, "timestamp", None),
                 mentions_bot=mentions_bot,
             )

@@ -108,6 +108,36 @@ async def fetch_pdf_text(url: str, max_chars: int = 20_000) -> str | None:
         return None
 
 
+async def fetch_bytes(
+    url: str, *, max_bytes: int = 20 * 1024 * 1024
+) -> tuple[bytes, str] | None:
+    """Download raw bytes and content-type for a URL (images / audio).
+
+    Returns ``(data, content_type)`` or ``None`` on failure or when the body
+    exceeds ``max_bytes``. ``content_type`` is the bare type without params
+    (e.g. ``image/png``) and may be empty if the server omitted it.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            resp = await client.get(url, headers={"User-Agent": USER_AGENT})
+            if resp.status_code != 200:
+                return None
+            data = resp.content
+            if len(data) > max_bytes:
+                logger.debug(
+                    "fetch_bytes: %s is %d bytes, over the %d cap",
+                    url,
+                    len(data),
+                    max_bytes,
+                )
+                return None
+            content_type = resp.headers.get("content-type", "").split(";")[0].strip()
+            return data, content_type
+    except Exception as e:
+        logger.debug("fetch_bytes failed for %s: %s", url, e)
+        return None
+
+
 def strip_html(html: str) -> str:
     """Fallback HTML→text used only when Jina is unavailable."""
     cleaned = _SCRIPT_STYLE_RE.sub("", html)
@@ -119,6 +149,7 @@ __all__ = [
     "USER_AGENT",
     "_HTML_TAG_RE",
     "_SCRIPT_STYLE_RE",
+    "fetch_bytes",
     "fetch_pdf_text",
     "fetch_via_jina",
     "fetch_youtube_metadata",
