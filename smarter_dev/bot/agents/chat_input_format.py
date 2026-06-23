@@ -22,6 +22,7 @@ from smarter_dev.bot.agents.chat_models import (
     Me,
     Message,
 )
+from smarter_dev.bot.agents.url_registry import register_escaped_url
 
 
 def _attr(value: str | bool | None) -> str | None:
@@ -112,7 +113,10 @@ def _render_message(msg: Message, *, me: Me, authors_by_id: dict[str, Author]) -
         return _text_tag("message", attrs, msg.body)
 
     # Surface attachment URLs as child tags so the agent can read them with the
-    # web_read tool (images, audio, PDFs, etc.).
+    # web_read tool (images, audio, PDFs, etc.). Record each so web_read can
+    # recover the exact original when the model echoes back the escaped form.
+    for att in msg.attachments:
+        register_escaped_url(att.url)
     attachment_tags = "\n".join(
         _empty_tag("attachment", {"kind": att.kind, "url": att.url})
         for att in msg.attachments
