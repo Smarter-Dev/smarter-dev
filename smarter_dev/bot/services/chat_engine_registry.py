@@ -31,7 +31,7 @@ class ChatEngineRegistry:
     async def has_active(self, channel_id: int) -> bool:
         async with self._lock:
             engine = self._engines.get(channel_id)
-            return engine is not None and engine.active
+            return engine is not None and engine.active and not engine.is_expired
 
     async def ensure_engine(
         self,
@@ -41,10 +41,36 @@ class ChatEngineRegistry:
         guild_id: int,
         voice_send: Callable[[int, str, int | None], Awaitable[None]],
     ) -> ChannelEngine:
-        """Return the active engine for the channel, creating it if needed."""
+        """Return the active engine for the channel, creating it if needed.
+
+        An engine that has aged past its inactivity window is treated as gone:
+        it is torn down and replaced by a fresh one so the triggering mention
+        starts a new engagement rather than being consumed by the stale
+        engine's lazy deactivation.
+        """
+        stale: ChannelEngine | None = None
         async with self._lock:
             engine = self._engines.get(channel_id)
+            if engine is not None and engine.active and not engine.is_expired:
+                return engine
             if engine is not None and engine.active:
+                # Expired but still parked here. Drop it from the registry now so
+                # its own deactivation (below) can't pop the replacement we are
+                # about to create for this channel.
+                stale = engine
+                self._engines.pop(channel_id, None)
+
+        if stale is not None:
+            try:
+                await stale.expire()
+            except Exception:
+                logger.exception(
+                    "Failed to expire stale chat engine for channel %s", channel_id
+                )
+
+        async with self._lock:
+            engine = self._engines.get(channel_id)
+            if engine is not None and engine.active and not engine.is_expired:
                 return engine
 
             new_engine = ChannelEngine(

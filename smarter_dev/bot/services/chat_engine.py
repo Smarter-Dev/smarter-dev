@@ -128,10 +128,32 @@ class ChannelEngine:
     # ------------------------------------------------------------------
     # Public API
 
+    @property
+    def is_expired(self) -> bool:
+        """True once the engine has been idle past the inactivity window.
+
+        The runner only evaluates the inactivity timeout lazily on its next
+        fire, so an idle engine lingers in the registry with ``active=True``
+        until something pokes it. The registry consults this so a mention that
+        arrives after the window starts a *fresh* engagement rather than being
+        consumed by the stale engine's deactivation (which previously required
+        a second mention to wake the bot back up).
+        """
+        return datetime.now(UTC) - self.last_sent_at > INACTIVITY_TIMEOUT
+
     def start(self) -> None:
         """Begin the background runner. Call once after construction."""
         if self._runner_task is None:
             self._runner_task = asyncio.create_task(self._runner())
+
+    async def expire(self) -> None:
+        """Tear down a stale engine that a new engagement is superseding.
+
+        Mirrors the runner's inactivity path (clears notes + history, ends the
+        engagement on the dashboard) but is driven by the registry rather than
+        a fire event.
+        """
+        await self._deactivate(send_notes_clear=True, reason="inactivity")
 
     def trigger_initial(self, trigger_message: hikari.Message) -> None:
         """Fire the agent immediately for the first turn of this engagement.
