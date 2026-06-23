@@ -52,9 +52,9 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 
-# Temporary test files
-test_*.py
-debug_*.py
+# Temporary test/debug scripts at the repo root (not the tests/ tree)
+/test_*.py
+/debug_*.py
 discord_server_icon.gif
 verify_setup.py
 .env.test
