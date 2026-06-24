@@ -283,8 +283,16 @@ class ResponseBody(BaseModel):
     message: str | None = Field(
         default=None,
         description=(
-            "Plain-text message body to post to Discord. Leave None if "
-            "the user only wanted a voice reply."
+            "Plain-text message body to post to Discord — ONLY the prose "
+            "meant for the user, nothing else. Leave None if the user "
+            "only wanted a voice reply. This field is the user-facing "
+            "text and stops the moment your reply to them stops: do NOT "
+            "append, echo, or embed any other field of this schema "
+            "(target_message_id, reply_directly, not_cs_topic_brief_answer, "
+            "voice_summary, topic, etc.), their values, or any "
+            "JSON/key-value structure into this string. Those belong in "
+            "their own fields; putting them here leaks raw schema into the "
+            "chat."
         ),
     )
     voice_summary: str | None = Field(
