@@ -69,6 +69,19 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: secret-key
+                  # Object storage (DigitalOcean Spaces) — app.yaml's
+                  # storage.stores.default.s3 block interpolates these at
+                  # config-load time, so the process won't boot without them.
+                  - name: SPACES_ACCESS_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: spaces-access-key
+                  - name: SPACES_SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: spaces-secret-key
                   # Auth provider creds — app.yaml's auth config interpolates
                   # these at load time, so config parsing fails without them.
                   - name: DISCORD_CLIENT_ID
