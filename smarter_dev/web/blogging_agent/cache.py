@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from smarter_dev.web.scan.tools import RateLimiter, URLRateLimiter
+from smarter_dev.web.research_tools import RateLimiter, URLRateLimiter
 
 
 @dataclass

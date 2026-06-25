@@ -21,7 +21,7 @@ from smarter_dev.bot.agents.media_reader import describe_media
 from smarter_dev.bot.agents.url_registry import resolve_escaped_url
 from smarter_dev.bot.agents.web_summarizer import summarize_web_content
 from smarter_dev.bot.utils import web_fetch
-from smarter_dev.web.scan.tools import brave_search
+from smarter_dev.web.research_tools import brave_search
 
 # Reads longer than this are truncated before summarization to bound the
 # summarizer's input; shorter reads are passed through whole.

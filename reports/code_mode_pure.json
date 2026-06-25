@@ -1,0 +1,156 @@
+{
+  "model": "gemini-3.1-flash-lite",
+  "results": [
+    {
+      "name": "compound_interest",
+      "web": false,
+      "prompt": "A member starts with 1240 bytes and earns 8% interest per day, compounded daily and floored to a whole number of bytes at the end of each day. How many bytes do they have after 30 days?",
+      "expect": "Deterministic integer from a 30-iteration floor-compounding loop.",
+      "status": "completed",
+      "seconds": 2.3,
+      "code_runs": [
+        {
+          "code": "def calculate_bytes():\n    balance = 1240\n    for day in range(1, 31):\n        balance = int(balance * 1.08)\n    return balance\n\nprint(calculate_bytes())",
+          "ok": true,
+          "result": "None",
+          "stdout": "12422\n",
+          "error": null
+        }
+      ],
+      "n_runs": 1,
+      "last_run_ok": true,
+      "answer": "The member has 12,422 bytes after 30 days.",
+      "input_tokens": 1387,
+      "output_tokens": 424,
+      "requests": 2,
+      "usage_repr": "RunUsage(input_tokens=1387, output_tokens=424, details={'thoughts_tokens': 340, 'text_prompt_tokens': 1387}, requests=2, tool_calls=1)"
+    },
+    {
+      "name": "date_diff",
+      "web": false,
+      "prompt": "How many days are there from 2026-01-15 to 2026-11-03, counting the end date but not the start date?",
+      "expect": "(date(2026,11,3) - date(2026,1,15)).days == 292.",
+      "status": "completed",
+      "seconds": 1.9,
+      "code_runs": [
+        {
+          "code": "from datetime import date\n\nstart_date = date(2026, 1, 15)\nend_date = date(2026, 11, 3)\ndelta = end_date - start_date\nprint(delta.days)",
+          "ok": true,
+          "result": "None",
+          "stdout": "292\n",
+          "error": null
+        }
+      ],
+      "n_runs": 1,
+      "last_run_ok": true,
+      "answer": "The number of days from 2026-01-15 to 2026-11-03, counting the end date but not the start date, is 292.",
+      "input_tokens": 1196,
+      "output_tokens": 281,
+      "requests": 2,
+      "usage_repr": "RunUsage(input_tokens=1196, output_tokens=281, details={'thoughts_tokens': 162, 'text_prompt_tokens': 1196}, requests=2, tool_calls=1)"
+    },
+    {
+      "name": "hex_color_regex",
+      "web": false,
+      "prompt": "How many of these strings are valid 6-digit hex colors (a # followed by exactly six hex digits)? ['#1a2b3c', '#FFF', '123456', '#abcdez', '#000000', '#AABBCC', '#12 34 56']",
+      "expect": "3 valid: #1a2b3c, #000000, #AABBCC.",
+      "status": "completed",
+      "seconds": 4.3,
+      "code_runs": [
+        {
+          "code": "def is_valid_hex(s):\n    if len(s) != 7:\n        return False\n    if not s.startswith('#'):\n        return False\n    hex_digits = s[1:]\n    import string\n    allowed = string.hexdigits # 0-9, a-f, A-F\n    return all(c in allowed for c in hex_digits)\n\nstrings = ['#1a2b3c', '#FFF', '123456', '#abcdez', '#000000', '#AABBCC', '#12 34 56']\nvalid = [s for s in strings if is_valid_hex(s)]\nprint(valid)\nprint(len(valid))\n",
+          "ok": false,
+          "result": null,
+          "stdout": "",
+          "error": "MontyRuntimeError: ModuleNotFoundError: No module named 'string'"
+        },
+        {
+          "code": "def is_valid_hex(s):\n    if len(s) != 7:\n        return False\n    if not s.startswith('#'):\n        return False\n    hex_digits = s[1:]\n    allowed = \"0123456789abcdefABCDEF\"\n    for char in hex_digits:\n        if char not in allowed:\n            return False\n    return True\n\nstrings = ['#1a2b3c', '#FFF', '123456', '#abcdez', '#000000', '#AABBCC', '#12 34 56']\nvalid = [s for s in strings if is_valid_hex(s)]\nprint(f\"Valid strings: {valid}\")\nprint(f\"Count: {len(valid)}\")\n",
+          "ok": true,
+          "result": "None",
+          "stdout": "Valid strings: ['#1a2b3c', '#000000', '#AABBCC']\nCount: 3\n",
+          "error": null
+        }
+      ],
+      "n_runs": 2,
+      "last_run_ok": true,
+      "answer": "There are 3 strings in the list that are valid 6-digit hex colors:\n\n*   `#1a2b3c`\n*   `#000000`\n*   `#AABBCC`\n\nThe others were invalid for the following reasons:\n*   `#FFF`: Too short (only 3 hex digits).\n*   `123456`: Missing the leading `#`.\n*   `#abcdez`: Contains the character 'z', which is not a valid hex digit.\n*   `#12 34 56`: Contains spaces.",
+      "input_tokens": 2952,
+      "output_tokens": 945,
+      "requests": 3,
+      "usage_repr": "RunUsage(input_tokens=2952, output_tokens=945, details={'thoughts_tokens': 430, 'text_prompt_tokens': 2952}, requests=3, tool_calls=2)"
+    },
+    {
+      "name": "fib_even_sum",
+      "web": false,
+      "prompt": "What is the sum of all even Fibonacci numbers strictly less than 100?",
+      "expect": "2 + 8 + 34 == 44.",
+      "status": "completed",
+      "seconds": 2.7,
+      "code_runs": [
+        {
+          "code": "def get_even_fibs_under_limit(limit):\n    fibs = [0, 1]\n    while True:\n        next_fib = fibs[-1] + fibs[-2]\n        if next_fib >= limit:\n            break\n        fibs.append(next_fib)\n    \n    even_fibs = [f for f in fibs if f % 2 == 0]\n    return even_fibs, sum(even_fibs)\n\neven_fibs, total_sum = get_even_fibs_under_limit(100)\nprint(f\"Even Fibonacci numbers under 100: {even_fibs}\")\nprint(f\"Sum: {total_sum}\")",
+          "ok": true,
+          "result": "None",
+          "stdout": "Even Fibonacci numbers under 100: [0, 2, 8, 34]\nSum: 44\n",
+          "error": null
+        }
+      ],
+      "n_runs": 1,
+      "last_run_ok": true,
+      "answer": "The even Fibonacci numbers strictly less than 100 are 0, 2, 8, and 34. Their sum is 44.",
+      "input_tokens": 1480,
+      "output_tokens": 574,
+      "requests": 2,
+      "usage_repr": "RunUsage(input_tokens=1480, output_tokens=574, details={'thoughts_tokens': 359, 'text_prompt_tokens': 1480}, requests=2, tool_calls=1)"
+    },
+    {
+      "name": "json_top_scorer",
+      "web": false,
+      "prompt": "Here is JSON of squad scores: [{\"squad\":\"Red\",\"pts\":42},{\"squad\":\"Blue\",\"pts\":71},{\"squad\":\"Green\",\"pts\":68},{\"squad\":\"Gold\",\"pts\":71}]. Which squad has the highest points, and what is the value? If there is a tie, list all tied squads.",
+      "expect": "Tie at 71 between Blue and Gold.",
+      "status": "completed",
+      "seconds": 2.0,
+      "code_runs": [
+        {
+          "code": "data = [{\"squad\":\"Red\",\"pts\":42},{\"squad\":\"Blue\",\"pts\":71},{\"squad\":\"Green\",\"pts\":68},{\"squad\":\"Gold\",\"pts\":71}]\nmax_pts = max(s['pts'] for s in data)\nwinners = [s['squad'] for s in data if s['pts'] == max_pts]\nprint(f\"Max points: {max_pts}\")\nprint(f\"Winners: {winners}\")",
+          "ok": true,
+          "result": "None",
+          "stdout": "Max points: 71\nWinners: ['Blue', 'Gold']\n",
+          "error": null
+        }
+      ],
+      "n_runs": 1,
+      "last_run_ok": true,
+      "answer": "The squads with the highest points are Blue and Gold, each with 71 points.",
+      "input_tokens": 1396,
+      "output_tokens": 376,
+      "requests": 2,
+      "usage_repr": "RunUsage(input_tokens=1396, output_tokens=376, details={'thoughts_tokens': 238, 'text_prompt_tokens': 1396}, requests=2, tool_calls=1)"
+    },
+    {
+      "name": "longest_word",
+      "web": false,
+      "prompt": "In the sentence \"Self documenting code needs descriptive identifiers everywhere\", what is the longest word and how many letters does it have?",
+      "expect": "'documenting' (11) and 'descriptive' (11) tie at 11 letters.",
+      "status": "completed",
+      "seconds": 2.2,
+      "code_runs": [
+        {
+          "code": "sentence = \"Self documenting code needs descriptive identifiers everywhere\"\nwords = sentence.split()\nmax_len = 0\nlongest_words = []\n\nfor word in words:\n    length = len(word)\n    if length > max_len:\n        max_len = length\n        longest_words = [word]\n    elif length == max_len:\n        longest_words.append(word)\n\nprint(f\"Words: {words}\")\nprint(f\"Longest words: {longest_words}\")\nprint(f\"Max length: {max_len}\")",
+          "ok": true,
+          "result": "None",
+          "stdout": "Words: ['Self', 'documenting', 'code', 'needs', 'descriptive', 'identifiers', 'everywhere']\nLongest words: ['documenting', 'descriptive', 'identifiers']\nMax length: 11\n",
+          "error": null
+        }
+      ],
+      "n_runs": 1,
+      "last_run_ok": true,
+      "answer": "In the sentence \"Self documenting code needs descriptive identifiers everywhere,\" there is a three-way tie for the longest word: **\"documenting\"**, **\"descriptive\"**, and **\"identifiers\"**. Each of these words has **11 letters**.",
+      "input_tokens": 1333,
+      "output_tokens": 443,
+      "requests": 2,
+      "usage_repr": "RunUsage(input_tokens=1333, output_tokens=443, details={'thoughts_tokens': 250, 'text_prompt_tokens': 1333}, requests=2, tool_calls=1)"
+    }
+  ]
+}

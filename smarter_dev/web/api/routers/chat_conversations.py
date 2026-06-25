@@ -32,7 +32,7 @@ from smarter_dev.web.models import (
     ChatAgentEngagement,
     ChatAgentTurn,
 )
-from smarter_dev.web.scan.pricing import calc_cost
+from smarter_dev.web.llm_pricing import calc_cost
 
 logger = logging.getLogger(__name__)
 
