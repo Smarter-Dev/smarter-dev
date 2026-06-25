@@ -39,7 +39,7 @@ dependencies = [
     "genai-prices>=0.0.55",
     "google-genai>=1.62.0",
     "resend>=2.0.0",
-    "pydantic-ai-slim[google]>=1.89.1,<2.0.0",
+    "pydantic-ai-slim[google,openai]>=1.89.1,<2.0.0",
     "skrift[passkeys]>=0.2.0a5",
     "pydantic-monty>=0.0.18",
 ]
