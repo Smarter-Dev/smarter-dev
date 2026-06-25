@@ -184,19 +184,19 @@ spec:
                 # HTTP port. Matches the bot's pgrep pattern.
                 startupProbe:
                     exec:
-                        command: ["pgrep", "-f", "workers run"]
+                        command: ["sh", "-c", "grep -qa workers /proc/*/cmdline"]
                     failureThreshold: 30
                     periodSeconds: 10
                 livenessProbe:
                     exec:
-                        command: ["pgrep", "-f", "workers run"]
+                        command: ["sh", "-c", "grep -qa workers /proc/*/cmdline"]
                     initialDelaySeconds: 15
                     periodSeconds: 30
                     timeoutSeconds: 5
                     failureThreshold: 3
                 readinessProbe:
                     exec:
-                        command: ["pgrep", "-f", "workers run"]
+                        command: ["sh", "-c", "grep -qa workers /proc/*/cmdline"]
                     initialDelaySeconds: 10
                     periodSeconds: 10
                     timeoutSeconds: 3
