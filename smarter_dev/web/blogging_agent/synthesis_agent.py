@@ -14,8 +14,6 @@ from pathlib import Path
 
 import skrift
 from pydantic import BaseModel, Field
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
-from pydantic_ai.providers.google import GoogleProvider
 from skrift.agents.models import ResumeContext
 
 from smarter_dev.web.blogging_agent.research_agent import Citation
@@ -27,17 +25,6 @@ SYNTHESIS_AGENT_NAME = "blogging.synthesis"
 _PROMPT = (Path(__file__).parent / "prompts" / "synthesis.md").read_text(
     encoding="utf-8"
 )
-
-
-def _build_model() -> GoogleModel:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-    return GoogleModel(SYNTHESIS_MODEL, provider=GoogleProvider(api_key=api_key))
-
-
-def _model_settings() -> GoogleModelSettings:
-    return GoogleModelSettings(
-        google_thinking_config={"thinking_level": "MEDIUM"},
-    )
 
 
 class SynthesisInput(BaseModel):
@@ -90,11 +77,11 @@ def _build_deps(ctx: ResumeContext) -> SynthesisDeps:
 
 
 synthesis_agent = skrift.Agent(
-    _build_model(),
+    f"google-gla:{SYNTHESIS_MODEL}",
     name=SYNTHESIS_AGENT_NAME,
     system_prompt=_PROMPT,
     output_type=SynthesisOutput,
-    model_settings=_model_settings(),
+    model_settings={"google_thinking_config": {"thinking_level": "MEDIUM"}},
     deps_type=SynthesisDeps,
     deps_factory=_build_deps,
 )

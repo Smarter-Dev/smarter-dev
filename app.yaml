@@ -164,6 +164,7 @@ workers:
   # off the web tier.)
   imports:
     - smarter_dev.web.resources_agent
+    - smarter_dev.web.resources_jobs
     - smarter_dev.web.title_agent
     - smarter_dev.web.blogging_agent.pipeline
 

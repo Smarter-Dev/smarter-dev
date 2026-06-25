@@ -16,48 +16,41 @@ once at first use.
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
-from pydantic_ai.providers.google import GoogleProvider
+
+if TYPE_CHECKING:
+    from pydantic_ai import Agent
 
 logger = logging.getLogger(__name__)
 
 _FLASH_LITE_MODEL = "gemini-3.1-flash-lite"
 
+_MODEL_SETTINGS = {"google_thinking_config": {"thinking_level": "LOW"}}
+
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
-
-
-def _build_model() -> GoogleModel:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-    return GoogleModel(_FLASH_LITE_MODEL, provider=GoogleProvider(api_key=api_key))
-
-
-def _model_settings() -> GoogleModelSettings:
-    return GoogleModelSettings(
-        google_thinking_config={"thinking_level": "LOW"},
-    )
 
 
 # ── News summariser (Scout) ──────────────────────────────────────────
 
 
-_news_summariser_agent: Agent[None, str] | None = None
+_news_summariser_agent: "Agent[None, str] | None" = None
 
 
-def _news_summariser() -> Agent[None, str]:
+def _news_summariser() -> "Agent[None, str]":
     global _news_summariser_agent
     if _news_summariser_agent is None:
+        from pydantic_ai import Agent
+
         _news_summariser_agent = Agent(
-            _build_model(),
+            f"google-gla:{_FLASH_LITE_MODEL}",
             system_prompt=(_PROMPTS_DIR / "news_summariser.md").read_text(
                 encoding="utf-8"
             ),
             output_type=str,
-            model_settings=_model_settings(),
+            model_settings=_MODEL_SETTINGS,
         )
     return _news_summariser_agent
 
@@ -93,19 +86,21 @@ class ExcerptOutput(BaseModel):
     )
 
 
-_excerpt_extractor_agent: Agent[None, ExcerptOutput] | None = None
+_excerpt_extractor_agent: "Agent[None, ExcerptOutput] | None" = None
 
 
-def _excerpt_extractor() -> Agent[None, ExcerptOutput]:
+def _excerpt_extractor() -> "Agent[None, ExcerptOutput]":
     global _excerpt_extractor_agent
     if _excerpt_extractor_agent is None:
+        from pydantic_ai import Agent
+
         _excerpt_extractor_agent = Agent(
-            _build_model(),
+            f"google-gla:{_FLASH_LITE_MODEL}",
             system_prompt=(_PROMPTS_DIR / "excerpt_extractor.md").read_text(
                 encoding="utf-8"
             ),
             output_type=ExcerptOutput,
-            model_settings=_model_settings(),
+            model_settings=_MODEL_SETTINGS,
         )
     return _excerpt_extractor_agent
 

@@ -10,35 +10,24 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import skrift
 from pydantic import BaseModel, Field
-from pydantic_ai import RunContext
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
-from pydantic_ai.providers.google import GoogleProvider
 from skrift.agents.models import ResumeContext
 
 from smarter_dev.web.blogging_agent.cache import get_cache
 from smarter_dev.web.blogging_agent.summariser import summarise_news_page
 from smarter_dev.web.research_tools import brave_search, jina_read
 
+if TYPE_CHECKING:
+    from pydantic_ai import RunContext
+
 SCOUT_MODEL = os.getenv("BLOGGING_SCOUT_MODEL", "gemini-3-flash-preview")
 SCOUT_AGENT_NAME = "blogging.scout"
 _PROMPT = (Path(__file__).parent / "prompts" / "scout.md").read_text(
     encoding="utf-8"
 )
-
-
-def _build_model() -> GoogleModel:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-    return GoogleModel(SCOUT_MODEL, provider=GoogleProvider(api_key=api_key))
-
-
-def _model_settings() -> GoogleModelSettings:
-    return GoogleModelSettings(
-        google_thinking_config={"thinking_level": "MEDIUM"},
-    )
 
 
 class ScoutTopic(BaseModel):
@@ -94,11 +83,11 @@ def _build_deps(ctx: ResumeContext) -> ScoutDeps:
 
 
 scout_agent = skrift.Agent(
-    _build_model(),
+    f"google-gla:{SCOUT_MODEL}",
     name=SCOUT_AGENT_NAME,
     system_prompt=_PROMPT,
     output_type=ScoutOutput,
-    model_settings=_model_settings(),
+    model_settings={"google_thinking_config": {"thinking_level": "MEDIUM"}},
     deps_type=ScoutDeps,
     deps_factory=_build_deps,
 )

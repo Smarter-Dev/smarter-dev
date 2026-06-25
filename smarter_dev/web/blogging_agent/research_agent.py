@@ -14,23 +14,18 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import skrift
 from pydantic import BaseModel, Field
-from pydantic_ai import RunContext
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
-from pydantic_ai.models.openai import (
-    OpenAIResponsesModel,
-    OpenAIResponsesModelSettings,
-)
-from pydantic_ai.providers.google import GoogleProvider
-from pydantic_ai.providers.openai import OpenAIProvider
 from skrift.agents.models import ResumeContext
 
 from smarter_dev.web.blogging_agent.cache import get_cache
 from smarter_dev.web.blogging_agent.summariser import extract_excerpts
 from smarter_dev.web.research_tools import brave_search, jina_read
+
+if TYPE_CHECKING:
+    from pydantic_ai import RunContext
 
 RESEARCH_MODEL = os.getenv(
     "BLOGGING_RESEARCH_MODEL", "gemini-3-flash-preview"
@@ -130,26 +125,16 @@ class ResearcherSubagentDeps:
     run_id: str
 
 
-def _build_openai_model() -> OpenAIResponsesModel:
-    api_key = os.getenv("OPENAI_API_KEY") or ""
-    return OpenAIResponsesModel(
-        RESEARCHER_SUBAGENT_MODEL,
-        provider=OpenAIProvider(api_key=api_key),
-    )
-
-
 def _build_subagent_deps(ctx: ResumeContext) -> ResearcherSubagentDeps:
     return ResearcherSubagentDeps(run_id=str(ctx.deps_ref.get("run_id", "")))
 
 
 researcher_subagent = skrift.Agent(
-    _build_openai_model(),
+    f"openai-responses:{RESEARCHER_SUBAGENT_MODEL}",
     name=RESEARCHER_SUBAGENT_NAME,
     system_prompt=_SUBAGENT_PROMPT,
     output_type=ResearchOutput,
-    model_settings=OpenAIResponsesModelSettings(
-        openai_reasoning_effort="medium"
-    ),
+    model_settings={"openai_reasoning_effort": "medium"},
     deps_type=ResearcherSubagentDeps,
     deps_factory=_build_subagent_deps,
 )
@@ -223,23 +208,16 @@ class ResearchDeps:
     run_id: str
 
 
-def _build_google_model() -> GoogleModel:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-    return GoogleModel(RESEARCH_MODEL, provider=GoogleProvider(api_key=api_key))
-
-
 def _build_research_deps(ctx: ResumeContext) -> ResearchDeps:
     return ResearchDeps(run_id=str(ctx.deps_ref.get("run_id", "")))
 
 
 research_agent = skrift.Agent(
-    _build_google_model(),
+    f"google-gla:{RESEARCH_MODEL}",
     name=RESEARCH_AGENT_NAME,
     system_prompt=_PROMPT,
     output_type=ResearchOutput,
-    model_settings=GoogleModelSettings(
-        google_thinking_config={"thinking_level": "MEDIUM"},
-    ),
+    model_settings={"google_thinking_config": {"thinking_level": "MEDIUM"}},
     deps_type=ResearchDeps,
     deps_factory=_build_research_deps,
 )
