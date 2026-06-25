@@ -30,7 +30,7 @@ from skrift.agents.models import ResumeContext
 
 from smarter_dev.web.blogging_agent.cache import get_cache
 from smarter_dev.web.blogging_agent.summariser import extract_excerpts
-from smarter_dev.web.scan.tools import brave_search, jina_read
+from smarter_dev.web.research_tools import brave_search, jina_read
 
 RESEARCH_MODEL = os.getenv(
     "BLOGGING_RESEARCH_MODEL", "gemini-3-flash-preview"

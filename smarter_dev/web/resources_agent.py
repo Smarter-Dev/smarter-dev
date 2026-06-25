@@ -72,7 +72,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from skrift.agents.models import ResumeContext
 from skrift.notifications import notify_user
 
-from smarter_dev.web.scan.tools import brave_search, jina_read
+from smarter_dev.web.research_tools import brave_search, jina_read
 
 logger = logging.getLogger(__name__)
 

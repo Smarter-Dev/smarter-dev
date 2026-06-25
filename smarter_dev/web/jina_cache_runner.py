@@ -29,7 +29,7 @@ from sqlalchemy.pool import NullPool
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import convert_postgres_url_for_asyncpg
 from smarter_dev.web.models import ResourceSource
-from smarter_dev.web.scan.tools import jina_read
+from smarter_dev.web.research_tools import jina_read
 
 logger = logging.getLogger(__name__)
 
