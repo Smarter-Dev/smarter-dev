@@ -81,13 +81,10 @@ controllers:
   - smarter_dev.web.click_tracking_admin:ClickTrackingAdminController
   - smarter_dev.web.jina_cache_admin:JinaCacheAdminController
   - smarter_dev.web.usage_admin:UsageAdminController
-  - smarter_dev.web.scan_profiles_admin:ScanProfilesAdminController
-  - smarter_dev.web.research_sessions_admin:ResearchSessionsAdminController
   - smarter_dev.web.bot_admin_skrift:BotAdminController
   - smarter_dev.web.quests_admin:QuestsAdminController
   - smarter_dev.web.chat_conversations_admin:ChatConversationsAdminController
   - smarter_dev.web.mod_actions_admin:ModActionsAdminController
-  - smarter_dev.web.scan.api_controller:ScanAPIController
   - smarter_dev.web.blog_controller:BlogController
   - smarter_dev.web.blogging_agent_admin:BloggingAgentAdminController
 
@@ -182,13 +179,6 @@ agents:
   # durability win — there's nothing to recover for an agent run that
   # the parent is blocking on anyway.
   default_subagent_dispatch: inline
-
-sites:
-  scan:
-    subdomain: scan
-    controllers:
-      - skrift.controllers.notifications:NotificationsController
-      - smarter_dev.web.scan.controller:ScanController
 
 # Legacy site — existing Starlette app serves from subdomain
 legacy:

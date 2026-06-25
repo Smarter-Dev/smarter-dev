@@ -2623,7 +2623,7 @@ wheels = [
 
 [[package]]
 name = "skrift"
-version = "0.2.0a5"
+version = "0.2.0a7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "advanced-alchemy" },
@@ -2638,16 +2638,15 @@ dependencies = [
     { name = "markdown-it-py" },
     { name = "mdit-py-plugins" },
     { name = "pillow" },
-    { name = "pydantic-ai-slim", extra = ["google"] },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "ruamel-yaml" },
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ce/3c/f88a7d8f1831d3ef8955edf7723976eed91c7a99a95c280723f8f604f6a0/skrift-0.2.0a5.tar.gz", hash = "sha256:2b9e148887c95b8066db89efc77bf19b462005e63e6f813f883713acd94a42ee", size = 400257 }
+sdist = { url = "https://files.pythonhosted.org/packages/2a/03/58001c7a7f0f6abb9a001b6472cb21e8cd64719609f1e08376e9a23daf01/skrift-0.2.0a7.tar.gz", hash = "sha256:75b8af1b70ed4776a8b4f16c94b065732d36aeab9e83c186cdd89cfaaa5a6509", size = 410939 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/e0/9030d42497d2e3d0a0fb905cbf1f2ddc55dac280e24706fd8de066646f5d/skrift-0.2.0a5-py3-none-any.whl", hash = "sha256:926355106a65b03bd97292cac2513a58ee54b56da678bdbc55257412b132b46d", size = 556396 },
+    { url = "https://files.pythonhosted.org/packages/74/e5/4be7682cc3c21ef5584bfe1f6d59a4bdb087602df22ceec562596d790e01/skrift-0.2.0a7-py3-none-any.whl", hash = "sha256:f520db73ef74fba0243ff604386dc18a80905de55c130a43091ef9711c3acffb", size = 569361 },
 ]
 
 [package.optional-dependencies]
@@ -2773,7 +2772,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "redis", specifier = ">=6.2.0" },
     { name = "resend", specifier = ">=2.0.0" },
-    { name = "skrift", extras = ["passkeys"], specifier = ">=0.2.0a5" },
+    { name = "skrift", extras = ["passkeys"], specifier = ">=0.2.0a7" },
     { name = "starlette", specifier = ">=0.47.1" },
 ]
 
@@ -2832,7 +2831,7 @@ web = [
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "httpx", specifier = ">=0.24.0" },
     { name = "redis", specifier = ">=5.0.0" },
-    { name = "skrift", extras = ["s3"], specifier = ">=0.2.0a5" },
+    { name = "skrift", extras = ["s3"], specifier = ">=0.2.0a7" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
     { name = "stripe", specifier = ">=15.1.0" },
 ]
