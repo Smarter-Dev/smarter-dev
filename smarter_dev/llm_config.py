@@ -4,9 +4,10 @@ This module provides a consistent way to configure LLM models across the entire
 project using environment variables.
 """
 
+from __future__ import annotations
+
 import os
 import dotenv
-import dspy
 from google import genai
 from typing import Optional
 
@@ -41,6 +42,11 @@ def get_llm_model(model_type: str = "fast") -> dspy.LM:
         # Use GPT-5 Nano for judge tests
         LLM_JUDGE_MODEL=gpt-5-nano-2025-08-07 python test_mention_agent.py --llm-only
     """
+    # Imported lazily so the web image (which only needs the Gemini TTS client
+    # below) doesn't pull in dspy + litellm/numpy. See pyproject: dspy is a
+    # bot-group dependency, not a base one.
+    import dspy
+
     # Get model based on type
     if model_type == "judge":
         model_name = os.getenv("LLM_JUDGE_MODEL", "gemini/gemini-3.1-flash-lite-preview")
