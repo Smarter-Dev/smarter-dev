@@ -21,6 +21,7 @@ jobs:
         TAG=$(echo $GITHUB_SHA | head -c7)
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-bot.yaml
+        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-worker.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/cron-sudo-sweep.yaml
 
     - name: Install doctl
@@ -59,6 +60,7 @@ jobs:
       run: |
         kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy-bot.yaml
+        kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy-worker.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/site.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-sudo-sweep.yaml
 
@@ -67,3 +69,6 @@ jobs:
 
     - name: Verify bot deployment
       run: kubectl rollout status deployment/smarter-dev-bot
+
+    - name: Verify agent-worker deployment
+      run: kubectl rollout status deployment/smarter-dev-agent-worker

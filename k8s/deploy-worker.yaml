@@ -1,0 +1,191 @@
+---
+# Agent-worker tier: a standalone Skrift worker process that drains the
+# shared Redis 'agents' queue and executes every agent/LLM job out-of-process,
+# off the web tier. Runs the WEB image (it imports smarter_dev.web.* agent
+# handler modules and needs the pydantic-ai/google-genai/openai stack), but
+# starts the worker CLI instead of the HTTP server. Pairs with
+# `workers.preset: distributed` (execution: out_of_process) in app.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: smarter-dev-agent-worker
+    namespace: smarter-dev
+    labels:
+        app: smarter-dev-agent-worker
+spec:
+    strategy:
+        type: RollingUpdate
+        rollingUpdate:
+            maxSurge: 1
+            maxUnavailable: 0
+    selector:
+        matchLabels:
+            app: smarter-dev-agent-worker
+            tier: backend
+    replicas: 1
+    template:
+        metadata:
+            labels:
+                app: smarter-dev-agent-worker
+                tier: backend
+        spec:
+            containers:
+              - name: agent-worker
+                image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+                # Drain the 'agents' queue. concurrency 8 keeps the blogging
+                # orchestrator job from starving its own stage/sub-agent jobs.
+                command: ["uv", "run", "--no-sync", "skrift", "workers", "run", "--queue", "agents", "--concurrency", "8"]
+                envFrom:
+                  - configMapRef:
+                      name: smarter-dev-config
+                env:
+                  - name: DATABASE_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: database-url
+                  - name: LEGACY_DATABASE_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: legacy-database-url
+                  - name: REDIS_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: redis-url
+                  - name: API_SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: api-secret-key
+                  - name: WEB_SESSION_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: web-session-secret
+                  - name: SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: secret-key
+                  # Auth provider creds — app.yaml's auth config interpolates
+                  # these at load time, so config parsing fails without them.
+                  - name: DISCORD_CLIENT_ID
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: discord-client-id
+                  - name: DISCORD_CLIENT_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: discord-client-secret
+                  - name: DISCORD_APPLICATION_ID
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: discord-application-id
+                  - name: DISCORD_APPLICATION_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: discord-client-secret
+                  - name: DISCORD_REDIRECT_URI
+                    valueFrom:
+                      configMapKeyRef:
+                        name: smarter-dev-config
+                        key: DISCORD_REDIRECT_URI
+                  - name: DISCORD_BOT_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: discord-bot-token
+                  - name: GITHUB_CLIENT_ID
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: github-client-id
+                  - name: GITHUB_CLIENT_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: github-client-secret
+                  - name: GOOGLE_CLIENT_ID
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: google-client-id
+                  - name: GOOGLE_CLIENT_SECRET
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: google-client-secret
+                  # LLM providers used by the agents executed here.
+                  - name: GEMINI_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: gemini-api-key
+                  - name: OPENAI_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: openai-api-key
+                  - name: ANTHROPIC_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: anthropic-api-key
+                  # Research/blogging agent tool credentials.
+                  - name: JINA_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: jina-api-key
+                  - name: BRAVE_SEARCH_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: brave-search-api-key
+                  - name: YOUTUBE_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: youtube-api-key
+                  - name: RESEND_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: resend-api-key
+                  - name: SKRIFT_ENV
+                    value: "production"
+                resources:
+                    requests:
+                        cpu: 250m
+                        memory: 512Mi
+                    limits:
+                        cpu: "1"
+                        memory: 1Gi
+                # Liveness/readiness by process presence — the worker has no
+                # HTTP port. Matches the bot's pgrep pattern.
+                startupProbe:
+                    exec:
+                        command: ["pgrep", "-f", "workers run"]
+                    failureThreshold: 30
+                    periodSeconds: 10
+                livenessProbe:
+                    exec:
+                        command: ["pgrep", "-f", "workers run"]
+                    initialDelaySeconds: 15
+                    periodSeconds: 30
+                    timeoutSeconds: 5
+                    failureThreshold: 3
+                readinessProbe:
+                    exec:
+                        command: ["pgrep", "-f", "workers run"]
+                    initialDelaySeconds: 10
+                    periodSeconds: 10
+                    timeoutSeconds: 3
+                    failureThreshold: 2
+            restartPolicy: Always
