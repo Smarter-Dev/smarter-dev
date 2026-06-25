@@ -51,19 +51,20 @@ import time
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 
 import httpx
 import skrift
 from pydantic import BaseModel, Field
+from pydantic_ai import RunContext
 from skrift.agents.models import ResumeContext
 
-if TYPE_CHECKING:
-    # Only needed as a tool-signature annotation; with `from __future__ import
-    # annotations` it is never evaluated at runtime, so importing it lazily
-    # here keeps this module import free of pydantic-ai (loaded only in the
-    # worker that executes the agents).
-    from pydantic_ai import RunContext
+# RunContext is imported at runtime (not under TYPE_CHECKING) because
+# pydantic-ai resolves the @tool signatures (`ctx: RunContext[RunDeps]`) via
+# get_type_hints when it materializes the agent on the worker — it must be a
+# real name in this module's globals. This pulls in pydantic-ai *core* only;
+# the heavy provider SDKs (google.genai / openai) still load lazily on the
+# worker when the string model ids below materialize, never on the web tier.
 from skrift.notifications import notify_user
 
 from smarter_dev.web.research_tools import brave_search, jina_read
