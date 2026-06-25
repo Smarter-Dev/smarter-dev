@@ -125,7 +125,16 @@ notifications:
 
 workers:
   enabled: true
-  preset: local
+  # 'distributed' preset → execution: out_of_process + Redis-distributed
+  # backends (Redis queue + state store, SQLAlchemy dead-letter + archive).
+  # The web pods now SUBMIT jobs only: under out_of_process, asgi startup
+  # configures the runtime but does NOT start a consumer pool, so submit()
+  # enqueues to the shared Redis queue and returns. A dedicated
+  # agent-worker Deployment (k8s/deploy-worker.yaml, running
+  # `skrift workers run`) drains that queue and executes every agent/LLM
+  # job out-of-process, in its own pod. Requires REDIS_URL (shared with
+  # the web pods) so producer and consumer see the same queue.
+  preset: distributed
   queues:
     - agents
   # Global claim-timeout for the worker pool. The blogging orchestrator
@@ -136,26 +145,26 @@ workers:
   # run_id, dropping each other's per-run cache mid-flight. 30 min
   # gives every realistic pipeline run room to finish under one claim.
   visibility_timeout: 1800
-  # Override the preset's default 'inline' execution. With 'inline', the
-  # submit() that the admin trigger button calls blocks until the entire
-  # pipeline finishes — the browser sees a multi-minute hang. With
-  # 'in_process', the worker runs the handler in a background task and
-  # submit() returns immediately.
-  execution: in_process
-  # The blogging orchestrator @handler runs the whole pipeline in one
-  # job and blocks on each stage agent's `session.result()`. With
-  # concurrency=1, the orchestrator would hold the only worker slot and
-  # nothing could pick up the stage agent jobs it enqueues — deadlock.
-  # Bumped so orchestrator + up to ~5 simultaneous stage / sub-agent /
-  # tool-call jobs can run side-by-side. In prod the same default holds
-  # whether workers run inside the web container or in a separate worker
-  # tier — what matters is that no worker is the only one in its pool.
+  # Consumed by the agent-worker tier (the web pods don't run a consumer
+  # pool under out_of_process). The blogging orchestrator @handler runs
+  # the whole pipeline in one job and blocks on each stage agent's
+  # `session.result()`; with concurrency=1 it would hold the only slot
+  # and nothing could pick up the stage jobs it enqueues — deadlock. 8
+  # lets the orchestrator plus ~5 simultaneous stage / sub-agent /
+  # tool-call jobs run side by side. `skrift workers run` reads this as
+  # its default concurrency (also passed explicitly in the manifest).
   concurrency: 8
   backends:
-    # Override only the event log so per-run audit trails survive web
-    # restarts. State store + queue stay in-memory; preset 'local' fills
-    # those defaults in via the merge in WorkersConfig.apply_preset_defaults.
+    # Keep the event log in Postgres so per-run audit trails survive
+    # restarts (the distributed preset would otherwise use Redis). Deep
+    # merge in apply_preset_defaults keeps the Redis queue/state defaults.
     event_log: skrift.workers.sqlalchemy:SQLAlchemyEventLog
+  # Handler modules imported by BOTH tiers: the agent-worker imports them
+  # to register the @handlers it executes; the web tier imports them so
+  # submit() can resolve each payload to its job type. (Until the Skrift
+  # lazy-Agent change lands — ZechCodes/Skrift#155 — importing these still
+  # pulls pydantic-ai into the web pods; execution, however, is now fully
+  # off the web tier.)
   imports:
     - smarter_dev.web.resources_agent
     - smarter_dev.web.title_agent
