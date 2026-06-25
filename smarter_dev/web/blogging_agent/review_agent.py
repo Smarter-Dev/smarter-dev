@@ -15,8 +15,6 @@ from uuid import UUID
 
 import skrift
 from pydantic import BaseModel, Field
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
-from pydantic_ai.providers.google import GoogleProvider
 from skrift.agents.models import ResumeContext
 
 REVIEW_MODEL = os.getenv(
@@ -26,17 +24,6 @@ REVIEW_AGENT_NAME = "blogging.review"
 _PROMPT = (Path(__file__).parent / "prompts" / "review.md").read_text(
     encoding="utf-8"
 )
-
-
-def _build_model() -> GoogleModel:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-    return GoogleModel(REVIEW_MODEL, provider=GoogleProvider(api_key=api_key))
-
-
-def _model_settings() -> GoogleModelSettings:
-    return GoogleModelSettings(
-        google_thinking_config={"thinking_level": "LOW"},
-    )
 
 
 class CandidateTopicView(BaseModel):
@@ -80,11 +67,11 @@ def _build_deps(ctx: ResumeContext) -> ReviewDeps:
 
 
 review_agent = skrift.Agent(
-    _build_model(),
+    f"google-gla:{REVIEW_MODEL}",
     name=REVIEW_AGENT_NAME,
     system_prompt=_PROMPT,
     output_type=ReviewOutput,
-    model_settings=_model_settings(),
+    model_settings={"google_thinking_config": {"thinking_level": "LOW"}},
     deps_type=ReviewDeps,
     deps_factory=_build_deps,
 )

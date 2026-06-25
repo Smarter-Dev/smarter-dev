@@ -20,8 +20,6 @@ import os
 import re
 
 import skrift
-from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.providers.google import GoogleProvider
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +43,12 @@ Reply with the title alone. No labels, no explanation.
 _TITLE_MAX_LEN = 80
 
 
-def _build_model() -> GoogleModel:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-    return GoogleModel(TITLE_MODEL, provider=GoogleProvider(api_key=api_key))
-
-
+# Model is a plain pydantic-ai model id string ("google-gla:" = Gemini API via
+# GEMINI_API_KEY/GOOGLE_API_KEY from the env). Passing a string (not a
+# GoogleModel object) keeps this module import free of pydantic-ai; Skrift
+# materializes the real model lazily in the worker that runs the agent.
 title_agent = skrift.Agent(
-    _build_model(),
+    f"google-gla:{TITLE_MODEL}",
     name=AGENT_NAME,
     system_prompt=_SYSTEM_PROMPT,
 )
@@ -95,7 +92,13 @@ async def generate_title(
         words = question.strip().split()[:6]
         return _sanitize(" ".join(w.capitalize() for w in words)) or "Synthetic Title"
     try:
-        session = await title_agent.run(question.strip(), actor=actor)
+        # dispatch="queued" forces this run onto the agent-worker tier instead
+        # of materializing pydantic-ai inline in the web process (the default
+        # 'inline' subagent dispatch would otherwise pull the inference stack
+        # into the web pods). Web just awaits the result via session.result().
+        session = await title_agent.run(
+            question.strip(), actor=actor, dispatch="queued"
+        )
         # Skrift's Agent.run returns a Session; poll until completion to
         # collect the final text. With `workers.preset: local` the run
         # executes inline on this node, so this awaits ~Gemini-latency.

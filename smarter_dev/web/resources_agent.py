@@ -51,25 +51,19 @@ import time
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import httpx
 import skrift
 from pydantic import BaseModel, Field
-from pydantic_ai import RunContext
-from pydantic_ai.messages import (
-    ModelRequest,
-    ModelResponse,
-    TextPart,
-    UserPromptPart,
-)
-from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.models.openai import OpenAIResponsesModel
-from pydantic_ai.models.google import GoogleModelSettings
-from pydantic_ai.models.openai import OpenAIResponsesModelSettings
-from pydantic_ai.providers.google import GoogleProvider
-from pydantic_ai.providers.openai import OpenAIProvider
 from skrift.agents.models import ResumeContext
+
+if TYPE_CHECKING:
+    # Only needed as a tool-signature annotation; with `from __future__ import
+    # annotations` it is never evaluated at runtime, so importing it lazily
+    # here keeps this module import free of pydantic-ai (loaded only in the
+    # worker that executes the agents).
+    from pydantic_ai import RunContext
 from skrift.notifications import notify_user
 
 from smarter_dev.web.research_tools import brave_search, jina_read
@@ -803,39 +797,34 @@ def _record_hit(hit: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _build_google_model(model_id: str) -> GoogleModel:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-    return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
+# Models are pydantic-ai model-id STRINGS (not Model objects), so this module
+# imports no pydantic-ai. Skrift materializes the real model lazily in the
+# worker. "google-gla:" = Gemini API (GEMINI_API_KEY/GOOGLE_API_KEY from env);
+# "openai-responses:" = the OpenAI Responses API, which the gpt-5 family needs
+# for reasoning_effort + function tools. model_settings are plain dicts (the
+# pydantic-ai settings types are TypedDicts, so these are identical at runtime).
+def _build_google_model(model_id: str) -> str:
+    return f"google-gla:{model_id}"
 
 
-def _build_openai_model(model_id: str) -> OpenAIResponsesModel:
-    # gpt-5 family with reasoning_effort + function tools requires the
-    # Responses API (`/v1/responses`); chat-completions rejects the
-    # combo.
-    api_key = os.getenv("OPENAI_API_KEY") or ""
-    return OpenAIResponsesModel(model_id, provider=OpenAIProvider(api_key=api_key))
+def _build_openai_model(model_id: str) -> str:
+    return f"openai-responses:{model_id}"
 
 
-def _reframer_model_settings() -> GoogleModelSettings:
-    return GoogleModelSettings(
-        google_thinking_config={"thinking_level": "MEDIUM"},
-    )
+def _reframer_model_settings() -> dict:
+    return {"google_thinking_config": {"thinking_level": "MEDIUM"}}
 
 
-def _researcher_model_settings() -> OpenAIResponsesModelSettings:
-    return OpenAIResponsesModelSettings(openai_reasoning_effort="medium")
+def _researcher_model_settings() -> dict:
+    return {"openai_reasoning_effort": "medium"}
 
 
-def _gap_filler_model_settings() -> GoogleModelSettings:
-    return GoogleModelSettings(
-        google_thinking_config={"thinking_level": "LOW"},
-    )
+def _gap_filler_model_settings() -> dict:
+    return {"google_thinking_config": {"thinking_level": "LOW"}}
 
 
-def _author_model_settings() -> GoogleModelSettings:
-    return GoogleModelSettings(
-        google_thinking_config={"thinking_level": "LOW"},
-    )
+def _author_model_settings() -> dict:
+    return {"google_thinking_config": {"thinking_level": "LOW"}}
 
 
 @dataclass

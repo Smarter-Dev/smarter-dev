@@ -48,9 +48,10 @@ from smarter_dev.web.models import (
     AgentMessage,
     ResourceSource,
 )
-from smarter_dev.web.resources_agent import begin_run, run_resources_pipeline
+from smarter_dev.web.resources_jobs import ResourcesRunPayload
 from smarter_dev.web.sdanswer import enrich_answer
 from smarter_dev.web.title_agent import generate_title
+from skrift.workers import submit as worker_submit
 
 logger = logging.getLogger(__name__)
 
@@ -263,7 +264,6 @@ def _derive_title(question: str, max_len: int = 80) -> str:
 # Hold strong refs to in-flight title tasks so the GC doesn't kill them
 # mid-run while their fire-and-forget creator has long since returned.
 _TITLE_TASKS: set[asyncio.Task] = set()
-_RUN_TASKS: set[asyncio.Task] = set()
 
 
 def _kick_title_generation(
@@ -399,139 +399,6 @@ def _coerce_usage(result_usage) -> Optional[dict]:
         return None
 
 
-def _kick_agent_run(
-    conversation_id: UUID,
-    owner_user_id: UUID,
-    question: str,
-) -> None:
-    """Fire-and-forget: run the resource agent and finalize the answer.
-
-    Skrift's agent runs are dispatched to the workers queue (the in-process
-    ``local`` preset still runs them on the event loop, but the API contract
-    is the same as a remote worker — we get a ``Session`` handle back
-    immediately). This helper:
-
-    1. Opens its own DB session (the request-scoped one is closed by now).
-    2. Queues the run with ``deps_ref`` carrying the conversation + owner
-       ids so tool implementations can emit ``agent_tool_event``
-       notifications.
-    3. Waits on ``session.result()``, persists the assistant turn with
-       resolved citations, and fires ``agent_run_complete`` so the open
-       browser tab swaps the tool stream for the final markdown.
-    4. On exception, fires ``agent_run_error`` with the detail.
-    """
-
-    async def _run() -> None:
-        try:
-            hits: list[dict] = []
-            stub = os.getenv("RESOURCE_AGENT_STUB", "").strip().lower() in {
-                "1", "true", "yes",
-            }
-            if stub:
-                # Local dev/debug short-circuit: skip the real Gemini call
-                # and any tool invocations, sleep briefly to mimic latency,
-                # and return a fixed answer. Keeps the title agent + the
-                # rest of the streaming flow honest.
-                await asyncio.sleep(2.0)
-                answer_text = (
-                    "[stub] resource_agent is disabled via "
-                    "`RESOURCE_AGENT_STUB=1`; no Gemini call was made.\n\n"
-                    "This is a placeholder answer so we can debug the live "
-                    "title typewriter and run-complete reveal without "
-                    "burning tokens."
-                )
-            else:
-                # Load prior turns so follow-ups inherit the conversation's
-                # context. For an initial ask there's only the just-committed
-                # user turn — drop it (the agent receives it as `question`).
-                async with get_skrift_db_session_context() as history_session:
-                    prior_q = await history_session.execute(
-                        select(AgentMessage)
-                        .where(AgentMessage.conversation_id == conversation_id)
-                        .order_by(AgentMessage.sequence.asc())
-                    )
-                    prior = list(prior_q.scalars().all())
-                # Drop the latest user turn — it's `question` itself; the
-                # agent gets it via the prompt arg.
-                if prior and prior[-1].role == "user":
-                    prior = prior[:-1]
-                message_history = (
-                    _build_message_history(prior) if prior else None
-                )
-
-                hits = begin_run()
-                answer_text = await run_resources_pipeline(
-                    question,
-                    message_history=message_history,
-                    actor=str(owner_user_id),
-                    conversation_id=str(conversation_id),
-                    owner_user_id=str(owner_user_id),
-                )
-
-            async with get_skrift_db_session_context() as bg_session:
-                conversation = await bg_session.get(
-                    AgentConversation, conversation_id
-                )
-                if conversation is None:
-                    return
-
-                next_seq_q = await bg_session.execute(
-                    select(AgentMessage.sequence)
-                    .where(AgentMessage.conversation_id == conversation_id)
-                    .order_by(AgentMessage.sequence.desc())
-                    .limit(1)
-                )
-                last_seq = next_seq_q.scalar_one_or_none() or 0
-
-                assistant_turn = AgentMessage(
-                    conversation_id=conversation_id,
-                    sequence=last_seq + 1,
-                    role="assistant",
-                    content=answer_text,
-                    citations=[],
-                )
-                bg_session.add(assistant_turn)
-                await bg_session.commit()
-                await bg_session.refresh(assistant_turn)
-
-                content_html, blocks = await enrich_answer(
-                    bg_session, answer_text
-                )
-
-            await notify_user(
-                str(owner_user_id),
-                "agent_run_complete",
-                conversation_id=str(conversation_id),
-                assistant_message_id=str(assistant_turn.id),
-                content_html=content_html,
-                sdanswer_blocks=blocks,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "agent run finalize failed for conversation %s", conversation_id
-            )
-            msg = str(exc)
-            if (
-                "GEMINI_API_KEY" in msg
-                or "GOOGLE_API_KEY" in msg
-                or "api_key" in msg.lower()
-            ):
-                detail = "Agent not configured. Try again later."
-            else:
-                detail = "Agent failed to respond. Try again in a moment."
-            try:
-                await notify_user(
-                    str(owner_user_id),
-                    "agent_run_error",
-                    conversation_id=str(conversation_id),
-                    detail=detail,
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception("agent_run_error notify_user failed")
-
-    task = asyncio.create_task(_run())
-    _RUN_TASKS.add(task)
-    task.add_done_callback(_RUN_TASKS.discard)
 
 
 # ---------------------------------------------------------------------------
@@ -651,7 +518,13 @@ class ResourcesAgentApiController(Controller):
         # browser stays on /resources (morphed into the answer layout) and
         # picks up notifications as each completes.
         _kick_title_generation(conversation.id, user_id, question)
-        _kick_agent_run(conversation.id, user_id, question)
+        await worker_submit(
+            ResourcesRunPayload(
+                conversation_id=str(conversation.id),
+                owner_user_id=str(user_id),
+                question=question,
+            )
+        )
 
         return {
             "id": str(conversation.id),
@@ -729,7 +602,13 @@ class AgentConversationApiController(Controller):
         await db_session.commit()
         await db_session.refresh(user_turn)
 
-        _kick_agent_run(conversation.id, user_id, question)
+        await worker_submit(
+            ResourcesRunPayload(
+                conversation_id=str(conversation.id),
+                owner_user_id=str(user_id),
+                question=question,
+            )
+        )
 
         # Recompute the remaining follow-ups *after* the just-committed
         # user turn so the client can decrement its counter from the
@@ -781,19 +660,3 @@ class AgentMessageApiController(Controller):
         )
 
 
-def _build_message_history(prior: list[AgentMessage]):
-    """Convert persisted turns into pydantic-ai ModelMessages for replay."""
-    from pydantic_ai.messages import (
-        ModelRequest,
-        ModelResponse,
-        TextPart,
-        UserPromptPart,
-    )
-
-    history = []
-    for msg in prior:
-        if msg.role == "user":
-            history.append(ModelRequest(parts=[UserPromptPart(content=msg.content)]))
-        elif msg.role == "assistant":
-            history.append(ModelResponse(parts=[TextPart(content=msg.content)]))
-    return history
