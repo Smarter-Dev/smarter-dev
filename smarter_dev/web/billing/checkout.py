@@ -1,9 +1,14 @@
-"""Stripe Checkout Session creation for the sudo founder tiers.
+"""Stripe Checkout Session creation for the sudo offerings.
 
-Founder tiers are sold as one-time, one-year purchases — Stripe Checkout in
-``payment`` mode, not subscription mode. No auto-renewal. When the year
-expires, the user re-purchases at the founder rate (33% off public) within
-the grace window, or at public rates outside it.
+Two shapes:
+
+* **hacker** — ``mode=subscription``. A recurring $8/mo price. Stripe manages
+  renewals and dunning; cancellation is via the customer portal.
+* **founder** — ``mode=payment``. A one-time, pay-what-you-want price
+  (``custom_unit_amount``); the buyer chooses any amount at or above the $256
+  minimum at the Stripe-hosted page.
+
+The webhook handler is the source of truth for role grants and lifecycle.
 """
 
 from __future__ import annotations
@@ -12,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.db.models.user import User
 
-from smarter_dev.web.billing import catalog, inventory
+from smarter_dev.web.billing import catalog
 from smarter_dev.web.billing.client import get_stripe
 
 
@@ -20,63 +25,53 @@ class CheckoutError(Exception):
     """Raised when a Checkout Session cannot be created."""
 
 
-class FounderSeatsExhausted(CheckoutError):
-    """Raised when all rwx 0day founder seats have been sold."""
+class UnknownRole(CheckoutError):
+    """Raised when an unrecognised offering role is passed to checkout."""
 
 
-class UnknownTier(CheckoutError):
-    """Raised when an unrecognised tier slug is passed to checkout."""
-
-
-async def create_founder_checkout_session(
+async def create_checkout_session(
     session: AsyncSession,
     user: User,
     *,
-    tier: str,
+    role: str,
     success_url: str,
     cancel_url: str,
 ) -> str:
-    """Create a one-time Stripe Checkout Session for the given founder tier.
+    """Create a Stripe Checkout Session for the given offering role.
 
-    Tier, price, and role all come from the Stripe catalog (source of truth).
-    The webhook handler is the source of truth for inventory; this function
-    performs a best-effort check for rwx so the user gets a fast 'sold out'
-    response instead of paying and being refunded.
+    Role, price, and mode all come from the Stripe catalog (source of truth).
+    Returns the hosted Checkout URL.
     """
-    tiers = await catalog.get_tiers()
-    tier_data = catalog.get_tier(tiers, tier)
-    if tier_data is None:
-        raise UnknownTier(f"Unknown founder tier: {tier!r}")
+    offerings = await catalog.get_offerings()
+    offering = catalog.get_offering(offerings, role)
+    if offering is None:
+        raise UnknownRole(f"Unknown sudo offering: {role!r}")
 
-    price_id = tier_data["price_id"]
-    webhook_tier = tier_data["role"]
+    price_id = offering["price_id"]
+    mode = "subscription" if offering["recurring"] else "payment"
+    metadata = {"role": role, "user_id": str(user.id)}
 
-    if tier == "rwx":
-        remaining = await inventory.seats_remaining(session)
-        if remaining <= 0:
-            raise FounderSeatsExhausted("All rwx 0day founder seats have been claimed.")
+    params: dict = {
+        "mode": mode,
+        "line_items": [{"price": price_id, "quantity": 1}],
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+        "client_reference_id": str(user.id),
+        "customer_email": user.email,
+        "allow_promotion_codes": False,
+        "metadata": metadata,
+    }
+    if mode == "subscription":
+        # Subscription mode always creates a Customer; stamp the metadata onto
+        # the subscription so the webhook can resolve it.
+        params["subscription_data"] = {"metadata": metadata}
+    else:
+        # One-time payment: create a Customer so the buyer can manage refunds
+        # and we can link future purchases to the same identity.
+        params["customer_creation"] = "always"
+        params["billing_address_collection"] = "auto"
+        params["payment_intent_data"] = {"metadata": metadata}
 
     stripe = get_stripe()
-    checkout_session = stripe.checkout.Session.create(
-        mode="payment",
-        line_items=[{"price": price_id, "quantity": 1}],
-        success_url=success_url,
-        cancel_url=cancel_url,
-        client_reference_id=str(user.id),
-        customer_email=user.email,
-        allow_promotion_codes=False,
-        billing_address_collection="auto",
-        # Customer record lets the user manage refunds and link future purchases.
-        customer_creation="always",
-        payment_intent_data={
-            "metadata": {
-                "tier": webhook_tier,
-                "user_id": str(user.id),
-            }
-        },
-        metadata={
-            "tier": webhook_tier,
-            "user_id": str(user.id),
-        },
-    )
+    checkout_session = stripe.checkout.Session.create(**params)
     return checkout_session.url

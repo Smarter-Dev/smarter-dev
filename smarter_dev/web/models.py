@@ -150,16 +150,15 @@ class SudoMembership(Base):
     natural lapse (which has no reason set). ``refunded_at`` stays as a
     timestamp companion specifically for refunds.
 
-    Founder seats (rwx 0day only) are recorded via ``founder_seat_number``
-    (1..N); once assigned the seat number is never cleared, even on refund,
-    so the inventory cap stays honored against historical purchases.
+    ``role`` is the offering the row grants: ``hacker`` (recurring) or
+    ``founder`` (one-time). Founder grants a superset of Hacker.
     """
 
     __tablename__ = "sudo_memberships"
     __table_args__ = (
         CheckConstraint(
-            "tier IN ('read', 'write', 'execute')",
-            name="ck_sudo_memberships_tier",
+            "role IN ('hacker', 'founder')",
+            name="ck_sudo_memberships_role",
         ),
         CheckConstraint(
             "source IN ('one_time', 'subscription', 'comp')",
@@ -183,7 +182,7 @@ class SudoMembership(Base):
         PostgresUUID(as_uuid=True),
         nullable=False,
     )
-    tier: Mapped[str] = mapped_column(
+    role: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
     )
@@ -239,11 +238,6 @@ class SudoMembership(Base):
     revoked_reason: Mapped[Optional[str]] = mapped_column(
         String(16),
         nullable=True,
-    )
-    founder_seat_number: Mapped[Optional[int]] = mapped_column(
-        Integer,
-        nullable=True,
-        unique=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
