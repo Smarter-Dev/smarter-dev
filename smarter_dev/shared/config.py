@@ -186,12 +186,8 @@ class Settings(BaseSettings):
         default=None,
         description="Stripe webhook signing secret (whsec_xxx)",
     )
-    sudo_founder_seat_limit: int = Field(
-        default=16,
-        description="Maximum number of rwx 0day founder seats ever sold",
-    )
 
-    # NOTE: Sudo Discord projection IDs (guild + base + tier roles) live
+    # NOTE: Sudo Discord projection IDs (guild + base + offering roles) live
     # on the Stripe Product metadata, not in settings. Seed via
     # ``scripts/seed_stripe_catalog.py`` and consume via
     # ``smarter_dev.web.billing.catalog.get_discord_config``.

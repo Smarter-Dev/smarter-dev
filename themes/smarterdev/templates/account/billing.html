@@ -200,19 +200,23 @@
 <p class="account-meta">Your sudo membership and payment details.</p>
 
 {% if membership %}
-{% set _tier_perm = {'execute': 'rwx', 'write': 'rw-', 'read': 'r--'}.get(membership.tier, membership.tier) %}
-{% set _tier_label = {'execute': '0day · founder', 'write': 'write · founder', 'read': 'read · founder'}.get(membership.tier, 'founder') %}
+{% set _is_founder = membership.role == 'founder' %}
+{% set _role_label = 'founder' if _is_founder else 'hacker' %}
 {% set _state = 'refunded' if membership.refunded_at else ('expired' if membership_expired else 'active') %}
 <div class="billing-card">
     <div class="bc-head">
         <div>
             <div class="bc-mark">
-                <span class="bc-perm">{{ _tier_perm }}</span>
-                <span class="bc-tier-label">{{ _tier_label }}</span>
+                <span class="bc-perm">{{ 'sudo' if _is_founder else 'sudo' }}</span>
+                <span class="bc-tier-label">{{ _role_label }}</span>
             </div>
             <p class="bc-summary">
-                One year of access, paid once.
-                Active through <b>{{ membership.expires_at.strftime('%-d %B %Y') }}</b>.
+                {% if _is_founder %}
+                Founder access, paid once. Yours to keep.
+                {% else %}
+                Hacker membership, $8/mo.
+                {% if membership.will_renew %}Renews <b>{{ membership.expires_at.strftime('%-d %B %Y') }}</b>.{% else %}Active through <b>{{ membership.expires_at.strftime('%-d %B %Y') }}</b>.{% endif %}
+                {% endif %}
             </p>
         </div>
         {% if _state != 'active' %}
@@ -226,25 +230,24 @@
 
     <dl class="bc-grid">
         <div>
-            <dt>Purchased</dt>
+            <dt>Started</dt>
             <dd>{{ membership.purchased_at.strftime('%-d %b %Y') }}</dd>
         </div>
+        {% if _is_founder %}
         <div>
-            <dt>Access ends</dt>
+            <dt>Access</dt>
+            <dd>Lifetime</dd>
+        </div>
+        {% else %}
+        <div>
+            <dt>{{ 'Renews' if membership.will_renew else 'Ends' }}</dt>
             <dd>{{ membership.expires_at.strftime('%-d %b %Y') }}</dd>
         </div>
+        {% endif %}
         <div>
             <dt>Amount paid</dt>
-            <dd>${{ '%.0f' | format(membership.amount_paid_cents / 100) }} USD</dd>
+            <dd>${{ '%.0f' | format(membership.amount_paid_cents / 100) }} USD{% if not _is_founder %}/mo{% endif %}</dd>
         </div>
-        {% if membership.founder_seat_number %}
-        <div class="bc-seat">
-            <dt>Founder seat</dt>
-            <dd>
-                <span class="bc-seat-num">#{{ membership.founder_seat_number }}</span>{% if seats_total %}<span class="bc-seat-of">of {{ seats_total }}</span>{% endif %}
-            </dd>
-        </div>
-        {% endif %}
     </dl>
 
     <div class="bc-rule"></div>
@@ -253,7 +256,7 @@
     <div class="bc-discord-link" role="status">
         <p class="bdl-body">
             Connect your Discord to receive your sudo roles in the server.
-            <em>Sign in with Discord once — we'll grant the founder roles automatically.</em>
+            <em>Sign in with Discord once — we'll grant your roles automatically.</em>
         </p>
         <a class="bdl-cta" href="/auth/discord/login?next=/account/billing" data-sk-no-spa>
             Connect Discord <span aria-hidden="true">→</span>
@@ -263,7 +266,11 @@
 
     <div class="bc-foot">
         <p class="bc-foot-note">
-            Invoices, refunds, and payment method live in your Stripe billing portal. No auto-renewal.
+            {% if _is_founder %}
+            Invoices and refunds live in your Stripe billing portal.
+            {% else %}
+            Invoices, payment method, and cancellation live in your Stripe billing portal.
+            {% endif %}
         </p>
         <form method="post" action="/account/billing/portal" data-sk-no-spa style="margin:0;">
             <button type="submit" class="bc-cta">Manage billing <span aria-hidden="true">→</span></button>
@@ -273,7 +280,7 @@
 {% else %}
 <div class="bc-empty">
     <p>You don't have a sudo membership yet.</p>
-    <p class="account-meta">One payment buys a year. rwx 0day founder seats are limited.</p>
+    <p class="account-meta">Hacker is $8/mo. Founder is one-time — pay once, keep it.</p>
     <div class="account-actions" style="margin-top:1.5rem; justify-content: flex-start;">
         <a href="/sudo" class="account-btn-primary" style="text-decoration:none;">See plans</a>
     </div>

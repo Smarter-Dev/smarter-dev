@@ -18,12 +18,10 @@ from skrift.db.models.user import User
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.web import feature_flags as flags_service
-from smarter_dev.web.billing.pricing_context import build_pricing_context
 from smarter_dev.web.billing.checkout import (
     CheckoutError,
-    FounderSeatsExhausted,
-    UnknownTier,
-    create_founder_checkout_session,
+    UnknownRole,
+    create_checkout_session,
 )
 from smarter_dev.web.feature_flags_admin import SEEDED_FLAGS
 from smarter_dev.web.models import CampaignSignup
@@ -90,117 +88,51 @@ class SudoController(Controller):
         if not show_pricing:
             return Template("page-sudo.html")
 
-        pricing_ctx = await build_pricing_context(db_session)
-        seats_total = pricing_ctx["seats_total"]
-        tiers = pricing_ctx["tiers"]
-        tier_map = {t["id"]: t for t in tiers}
-
-        def _join_prices(values: list[int], conj: str) -> str:
-            parts = [f"${v}" for v in values]
-            if len(parts) <= 1:
-                return "".join(parts)
-            return f"{', '.join(parts[:-1])}, {conj} {parts[-1]}"
-
-        annual_list = _join_prices([t["annual"] for t in tiers], "or")
-        monthly_list = _join_prices([t["public_monthly"] for t in tiers], "and")
+        faqs = [
+            {
+                "q": "What is sudo?",
+                "a": "sudo is elevated access on top of the free Smarter Dev community. The community stays free. sudo is how the work that costs money gets funded, and how you get more out of it: every RunHacks challenge as a Hacker, and an inside seat as a Founder.",
+            },
+            {
+                "q": "Is the community still free?",
+                "a": "Yes. Discord and the community stay free, same as always. sudo is a layer on top, not a paywall pulled across what\u2019s already here.",
+            },
+            {
+                "q": "Is Hacker a subscription?",
+                "a": "Yes. Hacker is $8 a month, billed monthly. Cancel anytime, no commitment.",
+            },
+            {
+                "q": "Is Founder recurring?",
+                "a": "No. Founder is a one-time payment. $256, or more if you want to. No auto-renewal, no second charge.",
+            },
+            {
+                "q": "What does Founder get that Hacker doesn\u2019t?",
+                "a": "Everything a Hacker gets, plus an early look at what\u2019s being built, a voice while it\u2019s young, and a Founder role with a dedicated channel. An inside seat while the rest gets built.",
+            },
+            {
+                "q": "What if you can\u2019t ship Gym or the Lab?",
+                "a": "You keep everything you already have. RunHacks is live now, that\u2019s what the money buys, and it\u2019s not going anywhere. Gym and the Lab are next, and I\u2019m building them full-time. I won\u2019t name a date I might miss, but I\u2019m not raising money to decide whether to build this. I\u2019ve run this community for years and just left my job to finish the rest. If it takes longer than I want, you\u2019ve still got the challenges and the community you came for.",
+            },
+            {
+                "q": "Refund policy?",
+                "a": "Founder has a 14-day refund, no questions. Hacker is monthly, so cancel anytime and you keep access through the month you paid for.",
+            },
+            {
+                "q": "Can I start as a Hacker and go Founder later?",
+                "a": "Yes. Start monthly, fund the build whenever it makes sense for you.",
+            },
+        ]
 
         return Template(
             "sudo/pricing.html",
-            context={
-                **pricing_ctx,
-                "tier_map": tier_map,
-                "founder_principles": [
-                    {
-                        "head": "One payment buys the year",
-                        "body": f"{annual_list} once — a year of access, no subscription, no auto-renewal. We don't touch the card again unless you ask us to.",
-                    },
-                    {
-                        "head": "Renew at the founder rate",
-                        "body": "When the year is up, renewing keeps you at 33% off the public price. The discount you bought in at is the discount you keep.",
-                    },
-                    {
-                        "head": f"rwx 0day is capped at {seats_total} seats",
-                        "body": f"r-- and rw- stay open. rwx 0day is a one-time founder window — when the {seats_total} seats are gone, the price and the preview access are gone with them.",
-                    },
-                ],
-                "roadmap": [
-                    {
-                        "head": "DAY ONE",
-                        "eta": "live at sudo open",
-                        "body": "What every founder gets when sudo opens. The Resources Agent answers questions from our library of top resources, RunHacks drops new challenges on a regular schedule, and the founder role carries your access into everything we ship next.",
-                        "bullets": [
-                            "Resources Agent answers using our selection of top resources",
-                            "RunHacks drops new challenges regularly",
-                            "Founder role and members-only Discord channels",
-                        ],
-                    },
-                    {
-                        "head": "GYM",
-                        "eta": "shipping next",
-                        "body": "Lesson-based curriculum paired with an AI tutor that remembers you. It tracks where you've gotten stuck and adapts how it walks you through what's next.",
-                        "bullets": [
-                            "Tutor that remembers where you've struggled",
-                            "Stack-trace-first; no syntax tutorials",
-                            "Each lesson builds on the last",
-                        ],
-                    },
-                    {
-                        "head": "THE LAB",
-                        "eta": "after Gym",
-                        "body": "Guided agentic coding environments. Using real coding agents, run in cloud-hosted workspaces accessible from any browser, with the lesson sitting alongside the agent terminal.",
-                        "bullets": [
-                            "Cloud workspaces, no local setup",
-                            "Lesson + agent terminal, side-by-side",
-                            "First look at every platform feature",
-                        ],
-                    },
-                ],
-                "faqs": [
-                    {
-                        "q": "What is sudo, and why are you launching paid tiers now?",
-                        "a": "Smarter Dev has always been free, and the community side stays that way. sudo is how we ship the things we couldn't build for free: a tutor with memory, agentic learning environments, deeper tools for working alongside AI. The world has changed in a way that asks more of developers, and we want to help developers like us meet that. We're opening founder tiers now because that work takes more than we can do for free.",
-                    },
-                    {
-                        "q": "What happens to the free Smarter Dev community?",
-                        "a": "It stays free. Discord access, RunHacks basic challenges, and Gym previews stay open. sudo is a layer added on top, not a paywall pulled across.",
-                    },
-                    {
-                        "q": "Where does my annual tier's money actually go?",
-                        "a": "Cloud infrastructure to run the website, Discord bot, RunHacks, and the agentic workspaces in the Lab. Development time on Gym curriculum and the Lab environments.",
-                    },
-                    {
-                        "q": "What if you can't ship Gym or the Lab on time?",
-                        "a": "Honest answer: it's a risk we all take. We've scoped Gym and the Lab to what we believe we can build in Q3 and Q4 with founder runway, but software ships when it's ready. If we slip, we slip publicly and your year of access keeps running. The refund policy applies for the first 14 days and prorates after that.",
-                    },
-                    {
-                        "q": "Is this a subscription?",
-                        "a": "No. Each year is a one-time purchase. No auto-renewal, no surprise charges. Public monthly, when it launches, is a normal subscription; founder is a deliberately different deal. One year up front, no recurring bill, and your founder pricing is waiting if you come back.",
-                    },
-                    {
-                        "q": "What happens at the end of my year?",
-                        "a": "Your access ends 12 months after you reserve your seat. Come back within 30 days and your founder pricing is waiting: same 33% off the public rate, same founder role and channel access. Wait longer than 30 days and you re-enter at the public rate.",
-                    },
-                    {
-                        "q": "What if I want to pay monthly?",
-                        "a": f"Wait until the official launch. Currently, we're fundraising to prove we have the demand and cash to operate at a larger scale. Public monthly opens at {monthly_list}, no founder pricing. If saving a third on the year and keeping founder pricing when you come back sounds better, annual is open right now.",
-                    },
-                    {
-                        "q": "Refund policy?",
-                        "a": "14 days, no questions, full refund. After that, a prorated refund on the remaining months. Your seat releases back to the pool.",
-                    },
-                    {
-                        "q": "What if I want to support Smarter Dev beyond a membership?",
-                        "a": "<p>sudo memberships are how most people support what we're building, but they fund a platform that's bigger than any single tier. Smarter Dev is the platform; sudo is the membership layer that pays for it. If you want to back Smarter Dev directly, beyond what a membership covers, email me at <a href=\"mailto:hello@smarter.dev\">hello@smarter.dev</a> and we'll work out what fits.</p><p>We shout out supporters who go above and beyond, on the Discord and the website, if they want the recognition. Plenty of people would rather keep it quiet, and that's just as welcome. Either way it goes straight into the build.</p>",
-                    },
-                ],
-            },
+            context={"faqs": faqs},
         )
 
     @post("/checkout", guards=[auth_guard])
-    async def checkout_founder(
+    async def checkout(
         self, request: Request, db_session: AsyncSession
     ) -> Redirect:
-        """Start a Stripe Checkout Session for the requested founder tier."""
+        """Start a Stripe Checkout Session for the requested offering (role)."""
         # The flag must let this user see the pricing page; otherwise the
         # button shouldn't even be reachable.
         show_pricing = await flags_service.is_enabled(
@@ -213,8 +145,8 @@ class SudoController(Controller):
             raise NotFoundException("Page not found")
 
         form = await request.form()
-        tier = (form.get("tier") or "").strip()
-        if tier not in {"r", "rw", "rwx"}:
+        role = (form.get("role") or "").strip()
+        if role not in {"hacker", "founder"}:
             return Redirect(path="/sudo?checkout_error=1")
 
         user_id = request.session.get("user_id") if request.session else None
@@ -233,19 +165,17 @@ class SudoController(Controller):
         base = settings.site_base_url.rstrip("/")
 
         try:
-            checkout_url = await create_founder_checkout_session(
+            checkout_url = await create_checkout_session(
                 db_session,
                 user,
-                tier=tier,
+                role=role,
                 success_url=f"{base}/sudo/checkout/success",
                 cancel_url=f"{base}/sudo/checkout/cancel",
             )
-        except FounderSeatsExhausted:
-            return Redirect(path="/sudo?sold_out=1")
-        except UnknownTier:
+        except UnknownRole:
             return Redirect(path="/sudo?checkout_error=1")
         except CheckoutError:
-            logger.exception("Failed to create founder Checkout Session for tier %r.", tier)
+            logger.exception("Failed to create Checkout Session for role %r.", role)
             return Redirect(path="/sudo?checkout_error=1")
 
         return Redirect(path=checkout_url, status_code=303)

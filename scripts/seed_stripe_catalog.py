@@ -1,185 +1,198 @@
-"""Seed/refresh the sudo founder tier metadata + perks on Stripe Products.
+"""Seed/refresh the sudo offering catalog on Stripe.
 
-Stripe is the source of truth for the sudo pricing catalog. The dashboard owns
-each Product's name, description, price, and perks (marketing_features); this
-script writes the short, structured site-side fields (metadata) and the perks
-list via the API so they don't have to be hand-entered.
+Stripe is the source of truth for the sudo catalog. There are exactly two
+offerings:
 
-Idempotent: re-running overwrites the same fields. Run against whichever key is
-in the environment (test or live).
+* **Hacker** — $8/month recurring subscription. Every RunHacks challenge.
+* **Founder** — one-time, pay-what-you-want with a $256 minimum. Funds the
+  build and grants the inside seat.
+
+Each is a Stripe Product tagged with ``metadata.sudo_role`` (``hacker`` /
+``founder``), carrying its perks in ``marketing_features`` and its price in a
+single active Price. Discord projection role IDs live on the Product metadata
+so ``converge`` can map an entitlement to guild roles.
+
+This script is idempotent: it matches products by ``metadata.sudo_role``,
+updates their metadata + perks, ensures the right Price exists (creating a new
+one only when the amount/shape changed — Stripe Prices are immutable), and
+archives any leftover legacy tier products (``metadata.sudo_tier`` set).
 
 Usage:
-    STRIPE_SECRET_KEY=sk_... python scripts/seed_stripe_catalog.py
+    STRIPE_SECRET_KEY=sk_... uv run python scripts/seed_stripe_catalog.py
 """
 
 from __future__ import annotations
 
-import os
+import json
 import sys
 
 import stripe
 
-# Match products by the founder price (unit_amount, cents) → tier slug.
-_AMOUNT_TO_SLUG = {12800: "r", 25600: "rw", 51200: "rwx"}
+from smarter_dev.shared.config import get_settings
 
-# slug → (metadata, perks). `tag` may contain `{seats}`, filled at render time.
-_TIERS: dict[str, dict] = {
-    "r": {
-        "description": (
-            "The starting line. Your year up front funds the build, and you "
-            "ship with us as every piece of sudo lands."
-        ),
+# ── Discord projection (carried over from the original launch config) ──
+# base role = "members-only" access granted to any active sudo member;
+# the Founder role + its dedicated-channel role are layered on for founders.
+_GUILD_ID = "644299523686006834"
+_BASE_ROLE_ID = "1513308785806938122"
+_FOUNDER_ROLE_ID = "1513308170519580823"
+_FOUNDER_CHANNEL_ROLE_ID = "1513308208582889674"
+
+# slug → full offering definition. ``price`` describes the single active Price
+# the offering should have; we create it if no active price matches.
+_OFFERINGS: dict[str, dict] = {
+    "hacker": {
+        "name": "Hacker",
+        "description": "Every RunHacks challenge, the day it drops.",
+        "price": {"unit_amount": 800, "recurring": {"interval": "month"}},
         "metadata": {
-            "sudo_tier": "r",
-            "perm": "r--",
-            "tier_label": "READ",
-            "role": "read",
+            "sudo_role": "hacker",
             "order": "1",
             "hero": "false",
-            "tag": "FOUNDER · 1 YEAR",
-            "cta_label": "./reserve --r--",
+            "cta_label": "./join --hacker",
+            "discord_guild_id": _GUILD_ID,
+            "discord_base_role_id": _BASE_ROLE_ID,
+            "discord_role_ids": "",
         },
         "features": [
-            "Resources Agent — answers from our curated library",
-            "RunHacks — new challenges on a schedule",
-            "Gym when it launches",
-            "Founder role + members-only Discord",
+            "All RunHacks challenges, new ones on a schedule",
+            "Members-only Discord",
         ],
     },
-    "rw": {
+    "founder": {
+        "name": "Founder",
         "description": (
-            "For the developers who'll lean on it. Extended limits across every "
-            "tool, and the support that pays for the headroom."
+            "Fund the build and take the inside seat. One-time, pay what you "
+            "want above the $256 minimum."
         ),
+        # Pay-what-you-want one-time price: a $256 floor with a $256 preset.
+        "price": {
+            "currency": "usd",
+            "custom_unit_amount": {
+                "enabled": True,
+                "minimum": 25600,
+                "preset": 25600,
+            },
+        },
         "metadata": {
-            "sudo_tier": "rw",
-            "perm": "rw-",
-            "tier_label": "WRITE",
-            "role": "write",
+            "sudo_role": "founder",
             "order": "2",
-            "hero": "false",
-            "tag": "FOUNDER · 1 YEAR",
-            "cta_label": "./reserve --rw-",
-        },
-        "features": [
-            "Everything in r--",
-            "Extended limits across every tool",
-            "Labs when it launches",
-            "Priority support from the team",
-        ],
-    },
-    "rwx": {
-        "description": (
-            "The first 16. Early preview access to Gym and Labs while we "
-            "shape them, because we need users in the loop to ship them right."
-        ),
-        "metadata": {
-            "sudo_tier": "rwx",
-            "perm": "rwx",
-            "tier_label": "EXECUTE",
-            "role": "execute",
-            "order": "3",
             "hero": "true",
-            "tag": "0DAY · {seats} SEATS",
-            "cta_label": "./reserve --rwx --0day",
+            "min_amount": "25600",
+            "cta_label": "./fund --founder",
+            "discord_guild_id": _GUILD_ID,
+            "discord_base_role_id": _BASE_ROLE_ID,
+            "discord_role_ids": f"{_FOUNDER_ROLE_ID},{_FOUNDER_CHANNEL_ROLE_ID}",
         },
         "features": [
-            "Everything in rw-",
-            "Gym preview access while we shape it",
-            "Labs preview access while we shape it",
-            "0day Founder role + dedicated channel",
+            "Everything in Hacker",
+            "An early look at what's being built",
+            "A voice while it's young",
+            "Founder role + dedicated channel",
         ],
     },
 }
 
 
-# Tier slug → env var holding that tier's Discord role ID.
-_TIER_TO_DISCORD_ROLE_ENV = {
-    "r":   "SUDO_DISCORD_R_ROLE_ID",
-    "rw":  "SUDO_DISCORD_W_ROLE_ID",
-    "rwx": "SUDO_DISCORD_X_ROLE_ID",
-}
+def _active_price_matches(price: dict, want: dict) -> bool:
+    """True if an existing active Price already matches the desired shape."""
+    if "custom_unit_amount" in want:
+        cua = price.get("custom_unit_amount")
+        if not cua:
+            return False
+        return (
+            int(cua.get("minimum") or 0) == int(want["custom_unit_amount"]["minimum"])
+            and price.get("type") == "one_time"
+        )
+    # Fixed recurring price.
+    if price.get("unit_amount") != want["unit_amount"]:
+        return False
+    rec = price.get("recurring") or {}
+    return rec.get("interval") == want["recurring"]["interval"]
 
-# Which "extra" role envs apply to which tier. Every founder gets the
-# generic Founder role; the rwx tier additionally gets the 0day Founder
-# role.
-_EXTRA_ROLE_ENVS_BY_TIER = {
-    "r":   ("SUDO_DISCORD_FOUNDER_ROLE_ID",),
-    "rw":  ("SUDO_DISCORD_FOUNDER_ROLE_ID",),
-    "rwx": ("SUDO_DISCORD_FOUNDER_ROLE_ID", "SUDO_DISCORD_0DAY_FOUNDER_ROLE_ID"),
-}
 
+def _ensure_price(product_id: str, want: dict) -> str:
+    """Return the id of an active Price matching ``want``, creating it if needed.
 
-def _discord_metadata(slug: str) -> dict[str, str]:
-    """Pull the Discord guild + role IDs for this tier from env, if present.
-
-    All values are optional independently — converge will skip the Discord
-    projection until the required ones (guild, base, all three tier roles)
-    are populated. Empty values are omitted so we don't clobber existing
-    metadata on Stripe with blanks.
+    Stripe Prices are immutable, so any change means a new Price; we leave the
+    old ones in place (archiving them would break historical references) but
+    only ever surface the matching one.
     """
-    out: dict[str, str] = {}
-    guild = os.environ.get("SUDO_DISCORD_GUILD_ID", "").strip()
-    base = os.environ.get("SUDO_DISCORD_BASE_ROLE_ID", "").strip()
-    tier_env = _TIER_TO_DISCORD_ROLE_ENV.get(slug, "")
-    tier_role = os.environ.get(tier_env, "").strip() if tier_env else ""
-    if guild:
-        out["discord_guild_id"] = guild
-    if base:
-        out["discord_base_role_id"] = base
-    if tier_role:
-        out["discord_role_id"] = tier_role
+    existing = json.loads(str(stripe.Price.list(product=product_id, active=True, limit=100)))
+    for price in existing["data"]:
+        if _active_price_matches(price, want):
+            return price["id"]
 
-    # Extras (Founder, 0day Founder) — CSV of role IDs that converge
-    # grants alongside the tier role. Skip entirely if none configured so
-    # we don't blank out an existing field.
-    extras: list[str] = []
-    for env_name in _EXTRA_ROLE_ENVS_BY_TIER.get(slug, ()):
-        v = os.environ.get(env_name, "").strip()
-        if v:
-            extras.append(v)
-    if extras:
-        out["discord_extra_role_ids"] = ",".join(extras)
-    return out
+    params: dict = {"product": product_id, "currency": want.get("currency", "usd")}
+    if "custom_unit_amount" in want:
+        params["custom_unit_amount"] = want["custom_unit_amount"]
+    else:
+        params["unit_amount"] = want["unit_amount"]
+        params["recurring"] = want["recurring"]
+    created = json.loads(str(stripe.Price.create(**params)))
+    return created["id"]
+
+
+def _find_product_by_role(role: str) -> dict | None:
+    for product in stripe.Product.list(limit=100, active=True).auto_paging_iter():
+        data = json.loads(str(product))
+        if (data.get("metadata") or {}).get("sudo_role") == role:
+            return data
+    return None
+
+
+def _archive_legacy_products() -> list[str]:
+    """Deactivate any leftover legacy tier products (``metadata.sudo_tier``)."""
+    archived: list[str] = []
+    for product in stripe.Product.list(limit=100, active=True).auto_paging_iter():
+        data = json.loads(str(product))
+        meta = data.get("metadata") or {}
+        if meta.get("sudo_tier") and not meta.get("sudo_role"):
+            stripe.Product.modify(data["id"], active=False)
+            archived.append(f"{data['id']} ({data.get('name')})")
+    return archived
 
 
 def main() -> int:
-    key = os.environ.get("STRIPE_SECRET_KEY")
-    if not key:
-        print("STRIPE_SECRET_KEY not set", file=sys.stderr)
+    settings = get_settings()
+    if not settings.stripe_secret_key:
+        print("STRIPE_SECRET_KEY is not configured.", file=sys.stderr)
         return 1
-    stripe.api_key = key
+    stripe.api_key = settings.stripe_secret_key
 
-    products = stripe.Product.list(limit=100, active=True).data
-    seeded = 0
-    for product in products:
-        prices = stripe.Price.list(product=product.id, active=True).data
-        amount = next((p.unit_amount for p in prices if p.type == "one_time"), None)
-        slug = _AMOUNT_TO_SLUG.get(amount)
-        if slug is None:
-            continue
-        spec = _TIERS[slug]
-        metadata = {**spec["metadata"], **_discord_metadata(slug)}
-        stripe.Product.modify(
-            product.id,
-            description=spec["description"],
-            metadata=metadata,
-            marketing_features=[{"name": f} for f in spec["features"]],
-        )
-        discord_keys = ", ".join(
-            k for k in (
-                "discord_guild_id",
-                "discord_base_role_id",
-                "discord_role_id",
-                "discord_extra_role_ids",
+    archived = _archive_legacy_products()
+    for line in archived:
+        print(f"archived legacy product: {line}")
+
+    for role, spec in _OFFERINGS.items():
+        product = _find_product_by_role(role)
+        if product is None:
+            product = json.loads(
+                str(
+                    stripe.Product.create(
+                        name=spec["name"],
+                        description=spec["description"],
+                        metadata=spec["metadata"],
+                        marketing_features=[{"name": f} for f in spec["features"]],
+                    )
+                )
             )
-            if k in metadata
-        ) or "(no Discord metadata set)"
-        print(f"seeded {slug:>3} → {product.id} ({amount/100:.0f} USD) [{discord_keys}]")
-        seeded += 1
+            print(f"created product {product['id']} ({spec['name']})")
+        else:
+            stripe.Product.modify(
+                product["id"],
+                name=spec["name"],
+                description=spec["description"],
+                metadata=spec["metadata"],
+                marketing_features=[{"name": f} for f in spec["features"]],
+            )
+            print(f"updated product {product['id']} ({spec['name']})")
 
-    print(f"done — {seeded}/3 tiers seeded")
-    return 0 if seeded == 3 else 2
+        price_id = _ensure_price(product["id"], spec["price"])
+        print(f"  price: {price_id}")
+
+    print("done.")
+    return 0
 
 
 if __name__ == "__main__":

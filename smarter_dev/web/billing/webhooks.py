@@ -1,26 +1,25 @@
 """Stripe webhook event handling for sudo memberships.
 
-The webhook handler is the source of truth for role grants, founder seat
-assignment, and membership lifecycle. Every handler is idempotent and keyed
-by ``stripe_checkout_session_id`` / ``stripe_payment_intent_id`` so Stripe's
+The webhook handler is the source of truth for role grants and membership
+lifecycle. Every handler is idempotent and keyed by ``stripe_checkout_session_id``
+/ ``stripe_payment_intent_id`` / ``stripe_subscription_id`` so Stripe's
 automatic retries are safe.
 
-Event semantics (one-time payment mode):
+Two offerings, two lifecycles:
 
-* ``checkout.session.completed`` — first paid checkout. For rwx 0day it
-  assigns a founder seat (atomic against the inventory cap); if the cap is
-  already hit (race past the UI guardrail) the charge is refunded. Inserts
-  the ``sudo_memberships`` row, grants the appropriate sudo role, and sets
-  ``expires_at = purchased_at + 365 days``.
-* ``charge.refunded`` — marks the membership refunded and revokes the role.
-  The founder seat stays burned so the inventory cap stays consistent
-  against historical purchases.
+* **founder** — ``checkout.session.completed`` in ``mode=payment``. One-time,
+  permanent access (``expires_at`` set far in the future). ``charge.refunded``
+  / ``charge.dispute.created`` revoke it.
+* **hacker** — ``checkout.session.completed`` in ``mode=subscription`` creates
+  the membership with ``expires_at`` = the subscription's current period end.
+  ``invoice.paid`` extends it each renewal; ``customer.subscription.updated``
+  tracks ``cancel_at_period_end``; ``customer.subscription.deleted`` ends access.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
@@ -29,7 +28,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.auth.services import assign_role_to_user, remove_role_from_user
 
-from smarter_dev.web.billing import inventory
 from smarter_dev.web.billing.client import get_stripe
 from smarter_dev.web.billing.converge import converge
 from smarter_dev.web.models import SudoMembership
@@ -37,14 +35,14 @@ from smarter_dev.web.models import SudoMembership
 logger = logging.getLogger(__name__)
 
 
-# How long each one-time founder purchase grants access.
-ACCESS_DURATION = timedelta(days=365)
+# Founder is one-time and permanent; we model that as a far-future expiry so the
+# same "active = not revoked and expires_at > now" predicate works for both.
+FOUNDER_ACCESS_END = datetime(9999, 12, 31, tzinfo=timezone.utc)
 
-# Map a tier slug to the Skrift role it grants.
-TIER_TO_ROLE: dict[str, str] = {
-    "execute": "sudo-rwx",
-    "write":   "sudo-rw",
-    "read":    "sudo-r",
+# Map an offering role to the Skrift role it grants.
+ROLE_TO_SKRIFT: dict[str, str] = {
+    "hacker": "sudo-hacker",
+    "founder": "sudo-founder",
 }
 
 
@@ -70,36 +68,65 @@ async def _get_by_payment_intent(
     return result.scalar_one_or_none()
 
 
-async def _grant_role_for_tier(session: AsyncSession, user_id: UUID, tier: str) -> None:
-    role_name = TIER_TO_ROLE.get(tier)
+async def _get_by_subscription_id(
+    session: AsyncSession, subscription_id: str
+) -> SudoMembership | None:
+    result = await session.execute(
+        select(SudoMembership).where(
+            SudoMembership.stripe_subscription_id == subscription_id
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def _grant_role(session: AsyncSession, user_id: UUID, role: str) -> None:
+    role_name = ROLE_TO_SKRIFT.get(role)
     if not role_name:
-        logger.warning("No role mapping for tier %r; skipping grant.", tier)
+        logger.warning("No Skrift role mapping for %r; skipping grant.", role)
         return
     assigned = await assign_role_to_user(session, user_id, role_name)
     if not assigned:
         logger.error(
             "Failed to assign role %s to user %s (user or role not found).",
-            role_name,
-            user_id,
+            role_name, user_id,
         )
 
 
-async def _revoke_role_for_tier(session: AsyncSession, user_id: UUID, tier: str) -> None:
-    role_name = TIER_TO_ROLE.get(tier)
+async def _revoke_role(session: AsyncSession, user_id: UUID, role: str) -> None:
+    role_name = ROLE_TO_SKRIFT.get(role)
     if not role_name:
         return
     await remove_role_from_user(session, user_id, role_name)
 
 
+def _subscription_period_end(sub: dict[str, Any]) -> datetime:
+    """Best-effort current period end for a subscription dict → aware datetime.
+
+    Stripe moved ``current_period_end`` onto subscription items in newer API
+    versions; read the top level first, then fall back to the first item.
+    """
+    ts = sub.get("current_period_end")
+    if not ts:
+        items = (sub.get("items") or {}).get("data") or []
+        if items:
+            ts = items[0].get("current_period_end")
+    if not ts:
+        # No period info; default to "now" so a stale sub doesn't grant forever.
+        return datetime.now(tz=timezone.utc)
+    return datetime.fromtimestamp(int(ts), tz=timezone.utc)
+
+
+async def _converge_quietly(session: AsyncSession, user_id: UUID, where: str) -> None:
+    try:
+        await converge(session, user_id)
+    except Exception:
+        logger.exception("converge failed after %s for user %s", where, user_id)
+
+
 async def handle_checkout_session_completed(
     session: AsyncSession, event_data: dict[str, Any]
 ) -> None:
-    """Handle ``checkout.session.completed`` for a one-time founder purchase.
-
-    For rwx 0day: assigns a founder seat atomically. If the cap is already
-    hit (race past the UI guardrail) the charge is refunded and no role is
-    granted.
-    """
+    """Create the membership for a completed checkout (founder or hacker)."""
     session_obj = event_data["object"]
     checkout_session_id = session_obj.get("id")
     user_id_raw = session_obj.get("client_reference_id")
@@ -112,87 +139,163 @@ async def handle_checkout_session_completed(
 
     user_id = UUID(user_id_raw)
     metadata = session_obj.get("metadata") or {}
-    tier = metadata.get("tier")
-    if tier not in TIER_TO_ROLE:
+    role = metadata.get("role")
+    if role not in ROLE_TO_SKRIFT:
         logger.error(
-            "checkout.session.completed with unknown tier %r; session=%s",
-            tier, checkout_session_id,
+            "checkout.session.completed with unknown role %r; session=%s",
+            role, checkout_session_id,
         )
         return
 
-    payment_intent_id = session_obj.get("payment_intent")
     stripe_customer_id = session_obj.get("customer")
-    if not payment_intent_id or not stripe_customer_id:
+    if not stripe_customer_id:
         logger.error(
-            "checkout.session.completed missing payment_intent/customer; session=%s",
+            "checkout.session.completed missing customer; session=%s",
             checkout_session_id,
         )
         return
 
     # Idempotency: if we've already recorded this checkout, do nothing.
-    existing = await _get_by_session_id(session, checkout_session_id)
-    if existing is not None:
+    if await _get_by_session_id(session, checkout_session_id) is not None:
         return
 
-    # Pull amount + price from Stripe so we record the truth, not what the
-    # client claimed in the form.
-    stripe = get_stripe()
-    line_items = stripe.checkout.Session.list_line_items(checkout_session_id, limit=1)
-    if not line_items["data"]:
-        logger.error("No line items on checkout session %s", checkout_session_id)
-        return
-    item = line_items["data"][0]
-    price_id = item["price"]["id"]
     amount_paid_cents = int(session_obj.get("amount_total") or 0)
+    mode = session_obj.get("mode")
+    stripe = get_stripe()
 
-    founder_seat: int | None = None
-    if tier == "execute":
-        founder_seat = await inventory.reserve_next_seat(session)
-        if founder_seat is None:
-            # Lost the race — refund and abandon the grant.
+    if mode == "subscription":
+        subscription_id = session_obj.get("subscription")
+        if not subscription_id:
             logger.error(
-                "Founder rwx seats exhausted by the time webhook fired; "
-                "refunding payment_intent %s for user %s",
-                payment_intent_id, user_id,
+                "subscription checkout missing subscription id; session=%s",
+                checkout_session_id,
             )
-            try:
-                stripe.Refund.create(payment_intent=payment_intent_id)
-            except Exception:
-                logger.exception("Refund failed for overflow founder seat.")
             return
+        import json
 
-    now = datetime.now(tz=timezone.utc)
-    membership = SudoMembership(
-        user_id=user_id,
-        tier=tier,
-        source="one_time",
-        stripe_customer_id=stripe_customer_id,
-        stripe_checkout_session_id=checkout_session_id,
-        stripe_payment_intent_id=payment_intent_id,
-        stripe_price_id=price_id,
-        amount_paid_cents=amount_paid_cents,
-        purchased_at=now,
-        expires_at=now + ACCESS_DURATION,
-        founder_seat_number=founder_seat,
-    )
+        sub = json.loads(str(stripe.Subscription.retrieve(subscription_id)))
+        items = (sub.get("items") or {}).get("data") or []
+        price_id = items[0]["price"]["id"] if items else ""
+        expires_at = _subscription_period_end(sub)
+        will_renew = not bool(sub.get("cancel_at_period_end"))
+        membership = SudoMembership(
+            user_id=user_id,
+            role=role,
+            source="subscription",
+            stripe_customer_id=stripe_customer_id,
+            stripe_checkout_session_id=checkout_session_id,
+            stripe_subscription_id=subscription_id,
+            stripe_price_id=price_id,
+            amount_paid_cents=amount_paid_cents,
+            will_renew=will_renew,
+            expires_at=expires_at,
+        )
+    else:  # one-time payment (founder)
+        payment_intent_id = session_obj.get("payment_intent")
+        if not payment_intent_id:
+            logger.error(
+                "payment checkout missing payment_intent; session=%s",
+                checkout_session_id,
+            )
+            return
+        line_items = stripe.checkout.Session.list_line_items(checkout_session_id, limit=1)
+        price_id = line_items["data"][0]["price"]["id"] if line_items["data"] else ""
+        membership = SudoMembership(
+            user_id=user_id,
+            role=role,
+            source="one_time",
+            stripe_customer_id=stripe_customer_id,
+            stripe_checkout_session_id=checkout_session_id,
+            stripe_payment_intent_id=payment_intent_id,
+            stripe_price_id=price_id,
+            amount_paid_cents=amount_paid_cents,
+            expires_at=FOUNDER_ACCESS_END,
+        )
+
     session.add(membership)
     await session.commit()
 
-    await _grant_role_for_tier(session, user_id, tier)
+    await _grant_role(session, user_id, role)
+    await session.commit()
+    await _converge_quietly(session, user_id, "fulfillment")
+
+
+async def handle_invoice_paid(
+    session: AsyncSession, event_data: dict[str, Any]
+) -> None:
+    """Extend a hacker membership's access window on each paid invoice."""
+    invoice = event_data["object"]
+    subscription_id = invoice.get("subscription")
+    if not subscription_id:
+        return
+    record = await _get_by_subscription_id(session, subscription_id)
+    if record is None:
+        # The creating checkout.session.completed hasn't landed yet; it will
+        # set expires_at from the subscription. Nothing to do.
+        return
+
+    import json
+
+    stripe = get_stripe()
+    sub = json.loads(str(stripe.Subscription.retrieve(subscription_id)))
+    new_end = _subscription_period_end(sub)
+    changed = False
+    if record.expires_at != new_end:
+        record.expires_at = new_end
+        changed = True
+    will_renew = not bool(sub.get("cancel_at_period_end"))
+    if record.will_renew != will_renew:
+        record.will_renew = will_renew
+        changed = True
+    # A previously-lapsed/canceled sub that pays again should be live.
+    if record.revoked_reason is None and changed:
+        await session.commit()
+        await _grant_role(session, record.user_id, record.role)
+        await session.commit()
+        await _converge_quietly(session, record.user_id, "invoice.paid")
+
+
+async def handle_subscription_updated(
+    session: AsyncSession, event_data: dict[str, Any]
+) -> None:
+    """Track ``cancel_at_period_end`` and period end for a hacker membership."""
+    sub = event_data["object"]
+    subscription_id = sub.get("id")
+    if not subscription_id:
+        return
+    record = await _get_by_subscription_id(session, subscription_id)
+    if record is None:
+        return
+    record.will_renew = not bool(sub.get("cancel_at_period_end"))
+    record.expires_at = _subscription_period_end(sub)
     await session.commit()
 
-    # Project to Discord. Failures are logged inside converge and do not
-    # block the response — the daily sweep + GUILD_MEMBER_ADD heal drift.
-    try:
-        await converge(session, user_id)
-    except Exception:
-        logger.exception("converge failed after fulfillment for user %s", user_id)
+
+async def handle_subscription_deleted(
+    session: AsyncSession, event_data: dict[str, Any]
+) -> None:
+    """End access when a hacker subscription is fully canceled."""
+    sub = event_data["object"]
+    subscription_id = sub.get("id")
+    if not subscription_id:
+        return
+    record = await _get_by_subscription_id(session, subscription_id)
+    if record is None:
+        return
+
+    record.will_renew = False
+    record.expires_at = datetime.now(tz=timezone.utc)
+    await session.commit()
+
+    await _revoke_role(session, record.user_id, record.role)
+    await session.commit()
+    await _converge_quietly(session, record.user_id, "subscription.deleted")
 
 
 async def handle_charge_refunded(
     session: AsyncSession, event_data: dict[str, Any]
 ) -> None:
-    """Handle ``charge.refunded`` — revoke the role; seat stays burned."""
+    """Handle ``charge.refunded`` for a founder purchase — revoke access."""
     charge = event_data["object"]
     payment_intent_id = charge.get("payment_intent")
     if not payment_intent_id:
@@ -205,35 +308,22 @@ async def handle_charge_refunded(
             payment_intent_id,
         )
         return
-
     if record.refunded_at is not None:
-        # Already processed.
         return
 
     record.refunded_at = datetime.now(tz=timezone.utc)
     record.revoked_reason = "refund"
     await session.commit()
 
-    await _revoke_role_for_tier(session, record.user_id, record.tier)
+    await _revoke_role(session, record.user_id, record.role)
     await session.commit()
-
-    try:
-        await converge(session, record.user_id)
-    except Exception:
-        logger.exception("converge failed after refund for user %s", record.user_id)
+    await _converge_quietly(session, record.user_id, "refund")
 
 
 async def handle_charge_dispute_created(
     session: AsyncSession, event_data: dict[str, Any]
 ) -> None:
-    """Handle ``charge.dispute.created`` — clamp access immediately.
-
-    A chargeback dispute means the cardholder is challenging the charge.
-    Per spec we clamp ``expires_at`` to now, mark the row with
-    ``revoked_reason='dispute'``, and converge to strip Discord roles
-    before the outcome is decided. If we ultimately win the dispute, the
-    restore is a manual support action.
-    """
+    """Handle ``charge.dispute.created`` — clamp access immediately."""
     dispute = event_data["object"]
     payment_intent_id = dispute.get("payment_intent")
     if not payment_intent_id:
@@ -246,49 +336,31 @@ async def handle_charge_dispute_created(
             payment_intent_id,
         )
         return
-
     if record.revoked_reason == "dispute":
-        return  # already handled
+        return
 
     record.revoked_reason = "dispute"
     record.expires_at = datetime.now(tz=timezone.utc)
     await session.commit()
 
-    await _revoke_role_for_tier(session, record.user_id, record.tier)
+    await _revoke_role(session, record.user_id, record.role)
     await session.commit()
-
-    try:
-        await converge(session, record.user_id)
-    except Exception:
-        logger.exception("converge failed after dispute for user %s", record.user_id)
+    await _converge_quietly(session, record.user_id, "dispute")
 
 
 async def handle_charge_dispute_closed(
     session: AsyncSession, event_data: dict[str, Any]
 ) -> None:
-    """Handle ``charge.dispute.closed`` — log only.
-
-    Spec: dispute outcomes are a judgment call. A "won" dispute means we
-    keep the money, but restoring access for a customer who disputed and
-    lost is a manual decision; an automation that auto-restored would
-    re-grant roles to bad-faith disputers. Log here so support can act
-    on it from the dashboard.
-    """
+    """Handle ``charge.dispute.closed`` — log only; restores are manual."""
     dispute = event_data["object"]
-    status_ = dispute.get("status")
-    pi = dispute.get("payment_intent")
     logger.info(
         "charge.dispute.closed status=%s payment_intent=%s — manual review.",
-        status_, pi,
+        dispute.get("status"), dispute.get("payment_intent"),
     )
 
 
 async def expire_lapsed_memberships(session: AsyncSession) -> int:
-    """Revoke roles for any memberships whose ``expires_at`` has passed.
-
-    Intended to be called from a scheduled sweep. Returns the number of
-    memberships expired in this pass.
-    """
+    """Revoke roles for any memberships whose ``expires_at`` has passed."""
     now = datetime.now(tz=timezone.utc)
     result = await session.execute(
         select(SudoMembership).where(
@@ -300,7 +372,7 @@ async def expire_lapsed_memberships(session: AsyncSession) -> int:
     expired = 0
     expired_user_ids: list[UUID] = []
     for membership in result.scalars():
-        role_name = TIER_TO_ROLE.get(membership.tier)
+        role_name = ROLE_TO_SKRIFT.get(membership.role)
         if role_name is None:
             continue
         await remove_role_from_user(session, membership.user_id, role_name)
@@ -308,25 +380,13 @@ async def expire_lapsed_memberships(session: AsyncSession) -> int:
         expired += 1
     if expired:
         await session.commit()
-    # Project the lapse to Discord too. Inline serial calls — fine at
-    # launch-cohort scale (a few dozen a day at most).
     for uid in expired_user_ids:
-        try:
-            await converge(session, uid)
-        except Exception:
-            logger.exception("converge failed during sweep for user %s", uid)
+        await _converge_quietly(session, uid, "sweep")
     return expired
 
 
 async def drift_restore_active(session: AsyncSession) -> int:
-    """Re-converge every active membership.
-
-    This is the drift-heal loop: if anyone manually pulled a sudo role off
-    a Discord member, if the bot was down when a webhook fired, or if the
-    Skrift role got rolled back, converge will re-apply the desired set on
-    the next sweep. Idempotent for already-correct members (no-op writes).
-    Returns the number of user_ids converged.
-    """
+    """Re-converge every active membership (heals manual/role drift)."""
     now = datetime.now(tz=timezone.utc)
     result = await session.execute(
         select(SudoMembership.user_id)
@@ -336,42 +396,32 @@ async def drift_restore_active(session: AsyncSession) -> int:
     )
     user_ids = [row[0] for row in result.all()]
     for uid in user_ids:
-        try:
-            await converge(session, uid)
-        except Exception:
-            logger.exception("drift-restore converge failed for user %s", uid)
+        await _converge_quietly(session, uid, "drift-restore")
     return len(user_ids)
 
 
 async def run_daily_sweep(session: AsyncSession) -> dict[str, Any]:
-    """Expire lapsed memberships + drift-restore + send renewal reminders.
+    """Expire lapsed memberships + drift-restore active ones.
 
-    Returns a small summary dict for logging. Safe to run repeatedly: the
-    expiry path is idempotent (revoked_reason becomes set), converge is
-    idempotent for already-correct members, and the reminder sender
-    relies on a unique constraint per (membership, threshold).
+    Renewal reminders are gone: Hacker is a Stripe subscription (Stripe owns
+    dunning) and Founder is permanent, so there's nothing to remind about.
     """
-    from smarter_dev.web.billing.reminders import send_renewal_reminders
-
     expired = await expire_lapsed_memberships(session)
     converged = await drift_restore_active(session)
-    reminders = await send_renewal_reminders(session)
     logger.info(
-        "sudo daily sweep done: expired=%d, drift-restored=%d, reminders=%s",
-        expired, converged, reminders,
+        "sudo daily sweep done: expired=%d, drift-restored=%d",
+        expired, converged,
     )
-    return {
-        "expired": expired,
-        "drift_restored": converged,
-        "reminders": reminders,
-    }
+    return {"expired": expired, "drift_restored": converged}
 
 
 _HANDLERS = {
     "checkout.session.completed": handle_checkout_session_completed,
     # Async-payment methods (ACH etc.) deliver this when the funds clear.
-    # Same handler — the fulfillment path is keyed on the checkout session.
     "checkout.session.async_payment_succeeded": handle_checkout_session_completed,
+    "invoice.paid": handle_invoice_paid,
+    "customer.subscription.updated": handle_subscription_updated,
+    "customer.subscription.deleted": handle_subscription_deleted,
     "charge.refunded": handle_charge_refunded,
     "charge.dispute.created": handle_charge_dispute_created,
     "charge.dispute.closed": handle_charge_dispute_closed,

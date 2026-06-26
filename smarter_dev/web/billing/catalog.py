@@ -1,19 +1,19 @@
-"""Sudo founder tier catalog, sourced from Stripe.
+"""Sudo offering catalog, sourced from Stripe.
 
-Stripe is the single source of truth for the pricing ladder: each tier is a
-Product tagged with ``metadata.sudo_tier``, carrying its perks in
-``marketing_features`` and its founder price in a one-time Price. The public
-comparison prices are *computed* from the founder price, not stored:
+Stripe is the single source of truth for the two sudo offerings. Each is a
+Product tagged with ``metadata.sudo_role`` (``hacker`` / ``founder``), carrying
+its perks in ``marketing_features``, its price in a single active Price, and
+its Discord projection role IDs in metadata. Seed/refresh with
+``scripts/seed_stripe_catalog.py``.
 
-    base   = founder * 1.5          # the public "full" rate; founder is 33% off it
-    monthly = base / 12             # public monthly
-    annual  = monthly * 10          # public annual, SaaS-standard 2 months free
+* **hacker** — recurring monthly Price ($8/mo).
+* **founder** — one-time, pay-what-you-want Price (``custom_unit_amount`` with a
+  $256 minimum).
 
 Reads are served from an in-process cache with a stale-while-revalidate policy:
 a request always gets the current cached catalog immediately; if the cache is
-older than ``_TTL_SECONDS`` it triggers a single background refresh (prices
-change rarely, so serving slightly stale data beats blocking on Stripe). Force
-a refresh by restarting the pods.
+older than ``_TTL_SECONDS`` it triggers a single background refresh. Force a
+refresh by restarting the pods.
 """
 
 from __future__ import annotations
@@ -34,125 +34,119 @@ _fetched_at: float = 0.0
 _refreshing = False
 
 
-def _compute_public_prices(founder: int) -> tuple[int, int, int]:
-    """Return (base, monthly, annual) derived from the founder price."""
-    base = round(founder * 1.5)
-    monthly = round(base / 12)
-    annual = monthly * 10
-    return base, monthly, annual
+def _select_price(prices: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Pick the offering's active Price: prefer recurring, else one-time."""
+    recurring = next((p for p in prices if p.get("recurring")), None)
+    if recurring:
+        return recurring
+    return next((p for p in prices if p["type"] == "one_time"), None)
 
 
 def _fetch_catalog_sync() -> list[dict[str, Any]]:
-    """Pull tiers from Stripe. Runs the blocking SDK calls off the event loop."""
+    """Pull offerings from Stripe. Runs the blocking SDK calls off the loop."""
     stripe = get_stripe()
-    tiers: list[dict[str, Any]] = []
+    offerings: list[dict[str, Any]] = []
     for product in stripe.Product.list(limit=100, active=True).auto_paging_iter():
         # StripeObject's attribute access is hostile to dict ops; the JSON repr
         # is the reliable way to get a plain nested dict.
         data = json.loads(str(product))
         meta = data.get("metadata") or {}
-        slug = meta.get("sudo_tier")
-        if not slug:
+        role = meta.get("sudo_role")
+        if role not in ("hacker", "founder"):
             continue
 
         prices = json.loads(str(stripe.Price.list(product=data["id"], active=True)))
-        price = next(
-            (p for p in prices["data"] if p["type"] == "one_time"), None
-        )
+        price = _select_price(prices["data"])
         if not price:
             continue
 
-        founder = price["unit_amount"] // 100
-        base, monthly, annual = _compute_public_prices(founder)
-        tiers.append(
+        recurring = price.get("recurring") or None
+        cua = price.get("custom_unit_amount") or None
+        if cua:
+            price_cents = int(cua.get("preset") or cua.get("minimum") or 0)
+            min_cents = int(cua.get("minimum") or 0)
+        else:
+            price_cents = int(price.get("unit_amount") or 0)
+            min_cents = price_cents
+
+        offerings.append(
             {
-                "id": slug,
-                "perm": meta.get("perm", ""),
-                "tier": meta.get("tier_label", ""),
-                "tag": meta.get("tag", ""),
-                "role": meta.get("role", ""),
-                "hero": meta.get("hero") == "true",
-                "order": int(meta.get("order", "0") or 0),
-                "cta_label": meta.get("cta_label", ""),
+                "id": role,
+                "role": role,
+                "name": data.get("name", ""),
                 "desc": data.get("description") or "",
                 "feats": [f["name"] for f in (data.get("marketing_features") or [])],
-                "annual": founder,
-                "base": base,
-                "public_monthly": monthly,
-                "public_annual": annual,
+                "cta_label": meta.get("cta_label", ""),
+                "hero": meta.get("hero") == "true",
+                "order": int(meta.get("order", "0") or 0),
                 "price_id": price["id"],
-                # Discord projection IDs. Each product carries the same
-                # guild + base, redundantly, so any one read is sufficient.
-                # ``discord_extra_role_ids`` is a CSV that converge grants
-                # alongside the tier role (e.g. Founder for all tiers,
-                # 0day Founder for rwx).
+                "price_cents": price_cents,
+                "min_cents": min_cents,
+                "recurring": recurring is not None,
+                "interval": recurring.get("interval") if recurring else None,
+                "pay_what_you_want": cua is not None,
+                # Discord projection IDs. Each product carries the same guild +
+                # base role, redundantly, so any one read is sufficient.
+                # ``discord_role_ids`` is a CSV of the roles to grant for this
+                # offering on top of the base role.
                 "discord_guild_id": meta.get("discord_guild_id", "") or None,
                 "discord_base_role_id": meta.get("discord_base_role_id", "") or None,
-                "discord_role_id": meta.get("discord_role_id", "") or None,
-                "discord_extra_role_ids": [
-                    p.strip() for p in (meta.get("discord_extra_role_ids") or "").split(",")
+                "discord_role_ids": [
+                    p.strip()
+                    for p in (meta.get("discord_role_ids") or "").split(",")
                     if p.strip()
                 ],
             }
         )
 
-    tiers.sort(key=lambda t: t["order"])
-    return tiers
+    offerings.sort(key=lambda o: o["order"])
+    return offerings
 
 
 async def get_discord_config() -> dict[str, Any] | None:
     """Return the Discord projection config derived from product metadata.
 
-    Shape: ``{"guild_id": str, "base_role_id": str, "role_ids_by_tier":
-    {"read": str, "write": str, "execute": str}}``. Returns ``None`` if
-    any required field is missing on any tier — converge then skips the
-    Discord step entirely (the Skrift role projection still runs).
+    Shape: ``{"guild_id": str, "base_role_id": str, "role_ids_by_role":
+    {"hacker": [...], "founder": [...]}}``, where each list is the extra roles
+    granted on top of the base role. Returns ``None`` if the guild or base role
+    is missing — converge then skips the Discord step (the Skrift role
+    projection still runs).
     """
-    tiers = await get_tiers()
-    if not tiers:
+    offerings = await get_offerings()
+    if not offerings:
         return None
 
-    # Map our internal tier slugs (sudo_membership.tier) to the catalog ids.
-    # ``role`` on the catalog dict ("read" / "write" / "execute") matches
-    # the SudoMembership.tier value, while ``id`` is the perm slug.
-    role_ids_by_tier: dict[str, str] = {}
-    extra_role_ids_by_tier: dict[str, list[str]] = {}
     guild_id: str | None = None
     base_role_id: str | None = None
-    for tier in tiers:
-        if tier.get("discord_guild_id") and not guild_id:
-            guild_id = tier["discord_guild_id"]
-        if tier.get("discord_base_role_id") and not base_role_id:
-            base_role_id = tier["discord_base_role_id"]
-        if tier.get("discord_role_id") and tier.get("role"):
-            role_ids_by_tier[tier["role"]] = tier["discord_role_id"]
-        if tier.get("role"):
-            extra_role_ids_by_tier[tier["role"]] = list(tier.get("discord_extra_role_ids") or [])
+    role_ids_by_role: dict[str, list[str]] = {}
+    for offering in offerings:
+        if offering.get("discord_guild_id") and not guild_id:
+            guild_id = offering["discord_guild_id"]
+        if offering.get("discord_base_role_id") and not base_role_id:
+            base_role_id = offering["discord_base_role_id"]
+        role_ids_by_role[offering["role"]] = list(offering.get("discord_role_ids") or [])
 
     if not guild_id or not base_role_id:
-        return None
-    if not all(t in role_ids_by_tier for t in ("read", "write", "execute")):
         return None
     return {
         "guild_id": guild_id,
         "base_role_id": base_role_id,
-        "role_ids_by_tier": role_ids_by_tier,
-        "extra_role_ids_by_tier": extra_role_ids_by_tier,
+        "role_ids_by_role": role_ids_by_role,
     }
 
 
 async def _refresh() -> None:
     global _cache, _fetched_at, _refreshing
     try:
-        tiers = await anyio.to_thread.run_sync(_fetch_catalog_sync)
-        _cache = tiers
+        offerings = await anyio.to_thread.run_sync(_fetch_catalog_sync)
+        _cache = offerings
         _fetched_at = time.monotonic()
     finally:
         _refreshing = False
 
 
-async def get_tiers() -> list[dict[str, Any]]:
-    """Return the founder tiers, newest-cached-first with background refresh.
+async def get_offerings() -> list[dict[str, Any]]:
+    """Return the sudo offerings, cached with background refresh.
 
     On a cold cache this blocks on Stripe once. Afterwards it always returns
     the cached catalog immediately and refreshes in the background past TTL.
@@ -170,6 +164,6 @@ async def get_tiers() -> list[dict[str, Any]]:
     return _cache
 
 
-def get_tier(tiers: list[dict[str, Any]], slug: str) -> dict[str, Any] | None:
-    """Find a tier by slug within an already-fetched catalog."""
-    return next((t for t in tiers if t["id"] == slug), None)
+def get_offering(offerings: list[dict[str, Any]], role: str) -> dict[str, Any] | None:
+    """Find an offering by role within an already-fetched catalog."""
+    return next((o for o in offerings if o["role"] == role), None)
