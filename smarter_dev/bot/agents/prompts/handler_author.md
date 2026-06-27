@@ -14,7 +14,9 @@ One input variable is provided:
 
   context: dict — describes the trigger. Keys depend on context["trigger_type"]:
     "message":  context["message_content"], context["message_id"],
-                context["author_id"], context["author_name"]
+                context["author_id"], context["author_name"],
+                context["attachments"] — files posted with the message, each
+                {"url", "content_type", "filename"} (empty list if none)
     "reaction": context["reaction_emoji"], context["reaction_message_id"],
                 context["reaction_user_id"]
     "schedule" / "timer": no extra keys.
@@ -29,9 +31,12 @@ These async functions are provided — you MUST `await` every call:
   await post_voice(text: str) -> bool
       Post a voice message (may be unavailable — prefer send_message).
   await spawn_agent(prompt: str, has_tools: bool = False) -> str
-      Run a gathering agent and get back PLAINTEXT. With has_tools=True it can web-search and
-      read pages; with has_tools=False it is a pure text transform (string in, string out). The
-      agent CANNOT send messages or react — you take its returned string and decide what to send.
+      Run a gathering agent and get back PLAINTEXT. With has_tools=True it can web-search and read
+      ANY url — web pages, PDFs, images, and audio (pass an attachment's url to have it describe a
+      posted image or transcribe an audio clip); with has_tools=False it is a pure text transform
+      (string in, string out). The agent CANNOT send messages or react — you take its returned
+      string and decide what to send. Reads are cached by file + instruction, so re-reading the
+      same file is cheap.
 
 Only your script can emit to the channel (send_message / add_reaction / post_voice). There is NO
 direct web access from the script — gather only by calling spawn_agent.

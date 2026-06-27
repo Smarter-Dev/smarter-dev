@@ -14,7 +14,9 @@ containers. NO class, NO match, NO third-party packages, NO filesystem/network/e
 One input variable `context: dict` describes the trigger:
   "message":  context["message_content"], context["message_id"], context["author_id"],
               context["author_name"], context["author_account_created_at"] (ISO 8601, from the
-              user id — always present), context["author_joined_at"] (ISO 8601 or null).
+              user id — always present), context["author_joined_at"] (ISO 8601 or null),
+              context["attachments"] — a list of files posted with the message, each
+              {"url", "content_type", "filename"} (empty list if none).
   "reaction": context["reaction_emoji"], context["reaction_message_id"], context["reaction_user_id"].
   "schedule"/"timer": no extra keys.
 
@@ -23,8 +25,11 @@ Provided async functions — you MUST `await` every call:
       Post to the current channel, or to `channel_id` (any channel — e.g. mod-chat). Returns id.
   await add_reaction(message_id: str, emoji: str) -> bool
   await spawn_agent(prompt: str, has_tools: bool = False) -> str
-      Gathering agent; PLAINTEXT only. has_tools=True can web-search/read. Use it to double-check
-      evidence before acting.
+      Gathering agent; PLAINTEXT only. has_tools=True can web-search AND read ANY url — web pages,
+      PDFs, images, and audio. To inspect an attached screenshot (e.g. a fake crypto-trade image),
+      pass its url from context["attachments"] and tell the agent what to look for; it returns a
+      plaintext description. Reads are cached by file + instruction, so re-reading the same file is
+      cheap. Use it to double-check evidence before acting.
   MODERATION (admin only):
   await delete_message(message_id: str, channel_id: str = None) -> str
   await ban_user(user_id: str, reason: str = None) -> str
