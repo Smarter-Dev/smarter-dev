@@ -1157,6 +1157,15 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         bot.load_extensions("smarter_dev.bot.plugins.warn")
         logger.info("✓ Loaded warn plugin")
 
+        # Load agentic handler plugins (member handlers + admin routines)
+        logger.info("Loading handler events plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.handler_events")
+        logger.info("✓ Loaded handler events plugin")
+
+        logger.info("Loading privileged routines plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.privileged_routines")
+        logger.info("✓ Loaded privileged routines plugin")
+
         logger.info("✓ All plugins loaded successfully")
     except Exception as e:
         logger.error(f"Failed to load plugins: {e}")
@@ -1717,7 +1726,7 @@ async def run_bot() -> None:
         await bot.start()
 
         # Start health check server for Kubernetes probes
-        health_runner = await start_health_server(bot)
+        health_runner = await start_health_server(bot, get_settings().bot_health_port)
 
         # Keep the bot running until interrupted
         logger.info("Bot is now running. Press Ctrl+C to stop.")
