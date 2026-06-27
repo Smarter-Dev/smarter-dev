@@ -26,6 +26,9 @@ CHANNEL_MESSAGES_PER_MIN = 10
 GLOBAL_AGENT_CALLS_PER_MIN = 30
 HANDLER_FIRES_PER_MIN_MESSAGE = 10
 HANDLER_FIRES_PER_MIN_REACTION = 4
+# Admin handlers monitor guild-wide (the script runs on every message), so they
+# need a high fire ceiling; the global agent/min cap still bounds expensive work.
+ADMIN_FIRES_PER_MIN = 120
 
 
 def channel_message_key(channel_id: str) -> str:

@@ -26,6 +26,16 @@ DEFAULT_MAX_WEB_READS = 3
 DEFAULT_MAX_AGENT_CALLS = 2
 DEFAULT_MAX_AGENT_CONTEXT_BYTES = 32 * 1024
 DEFAULT_WALL_CLOCK_SECONDS = 60.0
+# Standard handlers have no moderation powers, so zero mod actions.
+DEFAULT_MAX_MOD_ACTIONS = 0
+
+# Admin handlers are admin-created and trusted: looser per-fire caps, and a
+# moderation-action budget (bans/kicks/timeouts/deletes), e.g. cleaning up a
+# scammer's messages = several deletes in one fire.
+ADMIN_MAX_MESSAGES = 5
+ADMIN_MAX_AGENT_CALLS = 3
+ADMIN_MAX_MOD_ACTIONS = 25
+ADMIN_WALL_CLOCK_SECONDS = 120.0
 
 
 class CapExceeded(Exception):
@@ -55,11 +65,13 @@ class HandlerBudget:
     max_agent_calls: int = DEFAULT_MAX_AGENT_CALLS
     max_agent_context_bytes: int = DEFAULT_MAX_AGENT_CONTEXT_BYTES
     wall_clock_seconds: float = DEFAULT_WALL_CLOCK_SECONDS
+    max_mod_actions: int = DEFAULT_MAX_MOD_ACTIONS
 
     messages_sent: int = 0
     web_searches: int = 0
     web_reads: int = 0
     agent_calls: int = 0
+    mod_actions: int = 0
 
     started_at: float = field(default_factory=time.monotonic)
 
@@ -116,6 +128,16 @@ class HandlerBudget:
             )
         self.agent_calls += 1
 
+    def spend_mod_action(self) -> None:
+        """Account for one moderation action (ban/kick/timeout/delete)."""
+        self.check_deadline()
+        if self.mod_actions >= self.max_mod_actions:
+            raise CapExceeded(
+                "mod_actions",
+                f"handler hit its {self.max_mod_actions}-moderation-action cap",
+            )
+        self.mod_actions += 1
+
     def enforce_agent_context(self, argument: str) -> None:
         """Reject an agent argument larger than the context-bytes cap.
 
@@ -138,4 +160,15 @@ class HandlerBudget:
             "web_searches": self.web_searches,
             "web_reads": self.web_reads,
             "agent_calls": self.agent_calls,
+            "mod_actions": self.mod_actions,
         }
+
+
+def admin_budget() -> "HandlerBudget":
+    """A trusted, looser per-fire budget for admin handlers (incl. mod actions)."""
+    return HandlerBudget(
+        max_messages=ADMIN_MAX_MESSAGES,
+        max_agent_calls=ADMIN_MAX_AGENT_CALLS,
+        max_mod_actions=ADMIN_MAX_MOD_ACTIONS,
+        wall_clock_seconds=ADMIN_WALL_CLOCK_SECONDS,
+    )

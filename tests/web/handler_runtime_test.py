@@ -31,15 +31,39 @@ class _StubLimiter:
         return self.allow
 
 
-async def _run(script, *, budget=None, emitter=None, limiter=None, agent_runner=None):
+@dataclass
+class _FakeActor:
+    calls: list = field(default_factory=list)
+
+    async def ban_user(self, user_id, reason=None):
+        self.calls.append(("ban", user_id, reason)); return f"banned {user_id}"
+
+    async def kick_user(self, user_id):
+        self.calls.append(("kick", user_id)); return f"kicked {user_id}"
+
+    async def timeout_user(self, user_id, duration_seconds=600):
+        self.calls.append(("timeout", user_id, duration_seconds)); return "ok"
+
+    async def delete_message(self, channel_id, message_id):
+        self.calls.append(("delete", channel_id, message_id)); return "ok"
+
+
+async def _run(script, *, budget=None, emitter=None, limiter=None, agent_runner=None, actor=None):
     emitter = emitter or _FakeEmitter()
     limiter = limiter or _StubLimiter()
     kwargs = {}
     if agent_runner is not None:
         kwargs["agent_runner"] = agent_runner
+    if actor is not None:
+        kwargs["actor"] = actor
     result = await run_handler_script(
         script,
-        {"trigger_type": "message", "message_content": "hi"},
+        {
+            "trigger_type": "message",
+            "message_content": "hi",
+            "message_id": "M1",
+            "author_id": "U1",
+        },
         channel_id="C1",
         guild_id="G1",
         emitter=emitter,
@@ -156,3 +180,51 @@ async def test_compile_error_is_captured_not_raised():
     result, _, _ = await _run("this is not valid python ::::\n")
     assert result.outcome == "error"
     assert "compile" in (result.error or "")
+
+
+# -- admin handlers (actor set) ------------------------------------------------
+
+from smarter_dev.web.handler_budget import admin_budget
+
+
+async def test_standard_handler_has_no_admin_functions():
+    # No actor -> ban_user is not defined in the sandbox -> NameError -> error.
+    result, _, _ = await _run('await ban_user("U1")\n')
+    assert result.outcome == "error"
+
+
+async def test_standard_handler_cannot_send_to_other_channel():
+    result, emitter, _ = await _run('await send_message("hi", "OTHER")\n')
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "cross_channel_send"
+    assert emitter.messages == []
+
+
+async def test_admin_handler_moderation_metered():
+    actor = _FakeActor()
+    script = (
+        'await delete_message(context["message_id"], "C1")\n'
+        'await ban_user(context["author_id"], "scam")\n'
+        'await send_message("banned a scammer", "MODCHAT")\n'
+    )
+    result, emitter, _ = await _run(
+        script, budget=admin_budget(), actor=actor,
+        # context needs message_id/author_id
+    )
+    assert result.outcome == "ok", result.error
+    assert ("delete", "C1", "hi") not in actor.calls  # message_id is from context
+    kinds = [c[0] for c in actor.calls]
+    assert "delete" in kinds and "ban" in kinds
+    assert result.usage["mod_actions"] == 2
+    assert ("MODCHAT", "banned a scammer") in emitter.messages  # admin cross-channel ok
+
+
+async def test_admin_mod_action_cap():
+    actor = _FakeActor()
+    script = "for i in range(5):\n    await kick_user(str(i))\n"
+    result, _, _ = await _run(
+        script, budget=HandlerBudget(max_mod_actions=3, max_messages=5), actor=actor
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "mod_actions"
+    assert len(actor.calls) == 3

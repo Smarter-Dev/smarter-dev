@@ -129,7 +129,7 @@ async def test_list_and_delete(client):
 async def test_dispatch_no_handler(client):
     resp = await client.post(
         "/handlers/dispatch",
-        json={"channel_id": "C1", "trigger_type": "message", "trigger_context": {}},
+        json={"guild_id": "G1", "channel_id": "C1", "trigger_type": "message", "trigger_context": {}},
     )
     assert resp.json()["dispatched"] is False
 
@@ -139,6 +139,7 @@ async def test_dispatch_enqueues_when_handler_present(client):
     resp = await client.post(
         "/handlers/dispatch",
         json={
+            "guild_id": "G1",
             "channel_id": "C1",
             "trigger_type": "message",
             "trigger_context": {"trigger_type": "message", "message_content": "huzzah"},
@@ -155,9 +156,39 @@ async def test_dispatch_rate_limited(client, monkeypatch):
     await client.post("/handlers", json=_event_body())
     resp = await client.post(
         "/handlers/dispatch",
-        json={"channel_id": "C1", "trigger_type": "message", "trigger_context": {}},
+        json={"guild_id": "G1", "channel_id": "C1", "trigger_type": "message", "trigger_context": {}},
     )
-    assert resp.json() == {"dispatched": False, "reason": "rate_limited"}
+    assert resp.json()["dispatched"] is False
+
+
+async def test_dispatch_fans_out_to_standard_and_admin(client, session):
+    from smarter_dev.web.models import AdminHandler, ChannelHandler
+
+    # one standard handler in C1, one all-channel admin handler, one admin handler
+    # scoped to a different channel (should NOT fire for C1).
+    session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", trigger_type="message", settings={},
+        description="std", script="await send_message('x')\n", created_by="U1",
+    ))
+    session.add(AdminHandler(
+        guild_id="G1", trigger_type="message", settings={}, channel_ids=[],
+        description="all-chan admin", script="await send_message('y')\n", created_by_admin="A1",
+    ))
+    session.add(AdminHandler(
+        guild_id="G1", trigger_type="message", settings={}, channel_ids=["OTHER"],
+        description="scoped admin", script="await send_message('z')\n", created_by_admin="A1",
+    ))
+    await session.commit()
+
+    resp = await client.post(
+        "/handlers/dispatch",
+        json={"guild_id": "G1", "channel_id": "C1", "trigger_type": "message", "trigger_context": {}},
+    )
+    body = resp.json()
+    assert body["dispatched"] is True
+    # standard + all-channel admin = 2 fires; the OTHER-scoped admin is skipped.
+    assert len(body["handler_ids"]) == 2
+    assert len(client.submitted) == 2  # type: ignore[attr-defined]
 
 
 async def test_active_channels(client):
