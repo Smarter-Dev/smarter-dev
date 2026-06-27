@@ -152,9 +152,17 @@ workers:
   # its default concurrency (also passed explicitly in the manifest).
   concurrency: 8
   backends:
-    # Keep the event log in Postgres so per-run audit trails survive
-    # restarts (the distributed preset would otherwise use Redis). Deep
-    # merge in apply_preset_defaults keeps the Redis queue/state defaults.
+    # Pin queue + state + event log to Postgres so jobs and their state
+    # survive restarts AND a Redis flush (the distributed preset would
+    # otherwise keep them in Redis). This makes scheduled/timer handlers
+    # genuinely durable: a pending fire lives in `worker_queue` until due,
+    # and the recurring re-enqueue chain can't be lost to an ephemeral
+    # Redis. Affects ALL worker jobs (resources/blogging/handlers), which
+    # are low-volume and human-triggered, so Postgres is plenty. The web
+    # pods still only submit (out_of_process); the agent-worker drains the
+    # shared Postgres queue.
+    state_store: skrift.workers.sqlalchemy:SQLAlchemyStateStore
+    queue: skrift.workers.sqlalchemy:SQLAlchemyQueue
     event_log: skrift.workers.sqlalchemy:SQLAlchemyEventLog
   # Handler modules imported by BOTH tiers: the agent-worker imports them
   # to register the @handlers it executes; the web tier imports them so
