@@ -60,13 +60,10 @@ controllers:
   - smarter_dev.web.click_tracking_admin:ClickTrackingAdminController
   - smarter_dev.web.jina_cache_admin:JinaCacheAdminController
   - smarter_dev.web.usage_admin:UsageAdminController
-  - smarter_dev.web.scan_profiles_admin:ScanProfilesAdminController
-  - smarter_dev.web.research_sessions_admin:ResearchSessionsAdminController
   - smarter_dev.web.bot_admin_skrift:BotAdminController
   - smarter_dev.web.quests_admin:QuestsAdminController
   - smarter_dev.web.chat_conversations_admin:ChatConversationsAdminController
   - smarter_dev.web.mod_actions_admin:ModActionsAdminController
-  - smarter_dev.web.scan.api_controller:ScanAPIController
   - smarter_dev.web.blog_controller:BlogController
   - smarter_dev.web.blogging_agent_admin:BloggingAgentAdminController
 
@@ -100,16 +97,11 @@ workers:
     - smarter_dev.web.resources_agent
     - smarter_dev.web.title_agent
     - smarter_dev.web.blogging_agent.pipeline
+    - smarter_dev.web.handlers_jobs
+    - smarter_dev.web.privileged_jobs
 
 agents:
   default_queue: agents
   tool_call_queue: agents
   blob_backend: skrift.agents.blob:InMemoryBlobStore
   default_subagent_dispatch: inline
-
-sites:
-  scan:
-    subdomain: scan
-    controllers:
-      - skrift.controllers.notifications:NotificationsController
-      - smarter_dev.web.scan.controller:ScanController

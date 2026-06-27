@@ -85,6 +85,9 @@ class ChatDeps:
     bot: Any  # hikari.GatewayBot — typed as Any so tests can pass a mock
     channel_id: int
     guild_id: int
+    # APIClient for the handler-management tools; built from settings on demand
+    # when not supplied (see smarter_dev.bot.agents.handler_tools).
+    api_client: Any = None
 
 
 # -- web search / read ---------------------------------------------------
