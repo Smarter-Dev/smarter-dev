@@ -125,6 +125,7 @@ class HandlersAdminController(Controller):
                     "settings": r.settings or {},
                     "script": r.script,
                     "scope": _scope_label(list(r.channel_ids or [])),
+                    "memory": r.memory or {},
                 }
                 for r in admin_rows
             ]
@@ -232,3 +233,38 @@ class HandlersAdminController(Controller):
 
         flash_success(request, "Admin handler deleted.")
         return Redirect(path=f"/admin/handlers?guild_id={guild_id}&admin=1")
+
+    @post(
+        "/handlers/{handler_id:uuid}/clear-memory",
+        guards=[auth_guard, Permission("administrator")],
+    )
+    async def clear_handler_memory(
+        self, request: Request, db_session: AsyncSession, handler_id: UUID
+    ) -> Redirect:
+        record = await db_session.get(ChannelHandler, handler_id)
+        if record is None:
+            flash_error(request, "Handler not found.")
+            return Redirect(path="/admin/handlers")
+        record.memory = {}
+        await db_session.commit()
+        flash_success(request, "Handler memory cleared.")
+        return Redirect(
+            path=f"/admin/handlers?guild_id={record.guild_id}"
+            f"&channel_id={record.channel_id}"
+        )
+
+    @post(
+        "/handlers/admin/{handler_id:uuid}/clear-memory",
+        guards=[auth_guard, Permission("administrator")],
+    )
+    async def clear_admin_handler_memory(
+        self, request: Request, db_session: AsyncSession, handler_id: UUID
+    ) -> Redirect:
+        record = await db_session.get(AdminHandler, handler_id)
+        if record is None:
+            flash_error(request, "Admin handler not found.")
+            return Redirect(path="/admin/handlers")
+        record.memory = {}
+        await db_session.commit()
+        flash_success(request, "Admin handler memory cleared.")
+        return Redirect(path=f"/admin/handlers?guild_id={record.guild_id}&admin=1")
