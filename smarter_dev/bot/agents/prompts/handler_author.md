@@ -38,6 +38,19 @@ These async functions are provided — you MUST `await` every call:
       string and decide what to send. Reads are cached by file + instruction, so re-reading the
       same file is cheap.
 
+These functions give the handler PERSISTENT MEMORY that survives across firings (also `await` them):
+
+  await memory_get(key: str, default=None)   -> the stored value, or default if unset
+  await memory_set(key: str, value) -> True  -> store a JSON-serializable value (str/int/float/
+                                                bool/None/list/dict). ONLY memory_set persists.
+  await memory_all() -> dict                  -> a snapshot of all stored keys (safe to iterate)
+  await memory_delete(key: str) -> bool       -> remove a key
+
+Memory is private to this one handler and starts empty ({}). Use it for things that must remember
+across fires: counters ("messages seen today"), seen-sets (ids you've already replied to),
+cooldown timestamps, a running total. Mutating the dict from memory_all() does NOT save — you must
+call memory_set to persist. Keep it small (a few KB total).
+
 Only your script can emit to the channel (send_message / add_reaction / post_voice). There is NO
 direct web access from the script — gather only by calling spawn_agent.
 

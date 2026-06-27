@@ -61,6 +61,7 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
         trigger_type = record.trigger_type
         channel_ids = list(record.channel_ids or [])
         handler_settings = dict(record.settings or {})
+        memory = dict(record.memory or {})
 
     # For time triggers there's no triggering channel; default to the first
     # scoped channel (the script should target channels explicitly for "all").
@@ -85,6 +86,7 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
         agent_runner=run_gathering_agent,
         budget=budget,
         actor=actor,
+        memory=memory,
     )
 
     async with get_skrift_db_session_context() as session:
@@ -105,6 +107,10 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
                 finished_at=datetime.now(timezone.utc),
             )
         )
+        if result.memory_changed:
+            record = await session.get(AdminHandler, handler_id)
+            if record is not None:
+                record.memory = result.memory
         await session.commit()
 
     if trigger_type == "schedule":
