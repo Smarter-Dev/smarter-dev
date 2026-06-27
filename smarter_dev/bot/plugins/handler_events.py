@@ -127,6 +127,14 @@ async def on_message(event: hikari.GuildMessageCreateEvent) -> None:
     joined_at = None
     if event.member is not None and event.member.joined_at is not None:
         joined_at = event.member.joined_at.isoformat()
+    attachments = [
+        {
+            "url": a.url,
+            "content_type": a.media_type or "",
+            "filename": a.filename or "",
+        }
+        for a in msg.attachments
+    ]
     await _dispatch(
         str(event.channel_id),
         str(event.guild_id),
@@ -140,6 +148,9 @@ async def on_message(event: hikari.GuildMessageCreateEvent) -> None:
             # For admin handlers that gate on new accounts / recent joiners.
             "author_account_created_at": _snowflake_created_at(int(msg.author.id)),
             "author_joined_at": joined_at,
+            # Files posted with the message — scripts can read these via the
+            # gathering agent's web_read tool (it handles image/pdf/audio urls).
+            "attachments": attachments,
         },
     )
 

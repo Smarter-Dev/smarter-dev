@@ -25,21 +25,24 @@ from pydantic_ai import RunContext
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 
+from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.handler_budget import HandlerBudget
-from smarter_dev.web.research_tools import brave_search, jina_read
+from smarter_dev.web.media_read import read_url
+from smarter_dev.web.research_tools import brave_search
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 MODEL_ENV_VAR = "HANDLER_AGENT_MODEL"
-MAX_READ_CHARS = 100_000
 
 _GATHER_PROMPT = (
     "You are a gathering assistant for a Discord automation. Do exactly what the "
     "instruction asks and reply with PLAIN TEXT only — no markdown scaffolding, no "
     "preamble. You cannot send messages or react; your reply is handed back to the "
     "script that called you. Be concise. Use your tools sparingly: search or read "
-    "only when the instruction genuinely needs current or external information."
+    "only when the instruction genuinely needs current or external information. "
+    "web_read works on ANY url — web pages, PDFs, images, and audio — so you can "
+    "read a screenshot or document by passing its url."
 )
 _TRANSFORM_PROMPT = (
     "You transform text for a Discord automation. Do exactly what the instruction "
@@ -70,23 +73,19 @@ async def _web_search(ctx: RunContext[_GatherDeps], query: str) -> list[dict[str
 
 
 async def _web_read(ctx: RunContext[_GatherDeps], url: str, instruction: str) -> str:
-    """Fetch a URL's readable content (truncated) for the agent to work from.
+    """Read any URL — web page, PDF, image, or audio — into instruction-guided text.
 
-    The agent itself condenses the content per ``instruction`` — we return the
-    page text (bounded) rather than a separate summarization pass, keeping the
-    worker tier free of any extra summarizer dependency.
+    Images and audio are described by a multimodal agent; PDFs are extracted;
+    everything else is read as page text. Media descriptions are cached in Redis
+    by file content hash + instruction, so the same screenshot posted across many
+    messages is only read once.
     """
     ctx.deps.budget.spend_web_read()
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        data = await jina_read(client, url)
-    if "error" in data:
-        return f"error: {data['error']}"
-    content = (data.get("content") or "").strip()
-    if not content:
-        return f"error: no readable content at {url}"
-    title = data.get("title", "")
-    header = f"Title: {title}\n\n" if title else ""
-    return f"{header}{content[:MAX_READ_CHARS]}"
+    try:
+        redis = get_redis_client()
+    except Exception:  # noqa: BLE001 — caching is best-effort
+        redis = None
+    return await read_url(url, instruction, redis=redis)
 
 
 _agents: dict[bool, Agent] = {}

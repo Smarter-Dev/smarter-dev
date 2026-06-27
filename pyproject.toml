@@ -67,6 +67,7 @@ web = [
     "authlib>=1.2.0",
     "skrift[s3]>=0.2.0a7",
     "stripe>=15.1.0",
+    "pdfplumber>=0.11.0",  # worker reads PDFs for handler media_read
 ]
 
 # Development dependencies
