@@ -85,14 +85,16 @@ notifications:
 
 workers:
   enabled: true
-  preset: local
+  # single_node = in-process consumer pool + all-SQLAlchemy (Postgres) backends,
+  # so scheduled/timer jobs are durable and survive a web restart (the old
+  # `local` preset used in-memory queue/state, which wiped pending jobs on
+  # every restart).
+  preset: single_node
   queues:
     - agents
   visibility_timeout: 1800
   execution: in_process
   concurrency: 8
-  backends:
-    event_log: skrift.workers.sqlalchemy:SQLAlchemyEventLog
   imports:
     - smarter_dev.web.resources_agent
     - smarter_dev.web.title_agent
