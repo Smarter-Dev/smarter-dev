@@ -26,6 +26,7 @@
   .hx-meta dd { margin: 0; }
   .hx-code { margin: .5rem 0; border-radius: .5rem; max-height: 480px; overflow: auto; }
   .hx-code code { font-size: .85rem; }
+  .hx-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 </style>
 {% endblock %}
 
@@ -101,13 +102,23 @@
           <dt>Trigger</dt><dd>{{ h.trigger_type }}</dd>
           <dt>Scope</dt><dd>{{ h.scope }}</dd>
           <dt>Settings</dt><dd><code>{{ h.settings | tojson }}</code></dd>
+          <dt>Memory</dt><dd><code>{{ h.memory | tojson }}</code></dd>
         </dl>
         <pre class="hx-code"><code class="language-python">{{ h.script }}</code></pre>
-        <form method="post" action="/admin/handlers/admin/{{ h.id }}/delete"
-              onsubmit="return confirm('Delete this admin handler? This cannot be undone.')">
-          {{ csrf_field() }}
-          <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete admin handler</button>
-        </form>
+        <div class="hx-actions">
+          {% if h.memory %}
+          <form method="post" action="/admin/handlers/admin/{{ h.id }}/clear-memory"
+                onsubmit="return confirm('Clear this handler\'s saved memory?')">
+            {{ csrf_field() }}
+            <button type="submit" class="sk-btn-outline sk-btn-small">Clear memory</button>
+          </form>
+          {% endif %}
+          <form method="post" action="/admin/handlers/admin/{{ h.id }}/delete"
+                onsubmit="return confirm('Delete this admin handler? This cannot be undone.')">
+            {{ csrf_field() }}
+            <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete admin handler</button>
+          </form>
+        </div>
       </div>
     </details>
     {% else %}
@@ -127,15 +138,25 @@
           <dt>Handler ID</dt><dd><code>{{ h.id }}</code></dd>
           <dt>Trigger</dt><dd>{{ h.trigger_type }}</dd>
           <dt>Settings</dt><dd><code>{{ h.settings | tojson }}</code></dd>
+          <dt>Memory</dt><dd><code>{{ h.memory | tojson }}</code></dd>
           <dt>Created by</dt><dd>{{ h.created_by }}</dd>
           <dt>Created</dt><dd>{{ h.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</dd>
         </dl>
         <pre class="hx-code"><code class="language-python">{{ h.script }}</code></pre>
-        <form method="post" action="/admin/handlers/{{ h.id }}/delete"
-              onsubmit="return confirm('Delete this handler? This cannot be undone.')">
-          {{ csrf_field() }}
-          <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete handler</button>
-        </form>
+        <div class="hx-actions">
+          {% if h.memory %}
+          <form method="post" action="/admin/handlers/{{ h.id }}/clear-memory"
+                onsubmit="return confirm('Clear this handler\'s saved memory?')">
+            {{ csrf_field() }}
+            <button type="submit" class="sk-btn-outline sk-btn-small">Clear memory</button>
+          </form>
+          {% endif %}
+          <form method="post" action="/admin/handlers/{{ h.id }}/delete"
+                onsubmit="return confirm('Delete this handler? This cannot be undone.')">
+            {{ csrf_field() }}
+            <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete handler</button>
+          </form>
+        </div>
       </div>
     </details>
     {% else %}

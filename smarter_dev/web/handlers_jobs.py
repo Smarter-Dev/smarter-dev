@@ -64,6 +64,7 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
         guild_id = record.guild_id
         trigger_type = record.trigger_type
         handler_settings = dict(record.settings or {})
+        memory = dict(record.memory or {})
 
     # Lazy: these pull pydantic-ai / Monty, kept out of web-tier import.
     from smarter_dev.web.handler_agent import run_gathering_agent
@@ -82,6 +83,7 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
         limiter=limiter,
         agent_runner=run_gathering_agent,
         budget=budget,
+        memory=memory,
     )
 
     async with get_skrift_db_session_context() as session:
@@ -100,6 +102,12 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
                 finished_at=datetime.now(timezone.utc),
             )
         )
+        # Persist memory only when the script changed it (the common message-handler
+        # path leaves it untouched and skips the write).
+        if result.memory_changed:
+            record = await session.get(ChannelHandler, handler_id)
+            if record is not None:
+                record.memory = result.memory
         await session.commit()
 
     if trigger_type == "schedule":

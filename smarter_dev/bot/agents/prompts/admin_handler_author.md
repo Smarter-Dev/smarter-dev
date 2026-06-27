@@ -35,6 +35,14 @@ Provided async functions — you MUST `await` every call:
   await ban_user(user_id: str, reason: str = None) -> str
   await kick_user(user_id: str) -> str
   await timeout_user(user_id: str, duration_seconds: int = 600) -> str
+  PERSISTENT MEMORY (survives across fires; private to this handler; starts empty):
+  await memory_get(key: str, default=None)   -> stored value or default
+  await memory_set(key: str, value) -> True  -> store JSON-serializable value (ONLY this persists)
+  await memory_all() -> dict                  -> snapshot of all keys (safe to iterate)
+  await memory_delete(key: str) -> bool       -> remove a key
+      Use memory for state across firings: who you've already warned/banned, per-user strike
+      counts, last-run timestamps, daily counters. Mutating the memory_all() snapshot does NOT
+      save — call memory_set. Keep it small (a few KB).
 
 ## Per-fire limits (admin tier)
 - 5 messages, 25 moderation actions, 3 agent calls, 32 KB context into an agent, 120 s wall-clock.

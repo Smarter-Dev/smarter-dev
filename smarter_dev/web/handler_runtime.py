@@ -12,6 +12,9 @@ Script-facing surface (Monty external functions):
 - ``add_reaction(message_id, emoji)`` -> True
 - ``post_voice(text)`` -> True
 - ``spawn_agent(prompt, has_tools=False)`` -> plaintext str
+- ``memory_get(key, default=None)`` / ``memory_set(key, value)`` /
+  ``memory_all()`` / ``memory_delete(key)`` -> persistent per-handler key/value
+  store that survives across fires.
 
 Script-facing data (Monty input): ``context`` — a plain dict describing the
 trigger (its keys depend on ``context["trigger_type"]``).
@@ -41,6 +44,7 @@ from smarter_dev.web.handler_caps import (
     global_agent_key,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
+from smarter_dev.web.handler_memory import HandlerMemory
 from smarter_dev.web.admin_actions import AdminActor
 
 logger = logging.getLogger(__name__)
@@ -71,6 +75,10 @@ class HandlerResult:
     duration_ms: int
     error: str | None = None
     cap: str | None = None
+    # The handler's memory after the fire, and whether the script changed it.
+    # The caller persists ``memory`` back to the handler row only when ``memory_changed``.
+    memory: dict[str, Any] = field(default_factory=dict)
+    memory_changed: bool = False
 
 
 @dataclass
@@ -86,6 +94,9 @@ class HandlerExecution:
     # Set only for admin handlers; presence enables the moderation functions and
     # lets send_message target any channel.
     actor: AdminActor | None = None
+    # Per-handler persistent key/value store, loaded before the fire. The host
+    # owns it; the script reads/writes via the memory_* external functions.
+    memory: HandlerMemory = field(default_factory=HandlerMemory)
     # The cap that stopped this fire, captured here because Monty rewraps the
     # exception that crosses out of an external function (losing its type), so
     # we record the real CapExceeded on the host side before re-raising.
@@ -97,6 +108,10 @@ class HandlerExecution:
             "add_reaction": self._guard(self._add_reaction),
             "post_voice": self._guard(self._post_voice),
             "spawn_agent": self._guard(self._spawn_agent),
+            "memory_get": self._guard(self._memory_get),
+            "memory_set": self._guard(self._memory_set),
+            "memory_all": self._guard(self._memory_all),
+            "memory_delete": self._guard(self._memory_delete),
         }
         if self.actor is not None:  # admin handler — moderation powers
             funcs.update(
@@ -191,6 +206,20 @@ class HandlerExecution:
             )
         return await self.agent_runner(prompt, bool(has_tools), self.budget)
 
+    # -- persistent per-handler memory (survives across fires) --
+
+    async def _memory_get(self, key: str, default: Any = None) -> Any:
+        return self.memory.get(str(key), default)
+
+    async def _memory_set(self, key: str, value: Any) -> bool:
+        return self.memory.set(str(key), value)
+
+    async def _memory_all(self) -> dict[str, Any]:
+        return self.memory.all()
+
+    async def _memory_delete(self, key: str) -> bool:
+        return self.memory.delete(str(key))
+
 
 async def run_handler_script(
     script: str,
@@ -203,6 +232,7 @@ async def run_handler_script(
     agent_runner: AgentRunner = _no_agent,
     budget: HandlerBudget | None = None,
     actor: AdminActor | None = None,
+    memory: dict[str, Any] | None = None,
 ) -> HandlerResult:
     """Compile and run ``script`` in Monty with every rail enforced.
 
@@ -211,9 +241,13 @@ async def run_handler_script(
     :class:`HandlerResult` for the durable run record — never raise to the caller.
 
     Passing ``actor`` enables the admin moderation functions (and lets
-    send_message target any channel).
+    send_message target any channel). ``memory`` seeds the handler's persistent
+    store; the result carries it back (with ``memory_changed``) for the caller to
+    persist regardless of outcome — a counter bumped before a later failure is
+    not lost, matching the "emitted effects stay" rule.
     """
     budget = budget or HandlerBudget()
+    handler_memory = HandlerMemory(memory or {})
     execution = HandlerExecution(
         channel_id=channel_id,
         guild_id=guild_id,
@@ -222,6 +256,7 @@ async def run_handler_script(
         limiter=limiter,
         agent_runner=agent_runner,
         actor=actor,
+        memory=handler_memory,
     )
     started = time.monotonic()
 
@@ -232,6 +267,8 @@ async def run_handler_script(
             duration_ms=int((time.monotonic() - started) * 1000),
             error=error,
             cap=cap,
+            memory=handler_memory.snapshot(),
+            memory_changed=handler_memory.dirty,
         )
 
     try:

@@ -4517,6 +4517,11 @@ class ChannelHandler(Base):
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    # Persistent per-handler key/value store: the script reads/writes it via the
+    # memory_* functions and it survives across fires (counters, seen-sets, etc.).
+    memory: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
     # Queue job id for the next scheduled fire (time triggers), so delete can
     # cancel it.
     scheduled_job_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -4605,5 +4610,9 @@ class AdminHandler(Base):
     created_by_admin: Mapped[str] = mapped_column(String(20), nullable=False)
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
+    )
+    # Persistent per-handler key/value store (see ChannelHandler.memory).
+    memory: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
     )
     scheduled_job_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
