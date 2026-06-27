@@ -1,0 +1,69 @@
+"""Windowed (per-channel / global / per-handler) caps backed by Redis.
+
+These are the frequency bounds members actually feel — distinct from the
+per-fire :class:`~smarter_dev.web.handler_budget.HandlerBudget`. They must hold
+across *concurrent* fires, so the state is shared and atomic: a Redis counter
+per window, incremented with ``INCR`` and given a TTL with ``EXPIRE ... NX`` so
+the first hit of a window fixes its expiry and subsequent hits don't slide it.
+
+The limiter only counts and reports; callers decide what to do:
+- the worker emitter raises :class:`~smarter_dev.web.handler_budget.CapExceeded`
+  mid-flight when an emit would breach a window, and
+- the web dispatch endpoint simply declines to enqueue a fire.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from redis.asyncio import Redis
+
+WINDOW_SECONDS = 60
+
+# Frequency ceilings (generous preset). Reaction triggers are tighter: reactions
+# are free to add and people pile on, so the amplification ratio is worse.
+CHANNEL_MESSAGES_PER_MIN = 10
+GLOBAL_AGENT_CALLS_PER_MIN = 30
+HANDLER_FIRES_PER_MIN_MESSAGE = 10
+HANDLER_FIRES_PER_MIN_REACTION = 4
+
+
+def channel_message_key(channel_id: str) -> str:
+    return f"hcap:chanmsg:{channel_id}"
+
+
+def global_agent_key() -> str:
+    return "hcap:agent:global"
+
+
+def handler_fire_key(handler_id: str) -> str:
+    return f"hcap:fire:{handler_id}"
+
+
+def fires_per_min_for_trigger(trigger_type: str) -> int:
+    """Per-handler fire ceiling, tighter for reaction triggers."""
+    return (
+        HANDLER_FIRES_PER_MIN_REACTION
+        if trigger_type == "reaction"
+        else HANDLER_FIRES_PER_MIN_MESSAGE
+    )
+
+
+@dataclass
+class WindowedLimiter:
+    """Atomic fixed-window counters over a shared Redis client."""
+
+    redis: Redis
+    window_seconds: int = WINDOW_SECONDS
+
+    async def hit(self, key: str, limit: int) -> bool:
+        """Count one event against ``key``; return whether it stays within ``limit``.
+
+        Atomic: ``INCR`` then ``EXPIRE key window NX`` in one pipeline, so the
+        window's expiry is fixed by its first hit and never extended.
+        """
+        async with self.redis.pipeline(transaction=True) as pipe:
+            pipe.incr(key)
+            pipe.expire(key, self.window_seconds, nx=True)
+            count, _ = await pipe.execute()
+        return int(count) <= limit

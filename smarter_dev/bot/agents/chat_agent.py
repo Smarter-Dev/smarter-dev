@@ -26,6 +26,7 @@ from pydantic_ai.providers.google import GoogleProvider
 from smarter_dev.bot.agents.chat_compaction import compact_history
 from smarter_dev.bot.agents.chat_models import AgentReturn
 from smarter_dev.bot.agents.chat_tools import ChatDeps, chat_tool_functions
+from smarter_dev.bot.agents.handler_tools import handler_tool_functions
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def get_chat_agent() -> Agent[ChatDeps, AgentReturn]:
             output_type=AgentReturn,
             deps_type=ChatDeps,
             system_prompt=SYSTEM_PROMPT,
-            tools=chat_tool_functions(),
+            tools=chat_tool_functions() + handler_tool_functions(),
             model_settings=_model_settings(),
             history_processors=[compact_history],
         )
