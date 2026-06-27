@@ -11,8 +11,10 @@
         <a href="/sudo">sudo</a>
     </div>
     {# Signed-in check falls back to the session so the nav stays correct on any page,
-       even when its controller doesn't pass `user` into the template context. #}
-    {% set _signed_in = user or (request.session and request.session.get('user_id')) %}
+       even when its controller doesn't pass `user` into the template context. Guard
+       `request`: skrift's error pages render outside session middleware and omit it
+       (they pass a resolved `user` instead), so touching it unguarded 500s the error page. #}
+    {% set _signed_in = user or (request is defined and request.session and request.session.get('user_id')) %}
     {% if _signed_in %}
     <a href="/account" class="btn-follow">Account</a>
     {% else %}
