@@ -33,7 +33,9 @@ from skrift.workers import submit as worker_submit
 from smarter_dev.shared.database import get_skrift_db_session
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.api.dependencies import verify_api_key
+from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
 from smarter_dev.web.handler_caps import (
+    ADMIN_FIRES_PER_MIN,
     WindowedLimiter,
     fires_per_min_for_trigger,
     handler_fire_key,
@@ -47,6 +49,7 @@ from smarter_dev.web.handlers_jobs import HandlerFirePayload
 from smarter_dev.web.models import (
     HANDLER_EVENT_TRIGGERS,
     HANDLER_TRIGGER_TYPES,
+    AdminHandler,
     ChannelHandler,
 )
 
@@ -80,6 +83,7 @@ class HandlerDetailResponse(HandlerResponse):
 
 
 class DispatchRequest(BaseModel):
+    guild_id: str
     channel_id: str
     trigger_type: str
     trigger_context: dict = Field(default_factory=dict)
@@ -205,7 +209,11 @@ async def dispatch_event(
     session: AsyncSession = Depends(get_skrift_db_session),
     _: Any = Depends(verify_api_key),
 ) -> dict:
-    record = (
+    limiter = WindowedLimiter(redis=get_redis_client())
+    dispatched: list[str] = []
+
+    # Standard tier: at most one handler per (channel, trigger).
+    standard = (
         await session.execute(
             select(ChannelHandler).where(
                 ChannelHandler.channel_id == body.channel_id,
@@ -214,23 +222,45 @@ async def dispatch_event(
             )
         )
     ).scalar_one_or_none()
-    if record is None:
-        return {"dispatched": False, "reason": "no_handler"}
+    if standard is not None:
+        if await limiter.hit(
+            handler_fire_key(str(standard.id)),
+            fires_per_min_for_trigger(standard.trigger_type),
+        ):
+            await worker_submit(
+                HandlerFirePayload(
+                    handler_id=str(standard.id), trigger_context=body.trigger_context
+                )
+            )
+            dispatched.append(str(standard.id))
 
-    limiter = WindowedLimiter(redis=get_redis_client())
-    within = await limiter.hit(
-        handler_fire_key(str(record.id)),
-        fires_per_min_for_trigger(record.trigger_type),
-    )
-    if not within:
-        return {"dispatched": False, "reason": "rate_limited"}
-
-    await worker_submit(
-        HandlerFirePayload(
-            handler_id=str(record.id), trigger_context=body.trigger_context
+    # Admin tier: every enabled admin handler for this guild+trigger whose scope
+    # includes this channel ([] / null = all channels).
+    admin_rows = (
+        await session.execute(
+            select(AdminHandler).where(
+                AdminHandler.guild_id == body.guild_id,
+                AdminHandler.trigger_type == body.trigger_type,
+                AdminHandler.enabled.is_(True),
+            )
         )
-    )
-    return {"dispatched": True, "handler_id": str(record.id)}
+    ).scalars().all()
+    for ah in admin_rows:
+        scope = ah.channel_ids or []
+        if scope and body.channel_id not in scope:
+            continue
+        if not await limiter.hit(handler_fire_key(str(ah.id)), ADMIN_FIRES_PER_MIN):
+            continue
+        await worker_submit(
+            AdminHandlerFirePayload(
+                admin_handler_id=str(ah.id),
+                channel_id=body.channel_id,
+                trigger_context=body.trigger_context,
+            )
+        )
+        dispatched.append(str(ah.id))
+
+    return {"dispatched": bool(dispatched), "handler_ids": dispatched}
 
 
 @router.get("/active-channels", status_code=status.HTTP_200_OK)
@@ -238,6 +268,12 @@ async def active_channels(
     session: AsyncSession = Depends(get_skrift_db_session),
     _: Any = Depends(verify_api_key),
 ) -> dict:
+    """The bot's cheap dispatch guard.
+
+    ``channels``: [channel_id, trigger] for standard handlers AND admin handlers
+    scoped to specific channels. ``guild_triggers``: [guild_id, trigger] for
+    admin handlers scoped to ALL channels (so every channel in that guild fires).
+    """
     rows = (
         await session.execute(
             select(ChannelHandler.channel_id, ChannelHandler.trigger_type).where(
@@ -246,7 +282,28 @@ async def active_channels(
             )
         )
     ).all()
-    return {"channels": [[c, t] for c, t in rows]}
+    channels = [[c, t] for c, t in rows]
+
+    admin_rows = (
+        await session.execute(
+            select(
+                AdminHandler.guild_id,
+                AdminHandler.trigger_type,
+                AdminHandler.channel_ids,
+            ).where(
+                AdminHandler.enabled.is_(True),
+                AdminHandler.trigger_type.in_(HANDLER_EVENT_TRIGGERS),
+            )
+        )
+    ).all()
+    guild_triggers: list[list[str]] = []
+    for guild_id, trigger, channel_ids in admin_rows:
+        if channel_ids:
+            channels.extend([cid, trigger] for cid in channel_ids)
+        else:
+            guild_triggers.append([guild_id, trigger])
+
+    return {"channels": channels, "guild_triggers": guild_triggers}
 
 
 @router.get("/{handler_id}", response_model=HandlerDetailResponse)

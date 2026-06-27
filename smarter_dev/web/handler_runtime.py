@@ -41,6 +41,7 @@ from smarter_dev.web.handler_caps import (
     global_agent_key,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
+from smarter_dev.web.admin_actions import AdminActor
 
 logger = logging.getLogger(__name__)
 
@@ -82,18 +83,31 @@ class HandlerExecution:
     emitter: DiscordEmitter
     limiter: WindowedLimiter
     agent_runner: AgentRunner = _no_agent
+    # Set only for admin handlers; presence enables the moderation functions and
+    # lets send_message target any channel.
+    actor: AdminActor | None = None
     # The cap that stopped this fire, captured here because Monty rewraps the
     # exception that crosses out of an external function (losing its type), so
     # we record the real CapExceeded on the host side before re-raising.
     breach: CapExceeded | None = None
 
     def external_functions(self) -> dict[str, Callable[..., Any]]:
-        return {
+        funcs = {
             "send_message": self._guard(self._send_message),
             "add_reaction": self._guard(self._add_reaction),
             "post_voice": self._guard(self._post_voice),
             "spawn_agent": self._guard(self._spawn_agent),
         }
+        if self.actor is not None:  # admin handler — moderation powers
+            funcs.update(
+                {
+                    "delete_message": self._guard(self._delete_message),
+                    "ban_user": self._guard(self._ban_user),
+                    "kick_user": self._guard(self._kick_user),
+                    "timeout_user": self._guard(self._timeout_user),
+                }
+            )
+        return funcs
 
     def _guard(self, fn: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
         """Wrap an external function so a CapExceeded is recorded before it is
@@ -108,17 +122,44 @@ class HandlerExecution:
 
         return wrapper
 
-    async def _send_message(self, content: str) -> str:
+    async def _send_message(self, content: str, channel_id: str | None = None) -> str:
+        target = str(channel_id) if channel_id else self.channel_id
+        # Standard handlers may only post to their own channel; admin handlers
+        # (actor set) may post anywhere in the guild (e.g. mod-chat).
+        if self.actor is None and target != self.channel_id:
+            raise CapExceeded(
+                "cross_channel_send",
+                "standard handlers can only post to their own channel",
+            )
         self.budget.spend_message()
         within = await self.limiter.hit(
-            channel_message_key(self.channel_id), CHANNEL_MESSAGES_PER_MIN
+            channel_message_key(target), CHANNEL_MESSAGES_PER_MIN
         )
         if not within:
             raise CapExceeded(
                 "channel_messages_per_min",
                 f"channel hit its {CHANNEL_MESSAGES_PER_MIN} messages/min cap",
             )
-        return await self.emitter.create_message(self.channel_id, str(content))
+        return await self.emitter.create_message(target, str(content))
+
+    # -- admin-only moderation functions (only present when self.actor is set) --
+
+    async def _delete_message(self, message_id: str, channel_id: str | None = None) -> str:
+        self.budget.spend_mod_action()
+        target = str(channel_id) if channel_id else self.channel_id
+        return await self.actor.delete_message(target, str(message_id))
+
+    async def _ban_user(self, user_id: str, reason: str | None = None) -> str:
+        self.budget.spend_mod_action()
+        return await self.actor.ban_user(str(user_id), reason)
+
+    async def _kick_user(self, user_id: str) -> str:
+        self.budget.spend_mod_action()
+        return await self.actor.kick_user(str(user_id))
+
+    async def _timeout_user(self, user_id: str, duration_seconds: int = 600) -> str:
+        self.budget.spend_mod_action()
+        return await self.actor.timeout_user(str(user_id), int(duration_seconds))
 
     async def _add_reaction(self, message_id: str, emoji: str) -> bool:
         # Reactions are emits too — metered against the per-fire emit cap, but
@@ -161,12 +202,16 @@ async def run_handler_script(
     limiter: WindowedLimiter,
     agent_runner: AgentRunner = _no_agent,
     budget: HandlerBudget | None = None,
+    actor: AdminActor | None = None,
 ) -> HandlerResult:
     """Compile and run ``script`` in Monty with every rail enforced.
 
     Effects are not transactional: on a cap breach or error mid-script, whatever
     was already emitted stays. We stop, capture the cause, and always return a
     :class:`HandlerResult` for the durable run record — never raise to the caller.
+
+    Passing ``actor`` enables the admin moderation functions (and lets
+    send_message target any channel).
     """
     budget = budget or HandlerBudget()
     execution = HandlerExecution(
@@ -176,6 +221,7 @@ async def run_handler_script(
         emitter=emitter,
         limiter=limiter,
         agent_runner=agent_runner,
+        actor=actor,
     )
     started = time.monotonic()
 

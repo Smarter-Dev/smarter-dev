@@ -1162,9 +1162,9 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         bot.load_extensions("smarter_dev.bot.plugins.handler_events")
         logger.info("✓ Loaded handler events plugin")
 
-        logger.info("Loading privileged routines plugin...")
-        bot.load_extensions("smarter_dev.bot.plugins.privileged_routines")
-        logger.info("✓ Loaded privileged routines plugin")
+        logger.info("Loading admin handlers plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.admin_handlers")
+        logger.info("✓ Loaded admin handlers plugin")
 
         logger.info("✓ All plugins loaded successfully")
     except Exception as e:

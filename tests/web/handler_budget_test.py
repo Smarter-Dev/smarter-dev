@@ -77,4 +77,5 @@ def test_usage_snapshot():
         "web_searches": 0,
         "web_reads": 0,
         "agent_calls": 1,
+        "mod_actions": 0,
     }

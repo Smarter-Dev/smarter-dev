@@ -52,3 +52,19 @@ def test_compiles_detects_syntax_error():
 def test_lint_script_combines_checks():
     assert lint_script('await send_message("hi")\n') is None
     assert lint_script('eval("1")\n') is not None
+
+
+def test_rejects_defined_but_never_called_function():
+    # The classic no-op: everything in main(), never invoked.
+    noop = "async def main():\n    await send_message('hi')\n"
+    reason = check_static(noop)
+    assert reason and "never calls it" in reason
+
+
+def test_allows_function_that_is_called():
+    ok = "async def run():\n    await send_message('hi')\nawait run()\n"
+    assert check_static(ok) is None
+
+
+def test_allows_plain_toplevel_script():
+    assert check_static('await send_message("hi")\n') is None
