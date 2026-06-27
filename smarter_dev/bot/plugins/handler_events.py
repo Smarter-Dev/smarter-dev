@@ -30,12 +30,28 @@ logger = logging.getLogger(__name__)
 plugin = lightbulb.Plugin("handler_events")
 
 
+_DISCORD_EPOCH_MS = 1420070400000
+
+
+def _snowflake_created_at(snowflake: int) -> str:
+    """ISO-8601 UTC creation time encoded in a Discord snowflake id."""
+    from datetime import datetime, timezone
+
+    ms = (snowflake >> 22) + _DISCORD_EPOCH_MS
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
+
+
 class ActiveChannelsCache:
-    """Short-TTL cache of (channel_id, trigger_type) pairs with a handler."""
+    """Short-TTL cache of which (channel, trigger) and (guild, trigger) fire.
+
+    ``_pairs`` covers standard + channel-scoped admin handlers; ``_guild_triggers``
+    covers admin handlers scoped to all channels in a guild.
+    """
 
     def __init__(self, ttl_seconds: float = 30.0) -> None:
         self._ttl = ttl_seconds
         self._pairs: set[tuple[str, str]] = set()
+        self._guild_triggers: set[tuple[str, str]] = set()
         self._expires_at: float = 0.0
 
     def invalidate(self) -> None:
@@ -44,17 +60,26 @@ class ActiveChannelsCache:
     async def _refresh(self, api: Any) -> None:
         resp = await api.get("/handlers/active-channels")
         if resp.status_code < 400:
-            self._pairs = {(str(c), str(t)) for c, t in resp.json().get("channels", [])}
+            data = resp.json()
+            self._pairs = {(str(c), str(t)) for c, t in data.get("channels", [])}
+            self._guild_triggers = {
+                (str(g), str(t)) for g, t in data.get("guild_triggers", [])
+            }
             self._expires_at = time.monotonic() + self._ttl
 
-    async def has(self, api: Any, channel_id: str, trigger_type: str) -> bool:
+    async def has(
+        self, api: Any, channel_id: str, guild_id: str, trigger_type: str
+    ) -> bool:
         if time.monotonic() >= self._expires_at:
             try:
                 await self._refresh(api)
             except Exception:  # noqa: BLE001 — never let dispatch crash on a cache miss
                 logger.debug("active-channels refresh failed", exc_info=True)
                 return False
-        return (str(channel_id), str(trigger_type)) in self._pairs
+        return (
+            (str(channel_id), str(trigger_type)) in self._pairs
+            or (str(guild_id), str(trigger_type)) in self._guild_triggers
+        )
 
 
 _cache = ActiveChannelsCache()
@@ -73,14 +98,17 @@ def _get_api_client() -> Any:
     return _api_client
 
 
-async def _dispatch(channel_id: str, trigger_type: str, context: dict) -> None:
+async def _dispatch(
+    channel_id: str, guild_id: str, trigger_type: str, context: dict
+) -> None:
     api = _get_api_client()
-    if not await _cache.has(api, channel_id, trigger_type):
+    if not await _cache.has(api, channel_id, guild_id, trigger_type):
         return
     try:
         await api.post(
             "/handlers/dispatch",
             json_data={
+                "guild_id": guild_id,
                 "channel_id": channel_id,
                 "trigger_type": trigger_type,
                 "trigger_context": context,
@@ -96,8 +124,12 @@ async def on_message(event: hikari.GuildMessageCreateEvent) -> None:
     if not event.is_human:
         return
     msg = event.message
+    joined_at = None
+    if event.member is not None and event.member.joined_at is not None:
+        joined_at = event.member.joined_at.isoformat()
     await _dispatch(
         str(event.channel_id),
+        str(event.guild_id),
         "message",
         {
             "trigger_type": "message",
@@ -105,6 +137,9 @@ async def on_message(event: hikari.GuildMessageCreateEvent) -> None:
             "message_id": str(msg.id),
             "author_id": str(msg.author.id),
             "author_name": msg.author.username,
+            # For admin handlers that gate on new accounts / recent joiners.
+            "author_account_created_at": _snowflake_created_at(int(msg.author.id)),
+            "author_joined_at": joined_at,
         },
     )
 
@@ -118,6 +153,7 @@ async def on_reaction(event: hikari.GuildReactionAddEvent) -> None:
     emoji = event.emoji_name or (str(event.emoji_id) if event.emoji_id else "")
     await _dispatch(
         str(event.channel_id),
+        str(event.guild_id),
         "reaction",
         {
             "trigger_type": "reaction",

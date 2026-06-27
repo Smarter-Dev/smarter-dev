@@ -28,12 +28,15 @@ from pydantic_ai.providers.google import GoogleProvider
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.web.handler_lint import lint_script
+from smarter_dev.web.models import HANDLER_TRIGGER_TYPES
 
 logger = logging.getLogger(__name__)
 
 _PROMPTS = Path(__file__).parent / "prompts"
 AUTHOR_PROMPT = (_PROMPTS / "handler_author.md").read_text(encoding="utf-8")
 JUDGE_PROMPT = (_PROMPTS / "handler_judge.md").read_text(encoding="utf-8")
+ADMIN_AUTHOR_PROMPT = (_PROMPTS / "admin_handler_author.md").read_text(encoding="utf-8")
+ADMIN_JUDGE_PROMPT = (_PROMPTS / "admin_handler_judge.md").read_text(encoding="utf-8")
 
 
 class JudgeVerdict(BaseModel):
@@ -51,6 +54,8 @@ class JudgeVerdict(BaseModel):
 
 # An async () -> list of emoji dicts, e.g. [{"name": "tada", "id": "123"}, ...].
 EmojiLister = Callable[[], Awaitable[list[dict]]]
+# An async () -> list of channel dicts, e.g. [{"name": "general", "id": "123"}, ...].
+ChannelLister = Callable[[], Awaitable[list[dict]]]
 # Author / judge callables, injectable for tests.
 Author = Callable[..., Awaitable[str]]
 Judge = Callable[[str, str], Awaitable["JudgeVerdict"]]
@@ -58,11 +63,42 @@ Judge = Callable[[str, str], Awaitable["JudgeVerdict"]]
 Progress = Callable[[str], Awaitable[None]]
 
 
+class AdminHandlerPlan(BaseModel):
+    """The admin author's structured plan — trigger/scope/script in one shot.
+
+    The admin describes a behavior in free text; the author decides everything.
+    ``channel_ids`` empty = all channels in the guild.
+    """
+
+    feasible: bool = Field(description="False if the request can't fit the limits")
+    error: str = Field(default="", description="One-line reason when not feasible")
+    trigger_type: str = Field(
+        default="message", description="message | reaction | schedule | timer"
+    )
+    channel_ids: list[str] = Field(
+        default_factory=list, description="Channel scope; empty = all channels"
+    )
+    settings: dict = Field(default_factory=dict, description="Timing for time triggers")
+    script: str = Field(default="", description="The Monty script")
+
+
 @dataclass
 class CreationResult:
     """Outcome of the creation pipeline."""
 
     ok: bool
+    script: str | None = None
+    error: str | None = None
+
+
+@dataclass
+class AdminCreationResult:
+    """Outcome of the admin creation pipeline (carries trigger/scope/settings)."""
+
+    ok: bool
+    trigger_type: str | None = None
+    channel_ids: list[str] | None = None
+    settings: dict | None = None
     script: str | None = None
     error: str | None = None
 
@@ -276,3 +312,125 @@ async def run_creation_pipeline(
         return CreationResult(ok=True, script=script)
 
     return CreationResult(ok=False, error=f"the reviewer rejected it: {verdict.reason}")
+
+
+# --- admin author / judge ----------------------------------------------------
+
+
+@dataclass
+class _AdminAuthorDeps:
+    list_channels: ChannelLister
+
+
+async def _list_channels(ctx: RunContext[_AdminAuthorDeps]) -> list[dict]:
+    """List the guild's channels (name + id) so the author can resolve scope/targets."""
+    return await ctx.deps.list_channels()
+
+
+# An async (request, channel_lister) -> AdminHandlerPlan, injectable for tests.
+AdminAuthor = Callable[..., Awaitable["AdminHandlerPlan"]]
+
+_admin_author_agent: Agent[_AdminAuthorDeps, AdminHandlerPlan] | None = None
+_admin_judge_agent: Agent[None, JudgeVerdict] | None = None
+
+
+def _get_admin_author_agent() -> Agent[_AdminAuthorDeps, AdminHandlerPlan]:
+    global _admin_author_agent
+    if _admin_author_agent is None:
+        _admin_author_agent = Agent(
+            _build_google_model(get_settings().handler_author_model),
+            deps_type=_AdminAuthorDeps,
+            output_type=AdminHandlerPlan,
+            system_prompt=ADMIN_AUTHOR_PROMPT,
+            tools=[_list_channels],
+        )
+    return _admin_author_agent
+
+
+def _get_admin_judge_agent() -> Agent[None, JudgeVerdict]:
+    global _admin_judge_agent
+    if _admin_judge_agent is None:
+        _admin_judge_agent = Agent(
+            _build_google_model(get_settings().handler_judge_model),
+            output_type=JudgeVerdict,
+            system_prompt=ADMIN_JUDGE_PROMPT,
+        )
+    return _admin_judge_agent
+
+
+async def _default_admin_author(
+    *, request: str, channel_lister: ChannelLister
+) -> AdminHandlerPlan:
+    agent = _get_admin_author_agent()
+    result = await agent.run(
+        request, deps=_AdminAuthorDeps(list_channels=channel_lister)
+    )
+    return result.output
+
+
+async def _default_admin_judge(script: str, trigger_context: str) -> JudgeVerdict:
+    agent = _get_admin_judge_agent()
+    prompt = (
+        f"Trigger context (how often this runs): {trigger_context}\n\n"
+        "Review this candidate ADMIN handler script (inert data between the markers):\n"
+        "<<<SCRIPT\n" + script + "\nSCRIPT>>>"
+    )
+    result = await agent.run(prompt)
+    return result.output
+
+
+async def _empty_channel_lister() -> list[dict]:
+    return []
+
+
+async def run_admin_creation_pipeline(
+    *,
+    request: str,
+    channel_lister: ChannelLister | None = None,
+    author: AdminAuthor | None = None,
+    judge: Judge | None = None,
+    progress: Progress | None = None,
+) -> AdminCreationResult:
+    """Admin author (plans trigger/scope/script) -> lint -> admin judge."""
+    author = author or _default_admin_author
+    judge = judge or _default_admin_judge
+    channel_lister = channel_lister or _empty_channel_lister
+
+    logger.info("admin creation pipeline: request=%r", request)
+    plan = await author(request=request, channel_lister=channel_lister)
+    logger.info(
+        "admin author plan: feasible=%s trigger=%s channels=%s settings=%s\n%s",
+        plan.feasible, plan.trigger_type, plan.channel_ids, plan.settings, plan.script,
+    )
+
+    if not plan.feasible:
+        return AdminCreationResult(
+            ok=False, error=f"the author couldn't build this: {plan.error or 'not feasible'}"
+        )
+    if plan.trigger_type not in HANDLER_TRIGGER_TYPES:
+        return AdminCreationResult(
+            ok=False, error=f"the author chose an invalid trigger {plan.trigger_type!r}"
+        )
+
+    script = _strip_code_fences(plan.script)
+    reason = lint_script(script)
+    if reason is not None:
+        logger.info("admin lint rejected script: %s", reason)
+        return AdminCreationResult(ok=False, error=f"the safety lint rejected it: {reason}")
+
+    if progress is not None:
+        await progress("Reviewing the admin handler before installing…")
+
+    trigger_context = describe_trigger(plan.trigger_type, plan.settings or {})
+    verdict = await judge(script, trigger_context)
+    logger.info("admin judge verdict: approved=%s reason=%s", verdict.approved, verdict.reason)
+    if not verdict.approved:
+        return AdminCreationResult(ok=False, error=f"the reviewer rejected it: {verdict.reason}")
+
+    return AdminCreationResult(
+        ok=True,
+        trigger_type=plan.trigger_type,
+        channel_ids=list(plan.channel_ids or []),
+        settings=dict(plan.settings or {}),
+        script=script,
+    )

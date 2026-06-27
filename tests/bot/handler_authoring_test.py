@@ -135,3 +135,78 @@ def test_describe_trigger_cadence_phrasing():
     )
     assert "daily at 08:00" in describe_trigger("schedule", {"daily_time": "08:00"})
     assert "One-shot" in describe_trigger("timer", {"delay_seconds": 120})
+
+
+# -- admin creation pipeline ---------------------------------------------------
+
+from smarter_dev.bot.agents.handler_authoring import (
+    AdminHandlerPlan,
+    run_admin_creation_pipeline,
+)
+
+ADMIN_SCRIPT = (
+    'if context.get("author_joined_at"):\n'
+    '    report = await spawn_agent("scam?", has_tools=False)\n'
+    '    if "scam" in report.lower():\n'
+    '        await ban_user(context["author_id"], "scam")\n'
+    '        await send_message("banned a scammer", "MODCHAT")\n'
+)
+
+
+def _admin_author_returning(plan):
+    async def author(*, request, channel_lister):
+        return plan
+
+    return author
+
+
+async def test_admin_pipeline_happy():
+    plan = AdminHandlerPlan(
+        feasible=True, trigger_type="message", channel_ids=[], settings={},
+        script=ADMIN_SCRIPT,
+    )
+    result = await run_admin_creation_pipeline(
+        request="watch for scams and ban them",
+        author=_admin_author_returning(plan),
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert result.trigger_type == "message"
+    assert result.channel_ids == []
+    assert "ban_user" in result.script
+
+
+async def test_admin_pipeline_not_feasible():
+    plan = AdminHandlerPlan(feasible=False, error="needs 100 bans/sec, over the cap")
+    result = await run_admin_creation_pipeline(
+        request="impossible", author=_admin_author_returning(plan), judge=_judge_approving()
+    )
+    assert not result.ok
+    assert "over the cap" in result.error
+
+
+async def test_admin_pipeline_lint_blocks_blob_before_judge():
+    judged = []
+
+    async def judge(script, ctx):
+        judged.append(script)
+        return JudgeVerdict(approved=True, reason="ok")
+
+    blob = "QUJDREVG" * 30
+    plan = AdminHandlerPlan(feasible=True, trigger_type="message", script=f'x = "{blob}"\n')
+    result = await run_admin_creation_pipeline(
+        request="sneaky", author=_admin_author_returning(plan), judge=judge
+    )
+    assert not result.ok
+    assert "opaque" in result.error
+    assert judged == []
+
+
+async def test_admin_pipeline_judge_reject():
+    plan = AdminHandlerPlan(feasible=True, trigger_type="message", script=ADMIN_SCRIPT)
+    result = await run_admin_creation_pipeline(
+        request="x", author=_admin_author_returning(plan),
+        judge=_judge_rejecting("bans every author with no condition"),
+    )
+    assert not result.ok
+    assert "no condition" in result.error

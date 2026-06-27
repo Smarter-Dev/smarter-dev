@@ -1,4 +1,4 @@
-"""Tests for the privileged-routines admin API and its isolation."""
+"""Tests for the admin-handlers API + isolation from the chatbot path."""
 
 from __future__ import annotations
 
@@ -29,12 +29,12 @@ async def session():
 
 @pytest.fixture
 async def client(session, monkeypatch):
-    import smarter_dev.web.api.routers.privileged_routines as pr
+    import smarter_dev.web.api.routers.admin_handlers as ah
 
     async def _submit(payload, **kwargs):
         return None
 
-    monkeypatch.setattr(pr, "worker_submit", _submit)
+    monkeypatch.setattr(ah, "worker_submit", _submit)
 
     async def _verify():
         return object()
@@ -51,44 +51,52 @@ async def client(session, monkeypatch):
     api.dependency_overrides.pop(get_skrift_db_session, None)
 
 
-def _routine_body(**over):
+def _body(**over):
     body = {
         "guild_id": "G1",
-        "channel_id": "C1",
-        "trigger_type": "timer",
-        "settings": {"delay_seconds": 60},
-        "action": {"kind": "ban", "target_user_id": "U1"},
-        "created_by_admin": "ADMIN1",
+        "trigger_type": "message",
+        "settings": {},
+        "channel_ids": [],
+        "description": "ban scammers",
+        "script": 'await ban_user(context["author_id"])\n',
+        "created_by_admin": "A1",
     }
     body.update(over)
     return body
 
 
-async def test_create_list_delete_routine(client):
-    created = await client.post("/admin/routines", json=_routine_body())
+async def test_create_list_delete_admin_handler(client):
+    created = await client.post("/admin/handlers", json=_body())
     assert created.status_code == 201
-    rid = created.json()["routine_id"]
+    data = created.json()
+    assert data["trigger_type"] == "message"
+    assert data["channel_ids"] == []
+    hid = data["handler_id"]
 
-    listed = await client.get("/admin/routines", params={"guild_id": "G1"})
+    listed = await client.get("/admin/handlers", params={"guild_id": "G1"})
     assert len(listed.json()) == 1
 
-    deleted = await client.delete(f"/admin/routines/{rid}")
+    deleted = await client.delete(f"/admin/handlers/{hid}")
     assert deleted.status_code == 200
-    assert (await client.get("/admin/routines", params={"guild_id": "G1"})).json() == []
+    assert (await client.get("/admin/handlers", params={"guild_id": "G1"})).json() == []
 
 
-async def test_malformed_action_rejected(client):
-    resp = await client.post(
-        "/admin/routines", json=_routine_body(action={"kind": "timeout"})
+async def test_create_scheduled_admin_handler_schedules_fire(client):
+    body = _body(
+        trigger_type="timer",
+        settings={"delay_seconds": 60},
+        channel_ids=["MODCHAT"],
+        script='await send_message("tick", "MODCHAT")\n',
     )
-    assert resp.status_code == 422
+    resp = await client.post("/admin/handlers", json=body)
+    assert resp.status_code == 201
+    assert resp.json()["channel_ids"] == ["MODCHAT"]
 
 
-def test_chatbot_tools_cannot_touch_privileged_tier():
-    # The chatbot's tool surface has no routine/privileged tool — isolation by
-    # construction. The only path to privileged routines is the admin command.
+def test_chatbot_tools_cannot_create_admin_handlers():
+    # The member chatbot tools have no admin-handler tool — isolation by design.
     from smarter_dev.bot.agents.handler_tools import handler_tool_functions
 
     names = {f.__name__ for f in handler_tool_functions()}
     assert names == {"register_handler", "list_handlers", "delete_handler"}
-    assert not any("routine" in n or "privileg" in n for n in names)
+    assert not any("admin" in n for n in names)

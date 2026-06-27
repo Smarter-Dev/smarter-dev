@@ -72,6 +72,12 @@ def check_static(script: str) -> str | None:
         if len(compact) >= _OPAQUE_MIN_LEN and " " not in compact and "\n" not in compact:
             if _BASE64ISH.match(compact) or _HEXISH.match(compact):
                 return "script contains an opaque/encoded blob (base64/hex string)"
+
+    # Defined-but-never-called function = a silent no-op handler (a common LLM
+    # slip: wrapping all logic in `async def main()` and forgetting to call it).
+    for name in re.findall(r"(?:async\s+)?def\s+(\w+)\s*\(", script):
+        if len(re.findall(rf"\b{re.escape(name)}\s*\(", script)) <= 1:
+            return f"script defines {name}() but never calls it (handler would do nothing)"
     return None
 
 
