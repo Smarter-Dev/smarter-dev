@@ -90,6 +90,26 @@ class Settings(BaseSettings):
         description="Opus bitrate used when encoding Discord voice messages",
     )
 
+    # Bot health-check HTTP server port (override locally to avoid conflicts)
+    bot_health_port: int = Field(
+        default=8080,
+        description="Port for the bot's health-check HTTP server",
+    )
+
+    # Agentic handler system
+    handlers_enabled: bool = Field(
+        default=True,
+        description="Master kill switch for the agentic handler system",
+    )
+    handler_author_model: str = Field(
+        default="gemini-3-flash-preview",
+        description="Model that writes handler scripts from a description (Gemini 3 Flash)",
+    )
+    handler_judge_model: str = Field(
+        default="gemini-3-flash-preview",
+        description="Model that reviews candidate handler scripts (Gemini 3 Flash)",
+    )
+
     # API
     api_secret_key: str = Field(
         default="dev-secret-key-change-in-production",

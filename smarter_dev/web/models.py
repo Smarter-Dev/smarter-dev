@@ -18,6 +18,7 @@ from sqlalchemy import Integer
 from sqlalchemy import JSON
 from sqlalchemy import Numeric
 from sqlalchemy import String
+from sqlalchemy import text
 from sqlalchemy import Text
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import Mapped, relationship
@@ -4461,3 +4462,138 @@ class AuthoringPipelineRun(Base):
             "created_at",
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Agentic handler system
+# ---------------------------------------------------------------------------
+
+# Allowed trigger families for a member-created handler.
+HANDLER_TRIGGER_TYPES = ("message", "reaction", "schedule", "timer")
+# Event triggers are single-listener per channel; time triggers coexist.
+HANDLER_EVENT_TRIGGERS = ("message", "reaction")
+
+
+class ChannelHandler(Base):
+    """A member-created automation: a sandboxed script run when a trigger fires.
+
+    ``id`` is the public ``handler_id`` surfaced by ``list_handlers`` and used by
+    ``delete_handler``. Event triggers (message/reaction) are single-listener per
+    channel — enforced by the partial unique index below and by upsert logic in
+    the web API. Time triggers (schedule/timer) coexist freely.
+    """
+
+    __tablename__ = "channel_handlers"
+    __table_args__ = (
+        CheckConstraint(
+            "trigger_type IN ('message', 'reaction', 'schedule', 'timer')",
+            name="ck_channel_handlers_trigger_type",
+        ),
+        Index("ix_channel_handlers_channel_id", "channel_id"),
+        # One event handler per (channel, trigger_type). Partial so multiple
+        # schedules/timers can share a channel.
+        Index(
+            "uq_channel_handlers_event_listener",
+            "channel_id",
+            "trigger_type",
+            unique=True,
+            postgresql_where=text("trigger_type IN ('message', 'reaction')"),
+            sqlite_where=text("trigger_type IN ('message', 'reaction')"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    channel_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    trigger_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    settings: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    script: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(20), nullable=False)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    # Queue job id for the next scheduled fire (time triggers), so delete can
+    # cancel it.
+    scheduled_job_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+
+class HandlerRun(Base):
+    """Durable audit of a single handler firing, including budget spend.
+
+    Written on every fire (ok, cap_exceeded, or error) so cost is auditable.
+    """
+
+    __tablename__ = "handler_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome IN ('ok', 'cap_exceeded', 'error', 'rejected')",
+            name="ck_handler_runs_outcome",
+        ),
+        Index("ix_handler_runs_handler_id", "handler_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    handler_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False
+    )
+    fired_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    trigger_context: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False)
+    cap: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    messages_sent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    web_searches: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    web_reads: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    agent_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class PrivilegedRoutine(Base):
+    """Admin-only routine running a structured moderation action.
+
+    A completely separate tier from ``ChannelHandler``: created only by the
+    admin slash command, never readable or writable by the chatbot path. The
+    action is a structured spec (``{kind: timeout|kick|ban|delete, ...}``), not
+    a free-form script — no author/judge, no sandbox.
+    """
+
+    __tablename__ = "privileged_routines"
+    __table_args__ = (
+        CheckConstraint(
+            "trigger_type IN ('message', 'reaction', 'schedule', 'timer')",
+            name="ck_privileged_routines_trigger_type",
+        ),
+        Index("ix_privileged_routines_channel_id", "channel_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    channel_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    trigger_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    settings: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    action: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    created_by_admin: Mapped[str] = mapped_column(String(20), nullable=False)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    scheduled_job_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)

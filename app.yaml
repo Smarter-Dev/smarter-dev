@@ -167,6 +167,8 @@ workers:
     - smarter_dev.web.resources_jobs
     - smarter_dev.web.title_agent
     - smarter_dev.web.blogging_agent.pipeline
+    - smarter_dev.web.handlers_jobs
+    - smarter_dev.web.privileged_jobs
 
 agents:
   default_queue: agents
