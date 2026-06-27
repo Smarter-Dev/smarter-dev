@@ -1,0 +1,66 @@
+# One-shot DB migration job, run by the deploy workflow before rolling the new
+# images. Runs in-cluster (the DB's only trusted source) with the *admin*
+# (doadmin) direct connection, because migrations need DDL/ownership the app
+# role lacks. Admin creds live in the `smarter-dev-migrate-secrets` secret
+# (created out-of-band); every other env mirrors the web deployment so settings
+# load identically. backoffLimit 0 = fail loud (a failed migration fails the
+# deploy step and halts the rollout).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smarter-dev-migrate
+  namespace: smarter-dev
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: smarter-dev-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+          workingDir: /app
+          # --only main: apply this project's app-schema migrations (handlers,
+          # sudo, etc.). Skrift-core/legacy migrations are excluded — they load
+          # Skrift's app.yaml (which interpolates many env vars) and change only
+          # on a Skrift upgrade; run those manually when needed.
+          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/migrate.py --only main"]
+          envFrom:
+            - configMapRef:
+                name: smarter-dev-config
+          env:
+            # DB URLs use the admin (doadmin) direct connection — DDL needs it.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-migrate-secrets
+                  key: database-url
+            - name: LEGACY_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-migrate-secrets
+                  key: legacy-database-url
+            # Everything else mirrors the web deployment so settings load.
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: redis-url
+            - name: API_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: api-secret-key
+            - name: WEB_SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: web-session-secret
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: secret-key
