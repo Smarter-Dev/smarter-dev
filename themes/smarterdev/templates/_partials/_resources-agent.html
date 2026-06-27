@@ -1,6 +1,6 @@
 {# /resources — ASK THE RESOURCE AGENT block.
-   Renders the form when `can_ask_agent` (sudo r--/rw-/rwx or admin), a
-   founder-access CTA for signed-in members, otherwise a sign-in CTA. #}
+   Renders the form when `can_ask_agent` (sudo hacker/founder or admin), a
+   sudo-access CTA for signed-in members, otherwise a sign-in CTA. #}
 
 {% if can_ask_agent %}
 <section class="rsa reveal" aria-labelledby="rsa-title"

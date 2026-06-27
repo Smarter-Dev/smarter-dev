@@ -228,7 +228,6 @@ class BillingController(Controller):
             .limit(1)
         )
         has_discord_link = discord_link_q.first() is not None
-        settings = get_settings()
         return TemplateResponse(
             "account/billing.html",
             context={
@@ -236,7 +235,6 @@ class BillingController(Controller):
                 "membership": membership,
                 "membership_expired": membership_expired,
                 "has_discord_link": has_discord_link,
-                "seats_total": settings.sudo_founder_seat_limit,
                 "active_tab": "billing",
                 "flash_messages": get_flash_messages(request),
             },
