@@ -23,6 +23,7 @@ jobs:
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-bot.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-worker.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/cron-sudo-sweep.yaml
+        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/migrate-job.yaml
 
     - name: Install doctl
       uses: digitalocean/action-doctl@v2
@@ -55,6 +56,27 @@ jobs:
 
     - name: Apply ConfigMap
       run: kubectl apply -f $GITHUB_WORKSPACE/k8s/configmap.yaml
+
+    # Apply this project's app-schema migrations before rolling the new images,
+    # so the new code never starts against an old schema. Runs in-cluster (the
+    # DB's only trusted source) as a one-shot Job with admin creds. A failed
+    # migration fails this step and halts the deploy (Jobs use backoffLimit 0).
+    - name: Run database migrations
+      run: |
+        kubectl delete job smarter-dev-migrate -n smarter-dev --ignore-not-found
+        kubectl apply -f $GITHUB_WORKSPACE/k8s/migrate-job.yaml
+        echo "waiting for migration job (up to 5 min)..."
+        for i in $(seq 1 60); do
+          COMPLETE=$(kubectl get job smarter-dev-migrate -n smarter-dev -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)
+          FAILED=$(kubectl get job smarter-dev-migrate -n smarter-dev -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)
+          [ "$COMPLETE" = "True" ] || [ "$FAILED" = "True" ] && break
+          sleep 5
+        done
+        kubectl logs job/smarter-dev-migrate -n smarter-dev || true
+        if [ "$COMPLETE" != "True" ]; then
+          echo "::error::migration job did not complete (complete=$COMPLETE failed=$FAILED)"; exit 1
+        fi
+        echo "migrations applied"
 
     - name: Deploy to DigitalOcean Kubernetes
       run: |
