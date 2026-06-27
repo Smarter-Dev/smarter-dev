@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
 {% block page_type %}sudo{% endblock %}
-{% block page_title %}sudo — pay once, take the year, renew at the founder rate{% endblock %}
+{% block page_title %}sudo — two ways in: run the challenges or fund the build{% endblock %}
 
 {# Banner is redundant on the pricing page itself — suppress the site announcement. #}
 {% block site_announcement %}{% endblock %}
 
 {% block seo_meta %}
-<meta name="description" content="sudo founder access: {% for t in tiers %}${{ t.annual }}{% if not loop.last %} · {% endif %}{% endfor %} once for one year. Renew at 33% off the public rate. rwx 0day capped at {{ seats_total }} seats.">
+<meta name="description" content="sudo is elevated access on top of the free Smarter Dev community. Hacker — $8/mo for every RunHacks challenge. Founder — $256 once (or more) to fund the build and get an inside seat.">
 <meta name="robots" content="index, follow">
 <link rel="canonical" href="https://smarter.dev/sudo">
 {% endblock %}
@@ -17,254 +17,281 @@
 {% endblock %}
 
 {% block content %}
-<section class="sp-shell">
+<div class="screen-root">
 
-    {# ── Hero ───────────────────────────────────────── #}
-    <header class="sp-hero">
-        <div class="sp-status-live">
-            <span>FOUNDER ACCESS · ONE PAYMENT · ONE YEAR</span>
+    {# ─────────── HERO ─────────── #}
+    <section style="padding-top: 124px; padding-bottom: 30px; text-align: center;">
+        <div class="status-live" style="margin-bottom: 26px; border-color: rgba(239,68,68,.4); color: var(--white); background: rgba(239,68,68,.06);">
+            <span>sudo · ELEVATED ACCESS</span>
         </div>
 
-        <h1>
-            Pay once. Take the year.<br>
-            Renew at the <span class="hl-rose">founder rate.</span>
+        <h1 style="font-family: var(--heading); font-size: clamp(1.7rem, 3.7vw, 2.85rem); color: var(--white); letter-spacing: .005em; line-height: 1.34; margin: 0 auto 24px; max-width: 860px; text-wrap: balance;">
+            Run the challenges.<br>
+            Fund the <span style="color: var(--rose); text-shadow: 0 0 26px rgba(239,68,68,.4);">build.</span>
         </h1>
 
-        <p class="lede">
-            Smarter Dev has always been a free community, and that's not changing. But the world is, and what comes next takes more than we can do for free. Code is written by agents, questions are answered by AI, and the future belongs to developers who can direct it. We want to help developers like us get the skills to thrive in that world. We can't build it without your help.
+        <p style="font-size: .95rem; color: var(--light); max-width: 780px; margin: 0 auto; line-height: 1.8;">
+            Smarter Dev has always been a free community, and that's not changing. But the world is.
+            Code is written by agents, questions are answered by AI, and the future belongs to developers
+            who can direct it. We want to help developers like us get the skills to thrive in it. We can't
+            build it without your help.
         </p>
-    </header>
+    </section>
 
-    {# ── Pricing ladder ─────────────────────────────── #}
-    <section class="sp-ladder">
-
-        {# axis header — tag per column #}
-        <div class="sp-ladder-axis">
-            {% for t in tiers %}
-            <div class="sp-ladder-axis-col {% if t.hero %}is-hero{% endif %}">
-                <div class="sp-ladder-axis-head">
-                    <span class="perm">{{ t.perm }}</span>
-                    <span class="tier-name">{{ t.tier }}</span>
-                </div>
-                <span class="tag">{{ t.tag }}</span>
+    {# ─────────── OVERVIEW BEAT ─────────── #}
+    <section style="padding-top: 14px; padding-bottom: 20px; text-align: center;">
+        <div class="container" style="max-width: 840px;">
+            <div class="code-label" style="color: var(--cyan); letter-spacing: .18em;">TWO WAYS IN</div>
+            <p style="font-family: var(--heading); font-size: clamp(1.05rem, 2.1vw, 1.5rem); color: var(--white); line-height: 1.45; letter-spacing: .02em; max-width: 640px; margin: 0 auto 26px; text-wrap: balance;">
+                Two ways to be part of what comes next. Run the challenges, or fund the build.
+            </p>
+            <div style="display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;">
+                <a href="#hacker" class="teaser cyan">Hacker · $8/mo · the challenges →</a>
+                <a href="#founder" class="teaser rose">Founder · $256+ · back the build →</a>
             </div>
-            {% endfor %}
         </div>
+    </section>
 
-        {# Body grid: 6 rows × 3 tier columns #}
-        <div class="sp-ladder-body">
-            {% for t in tiers %}
-            <div class="sp-ladder-col {% if t.hero %}is-hero{% endif %}" data-tier="{{ t.id }}">
-                <div class="sp-ladder-cell sp-cell-price" style="--h: 76px;">
-                    <div class="price-num">
-                        <span class="dollar">$</span>{{ t.annual }}
-                    </div>
-                    <div class="price-meta">
-                        ONCE<br>
-                        <span class="eq">1 YEAR ACCESS</span>
-                    </div>
+    {# ─────────── 01 · HACKER ─────────── #}
+    <section id="hacker" style="padding-top: 58px; padding-bottom: 44px;">
+        <div class="container" style="max-width: 1000px;">
+            <div class="offer-row">
+                <div>
+                    <div class="code-label" style="color: var(--cyan); margin-bottom: 16px;">01 / HACKER</div>
+                    <h2 class="sec-h" style="margin-bottom: 18px;">
+                        Run the <span style="color: var(--cyan); text-shadow: 0 0 26px rgba(0,212,255,.4);">challenges.</span>
+                    </h2>
+                    <p style="font-size: .95rem; color: var(--light); line-height: 1.85; max-width: 440px;">
+                        RunHacks is the practical core of Smarter Dev. Real challenges that make you write code
+                        to win, new ones on a schedule. Hacker gets you all of them, the day they drop. The
+                        low-friction way in.
+                    </p>
                 </div>
 
-                <div class="sp-ladder-cell sp-cell-vs" style="--h: 78px;">
-                    <div class="vs-line">
-                        <span class="strike">${{ t.base }}/yr</span>
-                        <span class="muted">public price</span>
+                <div>
+                    {# offer card — hacker #}
+                    <div style="display: flex; flex-direction: column; background: var(--surface); border: 1px solid rgba(0,212,255,.16); box-shadow: none;">
+                        <div style="padding: 22px 22px 16px; display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;">
+                            <div style="font-family: var(--display); font-size: 3.4rem; color: var(--white); line-height: .9; font-weight: 100;">
+                                <span style="font-size: 1.05rem; vertical-align: 0.6em; color: var(--cyan);">$</span>8
+                            </div>
+                            <div style="font-family: var(--heading); font-size: .6rem; color: var(--gray); letter-spacing: .1em; padding-bottom: 8px;">/mo</div>
+                        </div>
+
+                        <div style="padding: 0 22px 14px; font-size: .85rem; color: var(--light); line-height: 1.65;">
+                            Every RunHacks challenge, the day it drops.
+                        </div>
+
+                        <div style="padding: 16px 22px; border-top: 1px solid rgba(0,212,255,.06); flex: 1;">
+                            <ul style="list-style: none; display: flex; flex-direction: column; gap: 10px;">
+                                <li style="font-size: .78rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--cyan); font-family: var(--mono); font-size: .7rem; margin-top: 1px;">›</span>All RunHacks challenges, new ones on a schedule</li>
+                                <li style="font-size: .78rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--cyan); font-family: var(--mono); font-size: .7rem; margin-top: 1px;">›</span>Members-only Discord</li>
+                            </ul>
+                        </div>
+
+                        <div style="padding: 14px 22px 20px;">
+                            <form method="post" action="/sudo/checkout" data-sk-no-spa>
+                                <input type="hidden" name="role" value="hacker">
+                                <button type="submit" class="card-cta">./join --hacker →</button>
+                            </form>
+                        </div>
                     </div>
-                    <div class="vs-save">SAVE ${{ t.base - t.annual }} · RENEW AT 33% OFF</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    {# ─────────── 02 · FOUNDER ─────────── #}
+    <section id="founder" style="padding-top: 48px; padding-bottom: 40px;">
+        <div class="container" style="max-width: 1000px;">
+            <div class="offer-row">
+                <div>
+                    <div class="code-label" style="color: var(--rose); margin-bottom: 16px;">02 / FOUNDER</div>
+                    <h2 class="sec-h" style="margin-bottom: 18px;">
+                        Fund the <span style="color: var(--rose); text-shadow: 0 0 26px rgba(239,68,68,.4);">build.</span>
+                    </h2>
+                    <p style="font-size: .95rem; color: var(--light); line-height: 1.85; max-width: 460px;">
+                        RunHacks is live now. Gym and the Lab are coming. I'm not selling a roadmap or a date.
+                        Founders fund the focus that builds them. The more that comes in, the more I build and the
+                        less I do anything else. You're not buying a feature list. You're backing the work, and
+                        getting a seat while it happens.
+                    </p>
                 </div>
 
-                <div class="sp-ladder-cell sp-cell-desc" style="--h: 110px;">{{ t.desc }}</div>
+                <div>
+                    {# offer card — founder (hero) #}
+                    <div style="display: flex; flex-direction: column; background: radial-gradient(120% 90% at 50% -10%, rgba(239,68,68,.07), transparent 60%), var(--surface); border: 1px solid rgba(239,68,68,.38); box-shadow: 0 0 50px rgba(239,68,68,.08), inset 0 0 50px rgba(239,68,68,.02);">
+                        <div style="padding: 22px 22px 16px; display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;">
+                            <div style="font-family: var(--display); font-size: 3.4rem; color: var(--white); line-height: .9; font-weight: 100;">
+                                <span style="font-size: 1.05rem; vertical-align: 0.6em; color: var(--rose);">$</span>256
+                            </div>
+                            <div style="font-family: var(--heading); font-size: .6rem; color: var(--gray); letter-spacing: .1em; padding-bottom: 8px;">once</div>
+                            <div style="margin-bottom: 8px; font-family: var(--mono); font-size: .66rem; color: var(--rose); border: 1px solid rgba(239,68,68,.4); background: rgba(239,68,68,.08); padding: 3px 9px; letter-spacing: .04em;">or more</div>
+                        </div>
 
-                <div class="sp-ladder-cell sp-cell-feats" style="--h: 178px;">
-                    <ul>
-                        {% for f in t.feats %}
-                        <li><span class="bullet">›</span>{{ f }}</li>
-                        {% endfor %}
+                        <div style="padding: 16px 22px; border-top: 1px solid rgba(239,68,68,.12); flex: 1;">
+                            <ul style="list-style: none; display: flex; flex-direction: column; gap: 10px;">
+                                <li style="font-size: .78rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--rose); font-family: var(--mono); font-size: .7rem; margin-top: 1px;">›</span>Everything in Hacker</li>
+                                <li style="font-size: .78rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--rose); font-family: var(--mono); font-size: .7rem; margin-top: 1px;">›</span>An early look at what's being built</li>
+                                <li style="font-size: .78rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--rose); font-family: var(--mono); font-size: .7rem; margin-top: 1px;">›</span>A voice while it's young</li>
+                                <li style="font-size: .78rem; color: var(--light); display: flex; align-items: flex-start; gap: 9px; line-height: 1.5;"><span style="color: var(--rose); font-family: var(--mono); font-size: .7rem; margin-top: 1px;">›</span>Founder role + dedicated channel</li>
+                            </ul>
+                        </div>
+
+                        <div style="padding: 0 22px 2px; font-family: var(--mono); font-size: .74rem; color: var(--rose); line-height: 1.6;">
+                            Give more if you believe in where this goes.
+                        </div>
+
+                        <div style="padding: 14px 22px 20px;">
+                            <form method="post" action="/sudo/checkout" data-sk-no-spa>
+                                <input type="hidden" name="role" value="founder">
+                                <button type="submit" class="card-cta is-hero">./fund --founder →</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {# microcopy under the two offers #}
+            <div style="margin-top: 60px; font-family: var(--mono); font-size: .7rem; color: var(--gray); text-align: center;">
+                // one role per person · Hacker is monthly · Founder is one time · 14-day refund on Founder
+            </div>
+        </div>
+    </section>
+
+    {# ─────────── FREE COMMUNITY ─────────── #}
+    <section style="padding-top: 38px; padding-bottom: 56px;">
+        <div class="container" style="max-width: 1080px;">
+            <div style="padding: 22px 26px; background: rgba(0,0,0,.25); border: 1px solid rgba(90,122,150,.22); display: grid; grid-template-columns: auto 1fr auto; gap: 24px; align-items: center;">
+                <div style="font-family: var(--mono); font-size: .95rem; color: var(--gray); padding: 2px 10px; border: 1px solid rgba(90,122,150,.3); background: rgba(90,122,150,.06);">---</div>
+                <div>
+                    <div style="font-family: var(--heading); font-size: .74rem; color: var(--white); letter-spacing: .08em; margin-bottom: 5px;">GUEST · FREE FOREVER</div>
+                    <div style="font-size: .8rem; color: var(--mid); line-height: 1.6;">Discord access and the community. A way in. No card required.</div>
+                </div>
+                <a href="https://discord.gg/de8kajxbYS" class="guest-cta">JOIN THE DISCORD →</a>
+            </div>
+        </div>
+    </section>
+
+    {# ─────────── 03 · WHERE THIS GOES ─────────── #}
+    <section style="padding-top: 48px; padding-bottom: 70px;">
+        <div class="container" style="max-width: 1080px;">
+            <div style="text-align: center; margin-bottom: 36px;">
+                <div class="code-label" style="color: var(--rose);">WHERE THIS GOES</div>
+                <h2 class="sec-h" style="margin-bottom: 10px;">Where this goes. No dates.</h2>
+                <p style="font-size: .85rem; color: var(--mid); max-width: 620px; margin: 0 auto; line-height: 1.7;">
+                    RunHacks is live. Gym and the Lab are the plan. No timeline, no promise, just the direction.
+                </p>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;">
+
+                {# LIVE NOW — cyan, no badge #}
+                <div style="background: var(--surface); border: 1px solid rgba(0,212,255,.08); border-top: 2px solid var(--cyan); padding: 26px 28px;">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px;">
+                        <div style="font-family: var(--display); font-size: 1.7rem; color: var(--white); letter-spacing: .06em; font-weight: 100;">LIVE NOW</div>
+                    </div>
+                    <p style="font-size: .82rem; color: var(--light); line-height: 1.75; margin-bottom: 18px;">
+                        RunHacks, the community, and members-only channels. The part you can use today.
+                    </p>
+                    <ul style="list-style: none; display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid rgba(90,122,150,.15);">
+                        <li style="font-size: .76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--cyan); font-family: var(--mono);">+</span>New RunHacks challenges on a schedule</li>
+                        <li style="font-size: .76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--cyan); font-family: var(--mono);">+</span>Members-only Discord</li>
+                        <li style="font-size: .76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--cyan); font-family: var(--mono);">+</span>Founder role and dedicated channel</li>
                     </ul>
                 </div>
 
-                <div class="sp-ladder-cell sp-cell-avail" style="--h: 70px;">
-                    {% if t.hero %}
-                    <div class="seat-grid" style="--seats: {{ seats_total }};">
-                        {% for s in seat_dots %}
-                        <span class="{% if s.claimed %}claimed{% else %}open{% endif %}"></span>
-                        {% endfor %}
+                {# GYM — rose, COMING #}
+                <div style="background: var(--surface); border: 1px solid rgba(239,68,68,.08); border-top: 2px solid var(--rose); padding: 26px 28px;">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px;">
+                        <div style="font-family: var(--display); font-size: 1.7rem; color: var(--white); letter-spacing: .06em; font-weight: 100;">GYM</div>
+                        <div style="font-family: var(--heading); font-size: .5rem; color: var(--rose); letter-spacing: .16em; border: 1px solid rgba(239,68,68,.35); padding: 3px 8px;">COMING</div>
                     </div>
-                    <div class="cap-label rose">{{ seats_left }} of {{ seats_total }} seats left</div>
-                    {% else %}
-                    <div class="cap-line">
-                        <span class="dot"></span>
-                        <span>unlimited seats · open now</span>
+                    <p style="font-size: .82rem; color: var(--light); line-height: 1.75; margin-bottom: 18px;">
+                        Lesson-based curriculum with an AI tutor that remembers where you got stuck and walks you through what's next.
+                    </p>
+                    <ul style="list-style: none; display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid rgba(90,122,150,.15);">
+                        <li style="font-size: .76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>Tutor that remembers where you struggled</li>
+                        <li style="font-size: .76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>Stack-trace-first, no syntax tutorials</li>
+                        <li style="font-size: .76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>Each lesson builds on the last</li>
+                    </ul>
+                </div>
+
+                {# THE LAB — rose, COMING #}
+                <div style="background: var(--surface); border: 1px solid rgba(239,68,68,.08); border-top: 2px solid var(--rose); padding: 26px 28px;">
+                    <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px;">
+                        <div style="font-family: var(--display); font-size: 1.7rem; color: var(--white); letter-spacing: .06em; font-weight: 100;">THE LAB</div>
+                        <div style="font-family: var(--heading); font-size: .5rem; color: var(--rose); letter-spacing: .16em; border: 1px solid rgba(239,68,68,.35); padding: 3px 8px;">COMING</div>
                     </div>
-                    {% endif %}
-                </div>
-
-                <div class="sp-ladder-cell sp-cell-action" style="--h: 84px;">
-                    {% if t.hero and seats_left <= 0 %}
-                    <button type="button" class="btn-glow is-disabled" disabled>sold out</button>
-                    {% else %}
-                    <form method="post" action="/sudo/checkout" data-sk-no-spa>
-                        <input type="hidden" name="tier" value="{{ t.id }}">
-                        <button type="submit" class="btn-glow">{{ t.cta_label }} →</button>
-                    </form>
-                    {% endif %}
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-
-        <div class="sp-ladder-fineprint">
-            <div>// one seat per person · no subscription · 14-day full refund</div>
-            <div>// founder access closes when public monthly opens</div>
-        </div>
-    </section>
-
-    {# ── How founder pricing works ─────────────────── #}
-    <section class="sp-principles">
-        <div class="sp-principles-head">
-            <span class="cmd">$ cat /docs/founder-pricing.md</span>
-            <span class="rule" aria-hidden="true"></span>
-            <span class="step">03 / HOW IT WORKS</span>
-        </div>
-
-        <div class="sp-principles-grid">
-            {% for p in founder_principles %}
-            <article class="sp-principle">
-                <div class="num">0{{ loop.index }}</div>
-                <h3>{{ p.head }}</h3>
-                <p>{{ p.body }}</p>
-            </article>
-            {% endfor %}
-        </div>
-
-        <div class="sp-guest">
-            <span class="sp-guest-chip">---</span>
-            <div class="sp-guest-text">
-                <div class="sp-guest-head">GUEST · FREE FOREVER</div>
-                <div class="sp-guest-body">Discord access, limited RunHacks, Gym preview. A way in — no card required.</div>
-            </div>
-            <a href="https://discord.gg/de8kajxbYS" class="sp-guest-cta">JOIN AS GUEST →</a>
-        </div>
-    </section>
-
-    {# ── Roadmap ─────────────────────────────────────── #}
-    <section class="sp-roadmap">
-        <div class="sp-roadmap-head">
-            <span class="step">04 / ROADMAP</span>
-            <h2>What every founder's funding.</h2>
-            <p>Day one access lands when sudo opens. Gym and the Lab ship next, with rwx 0day in the preview loop.</p>
-        </div>
-
-        <div class="sp-roadmap-grid">
-            {% for r in roadmap %}
-            <article class="sp-phase">
-                <div class="sp-phase-head">
-                    <span class="name">{{ r.head }}</span>
-                    <span class="eta">{{ r.eta }}</span>
-                </div>
-                <p>{{ r.body }}</p>
-                <ul>
-                    {% for b in r.bullets %}
-                    <li><span class="plus">+</span>{{ b }}</li>
-                    {% endfor %}
-                </ul>
-            </article>
-            {% endfor %}
-        </div>
-    </section>
-
-    {# ── FAQ ───────────────────────────────────────── #}
-    <section class="sp-faq-wrap">
-        <div class="sp-faq-head">
-            <span class="step">05 / FAQ</span>
-            <h2>The questions every founder asks.</h2>
-        </div>
-
-        <div class="sp-faq">
-            {% for f in faqs %}
-            <details>
-                <summary>{{ f.q }}<span class="ind">−</span></summary>
-                <div class="ans">{{ f.a | safe }}</div>
-            </details>
-            {% endfor %}
-        </div>
-    </section>
-
-    {# ── Final CTA — founder access last call ───────── #}
-    <section class="sp-footer-cta">
-        <div class="close-panel">
-            {# terminal bar #}
-            <div class="sp-cta-bar">
-                <span class="prompt">❯</span>
-                <span class="label">founder-access — last call</span>
-                <span class="seats-left">
-                    <span class="pulse"></span>
-                    {{ seats_left }} SEATS LEFT
-                </span>
-            </div>
-
-            {# body #}
-            <div class="sp-cta-body">
-                <div class="eyebrow">FINAL CALL</div>
-
-                <h2>
-                    {% if seats_left > 0 %}
-                    <span class="hl-rose nowrap">{{ seats_left }} seats</span> left in rwx 0day. When they're gone, so is founder pricing.
-                    {% else %}
-                    rwx 0day is <span class="hl-rose">sold out.</span> r-- and rw- founder access is still open.
-                    {% endif %}
-                </h2>
-
-                {# scarcity grid #}
-                <div class="sp-cta-scarcity">
-                    <div class="seat-grid" style="--seats: {{ seats_total }};">
-                        {% for s in seat_dots %}
-                        <div class="{% if s.claimed %}claimed{% else %}seat-cell open{% endif %}"></div>
-                        {% endfor %}
-                    </div>
-                    <div class="scarcity-meta">
-                        <span>{{ seats_claimed }} claimed</span>
-                        <span class="rose">{{ seats_left }} of {{ seats_total }} remaining</span>
-                    </div>
-                </div>
-
-                {# primary action #}
-                <div class="sp-cta-primary-wrap">
-                    {% if seats_left > 0 %}
-                    <form method="post" action="/sudo/checkout" data-sk-no-spa>
-                        <input type="hidden" name="tier" value="rwx">
-                        <button type="submit" class="cta-primary">
-                            <span class="lbl">Reserve rwx 0day</span>
-                            <span class="px">${{ tier_map['rwx'].annual }}</span>
-                        </button>
-                    </form>
-                    {% else %}
-                    <span class="cta-primary is-disabled">
-                        <span class="lbl">rwx 0day · sold out</span>
-                    </span>
-                    {% endif %}
-                </div>
-
-                <p class="meta">1 year of access · renew at the founder rate · 14-day full refund</p>
-
-                {# secondary tiers #}
-                <div class="sp-cta-secondary">
-                    <span class="note">// or start lower:</span>
-                    <form method="post" action="/sudo/checkout" data-sk-no-spa>
-                        <input type="hidden" name="tier" value="r">
-                        <button type="submit" class="cta-secondary">Reserve r-- <span class="sp">${{ tier_map['r'].annual }}</span> →</button>
-                    </form>
-                    <form method="post" action="/sudo/checkout" data-sk-no-spa>
-                        <input type="hidden" name="tier" value="rw">
-                        <button type="submit" class="cta-secondary">Reserve rw- <span class="sp">${{ tier_map['rw'].annual }}</span> →</button>
-                    </form>
+                    <p style="font-size: .82rem; color: var(--light); line-height: 1.75; margin-bottom: 18px;">
+                        Guided agentic coding environments. Real agents in cloud workspaces, with the lesson sitting beside the terminal.
+                    </p>
+                    <ul style="list-style: none; display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid rgba(90,122,150,.15);">
+                        <li style="font-size: .76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>Cloud workspaces, no local setup</li>
+                        <li style="font-size: .76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>Lesson + agent terminal, side by side</li>
+                        <li style="font-size: .76rem; color: var(--mid); display: flex; gap: 10px; line-height: 1.55;"><span style="color: var(--rose); font-family: var(--mono);">+</span>Real agents on real systems</li>
+                    </ul>
                 </div>
             </div>
         </div>
     </section>
-</section>
-{% endblock %}
 
-{% block page_scripts %}
-<script src="{{ theme_url('js/sudo.js') }}"></script>
+    {# ─────────── 04 · FAQ ─────────── #}
+    <section style="padding-top: 40px; padding-bottom: 70px;">
+        <div class="container" style="max-width: 760px;">
+            <div style="text-align: center; margin-bottom: 30px;">
+                <div class="code-label" style="color: var(--rose);">FAQ</div>
+                <h2 class="sec-h" style="margin-bottom: 8px;">Two roles. Straight answers.</h2>
+            </div>
+            <div>
+                {% for f in faqs %}
+                <div style="border-bottom: 1px solid rgba(0,212,255,.06); padding: 1.1rem 0;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; gap: 16px;">
+                        <div style="font-family: var(--heading); font-size: .82rem; color: var(--white); letter-spacing: .02em; line-height: 1.5;">{{ f.q }}</div>
+                        <span style="font-family: var(--heading); font-size: .7rem; color: var(--cyan); flex-shrink: 0;">−</span>
+                    </div>
+                    <div style="font-size: .8rem; color: var(--mid); line-height: 1.75;">{{ f.a }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    {# ─────────── CLOSING CTA ─────────── #}
+    <section style="padding-top: 24px; padding-bottom: 96px;">
+        <div class="container" style="max-width: 760px;">
+            <div class="close-panel">
+
+                {# terminal bar #}
+                <div style="display: flex; align-items: center; gap: 8px; padding: 12px 20px; background: rgba(0,0,0,.4); border-bottom: 1px solid rgba(239,68,68,.22);">
+                    <span style="font-family: var(--mono); font-size: .72rem; color: var(--light);">&gt; sudo — join</span>
+                </div>
+
+                {# body #}
+                <div style="padding: clamp(52px, 6.5vw, 80px) clamp(24px, 5vw, 60px); text-align: center;">
+                    <h2 style="font-family: var(--heading); font-size: clamp(1.45rem, 3vw, 2.3rem); color: var(--white); letter-spacing: .005em; line-height: 1.32; margin: 0 auto 32px; max-width: 540px; text-wrap: balance;">
+                        RunHacks is live. <span style="color: var(--rose); text-shadow: 0 0 26px rgba(239,68,68,.45);">The rest is coming.</span>
+                    </h2>
+
+                    {# two buttons side by side #}
+                    <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
+                        <form method="post" action="/sudo/checkout" data-sk-no-spa>
+                            <input type="hidden" name="role" value="hacker">
+                            <button type="submit" class="close-cta ghost">./join --hacker<span class="pr">$8/mo</span>→</button>
+                        </form>
+                        <form method="post" action="/sudo/checkout" data-sk-no-spa>
+                            <input type="hidden" name="role" value="founder">
+                            <button type="submit" class="close-cta primary">./fund --founder<span class="pr">$256+</span>→</button>
+                        </form>
+                    </div>
+
+                    <p style="font-size: .74rem; color: var(--mid); margin: 22px auto 0; max-width: 440px; line-height: 1.6;">
+                        Hacker is monthly · Founder is one time · 14-day refund
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+</div>
 {% endblock %}

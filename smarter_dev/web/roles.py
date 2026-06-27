@@ -6,33 +6,24 @@ the database sync occurs during app startup.
 
 from skrift.auth import register_role
 
-# ── Sudo tiers ────────────────────────────────────────────────
+# ── Sudo offerings ────────────────────────────────────────────
 
 register_role(
-    "sudo-r",
+    "sudo-hacker",
     "use-scan",
     "use-deep-scan",
     "view-answer-history",
-    display_name="sudo r--",
-    description="Read-only sudo access to Scan tools",
+    display_name="sudo Hacker",
+    description="Hacker membership — every RunHacks challenge + Scan tools",
 )
 
 register_role(
-    "sudo-rw",
+    "sudo-founder",
     "use-scan",
     "use-deep-scan",
     "view-answer-history",
-    display_name="sudo rw-",
-    description="Read-write sudo access to Scan tools",
-)
-
-register_role(
-    "sudo-rwx",
-    "use-scan",
-    "use-deep-scan",
-    "view-answer-history",
-    display_name="sudo rwx",
-    description="Full sudo access to Scan tools",
+    display_name="sudo Founder",
+    description="Founder membership — everything in Hacker plus the inside seat",
 )
 
 # ── Member ────────────────────────────────────────────────────

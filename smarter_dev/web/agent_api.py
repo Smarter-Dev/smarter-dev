@@ -89,11 +89,10 @@ def _enforce_rate(bucket: dict[str, list[float]], key: str, limit: int) -> None:
 # Weekly quotas (the per-minute `_enforce_rate` above is for anti-spam burst
 # control; these gate sustained usage per role tier).
 #
-# Tiers (highest wins):
-#   sudo-rwx / administrator -> 50 questions/week, 10 follow-ups per answer
-#   sudo-rw                  -> 30 / 10
-#   sudo-r                   -> 20 / 10
-#   everyone else            ->  0 /  0  (asking is a founder benefit)
+# Roles (highest wins):
+#   sudo-founder / administrator -> 50 questions/week, 10 follow-ups per answer
+#   sudo-hacker                  -> 30 / 10
+#   everyone else                ->  0 /  0  (asking is a sudo benefit)
 # ---------------------------------------------------------------------------
 
 
@@ -101,13 +100,11 @@ def resources_weekly_quota(perms) -> tuple[int, int]:
     """Return ``(max_questions_per_week, max_followups_per_answer)``."""
     if (
         "administrator" in perms.permissions
-        or "sudo-rwx" in perms.roles
+        or "sudo-founder" in perms.roles
     ):
         return 50, 10
-    if "sudo-rw" in perms.roles:
+    if "sudo-hacker" in perms.roles:
         return 30, 10
-    if "sudo-r" in perms.roles:
-        return 20, 10
     return 0, 0
 
 

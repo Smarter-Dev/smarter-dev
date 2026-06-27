@@ -45,10 +45,10 @@
           <h2 class="hp-head">Get sudo</h2>
         </div>
         <ul class="hp-list">
-          <li>Founding membership, claimed before launch</li>
-          <li>Lock founding pricing before public rates open</li>
-          <li>Every gym course as it ships</li>
-          <li>Three tiers, from the gym to all of it</li>
+          <li>Every RunHacks challenge, the day it drops</li>
+          <li>Members-only Discord and the community</li>
+          <li>Founder role for those who fund the build</li>
+          <li>An early look at the gym and the Lab</li>
         </ul>
         <a class="hp-btn" href="/sudo">Get sudo<span class="hp-arr">→</span></a>
       </div>
@@ -418,50 +418,33 @@
     <div class="container">
       <div class="reveal sec-intro">
         <div class="eyebrow">The ground floor</div>
-        <h2 class="big-h" style="font-size:clamp(1.9rem,3.6vw,3rem);margin-bottom:1.4rem;">You're early. That's the offer.</h2>
+        <h2 class="big-h" style="font-size:clamp(1.9rem,3.6vw,3rem);margin-bottom:1.4rem;">Two ways in. You're early either way.</h2>
         <p class="lede muted">
-          Pay once, take the year, and renew at the founder rate: 33% off the public price, locked in.
-          No subscription, no auto-renewal. <strong>rwx 0day is the first {{ seats_total }} seats</strong>, with preview
-          access to Gym and the Lab while we shape them.
+          Run the challenges as a <strong>Hacker</strong>, or fund the build as a <strong>Founder</strong>.
+          The community stays free — sudo is the layer on top.
         </p>
       </div>
 
-      <div class="price-ladder reveal">
-        <div class="pl-head">
-          {% for tier in tiers %}
-          <div class="pl-hcell{% if tier.hero %} pl-hero{% endif %}">
-            <div class="pl-id"><span class="pl-perm">{{ tier.perm }}</span><span class="pl-tier">{{ tier.tier }}</span></div>
-            <span class="pl-tag">{{ tier.tag }}</span>
-          </div>
-          {% endfor %}
+      <div class="reveal" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:760px;margin:2.5rem auto 0;">
+        {% if hacker %}
+        <div style="display:flex;flex-direction:column;background:var(--surface);border:1px solid rgba(0,212,255,.16);border-top:2px solid var(--cyan);padding:26px 28px;">
+          <div style="font-family:var(--heading);font-size:.85rem;color:var(--white);letter-spacing:.06em;margin-bottom:12px;">HACKER</div>
+          <div style="font-family:var(--display);font-size:2.6rem;color:var(--white);font-weight:100;line-height:1;"><span style="font-size:1rem;vertical-align:.6em;color:var(--cyan);">$</span>{{ hacker.price_cents // 100 }}<span style="font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.1em;"> /MO</span></div>
+          <p style="font-size:.78rem;color:var(--mid);line-height:1.6;margin-top:14px;">Every RunHacks challenge, the day it drops. Members-only Discord.</p>
         </div>
+        {% endif %}
+        {% if founder %}
+        <div style="display:flex;flex-direction:column;background:radial-gradient(120% 90% at 50% -10%, rgba(239,68,68,.07), transparent 60%), var(--surface);border:1px solid rgba(239,68,68,.38);border-top:2px solid var(--rose);padding:26px 28px;">
+          <div style="font-family:var(--heading);font-size:.85rem;color:var(--white);letter-spacing:.06em;margin-bottom:12px;">FOUNDER</div>
+          <div style="font-family:var(--display);font-size:2.6rem;color:var(--white);font-weight:100;line-height:1;"><span style="font-size:1rem;vertical-align:.6em;color:var(--rose);">$</span>{{ founder.min_cents // 100 }}<span style="font-family:var(--heading);font-size:.55rem;color:var(--gray);letter-spacing:.1em;"> + ONCE</span></div>
+          <p style="font-size:.78rem;color:var(--mid);line-height:1.6;margin-top:14px;">Everything in Hacker, plus the inside seat and the Founder role.</p>
+        </div>
+        {% endif %}
+      </div>
 
-        <div class="pl-body">
-          {% for tier in tiers %}
-          <div class="pl-col{% if tier.hero %} pl-hero{% endif %}">
-            <div class="pl-cell pl-price"><div class="amt"><span class="cur">$</span>{{ tier.annual }}</div><div class="once">ONCE<br><b>1 YEAR ACCESS</b></div></div>
-            <div class="pl-cell pl-vs"><div class="pub"><s>${{ tier.base }}/yr</s><span>public price</span></div><div class="save">SAVE ${{ tier.base - tier.annual }} · RENEW AT 33% OFF</div></div>
-            <div class="pl-cell pl-avail">
-              {% if tier.hero %}
-              <div class="pl-seats">{% for s in seat_dots %}<span class="seat{% if s.claimed %} claimed{% endif %}"></span>{% endfor %}</div>
-              <div class="seatlabel">{{ seats_left }} of {{ seats_total }} seats left</div>
-              {% else %}
-              <div class="open">unlimited seats · open now</div>
-              {% endif %}
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-
-        <div class="pl-reserve">
-          <a class="pl-cta pl-cta-single" href="/sudo" data-sk-no-spa>./reserve --founder →</a>
-          <span class="pl-reserve-note">full tiers, features, and checkout on the pricing page</span>
-        </div>
-
-        <div class="pl-fine">
-          <div>// one seat per person · no subscription · 14-day full refund</div>
-          <div>// founder access closes when public monthly opens</div>
-        </div>
+      <div class="reveal" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px 20px;max-width:760px;margin:24px auto 0;">
+        <span style="font-family:var(--mono);font-size:.68rem;color:var(--gray);letter-spacing:.02em;">full details and checkout on the pricing page</span>
+        <a class="btn-glow" href="/sudo" data-sk-no-spa>See both ways in →</a>
       </div>
     </div>
   </section>
