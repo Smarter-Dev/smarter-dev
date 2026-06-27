@@ -4552,6 +4552,11 @@ class HandlerRun(Base):
     trigger_context: Mapped[dict] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
     )
+    # 'standard' (member ChannelHandler) or 'admin' (AdminHandler) — handler_id
+    # references the matching table by kind.
+    handler_kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="standard", server_default="standard"
+    )
     outcome: Mapped[str] = mapped_column(String(20), nullable=False)
     cap: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
     error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -4559,39 +4564,44 @@ class HandlerRun(Base):
     web_searches: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     web_reads: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     agent_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Moderation actions (ban/kick/timeout/delete) — admin handlers only.
+    mod_actions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
-class PrivilegedRoutine(Base):
-    """Admin-only routine running a structured moderation action.
+class AdminHandler(Base):
+    """Admin-only sandboxed handler with moderation powers.
 
-    A completely separate tier from ``ChannelHandler``: created only by the
-    admin slash command, never readable or writable by the chatbot path. The
-    action is a structured spec (``{kind: timeout|kick|ban|delete, ...}``), not
-    a free-form script — no author/judge, no sandbox.
+    A separate tier from ``ChannelHandler``: created only via the admin slash
+    command (author-written script, never editable by regular members). The
+    script may call moderation external functions (ban/kick/timeout/delete) and
+    send to any channel. ``channel_ids`` is the scope — empty/null means ALL
+    channels in the guild; otherwise the listed channel ids.
     """
 
-    __tablename__ = "privileged_routines"
+    __tablename__ = "admin_handlers"
     __table_args__ = (
         CheckConstraint(
             "trigger_type IN ('message', 'reaction', 'schedule', 'timer')",
-            name="ck_privileged_routines_trigger_type",
+            name="ck_admin_handlers_trigger_type",
         ),
-        Index("ix_privileged_routines_channel_id", "channel_id"),
+        Index("ix_admin_handlers_guild_id", "guild_id"),
     )
 
     id: Mapped[UUID] = mapped_column(
         PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
     )
     guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
-    channel_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     trigger_type: Mapped[str] = mapped_column(String(20), nullable=False)
     settings: Mapped[dict] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
     )
-    action: Mapped[dict] = mapped_column(
-        JSON, nullable=False, default=dict, server_default="{}"
+    # Scope: [] / null = all channels in the guild; else the listed channel ids.
+    channel_ids: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=list, server_default="[]"
     )
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    script: Mapped[str] = mapped_column(Text, nullable=False)
     created_by_admin: Mapped[str] = mapped_column(String(20), nullable=False)
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
