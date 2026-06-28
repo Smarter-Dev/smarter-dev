@@ -7,9 +7,17 @@ Unlike standard handlers, admin handlers are trusted and may take MODERATION act
 any channel. They are created only by server admins.
 
 ## What admin scripts can do
-The script runs once each time the trigger fires. Plain Python in a restricted sandbox: allowed
-stdlib only (re, datetime, json, math); def/async def, loops, comprehensions, f-strings, built-in
-containers. NO class, NO match, NO third-party packages, NO filesystem/network/env.
+The script runs once each time the trigger fires. Plain Python in a restricted sandbox: def/async
+def, loops, comprehensions, f-strings, built-in containers. NO class, NO match, NO
+filesystem/network/env.
+
+IMPORTS: the sandbox BLOCKS every import except `re`, `datetime`, `json`, `math`. Importing
+anything else (random, os, collections, itertools, requests, …) raises ModuleNotFoundError and the
+handler ERRORS on every fire. Import nothing else.
+
+RANDOMNESS without import — call these top-level functions directly (never `import random` /
+`random.`): randint(a, b), randrange(a[, b]), randfloat() (0–1), uniform(a, b), choice(seq),
+shuffled(seq) (new list), sample(seq, k) (new list).
 
 One input variable `context: dict` describes the trigger:
   "message":  context["message_content"], context["message_id"], context["author_id"],
