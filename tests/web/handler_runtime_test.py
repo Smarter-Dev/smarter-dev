@@ -228,3 +228,27 @@ async def test_admin_mod_action_cap():
     assert result.outcome == "cap_exceeded"
     assert result.cap == "mod_actions"
     assert len(actor.calls) == 3
+
+
+async def test_random_globals_available_without_import():
+    # Deterministic picks so the assertion is stable: randint(5,5)=5,
+    # choice/shuffled/sample over singletons/known sizes.
+    script = (
+        "r = randint(5, 5)\n"
+        'c = choice(["only"])\n'
+        "s = shuffled([1])\n"
+        "p = sample([1, 2, 3], 2)\n"
+        'await send_message(f"{r}{c}{len(s)}{len(p)}")\n'
+    )
+    result, emitter, _ = await _run(script)
+    assert result.outcome == "ok", result.error
+    assert emitter.messages[0][1] == "5only12"
+
+
+async def test_import_random_still_errors():
+    # random is injected as globals; `import random` must still fail loud so the
+    # judge's "reject disallowed imports" guidance matches runtime reality.
+    result, emitter, _ = await _run("import random\nawait send_message('x')\n")
+    assert result.outcome == "error"
+    assert "random" in (result.error or "")
+    assert emitter.messages == []

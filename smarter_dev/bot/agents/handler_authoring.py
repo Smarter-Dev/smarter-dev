@@ -23,7 +23,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.providers.google import GoogleProvider
 
 from smarter_dev.shared.config import get_settings
@@ -178,6 +178,13 @@ def _build_google_model(model_id: str) -> GoogleModel:
     return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
 
 
+# Author and judge both think at MEDIUM: writing a sandbox-correct script and
+# catching subtle violations (e.g. a disallowed import) is worth the deliberation.
+_HANDLER_THINKING = GoogleModelSettings(
+    google_thinking_config={"thinking_level": "MEDIUM"}
+)
+
+
 _author_agent: Agent[_AuthorDeps, str] | None = None
 _judge_agent: Agent[None, JudgeVerdict] | None = None
 
@@ -190,6 +197,7 @@ def _get_author_agent() -> Agent[_AuthorDeps, str]:
             deps_type=_AuthorDeps,
             system_prompt=AUTHOR_PROMPT,
             tools=[_list_channel_emojis],
+            model_settings=_HANDLER_THINKING,
         )
     return _author_agent
 
@@ -201,6 +209,7 @@ def _get_judge_agent() -> Agent[None, JudgeVerdict]:
             _build_google_model(get_settings().handler_judge_model),
             output_type=JudgeVerdict,
             system_prompt=JUDGE_PROMPT,
+            model_settings=_HANDLER_THINKING,
         )
     return _judge_agent
 
@@ -343,6 +352,7 @@ def _get_admin_author_agent() -> Agent[_AdminAuthorDeps, AdminHandlerPlan]:
             output_type=AdminHandlerPlan,
             system_prompt=ADMIN_AUTHOR_PROMPT,
             tools=[_list_channels],
+            model_settings=_HANDLER_THINKING,
         )
     return _admin_author_agent
 
@@ -354,6 +364,7 @@ def _get_admin_judge_agent() -> Agent[None, JudgeVerdict]:
             _build_google_model(get_settings().handler_judge_model),
             output_type=JudgeVerdict,
             system_prompt=ADMIN_JUDGE_PROMPT,
+            model_settings=_HANDLER_THINKING,
         )
     return _admin_judge_agent
 
