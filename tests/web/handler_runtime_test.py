@@ -252,3 +252,42 @@ async def test_import_random_still_errors():
     assert result.outcome == "error"
     assert "random" in (result.error or "")
     assert emitter.messages == []
+
+
+async def test_datetime_now_returns_host_clock():
+    # datetime.now(tz) is an OS call Monty refuses unless the host wires a clock;
+    # _clock_os grants it. A script must be able to compute a recency window
+    # against an ISO timestamp from context — the canonical "new account" guard.
+    script = (
+        "import datetime\n"
+        "now = datetime.datetime.now(datetime.timezone.utc)\n"
+        'joined = datetime.datetime.fromisoformat("2000-01-01T00:00:00+00:00")\n'
+        "age = (now - joined).total_seconds()\n"
+        'await send_message("old" if age > 86400 else "new")\n'
+    )
+    result, emitter, _ = await _run(script)
+    assert result.outcome == "ok", result.error
+    assert emitter.messages[0][1] == "old"  # joined in year 2000 -> well past 24h
+
+
+async def test_date_today_available():
+    script = (
+        "import datetime\n"
+        "y = datetime.date.today().year\n"
+        'await send_message("yes" if y >= 2026 else "no")\n'
+    )
+    result, emitter, _ = await _run(script)
+    assert result.outcome == "ok", result.error
+    assert emitter.messages[0][1] == "yes"
+
+
+async def test_filesystem_still_blocked_with_clock_wired():
+    # Wiring the clock OS callback must not crack open any other OS surface:
+    # filesystem reads still fail loud.
+    script = (
+        "from pathlib import Path\n"
+        'await send_message(Path("/etc/passwd").read_text())\n'
+    )
+    result, emitter, _ = await _run(script)
+    assert result.outcome == "error"
+    assert emitter.messages == []

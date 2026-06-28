@@ -14,6 +14,11 @@ Importing ANYTHING else (random, os, sys, collections, itertools, string, reques
 ModuleNotFoundError at runtime and the handler ERRORS on every single fire. Do not import any
 other module, and do not import re/datetime/json/math unless you actually use them.
 
+CLOCK: the current time IS available — `datetime.datetime.now(datetime.timezone.utc)` returns the
+real now, and `datetime.date.today()` works too (after `import datetime`). Pass an explicit
+timezone (UTC) so comparisons against ISO timestamps in `context` are correct. Date/time math
+(subtracting two datetimes, `.total_seconds()`, `fromisoformat`) all work in the sandbox.
+
 RANDOMNESS is available WITHOUT any import, as top-level functions (do NOT write `random.` and do
 NOT `import random` — that would fail). Call these directly:
   randint(a, b) -> int in [a, b]      randrange(a) / randrange(a, b) -> int
