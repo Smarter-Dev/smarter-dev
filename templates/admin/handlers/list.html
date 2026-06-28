@@ -27,10 +27,39 @@
   .hx-code { margin: .5rem 0; border-radius: .5rem; max-height: 480px; overflow: auto; }
   .hx-code code { font-size: .85rem; }
   .hx-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .hx-errpill { background: rgba(220,53,69,.18); color: #e35d6a; border: 1px solid rgba(220,53,69,.4);
+                border-radius: 1rem; padding: .05rem .5rem; font-size: .75rem; font-weight: 600; white-space: nowrap; }
+  .hx-errors { margin: .5rem 0; }
+  .hx-errors > summary { cursor: pointer; font-size: .9rem; color: #e35d6a; }
+  .hx-errtable { width: 100%; border-collapse: collapse; margin-top: .5rem; font-size: .82rem; }
+  .hx-errtable th, .hx-errtable td { text-align: left; padding: .3rem .5rem; vertical-align: top;
+                border-bottom: 1px solid rgba(127,127,127,.18); }
+  .hx-errtable th { font-weight: 600; opacity: .7; }
+  .hx-errtable td.hx-when { white-space: nowrap; opacity: .8; }
+  .hx-errtable td.hx-detail { font-family: ui-monospace, monospace; word-break: break-word; }
 </style>
 {% endblock %}
 
 {% block admin_content %}
+{% macro error_log_block(errors) %}
+  {% if errors %}
+  <details class="hx-errors">
+    <summary>⚠️ {{ errors | length }} error{{ '' if errors | length == 1 else 's' }} in the last {{ error_log_days }} days</summary>
+    <table class="hx-errtable">
+      <thead><tr><th>When (UTC)</th><th>Outcome</th><th>Detail</th></tr></thead>
+      <tbody>
+        {% for e in errors %}
+        <tr>
+          <td class="hx-when">{{ e.fired_at.strftime('%Y-%m-%d %H:%M') }}</td>
+          <td>{{ e.cap or e.outcome }}</td>
+          <td class="hx-detail">{{ e.error or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
+{% endmacro %}
 <hgroup>
   <h1>Handlers</h1>
   <p>Registered channel handlers, by guild and channel. Expand one to review its script.</p>
@@ -90,10 +119,12 @@
     {% if view == 'admin' %}
     <h2 style="margin-top:0;">Admin handlers</h2>
     {% for h in admin_handlers %}
+    {% set errs = error_log.get(h.id | string, []) %}
     <details class="hx-handler">
       <summary>
         <span class="sk-pill">{{ h.trigger_type }}</span>
         <span class="hx-desc">{{ h.description }}</span>
+        {% if errs %}<span class="hx-errpill">{{ errs | length }} err</span>{% endif %}
         {% if not h.enabled %}<span class="sk-pill sk-pill-draft">disabled</span>{% endif %}
       </summary>
       <div class="hx-body">
@@ -104,6 +135,7 @@
           <dt>Settings</dt><dd><code>{{ h.settings | tojson }}</code></dd>
           <dt>Memory</dt><dd><code>{{ h.memory | tojson }}</code></dd>
         </dl>
+        {{ error_log_block(errs) }}
         <pre class="hx-code"><code class="language-python">{{ h.script }}</code></pre>
         <div class="hx-actions">
           {% if h.memory %}
@@ -127,10 +159,12 @@
     {% elif selected_channel_id %}
     <h2 style="margin-top:0;">#{{ selected_channel_name }}</h2>
     {% for h in handlers %}
+    {% set errs = error_log.get(h.id | string, []) %}
     <details class="hx-handler">
       <summary>
         <span class="sk-pill">{{ h.trigger_type }}</span>
         <span class="hx-desc">{{ h.description }}</span>
+        {% if errs %}<span class="hx-errpill">{{ errs | length }} err</span>{% endif %}
         {% if not h.enabled %}<span class="sk-pill sk-pill-draft">disabled</span>{% endif %}
       </summary>
       <div class="hx-body">
@@ -142,6 +176,7 @@
           <dt>Created by</dt><dd>{{ h.created_by }}</dd>
           <dt>Created</dt><dd>{{ h.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</dd>
         </dl>
+        {{ error_log_block(errs) }}
         <pre class="hx-code"><code class="language-python">{{ h.script }}</code></pre>
         <div class="hx-actions">
           {% if h.memory %}
