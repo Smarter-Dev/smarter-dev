@@ -8,6 +8,7 @@ script. Admin-only; supports deleting either kind (cancelling any queued job).
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from litestar import Controller, Request, get, post
@@ -21,7 +22,56 @@ from skrift.auth.guards import auth_guard, Permission
 from skrift.flash import flash_error, flash_success, get_flash_messages
 
 from smarter_dev.web.admin.discord import get_discord_client
-from smarter_dev.web.models import AdminHandler, ChannelHandler
+from smarter_dev.web.models import AdminHandler, ChannelHandler, HandlerRun
+
+# How far back the per-handler error log reaches, and how many rows to keep per
+# handler so a chronically-failing handler can't blow up the page.
+ERROR_LOG_DAYS = 7
+ERROR_LOG_PER_HANDLER = 50
+
+
+def _group_error_runs(
+    rows: list[HandlerRun], per_handler: int = ERROR_LOG_PER_HANDLER
+) -> dict[str, list[dict]]:
+    """Group non-ok runs (already newest-first) by handler id, keeping the most
+    recent ``per_handler`` of each."""
+    grouped: dict[str, list[dict]] = {}
+    for run in rows:
+        bucket = grouped.setdefault(str(run.handler_id), [])
+        if len(bucket) < per_handler:
+            bucket.append(
+                {
+                    "fired_at": run.fired_at,
+                    "outcome": run.outcome,
+                    "cap": run.cap,
+                    "error": run.error,
+                }
+            )
+    return grouped
+
+
+async def _recent_error_log(
+    db_session: AsyncSession, handler_ids: list[UUID]
+) -> dict[str, list[dict]]:
+    """Fetch each handler's non-ok runs from the last ``ERROR_LOG_DAYS`` days."""
+    if not handler_ids:
+        return {}
+    since = datetime.now(timezone.utc) - timedelta(days=ERROR_LOG_DAYS)
+    rows = list(
+        (
+            await db_session.execute(
+                select(HandlerRun)
+                .where(
+                    HandlerRun.handler_id.in_(handler_ids),
+                    HandlerRun.fired_at >= since,
+                    HandlerRun.outcome != "ok",
+                )
+                .order_by(HandlerRun.fired_at.desc())
+                .limit(1000)
+            )
+        ).scalars().all()
+    )
+    return _group_error_runs(rows)
 
 
 class HandlersAdminController(Controller):
@@ -158,6 +208,15 @@ class HandlersAdminController(Controller):
                         ).scalars().all()
                     )
 
+        # Last-week error log for every handler currently on screen (channel
+        # member handlers + the guild's admin handlers).
+        error_log = await _recent_error_log(
+            db_session,
+            [h.id for h in handlers] + [r.id for r in admin_rows]
+            if selected_guild_id
+            else [],
+        )
+
         return TemplateResponse(
             "admin/handlers/list.html",
             context={
@@ -170,6 +229,8 @@ class HandlersAdminController(Controller):
                 "admin_handlers": admin_handlers,
                 "admin_count": len(admin_handlers),
                 "view": view,
+                "error_log": error_log,
+                "error_log_days": ERROR_LOG_DAYS,
                 "flash_messages": get_flash_messages(request),
                 **ctx,
             },
