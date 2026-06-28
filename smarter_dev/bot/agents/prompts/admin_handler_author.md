@@ -15,6 +15,11 @@ IMPORTS: the sandbox BLOCKS every import except `re`, `datetime`, `json`, `math`
 anything else (random, os, collections, itertools, requests, …) raises ModuleNotFoundError and the
 handler ERRORS on every fire. Import nothing else.
 
+CLOCK: current time IS available — `datetime.datetime.now(datetime.timezone.utc)` and
+`datetime.date.today()` work (after `import datetime`). Always pass UTC so comparisons against ISO
+timestamps in `context` (e.g. `author_joined_at`) are correct; datetime subtraction,
+`.total_seconds()`, and `fromisoformat` all work.
+
 RANDOMNESS without import — call these top-level functions directly (never `import random` /
 `random.`): randint(a, b), randrange(a[, b]), randfloat() (0–1), uniform(a, b), choice(seq),
 shuffled(seq) (new list), sample(seq, k) (new list).

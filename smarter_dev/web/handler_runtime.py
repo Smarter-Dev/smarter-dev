@@ -19,6 +19,10 @@ Script-facing surface (Monty external functions):
 Script-facing data (Monty input): ``context`` — a plain dict describing the
 trigger (its keys depend on ``context["trigger_type"]``).
 
+The wall clock is available: scripts may call ``datetime.datetime.now(tz)`` and
+``datetime.date.today()`` (wired through ``_clock_os``). Every other OS surface —
+filesystem, env — stays blocked.
+
 Gathering is agent-only: the script itself has no web access. A spawned agent
 returns plaintext and cannot emit. The budget bounds both the agent's *input*
 (``enforce_agent_context``, regardless of ``has_tools``) and any searches/reads
@@ -27,6 +31,7 @@ it performs (shared with the script's pool).
 
 from __future__ import annotations
 
+import datetime
 import logging
 import random
 import time
@@ -65,6 +70,26 @@ AgentRunner = Callable[[str, bool, HandlerBudget], Awaitable[str]]
 
 async def _no_agent(prompt: str, has_tools: bool, budget: HandlerBudget) -> str:
     raise RuntimeError("no agent runner configured for this handler execution")
+
+
+def _clock_os(
+    function_name: str, args: tuple[Any, ...], kwargs: dict[str, Any] | None = None
+) -> Any:
+    """Monty ``os=`` callback that grants ONLY the wall-clock functions.
+
+    Monty treats ``datetime.now(tz)`` and ``date.today()`` as OS calls (they are
+    non-deterministic, so the sandbox refuses them — ``datetime.now`` is "not
+    implemented" — unless a host opts in). We answer just those two from the real
+    host clock and return ``NOT_HANDLED`` for everything else, so filesystem, env,
+    and every other OS surface stay blocked exactly as before. Scripts get the
+    natural ``datetime.datetime.now(datetime.timezone.utc)`` with no special API.
+    """
+    if function_name == "datetime.now":
+        tz = args[0] if args else None
+        return datetime.datetime.now(tz=tz)
+    if function_name == "date.today":
+        return datetime.date.today()
+    return monty.NOT_HANDLED
 
 
 def _random_functions() -> dict[str, Callable[..., Any]]:
@@ -310,6 +335,7 @@ async def run_handler_script(
             inputs={"context": context},
             limits=limits,
             external_functions=execution.external_functions(),
+            os=_clock_os,
         )
     except CapExceeded as exc:  # defensive: a direct (non-sandbox) breach
         logger.info("handler hit cap %s (channel=%s)", exc.cap, channel_id)
