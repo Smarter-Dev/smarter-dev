@@ -25,8 +25,9 @@ from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_skrift_db_session_context
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.handler_budget import HandlerBudget
-from smarter_dev.web.handler_caps import WindowedLimiter
+from smarter_dev.web.handler_caps import ERROR_NOTICE_WINDOW_SECONDS, WindowedLimiter
 from smarter_dev.web.handler_emitter import DiscordEmitter
+from smarter_dev.web.handler_notify import notify_handler_error
 from smarter_dev.web.handler_schedule import next_fire_at
 from smarter_dev.web.models import ChannelHandler, HandlerRun
 
@@ -72,7 +73,8 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
 
     budget = HandlerBudget()
     emitter = DiscordEmitter(bot_token=settings.discord_bot_token)
-    limiter = WindowedLimiter(redis=get_redis_client())
+    redis = get_redis_client()
+    limiter = WindowedLimiter(redis=redis)
 
     result = await run_handler_script(
         script,
@@ -109,6 +111,18 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
             if record is not None:
                 record.memory = result.memory
         await session.commit()
+
+    # On an error (not a cap breach), tell the channel so it can be fixed.
+    if result.outcome == "error":
+        await notify_handler_error(
+            emitter=emitter,
+            limiter=WindowedLimiter(
+                redis=redis, window_seconds=ERROR_NOTICE_WINDOW_SECONDS
+            ),
+            handler_id=str(handler_id),
+            channel_id=channel_id,
+            error=result.error,
+        )
 
     if trigger_type == "schedule":
         await _reschedule(handler_id, handler_settings)
