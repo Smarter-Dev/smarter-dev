@@ -4540,6 +4540,8 @@ class HandlerRun(Base):
             name="ck_handler_runs_outcome",
         ),
         Index("ix_handler_runs_handler_id", "handler_id"),
+        # Serves the admin error log: a handler's recent runs by time.
+        Index("ix_handler_runs_handler_id_fired_at", "handler_id", "fired_at"),
     )
 
     id: Mapped[UUID] = mapped_column(
