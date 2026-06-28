@@ -28,6 +28,7 @@ it performs (shared with the script's pool).
 from __future__ import annotations
 
 import logging
+import random
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -64,6 +65,27 @@ AgentRunner = Callable[[str, bool, HandlerBudget], Awaitable[str]]
 
 async def _no_agent(prompt: str, has_tools: bool, budget: HandlerBudget) -> str:
     raise RuntimeError("no agent runner configured for this handler execution")
+
+
+def _random_functions() -> dict[str, Callable[..., Any]]:
+    """Randomness as flat top-level globals, since Monty blocks ``import random``.
+
+    Exposed as plain callables (Monty can only inject flat external functions, not
+    a dotted ``random.`` namespace). These are pure compute — no budget cost — and
+    return new values rather than mutating in place (``shuffled``/``sample``),
+    which keeps them correct across the sandbox boundary.
+    """
+    return {
+        "randint": lambda a, b: random.randint(int(a), int(b)),
+        "randrange": lambda a, b=None: (
+            random.randrange(int(a)) if b is None else random.randrange(int(a), int(b))
+        ),
+        "randfloat": random.random,
+        "uniform": lambda a, b: random.uniform(float(a), float(b)),
+        "choice": lambda seq: random.choice(list(seq)),
+        "shuffled": lambda seq: random.sample(list(seq), len(list(seq))),
+        "sample": lambda seq, k: random.sample(list(seq), int(k)),
+    }
 
 
 @dataclass
@@ -113,6 +135,8 @@ class HandlerExecution:
             "memory_all": self._guard(self._memory_all),
             "memory_delete": self._guard(self._memory_delete),
         }
+        # Randomness as flat globals (Monty can't `import random`); pure compute.
+        funcs.update(_random_functions())
         if self.actor is not None:  # admin handler — moderation powers
             funcs.update(
                 {

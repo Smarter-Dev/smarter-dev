@@ -30,6 +30,13 @@ HANDLER_FIRES_PER_MIN_REACTION = 4
 # need a high fire ceiling; the global agent/min cap still bounds expensive work.
 ADMIN_FIRES_PER_MIN = 120
 
+# When a handler fire errors we post a notice in the channel — but a broken
+# handler errors on every fire, so throttle the notice hard: at most one per
+# handler per window. The window is long enough not to nag, short enough that the
+# channel learns the handler is broken.
+ERROR_NOTICE_WINDOW_SECONDS = 30 * 60
+ERROR_NOTICES_PER_WINDOW = 1
+
 
 def channel_message_key(channel_id: str) -> str:
     return f"hcap:chanmsg:{channel_id}"
@@ -41,6 +48,10 @@ def global_agent_key() -> str:
 
 def handler_fire_key(handler_id: str) -> str:
     return f"hcap:fire:{handler_id}"
+
+
+def handler_error_notice_key(handler_id: str) -> str:
+    return f"hcap:errnotice:{handler_id}"
 
 
 def fires_per_min_for_trigger(trigger_type: str) -> int:

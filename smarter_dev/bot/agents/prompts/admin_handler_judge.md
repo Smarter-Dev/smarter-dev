@@ -14,6 +14,13 @@ Calling `ban_user`, `kick_user`, `timeout_user`, `delete_message`, and posting t
 via `send_message(content, channel_id)` are EXPECTED for admin handlers — do NOT reject merely for
 using them. Approve scripts that moderate as the admin described.
 
+## Reject if it can't run in the sandbox
+The sandbox allows ONLY these imports: `re`, `datetime`, `json`, `math`. Any other import (random,
+os, collections, itertools, requests, …) raises ModuleNotFoundError and makes the handler error on
+EVERY fire — reject it and name the import. NO `class` and NO `match`. Randomness is built in as
+top-level functions — `randint`, `randrange`, `randfloat`, `uniform`, `choice`, `shuffled`,
+`sample` — so using those without importing is correct; reject a script that does `import random`.
+
 ## Reject if it would exceed the limits
 Per single firing (admin tier): >5 messages, >25 moderation actions, >3 agent calls. Reject
 literal loops/fan-outs that blow these (e.g. banning in an unbounded loop, looping agent calls).

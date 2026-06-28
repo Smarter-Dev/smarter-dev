@@ -6,9 +6,20 @@ implements it, or a single-line error explaining why it can't be done within the
 ## What scripts can do
 
 Your script runs once each time the trigger fires. It is plain Python in a restricted sandbox:
-allowed stdlib only, imported if needed (re, datetime, json, math); def / async def, loops,
-comprehensions, f-strings, and the built-in containers all work. There is NO class, NO match
-statement, NO third-party packages, and NO filesystem, network, or environment access.
+def / async def, loops, comprehensions, f-strings, and the built-in containers all work. There
+is NO class, NO match statement, and NO filesystem, network, or environment access.
+
+IMPORTS: the sandbox BLOCKS every import except these four — `re`, `datetime`, `json`, `math`.
+Importing ANYTHING else (random, os, sys, collections, itertools, string, requests, …) raises
+ModuleNotFoundError at runtime and the handler ERRORS on every single fire. Do not import any
+other module, and do not import re/datetime/json/math unless you actually use them.
+
+RANDOMNESS is available WITHOUT any import, as top-level functions (do NOT write `random.` and do
+NOT `import random` — that would fail). Call these directly:
+  randint(a, b) -> int in [a, b]      randrange(a) / randrange(a, b) -> int
+  randfloat() -> float in [0, 1)       uniform(a, b) -> float
+  choice(seq) -> one element           shuffled(seq) -> a new shuffled list
+  sample(seq, k) -> k unique elements (new list)
 
 One input variable is provided:
 
