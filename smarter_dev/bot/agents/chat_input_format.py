@@ -149,6 +149,7 @@ def render_metadata_xml(
     now_utc: datetime,
     topic: str | None,
     notes: str | None,
+    image_quota: dict | None = None,
 ) -> str:
     """Render the per-turn metadata block (me / channel / now / topic / notes)."""
     return _render_metadata(
@@ -157,12 +158,14 @@ def render_metadata_xml(
         now_utc=now_utc,
         topic=topic,
         notes=notes,
+        image_quota=image_quota,
     )
 
 
 def build_agent_call(
     agent_input: InitialAgentInput | FollowupAgentInput,
     prior_history: list[ModelMessage],
+    image_quota: dict | None = None,
 ) -> tuple[str, list[ModelMessage]]:
     """Convert a turn input into (user_prompt, message_history) for ``agent.run``.
 
@@ -197,6 +200,7 @@ def build_agent_call(
                 now_utc=agent_input.now_utc,
                 topic=agent_input.topic,
                 notes=agent_input.notes,
+                image_quota=image_quota,
             ),
             history,
         )
@@ -219,6 +223,7 @@ def build_agent_call(
         now_utc=agent_input.now_utc,
         topic=agent_input.topic,
         notes=agent_input.notes,
+        image_quota=image_quota,
     )
     latest_xml = render_message_xml(latest, me=me, authors=authors)
     user_prompt = f"{metadata}\n\n{latest_xml}"
@@ -232,6 +237,7 @@ def _render_metadata(
     now_utc: datetime,
     topic: str | None,
     notes: str | None,
+    image_quota: dict | None = None,
 ) -> str:
     chunks: list[str] = []
     chunks.append(_empty_tag("me", {"user-id": me.user_id, "username": me.username}))
@@ -246,6 +252,21 @@ def _render_metadata(
         )
     )
     chunks.append(_empty_tag("now", {"utc": _format_utc(now_utc)}))
+    if image_quota is not None:
+        # How many technical images can still be generated this hour, and when
+        # the window resets — so the agent knows up front whether it can draw.
+        remaining = image_quota.get("remaining")
+        limit = image_quota.get("limit")
+        chunks.append(
+            _empty_tag(
+                "image-quota",
+                {
+                    "remaining": None if remaining is None else str(remaining),
+                    "limit": None if limit is None else str(limit),
+                    "resets-utc": image_quota.get("resets_at"),
+                },
+            )
+        )
     if topic:
         chunks.append(_text_tag("topic", {}, topic))
     if notes:

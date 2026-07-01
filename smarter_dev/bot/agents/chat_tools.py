@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import logging
 import mimetypes
-from dataclasses import dataclass
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from typing import Any
 
 import hikari
@@ -17,10 +18,15 @@ import httpx
 import pydantic_monty as monty
 from pydantic_ai import RunContext
 
+from smarter_dev.bot.agents.image_generator import (
+    generate_image as generate_image_bytes,
+)
+from smarter_dev.bot.agents.image_prompt_reviewer import review_image_prompt
 from smarter_dev.bot.agents.media_reader import describe_media
 from smarter_dev.bot.agents.url_registry import resolve_escaped_url
 from smarter_dev.bot.agents.web_summarizer import summarize_web_content
 from smarter_dev.bot.utils import web_fetch
+from smarter_dev.shared.config import get_settings
 from smarter_dev.web.research_tools import brave_search
 
 # Reads longer than this are truncated before summarization to bound the
@@ -79,15 +85,31 @@ COMMON_UNICODE_EMOJIS = [
 
 
 @dataclass
+class GeneratedImage:
+    """An image produced by ``generate_image`` this turn, awaiting attachment.
+
+    The engine drains ``ChatDeps.pending_images`` after the run and attaches
+    each to the reply message it sends.
+    """
+
+    data: bytes
+    mime_type: str
+    filename: str
+
+
+@dataclass
 class ChatDeps:
     """Per-run dependencies injected into chat agent tool calls."""
 
     bot: Any  # hikari.GatewayBot — typed as Any so tests can pass a mock
     channel_id: int
     guild_id: int
-    # APIClient for the handler-management tools; built from settings on demand
-    # when not supplied (see smarter_dev.bot.agents.handler_tools).
+    # APIClient for the handler-management + image-quota tools; built from
+    # settings on demand when not supplied (see handler_tools / _quota_api).
     api_client: Any = None
+    # Images generated this turn, drained by the engine and attached to the
+    # outgoing reply. Fresh per run (a new ChatDeps is built each turn).
+    pending_images: list[GeneratedImage] = field(default_factory=list)
 
 
 # -- web search / read ---------------------------------------------------
@@ -399,6 +421,149 @@ async def run_code(ctx: RunContext[ChatDeps], reason: str, code: str) -> str:
     return out
 
 
+# -- image generation ----------------------------------------------------
+
+IMAGE_QUOTA_PATH = "/image-generations"
+_MIME_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
+
+
+@asynccontextmanager
+async def _quota_api(ctx: RunContext[ChatDeps]):
+    """Yield an APIClient for the image-quota endpoints.
+
+    Reuse a client injected on the deps (engine/tests) and leave it open;
+    otherwise build one from settings and close it on exit.
+    """
+    if ctx.deps.api_client is not None:
+        yield ctx.deps.api_client
+        return
+    from smarter_dev.bot.services.api_client import APIClient
+
+    settings = get_settings()
+    api = APIClient(base_url=settings.api_base_url, api_key=settings.bot_api_key)
+    try:
+        yield api
+    finally:
+        await api.close()
+
+
+def _format_remaining(status: dict) -> str:
+    """One-line budget summary for the agent, explicit about when to stop."""
+    remaining = int(status.get("remaining", 0))
+    limit = int(status.get("limit", 0))
+    resets_at = status.get("resets_at")
+    retry = status.get("retry_after_seconds")
+    if remaining > 0:
+        line = f"{remaining} of {limit} image generations remaining this hour."
+        if resets_at:
+            line += f" This hour's window resets at {resets_at}."
+        return line
+    when = f"at {resets_at}" if resets_at else "when the hour resets"
+    mins = f" (~{max(1, round(int(retry) / 60))} min)" if retry else ""
+    return (
+        f"0 of {limit} image generations remaining this hour. The next image "
+        f"can be generated {when}{mins} — do NOT call generate_image again "
+        f"until then."
+    )
+
+
+async def generate_image(ctx: RunContext[ChatDeps], prompt: str) -> str:
+    """Generate an image and attach it to your reply this turn.
+
+    STRICT policy: only diagrams/illustrations whose SUBJECT is SOFTWARE,
+    COMPUTER SCIENCE, or MATH (data structures, algorithms, architecture/
+    protocol diagrams, state machines, DB schemas, UML, math/geometry figures,
+    complexity or loss curves, logic/truth tables). A chart counts ONLY if it
+    plots code/CS/math data. NEVER for other-science diagrams (biology/anatomy,
+    physics, chemistry), non-technical charts (finance, stocks, demographics,
+    sports), politics, off-topic subjects, art/decoration, memes, logos, or real
+    people — those are rejected.
+
+    ``prompt`` is a detailed description of the image to draw. It is reviewed by
+    a separate system before anything is generated; if it's rejected you get an
+    explanation back and NO image (no quota spent) — don't retry the same
+    prompt. Generation is limited to a few images per hour per server; the
+    return value always tells you how many remain and, when none do, when the
+    next one is allowed. Respect it — once it says 0 remain, do not call this
+    again until the stated time. On success the image is attached to the message
+    you send this turn, so introduce/explain it in your reply.
+    """
+    guild_id = str(ctx.deps.guild_id)
+    async with _quota_api(ctx) as api:
+        # 1. Cheap gate: if the hour's budget is already spent, don't spend a
+        #    review call or a generation — tell the agent when to try again.
+        try:
+            status = (
+                await api.get(
+                    f"{IMAGE_QUOTA_PATH}/quota", params={"guild_id": guild_id}
+                )
+            ).json()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("generate_image: quota check failed: %s", e)
+            return "Couldn't check the image budget just now — try again shortly."
+        if int(status.get("remaining", 0)) <= 0:
+            return f"No image generated. {_format_remaining(status)}"
+
+        # 2. Independent policy review — a rejection here costs no quota.
+        try:
+            decision = await review_image_prompt(prompt)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("generate_image: prompt review failed: %s", e)
+            return "Couldn't review the image prompt just now — try again shortly."
+        if not decision.approved:
+            return (
+                f"Image request rejected (no image generated, no quota spent): "
+                f"{decision.reason} {_format_remaining(status)}"
+            )
+
+        # 3. Reserve a slot, generate, and refund the slot if generation fails.
+        try:
+            reserved = (
+                await api.post(
+                    f"{IMAGE_QUOTA_PATH}/reserve", json_data={"guild_id": guild_id}
+                )
+            ).json()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("generate_image: reserve failed: %s", e)
+            return "Couldn't reserve an image slot just now — try again shortly."
+        if not reserved.get("granted"):
+            return f"No image generated. {_format_remaining(reserved)}"
+
+        await _post_status(ctx, "Generating an image…")
+        try:
+            data, mime_type = await generate_image_bytes(prompt)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("generate_image: generation failed: %s", e)
+            try:
+                await api.post(
+                    f"{IMAGE_QUOTA_PATH}/release", json_data={"guild_id": guild_id}
+                )
+                reserved = (
+                    await api.get(
+                        f"{IMAGE_QUOTA_PATH}/quota", params={"guild_id": guild_id}
+                    )
+                ).json()
+            except Exception:  # noqa: BLE001
+                logger.debug("generate_image: quota refund failed", exc_info=True)
+            return (
+                f"Image generation failed ({type(e).__name__}); no image was "
+                f"attached and the slot was refunded. {_format_remaining(reserved)}"
+            )
+
+    filename = f"diagram{_MIME_EXT.get(mime_type, '.png')}"
+    ctx.deps.pending_images.append(
+        GeneratedImage(data=data, mime_type=mime_type, filename=filename)
+    )
+    logger.info(
+        "generate_image: attached %d bytes (%s) channel=%s remaining=%s",
+        len(data),
+        mime_type,
+        ctx.deps.channel_id,
+        reserved.get("remaining"),
+    )
+    return f"Image generated and attached to your reply. {_format_remaining(reserved)}"
+
+
 def chat_tool_functions() -> list:
     """Return the list of tool callables to register with the chat agent."""
     return [
@@ -408,4 +573,5 @@ def chat_tool_functions() -> list:
         add_reaction,
         report_behavior,
         run_code,
+        generate_image,
     ]

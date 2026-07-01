@@ -51,7 +51,7 @@ from smarter_dev.bot.agents.chat_context import (
 )
 from smarter_dev.bot.agents.chat_input_format import build_agent_call
 from smarter_dev.bot.agents.chat_models import ResponseBody, TurnDecision
-from smarter_dev.bot.agents.chat_tools import ChatDeps
+from smarter_dev.bot.agents.chat_tools import ChatDeps, GeneratedImage
 from smarter_dev.bot.services.chat_conversation_persistence import (
     end_engagement,
     persist_turn,
@@ -428,11 +428,15 @@ class ChannelEngine:
                 bot=self.bot,
                 channel_id=self.channel_id,
                 guild_id=self.guild_id,
+                api_client=self._shared_api_client(),
             )
             # Install a per-run compaction collector. The history processor
             # appends events to it; we drain after the run.
             start_collection()
-            user_prompt, message_history = build_agent_call(agent_input, history)
+            image_quota = await self._fetch_image_quota()
+            user_prompt, message_history = build_agent_call(
+                agent_input, history, image_quota=image_quota
+            )
             try:
                 result = await agent.run(
                     user_prompt=user_prompt,
@@ -477,7 +481,7 @@ class ChannelEngine:
                     self.channel_id,
                 )
 
-            dispatch = await self._apply_output(output)
+            dispatch = await self._apply_output(output, list(deps.pending_images))
 
             # Persist this turn to the operator dashboard (best-effort).
             try:
@@ -550,12 +554,13 @@ class ChannelEngine:
         await self._maybe_refire()
 
     async def _apply_output(
-        self, output: TurnDecision
+        self, output: TurnDecision, images: list[GeneratedImage] | None = None
     ) -> _TurnDispatchOutcome:
         """Write memory + dispatch sends. Returns the dispatch outcome so the
         engine can persist the turn BEFORE finalising any deactivation."""
         memory = get_chat_memory()
         outcome = _TurnDispatchOutcome()
+        images = images or []
 
         await memory.write_topic(self.channel_id, output.topic)
         if output.notes is not None:
@@ -569,8 +574,12 @@ class ChannelEngine:
         if output.response is not None:
             self.consecutive_no_response = 0
             self.last_sent_at = datetime.now(UTC)
-            outcome.voice = await self._send(output.response)
+            outcome.voice = await self._send(output.response, images)
         else:
+            # No textual reply this turn — but if the agent still generated an
+            # image, post it standalone so the work isn't lost.
+            if images:
+                await self._post_images(images, reply_to=None)
             self.consecutive_no_response += 1
             if self.consecutive_no_response >= MAX_NO_RESPONSE_TURNS:
                 outcome.deactivate_reason = "no_response_quota"
@@ -581,12 +590,17 @@ class ChannelEngine:
 
         return outcome
 
-    async def _send(self, body: ResponseBody) -> _VoiceOutcome | None:
+    async def _send(
+        self, body: ResponseBody, images: list[GeneratedImage] | None = None
+    ) -> _VoiceOutcome | None:
         """Dispatch the agent's send outputs.
 
         Returns the voice outcome (sent_ok + usage + error) when voice was
         attempted, None otherwise — so the engine can record it on the turn.
+        Any ``images`` ride along on the text reply; if there's no text this
+        turn they're posted as their own message so they still reach the channel.
         """
+        images = images or []
         reply_to: int | None = None
         if (
             body.reply_directly
@@ -601,12 +615,12 @@ class ChannelEngine:
         text_ok = True
         voice_outcome: _VoiceOutcome | None = None
 
-        if not has_text and not has_voice:
+        if not has_text and not has_voice and not images:
             return None
 
         # Dispatch in parallel; capture each result independently.
         async def _text_runner() -> bool:
-            return await self._send_text(body.message, reply_to)
+            return await self._send_text(body.message, reply_to, images)
 
         async def _voice_runner() -> _VoiceOutcome:
             return await self._send_voice(
@@ -616,6 +630,11 @@ class ChannelEngine:
         tasks: dict[str, asyncio.Task] = {}
         if has_text:
             tasks["text"] = asyncio.create_task(_text_runner())
+        elif images:
+            # No text to carry the image — post it on its own (best-effort).
+            tasks["images"] = asyncio.create_task(
+                self._post_images(images, reply_to)
+            )
         if has_voice:
             tasks["voice"] = asyncio.create_task(_voice_runner())
 
@@ -624,7 +643,7 @@ class ChannelEngine:
             if kind == "text":
                 if isinstance(res, BaseException) or res is False:
                     text_ok = False
-            else:  # voice
+            elif kind == "voice":
                 if isinstance(res, BaseException):
                     voice_outcome = _VoiceOutcome(
                         sent_ok=False,
@@ -632,6 +651,7 @@ class ChannelEngine:
                     )
                 else:
                     voice_outcome = res
+            # "images" is a best-effort standalone post — nothing to record.
 
         # Voice-only failed → tell the user so silence doesn't look like
         # the agent ignored them.
@@ -649,11 +669,21 @@ class ChannelEngine:
 
         return voice_outcome
 
-    async def _send_text(self, message: str, reply_to: int | None) -> bool:
+    async def _send_text(
+        self,
+        message: str,
+        reply_to: int | None,
+        images: list[GeneratedImage] | None = None,
+    ) -> bool:
         try:
             kwargs: dict[str, Any] = {"content": message.strip()[:2000]}
             if reply_to is not None:
                 kwargs["reply"] = reply_to
+            if images:
+                kwargs["attachments"] = [
+                    hikari.Bytes(img.data, img.filename, img.mime_type)
+                    for img in images
+                ]
             await self.bot.rest.create_message(self.channel_id, **kwargs)
             return True
         except Exception:
@@ -661,6 +691,63 @@ class ChannelEngine:
                 "Failed to send chat agent text in channel %s", self.channel_id
             )
             return False
+
+    async def _post_images(
+        self, images: list[GeneratedImage], reply_to: int | None
+    ) -> bool:
+        """Post generated images as their own channel message (no text body)."""
+        if not images:
+            return False
+        try:
+            kwargs: dict[str, Any] = {
+                "attachments": [
+                    hikari.Bytes(img.data, img.filename, img.mime_type)
+                    for img in images
+                ]
+            }
+            if reply_to is not None:
+                kwargs["reply"] = reply_to
+            await self.bot.rest.create_message(self.channel_id, **kwargs)
+            return True
+        except Exception:
+            logger.exception(
+                "Failed to post generated image(s) in channel %s", self.channel_id
+            )
+            return False
+
+    def _shared_api_client(self) -> Any | None:
+        """The bot's shared APIClient (set on ``bot.d``), or None if absent.
+
+        Reused for the image-quota calls — both the per-turn read here and the
+        ``generate_image`` tool via ``ChatDeps.api_client`` — so we don't build
+        (and leak) a fresh HTTP client every turn.
+        """
+        return getattr(self.bot, "d", {}).get("api_client")
+
+    async def _fetch_image_quota(self) -> dict | None:
+        """Read this guild's remaining image budget for the prompt (best-effort).
+
+        Surfaced to the agent as ``<image-quota>`` in the per-turn metadata so it
+        knows up front how many technical images it can still draw this hour.
+        Any failure degrades to no tag rather than blocking the turn.
+        """
+        api = self._shared_api_client()
+        if api is None:
+            return None
+        try:
+            resp = await api.get(
+                "/image-generations/quota",
+                params={"guild_id": str(self.guild_id)},
+            )
+            if resp.status_code < 400:
+                return resp.json()
+        except Exception:
+            logger.debug(
+                "could not fetch image quota for guild %s",
+                self.guild_id,
+                exc_info=True,
+            )
+        return None
 
     async def _send_voice(
         self,
