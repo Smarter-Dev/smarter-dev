@@ -71,6 +71,14 @@ MAX_NO_RESPONSE_TURNS = 3
 INACTIVITY_TIMEOUT = timedelta(minutes=30)
 MAX_RUNTIME = timedelta(hours=2)
 
+# Appended to a text reply when a generated image can't be attached because the
+# bot is missing the "Attach Files" permission — so the answer still lands and
+# the gap is explained instead of silent.
+_ATTACH_PERM_NOTE = (
+    "\n\n-# (couldn't attach the generated image here — I'm missing the "
+    '"Attach Files" permission in this channel)'
+)
+
 
 @dataclass
 class _QueuedMessage:
@@ -450,10 +458,19 @@ class ChannelEngine:
                     self.channel_id,
                 )
                 drain_collection()  # discard
-                await self._post_error(
-                    "Sorry, couldn't generate a reply for that one — try again?",
-                    reply_to=error_reply_to,
-                )
+                # The run may have crashed *after* generate_image already spent a
+                # quota slot and stashed an image. Salvage it — the user paid for
+                # it — and only show the generic error if nothing was delivered.
+                salvaged = False
+                if deps.pending_images:
+                    salvaged = await self._post_images(
+                        list(deps.pending_images), reply_to=error_reply_to
+                    )
+                if not salvaged:
+                    await self._post_error(
+                        "Sorry, couldn't generate a reply for that one — try again?",
+                        reply_to=error_reply_to,
+                    )
                 return
             compaction_events = drain_collection()
 
@@ -576,14 +593,18 @@ class ChannelEngine:
             self.last_sent_at = datetime.now(UTC)
             outcome.voice = await self._send(output.response, images)
         else:
-            # No textual reply this turn — but if the agent still generated an
-            # image, post it standalone so the work isn't lost.
-            if images:
-                await self._post_images(images, reply_to=None)
-            self.consecutive_no_response += 1
-            if self.consecutive_no_response >= MAX_NO_RESPONSE_TURNS:
-                outcome.deactivate_reason = "no_response_quota"
-                return outcome
+            # No textual reply this turn. If the agent still generated an image,
+            # post it standalone — that counts as engagement, so it must NOT burn
+            # a no-response strike. Only a turn that delivered nothing is silence.
+            posted = await self._post_images(images, reply_to=None) if images else False
+            if posted:
+                self.consecutive_no_response = 0
+                self.last_sent_at = datetime.now(UTC)
+            else:
+                self.consecutive_no_response += 1
+                if self.consecutive_no_response >= MAX_NO_RESPONSE_TURNS:
+                    outcome.deactivate_reason = "no_response_quota"
+                    return outcome
 
         if not output.continue_watching:
             outcome.deactivate_reason = "continue_watching_false"
@@ -675,22 +696,52 @@ class ChannelEngine:
         reply_to: int | None,
         images: list[GeneratedImage] | None = None,
     ) -> bool:
+        content = message.strip()[:2000]
+        base_kwargs: dict[str, Any] = {"content": content}
+        if reply_to is not None:
+            base_kwargs["reply"] = reply_to
+        attachments = (
+            [hikari.Bytes(img.data, img.filename, img.mime_type) for img in images]
+            if images
+            else []
+        )
         try:
-            kwargs: dict[str, Any] = {"content": message.strip()[:2000]}
-            if reply_to is not None:
-                kwargs["reply"] = reply_to
-            if images:
-                kwargs["attachments"] = [
-                    hikari.Bytes(img.data, img.filename, img.mime_type)
-                    for img in images
-                ]
+            kwargs = dict(base_kwargs)
+            if attachments:
+                kwargs["attachments"] = attachments
             await self.bot.rest.create_message(self.channel_id, **kwargs)
             return True
-        except Exception:
-            logger.exception(
-                "Failed to send chat agent text in channel %s", self.channel_id
+        except Exception as err:
+            if not attachments:
+                logger.exception(
+                    "Failed to send chat agent text in channel %s", self.channel_id
+                )
+                return False
+            # The image upload failed — most often the bot lacks the "Attach
+            # Files" permission here (or the file is too big). Don't lose the
+            # whole reply: resend the text alone so the answer still lands, and
+            # note the missing permission when that's the cause.
+            logger.warning(
+                "Send with %d attachment(s) failed in channel %s (%s); "
+                "retrying text-only",
+                len(attachments),
+                self.channel_id,
+                type(err).__name__,
+                exc_info=True,
             )
-            return False
+            text_only = dict(base_kwargs)
+            if isinstance(err, hikari.ForbiddenError):
+                text_only["content"] = (content + _ATTACH_PERM_NOTE)[:2000]
+            try:
+                await self.bot.rest.create_message(self.channel_id, **text_only)
+                return True
+            except Exception:
+                logger.exception(
+                    "Failed to send chat agent text (text-only fallback) in "
+                    "channel %s",
+                    self.channel_id,
+                )
+                return False
 
     async def _post_images(
         self, images: list[GeneratedImage], reply_to: int | None
@@ -709,10 +760,24 @@ class ChannelEngine:
                 kwargs["reply"] = reply_to
             await self.bot.rest.create_message(self.channel_id, **kwargs)
             return True
-        except Exception:
+        except Exception as err:
             logger.exception(
                 "Failed to post generated image(s) in channel %s", self.channel_id
             )
+            # No text body to fall back to — but if it's a permission problem,
+            # say so instead of going silent.
+            if isinstance(err, hikari.ForbiddenError):
+                try:
+                    note_kwargs: dict[str, Any] = {"content": _ATTACH_PERM_NOTE.strip()}
+                    if reply_to is not None:
+                        note_kwargs["reply"] = reply_to
+                    await self.bot.rest.create_message(self.channel_id, **note_kwargs)
+                except Exception:
+                    logger.debug(
+                        "could not post attach-permission note in channel %s",
+                        self.channel_id,
+                        exc_info=True,
+                    )
             return False
 
     def _shared_api_client(self) -> Any | None:
