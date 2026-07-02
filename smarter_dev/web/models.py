@@ -4615,3 +4615,30 @@ class AdminHandler(Base):
         JSON, nullable=False, default=dict, server_default="{}"
     )
     scheduled_job_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+
+class MemberActivity(Base):
+    """Per-(guild, member) message activity: first and most recent message times.
+
+    Fed by the bot's batched activity reports (all human guild messages) and
+    updated synchronously at handler dispatch. Handler trigger contexts derive
+    "first message ever" / "first message in N days" facts from this, so
+    scripts never track per-user history in their size-capped memory.
+    """
+
+    __tablename__ = "member_activity"
+    __table_args__ = (
+        Index("uq_member_activity_guild_user", "guild_id", "user_id", unique=True),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    first_message_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_message_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )

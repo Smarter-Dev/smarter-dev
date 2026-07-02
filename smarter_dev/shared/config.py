@@ -109,6 +109,12 @@ class Settings(BaseSettings):
         default="gemini-3-flash-preview",
         description="Model that reviews candidate handler scripts (Gemini 3 Flash)",
     )
+    handler_admin_second_judge_model: str = Field(
+        default="gemini-3.5-flash",
+        description="Second judge for ADMIN handlers — reviews in series with the "
+        "primary judge and either rejection blocks install (their observed blind "
+        "spots don't overlap). Empty string disables the second judge.",
+    )
 
     # API
     api_secret_key: str = Field(

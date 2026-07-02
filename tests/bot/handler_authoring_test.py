@@ -55,16 +55,33 @@ def _author_returning(plan):
     return author
 
 
+def _verdict(approved=True, reason="ok", **overrides):
+    """A checklist verdict with every category passing unless overridden."""
+    fields = {
+        "sandbox_valid": True,
+        "within_limits": True,
+        "memory_bounded": True,
+        "guards_effective": True,
+        "agent_verdict_safe": True,
+        "actions_appropriate": True,
+        "transparent": True,
+        "approved": approved,
+        "reason": reason,
+    }
+    fields.update(overrides)
+    return JudgeVerdict(**fields)
+
+
 def _judge_approving():
     async def judge(script, trigger_context):
-        return JudgeVerdict(approved=True, reason="reacts once on a keyword, within caps")
+        return _verdict(reason="reacts once on a keyword, within caps")
 
     return judge
 
 
 def _judge_rejecting(reason):
     async def judge(script, trigger_context):
-        return JudgeVerdict(approved=False, reason=reason)
+        return _verdict(approved=False, reason=reason)
 
     return judge
 
@@ -218,7 +235,7 @@ async def test_lint_blocks_opaque_blob_before_judge():
 
     async def judge(script, trigger_context):
         judged.append(script)
-        return JudgeVerdict(approved=True, reason="ok")
+        return _verdict(reason="ok")
 
     blob = "QUJDREVG" * 30
     result = await run_creation_pipeline(
@@ -259,7 +276,7 @@ async def test_judge_receives_trigger_cadence():
 
     async def judge(script, trigger_context):
         seen["ctx"] = trigger_context
-        return JudgeVerdict(approved=True, reason="ok")
+        return _verdict(reason="ok")
 
     await run_creation_pipeline(
         request="post fib",
@@ -408,7 +425,7 @@ async def test_admin_pipeline_lint_blocks_blob_before_judge():
 
     async def judge(script, ctx):
         judged.append(script)
-        return JudgeVerdict(approved=True, reason="ok")
+        return _verdict(reason="ok")
 
     blob = "QUJDREVG" * 30
     result = await run_admin_creation_pipeline(
@@ -431,3 +448,61 @@ async def test_admin_pipeline_judge_reject():
     )
     assert not result.ok
     assert "no condition" in result.error
+
+
+# -- checklist verdict + dual-judge merge --------------------------------------
+
+from smarter_dev.bot.agents.handler_authoring import (
+    checklist_failures,
+    strictest_verdict,
+)
+
+
+def test_checklist_failures_names_failing_categories():
+    verdict = _verdict(memory_bounded=False, agent_verdict_safe=False)
+    assert checklist_failures(verdict) == ["memory_bounded", "agent_verdict_safe"]
+    assert checklist_failures(_verdict()) == []
+
+
+async def test_checklist_failure_forces_rejection_despite_approval():
+    async def judge(script, trigger_context):
+        # Judge says approved overall but flags unbounded memory — the
+        # checklist wins.
+        return _verdict(approved=True, reason="looks fine", memory_bounded=False)
+
+    result = await run_creation_pipeline(
+        request="x",
+        trigger_type="message",
+        settings={},
+        existing_handlers=[],
+        author=_author_returning(_plan()),
+        judge=judge,
+    )
+    assert not result.ok
+    assert "memory_bounded" in result.error
+
+
+async def test_admin_checklist_failure_forces_rejection():
+    async def judge(script, trigger_context):
+        return _verdict(approved=True, reason="solid", actions_appropriate=False)
+
+    result = await run_admin_creation_pipeline(
+        request="x",
+        existing_handlers=[],
+        author=_admin_author_returning(_admin_plan()),
+        judge=judge,
+    )
+    assert not result.ok
+    assert "actions_appropriate" in result.error
+
+
+def test_strictest_verdict_picks_the_rejector():
+    ok = _verdict(reason="fine")
+    bad = _verdict(approved=False, reason="bans everyone")
+    assert strictest_verdict([ok, bad]).reason == "bans everyone"
+    assert strictest_verdict([bad, ok]).reason == "bans everyone"
+    # A checklist failure counts as a rejection even with approved=True.
+    sneaky = _verdict(approved=True, reason="lgtm", guards_effective=False)
+    assert strictest_verdict([ok, sneaky]).reason == "lgtm"
+    # All passing: first verdict wins.
+    assert strictest_verdict([ok, _verdict(reason="also fine")]).reason == "fine"

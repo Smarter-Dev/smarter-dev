@@ -16,8 +16,10 @@ just decides whether to dispatch.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import hikari
@@ -28,6 +30,50 @@ from smarter_dev.shared.config import get_settings
 logger = logging.getLogger(__name__)
 
 plugin = lightbulb.Plugin("handler_events")
+
+ACTIVITY_FLUSH_SECONDS = 30.0
+
+
+class ActivityBatcher:
+    """Collects (guild, user) -> latest message time and flushes in one call.
+
+    Every human guild message is recorded (not just handler channels) so the
+    activity facts in handler contexts reflect real guild-wide activity. One
+    API call per flush interval instead of one per message; a failed flush
+    re-queues its events without regressing anything newer.
+    """
+
+    def __init__(self) -> None:
+        self._pending: dict[tuple[str, str], datetime] = {}
+
+    def record(self, guild_id: str, user_id: str, message_at: datetime) -> None:
+        key = (guild_id, user_id)
+        current = self._pending.get(key)
+        if current is None or message_at > current:
+            self._pending[key] = message_at
+
+    async def flush(self, api: Any) -> None:
+        if not self._pending:
+            return
+        taken, self._pending = self._pending, {}
+        events = [
+            {"guild_id": g, "user_id": u, "message_at": at.isoformat()}
+            for (g, u), at in taken.items()
+        ]
+        try:
+            await api.post("/activity/batch", json_data={"events": events})
+        except Exception:  # noqa: BLE001 — activity is best-effort; keep for retry
+            logger.debug("activity flush failed; re-queueing", exc_info=True)
+            for (g, u), at in taken.items():
+                self.record(g, u, at)
+
+    async def run(self, api: Any) -> None:
+        while True:
+            await asyncio.sleep(ACTIVITY_FLUSH_SECONDS)
+            await self.flush(api)
+
+
+_activity = ActivityBatcher()
 
 
 _DISCORD_EPOCH_MS = 1420070400000
@@ -118,11 +164,21 @@ async def _dispatch(
         logger.debug("handler dispatch failed", exc_info=True)
 
 
+@plugin.listener(hikari.StartedEvent)
+async def start_activity_flush(_: hikari.StartedEvent) -> None:
+    asyncio.create_task(_activity.run(_get_api_client()))
+
+
 @plugin.listener(hikari.GuildMessageCreateEvent)
 async def on_message(event: hikari.GuildMessageCreateEvent) -> None:
     # Only user actions fire triggers.
     if not event.is_human:
         return
+    _activity.record(
+        str(event.guild_id),
+        str(event.message.author.id),
+        datetime.now(timezone.utc),
+    )
     msg = event.message
     joined_at = None
     if event.member is not None and event.member.joined_at is not None:
