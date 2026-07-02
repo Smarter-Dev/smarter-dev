@@ -1,9 +1,10 @@
-"""Admin slash command — talk to the admin author and create an admin handler.
+"""Admin slash command — talk to the admin author to create or edit admin handlers.
 
 Replaces the old structured `/routine`. `/adminhandler create request:<text>` is
-text-only: the admin describes the behavior, the admin author writes the script
-and decides the trigger + channel scope, the admin judge reviews, and it's
-installed via the admin-handlers API. Admin-gated (ADMINISTRATOR).
+text-only: the admin describes the behavior, the admin author sees the guild's
+existing named handlers and decides whether to edit one or create a new one
+(picking its name, trigger, and channel scope), the admin judge reviews, and
+it's installed via the admin-handlers API. Admin-gated (ADMINISTRATOR).
 """
 
 from __future__ import annotations
@@ -66,6 +67,74 @@ async def adminhandler_group(ctx: lightbulb.Context) -> None:
     pass
 
 
+async def _guild_admin_handlers_with_scripts(api: Any, guild_id: str) -> list[dict]:
+    """The guild's admin handlers, scripts included, for the author's
+    edit-vs-create decision. Best-effort: a failure means the author sees an
+    empty list (it will create rather than edit)."""
+    try:
+        resp = await api.get(
+            "/admin/handlers",
+            params={"guild_id": guild_id, "include_scripts": "true"},
+        )
+        if resp.status_code < 400:
+            return list(resp.json())
+    except Exception:  # noqa: BLE001
+        logger.debug("could not load existing admin handlers", exc_info=True)
+    return []
+
+
+async def install_admin_result(api: Any, guild_id: str, admin_id: str, result: Any) -> str:
+    """Persist an approved admin plan (create or edit); return the user-facing line."""
+    if result.action == "edit":
+        resp = await api.put(
+            f"/admin/handlers/{result.target_handler_id}",
+            json_data={
+                "description": result.description,
+                "script": result.script,
+                "settings": result.settings or {},
+                "channel_ids": result.channel_ids or [],
+            },
+        )
+        if resp.status_code >= 400:
+            return f"Failed to update: {resp.text[:300]}"
+        data = resp.json()
+        scope = (
+            "all channels"
+            if not data["channel_ids"]
+            else f"{len(data['channel_ids'])} channel(s)"
+        )
+        return (
+            f"Updated admin handler **{data['name']}** "
+            f"({data['trigger_type']}, {scope}): {data['description']}"
+        )
+
+    resp = await api.post(
+        "/admin/handlers",
+        json_data={
+            "guild_id": guild_id,
+            "name": result.name,
+            "trigger_type": result.trigger_type,
+            "settings": result.settings or {},
+            "channel_ids": result.channel_ids or [],
+            "description": result.description,
+            "script": result.script,
+            "created_by_admin": admin_id,
+        },
+    )
+    if resp.status_code >= 400:
+        return f"Failed to install: {resp.text[:300]}"
+    data = resp.json()
+    scope = (
+        "all channels"
+        if not data["channel_ids"]
+        else f"{len(data['channel_ids'])} channel(s)"
+    )
+    return (
+        f"Created admin handler **{data['name']}** "
+        f"({data['trigger_type']}, {scope})."
+    )
+
+
 @adminhandler_group.child
 @lightbulb.option(
     "request",
@@ -73,7 +142,7 @@ async def adminhandler_group(ctx: lightbulb.Context) -> None:
     type=str,
 )
 @lightbulb.command(
-    "create", "Describe an admin handler; the author builds it", pass_options=True
+    "create", "Describe an admin handler; the author builds or edits one", pass_options=True
 )
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def create_admin_handler(ctx: lightbulb.Context, request: str) -> None:
@@ -85,36 +154,19 @@ async def create_admin_handler(ctx: lightbulb.Context, request: str) -> None:
 
     from smarter_dev.bot.agents.handler_authoring import run_admin_creation_pipeline
 
+    api = _api_client()
+    existing_handlers = await _guild_admin_handlers_with_scripts(api, str(ctx.guild_id))
     result = await run_admin_creation_pipeline(
         request=request,
+        existing_handlers=existing_handlers,
         channel_lister=lambda: _list_guild_channels(ctx),
     )
     if not result.ok:
-        await ctx.edit_last_response(f"Couldn't create it — {result.error}")
+        await ctx.edit_last_response(f"Couldn't do it — {result.error}")
         return
 
-    api = _api_client()
-    resp = await api.post(
-        "/admin/handlers",
-        json_data={
-            "guild_id": str(ctx.guild_id),
-            "trigger_type": result.trigger_type,
-            "settings": result.settings or {},
-            "channel_ids": result.channel_ids or [],
-            "description": request,
-            "script": result.script,
-            "created_by_admin": str(ctx.author.id),
-        },
-    )
-    if resp.status_code >= 400:
-        await ctx.edit_last_response(f"Failed to install: {resp.text[:300]}")
-        return
-    data = resp.json()
-    scope = "all channels" if not data["channel_ids"] else f"{len(data['channel_ids'])} channel(s)"
-    await ctx.edit_last_response(
-        f"Created admin handler `{data['handler_id']}` "
-        f"({data['trigger_type']}, {scope})."
-    )
+    line = await install_admin_result(api, str(ctx.guild_id), str(ctx.author.id), result)
+    await ctx.edit_last_response(line)
 
 
 @adminhandler_group.child
@@ -130,7 +182,7 @@ async def list_admin_handlers(ctx: lightbulb.Context) -> None:
         await ctx.respond("No admin handlers.", flags=hikari.MessageFlag.EPHEMERAL)
         return
     lines = "\n".join(
-        f"- `{r['handler_id']}` [{r['trigger_type']}] {r['description'][:60]}"
+        f"- **{r['name']}** (`{r['handler_id']}`) [{r['trigger_type']}] {r['description'][:60]}"
         for r in rows
     )
     await ctx.respond(lines, flags=hikari.MessageFlag.EPHEMERAL)

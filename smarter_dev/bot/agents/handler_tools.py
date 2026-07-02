@@ -37,7 +37,6 @@ _TRIGGER_ALIASES = {
     "schedule": "schedule",
     "timer": "timer",
 }
-_EVENT_TRIGGERS = ("message", "reaction")
 
 
 def _api_client(ctx: RunContext[ChatDeps]):
@@ -70,17 +69,18 @@ async def register_handler(
     settings: dict | None = None,
     channel_id: str | None = None,
 ) -> str:
-    """Create a persistent handler from a plain-language description.
+    """Create or update a persistent handler from a plain-language description.
 
-    Describe the behavior clearly and completely — a separate system writes and
-    reviews the actual script; you do NOT write code. Trigger types: "new message",
-    "reaction add" (event); "schedule", "timer" (time). For time triggers put the
-    timing in ``settings`` — schedule: {"interval_seconds": N} or {"daily_time":
-    "HH:MM"} (UTC); timer: {"delay_seconds": N} or {"fire_at": "<ISO-8601 UTC>"}.
+    Describe the desired behavior clearly and completely — a separate authoring
+    system sees this channel's existing handlers and decides whether to edit one
+    of them or create a new, named one; you do NOT write code and do NOT pick
+    which handler to touch. Trigger types: "new message", "reaction add"
+    (event); "schedule", "timer" (time) — these are hints, the author decides.
+    For time triggers put the timing in ``settings`` — schedule:
+    {"interval_seconds": N} or {"daily_time": "HH:MM"} (UTC); timer:
+    {"delay_seconds": N} or {"fire_at": "<ISO-8601 UTC>"}.
 
-    For message/reaction triggers there is one handler per channel; registering
-    again merges with or replaces it. Returns a success summary or an error to
-    relay plainly.
+    Returns a success summary naming the handler, or an error to relay plainly.
     """
     canonical = _canonical_trigger(trigger_type)
     if canonical is None:
@@ -89,60 +89,69 @@ async def register_handler(
     channel = str(channel_id or ctx.deps.channel_id)
 
     api = _api_client(ctx)
-
-    existing_script: str | None = None
-    if canonical in _EVENT_TRIGGERS:
-        try:
-            resp = await api.get("/handlers", params={"channel_id": channel})
-            if resp.status_code < 400:
-                for row in resp.json():
-                    if row["trigger_type"] == canonical:
-                        existing_script = (await _get_script(api, row["handler_id"])) or None
-                        break
-        except Exception:  # noqa: BLE001
-            logger.debug("could not load existing handler", exc_info=True)
+    existing_handlers = await _channel_handlers_with_scripts(api, channel)
 
     async def _status(text: str) -> None:
         await _post_status(ctx, text)
 
-    await _status("Setting up a new handler…")
+    await _status("Working on the handler…")
     result = await run_creation_pipeline(
-        description=description,
+        request=description,
         trigger_type=canonical,
         settings=settings,
-        existing_script=existing_script,
+        existing_handlers=existing_handlers,
         emoji_lister=lambda: _list_guild_emojis(ctx),
         progress=_status,
     )
     if not result.ok:
         return f"error: {result.error}"
 
-    if canonical in ("schedule", "timer"):
+    if result.trigger_type in ("schedule", "timer"):
         try:
-            validate_interval(settings, uses_agent=script_uses_agent(result.script))
+            validate_interval(
+                result.settings or {}, uses_agent=script_uses_agent(result.script)
+            )
         except ScheduleError as exc:
             return f"error: {exc}"
 
-    payload = {
-        "guild_id": str(ctx.deps.guild_id),
-        "channel_id": channel,
-        "trigger_type": canonical,
-        "settings": settings,
-        "description": description,
-        "script": result.script,
-        "created_by": "chatbot",
-    }
-    resp = await api.post("/handlers", json_data=payload)
+    if result.action == "edit":
+        resp = await api.put(
+            f"/handlers/{result.target_handler_id}",
+            json_data={
+                "description": result.description,
+                "script": result.script,
+                "settings": result.settings or {},
+            },
+        )
+        if resp.status_code >= 400:
+            return f"error: {_error_detail(resp)}"
+        data = resp.json()
+        return f"Updated handler '{data['name']}': {data['description']}"
+
+    resp = await api.post(
+        "/handlers",
+        json_data={
+            "guild_id": str(ctx.deps.guild_id),
+            "channel_id": channel,
+            "name": result.name,
+            "trigger_type": result.trigger_type,
+            "settings": result.settings or {},
+            "description": result.description,
+            "script": result.script,
+            "created_by": "chatbot",
+        },
+    )
     if resp.status_code >= 400:
         return f"error: {_error_detail(resp)}"
     data = resp.json()
     return (
-        f"Created handler {data['handler_id']} ({canonical}): {data['description']}"
+        f"Created handler '{data['name']}' ({result.trigger_type}): "
+        f"{data['description']}"
     )
 
 
 async def list_handlers(ctx: RunContext[ChatDeps], channel_id: str | None = None) -> str:
-    """List the handlers active in a channel, with their ids and triggers."""
+    """List the handlers active in a channel, with their names, ids and triggers."""
     channel = str(channel_id or ctx.deps.channel_id)
     api = _api_client(ctx)
     resp = await api.get("/handlers", params={"channel_id": channel})
@@ -152,7 +161,8 @@ async def list_handlers(ctx: RunContext[ChatDeps], channel_id: str | None = None
     if not rows:
         return "No handlers active in this channel."
     return "\n".join(
-        f"- {r['handler_id']} [{r['trigger_type']}] {r['description']}" for r in rows
+        f"- {r['name']} ({r['handler_id']}) [{r['trigger_type']}] {r['description']}"
+        for r in rows
     )
 
 
@@ -167,15 +177,19 @@ async def delete_handler(ctx: RunContext[ChatDeps], handler_id: str) -> str:
     return f"Deleted handler {handler_id}."
 
 
-async def _get_script(api: Any, handler_id: str) -> str | None:
-    """Fetch a handler's script body (for author merge), or None if unavailable."""
+async def _channel_handlers_with_scripts(api: Any, channel_id: str) -> list[dict]:
+    """The channel's handlers, scripts included, for the author's edit-vs-create
+    decision. Best-effort: an API failure means the author sees an empty list
+    (it will create rather than edit)."""
     try:
-        resp = await api.get(f"/handlers/{handler_id}")
+        resp = await api.get(
+            "/handlers", params={"channel_id": channel_id, "include_scripts": "true"}
+        )
         if resp.status_code < 400:
-            return resp.json().get("script")
+            return list(resp.json())
     except Exception:  # noqa: BLE001
-        logger.debug("could not fetch handler script", exc_info=True)
-    return None
+        logger.debug("could not load existing handlers", exc_info=True)
+    return []
 
 
 def _error_detail(resp: Any) -> str:

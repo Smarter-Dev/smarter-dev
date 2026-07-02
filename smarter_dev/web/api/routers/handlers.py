@@ -3,11 +3,14 @@
 The Discord bot owns the live creation pipeline (author + judge) but has no DB
 access, so it reaches the data layer through these endpoints:
 
-- ``POST /handlers`` install an authored+approved script (event = single-listener
-  upsert; time = insert + schedule the first fire).
-- ``GET /handlers`` list a channel's handlers.
+- ``POST /handlers`` install an authored+approved script under a channel-unique
+  name (time triggers also schedule the first fire).
+- ``PUT /handlers/{id}`` edit an existing handler (script/description/settings,
+  optional rename); time triggers are rescheduled.
+- ``GET /handlers`` list a channel's handlers (``include_scripts`` for bodies).
 - ``DELETE /handlers/{id}`` remove any handler and cancel its queued job.
-- ``POST /handlers/dispatch`` event dispatch — windowed fire cap then enqueue.
+- ``POST /handlers/dispatch`` event dispatch — every enabled handler for the
+  (channel, trigger) fires, each behind its own windowed fire cap.
 - ``GET /handlers/active-channels`` the (channel, trigger) set for the bot's
   cheap in-memory guard, so it doesn't call the API on every message.
 
@@ -36,6 +39,7 @@ from smarter_dev.web.api.dependencies import verify_api_key
 from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
 from smarter_dev.web.handler_caps import (
     ADMIN_FIRES_PER_MIN,
+    MAX_HANDLERS_PER_CHANNEL,
     WindowedLimiter,
     fires_per_min_for_trigger,
     handler_fire_key,
@@ -61,6 +65,7 @@ router = APIRouter(prefix="/handlers", tags=["handlers"])
 class CreateHandlerRequest(BaseModel):
     guild_id: str
     channel_id: str
+    name: str
     trigger_type: str
     settings: dict = Field(default_factory=dict)
     description: str
@@ -68,10 +73,19 @@ class CreateHandlerRequest(BaseModel):
     created_by: str
 
 
+class UpdateHandlerRequest(BaseModel):
+    description: str
+    script: str
+    settings: dict = Field(default_factory=dict)
+    # Optional rename; omitted = keep the current name.
+    name: str | None = None
+
+
 class HandlerResponse(BaseModel):
     handler_id: str
     guild_id: str
     channel_id: str
+    name: str
     trigger_type: str
     settings: dict
     description: str
@@ -94,11 +108,33 @@ def _to_response(record: ChannelHandler) -> HandlerResponse:
         handler_id=str(record.id),
         guild_id=record.guild_id,
         channel_id=record.channel_id,
+        name=record.name,
         trigger_type=record.trigger_type,
         settings=record.settings or {},
         description=record.description,
         enabled=record.enabled,
     )
+
+
+def _normalized_name(raw: str) -> str:
+    """Validate and normalize a handler name; 422 on blank/oversized."""
+    name = raw.strip()
+    if not name:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "name is required")
+    if len(name) > 64:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "name is too long (max 64)")
+    return name
+
+
+async def _name_taken(
+    session: AsyncSession, channel_id: str, name: str, exclude_id: UUID | None = None
+) -> bool:
+    query = select(ChannelHandler.id).where(
+        ChannelHandler.channel_id == channel_id, ChannelHandler.name == name
+    )
+    if exclude_id is not None:
+        query = query.where(ChannelHandler.id != exclude_id)
+    return (await session.execute(query)).first() is not None
 
 
 async def _schedule_first_fire(record: ChannelHandler) -> None:
@@ -127,29 +163,33 @@ async def create_handler(
 ) -> HandlerResponse:
     if body.trigger_type not in HANDLER_TRIGGER_TYPES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "unknown trigger_type")
+    name = _normalized_name(body.name)
 
-    if body.trigger_type in HANDLER_EVENT_TRIGGERS:
-        # Single-listener: replace any existing handler for this channel+trigger.
-        existing = (
+    if await _name_taken(session, body.channel_id, name):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"a handler named {name!r} already exists in this channel — edit it instead",
+        )
+    channel_count = len(
+        (
             await session.execute(
-                select(ChannelHandler).where(
-                    ChannelHandler.channel_id == body.channel_id,
-                    ChannelHandler.trigger_type == body.trigger_type,
+                select(ChannelHandler.id).where(
+                    ChannelHandler.channel_id == body.channel_id
                 )
             )
-        ).scalar_one_or_none()
-        if existing is not None:
-            existing.script = body.script
-            existing.description = body.description
-            existing.settings = body.settings
-            existing.enabled = True
-            await session.commit()
-            await session.refresh(existing)
-            return _to_response(existing)
+        ).all()
+    )
+    if channel_count >= MAX_HANDLERS_PER_CHANNEL:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            f"this channel already has {MAX_HANDLERS_PER_CHANNEL} handlers — "
+            "delete or edit one instead",
+        )
 
     record = ChannelHandler(
         guild_id=body.guild_id,
         channel_id=body.channel_id,
+        name=name,
         trigger_type=body.trigger_type,
         settings=body.settings,
         description=body.description,
@@ -170,17 +210,68 @@ async def create_handler(
     return _to_response(record)
 
 
-@router.get("", response_model=list[HandlerResponse])
-async def list_handlers(
-    channel_id: str,
+@router.put("/{handler_id}", response_model=HandlerResponse)
+async def update_handler(
+    handler_id: UUID,
+    body: UpdateHandlerRequest,
     session: AsyncSession = Depends(get_skrift_db_session),
     _: Any = Depends(verify_api_key),
-) -> list[HandlerResponse]:
+) -> HandlerResponse:
+    record = await session.get(ChannelHandler, handler_id)
+    if record is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "handler not found")
+
+    if body.name is not None:
+        name = _normalized_name(body.name)
+        if await _name_taken(session, record.channel_id, name, exclude_id=record.id):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"a handler named {name!r} already exists in this channel",
+            )
+        record.name = name
+
+    record.description = body.description
+    record.script = body.script
+    record.settings = body.settings
+    record.enabled = True
+
+    if record.trigger_type not in HANDLER_EVENT_TRIGGERS:
+        # Timing may have changed: cancel the pending fire and schedule afresh.
+        if record.scheduled_job_id:
+            try:
+                await get_handle(record.scheduled_job_id).cancel()
+            except Exception:  # noqa: BLE001 — best-effort; the chain also self-stops
+                logger.warning("could not cancel job %s", record.scheduled_job_id)
+            record.scheduled_job_id = None
+        try:
+            await _schedule_first_fire(record)
+        except ScheduleError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+
+    await session.commit()
+    await session.refresh(record)
+    return _to_response(record)
+
+
+@router.get("", response_model=list[HandlerResponse] | list[HandlerDetailResponse])
+async def list_handlers(
+    channel_id: str,
+    include_scripts: bool = False,
+    session: AsyncSession = Depends(get_skrift_db_session),
+    _: Any = Depends(verify_api_key),
+) -> list[HandlerResponse] | list[HandlerDetailResponse]:
+    """List a channel's handlers; ``include_scripts`` adds the script bodies
+    (used by the authoring agent to decide edit-vs-create)."""
     rows = (
         await session.execute(
             select(ChannelHandler).where(ChannelHandler.channel_id == channel_id)
         )
     ).scalars().all()
+    if include_scripts:
+        return [
+            HandlerDetailResponse(**_to_response(r).model_dump(), script=r.script)
+            for r in rows
+        ]
     return [_to_response(r) for r in rows]
 
 
@@ -212,8 +303,9 @@ async def dispatch_event(
     limiter = WindowedLimiter(redis=get_redis_client())
     dispatched: list[str] = []
 
-    # Standard tier: at most one handler per (channel, trigger).
-    standard = (
+    # Standard tier: every enabled handler for this (channel, trigger) fires,
+    # each behind its own windowed cap.
+    standard_rows = (
         await session.execute(
             select(ChannelHandler).where(
                 ChannelHandler.channel_id == body.channel_id,
@@ -221,18 +313,19 @@ async def dispatch_event(
                 ChannelHandler.enabled.is_(True),
             )
         )
-    ).scalar_one_or_none()
-    if standard is not None:
-        if await limiter.hit(
+    ).scalars().all()
+    for standard in standard_rows:
+        if not await limiter.hit(
             handler_fire_key(str(standard.id)),
             fires_per_min_for_trigger(standard.trigger_type),
         ):
-            await worker_submit(
-                HandlerFirePayload(
-                    handler_id=str(standard.id), trigger_context=body.trigger_context
-                )
+            continue
+        await worker_submit(
+            HandlerFirePayload(
+                handler_id=str(standard.id), trigger_context=body.trigger_context
             )
-            dispatched.append(str(standard.id))
+        )
+        dispatched.append(str(standard.id))
 
     # Admin tier: every enabled admin handler for this guild+trigger whose scope
     # includes this channel ([] / null = all channels).
