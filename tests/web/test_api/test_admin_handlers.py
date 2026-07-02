@@ -12,6 +12,16 @@ from smarter_dev.web.api.app import api
 from smarter_dev.web.api.dependencies import verify_api_key
 
 
+class _StubJobHandle:
+    cancelled: list[str] = []
+
+    def __init__(self, job_id):
+        self.job_id = job_id
+
+    async def cancel(self):
+        _StubJobHandle.cancelled.append(self.job_id)
+
+
 @pytest.fixture
 async def session():
     engine = create_async_engine(
@@ -31,10 +41,14 @@ async def session():
 async def client(session, monkeypatch):
     import smarter_dev.web.api.routers.admin_handlers as ah
 
-    async def _submit(payload, **kwargs):
-        return None
+    submitted = []
 
+    async def _submit(payload, **kwargs):
+        submitted.append((payload, kwargs))
+
+    _StubJobHandle.cancelled = []
     monkeypatch.setattr(ah, "worker_submit", _submit)
+    monkeypatch.setattr(ah, "get_handle", _StubJobHandle)
 
     async def _verify():
         return object()
@@ -46,6 +60,7 @@ async def client(session, monkeypatch):
     api.dependency_overrides[get_skrift_db_session] = _session
     transport = ASGITransport(app=api)
     async with AsyncClient(transport=transport, base_url="http://t") as c:
+        c.submitted = submitted  # type: ignore[attr-defined]
         yield c
     api.dependency_overrides.pop(verify_api_key, None)
     api.dependency_overrides.pop(get_skrift_db_session, None)
@@ -54,6 +69,7 @@ async def client(session, monkeypatch):
 def _body(**over):
     body = {
         "guild_id": "G1",
+        "name": "scam-banner",
         "trigger_type": "message",
         "settings": {},
         "channel_ids": [],
@@ -71,14 +87,105 @@ async def test_create_list_delete_admin_handler(client):
     data = created.json()
     assert data["trigger_type"] == "message"
     assert data["channel_ids"] == []
+    assert data["name"] == "scam-banner"
     hid = data["handler_id"]
 
     listed = await client.get("/admin/handlers", params={"guild_id": "G1"})
     assert len(listed.json()) == 1
+    assert "script" not in listed.json()[0]
 
     deleted = await client.delete(f"/admin/handlers/{hid}")
     assert deleted.status_code == 200
     assert (await client.get("/admin/handlers", params={"guild_id": "G1"})).json() == []
+
+
+async def test_multiple_admin_handlers_per_trigger_coexist(client):
+    first = await client.post("/admin/handlers", json=_body(name="scam-banner"))
+    second = await client.post("/admin/handlers", json=_body(name="spam-sweeper"))
+    assert first.status_code == 201 and second.status_code == 201
+    listed = await client.get("/admin/handlers", params={"guild_id": "G1"})
+    assert {r["name"] for r in listed.json()} == {"scam-banner", "spam-sweeper"}
+
+
+async def test_duplicate_admin_name_in_guild_is_conflict(client):
+    await client.post("/admin/handlers", json=_body(name="scam-banner"))
+    dupe = await client.post(
+        "/admin/handlers", json=_body(name="scam-banner", trigger_type="reaction")
+    )
+    assert dupe.status_code == 409
+    other_guild = await client.post(
+        "/admin/handlers", json=_body(name="scam-banner", guild_id="G2")
+    )
+    assert other_guild.status_code == 201
+
+
+async def test_list_admin_handlers_with_scripts(client):
+    await client.post("/admin/handlers", json=_body())
+    listed = await client.get(
+        "/admin/handlers", params={"guild_id": "G1", "include_scripts": "true"}
+    )
+    assert listed.json()[0]["script"].startswith("await ban_user")
+
+
+async def test_edit_admin_handler(client):
+    created = await client.post("/admin/handlers", json=_body())
+    hid = created.json()["handler_id"]
+    resp = await client.put(
+        f"/admin/handlers/{hid}",
+        json={
+            "description": "ban scammers politely",
+            "script": 'await ban_user(context["author_id"], "scam")\n',
+            "settings": {},
+            "channel_ids": ["MODCHAT"],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["channel_ids"] == ["MODCHAT"]
+    assert resp.json()["description"] == "ban scammers politely"
+
+
+async def test_edit_admin_rename_collision_is_conflict(client):
+    await client.post("/admin/handlers", json=_body(name="scam-banner"))
+    created = await client.post("/admin/handlers", json=_body(name="spam-sweeper"))
+    hid = created.json()["handler_id"]
+    collision = await client.put(
+        f"/admin/handlers/{hid}",
+        json={
+            "description": "d",
+            "script": "pass\n",
+            "settings": {},
+            "channel_ids": [],
+            "name": "scam-banner",
+        },
+    )
+    assert collision.status_code == 409
+
+
+async def test_edit_scheduled_admin_handler_reschedules(client):
+    created = await client.post(
+        "/admin/handlers",
+        json=_body(
+            trigger_type="schedule",
+            settings={"interval_seconds": 3600},
+            channel_ids=["MODCHAT"],
+            script='await send_message("tick", "MODCHAT")\n',
+        ),
+    )
+    hid = created.json()["handler_id"]
+    assert len(client.submitted) == 1  # type: ignore[attr-defined]
+
+    resp = await client.put(
+        f"/admin/handlers/{hid}",
+        json={
+            "description": "tock",
+            "script": 'await send_message("tock", "MODCHAT")\n',
+            "settings": {"interval_seconds": 7200},
+            "channel_ids": ["MODCHAT"],
+        },
+    )
+    assert resp.status_code == 200
+    assert len(_StubJobHandle.cancelled) == 1
+    assert len(client.submitted) == 2  # type: ignore[attr-defined]
 
 
 async def test_create_scheduled_admin_handler_schedules_fire(client):

@@ -5,11 +5,12 @@ in the live user-interaction context — so a *triggered* execution, which runs 
 the worker, structurally has no path to this code. That is the "triggered
 executions can't author" invariant, enforced by where the code lives.
 
-Pipeline: Author (Gemini 3 Flash) writes a script or returns ``ERROR:``; the
-host-side :mod:`~smarter_dev.web.handler_lint` rejects opaque blobs / dynamic
-execution; Judge (Gemini 3 Flash) reviews the script as inert data and
-APPROVEs or REJECTs. The author and judge callables are injectable so the
-orchestration is unit-testable without any model calls.
+Pipeline: Author (Gemini 3 Flash) sees the existing named handlers and returns
+a structured plan — edit one of them or create a new, named one — or marks the
+request infeasible; the host-side :mod:`~smarter_dev.web.handler_lint` rejects
+opaque blobs / dynamic execution; Judge (Gemini 3 Flash) reviews the script as
+inert data and APPROVEs or REJECTs. The author and judge callables are
+injectable so the orchestration is unit-testable without any model calls.
 """
 
 from __future__ import annotations
@@ -63,15 +64,56 @@ Judge = Callable[[str, str], Awaitable["JudgeVerdict"]]
 Progress = Callable[[str], Awaitable[None]]
 
 
-class AdminHandlerPlan(BaseModel):
-    """The admin author's structured plan — trigger/scope/script in one shot.
+class HandlerPlan(BaseModel):
+    """The author's structured plan: edit one of the channel's handlers or
+    create a new, named one.
 
-    The admin describes a behavior in free text; the author decides everything.
-    ``channel_ids`` empty = all channels in the guild.
+    The author sees the channel's existing handlers (name, trigger, script) and
+    decides. ``target_handler_id`` names the handler to edit; ``name`` labels a
+    newly created one.
     """
 
     feasible: bool = Field(description="False if the request can't fit the limits")
     error: str = Field(default="", description="One-line reason when not feasible")
+    action: str = Field(
+        default="create", description="'edit' an existing handler or 'create' a new one"
+    )
+    target_handler_id: str = Field(
+        default="", description="handler_id of the handler to edit (action='edit')"
+    )
+    name: str = Field(
+        default="", description="Short kebab-case name for a new handler (action='create')"
+    )
+    trigger_type: str = Field(
+        default="message", description="message | reaction | schedule | timer"
+    )
+    settings: dict = Field(default_factory=dict, description="Timing for time triggers")
+    description: str = Field(
+        default="",
+        description="One line: what the handler does AFTER this change",
+    )
+    script: str = Field(default="", description="The Monty script")
+
+
+class AdminHandlerPlan(BaseModel):
+    """The admin author's structured plan — edit-vs-create, trigger/scope/script.
+
+    The admin describes a behavior in free text; the author sees the guild's
+    existing admin handlers and decides everything. ``channel_ids`` empty = all
+    channels in the guild.
+    """
+
+    feasible: bool = Field(description="False if the request can't fit the limits")
+    error: str = Field(default="", description="One-line reason when not feasible")
+    action: str = Field(
+        default="create", description="'edit' an existing handler or 'create' a new one"
+    )
+    target_handler_id: str = Field(
+        default="", description="handler_id of the handler to edit (action='edit')"
+    )
+    name: str = Field(
+        default="", description="Short kebab-case name for a new handler (action='create')"
+    )
     trigger_type: str = Field(
         default="message", description="message | reaction | schedule | timer"
     )
@@ -79,14 +121,24 @@ class AdminHandlerPlan(BaseModel):
         default_factory=list, description="Channel scope; empty = all channels"
     )
     settings: dict = Field(default_factory=dict, description="Timing for time triggers")
+    description: str = Field(
+        default="",
+        description="One line: what the handler does AFTER this change",
+    )
     script: str = Field(default="", description="The Monty script")
 
 
 @dataclass
 class CreationResult:
-    """Outcome of the creation pipeline."""
+    """Outcome of the creation pipeline: an approved create or edit."""
 
     ok: bool
+    action: str | None = None
+    target_handler_id: str | None = None
+    name: str | None = None
+    trigger_type: str | None = None
+    settings: dict | None = None
+    description: str | None = None
     script: str | None = None
     error: str | None = None
 
@@ -96,11 +148,116 @@ class AdminCreationResult:
     """Outcome of the admin creation pipeline (carries trigger/scope/settings)."""
 
     ok: bool
+    action: str | None = None
+    target_handler_id: str | None = None
+    name: str | None = None
     trigger_type: str | None = None
     channel_ids: list[str] | None = None
     settings: dict | None = None
+    description: str | None = None
     script: str | None = None
     error: str | None = None
+
+
+@dataclass
+class _ResolvedTarget:
+    """A plan's edit/create intent validated against the real handler list."""
+
+    action: str
+    target_handler_id: str | None
+    name: str
+    trigger_type: str
+    settings: dict
+
+
+def _resolve_plan_target(
+    *,
+    action: str,
+    target_handler_id: str,
+    name: str,
+    trigger_type: str,
+    settings: dict,
+    existing_handlers: list[dict],
+) -> tuple[str, None] | tuple[None, _ResolvedTarget]:
+    """Validate edit-vs-create against the handlers the author was shown.
+
+    Returns ``(error, None)`` or ``(None, resolved)``. On edit the target's
+    trigger wins (a handler cannot change trigger type) and its settings are
+    kept unless the plan supplies new ones. On create the name must be new
+    (case-insensitive) among the existing handlers.
+    """
+    if action == "edit":
+        target = next(
+            (h for h in existing_handlers if h["handler_id"] == target_handler_id),
+            None,
+        )
+        if target is None:
+            return (
+                f"the author chose to edit unknown handler {target_handler_id!r}",
+                None,
+            )
+        return None, _ResolvedTarget(
+            action="edit",
+            target_handler_id=target_handler_id,
+            name=target["name"],
+            trigger_type=target["trigger_type"],
+            settings=dict(settings) if settings else dict(target.get("settings") or {}),
+        )
+
+    if action != "create":
+        return f"the author chose an invalid action {action!r}", None
+    cleaned_name = name.strip()
+    if not cleaned_name or len(cleaned_name) > 64:
+        return "the author didn't give the new handler a usable name", None
+    taken = {h["name"].casefold() for h in existing_handlers}
+    if cleaned_name.casefold() in taken:
+        return f"a handler named {cleaned_name!r} already exists — the author should edit it", None
+    if trigger_type not in HANDLER_TRIGGER_TYPES:
+        return f"the author chose an invalid trigger {trigger_type!r}", None
+    return None, _ResolvedTarget(
+        action="create",
+        target_handler_id=None,
+        name=cleaned_name,
+        trigger_type=trigger_type,
+        settings=dict(settings),
+    )
+
+
+def _final_description(
+    plan_description: str,
+    resolved: _ResolvedTarget,
+    existing_handlers: list[dict],
+    request: str,
+) -> str:
+    """The stored handler description: the author's restatement when given,
+    else the target's old description (edit) or the raw request (create)."""
+    cleaned = plan_description.strip()
+    if cleaned:
+        return cleaned
+    if resolved.action == "edit":
+        target = next(
+            h for h in existing_handlers if h["handler_id"] == resolved.target_handler_id
+        )
+        return target.get("description", "") or request
+    return request
+
+
+def _render_existing_handlers(existing_handlers: list[dict]) -> str:
+    """The handler inventory the author decides against, scripts included."""
+    if not existing_handlers:
+        return "There are NO existing handlers here — any request means creating a new one."
+    blocks = []
+    for h in existing_handlers:
+        blocks.append(
+            f"- handler_id: {h['handler_id']}\n"
+            f"  name: {h['name']} | trigger: {h['trigger_type']} | "
+            f"settings: {json.dumps(h.get('settings') or {})}\n"
+            f"  description: {h.get('description', '')}\n"
+            f"  script:\n  ---\n{h.get('script', '')}\n  ---"
+        )
+    return "Existing handlers (edit ONE of these, or create a new one):\n" + "\n".join(
+        blocks
+    )
 
 
 def _humanize_seconds(seconds: int) -> str:
@@ -185,16 +342,17 @@ _HANDLER_THINKING = GoogleModelSettings(
 )
 
 
-_author_agent: Agent[_AuthorDeps, str] | None = None
+_author_agent: Agent[_AuthorDeps, HandlerPlan] | None = None
 _judge_agent: Agent[None, JudgeVerdict] | None = None
 
 
-def _get_author_agent() -> Agent[_AuthorDeps, str]:
+def _get_author_agent() -> Agent[_AuthorDeps, HandlerPlan]:
     global _author_agent
     if _author_agent is None:
         _author_agent = Agent(
             _build_google_model(get_settings().handler_author_model),
             deps_type=_AuthorDeps,
+            output_type=HandlerPlan,
             system_prompt=AUTHOR_PROMPT,
             tools=[_list_channel_emojis],
             model_settings=_HANDLER_THINKING,
@@ -215,36 +373,30 @@ def _get_judge_agent() -> Agent[None, JudgeVerdict]:
 
 
 def _build_author_prompt(
-    description: str, trigger_type: str, settings: dict, existing_script: str | None
+    request: str, trigger_type: str, settings: dict, existing_handlers: list[dict]
 ) -> str:
-    parts = [
-        f"Trigger: {trigger_type}",
-        f"Settings: {json.dumps(settings)}",
-        f"Description:\n{description}",
-    ]
-    if existing_script:
-        parts.append(
-            "An existing handler is installed for this channel + trigger. Merge the "
-            "new behavior into it, or replace it — the combined result must still "
-            "satisfy every limit. Existing script:\n---\n"
-            + existing_script
-            + "\n---"
-        )
-    return "\n\n".join(parts)
+    return "\n\n".join(
+        [
+            f"Requested trigger (a hint — you decide): {trigger_type}",
+            f"Requested settings (a hint — you decide): {json.dumps(settings)}",
+            f"Request:\n{request}",
+            _render_existing_handlers(existing_handlers),
+        ]
+    )
 
 
 async def _default_author(
     *,
-    description: str,
+    request: str,
     trigger_type: str,
     settings: dict,
-    existing_script: str | None,
+    existing_handlers: list[dict],
     emoji_lister: EmojiLister,
-) -> str:
+) -> HandlerPlan:
     agent = _get_author_agent()
-    prompt = _build_author_prompt(description, trigger_type, settings, existing_script)
+    prompt = _build_author_prompt(request, trigger_type, settings, existing_handlers)
     result = await agent.run(prompt, deps=_AuthorDeps(list_emojis=emoji_lister))
-    return str(result.output)
+    return result.output
 
 
 async def _default_judge(script: str, trigger_context: str) -> JudgeVerdict:
@@ -264,47 +416,64 @@ async def _empty_emoji_lister() -> list[dict]:
 
 async def run_creation_pipeline(
     *,
-    description: str,
+    request: str,
     trigger_type: str,
     settings: dict,
-    existing_script: str | None = None,
+    existing_handlers: list[dict],
     emoji_lister: EmojiLister | None = None,
     author: Author | None = None,
     judge: Judge | None = None,
     progress: Progress | None = None,
 ) -> CreationResult:
-    """Author -> lint -> judge. Return an approved script or a one-line error.
+    """Author (plans edit-vs-create) -> lint -> judge.
 
-    Each stage is logged (description, author output, lint result, judge verdict)
-    so a rejection is always diagnosable from the bot log, and the returned
-    error carries a concrete reason the chatbot can relay verbatim.
+    The author sees the channel's existing named handlers and either edits one
+    (by handler_id) or creates a new, named one. ``trigger_type``/``settings``
+    are the chatbot's hints; the validated plan is authoritative. Each stage is
+    logged so a rejection is always diagnosable from the bot log, and the
+    returned error carries a concrete reason the chatbot can relay verbatim.
     """
     author = author or _default_author
     judge = judge or _default_judge
     emoji_lister = emoji_lister or _empty_emoji_lister
 
     logger.info(
-        "creation pipeline: trigger=%s settings=%s description=%r",
-        trigger_type, settings, description,
+        "creation pipeline: trigger=%s settings=%s request=%r existing=%d",
+        trigger_type, settings, request, len(existing_handlers),
     )
 
-    raw = (
-        await author(
-            description=description,
-            trigger_type=trigger_type,
-            settings=settings,
-            existing_script=existing_script,
-            emoji_lister=emoji_lister,
+    plan = await author(
+        request=request,
+        trigger_type=trigger_type,
+        settings=settings,
+        existing_handlers=existing_handlers,
+        emoji_lister=emoji_lister,
+    )
+    logger.info(
+        "author plan: feasible=%s action=%s target=%s name=%s trigger=%s settings=%s\n%s",
+        plan.feasible, plan.action, plan.target_handler_id, plan.name,
+        plan.trigger_type, plan.settings, plan.script,
+    )
+
+    if not plan.feasible:
+        return CreationResult(
+            ok=False,
+            error=f"the author couldn't build this: {plan.error or 'not feasible'}",
         )
-    ).strip()
-    logger.info("author output:\n%s", raw)
 
-    if raw.upper().startswith("ERROR:"):
-        detail = raw.split(":", 1)[1].strip()
-        logger.info("author declined: %s", detail)
-        return CreationResult(ok=False, error=f"the author couldn't build this: {detail}")
+    error, resolved = _resolve_plan_target(
+        action=plan.action,
+        target_handler_id=plan.target_handler_id,
+        name=plan.name,
+        trigger_type=plan.trigger_type,
+        settings=plan.settings,
+        existing_handlers=existing_handlers,
+    )
+    if error is not None:
+        logger.info("plan rejected: %s", error)
+        return CreationResult(ok=False, error=error)
 
-    script = _strip_code_fences(raw)
+    script = _strip_code_fences(plan.script)
 
     reason = lint_script(script)
     if reason is not None:
@@ -314,13 +483,24 @@ async def run_creation_pipeline(
     if progress is not None:
         await progress("Reviewing the handler before installing…")
 
-    trigger_context = describe_trigger(trigger_type, settings)
+    trigger_context = describe_trigger(resolved.trigger_type, resolved.settings)
     verdict = await judge(script, trigger_context)
     logger.info("judge verdict: approved=%s reason=%s", verdict.approved, verdict.reason)
-    if verdict.approved:
-        return CreationResult(ok=True, script=script)
+    if not verdict.approved:
+        return CreationResult(ok=False, error=f"the reviewer rejected it: {verdict.reason}")
 
-    return CreationResult(ok=False, error=f"the reviewer rejected it: {verdict.reason}")
+    return CreationResult(
+        ok=True,
+        action=resolved.action,
+        target_handler_id=resolved.target_handler_id,
+        name=resolved.name,
+        trigger_type=resolved.trigger_type,
+        settings=resolved.settings,
+        description=_final_description(
+            plan.description, resolved, existing_handlers, request
+        ),
+        script=script,
+    )
 
 
 # --- admin author / judge ----------------------------------------------------
@@ -370,11 +550,14 @@ def _get_admin_judge_agent() -> Agent[None, JudgeVerdict]:
 
 
 async def _default_admin_author(
-    *, request: str, channel_lister: ChannelLister
+    *, request: str, existing_handlers: list[dict], channel_lister: ChannelLister
 ) -> AdminHandlerPlan:
     agent = _get_admin_author_agent()
+    prompt = "\n\n".join(
+        [f"Request:\n{request}", _render_existing_handlers(existing_handlers)]
+    )
     result = await agent.run(
-        request, deps=_AdminAuthorDeps(list_channels=channel_lister)
+        prompt, deps=_AdminAuthorDeps(list_channels=channel_lister)
     )
     return result.output
 
@@ -397,31 +580,52 @@ async def _empty_channel_lister() -> list[dict]:
 async def run_admin_creation_pipeline(
     *,
     request: str,
+    existing_handlers: list[dict],
     channel_lister: ChannelLister | None = None,
     author: AdminAuthor | None = None,
     judge: Judge | None = None,
     progress: Progress | None = None,
 ) -> AdminCreationResult:
-    """Admin author (plans trigger/scope/script) -> lint -> admin judge."""
+    """Admin author (plans edit-vs-create + trigger/scope/script) -> lint -> judge.
+
+    The author sees the guild's existing named admin handlers and either edits
+    one (by handler_id) or creates a new, named one.
+    """
     author = author or _default_admin_author
     judge = judge or _default_admin_judge
     channel_lister = channel_lister or _empty_channel_lister
 
-    logger.info("admin creation pipeline: request=%r", request)
-    plan = await author(request=request, channel_lister=channel_lister)
     logger.info(
-        "admin author plan: feasible=%s trigger=%s channels=%s settings=%s\n%s",
-        plan.feasible, plan.trigger_type, plan.channel_ids, plan.settings, plan.script,
+        "admin creation pipeline: request=%r existing=%d", request, len(existing_handlers)
+    )
+    plan = await author(
+        request=request,
+        existing_handlers=existing_handlers,
+        channel_lister=channel_lister,
+    )
+    logger.info(
+        "admin author plan: feasible=%s action=%s target=%s name=%s trigger=%s "
+        "channels=%s settings=%s\n%s",
+        plan.feasible, plan.action, plan.target_handler_id, plan.name,
+        plan.trigger_type, plan.channel_ids, plan.settings, plan.script,
     )
 
     if not plan.feasible:
         return AdminCreationResult(
             ok=False, error=f"the author couldn't build this: {plan.error or 'not feasible'}"
         )
-    if plan.trigger_type not in HANDLER_TRIGGER_TYPES:
-        return AdminCreationResult(
-            ok=False, error=f"the author chose an invalid trigger {plan.trigger_type!r}"
-        )
+
+    error, resolved = _resolve_plan_target(
+        action=plan.action,
+        target_handler_id=plan.target_handler_id,
+        name=plan.name,
+        trigger_type=plan.trigger_type,
+        settings=plan.settings,
+        existing_handlers=existing_handlers,
+    )
+    if error is not None:
+        logger.info("admin plan rejected: %s", error)
+        return AdminCreationResult(ok=False, error=error)
 
     script = _strip_code_fences(plan.script)
     reason = lint_script(script)
@@ -432,7 +636,7 @@ async def run_admin_creation_pipeline(
     if progress is not None:
         await progress("Reviewing the admin handler before installing…")
 
-    trigger_context = describe_trigger(plan.trigger_type, plan.settings or {})
+    trigger_context = describe_trigger(resolved.trigger_type, resolved.settings)
     verdict = await judge(script, trigger_context)
     logger.info("admin judge verdict: approved=%s reason=%s", verdict.approved, verdict.reason)
     if not verdict.approved:
@@ -440,8 +644,14 @@ async def run_admin_creation_pipeline(
 
     return AdminCreationResult(
         ok=True,
-        trigger_type=plan.trigger_type,
+        action=resolved.action,
+        target_handler_id=resolved.target_handler_id,
+        name=resolved.name,
+        trigger_type=resolved.trigger_type,
         channel_ids=list(plan.channel_ids or []),
-        settings=dict(plan.settings or {}),
+        settings=resolved.settings,
+        description=_final_description(
+            plan.description, resolved, existing_handlers, request
+        ),
         script=script,
     )

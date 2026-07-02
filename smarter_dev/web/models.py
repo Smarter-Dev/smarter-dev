@@ -18,7 +18,6 @@ from sqlalchemy import Integer
 from sqlalchemy import JSON
 from sqlalchemy import Numeric
 from sqlalchemy import String
-from sqlalchemy import text
 from sqlalchemy import Text
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import Mapped, relationship
@@ -4478,9 +4477,9 @@ class ChannelHandler(Base):
     """A member-created automation: a sandboxed script run when a trigger fires.
 
     ``id`` is the public ``handler_id`` surfaced by ``list_handlers`` and used by
-    ``delete_handler``. Event triggers (message/reaction) are single-listener per
-    channel — enforced by the partial unique index below and by upsert logic in
-    the web API. Time triggers (schedule/timer) coexist freely.
+    ``delete_handler``. ``name`` is the author-chosen label members and the
+    authoring agent refer to a handler by — unique within a channel. Any number
+    of handlers may share a (channel, trigger); every enabled one fires.
     """
 
     __tablename__ = "channel_handlers"
@@ -4490,15 +4489,8 @@ class ChannelHandler(Base):
             name="ck_channel_handlers_trigger_type",
         ),
         Index("ix_channel_handlers_channel_id", "channel_id"),
-        # One event handler per (channel, trigger_type). Partial so multiple
-        # schedules/timers can share a channel.
         Index(
-            "uq_channel_handlers_event_listener",
-            "channel_id",
-            "trigger_type",
-            unique=True,
-            postgresql_where=text("trigger_type IN ('message', 'reaction')"),
-            sqlite_where=text("trigger_type IN ('message', 'reaction')"),
+            "uq_channel_handlers_channel_name", "channel_id", "name", unique=True
         ),
     )
 
@@ -4507,6 +4499,7 @@ class ChannelHandler(Base):
     )
     guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
     channel_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
     trigger_type: Mapped[str] = mapped_column(String(20), nullable=False)
     settings: Mapped[dict] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
@@ -4583,7 +4576,9 @@ class AdminHandler(Base):
     command (author-written script, never editable by regular members). The
     script may call moderation external functions (ban/kick/timeout/delete) and
     send to any channel. ``channel_ids`` is the scope — empty/null means ALL
-    channels in the guild; otherwise the listed channel ids.
+    channels in the guild; otherwise the listed channel ids. ``name`` is the
+    author-chosen label admins and the authoring agent refer to a handler by —
+    unique within a guild.
     """
 
     __tablename__ = "admin_handlers"
@@ -4593,12 +4588,14 @@ class AdminHandler(Base):
             name="ck_admin_handlers_trigger_type",
         ),
         Index("ix_admin_handlers_guild_id", "guild_id"),
+        Index("uq_admin_handlers_guild_name", "guild_id", "name", unique=True),
     )
 
     id: Mapped[UUID] = mapped_column(
         PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
     )
     guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
     trigger_type: Mapped[str] = mapped_column(String(20), nullable=False)
     settings: Mapped[dict] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"

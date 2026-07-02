@@ -30,6 +30,11 @@ HANDLER_FIRES_PER_MIN_REACTION = 4
 # need a high fire ceiling; the global agent/min cap still bounds expensive work.
 ADMIN_FIRES_PER_MIN = 120
 
+# Creation ceilings. Named handlers removed the single-listener bound, so the
+# number of handlers is capped outright — enforced at the create endpoints.
+MAX_HANDLERS_PER_CHANNEL = 10
+MAX_ADMIN_HANDLERS_PER_GUILD = 20
+
 # When a handler fire errors we post a notice in the channel — but a broken
 # handler errors on every fire, so throttle the notice hard: at most one per
 # handler per window. The window is long enough not to nag, short enough that the

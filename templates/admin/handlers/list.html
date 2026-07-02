@@ -122,6 +122,7 @@
     {% set errs = error_log.get(h.id | string, []) %}
     <details class="hx-handler">
       <summary>
+        <strong>{{ h.name }}</strong>
         <span class="sk-pill">{{ h.trigger_type }}</span>
         <span class="hx-desc">{{ h.description }}</span>
         {% if errs %}<span class="hx-errpill">{{ errs | length }} err</span>{% endif %}
@@ -162,6 +163,7 @@
     {% set errs = error_log.get(h.id | string, []) %}
     <details class="hx-handler">
       <summary>
+        <strong>{{ h.name }}</strong>
         <span class="sk-pill">{{ h.trigger_type }}</span>
         <span class="hx-desc">{{ h.description }}</span>
         {% if errs %}<span class="hx-errpill">{{ errs | length }} err</span>{% endif %}

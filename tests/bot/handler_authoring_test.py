@@ -6,6 +6,7 @@ Author and judge are injected, so these run with no model calls.
 from __future__ import annotations
 
 from smarter_dev.bot.agents.handler_authoring import (
+    HandlerPlan,
     JudgeVerdict,
     describe_trigger,
     run_creation_pipeline,
@@ -14,10 +15,42 @@ from smarter_dev.bot.agents.handler_authoring import (
 
 GOOD_SCRIPT = 'if "huzzah" in context["message_content"].lower():\n    await add_reaction(context["message_id"], "🎉")\n'
 
+EXISTING = [
+    {
+        "handler_id": "11111111-1111-1111-1111-111111111111",
+        "name": "greeter",
+        "trigger_type": "message",
+        "settings": {},
+        "description": "greets newcomers",
+        "script": 'await send_message("welcome")\n',
+    },
+    {
+        "handler_id": "22222222-2222-2222-2222-222222222222",
+        "name": "daily-digest",
+        "trigger_type": "schedule",
+        "settings": {"daily_time": "08:00"},
+        "description": "posts a daily digest",
+        "script": 'await send_message("digest")\n',
+    },
+]
 
-def _author_returning(text):
+
+def _plan(**over):
+    fields = {
+        "feasible": True,
+        "action": "create",
+        "name": "huzzah-reactor",
+        "trigger_type": "message",
+        "settings": {},
+        "script": GOOD_SCRIPT,
+    }
+    fields.update(over)
+    return HandlerPlan(**fields)
+
+
+def _author_returning(plan):
     async def author(**kwargs):
-        return text
+        return plan
 
     return author
 
@@ -36,24 +69,131 @@ def _judge_rejecting(reason):
     return judge
 
 
-async def test_happy_path_approves():
+async def test_create_happy_path():
     result = await run_creation_pipeline(
-        description="react with tada on huzzah",
+        request="react with tada on huzzah",
         trigger_type="message",
         settings={},
-        author=_author_returning(GOOD_SCRIPT),
+        existing_handlers=EXISTING,
+        author=_author_returning(_plan()),
         judge=_judge_approving(),
     )
     assert result.ok
+    assert result.action == "create"
+    assert result.name == "huzzah-reactor"
+    assert result.trigger_type == "message"
     assert "add_reaction" in result.script
 
 
-async def test_author_error_is_relayed():
-    result = await run_creation_pipeline(
-        description="say hi 100 times",
+async def test_author_sees_existing_handlers():
+    seen = {}
+
+    async def author(**kwargs):
+        seen.update(kwargs)
+        return _plan()
+
+    await run_creation_pipeline(
+        request="x",
         trigger_type="message",
         settings={},
-        author=_author_returning("ERROR: cannot exceed the 3-message cap"),
+        existing_handlers=EXISTING,
+        author=author,
+        judge=_judge_approving(),
+    )
+    assert seen["existing_handlers"] == EXISTING
+
+
+async def test_edit_targets_existing_handler():
+    plan = _plan(
+        action="edit",
+        target_handler_id="11111111-1111-1111-1111-111111111111",
+        name="",
+        script='await send_message("welcome, adventurer")\n',
+    )
+    result = await run_creation_pipeline(
+        request="make the greeter more whimsical",
+        trigger_type="message",
+        settings={},
+        existing_handlers=EXISTING,
+        author=_author_returning(plan),
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert result.action == "edit"
+    assert result.target_handler_id == "11111111-1111-1111-1111-111111111111"
+    # Trigger comes from the target, not the plan.
+    assert result.trigger_type == "message"
+
+
+async def test_edit_of_unknown_target_is_rejected():
+    plan = _plan(action="edit", target_handler_id="99999999-9999-9999-9999-999999999999")
+    result = await run_creation_pipeline(
+        request="x",
+        trigger_type="message",
+        settings={},
+        existing_handlers=EXISTING,
+        author=_author_returning(plan),
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "unknown handler" in result.error
+
+
+async def test_edit_uses_target_trigger_and_plan_settings():
+    plan = _plan(
+        action="edit",
+        target_handler_id="22222222-2222-2222-2222-222222222222",
+        trigger_type="message",  # author restates wrongly; the target wins
+        settings={"daily_time": "09:30"},
+        script='await send_message("digest v2")\n',
+    )
+    result = await run_creation_pipeline(
+        request="move the digest to 9:30",
+        trigger_type="schedule",
+        settings={},
+        existing_handlers=EXISTING,
+        author=_author_returning(plan),
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert result.trigger_type == "schedule"
+    assert result.settings == {"daily_time": "09:30"}
+
+
+async def test_create_with_taken_name_is_rejected():
+    result = await run_creation_pipeline(
+        request="x",
+        trigger_type="message",
+        settings={},
+        existing_handlers=EXISTING,
+        author=_author_returning(_plan(name="Greeter")),  # case-insensitive clash
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "already" in result.error
+
+
+async def test_create_without_name_is_rejected():
+    result = await run_creation_pipeline(
+        request="x",
+        trigger_type="message",
+        settings={},
+        existing_handlers=[],
+        author=_author_returning(_plan(name="  ")),
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "name" in result.error
+
+
+async def test_author_infeasible_is_relayed():
+    plan = HandlerPlan(feasible=False, error="cannot exceed the 3-message cap")
+    result = await run_creation_pipeline(
+        request="say hi 100 times",
+        trigger_type="message",
+        settings={},
+        existing_handlers=[],
+        author=_author_returning(plan),
         judge=_judge_approving(),
     )
     assert not result.ok
@@ -62,10 +202,11 @@ async def test_author_error_is_relayed():
 
 async def test_judge_reject_is_relayed():
     result = await run_creation_pipeline(
-        description="whatever",
+        request="whatever",
         trigger_type="message",
         settings={},
-        author=_author_returning(GOOD_SCRIPT),
+        existing_handlers=[],
+        author=_author_returning(_plan()),
         judge=_judge_rejecting("sends in a loop, over the 3-message cap"),
     )
     assert not result.ok
@@ -81,10 +222,13 @@ async def test_lint_blocks_opaque_blob_before_judge():
 
     blob = "QUJDREVG" * 30
     result = await run_creation_pipeline(
-        description="sneaky",
+        request="sneaky",
         trigger_type="message",
         settings={},
-        author=_author_returning(f'data = "{blob}"\nawait send_message(data)\n'),
+        existing_handlers=[],
+        author=_author_returning(
+            _plan(script=f'data = "{blob}"\nawait send_message(data)\n')
+        ),
         judge=judge,
     )
     assert not result.ok
@@ -93,12 +237,12 @@ async def test_lint_blocks_opaque_blob_before_judge():
 
 
 async def test_code_fences_are_stripped():
-    fenced = "```python\n" + GOOD_SCRIPT + "```"
     result = await run_creation_pipeline(
-        description="x",
+        request="x",
         trigger_type="message",
         settings={},
-        author=_author_returning(fenced),
+        existing_handlers=[],
+        author=_author_returning(_plan(script="```python\n" + GOOD_SCRIPT + "```")),
         judge=_judge_approving(),
     )
     assert result.ok
@@ -118,10 +262,17 @@ async def test_judge_receives_trigger_cadence():
         return JudgeVerdict(approved=True, reason="ok")
 
     await run_creation_pipeline(
-        description="post fib",
+        request="post fib",
         trigger_type="schedule",
         settings={"interval_seconds": 300},
-        author=_author_returning('await send_message("0,1,1,2")\n'),
+        existing_handlers=[],
+        author=_author_returning(
+            _plan(
+                trigger_type="schedule",
+                settings={"interval_seconds": 300},
+                script='await send_message("0,1,1,2")\n',
+            )
+        ),
         judge=judge,
     )
     assert "every 5 minutes" in seen["ctx"]
@@ -152,34 +303,101 @@ ADMIN_SCRIPT = (
     '        await send_message("banned a scammer", "MODCHAT")\n'
 )
 
+ADMIN_EXISTING = [
+    {
+        "handler_id": "33333333-3333-3333-3333-333333333333",
+        "name": "scam-banner",
+        "trigger_type": "message",
+        "settings": {},
+        "channel_ids": [],
+        "description": "bans scammers",
+        "script": ADMIN_SCRIPT,
+    },
+]
+
+
+def _admin_plan(**over):
+    fields = {
+        "feasible": True,
+        "action": "create",
+        "name": "raid-alarm",
+        "trigger_type": "message",
+        "channel_ids": [],
+        "settings": {},
+        "script": ADMIN_SCRIPT,
+    }
+    fields.update(over)
+    return AdminHandlerPlan(**fields)
+
 
 def _admin_author_returning(plan):
-    async def author(*, request, channel_lister):
+    async def author(*, request, existing_handlers, channel_lister):
         return plan
 
     return author
 
 
-async def test_admin_pipeline_happy():
-    plan = AdminHandlerPlan(
-        feasible=True, trigger_type="message", channel_ids=[], settings={},
-        script=ADMIN_SCRIPT,
-    )
+async def test_admin_pipeline_create():
     result = await run_admin_creation_pipeline(
         request="watch for scams and ban them",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(_admin_plan()),
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert result.action == "create"
+    assert result.name == "raid-alarm"
+    assert result.trigger_type == "message"
+    assert "ban_user" in result.script
+
+
+async def test_admin_pipeline_edit():
+    plan = _admin_plan(
+        action="edit",
+        target_handler_id="33333333-3333-3333-3333-333333333333",
+        name="",
+    )
+    result = await run_admin_creation_pipeline(
+        request="also check attachments",
+        existing_handlers=ADMIN_EXISTING,
         author=_admin_author_returning(plan),
         judge=_judge_approving(),
     )
     assert result.ok
-    assert result.trigger_type == "message"
-    assert result.channel_ids == []
-    assert "ban_user" in result.script
+    assert result.action == "edit"
+    assert result.target_handler_id == "33333333-3333-3333-3333-333333333333"
+
+
+async def test_admin_pipeline_edit_unknown_target():
+    plan = _admin_plan(action="edit", target_handler_id="not-a-real-id")
+    result = await run_admin_creation_pipeline(
+        request="x",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(plan),
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "unknown handler" in result.error
+
+
+async def test_admin_pipeline_create_taken_name():
+    result = await run_admin_creation_pipeline(
+        request="x",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(_admin_plan(name="scam-banner")),
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "already" in result.error
 
 
 async def test_admin_pipeline_not_feasible():
     plan = AdminHandlerPlan(feasible=False, error="needs 100 bans/sec, over the cap")
     result = await run_admin_creation_pipeline(
-        request="impossible", author=_admin_author_returning(plan), judge=_judge_approving()
+        request="impossible",
+        existing_handlers=[],
+        author=_admin_author_returning(plan),
+        judge=_judge_approving(),
     )
     assert not result.ok
     assert "over the cap" in result.error
@@ -193,9 +411,11 @@ async def test_admin_pipeline_lint_blocks_blob_before_judge():
         return JudgeVerdict(approved=True, reason="ok")
 
     blob = "QUJDREVG" * 30
-    plan = AdminHandlerPlan(feasible=True, trigger_type="message", script=f'x = "{blob}"\n')
     result = await run_admin_creation_pipeline(
-        request="sneaky", author=_admin_author_returning(plan), judge=judge
+        request="sneaky",
+        existing_handlers=[],
+        author=_admin_author_returning(_admin_plan(script=f'x = "{blob}"\n')),
+        judge=judge,
     )
     assert not result.ok
     assert "opaque" in result.error
@@ -203,9 +423,10 @@ async def test_admin_pipeline_lint_blocks_blob_before_judge():
 
 
 async def test_admin_pipeline_judge_reject():
-    plan = AdminHandlerPlan(feasible=True, trigger_type="message", script=ADMIN_SCRIPT)
     result = await run_admin_creation_pipeline(
-        request="x", author=_admin_author_returning(plan),
+        request="x",
+        existing_handlers=[],
+        author=_admin_author_returning(_admin_plan()),
         judge=_judge_rejecting("bans every author with no condition"),
     )
     assert not result.ok
