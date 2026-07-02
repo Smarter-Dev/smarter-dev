@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from skrift.workers import get_handle
 from skrift.workers import submit as worker_submit
@@ -139,13 +139,13 @@ async def create_admin_handler(
             status.HTTP_409_CONFLICT,
             f"an admin handler named {name!r} already exists in this guild — edit it instead",
         )
-    guild_count = len(
-        (
-            await session.execute(
-                select(AdminHandler.id).where(AdminHandler.guild_id == body.guild_id)
-            )
-        ).all()
-    )
+    guild_count = (
+        await session.execute(
+            select(func.count())
+            .select_from(AdminHandler)
+            .where(AdminHandler.guild_id == body.guild_id)
+        )
+    ).scalar_one()
     if guild_count >= MAX_ADMIN_HANDLERS_PER_GUILD:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
