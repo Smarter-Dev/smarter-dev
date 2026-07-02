@@ -10,47 +10,33 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import ClassVar
+from urllib.parse import quote
 
-import httpx
-
-_API_BASE = "https://discord.com/api/v10"
+from smarter_dev.web.discord_rest import DiscordBotClient, DiscordRestError
 
 
-class AdminActionError(Exception):
+class AdminActionError(DiscordRestError):
     """A moderation action's REST call failed."""
 
 
-@dataclass
-class AdminActor:
+@dataclass(kw_only=True)
+class AdminActor(DiscordBotClient):
     """Performs moderation actions for one guild via Discord REST."""
 
-    bot_token: str
     guild_id: str
-    timeout: float = 15.0
 
-    @property
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bot {self.bot_token}",
-            "User-Agent": "SmarterDev-AdminHandlers/1.0",
-        }
-
-    async def _request(self, method: str, endpoint: str, **kwargs) -> None:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.request(
-                method, f"{_API_BASE}{endpoint}", headers=self._headers, **kwargs
-            )
-        if response.status_code >= 400:
-            raise AdminActionError(
-                f"{method} {endpoint} -> {response.status_code}: {response.text[:300]}"
-            )
+    user_agent: ClassVar[str] = "SmarterDev-AdminHandlers/1.0"
+    error_type: ClassVar[type[DiscordRestError]] = AdminActionError
 
     async def ban_user(self, user_id: str, reason: str | None = None) -> str:
-        kwargs: dict = {}
-        if reason:
-            kwargs["headers"] = {**self._headers, "X-Audit-Log-Reason": reason[:400]}
+        # Discord expects the audit-log reason URL-encoded; encoding also keeps
+        # non-latin-1 reasons (em dashes, emoji) out of raw header bytes.
+        headers = (
+            {"X-Audit-Log-Reason": quote(reason[:400])} if reason else None
+        )
         await self._request(
-            "PUT", f"/guilds/{self.guild_id}/bans/{user_id}", **kwargs
+            "PUT", f"/guilds/{self.guild_id}/bans/{user_id}", headers=headers
         )
         return f"banned {user_id}"
 
