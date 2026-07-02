@@ -1,42 +1,84 @@
-"""Tests for AdminActor (moderation REST calls)."""
+"""Tests for AdminActor (moderation REST calls).
+
+These run through the real ``_request`` path over ``httpx.MockTransport`` — a
+mock of ``_request`` itself is what let the ban-with-reason double-``headers``
+TypeError reach production.
+"""
 
 from __future__ import annotations
 
-from smarter_dev.web.admin_actions import AdminActor
+import json
+
+import httpx
+import pytest
+
+from smarter_dev.web.admin_actions import AdminActionError, AdminActor
 
 
-class _RecordingActor(AdminActor):
-    def __init__(self):
-        super().__init__(bot_token="t", guild_id="G1")
-        self.calls = []
+def _actor(requests: list[httpx.Request], status_code: int = 204) -> AdminActor:
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(status_code)
 
-    async def _request(self, method, endpoint, **kwargs):
-        self.calls.append((method, endpoint, kwargs))
+    return AdminActor(
+        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+    )
 
 
-async def test_ban_user():
-    a = _RecordingActor()
-    out = await a.ban_user("U1", reason="scam")
+async def test_ban_user_with_reason_sends_auth_and_audit_headers():
+    """Regression: a ban with a reason must not crash on duplicate headers."""
+    requests: list[httpx.Request] = []
+    out = await _actor(requests).ban_user("U1", reason="scam")
     assert "banned U1" in out
-    assert a.calls[0][:2] == ("PUT", "/guilds/G1/bans/U1")
-    assert "X-Audit-Log-Reason" in a.calls[0][2].get("headers", {})
+    request = requests[0]
+    assert request.method == "PUT"
+    assert request.url.path.endswith("/guilds/G1/bans/U1")
+    assert request.headers["Authorization"] == "Bot t"
+    assert request.headers["X-Audit-Log-Reason"] == "scam"
+
+
+async def test_ban_user_without_reason():
+    requests: list[httpx.Request] = []
+    await _actor(requests).ban_user("U1")
+    request = requests[0]
+    assert request.method == "PUT"
+    assert request.url.path.endswith("/guilds/G1/bans/U1")
+    assert "X-Audit-Log-Reason" not in request.headers
+
+
+async def test_ban_reason_is_url_encoded_for_the_audit_header():
+    """Non-latin-1 reasons must not crash httpx's header encoding."""
+    requests: list[httpx.Request] = []
+    await _actor(requests).ban_user("U1", reason="crypto scam — telegram")
+    assert requests[0].headers["X-Audit-Log-Reason"] == "crypto%20scam%20%E2%80%94%20telegram"
 
 
 async def test_kick_user():
-    a = _RecordingActor()
-    await a.kick_user("U1")
-    assert a.calls[0][:2] == ("DELETE", "/guilds/G1/members/U1")
+    requests: list[httpx.Request] = []
+    await _actor(requests).kick_user("U1")
+    request = requests[0]
+    assert request.method == "DELETE"
+    assert request.url.path.endswith("/guilds/G1/members/U1")
 
 
 async def test_timeout_user():
-    a = _RecordingActor()
-    await a.timeout_user("U1", duration_seconds=120)
-    method, endpoint, kwargs = a.calls[0]
-    assert (method, endpoint) == ("PATCH", "/guilds/G1/members/U1")
-    assert "communication_disabled_until" in kwargs["json"]
+    requests: list[httpx.Request] = []
+    await _actor(requests).timeout_user("U1", duration_seconds=120)
+    request = requests[0]
+    assert request.method == "PATCH"
+    assert request.url.path.endswith("/guilds/G1/members/U1")
+    assert "communication_disabled_until" in json.loads(request.content)
 
 
 async def test_delete_message():
-    a = _RecordingActor()
-    await a.delete_message("C1", "M1")
-    assert a.calls[0][:2] == ("DELETE", "/channels/C1/messages/M1")
+    requests: list[httpx.Request] = []
+    await _actor(requests).delete_message("C1", "M1")
+    request = requests[0]
+    assert request.method == "DELETE"
+    assert request.url.path.endswith("/channels/C1/messages/M1")
+
+
+async def test_error_status_raises_admin_action_error():
+    requests: list[httpx.Request] = []
+    with pytest.raises(AdminActionError):
+        await _actor(requests, status_code=403).kick_user("U1")

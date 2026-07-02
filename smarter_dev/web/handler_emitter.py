@@ -6,22 +6,21 @@ is the *only* way a handler reaches a channel; the sandboxed script can call it
 solely through the metered external functions in
 :mod:`smarter_dev.web.handler_runtime`.
 
-Kept deliberately small: send a message, add a reaction. Mirrors the request
-shape of :class:`smarter_dev.web.admin.discord.DiscordClient` but for the
-POST/PUT endpoints that client does not expose.
+Kept deliberately small: send a message, add a reaction. Request plumbing
+lives in :mod:`smarter_dev.web.discord_rest`, shared with ``AdminActor``.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from typing import ClassVar
 from urllib.parse import quote
 
-import httpx
+from smarter_dev.web.discord_rest import DiscordBotClient, DiscordRestError
 
 logger = logging.getLogger(__name__)
 
-_API_BASE = "https://discord.com/api/v10"
 _MESSAGE_MAX = 2000
 # Discord message flag: suppress auto-generated link-preview embeds. Handler
 # output is often a list of links (e.g. a news digest); without this each URL
@@ -29,36 +28,16 @@ _MESSAGE_MAX = 2000
 _SUPPRESS_EMBEDS = 1 << 2
 
 
-class DiscordEmitError(Exception):
+class DiscordEmitError(DiscordRestError):
     """A Discord REST emit failed."""
 
 
-@dataclass
-class DiscordEmitter:
+@dataclass(kw_only=True)
+class DiscordEmitter(DiscordBotClient):
     """Minimal bot-token REST emitter used by handler executions."""
 
-    bot_token: str
-    timeout: float = 15.0
-
-    @property
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bot {self.bot_token}",
-            "User-Agent": "SmarterDev-Handlers/1.0",
-        }
-
-    async def _request(self, method: str, endpoint: str, **kwargs) -> httpx.Response:
-        url = f"{_API_BASE}{endpoint}"
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            response = await client.request(
-                method, url, headers=self._headers, **kwargs
-            )
-        if response.status_code >= 400:
-            body = response.text[:500]
-            raise DiscordEmitError(
-                f"{method} {endpoint} -> {response.status_code}: {body}"
-            )
-        return response
+    user_agent: ClassVar[str] = "SmarterDev-Handlers/1.0"
+    error_type: ClassVar[type[DiscordRestError]] = DiscordEmitError
 
     async def create_message(self, channel_id: str, content: str) -> str:
         """Post a message to a channel; return the new message id.
