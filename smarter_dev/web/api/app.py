@@ -48,6 +48,7 @@ from smarter_dev.web.api.routers.repeating_messages import (
 from smarter_dev.web.api.routers.members import router as members_router
 from smarter_dev.web.api.routers.advent_of_code import router as advent_of_code_router
 from smarter_dev.web.api.routers.stripe_webhooks import router as stripe_webhooks_router
+from smarter_dev.web.api.routers.activity import router as activity_router
 from smarter_dev.web.api.routers.handlers import router as handlers_router
 from smarter_dev.web.api.routers.image_quota import router as image_quota_router
 from smarter_dev.web.api.routers.admin_handlers import (
@@ -418,6 +419,7 @@ api.include_router(members_router, tags=["Members"])
 
 api.include_router(advent_of_code_router, tags=["Advent of Code"])
 api.include_router(handlers_router, tags=["Handlers"])
+api.include_router(activity_router, tags=["Member Activity"])
 api.include_router(image_quota_router, tags=["Image Generation Quota"])
 api.include_router(admin_handlers_router, tags=["Admin Handlers"])
 

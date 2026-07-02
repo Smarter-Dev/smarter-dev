@@ -28,7 +28,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from skrift.workers import get_handle
 from skrift.workers import submit as worker_submit
@@ -50,6 +50,11 @@ from smarter_dev.web.handler_schedule import (
     validate_interval,
 )
 from smarter_dev.web.handlers_jobs import HandlerFirePayload
+from smarter_dev.web.member_activity import (
+    activity_facts,
+    get_activity,
+    record_activity,
+)
 from smarter_dev.web.models import (
     HANDLER_EVENT_TRIGGERS,
     HANDLER_TRIGGER_TYPES,
@@ -170,15 +175,13 @@ async def create_handler(
             status.HTTP_409_CONFLICT,
             f"a handler named {name!r} already exists in this channel — edit it instead",
         )
-    channel_count = len(
-        (
-            await session.execute(
-                select(ChannelHandler.id).where(
-                    ChannelHandler.channel_id == body.channel_id
-                )
-            )
-        ).all()
-    )
+    channel_count = (
+        await session.execute(
+            select(func.count())
+            .select_from(ChannelHandler)
+            .where(ChannelHandler.channel_id == body.channel_id)
+        )
+    ).scalar_one()
     if channel_count >= MAX_HANDLERS_PER_CHANNEL:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -303,6 +306,19 @@ async def dispatch_event(
     limiter = WindowedLimiter(redis=get_redis_client())
     dispatched: list[str] = []
 
+    # Message triggers carry the author: enrich the context with activity facts
+    # ("first message ever", "days since last message") read BEFORE recording
+    # this message, so scripts get platform truth instead of tracking users in
+    # their size-capped memory.
+    trigger_context = dict(body.trigger_context)
+    author_id = trigger_context.get("author_id")
+    if body.trigger_type == "message" and author_id:
+        now = datetime.now(timezone.utc)
+        row = await get_activity(session, body.guild_id, str(author_id))
+        trigger_context.update(activity_facts(row, now))
+        await record_activity(session, body.guild_id, str(author_id), now)
+        await session.commit()
+
     # Standard tier: every enabled handler for this (channel, trigger) fires,
     # each behind its own windowed cap.
     standard_rows = (
@@ -322,7 +338,7 @@ async def dispatch_event(
             continue
         await worker_submit(
             HandlerFirePayload(
-                handler_id=str(standard.id), trigger_context=body.trigger_context
+                handler_id=str(standard.id), trigger_context=trigger_context
             )
         )
         dispatched.append(str(standard.id))
@@ -348,7 +364,7 @@ async def dispatch_event(
             AdminHandlerFirePayload(
                 admin_handler_id=str(ah.id),
                 channel_id=body.channel_id,
-                trigger_context=body.trigger_context,
+                trigger_context=trigger_context,
             )
         )
         dispatched.append(str(ah.id))
