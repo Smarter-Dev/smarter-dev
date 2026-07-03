@@ -2,6 +2,16 @@
    Background — Hex warp canvas styles
    ══════════════════════════════════════════════════════ */
 
+/* The theme's own sections set `z-index: 1` per-component so they sit above
+   the fixed hex canvas. Skrift-rendered pages (e.g. /account) emit raw content
+   into the content partial with no such wrapper, so lift the partial itself —
+   otherwise its content sits at the canvas's stacking level and #bg paints
+   over it (page appears blank until the canvas is removed). */
+[data-sk-partial="content"] {
+  position: relative;
+  z-index: 1;
+}
+
 #bg {
   position: fixed;
   inset: 0;
