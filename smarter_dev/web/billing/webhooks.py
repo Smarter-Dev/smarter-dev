@@ -56,6 +56,17 @@ def _field(obj: Any, name: str, default: Any = None) -> Any:
     return getattr(obj, name, default)
 
 
+def event_type(event: Any) -> str | None:
+    """Return the event type string for a Polar webhook payload or dict.
+
+    The SDK payload models expose the discriminator as ``TYPE`` (with the
+    serialization alias ``type``); dict test fakes use a plain ``type`` key.
+    """
+    if isinstance(event, dict):
+        return event.get("type")
+    return getattr(event, "TYPE", None)
+
+
 async def _get_by_order_id(
     session: AsyncSession, order_id: str
 ) -> SudoMembership | None:
@@ -381,8 +392,7 @@ async def dispatch(session: AsyncSession, event: Any) -> None:
     ``event`` is a validated Polar webhook payload (``.type`` + ``.data``) or an
     equivalent dict; the handler receives the event's ``data`` object.
     """
-    event_type = _field(event, "type")
-    handler = _HANDLERS.get(event_type)
+    handler = _HANDLERS.get(event_type(event))
     if handler is None:
         return
     await handler(session, _field(event, "data"))
