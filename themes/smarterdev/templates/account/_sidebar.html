@@ -1,5 +1,9 @@
+{# active_tab is set by the billing/security controllers; the profile page is
+   rendered by Skrift's account controller which doesn't set it, so default to
+   'profile'. #}
+{% set _tab = active_tab | default('profile', true) %}
 <nav aria-label="Account sections">
-    <a href="/account" class="{% if active_tab == 'profile' %}is-active{% endif %}">Profile</a>
-    <a href="/account/security" class="{% if active_tab == 'security' %}is-active{% endif %}">Security &amp; Accounts</a>
-    <a href="/account/billing" class="{% if active_tab == 'billing' %}is-active{% endif %}">Billing &amp; Plan</a>
+    <a href="/account" class="{% if _tab == 'profile' %}is-active{% endif %}">Profile</a>
+    <a href="/account/security" class="{% if _tab == 'security' %}is-active{% endif %}">Security &amp; Accounts</a>
+    <a href="/account/billing" class="{% if _tab == 'billing' %}is-active{% endif %}">Billing &amp; Plan</a>
 </nav>
