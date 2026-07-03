@@ -40,11 +40,12 @@ from smarter_dev.shared.config import get_settings
 
 # ── Discord projection (carried over from the original launch config) ──
 # base role = "members-only" access granted to any active sudo member;
-# the Founder role + its dedicated-channel role are layered on for founders.
+# the Founder role is layered on for founders. Dedicated-channel access hangs
+# off the Founder role itself (via Discord channel permissions), so no separate
+# channel role is granted.
 _GUILD_ID = "644299523686006834"
 _BASE_ROLE_ID = "1513308785806938122"
 _FOUNDER_ROLE_ID = "1513308170519580823"
-_FOUNDER_CHANNEL_ROLE_ID = "1513308208582889674"
 
 _HACKER_PRICE_CENTS = 800
 _FOUNDER_MIN_CENTS = 25600
@@ -89,7 +90,7 @@ _OFFERINGS: dict[str, dict] = {
             "cta_label": "./fund --founder",
             "discord_guild_id": _GUILD_ID,
             "discord_base_role_id": _BASE_ROLE_ID,
-            "discord_role_ids": f"{_FOUNDER_ROLE_ID},{_FOUNDER_CHANNEL_ROLE_ID}",
+            "discord_role_ids": _FOUNDER_ROLE_ID,
         },
         "features": [
             "Everything in Hacker",
