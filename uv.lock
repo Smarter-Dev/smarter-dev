@@ -628,6 +628,18 @@ wheels = [
 ]
 
 [[package]]
+name = "deprecated"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "wrapt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/49/85/12f0a49a7c4ffb70572b6c2ef13c90c88fd190debda93b23f026b25f9634/deprecated-1.3.1.tar.gz", hash = "sha256:b1b50e0ff0c1fddaa5708a2c6b0a6588bb09b892825ab2b214ac9ea9d92a5223", size = 2932523 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/84/d0/205d54408c08b13550c733c4b85429e7ead111c7f0014309637425520a9a/deprecated-1.3.1-py2.py3-none-any.whl", hash = "sha256:597bfef186b6f60181535a29fbe44865ce137a5079f295b479886c82729d5f3f", size = 11298 },
+]
+
+[[package]]
 name = "diskcache"
 version = "5.6.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1223,6 +1235,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fc/b5/dd0e703abd6f69507c7ec0494c4d0bf5ecefaabaa454801bebcc8b80ff73/json_repair-0.48.0.tar.gz", hash = "sha256:030f826e6867dbc465be7163dfc23458c0776002c0878d239b29136cd2ae8f39", size = 34736 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ba/e9/22315fd481ed9dc007646181b8c2ebf8b63cd512e59c750d03d50a9ed838/json_repair-0.48.0-py3-none-any.whl", hash = "sha256:c3eb34518c39a7a58d963dbbbda8cdb44e16d819169a85d6d1882f7d2fa24774", size = 26354 },
+]
+
+[[package]]
+name = "jsonpath-python"
+version = "1.1.6"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/98/18/4ca8742534a5993ff383f7602e325ce2d5d7cc93d72ac5e1cdedbea8a458/jsonpath_python-1.1.6.tar.gz", hash = "sha256:dded9932b4ec41fb8726e09c83afa4e6be618f938c2db287cc2a81723c639671", size = 88178 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/55/8a/1270a6803bd821cbfcdda387eaa13cb41a7b1f7b9bd145979b3bfb9d6cb7/jsonpath_python-1.1.6-py3-none-any.whl", hash = "sha256:a1c50afd8d3fbbaf47a4873bc890dcb3c15da96f5c020327977d844d8731a2d4", size = 14453 },
 ]
 
 [[package]]
@@ -1871,6 +1892,22 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538 },
+]
+
+[[package]]
+name = "polar-sdk"
+version = "0.31.7"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpcore" },
+    { name = "httpx" },
+    { name = "jsonpath-python" },
+    { name = "pydantic" },
+    { name = "standardwebhooks" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/78/8f/c60e5793fa9d1ea4344ae61522567ba2b8660170341794e869b936fcd5c2/polar_sdk-0.31.7.tar.gz", hash = "sha256:05fd6d47c15b2bae5efa068bee8f2251527db982584a81b5c78e042b9723874a", size = 323115 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dc/e0/a88026b9432c7e2c0c096911ddc97cb06f483036a00a8afd5254efe1c16a/polar_sdk-0.31.7-py3-none-any.whl", hash = "sha256:acff8f3405046d45fa31130674f269314586fee1d3d2fec221eed21cb8697340", size = 902336 },
 ]
 
 [[package]]
@@ -2674,6 +2711,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "markdown" },
     { name = "pillow" },
+    { name = "polar-sdk" },
     { name = "pydantic" },
     { name = "pydantic-ai-slim", extra = ["google", "openai"] },
     { name = "pydantic-monty" },
@@ -2744,10 +2782,10 @@ web = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pdfplumber" },
+    { name = "polar-sdk" },
     { name = "redis" },
     { name = "skrift", extra = ["s3"] },
     { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "stripe" },
 ]
 
 [package.metadata]
@@ -2764,6 +2802,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "markdown", specifier = ">=3.4.0" },
     { name = "pillow", specifier = ">=11.3.0" },
+    { name = "polar-sdk", specifier = ">=0.31.7" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-ai-slim", extras = ["google", "openai"], specifier = ">=1.89.1,<2.0.0" },
     { name = "pydantic-monty", specifier = ">=0.0.18" },
@@ -2832,10 +2871,10 @@ web = [
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "httpx", specifier = ">=0.24.0" },
     { name = "pdfplumber", specifier = ">=0.11.0" },
+    { name = "polar-sdk", specifier = ">=0.31.7" },
     { name = "redis", specifier = ">=5.0.0" },
     { name = "skrift", extras = ["s3"], specifier = ">=0.2.0a7" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
-    { name = "stripe", specifier = ">=15.1.0" },
 ]
 
 [[package]]
@@ -2883,6 +2922,20 @@ asyncio = [
 ]
 
 [[package]]
+name = "standardwebhooks"
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "deprecated" },
+    { name = "httpx" },
+    { name = "python-dateutil" },
+    { name = "types-deprecated" },
+    { name = "types-python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c4/7d/04fc3aa177403472d3ddae90953d8f878dc5fd21ba29c02fc9e97e10703f/standardwebhooks-1.0.1.tar.gz", hash = "sha256:b557bb2e4b16ada179a517ec0fe6cbec5acf976c5619922bf29c457f89a451bd", size = 5103 }
+
+[[package]]
 name = "starlette"
 version = "0.47.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2892,19 +2945,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/0a/69/662169fdb92fb96ec3eaee218cf540a629d629c86d7993d9651226a6789b/starlette-0.47.1.tar.gz", hash = "sha256:aef012dd2b6be325ffa16698f9dc533614fb1cebd593a906b90dc1025529a79b", size = 2583072 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/82/95/38ef0cd7fa11eaba6a99b3c4f5ac948d8bc6ff199aabd327a29cc000840c/starlette-0.47.1-py3-none-any.whl", hash = "sha256:5e11c9f5c7c3f24959edbf2dffdc01bba860228acf657129467d8a7468591527", size = 72747 },
-]
-
-[[package]]
-name = "stripe"
-version = "15.1.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "requests" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/45/26/5d6f5f5beae6f1ff78213e2e6f4fbd431518dcd98733cdd39fb4ba0d01d3/stripe-15.1.0.tar.gz", hash = "sha256:24bd3b6bd0969a4841bd4d7681556a9e35e46c414a07c8590a225fbd5a878450", size = 1501673 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/4e/fd9cb74ddf1e61fb6241e2f6799a81ef99bf6cf2e94f8812ee1cd5458e5d/stripe-15.1.0-py3-none-any.whl", hash = "sha256:bdfb556be08662a41833e6403607ebf12e0062cae4f9b93e2b89b6ba926d7c82", size = 2143199 },
 ]
 
 [[package]]
@@ -2991,6 +3031,24 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a8/4b/29b4ef32e036bb34e4ab51796dd745cdba7ed47ad142a9f4a1eb8e0c744d/tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2", size = 169737 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d0/30/dc54f88dd4a2b5dc8a0279bdd7270e735851848b762aeb1c1184ed1f6b14/tqdm-4.67.1-py3-none-any.whl", hash = "sha256:26445eca388f82e72884e0d580d5464cd801a3ea01e63e5601bdff9ba6a48de2", size = 78540 },
+]
+
+[[package]]
+name = "types-deprecated"
+version = "1.3.1.20260520"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e9/86/8cc66b0a4d01826e64f86e0001b8755105d1b6052c654e2448a0e72750ee/types_deprecated-1.3.1.20260520.tar.gz", hash = "sha256:4d0d9e5521432d9ce88169fb8b793b45d70d8e8cc1a7ecd5a4465abbf83c9ab4", size = 8649 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1c/27/e8fd41f0d41b964870d370e7fc78311193910fe9a15c7399ade4a4aeea58/types_deprecated-1.3.1.20260520-py3-none-any.whl", hash = "sha256:8af853b7ccd3b7685159f3ab2e3b6f7999b6cd7e425cda02749e32a42a96c7d6", size = 9105 },
+]
+
+[[package]]
+name = "types-python-dateutil"
+version = "2.9.0.20260518"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8d/e8/c01bdf0d7c3659428c091fbd693177093639565bcbc86bc20098e6d37cc6/types_python_dateutil-2.9.0.20260518.tar.gz", hash = "sha256:51f02dc03b61c7f6a07df45797d4dfe8a1aa47f0b7db9ad89f6fd3a1a70e1b51", size = 17082 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/36/22/169273273ca34e9ab0ae2f387ba72ed7e09faaaf834da01d6b89c2bea71a/types_python_dateutil-2.9.0.20260518-py3-none-any.whl", hash = "sha256:d6a9c5bd0de61460c8fdef8ab2b400f956a1a1075cce08d4e2b4434e478c50b8", size = 18431 },
 ]
 
 [[package]]

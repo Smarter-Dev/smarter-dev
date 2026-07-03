@@ -149,16 +149,21 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: openai-api-key
-                  - name: STRIPE_SECRET_KEY
+                  - name: POLAR_ACCESS_TOKEN
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
-                        key: stripe-secret-key
-                  - name: STRIPE_WEBHOOK_SECRET
+                        key: polar-access-token
+                  - name: POLAR_WEBHOOK_SECRET
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
-                        key: stripe-webhook-secret
+                        key: polar-webhook-secret
+                  # Polar environment: "sandbox" while validating the deployed
+                  # app against the Polar sandbox; flip to "production" (and swap
+                  # the two polar-* secrets to the prod org's values) at cutover.
+                  - name: POLAR_SERVER
+                    value: "sandbox"
                   - name: GITHUB_CLIENT_ID
                     valueFrom:
                       secretKeyRef:

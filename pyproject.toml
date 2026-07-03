@@ -42,6 +42,7 @@ dependencies = [
     "pydantic-ai-slim[google,openai]>=1.89.1,<2.0.0",
     "skrift[passkeys]>=0.2.0a7",
     "pydantic-monty>=0.0.18",
+    "polar-sdk>=0.31.7",
 ]
 
 [dependency-groups]
@@ -66,7 +67,7 @@ web = [
     "httpx>=0.24.0",
     "authlib>=1.2.0",
     "skrift[s3]>=0.2.0a7",
-    "stripe>=15.1.0",
+    "polar-sdk>=0.31.7",
     "pdfplumber>=0.11.0",  # worker reads PDFs for handler media_read
 ]
 

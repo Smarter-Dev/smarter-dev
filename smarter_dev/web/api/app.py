@@ -47,7 +47,7 @@ from smarter_dev.web.api.routers.repeating_messages import (
 )
 from smarter_dev.web.api.routers.members import router as members_router
 from smarter_dev.web.api.routers.advent_of_code import router as advent_of_code_router
-from smarter_dev.web.api.routers.stripe_webhooks import router as stripe_webhooks_router
+from smarter_dev.web.api.routers.polar_webhooks import router as polar_webhooks_router
 from smarter_dev.web.api.routers.activity import router as activity_router
 from smarter_dev.web.api.routers.handlers import router as handlers_router
 from smarter_dev.web.api.routers.image_quota import router as image_quota_router
@@ -423,7 +423,7 @@ api.include_router(activity_router, tags=["Member Activity"])
 api.include_router(image_quota_router, tags=["Image Generation Quota"])
 api.include_router(admin_handlers_router, tags=["Admin Handlers"])
 
-api.include_router(stripe_webhooks_router)
+api.include_router(polar_webhooks_router)
 
 from smarter_dev.web.api.routers.sudo_converge import router as sudo_converge_router  # noqa: E402
 api.include_router(sudo_converge_router, tags=["Sudo Converge"])

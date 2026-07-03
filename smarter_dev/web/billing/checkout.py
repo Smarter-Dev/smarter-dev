@@ -1,12 +1,11 @@
-"""Stripe Checkout Session creation for the sudo offerings.
+"""Polar Checkout creation for the sudo offerings.
 
-Two shapes:
+Two shapes, but Polar infers both from the product itself:
 
-* **hacker** — ``mode=subscription``. A recurring $8/mo price. Stripe manages
-  renewals and dunning; cancellation is via the customer portal.
-* **founder** — ``mode=payment``. A one-time, pay-what-you-want price
-  (``custom_unit_amount``); the buyer chooses any amount at or above the $256
-  minimum at the Stripe-hosted page.
+* **hacker** — a recurring monthly product. Polar manages renewals and dunning;
+  cancellation is via the customer portal.
+* **founder** — a one-time, pay-what-you-want product (custom price); the buyer
+  chooses any amount at or above the $256 minimum on the Polar-hosted page.
 
 The webhook handler is the source of truth for role grants and lifecycle.
 """
@@ -18,11 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from skrift.db.models.user import User
 
 from smarter_dev.web.billing import catalog
-from smarter_dev.web.billing.client import get_stripe
+from smarter_dev.web.billing.client import get_polar
 
 
 class CheckoutError(Exception):
-    """Raised when a Checkout Session cannot be created."""
+    """Raised when a Checkout cannot be created."""
 
 
 class UnknownRole(CheckoutError):
@@ -35,43 +34,31 @@ async def create_checkout_session(
     *,
     role: str,
     success_url: str,
-    cancel_url: str,
 ) -> str:
-    """Create a Stripe Checkout Session for the given offering role.
+    """Create a Polar Checkout for the given offering role.
 
-    Role, price, and mode all come from the Stripe catalog (source of truth).
-    Returns the hosted Checkout URL.
+    Role and product all come from the Polar catalog (source of truth). Whether
+    it's a subscription or a one-time payment is determined by the product, not
+    here. Returns the hosted Checkout URL. Polar's hosted page handles the
+    cancel/back path itself, so there is no separate cancel URL.
     """
     offerings = await catalog.get_offerings()
     offering = catalog.get_offering(offerings, role)
     if offering is None:
         raise UnknownRole(f"Unknown sudo offering: {role!r}")
 
-    price_id = offering["price_id"]
-    mode = "subscription" if offering["recurring"] else "payment"
     metadata = {"role": role, "user_id": str(user.id)}
-
-    params: dict = {
-        "mode": mode,
-        "line_items": [{"price": price_id, "quantity": 1}],
-        "success_url": success_url,
-        "cancel_url": cancel_url,
-        "client_reference_id": str(user.id),
-        "customer_email": user.email,
-        "allow_promotion_codes": False,
-        "metadata": metadata,
-    }
-    if mode == "subscription":
-        # Subscription mode always creates a Customer; stamp the metadata onto
-        # the subscription so the webhook can resolve it.
-        params["subscription_data"] = {"metadata": metadata}
-    else:
-        # One-time payment: create a Customer so the buyer can manage refunds
-        # and we can link future purchases to the same identity.
-        params["customer_creation"] = "always"
-        params["billing_address_collection"] = "auto"
-        params["payment_intent_data"] = {"metadata": metadata}
-
-    stripe = get_stripe()
-    checkout_session = stripe.checkout.Session.create(**params)
-    return checkout_session.url
+    async with get_polar() as polar:
+        checkout = await polar.checkouts.create_async(
+            request={
+                "products": [offering["product_id"]],
+                "metadata": metadata,
+                # Link the resulting order/subscription back to this site user;
+                # the webhook resolves the membership from checkout metadata.
+                "external_customer_id": str(user.id),
+                "customer_email": user.email,
+                "success_url": success_url,
+                "allow_discount_codes": False,
+            }
+        )
+    return checkout.url

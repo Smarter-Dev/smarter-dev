@@ -59,11 +59,14 @@ spec:
                                 secretKeyRef:
                                     name: smarter-dev-secrets
                                     key: redis-url
-                          - name: STRIPE_SECRET_KEY
+                          - name: POLAR_ACCESS_TOKEN
                             valueFrom:
                                 secretKeyRef:
                                     name: smarter-dev-secrets
-                                    key: stripe-secret-key
+                                    key: polar-access-token
+                          # Keep in sync with the web deployment's POLAR_SERVER.
+                          - name: POLAR_SERVER
+                            value: "sandbox"
                           - name: DISCORD_BOT_TOKEN
                             valueFrom:
                                 secretKeyRef:
