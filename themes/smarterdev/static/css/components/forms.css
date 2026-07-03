@@ -2,6 +2,43 @@
    Forms — Textarea, dropdowns, source chips, char counter
    ══════════════════════════════════════════════════════ */
 
+/* ── Base form controls ──
+   Default dark-theme appearance for otherwise-unstyled inputs (e.g. Skrift's
+   passkey label field and account forms). Kept low-specificity (element
+   selectors) so component styles below and page CSS override freely. Width is
+   intentionally left alone so inline inputs keep their natural size. */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="url"],
+input[type="tel"],
+input[type="number"],
+textarea,
+select {
+  background: rgba(255, 255, 255, .02);
+  border: 1px solid rgba(0, 212, 255, .18);
+  color: var(--white);
+  padding: .55rem .8rem;
+  font-family: var(--mono);
+  font-size: .9rem;
+  border-radius: 0;
+}
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="search"]:focus,
+input[type="url"]:focus,
+input[type="tel"]:focus,
+input[type="number"]:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--cyan);
+}
+input::placeholder,
+textarea::placeholder { color: var(--gray); }
+
 /* ── Research Textarea ── */
 .research-textarea {
   width: 100%;
