@@ -1,0 +1,50 @@
+{# Theme override for Skrift's built-in /account page. Renders the account
+   profile on the shared themed layout (sidebar nav + .account-form styling)
+   so it matches /account/billing and /account/security. Context (user,
+   profile, account_sections) comes from Skrift's account controller plus the
+   account_page_* hooks in account_hooks.py. #}
+{% extends "account/_layout.html" %}
+
+{% block account_content %}
+<style nonce="{{ csp_nonce() }}">
+.account-card h2 {
+    font-family: var(--heading);
+    color: var(--white);
+    font-size: .95rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    margin: 0 0 .35rem;
+}
+.account-card-sub { color: var(--mid); font-size: .85rem; margin: 0 0 1.5rem; }
+.account-ro-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: .7rem 0;
+    border-top: 1px solid rgba(255,255,255,.05);
+}
+.account-ro-row:first-of-type { border-top: none; padding-top: 0; }
+.account-ro-row > .k {
+    color: var(--mid);
+    font-family: var(--heading);
+    font-size: .78rem;
+    letter-spacing: .05em;
+}
+.account-ro-row > .v { color: var(--white); font-family: var(--mono); font-size: .88rem; }
+</style>
+
+<h1>Account</h1>
+<p class="account-meta">Signed in as <code>{{ user.email or user.name or user.id }}</code></p>
+
+<section class="account-card">
+    <h2>Profile</h2>
+    <p class="account-card-sub">Your core account details.</p>
+    <div class="account-ro-row"><span class="k">Name</span><span class="v">{{ user.name or "Not set" }}</span></div>
+    <div class="account-ro-row"><span class="k">Email</span><span class="v">{{ user.email or "Not set" }}</span></div>
+    <div class="account-ro-row"><span class="k">Last Login</span><span class="v">{{ user.last_login_at.strftime('%Y-%m-%d %H:%M') if user.last_login_at else "Not recorded" }}</span></div>
+</section>
+
+{% for section in account_sections %}
+    {% include section.template %}
+{% endfor %}
+{% endblock %}

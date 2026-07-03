@@ -1,26 +1,28 @@
-{# Smarter Dev profile editor — rendered as a section on Skrift's core /account page. #}
-<section class="account-panel">
+{# Smarter Dev profile editor — rendered as a section on the /account page.
+   Uses the theme's .account-card / .account-form classes (styled in
+   account/_layout.html) so it matches the billing + security pages. #}
+<section class="account-card">
     <h2>Public profile</h2>
-    <p class="account-empty">How you appear to other developers in Smarter Dev's spaces.</p>
-    <form method="post" action="/account/profile" class="account-detail-list" data-sk-no-spa>
-        <div class="account-detail-row">
+    <p class="account-card-sub">How you appear to other developers in Smarter Dev's spaces.</p>
+    <form method="post" action="/account/profile" class="account-form" data-sk-no-spa>
+        <div class="form-row">
             <label for="display_name">Display name</label>
             <input type="text" id="display_name" name="display_name" maxlength="255" value="{{ user.name or '' }}">
         </div>
-        <div class="account-detail-row">
+        <div class="form-row">
             <label for="handle">Handle</label>
             <input type="text" id="handle" name="handle" maxlength="40" value="{{ profile.handle or '' }}" placeholder="@yourhandle">
         </div>
-        <div class="account-detail-row">
+        <div class="form-row">
             <label for="bio">Bio</label>
             <textarea id="bio" name="bio" maxlength="500" placeholder="A short blurb that shows up next to your contributions.">{{ profile.bio or '' }}</textarea>
         </div>
-        <div class="account-detail-row">
+        <div class="form-row">
             <label for="timezone">Timezone</label>
             <input type="text" id="timezone" name="timezone" maxlength="64" value="{{ profile.timezone or '' }}" placeholder="America/Chicago">
         </div>
         <div class="account-actions">
-            <button type="submit" class="sk-btn">Save profile</button>
+            <button type="submit" class="account-btn-primary">Save profile</button>
         </div>
     </form>
 </section>
