@@ -61,7 +61,9 @@ async def polar_webhook(
     # side-effect handler twice.
     event_id = headers.get("webhook-id")
     if event_id:
-        record = WebhookEventProcessed(event_id=event_id, type=event.type)
+        record = WebhookEventProcessed(
+            event_id=event_id, type=billing_webhooks.event_type(event) or ""
+        )
         db_session.add(record)
         try:
             await db_session.flush()

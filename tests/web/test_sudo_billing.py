@@ -163,6 +163,31 @@ async def test_dispatch_ignores_unknown_event():
     await webhooks.dispatch(None, {"type": "customer.updated", "data": {}})
 
 
+def test_event_type_from_sdk_payload_uses_TYPE_attr():
+    # Polar SDK payloads expose the discriminator as ``TYPE`` (alias ``type``),
+    # NOT ``.type`` — regressing this silently drops every webhook.
+    payload = SimpleNamespace(TYPE="order.paid", data={"id": "o1"})
+    assert webhooks.event_type(payload) == "order.paid"
+
+
+def test_event_type_from_dict():
+    assert webhooks.event_type({"type": "order.paid"}) == "order.paid"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_routes_sdk_style_payload(monkeypatch):
+    # An object with a ``TYPE`` attr + ``data`` attr (the real SDK shape).
+    seen = {}
+
+    async def fake_handler(session, data):
+        seen["data"] = data
+
+    monkeypatch.setitem(webhooks._HANDLERS, "order.paid", fake_handler)
+    payload = SimpleNamespace(TYPE="order.paid", data={"x": 1})
+    await webhooks.dispatch(None, payload)
+    assert seen["data"] == {"x": 1}
+
+
 # ── order.paid billing_reason routing ──────────────────────────────
 
 
