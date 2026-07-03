@@ -1,13 +1,13 @@
-"""Sudo offering catalog, sourced from Stripe.
+"""Sudo offering catalog, sourced from Polar.
 
-Stripe is the single source of truth for the two sudo offerings. Each is a
+Polar is the single source of truth for the two sudo offerings. Each is a
 Product tagged with ``metadata.sudo_role`` (``hacker`` / ``founder``), carrying
-its perks in ``marketing_features``, its price in a single active Price, and
-its Discord projection role IDs in metadata. Seed/refresh with
-``scripts/seed_stripe_catalog.py``.
+its perks in numbered ``metadata.feature_<n>`` keys, its price as a single
+active Price, and its Discord projection role IDs in metadata. Seed/refresh
+with ``scripts/seed_polar_catalog.py``.
 
-* **hacker** — recurring monthly Price ($8/mo).
-* **founder** — one-time, pay-what-you-want Price (``custom_unit_amount`` with a
+* **hacker** — recurring monthly product ($8/mo).
+* **founder** — one-time, pay-what-you-want product (custom price with a
   $256 minimum).
 
 Reads are served from an in-process cache with a stale-while-revalidate policy:
@@ -19,13 +19,10 @@ refresh by restarting the pods.
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from typing import Any
 
-import anyio
-
-from smarter_dev.web.billing.client import get_stripe
+from smarter_dev.web.billing.client import get_polar
 
 _TTL_SECONDS = 15 * 60
 
@@ -34,72 +31,119 @@ _fetched_at: float = 0.0
 _refreshing = False
 
 
-def _select_price(prices: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Pick the offering's active Price: prefer recurring, else one-time."""
-    recurring = next((p for p in prices if p.get("recurring")), None)
-    if recurring:
-        return recurring
-    return next((p for p in prices if p["type"] == "one_time"), None)
+def _price_shape(price: Any) -> tuple[int, int, bool] | None:
+    """Return ``(price_cents, min_cents, pay_what_you_want)`` for a Polar price.
+
+    Polar prices are one of ``fixed`` (``price_amount``), ``custom``
+    (pay-what-you-want, with ``minimum_amount`` / ``preset_amount``), or
+    ``free``. Returns ``None`` for free / unpriceable shapes.
+    """
+    if getattr(price, "minimum_amount", None) is not None:
+        min_cents = int(price.minimum_amount or 0)
+        price_cents = int(getattr(price, "preset_amount", None) or min_cents)
+        return price_cents, min_cents, True
+    if getattr(price, "price_amount", None) is not None:
+        amount = int(price.price_amount)
+        return amount, amount, False
+    return None
 
 
-def _fetch_catalog_sync() -> list[dict[str, Any]]:
-    """Pull offerings from Stripe. Runs the blocking SDK calls off the loop."""
-    stripe = get_stripe()
+def _select_price(prices: list[Any]) -> Any | None:
+    """Pick the offering's active, priceable Price (skips archived / free)."""
+    for price in prices:
+        if getattr(price, "is_archived", False):
+            continue
+        if _price_shape(price) is not None:
+            return price
+    return None
+
+
+def _features(meta: dict[str, Any]) -> list[str]:
+    """Collect numbered ``feature_<n>`` metadata keys, ordered by index."""
+    numbered: list[tuple[int, str]] = []
+    for key, value in meta.items():
+        if not key.startswith("feature_"):
+            continue
+        try:
+            index = int(key[len("feature_"):])
+        except ValueError:
+            continue
+        text = str(value).strip()
+        if text:
+            numbered.append((index, text))
+    numbered.sort(key=lambda pair: pair[0])
+    return [text for _, text in numbered]
+
+
+def _offering_from_product(product: Any) -> dict[str, Any] | None:
+    """Build an offering dict from a Polar product, or ``None`` if not a sudo
+    offering / has no priceable price."""
+    meta = dict(product.metadata or {})
+    role = meta.get("sudo_role")
+    if role not in ("hacker", "founder"):
+        return None
+
+    price = _select_price(list(product.prices or []))
+    if price is None:
+        return None
+    price_cents, min_cents, pay_what_you_want = _price_shape(price)
+
+    recurring = bool(getattr(product, "is_recurring", False))
+    # ``recurring_interval`` is a SubscriptionRecurringInterval enum on the SDK
+    # model; unwrap to its plain value ("month") for display.
+    interval = getattr(product, "recurring_interval", None)
+    interval = getattr(interval, "value", interval)
+    discord_role_ids = [
+        part.strip()
+        for part in str(meta.get("discord_role_ids") or "").split(",")
+        if part.strip()
+    ]
+    return {
+        "id": role,
+        "role": role,
+        "name": product.name or "",
+        "desc": product.description or "",
+        "feats": _features(meta),
+        "cta_label": str(meta.get("cta_label", "")),
+        "hero": str(meta.get("hero")) == "true",
+        "order": int(meta.get("order", "0") or 0),
+        "price_id": price.id,
+        "price_cents": price_cents,
+        "min_cents": min_cents,
+        "recurring": recurring,
+        "interval": str(interval) if interval else None,
+        "pay_what_you_want": pay_what_you_want,
+        # Discord projection IDs. Each product carries the same guild + base
+        # role, redundantly, so any one read is sufficient. ``discord_role_ids``
+        # is a CSV of the roles to grant for this offering on top of the base.
+        "product_id": product.id,
+        "discord_guild_id": str(meta.get("discord_guild_id") or "") or None,
+        "discord_base_role_id": str(meta.get("discord_base_role_id") or "") or None,
+        "discord_role_ids": discord_role_ids,
+    }
+
+
+async def _fetch_catalog() -> list[dict[str, Any]]:
+    """Pull the sudo offerings from Polar (async, over the SDK's httpx client)."""
     offerings: list[dict[str, Any]] = []
-    for product in stripe.Product.list(limit=100, active=True).auto_paging_iter():
-        # StripeObject's attribute access is hostile to dict ops; the JSON repr
-        # is the reliable way to get a plain nested dict.
-        data = json.loads(str(product))
-        meta = data.get("metadata") or {}
-        role = meta.get("sudo_role")
-        if role not in ("hacker", "founder"):
-            continue
+    async with get_polar() as polar:
+        page = 1
+        while True:
+            response = await polar.products.list_async(
+                is_archived=False, limit=100, page=page
+            )
+            if response is None:
+                break
+            items = list(response.result.items)
+            for product in items:
+                offering = _offering_from_product(product)
+                if offering is not None:
+                    offerings.append(offering)
+            if len(items) < 100:
+                break
+            page += 1
 
-        prices = json.loads(str(stripe.Price.list(product=data["id"], active=True)))
-        price = _select_price(prices["data"])
-        if not price:
-            continue
-
-        recurring = price.get("recurring") or None
-        cua = price.get("custom_unit_amount") or None
-        if cua:
-            price_cents = int(cua.get("preset") or cua.get("minimum") or 0)
-            min_cents = int(cua.get("minimum") or 0)
-        else:
-            price_cents = int(price.get("unit_amount") or 0)
-            min_cents = price_cents
-
-        offerings.append(
-            {
-                "id": role,
-                "role": role,
-                "name": data.get("name", ""),
-                "desc": data.get("description") or "",
-                "feats": [f["name"] for f in (data.get("marketing_features") or [])],
-                "cta_label": meta.get("cta_label", ""),
-                "hero": meta.get("hero") == "true",
-                "order": int(meta.get("order", "0") or 0),
-                "price_id": price["id"],
-                "price_cents": price_cents,
-                "min_cents": min_cents,
-                "recurring": recurring is not None,
-                "interval": recurring.get("interval") if recurring else None,
-                "pay_what_you_want": cua is not None,
-                # Discord projection IDs. Each product carries the same guild +
-                # base role, redundantly, so any one read is sufficient.
-                # ``discord_role_ids`` is a CSV of the roles to grant for this
-                # offering on top of the base role.
-                "discord_guild_id": meta.get("discord_guild_id", "") or None,
-                "discord_base_role_id": meta.get("discord_base_role_id", "") or None,
-                "discord_role_ids": [
-                    p.strip()
-                    for p in (meta.get("discord_role_ids") or "").split(",")
-                    if p.strip()
-                ],
-            }
-        )
-
-    offerings.sort(key=lambda o: o["order"])
+    offerings.sort(key=lambda offering: offering["order"])
     return offerings
 
 
@@ -138,8 +182,7 @@ async def get_discord_config() -> dict[str, Any] | None:
 async def _refresh() -> None:
     global _cache, _fetched_at, _refreshing
     try:
-        offerings = await anyio.to_thread.run_sync(_fetch_catalog_sync)
-        _cache = offerings
+        _cache = await _fetch_catalog()
         _fetched_at = time.monotonic()
     finally:
         _refreshing = False
@@ -148,7 +191,7 @@ async def _refresh() -> None:
 async def get_offerings() -> list[dict[str, Any]]:
     """Return the sudo offerings, cached with background refresh.
 
-    On a cold cache this blocks on Stripe once. Afterwards it always returns
+    On a cold cache this blocks on Polar once. Afterwards it always returns
     the cached catalog immediately and refreshes in the background past TTL.
     """
     global _refreshing

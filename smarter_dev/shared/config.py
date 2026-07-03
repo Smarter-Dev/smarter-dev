@@ -200,22 +200,35 @@ class Settings(BaseSettings):
         description="Google Analytics Measurement ID (G-XXXXXXXXXX)",
     )
 
-    # Stripe / sudo membership billing
-    # The tier catalog (products, prices, perks) lives in Stripe — see
-    # smarter_dev.web.billing.catalog. Only the secret key and webhook signing
-    # secret are configured here; price IDs are discovered from the API.
-    stripe_secret_key: Optional[str] = Field(
+    # Polar / sudo membership billing
+    # The offering catalog (products, prices, perks) lives in Polar — see
+    # smarter_dev.web.billing.catalog. Only the access token, webhook signing
+    # secret, and environment are configured here; product IDs are discovered
+    # from the API.
+    polar_access_token: Optional[str] = Field(
         default=None,
-        description="Stripe API secret key (sk_live_xxx or sk_test_xxx)",
+        description="Polar organization access token (polar_oat_xxx)",
     )
-    stripe_webhook_secret: Optional[str] = Field(
+    polar_webhook_secret: Optional[str] = Field(
         default=None,
-        description="Stripe webhook signing secret (whsec_xxx)",
+        description="Polar webhook signing secret (standard-webhooks base64 secret)",
+    )
+    polar_server: str = Field(
+        default="production",
+        description="Polar API environment: 'production' or 'sandbox'",
+    )
+    polar_organization_id: Optional[str] = Field(
+        default=None,
+        description=(
+            "Polar organization id. Optional — an organization access token is "
+            "already org-scoped; only needed when seeding with a token that can "
+            "see multiple organizations."
+        ),
     )
 
     # NOTE: Sudo Discord projection IDs (guild + base + offering roles) live
-    # on the Stripe Product metadata, not in settings. Seed via
-    # ``scripts/seed_stripe_catalog.py`` and consume via
+    # on the Polar Product metadata, not in settings. Seed via
+    # ``scripts/seed_polar_catalog.py`` and consume via
     # ``smarter_dev.web.billing.catalog.get_discord_config``.
 
     # Quests

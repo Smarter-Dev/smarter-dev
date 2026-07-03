@@ -132,7 +132,7 @@ class SudoController(Controller):
     async def checkout(
         self, request: Request, db_session: AsyncSession
     ) -> Redirect:
-        """Start a Stripe Checkout Session for the requested offering (role)."""
+        """Start a Polar Checkout for the requested offering (role)."""
         # The flag must let this user see the pricing page; otherwise the
         # button shouldn't even be reachable.
         show_pricing = await flags_service.is_enabled(
@@ -170,7 +170,6 @@ class SudoController(Controller):
                 user,
                 role=role,
                 success_url=f"{base}/sudo/checkout/success",
-                cancel_url=f"{base}/sudo/checkout/cancel",
             )
         except UnknownRole:
             return Redirect(path="/sudo?checkout_error=1")
@@ -182,7 +181,7 @@ class SudoController(Controller):
 
     @get("/checkout/success")
     async def checkout_success(self, request: Request) -> Template:
-        """Land here after a successful Stripe Checkout."""
+        """Land here after a successful Polar Checkout."""
         return Template("sudo/checkout_success.html")
 
     @get("/checkout/cancel")

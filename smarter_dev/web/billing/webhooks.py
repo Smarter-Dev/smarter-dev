@@ -1,19 +1,21 @@
-"""Stripe webhook event handling for sudo memberships.
+"""Polar webhook event handling for sudo memberships.
 
 The webhook handler is the source of truth for role grants and membership
-lifecycle. Every handler is idempotent and keyed by ``stripe_checkout_session_id``
-/ ``stripe_payment_intent_id`` / ``stripe_subscription_id`` so Stripe's
-automatic retries are safe.
+lifecycle. Every handler is idempotent and keyed by ``order_id`` /
+``subscription_id`` so Polar's automatic retries are safe.
 
 Two offerings, two lifecycles:
 
-* **founder** — ``checkout.session.completed`` in ``mode=payment``. One-time,
-  permanent access (``expires_at`` set far in the future). ``charge.refunded``
-  / ``charge.dispute.created`` revoke it.
-* **hacker** — ``checkout.session.completed`` in ``mode=subscription`` creates
-  the membership with ``expires_at`` = the subscription's current period end.
-  ``invoice.paid`` extends it each renewal; ``customer.subscription.updated``
-  tracks ``cancel_at_period_end``; ``customer.subscription.deleted`` ends access.
+* **founder** — ``order.paid`` with ``billing_reason=purchase``. One-time,
+  permanent access (``expires_at`` set far in the future). ``order.refunded``
+  revokes it. (Polar is Merchant of Record, so it absorbs chargebacks/disputes
+  internally — there are no dispute webhooks to handle.)
+* **hacker** — ``order.paid`` with ``billing_reason=subscription_create``
+  creates the membership with ``expires_at`` = the subscription's current
+  period end. Subsequent ``order.paid`` with ``billing_reason=subscription_cycle``
+  extends it each renewal. ``subscription.updated`` tracks
+  ``cancel_at_period_end``; ``subscription.canceled`` flags a scheduled cancel;
+  ``subscription.revoked`` ends access.
 """
 
 from __future__ import annotations
@@ -28,7 +30,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.auth.services import assign_role_to_user, remove_role_from_user
 
-from smarter_dev.web.billing.client import get_stripe
 from smarter_dev.web.billing.converge import converge
 from smarter_dev.web.models import SudoMembership
 
@@ -46,24 +47,20 @@ ROLE_TO_SKRIFT: dict[str, str] = {
 }
 
 
-async def _get_by_session_id(
-    session: AsyncSession, checkout_session_id: str
-) -> SudoMembership | None:
-    result = await session.execute(
-        select(SudoMembership).where(
-            SudoMembership.stripe_checkout_session_id == checkout_session_id
-        )
-    )
-    return result.scalar_one_or_none()
+def _field(obj: Any, name: str, default: Any = None) -> Any:
+    """Read ``name`` off a Polar SDK model or a plain dict (test fakes)."""
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
 
 
-async def _get_by_payment_intent(
-    session: AsyncSession, payment_intent_id: str
+async def _get_by_order_id(
+    session: AsyncSession, order_id: str
 ) -> SudoMembership | None:
     result = await session.execute(
-        select(SudoMembership).where(
-            SudoMembership.stripe_payment_intent_id == payment_intent_id
-        )
+        select(SudoMembership).where(SudoMembership.order_id == order_id)
     )
     return result.scalar_one_or_none()
 
@@ -73,7 +70,7 @@ async def _get_by_subscription_id(
 ) -> SudoMembership | None:
     result = await session.execute(
         select(SudoMembership).where(
-            SudoMembership.stripe_subscription_id == subscription_id
+            SudoMembership.subscription_id == subscription_id
         )
     )
     return result.scalar_one_or_none()
@@ -99,21 +96,38 @@ async def _revoke_role(session: AsyncSession, user_id: UUID, role: str) -> None:
     await remove_role_from_user(session, user_id, role_name)
 
 
-def _subscription_period_end(sub: dict[str, Any]) -> datetime:
-    """Best-effort current period end for a subscription dict → aware datetime.
+def _subscription_period_end(sub: Any) -> datetime:
+    """Current period end for a Polar subscription → aware datetime.
 
-    Stripe moved ``current_period_end`` onto subscription items in newer API
-    versions; read the top level first, then fall back to the first item.
+    Polar exposes ``current_period_end`` as a datetime (unlike Stripe's epoch).
+    Missing period info defaults to "now" so a stale sub doesn't grant forever.
     """
-    ts = sub.get("current_period_end")
-    if not ts:
-        items = (sub.get("items") or {}).get("data") or []
-        if items:
-            ts = items[0].get("current_period_end")
-    if not ts:
-        # No period info; default to "now" so a stale sub doesn't grant forever.
+    end = _field(sub, "current_period_end")
+    if end is None:
         return datetime.now(tz=timezone.utc)
-    return datetime.fromtimestamp(int(ts), tz=timezone.utc)
+    if isinstance(end, datetime):
+        return end if end.tzinfo else end.replace(tzinfo=timezone.utc)
+    # ISO-8601 string fallback (dict test fakes).
+    return datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+
+
+def _order_price_id(order: Any) -> str:
+    """Best-effort price id for an order (falls back to the product id)."""
+    for item in _field(order, "items", []) or []:
+        price_id = _field(item, "product_price_id") or _field(item, "price_id")
+        if price_id:
+            return str(price_id)
+    return str(_field(order, "product_id", "") or "")
+
+
+def _role_and_user(metadata: Any) -> tuple[str | None, UUID | None]:
+    """Extract ``(role, user_id)`` from checkout/subscription metadata."""
+    meta = metadata or {}
+    role = meta.get("role")
+    user_id_raw = meta.get("user_id")
+    if role not in ROLE_TO_SKRIFT or not user_id_raw:
+        return None, None
+    return role, UUID(str(user_id_raw))
 
 
 async def _converge_quietly(session: AsyncSession, user_id: UUID, where: str) -> None:
@@ -123,95 +137,47 @@ async def _converge_quietly(session: AsyncSession, user_id: UUID, where: str) ->
         logger.exception("converge failed after %s for user %s", where, user_id)
 
 
-async def handle_checkout_session_completed(
-    session: AsyncSession, event_data: dict[str, Any]
-) -> None:
-    """Create the membership for a completed checkout (founder or hacker)."""
-    session_obj = event_data["object"]
-    checkout_session_id = session_obj.get("id")
-    user_id_raw = session_obj.get("client_reference_id")
-    if not user_id_raw:
-        logger.error(
-            "checkout.session.completed without client_reference_id; session=%s",
-            checkout_session_id,
+async def handle_order_paid(session: AsyncSession, order: Any) -> None:
+    """Fulfil a paid order — founder purchase, hacker signup, or hacker renewal."""
+    billing_reason = _field(order, "billing_reason")
+    if billing_reason == "purchase":
+        await _fulfil_one_time(session, order)
+    elif billing_reason in ("subscription_create", "subscription_cycle"):
+        await _fulfil_subscription(session, order)
+    else:
+        logger.info(
+            "order.paid with unhandled billing_reason %r; order=%s",
+            billing_reason, _field(order, "id"),
         )
+
+
+async def _fulfil_one_time(session: AsyncSession, order: Any) -> None:
+    """Create the permanent founder membership for a one-time order."""
+    order_id = _field(order, "id")
+    role, user_id = _role_and_user(_field(order, "metadata"))
+    if role is None or user_id is None:
+        logger.error("order.paid (purchase) missing role/user_id; order=%s", order_id)
+        return
+    customer_id = _field(order, "customer_id")
+    if not customer_id:
+        logger.error("order.paid (purchase) missing customer_id; order=%s", order_id)
         return
 
-    user_id = UUID(user_id_raw)
-    metadata = session_obj.get("metadata") or {}
-    role = metadata.get("role")
-    if role not in ROLE_TO_SKRIFT:
-        logger.error(
-            "checkout.session.completed with unknown role %r; session=%s",
-            role, checkout_session_id,
-        )
+    # Idempotency: if we've already recorded this order, do nothing.
+    if await _get_by_order_id(session, order_id) is not None:
         return
 
-    stripe_customer_id = session_obj.get("customer")
-    if not stripe_customer_id:
-        logger.error(
-            "checkout.session.completed missing customer; session=%s",
-            checkout_session_id,
-        )
-        return
-
-    # Idempotency: if we've already recorded this checkout, do nothing.
-    if await _get_by_session_id(session, checkout_session_id) is not None:
-        return
-
-    amount_paid_cents = int(session_obj.get("amount_total") or 0)
-    mode = session_obj.get("mode")
-    stripe = get_stripe()
-
-    if mode == "subscription":
-        subscription_id = session_obj.get("subscription")
-        if not subscription_id:
-            logger.error(
-                "subscription checkout missing subscription id; session=%s",
-                checkout_session_id,
-            )
-            return
-        import json
-
-        sub = json.loads(str(stripe.Subscription.retrieve(subscription_id)))
-        items = (sub.get("items") or {}).get("data") or []
-        price_id = items[0]["price"]["id"] if items else ""
-        expires_at = _subscription_period_end(sub)
-        will_renew = not bool(sub.get("cancel_at_period_end"))
-        membership = SudoMembership(
-            user_id=user_id,
-            role=role,
-            source="subscription",
-            stripe_customer_id=stripe_customer_id,
-            stripe_checkout_session_id=checkout_session_id,
-            stripe_subscription_id=subscription_id,
-            stripe_price_id=price_id,
-            amount_paid_cents=amount_paid_cents,
-            will_renew=will_renew,
-            expires_at=expires_at,
-        )
-    else:  # one-time payment (founder)
-        payment_intent_id = session_obj.get("payment_intent")
-        if not payment_intent_id:
-            logger.error(
-                "payment checkout missing payment_intent; session=%s",
-                checkout_session_id,
-            )
-            return
-        line_items = stripe.checkout.Session.list_line_items(checkout_session_id, limit=1)
-        price_id = line_items["data"][0]["price"]["id"] if line_items["data"] else ""
-        membership = SudoMembership(
-            user_id=user_id,
-            role=role,
-            source="one_time",
-            stripe_customer_id=stripe_customer_id,
-            stripe_checkout_session_id=checkout_session_id,
-            stripe_payment_intent_id=payment_intent_id,
-            stripe_price_id=price_id,
-            amount_paid_cents=amount_paid_cents,
-            expires_at=FOUNDER_ACCESS_END,
-        )
-
+    membership = SudoMembership(
+        user_id=user_id,
+        role=role,
+        source="one_time",
+        customer_id=customer_id,
+        checkout_id=_field(order, "checkout_id") or order_id,
+        order_id=order_id,
+        price_id=_order_price_id(order),
+        amount_paid_cents=int(_field(order, "total_amount", 0) or 0),
+        expires_at=FOUNDER_ACCESS_END,
+    )
     session.add(membership)
     await session.commit()
 
@@ -220,63 +186,94 @@ async def handle_checkout_session_completed(
     await _converge_quietly(session, user_id, "fulfillment")
 
 
-async def handle_invoice_paid(
-    session: AsyncSession, event_data: dict[str, Any]
-) -> None:
-    """Extend a hacker membership's access window on each paid invoice."""
-    invoice = event_data["object"]
-    subscription_id = invoice.get("subscription")
+async def _fulfil_subscription(session: AsyncSession, order: Any) -> None:
+    """Create or extend the hacker membership for a subscription order."""
+    order_id = _field(order, "id")
+    subscription_id = _field(order, "subscription_id")
     if not subscription_id:
+        logger.error("subscription order missing subscription_id; order=%s", order_id)
         return
+
+    sub = _field(order, "subscription")
+    expires_at = _subscription_period_end(sub)
+    will_renew = not bool(_field(sub, "cancel_at_period_end"))
+
     record = await _get_by_subscription_id(session, subscription_id)
-    if record is None:
-        # The creating checkout.session.completed hasn't landed yet; it will
-        # set expires_at from the subscription. Nothing to do.
+    if record is not None:
+        # Renewal (or a re-delivered create): extend the window and re-grant.
+        changed = False
+        if record.expires_at != expires_at:
+            record.expires_at = expires_at
+            changed = True
+        if record.will_renew != will_renew:
+            record.will_renew = will_renew
+            changed = True
+        if record.revoked_reason is None and changed:
+            await session.commit()
+            await _grant_role(session, record.user_id, record.role)
+            await session.commit()
+            await _converge_quietly(session, record.user_id, "renewal")
         return
 
-    import json
+    # First order for this subscription — create the membership.
+    role, user_id = _role_and_user(_field(order, "metadata") or _field(sub, "metadata"))
+    if role is None or user_id is None:
+        logger.error("subscription order missing role/user_id; order=%s", order_id)
+        return
+    customer_id = _field(order, "customer_id")
+    if not customer_id:
+        logger.error("subscription order missing customer_id; order=%s", order_id)
+        return
 
-    stripe = get_stripe()
-    sub = json.loads(str(stripe.Subscription.retrieve(subscription_id)))
-    new_end = _subscription_period_end(sub)
-    changed = False
-    if record.expires_at != new_end:
-        record.expires_at = new_end
-        changed = True
-    will_renew = not bool(sub.get("cancel_at_period_end"))
-    if record.will_renew != will_renew:
-        record.will_renew = will_renew
-        changed = True
-    # A previously-lapsed/canceled sub that pays again should be live.
-    if record.revoked_reason is None and changed:
-        await session.commit()
-        await _grant_role(session, record.user_id, record.role)
-        await session.commit()
-        await _converge_quietly(session, record.user_id, "invoice.paid")
+    membership = SudoMembership(
+        user_id=user_id,
+        role=role,
+        source="subscription",
+        customer_id=customer_id,
+        checkout_id=_field(order, "checkout_id") or order_id,
+        subscription_id=subscription_id,
+        price_id=_order_price_id(order),
+        amount_paid_cents=int(_field(order, "total_amount", 0) or 0),
+        will_renew=will_renew,
+        expires_at=expires_at,
+    )
+    session.add(membership)
+    await session.commit()
+
+    await _grant_role(session, user_id, role)
+    await session.commit()
+    await _converge_quietly(session, user_id, "fulfillment")
 
 
-async def handle_subscription_updated(
-    session: AsyncSession, event_data: dict[str, Any]
-) -> None:
+async def handle_subscription_updated(session: AsyncSession, sub: Any) -> None:
     """Track ``cancel_at_period_end`` and period end for a hacker membership."""
-    sub = event_data["object"]
-    subscription_id = sub.get("id")
+    subscription_id = _field(sub, "id")
     if not subscription_id:
         return
     record = await _get_by_subscription_id(session, subscription_id)
     if record is None:
         return
-    record.will_renew = not bool(sub.get("cancel_at_period_end"))
+    record.will_renew = not bool(_field(sub, "cancel_at_period_end"))
     record.expires_at = _subscription_period_end(sub)
     await session.commit()
 
 
-async def handle_subscription_deleted(
-    session: AsyncSession, event_data: dict[str, Any]
-) -> None:
-    """End access when a hacker subscription is fully canceled."""
-    sub = event_data["object"]
-    subscription_id = sub.get("id")
+async def handle_subscription_canceled(session: AsyncSession, sub: Any) -> None:
+    """A scheduled cancellation — access continues until the period ends."""
+    subscription_id = _field(sub, "id")
+    if not subscription_id:
+        return
+    record = await _get_by_subscription_id(session, subscription_id)
+    if record is None:
+        return
+    record.will_renew = False
+    record.expires_at = _subscription_period_end(sub)
+    await session.commit()
+
+
+async def handle_subscription_revoked(session: AsyncSession, sub: Any) -> None:
+    """End access when a hacker subscription is fully revoked."""
+    subscription_id = _field(sub, "id")
     if not subscription_id:
         return
     record = await _get_by_subscription_id(session, subscription_id)
@@ -289,24 +286,17 @@ async def handle_subscription_deleted(
 
     await _revoke_role(session, record.user_id, record.role)
     await session.commit()
-    await _converge_quietly(session, record.user_id, "subscription.deleted")
+    await _converge_quietly(session, record.user_id, "subscription.revoked")
 
 
-async def handle_charge_refunded(
-    session: AsyncSession, event_data: dict[str, Any]
-) -> None:
-    """Handle ``charge.refunded`` for a founder purchase — revoke access."""
-    charge = event_data["object"]
-    payment_intent_id = charge.get("payment_intent")
-    if not payment_intent_id:
+async def handle_order_refunded(session: AsyncSession, order: Any) -> None:
+    """Handle ``order.refunded`` for a founder purchase — revoke access."""
+    order_id = _field(order, "id")
+    if not order_id:
         return
-
-    record = await _get_by_payment_intent(session, payment_intent_id)
+    record = await _get_by_order_id(session, order_id)
     if record is None:
-        logger.info(
-            "charge.refunded for unknown payment_intent %s; ignoring.",
-            payment_intent_id,
-        )
+        logger.info("order.refunded for unknown order %s; ignoring.", order_id)
         return
     if record.refunded_at is not None:
         return
@@ -318,45 +308,6 @@ async def handle_charge_refunded(
     await _revoke_role(session, record.user_id, record.role)
     await session.commit()
     await _converge_quietly(session, record.user_id, "refund")
-
-
-async def handle_charge_dispute_created(
-    session: AsyncSession, event_data: dict[str, Any]
-) -> None:
-    """Handle ``charge.dispute.created`` — clamp access immediately."""
-    dispute = event_data["object"]
-    payment_intent_id = dispute.get("payment_intent")
-    if not payment_intent_id:
-        return
-
-    record = await _get_by_payment_intent(session, payment_intent_id)
-    if record is None:
-        logger.info(
-            "charge.dispute.created for unknown payment_intent %s; ignoring.",
-            payment_intent_id,
-        )
-        return
-    if record.revoked_reason == "dispute":
-        return
-
-    record.revoked_reason = "dispute"
-    record.expires_at = datetime.now(tz=timezone.utc)
-    await session.commit()
-
-    await _revoke_role(session, record.user_id, record.role)
-    await session.commit()
-    await _converge_quietly(session, record.user_id, "dispute")
-
-
-async def handle_charge_dispute_closed(
-    session: AsyncSession, event_data: dict[str, Any]
-) -> None:
-    """Handle ``charge.dispute.closed`` — log only; restores are manual."""
-    dispute = event_data["object"]
-    logger.info(
-        "charge.dispute.closed status=%s payment_intent=%s — manual review.",
-        dispute.get("status"), dispute.get("payment_intent"),
-    )
 
 
 async def expire_lapsed_memberships(session: AsyncSession) -> int:
@@ -403,7 +354,7 @@ async def drift_restore_active(session: AsyncSession) -> int:
 async def run_daily_sweep(session: AsyncSession) -> dict[str, Any]:
     """Expire lapsed memberships + drift-restore active ones.
 
-    Renewal reminders are gone: Hacker is a Stripe subscription (Stripe owns
+    Renewal reminders are gone: Hacker is a Polar subscription (Polar owns
     dunning) and Founder is permanent, so there's nothing to remind about.
     """
     expired = await expire_lapsed_memberships(session)
@@ -416,22 +367,22 @@ async def run_daily_sweep(session: AsyncSession) -> dict[str, Any]:
 
 
 _HANDLERS = {
-    "checkout.session.completed": handle_checkout_session_completed,
-    # Async-payment methods (ACH etc.) deliver this when the funds clear.
-    "checkout.session.async_payment_succeeded": handle_checkout_session_completed,
-    "invoice.paid": handle_invoice_paid,
-    "customer.subscription.updated": handle_subscription_updated,
-    "customer.subscription.deleted": handle_subscription_deleted,
-    "charge.refunded": handle_charge_refunded,
-    "charge.dispute.created": handle_charge_dispute_created,
-    "charge.dispute.closed": handle_charge_dispute_closed,
+    "order.paid": handle_order_paid,
+    "subscription.updated": handle_subscription_updated,
+    "subscription.canceled": handle_subscription_canceled,
+    "subscription.revoked": handle_subscription_revoked,
+    "order.refunded": handle_order_refunded,
 }
 
 
-async def dispatch(session: AsyncSession, event: dict[str, Any]) -> None:
-    """Dispatch a verified Stripe event to its handler. No-ops for unknown types."""
-    event_type = event.get("type")
+async def dispatch(session: AsyncSession, event: Any) -> None:
+    """Dispatch a verified Polar event to its handler. No-ops for unknown types.
+
+    ``event`` is a validated Polar webhook payload (``.type`` + ``.data``) or an
+    equivalent dict; the handler receives the event's ``data`` object.
+    """
+    event_type = _field(event, "type")
     handler = _HANDLERS.get(event_type)
     if handler is None:
         return
-    await handler(session, event.get("data") or {})
+    await handler(session, _field(event, "data"))

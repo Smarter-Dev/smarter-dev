@@ -254,11 +254,11 @@ class BillingController(Controller):
         return_url = f"{settings.site_base_url.rstrip('/')}/account/billing"
 
         try:
-            url = create_portal_session(
-                membership.stripe_customer_id, return_url=return_url
+            url = await create_portal_session(
+                membership.customer_id, return_url=return_url
             )
         except Exception:
-            logger.exception("Failed to open Stripe Customer Portal session.")
+            logger.exception("Failed to open Polar customer portal session.")
             flash_error(request, "Couldn't open billing portal — try again shortly.")
             return Redirect(path="/account/billing")
 

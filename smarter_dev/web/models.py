@@ -138,13 +138,13 @@ class SudoMembership(Base):
     ``user_id``.
 
     Sources:
-      - ``one_time``: Stripe Checkout ``mode=payment`` — the founder model.
-        ``expires_at`` advances on stacked renewals; ``stripe_subscription_id``
-        and ``will_renew`` are null.
-      - ``subscription``: Stripe Checkout ``mode=subscription``. ``expires_at``
-        mirrors ``current_period_end`` from the latest paid invoice;
+      - ``one_time``: a Polar one-time order (``billing_reason=purchase``) —
+        the founder model. ``expires_at`` advances on stacked renewals;
+        ``subscription_id`` and ``will_renew`` are null.
+      - ``subscription``: a Polar subscription. ``expires_at`` mirrors
+        ``current_period_end`` from the latest paid order (``order.paid``);
         ``will_renew`` mirrors ``cancel_at_period_end`` (messaging only).
-      - ``comp``: hand-issued. No Stripe IDs required.
+      - ``comp``: hand-issued. No Polar IDs required.
 
     ``revoked_reason`` distinguishes refund / dispute / admin clamps from
     natural lapse (which has no reason set). ``refunded_at`` stays as a
@@ -169,7 +169,7 @@ class SudoMembership(Base):
             name="ck_sudo_memberships_revoked_reason",
         ),
         Index("ix_sudo_memberships_user_id", "user_id"),
-        Index("ix_sudo_memberships_stripe_customer_id", "stripe_customer_id"),
+        Index("ix_sudo_memberships_customer_id", "customer_id"),
         Index("ix_sudo_memberships_expires_at", "expires_at"),
     )
 
@@ -191,26 +191,26 @@ class SudoMembership(Base):
         nullable=False,
         server_default="one_time",
     )
-    stripe_customer_id: Mapped[str] = mapped_column(
+    customer_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
     )
-    stripe_checkout_session_id: Mapped[str] = mapped_column(
+    checkout_id: Mapped[str] = mapped_column(
         String(128),
         nullable=False,
         unique=True,
     )
-    stripe_payment_intent_id: Mapped[Optional[str]] = mapped_column(
+    order_id: Mapped[Optional[str]] = mapped_column(
         String(128),
         nullable=True,
         unique=True,
     )
-    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(
+    subscription_id: Mapped[Optional[str]] = mapped_column(
         String(128),
         nullable=True,
         unique=True,
     )
-    stripe_price_id: Mapped[str] = mapped_column(
+    price_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
     )
@@ -290,17 +290,17 @@ class SudoMembershipReminder(Base):
     )
 
 
-class StripeEventProcessed(Base):
-    """Dedupe ledger for Stripe webhook events.
+class WebhookEventProcessed(Base):
+    """Dedupe ledger for Polar webhook events.
 
-    Stripe delivers webhooks at-least-once, so the router records every
-    successfully-verified event's ``id`` in this table before dispatching;
-    a duplicate ``event_id`` short-circuits the handler with a 200. Keeps
-    the table small by garbage-collecting old rows out-of-band (Stripe
-    will not retry events older than ~3 days).
+    Polar delivers webhooks at-least-once, so the router records every
+    successfully-verified delivery's ``webhook-id`` (standard-webhooks
+    delivery id) in this table before dispatching; a duplicate ``event_id``
+    short-circuits the handler with a 200. Keeps the table small by
+    garbage-collecting old rows out-of-band.
     """
 
-    __tablename__ = "stripe_events_processed"
+    __tablename__ = "webhook_events_processed"
 
     event_id: Mapped[str] = mapped_column(
         String(128),
@@ -317,7 +317,7 @@ class StripeEventProcessed(Base):
     )
 
     __table_args__ = (
-        Index("ix_stripe_events_processed_processed_at", "processed_at"),
+        Index("ix_webhook_events_processed_processed_at", "processed_at"),
     )
 
 

@@ -1,24 +1,30 @@
-"""Stripe SDK client initialised from project settings."""
+"""Polar SDK client initialised from project settings."""
 
 from __future__ import annotations
 
-import stripe
+from polar_sdk import Polar
 
 from smarter_dev.shared.config import get_settings
 
 
-def get_stripe() -> "stripe":
-    """Return the Stripe SDK module with the secret key configured.
+def get_polar() -> Polar:
+    """Return a configured Polar client.
 
-    Stripe's Python SDK is module-level (no client object), so this just
-    ensures ``stripe.api_key`` is set before callers reach into it. Raises if
-    the secret key isn't configured — billing endpoints should refuse to run
-    rather than silently call against a misconfigured client.
+    Unlike Stripe's module-level SDK, Polar's client is an object with its own
+    HTTP transport, so callers should use it as a context manager::
+
+        async with get_polar() as polar:
+            await polar.checkouts.create_async(request=...)
+
+    Raises if the access token isn't configured — billing endpoints should
+    refuse to run rather than silently call against a misconfigured client.
     """
     settings = get_settings()
-    if not settings.stripe_secret_key:
+    if not settings.polar_access_token:
         raise RuntimeError(
-            "STRIPE_SECRET_KEY is not configured; cannot reach the Stripe API."
+            "POLAR_ACCESS_TOKEN is not configured; cannot reach the Polar API."
         )
-    stripe.api_key = settings.stripe_secret_key
-    return stripe
+    return Polar(
+        access_token=settings.polar_access_token,
+        server=settings.polar_server,
+    )
