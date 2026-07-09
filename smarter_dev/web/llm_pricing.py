@@ -84,6 +84,19 @@ _patch_provider(
     ),
 )
 
+# GPT-5.6 Luna — not yet in genai-prices (preview pricing, July 2026)
+_patch_provider(
+    "openai",
+    types.ModelInfo(
+        id="gpt-5.6-luna",
+        match=types.ClauseStartsWith(starts_with="gpt-5.6-luna"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("1.00"),
+            output_mtok=Decimal("6.00"),
+        ),
+    ),
+)
+
 # GPT-5.4 (standard) — not yet in genai-prices
 # NOTE: must come after gpt-5.4-nano so the more specific match wins
 _patch_provider(
