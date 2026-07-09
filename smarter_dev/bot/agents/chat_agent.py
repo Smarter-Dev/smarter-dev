@@ -1,7 +1,9 @@
 """Discord chat agent — single Pydantic AI agent driving every conversation turn.
 
 Replaces the old classification/evaluation/response trio. One agent, one model
-(Gemini 3.1 Flash Lite on medium thinking), one structured return type.
+(Gemini 3.1 Flash Lite on medium thinking by default; override with the
+CHAT_AGENT_MODEL env var — "gpt-"/"openai/" ids route to OpenAI), one
+structured return type.
 
 Usage:
     from smarter_dev.bot.agents.chat_input_format import render_input_xml
@@ -20,8 +22,10 @@ import os
 from pathlib import Path
 
 from pydantic_ai import Agent
+from pydantic_ai.models import Model
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.settings import ModelSettings
 
 from smarter_dev.bot.agents.chat_compaction import compact_history
 from smarter_dev.bot.agents.chat_models import AgentReturn
@@ -38,13 +42,27 @@ SYSTEM_PROMPT = (
 ).read_text(encoding="utf-8")
 
 
-def _build_model() -> GoogleModel:
+def _model_id() -> str:
+    return os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL)
+
+
+def _build_model() -> Model:
+    model_id = _model_id()
+    if model_id.startswith(("gpt-", "openai/")):
+        from pydantic_ai.models.openai import OpenAIResponsesModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+
+        return OpenAIResponsesModel(
+            model_id.removeprefix("openai/"),
+            provider=OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY") or ""),
+        )
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-    model_id = os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL)
     return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
 
 
-def _model_settings() -> GoogleModelSettings:
+def _model_settings() -> ModelSettings | None:
+    if _model_id().startswith(("gpt-", "openai/")):
+        return None
     return GoogleModelSettings(
         google_thinking_config={"thinking_level": "MEDIUM"},
     )
