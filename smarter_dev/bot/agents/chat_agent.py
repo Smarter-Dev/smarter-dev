@@ -62,7 +62,9 @@ def _build_model() -> Model:
 
 def _model_settings() -> ModelSettings | None:
     if _model_id().startswith(("gpt-", "openai/")):
-        return None
+        from pydantic_ai.models.openai import OpenAIResponsesModelSettings
+
+        return OpenAIResponsesModelSettings(openai_reasoning_effort="low")
     return GoogleModelSettings(
         google_thinking_config={"thinking_level": "MEDIUM"},
     )
