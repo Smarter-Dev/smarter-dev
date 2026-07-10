@@ -1,11 +1,32 @@
 """Conversation-level history compaction for the chat agent.
 
 Registered on the ``ChatAgent`` as a ``history_processor``. Pydantic AI
-invokes this before every model call. When the *prior* conversation
-(everything before the current model request) grows past
-``COMPACT_TRIGGER_CHARS``, the oldest turns are rendered to a transcript
-and summarised into a single running-summary message by a small Gemini
-agent; the most recent ~``KEEP_RECENT_CHARS`` of turns stay verbatim.
+invokes this before every model call. When folding the oldest turns into
+a summary is *economically* worth it (see below), they're rendered to a
+transcript and summarised into a single running-summary message by a
+small Gemini agent; the most recent ~``KEEP_RECENT_CHARS`` of turns stay
+verbatim.
+
+The fold decision is a cost model, not a fixed threshold. Providers cache
+prompt prefixes for a few minutes; re-reading a cached prefix costs ~10%
+of list price, and a fold rewrites the prefix (busting the cache) while
+also paying the summariser to read the folded turns. With F = foldable
+tokens, S = summary tokens, K = kept prefix tokens, prices p (input),
+c (cached input), and summariser cost Sigma:
+
+- cache COLD (last model call over ``CACHE_TTL_SECONDS`` ago): this call
+  re-pays full price on the prefix regardless, so folding earns
+  ``p*(F-S)`` immediately plus ``n*c*(F-S)`` over the next ``n`` expected
+  calls. Fold iff that beats Sigma.
+- cache WARM: folding forfeits the discount on the kept prefix now
+  (``(p-c)*K``) and only future calls save. Fold iff
+  ``n*c*(F-S) >= (p-c)*K + Sigma`` — for cheap models whose cached rate
+  is below the summariser's input rate this is never true, which is
+  correct: wait for the next lull, where folding is free.
+
+Net effect: compaction naturally happens on re-engagement after a lull
+(cache already cold, fold costs nothing extra) and only interrupts an
+active burst when history is genuinely bloated on an expensive model.
 
 The summary REQUIRES per-user attribution (username + user-id) so the
 agent's multi-user discipline survives compaction — a summary that says
@@ -29,6 +50,7 @@ import dataclasses
 import logging
 import os
 from contextvars import ContextVar
+from datetime import UTC, datetime
 
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
@@ -45,14 +67,17 @@ from pydantic_ai.providers.google import GoogleProvider
 
 logger = logging.getLogger(__name__)
 
-# Compact once the prior conversation exceeds this many characters
-# (~10k tokens). Keeps steady-state input well below the unbounded growth
-# we had before, without touching short conversations at all.
-COMPACT_TRIGGER_CHARS = 40_000
-# After compaction, keep roughly this many characters of the most recent
-# turns verbatim. The gap between trigger and keep is hysteresis — it
-# stops the compactor from re-firing on every single turn.
+# Quality floor: this many characters of the most recent turns are never
+# foldable, whatever the economics say — the agent needs verbatim recency.
 KEEP_RECENT_CHARS = 20_000
+# Provider prompt caches are advertised at 5-10 minutes; 10 keeps the bot
+# from folding (and re-reading history at full price) just because a user
+# took five minutes to reply.
+CACHE_TTL_SECONDS = 600
+# Conservative expectation of how many more model calls this engagement
+# makes after a fold (median engagement runs ~11 turns).
+EXPECTED_FUTURE_CALLS = 5
+CHARS_PER_TOKEN = 4
 MAX_SUMMARY_CHARS = 2_500
 # Individual tool returns/calls are clamped to this many chars in the
 # transcript handed to the summariser — web fetches are already summaries,
@@ -63,6 +88,64 @@ COMPACTED_PREFIX = "[compacted history]"
 
 DEFAULT_COMPACT_MODEL = "gemini-3.1-flash-lite"
 COMPACT_MODEL_ENV_VAR = "CHAT_AGENT_COMPACT_MODEL"
+# Mirrors chat_agent.MODEL_ENV_VAR — chat_agent imports this module, so
+# importing back would be circular.
+CHAT_MODEL_ENV_VAR = "CHAT_AGENT_MODEL"
+DEFAULT_CHAT_MODEL = "gemini-3.1-flash-lite"
+
+# $/Mtok (input, cached_input, output), matched by id prefix. Cached rate
+# defaults to 10% of input when the provider hasn't published one.
+_PRICES: dict[str, tuple[float, float, float]] = {
+    "gemini-3.1-flash-lite": (0.25, 0.025, 1.50),
+    "gemini-3-flash": (0.15, 0.0375, 0.60),
+    "gpt-5.6-luna": (1.00, 0.10, 6.00),
+    "gpt-5.4-nano": (0.20, 0.02, 1.25),
+}
+_DEFAULT_PRICES = (0.50, 0.05, 2.00)
+
+
+def _prices_for(model_id: str) -> tuple[float, float, float]:
+    for prefix, prices in _PRICES.items():
+        if model_id.startswith(prefix):
+            return prices
+    return _DEFAULT_PRICES
+
+
+# Timestamp of the previous model call for the engagement being run. The
+# engine seeds it before ``agent.run`` (from its own turn bookkeeping);
+# the processor refreshes it on every invocation so the later calls of a
+# multi-request (tool-looping) run correctly read as cache-warm.
+_last_model_call: ContextVar[datetime | None] = ContextVar(
+    "chat_last_model_call", default=None
+)
+
+
+def set_last_model_call(when: datetime | None) -> None:
+    """Seed the previous-model-call timestamp (engine calls per turn)."""
+    _last_model_call.set(when)
+
+
+def _should_fold(
+    foldable_tokens: int, kept_tokens: int, *, cache_warm: bool
+) -> bool:
+    """The cost model: is folding cheaper than carrying the history?"""
+    chat_model = os.getenv(CHAT_MODEL_ENV_VAR, DEFAULT_CHAT_MODEL)
+    p_in, p_cached, _ = _prices_for(chat_model)
+    q_in, _, q_out = _prices_for(os.getenv(COMPACT_MODEL_ENV_VAR, DEFAULT_COMPACT_MODEL))
+
+    summary_tokens = MAX_SUMMARY_CHARS // CHARS_PER_TOKEN
+    saved = foldable_tokens - summary_tokens
+    if saved <= 0:
+        return False
+    summarizer_cost = foldable_tokens * q_in + summary_tokens * q_out
+
+    future_savings = EXPECTED_FUTURE_CALLS * p_cached * saved
+    if cache_warm:
+        # Folding now busts the warm cache on everything we keep.
+        return future_savings >= (p_in - p_cached) * kept_tokens + summarizer_cost
+    # Cold: this call re-reads the prefix at full price either way, so the
+    # fold pays back immediately on top of the future savings.
+    return p_in * saved + future_savings >= summarizer_cost
 
 
 @dataclasses.dataclass
@@ -312,26 +395,41 @@ def _collect_system_parts(messages: list[ModelMessage]) -> list[SystemPromptPart
 
 
 async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
-    """Fold old turns into a running summary once history gets long.
+    """Fold old turns into a running summary when the cost model says to.
 
     The current turn (last ``ModelRequest`` onward) is always left intact.
     """
+    now = datetime.now(UTC)
+    last_call = _last_model_call.get()
+    _last_model_call.set(now)
     if len(messages) <= 1:
         return messages
+    cache_warm = (
+        last_call is not None
+        and (now - last_call).total_seconds() < CACHE_TTL_SECONDS
+    )
 
     current_start = _index_of_last_request(messages)
     prior = messages[:current_start]
     current = messages[current_start:]
-
-    total_chars = sum(_message_chars(m) for m in prior)
-    if total_chars <= COMPACT_TRIGGER_CHARS:
-        return messages
 
     cut = _pick_cut_index(prior)
     if cut is None:
         return messages
     old = prior[:cut]
     kept = prior[cut:]
+
+    foldable_tokens = sum(_message_chars(m) for m in old) // CHARS_PER_TOKEN
+    kept_tokens = (
+        sum(_message_chars(m) for m in kept)
+        + sum(
+            len(p.content)
+            for p in _collect_system_parts(old)
+            if isinstance(p.content, str)
+        )
+    ) // CHARS_PER_TOKEN
+    if not _should_fold(foldable_tokens, kept_tokens, cache_warm=cache_warm):
+        return messages
 
     transcript = _render_transcript(old)
     summary = await _summarise_conversation(transcript)
