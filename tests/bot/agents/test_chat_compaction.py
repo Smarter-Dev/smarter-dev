@@ -25,6 +25,7 @@ from pydantic_ai.messages import (
 from smarter_dev.bot.agents.chat_compaction import (
     CACHE_TTL_SECONDS,
     COMPACTED_PREFIX,
+    HARD_FOLD_TOKENS,
     KEEP_RECENT_CHARS,
     CompactionEvent,
     _should_fold,
@@ -132,11 +133,19 @@ def test_should_fold_flash_lite_cold_threshold(monkeypatch):
     assert _should_fold(10_000, 3_000, cache_warm=False)
 
 
-def test_should_fold_flash_lite_never_warm(monkeypatch):
+def test_should_fold_flash_lite_never_warm_below_cap(monkeypatch):
     monkeypatch.delenv("CHAT_AGENT_MODEL", raising=False)
     # Cached savings (0.025*n) accrue slower than the summariser's own
-    # input rate (0.25) — no F makes a warm fold profitable.
-    assert not _should_fold(1_000_000, 0, cache_warm=True)
+    # input rate (0.25) — below the latency cap, no F makes a warm fold
+    # profitable.
+    assert not _should_fold(HARD_FOLD_TOKENS - 1, 0, cache_warm=True)
+
+
+def test_hard_cap_folds_regardless_of_economics(monkeypatch):
+    monkeypatch.delenv("CHAT_AGENT_MODEL", raising=False)
+    # At the cap, latency protection overrides the dollar math even on the
+    # cheapest model with a warm cache.
+    assert _should_fold(HARD_FOLD_TOKENS, 0, cache_warm=True)
 
 
 def test_should_fold_luna_cold_threshold(monkeypatch):

@@ -78,6 +78,12 @@ CACHE_TTL_SECONDS = 600
 # makes after a fold (median engagement runs ~11 turns).
 EXPECTED_FUTURE_CALLS = 5
 CHARS_PER_TOKEN = 4
+# Latency/quality guardrail: past this many foldable tokens, fold even on
+# a warm cache and even when the dollar math says wait. Without it, a
+# cheap model in a busy channel (never cache-cold, "never fold warm"
+# economics) grows history unboundedly for up to the engine's 2h max
+# runtime — prefill latency the cost model doesn't price in.
+HARD_FOLD_TOKENS = 16_000
 MAX_SUMMARY_CHARS = 2_500
 # Individual tool returns/calls are clamped to this many chars in the
 # transcript handed to the summariser — web fetches are already summaries,
@@ -137,6 +143,8 @@ def _should_fold(
     saved = foldable_tokens - summary_tokens
     if saved <= 0:
         return False
+    if foldable_tokens >= HARD_FOLD_TOKENS:
+        return True
     summarizer_cost = foldable_tokens * q_in + summary_tokens * q_out
 
     future_savings = EXPECTED_FUTURE_CALLS * p_cached * saved
