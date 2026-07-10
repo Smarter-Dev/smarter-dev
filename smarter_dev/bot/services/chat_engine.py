@@ -43,6 +43,7 @@ from smarter_dev.bot.agents.chat_agent import (
 )
 from smarter_dev.bot.agents.chat_compaction import (
     drain_collection,
+    set_last_model_call,
     start_collection,
 )
 from smarter_dev.bot.agents.chat_context import (
@@ -132,6 +133,9 @@ class ChannelEngine:
     _idle_task: asyncio.Task | None = None
     _runner_task: asyncio.Task | None = None
     _shutdown: bool = False
+    # When this engagement last hit the model — feeds the compactor's
+    # cache-warm/cold judgement. None on the first turn (treated as cold).
+    _last_model_call_at: datetime | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -441,6 +445,7 @@ class ChannelEngine:
             # Install a per-run compaction collector. The history processor
             # appends events to it; we drain after the run.
             start_collection()
+            set_last_model_call(self._last_model_call_at)
             image_quota = await self._fetch_image_quota()
             user_prompt, message_history = build_agent_call(
                 agent_input, history, image_quota=image_quota
@@ -452,6 +457,9 @@ class ChannelEngine:
                     deps=deps,
                 )
             except Exception:
+                # Even a failed run (probably) hit the model — later turns
+                # inside the cache TTL should read warm.
+                self._last_model_call_at = datetime.now(UTC)
                 logger.exception(
                     "[%s] Chat agent run failed for channel %s",
                     request_id,
@@ -472,6 +480,7 @@ class ChannelEngine:
                         reply_to=error_reply_to,
                     )
                 return
+            self._last_model_call_at = datetime.now(UTC)
             compaction_events = drain_collection()
 
             output = result.output
