@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block page_title %}Authorize{% endblock %}
+
+{% block page_css %}
+<style nonce="{{ csp_nonce() }}">
+    .consent-section {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 60vh;
+        padding: clamp(3rem, 8vw, 6rem) 1.5rem;
+    }
+
+    .consent-wrap {
+        width: 100%;
+        max-width: 420px;
+    }
+
+    .consent-card {
+        background: var(--surface);
+        border: var(--border-subtle);
+        padding: 2.5rem 2rem;
+    }
+
+    .consent-heading {
+        font-family: var(--heading);
+        font-size: .85rem;
+        color: var(--cyan);
+        text-align: center;
+        letter-spacing: .08em;
+        margin-bottom: .5rem;
+    }
+
+    .consent-desc {
+        font-size: .85rem;
+        color: var(--mid);
+        text-align: center;
+        margin-bottom: 2rem;
+        line-height: 1.6;
+    }
+
+    .consent-client {
+        color: var(--cyan);
+        font-weight: 600;
+    }
+
+    .consent-lead {
+        font-size: .8rem;
+        color: var(--light);
+        margin-bottom: .5rem;
+    }
+
+    .consent-scopes {
+        list-style: none;
+        padding: 0;
+        margin: 0 0 2rem;
+    }
+
+    .consent-scopes li {
+        display: flex;
+        align-items: center;
+        gap: .6rem;
+        padding: .65rem 0;
+        border-bottom: 1px solid rgba(0,212,255,.06);
+        font-size: .85rem;
+        color: var(--light);
+    }
+
+    .consent-scopes li::before {
+        content: "\2713";
+        color: var(--cyan);
+        font-weight: 700;
+        flex-shrink: 0;
+    }
+
+    .consent-buttons {
+        display: flex;
+        gap: .75rem;
+    }
+
+    .consent-btn {
+        flex: 1;
+        padding: .85rem 1.5rem;
+        font-family: var(--heading);
+        font-size: .7rem;
+        letter-spacing: .06em;
+        border: none;
+        cursor: pointer;
+        transition: box-shadow .2s, background .2s, color .2s, border-color .2s;
+    }
+
+    .consent-btn-allow {
+        background: var(--cyan);
+        color: #04141d;
+    }
+
+    .consent-btn-allow:hover {
+        box-shadow: 0 0 20px rgba(0,212,255,.4);
+    }
+
+    .consent-btn-deny {
+        background: transparent;
+        color: var(--mid);
+        border: 1.5px solid rgba(90,122,150,.4);
+    }
+
+    .consent-btn-deny:hover {
+        color: var(--light);
+        border-color: var(--light);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<section class="consent-section">
+    <div class="consent-wrap">
+        <div class="consent-card">
+            <div class="consent-heading">Authorize Application</div>
+            <p class="consent-desc">
+                <span class="consent-client">{{ display_name or client_id }}</span>
+                wants to access your account.
+            </p>
+
+            {% if scope_descriptions %}
+            <p class="consent-lead">This will allow the application to:</p>
+            <ul class="consent-scopes">
+                {% for scope in scope_descriptions %}
+                <li>{{ scope.description }}</li>
+                {% endfor %}
+            </ul>
+            {% elif scopes %}
+            <p class="consent-lead">This will allow the application to:</p>
+            <ul class="consent-scopes">
+                {% for scope in scopes %}
+                <li>{{ scope }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+
+            <form method="post" action="/oauth/authorize">
+                {{ csrf_field() }}
+                <div class="consent-buttons">
+                    <button type="submit" name="action" value="deny" class="consent-btn consent-btn-deny">Deny</button>
+                    <button type="submit" name="action" value="allow" class="consent-btn consent-btn-allow">Allow</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</section>
+{% endblock %}
