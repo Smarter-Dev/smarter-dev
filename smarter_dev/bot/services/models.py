@@ -594,3 +594,40 @@ class BytesConfig:
             result["Last Check"] = f"<t:{int(self.last_check.timestamp())}:R>"
 
         return result
+
+
+@dataclass(frozen=True)
+class ChannelModelOverride:
+    """An admin-set LLM model override + token budgets for one channel.
+
+    Mirrors the web API's ``ChannelModelOverrideRead``. ``model_key`` is a stable
+    catalog key; budgets are token caps where ``0`` means unlimited.
+    """
+
+    guild_id: str
+    channel_id: str
+    model_key: str
+    daily_token_budget: int
+    hourly_token_budget: int
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @classmethod
+    def from_api_response(cls, data: dict) -> ChannelModelOverride:
+        """Build from an API JSON payload (ISO timestamps parsed to datetimes)."""
+        return cls(
+            guild_id=data["guild_id"],
+            channel_id=data["channel_id"],
+            model_key=data["model_key"],
+            daily_token_budget=data["daily_token_budget"],
+            hourly_token_budget=data["hourly_token_budget"],
+            created_at=_parse_iso_datetime(data.get("created_at")),
+            updated_at=_parse_iso_datetime(data.get("updated_at")),
+        )
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    """Parse an ISO-8601 timestamp (``Z`` suffix tolerated) or return ``None``."""
+    if not value:
+        return None
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))

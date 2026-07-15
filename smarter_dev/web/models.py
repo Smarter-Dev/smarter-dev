@@ -4642,3 +4642,41 @@ class MemberActivity(Base):
     last_message_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+
+
+class ChannelModelOverride(Base):
+    """An admin-set LLM model override + token budgets for a single channel.
+
+    Set via the admin ``/model`` slash command: it pins which catalog model the
+    chat agent uses in ``channel_id`` and caps spend with daily/hourly token
+    budgets (``0`` means unlimited; enforcement lives in the chat runtime, not
+    here). Exactly one row per channel — the slash command's PUT is an upsert, so
+    reopening the modal edits the existing row rather than stacking duplicates.
+
+    ``model_key`` is a stable ``key`` from
+    :data:`smarter_dev.bot.agents.model_catalog.MODEL_CATALOG`; the wire
+    ``model_id`` is resolved from it at request time, so re-verifying a model's
+    wire id never needs a migration here.
+    """
+
+    __tablename__ = "channel_model_overrides"
+    __table_args__ = (
+        UniqueConstraint(
+            "channel_id", name="uq_channel_model_overrides_channel_id"
+        ),
+        Index("ix_channel_model_overrides_guild_id", "guild_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    channel_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    model_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 0 == unlimited for both budgets (enforced in the chat runtime).
+    daily_token_budget: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    hourly_token_budget: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )

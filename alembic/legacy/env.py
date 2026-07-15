@@ -31,6 +31,7 @@ LEGACY_TABLES: frozenset[str] = frozenset({
     "bytes_configs",
     "bytes_transactions",
     "campaigns",
+    "channel_model_overrides",
     "challenge_inputs",
     "challenge_submissions",
     "challenges",
