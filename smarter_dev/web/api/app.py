@@ -51,6 +51,7 @@ from smarter_dev.web.api.routers.polar_webhooks import router as polar_webhooks_
 from smarter_dev.web.api.routers.activity import router as activity_router
 from smarter_dev.web.api.routers.handlers import router as handlers_router
 from smarter_dev.web.api.routers.image_quota import router as image_quota_router
+from smarter_dev.web.api.routers.model_overrides import router as model_overrides_router
 from smarter_dev.web.api.routers.admin_handlers import (
     router as admin_handlers_router,
 )
@@ -422,6 +423,7 @@ api.include_router(handlers_router, tags=["Handlers"])
 api.include_router(activity_router, tags=["Member Activity"])
 api.include_router(image_quota_router, tags=["Image Generation Quota"])
 api.include_router(admin_handlers_router, tags=["Admin Handlers"])
+api.include_router(model_overrides_router, tags=["Channel Model Overrides"])
 
 api.include_router(polar_webhooks_router)
 

@@ -46,6 +46,7 @@ from smarter_dev.web.models import (
     AttachmentFilterConfig,
     ModerationConfig,
     ModerationAction,
+    ChannelModelOverride,
 )
 
 logger = logging.getLogger(__name__)
@@ -5921,3 +5922,84 @@ class ModerationActionOperations:
             return list(result.scalars().all())
         except Exception as e:
             raise DatabaseOperationError(f"Failed to get recent moderation actions: {e}") from e
+
+
+# ============================================================================
+# Channel model override operations
+# ============================================================================
+#
+# One row per channel (unique ``channel_id``): the admin ``/model`` command's
+# PUT is an upsert so reopening the modal edits the existing row. These are
+# plain functions (not an Operations class) taking an ``AsyncSession``; the
+# caller owns the transaction and commits.
+
+
+async def get_channel_model_override(
+    session: AsyncSession, guild_id: str, channel_id: str
+) -> ChannelModelOverride | None:
+    """Return the override for ``channel_id`` in ``guild_id``, or ``None``."""
+    result = await session.execute(
+        select(ChannelModelOverride).where(
+            ChannelModelOverride.guild_id == guild_id,
+            ChannelModelOverride.channel_id == channel_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def upsert_channel_model_override(
+    session: AsyncSession,
+    guild_id: str,
+    channel_id: str,
+    model_key: str,
+    daily_token_budget: int,
+    hourly_token_budget: int,
+) -> ChannelModelOverride:
+    """Insert or update the single override row for ``channel_id``.
+
+    Loads (or creates) the row internally so no caller-owned object is mutated.
+    """
+    record = await get_channel_model_override(session, guild_id, channel_id)
+    if record is None:
+        record = ChannelModelOverride(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            model_key=model_key,
+            daily_token_budget=daily_token_budget,
+            hourly_token_budget=hourly_token_budget,
+        )
+        session.add(record)
+    else:
+        record.guild_id = guild_id
+        record.model_key = model_key
+        record.daily_token_budget = daily_token_budget
+        record.hourly_token_budget = hourly_token_budget
+    await session.flush()
+    # Load server-generated timestamps (created_at/updated_at) now, so callers can
+    # serialize the row without triggering a lazy load outside the async context.
+    await session.refresh(record)
+    return record
+
+
+async def delete_channel_model_override(
+    session: AsyncSession, guild_id: str, channel_id: str
+) -> bool:
+    """Delete the override for ``channel_id``; return whether a row was removed."""
+    record = await get_channel_model_override(session, guild_id, channel_id)
+    if record is None:
+        return False
+    await session.delete(record)
+    await session.flush()
+    return True
+
+
+async def list_channel_model_overrides(
+    session: AsyncSession, guild_id: str
+) -> list[ChannelModelOverride]:
+    """Return all overrides in ``guild_id`` (for listing/admin views)."""
+    result = await session.execute(
+        select(ChannelModelOverride)
+        .where(ChannelModelOverride.guild_id == guild_id)
+        .order_by(ChannelModelOverride.channel_id)
+    )
+    return list(result.scalars().all())

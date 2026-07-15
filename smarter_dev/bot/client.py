@@ -521,6 +521,9 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             AdventOfCodeService,
         )
         from smarter_dev.bot.services.discord_voice import VoiceService
+        from smarter_dev.bot.services.model_override_service import (
+            ModelOverrideService,
+        )
 
         bytes_service = BytesService(api_client, cache_manager)
         squads_service = SquadsService(api_client, cache_manager)
@@ -535,6 +538,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         )
         advent_of_code_service = AdventOfCodeService(api_client, cache_manager, bot)
         voice_service = VoiceService(api_client, cache_manager, settings)
+        model_override_service = ModelOverrideService(api_client, cache_manager)
 
         # Initialize chat agent memory (Redis-backed; non-critical)
         import redis.asyncio as redis_async
@@ -588,6 +592,10 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         logger.info("Initializing voice service...")
         await voice_service.initialize()
         logger.info("✓ Voice service initialized")
+
+        logger.info("Initializing model override service...")
+        await model_override_service.initialize()
+        logger.info("✓ Model override service initialized")
 
         # Verify service health
         logger.info("Verifying service health...")
@@ -685,6 +693,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d["advent_of_code_service"] = advent_of_code_service
         bot.d["chat_memory_redis"] = chat_memory_redis
         bot.d["voice_service"] = voice_service
+        bot.d["model_override_service"] = model_override_service
 
         # Store services in d for plugin access (primary)
         bot.d["_services"] = {
@@ -697,6 +706,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             "repeating_message_service": repeating_message_service,
             "advent_of_code_service": advent_of_code_service,
             "voice_service": voice_service,
+            "model_override_service": model_override_service,
         }
 
         logger.info("✓ Bot services setup complete")

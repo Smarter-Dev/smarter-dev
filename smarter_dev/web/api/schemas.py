@@ -862,3 +862,49 @@ class ChatAgentTurnCreateResponse(BaseAPIModel):
     chat_cost_usd: str  # serialised Decimal
     voice_cost_usd: str
     summarizer_cost_usd_total: str
+
+
+# ============================================================================
+# Channel Model Override Schemas
+# ============================================================================
+
+class ChannelModelOverrideWrite(BaseAPIModel):
+    """Request body for setting a channel's model override (upsert).
+
+    ``model_key`` must name a model in the shared catalog; budgets are token
+    caps where ``0`` means unlimited. Unknown keys and negative budgets are
+    rejected with 422.
+    """
+
+    model_key: str = Field(description="Stable catalog key for the model")
+    daily_token_budget: int = Field(
+        0, ge=0, description="Daily token cap (0 = unlimited)"
+    )
+    hourly_token_budget: int = Field(
+        0, ge=0, description="Hourly token cap (0 = unlimited)"
+    )
+
+    @field_validator("model_key")
+    @classmethod
+    def _model_key_in_catalog(cls, value: str) -> str:
+        from smarter_dev.bot.agents.model_catalog import is_valid_model_key
+
+        if not is_valid_model_key(value):
+            raise ValueError(f"unknown model key: {value!r}")
+        return value
+
+
+class ChannelModelOverrideRead(BaseAPIModel):
+    """Response model for a channel's model override."""
+
+    guild_id: str = Field(description="Discord guild ID")
+    channel_id: str = Field(description="Discord channel ID")
+    model_key: str = Field(description="Stable catalog key for the model")
+    daily_token_budget: int = Field(description="Daily token cap (0 = unlimited)")
+    hourly_token_budget: int = Field(description="Hourly token cap (0 = unlimited)")
+    created_at: datetime = Field(description="Override creation timestamp")
+    updated_at: datetime = Field(description="Last update timestamp")
+
+    @field_serializer("created_at", "updated_at")
+    def _serialize_datetime(self, value: datetime) -> str:
+        return value.isoformat()
