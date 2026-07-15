@@ -31,6 +31,8 @@ from smarter_dev.bot.agents.chat_compaction import compact_history
 from smarter_dev.bot.agents.chat_models import AgentReturn
 from smarter_dev.bot.agents.chat_tools import ChatDeps, chat_tool_functions
 from smarter_dev.bot.agents.handler_tools import handler_tool_functions
+from smarter_dev.bot.agents.model_catalog import MODEL_CATALOG, CatalogModel
+from smarter_dev.bot.agents.model_router import build_model_for
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,37 @@ SYSTEM_PROMPT = (
 
 def _model_id() -> str:
     return os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL)
+
+
+def _catalog_model_for_id(model_id: str) -> CatalogModel | None:
+    """Return the catalog model whose wire ``model_id`` matches, if any."""
+    for model in MODEL_CATALOG:
+        if model.model_id == model_id:
+            return model
+    return None
+
+
+def build_agent_model(model_id: str) -> Model:
+    """Build a Pydantic AI model for ``model_id``.
+
+    Catalog models (the admin-selectable set) route through the shared
+    :mod:`model_router`; anything else falls back to the historical prefix
+    logic so ad-hoc ``CHAT_AGENT_MODEL`` ids keep working. Later stages call
+    this to realize a per-channel override.
+    """
+    catalog_model = _catalog_model_for_id(model_id)
+    if catalog_model is not None:
+        return build_model_for(catalog_model)
+    if model_id.startswith(("gpt-", "openai/")):
+        from pydantic_ai.models.openai import OpenAIResponsesModel
+        from pydantic_ai.providers.openai import OpenAIProvider
+
+        return OpenAIResponsesModel(
+            model_id.removeprefix("openai/"),
+            provider=OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY") or ""),
+        )
+    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+    return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
 
 
 def _build_model() -> Model:
