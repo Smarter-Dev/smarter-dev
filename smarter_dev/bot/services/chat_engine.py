@@ -28,41 +28,40 @@ import asyncio
 import logging
 import os
 import uuid
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from collections.abc import Awaitable
+from collections.abc import Callable
+from dataclasses import dataclass
+from dataclasses import field
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 from typing import Any
 
 import hikari
 from pydantic_ai.usage import RunUsage
 
-from smarter_dev.bot.agents.chat_agent import (
-    DEFAULT_MODEL as CHAT_DEFAULT_MODEL,
-    MODEL_ENV_VAR as CHAT_MODEL_ENV_VAR,
-    get_chat_agent,
-)
-from smarter_dev.bot.agents.chat_compaction import (
-    drain_collection,
-    set_last_model_call,
-    start_collection,
-)
-from smarter_dev.bot.agents.chat_context import (
-    build_followup_input,
-    build_initial_input,
-)
+from smarter_dev.bot.agents.chat_agent import DEFAULT_MODEL as CHAT_DEFAULT_MODEL
+from smarter_dev.bot.agents.chat_agent import MODEL_ENV_VAR as CHAT_MODEL_ENV_VAR
+from smarter_dev.bot.agents.chat_agent import get_chat_agent
+from smarter_dev.bot.agents.chat_compaction import drain_collection
+from smarter_dev.bot.agents.chat_compaction import set_last_model_call
+from smarter_dev.bot.agents.chat_compaction import start_collection
+from smarter_dev.bot.agents.chat_context import build_followup_input
+from smarter_dev.bot.agents.chat_context import build_initial_input
 from smarter_dev.bot.agents.chat_input_format import build_agent_call
-from smarter_dev.bot.agents.chat_models import ResponseBody, TurnDecision
-from smarter_dev.bot.agents.chat_tools import ChatDeps, GeneratedImage
-from smarter_dev.bot.services.chat_conversation_persistence import (
-    end_engagement,
-    persist_turn,
-    start_engagement,
-)
+from smarter_dev.bot.agents.chat_models import ResponseBody
+from smarter_dev.bot.agents.chat_models import TurnDecision
+from smarter_dev.bot.agents.chat_tools import ChatDeps
+from smarter_dev.bot.agents.chat_tools import GeneratedImage
+from smarter_dev.bot.agents.model_catalog import get_model
+from smarter_dev.bot.services.channel_token_budget import add_usage
+from smarter_dev.bot.services.channel_token_budget import is_over_budget
+from smarter_dev.bot.services.chat_conversation_persistence import end_engagement
+from smarter_dev.bot.services.chat_conversation_persistence import persist_turn
+from smarter_dev.bot.services.chat_conversation_persistence import start_engagement
 from smarter_dev.bot.services.chat_memory import get_chat_memory
-from smarter_dev.bot.utils.stop_detection import (
-    is_stop_request,
-    set_channel_cooldown,
-)
+from smarter_dev.bot.utils.stop_detection import is_stop_request
+from smarter_dev.bot.utils.stop_detection import set_channel_cooldown
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +70,16 @@ QUEUE_FIRE_THRESHOLD = 15
 MAX_NO_RESPONSE_TURNS = 3
 INACTIVITY_TIMEOUT = timedelta(minutes=30)
 MAX_RUNTIME = timedelta(hours=2)
+
+# When a channel's model token budget is exhausted the engine stays quiet, but
+# posts one short notice so the silence is explained. This throttle (a Redis
+# SET NX EX) caps that notice to once per hour per channel so a busy channel
+# can't be spammed while the budget stays spent.
+BUDGET_NOTICE_COOLDOWN_SECONDS = 60 * 60
+_BUDGET_EXHAUSTED_NOTICE = (
+    "This channel's model token budget is used up for now — I'll pick back "
+    "up once it resets."
+)
 
 # Appended to a text reply when a generated image can't be attached because the
 # bot is missing the "Attach Files" permission — so the answer still lands and
@@ -413,6 +422,30 @@ class ChannelEngine:
                 len(history),
             )
 
+            # Resolve any admin per-channel override and enforce its token
+            # budget before we spend a model call. A channel with no override
+            # falls through unchanged (default model, no budget checks).
+            override = await self._get_channel_override()
+            budget_redis = self._budget_redis() if override is not None else None
+            if override is not None and budget_redis is not None:
+                over_budget = await is_over_budget(
+                    budget_redis,
+                    str(self.channel_id),
+                    override.daily_token_budget,
+                    override.hourly_token_budget,
+                )
+                if over_budget:
+                    logger.info(
+                        "[%s] Channel %s over model token budget — skipping turn",
+                        request_id,
+                        self.channel_id,
+                    )
+                    await self._maybe_notice_budget_exhausted(
+                        budget_redis, reply_to=error_reply_to
+                    )
+                    return
+            override_model_id = self._resolve_override_model_id(override)
+
             # Start engagement persistence on the very first turn — gives us
             # an engagement_id we attach to every persisted turn that follows.
             if first_activation and self.engagement_id is None:
@@ -435,7 +468,7 @@ class ChannelEngine:
                     activation_message_id=int(trigger.id) if trigger else 0,
                 )
 
-            agent = get_chat_agent()
+            agent = get_chat_agent(override_model_id)
             deps = ChatDeps(
                 bot=self.bot,
                 channel_id=self.channel_id,
@@ -485,6 +518,12 @@ class ChannelEngine:
 
             output = result.output
             tokens = _extract_tokens(result.usage())
+            # Charge this turn's chat tokens against the channel's budget. Only
+            # override channels are metered (no override → no tracking overhead).
+            # Compaction runs on its own summarizer model and its tokens are not
+            # in ``result.usage()``, so they are not counted here.
+            if override is not None and budget_redis is not None:
+                await self._record_budget_usage(budget_redis, tokens)
             logger.info(
                 "[%s] Chat agent returned response=%s continue_watching=%s "
                 "max_score=%s tokens=%s",
@@ -788,6 +827,110 @@ class ChannelEngine:
                         exc_info=True,
                     )
             return False
+
+    def _override_service(self) -> Any | None:
+        """The bot's ModelOverrideService (set on ``bot.d``), or None if absent.
+
+        Mirrors ``plugins/model_override._get_override_service`` but stays
+        fail-soft: a bot without the service (or a non-dict ``bot.d`` in tests)
+        yields None so channels behave as if they have no override.
+        """
+        data = getattr(self.bot, "d", None)
+        if not isinstance(data, dict):
+            return None
+        service = data.get("model_override_service")
+        if service is None:
+            service = data.get("_services", {}).get("model_override_service")
+        return service
+
+    def _budget_redis(self) -> Any | None:
+        """The bot's shared Redis client used for per-channel token budgets.
+
+        Reuses the chat-memory Redis connection on ``bot.d`` — enforcement runs
+        bot-side, so we spend budget locally rather than round-tripping the API.
+        Returns None when Redis is unavailable (budgets then simply don't block).
+        """
+        data = getattr(self.bot, "d", None)
+        if not isinstance(data, dict):
+            return None
+        return data.get("chat_memory_redis")
+
+    async def _get_channel_override(self) -> Any | None:
+        """Read this channel's admin model override (fail-soft).
+
+        A bad or unreachable override read must never break chat, so any error
+        degrades to "no override" (default model, no budget) with a warning.
+        """
+        service = self._override_service()
+        if service is None:
+            return None
+        try:
+            return await service.get_override(
+                str(self.guild_id), str(self.channel_id)
+            )
+        except Exception:
+            logger.warning(
+                "Failed to read model override for channel %s — using default",
+                self.channel_id,
+                exc_info=True,
+            )
+            return None
+
+    def _resolve_override_model_id(self, override: Any | None) -> str | None:
+        """Wire model id for ``override``, or None to use the default agent.
+
+        A stored ``model_key`` the catalog no longer knows (stale) falls back to
+        the default model with a warning rather than crashing the turn.
+        """
+        if override is None:
+            return None
+        catalog_model = get_model(override.model_key)
+        if catalog_model is None:
+            logger.warning(
+                "Channel %s override names unknown model_key %r — "
+                "falling back to default model",
+                self.channel_id,
+                override.model_key,
+            )
+            return None
+        return catalog_model.model_id
+
+    async def _record_budget_usage(self, redis: Any, tokens: int) -> None:
+        """Add ``tokens`` to the channel's budget windows (best-effort)."""
+        try:
+            await add_usage(redis, str(self.channel_id), tokens)
+        except Exception:
+            logger.warning(
+                "Failed to record token budget usage for channel %s",
+                self.channel_id,
+                exc_info=True,
+            )
+
+    async def _maybe_notice_budget_exhausted(
+        self, redis: Any, *, reply_to: int | None
+    ) -> None:
+        """Post the budget-exhausted notice, throttled to once per hour.
+
+        A Redis ``SET NX EX`` acts as the per-channel throttle: only the call
+        that wins the key posts, so repeated over-budget turns stay silent until
+        the cooldown lapses. Any Redis hiccup skips the notice (never blocks).
+        """
+        try:
+            won = await redis.set(
+                f"modelbudget-notice:{self.channel_id}",
+                "1",
+                nx=True,
+                ex=BUDGET_NOTICE_COOLDOWN_SECONDS,
+            )
+        except Exception:
+            logger.debug(
+                "could not claim budget-notice throttle for channel %s",
+                self.channel_id,
+                exc_info=True,
+            )
+            return
+        if won:
+            await self._post_error(_BUDGET_EXHAUSTED_NOTICE, reply_to=reply_to)
 
     def _shared_api_client(self) -> Any | None:
         """The bot's shared APIClient (set on ``bot.d``), or None if absent.
