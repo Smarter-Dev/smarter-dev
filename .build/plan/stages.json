@@ -1,0 +1,26 @@
+[
+  {
+    "id": "model-catalog-provider-routing",
+    "title": "Model catalog + provider routing (incl. Digital Ocean)",
+    "path": ".build/plan/01-model-catalog-provider-routing.md",
+    "summary": "Add a curated catalog of Kimi/GLM/DeepSeek/Gemma/Qwen/Gemini/GPT models (each with provider + wire id) and a router that builds a Pydantic AI model per entry — Gemini→Google, GPT→OpenAI, the rest→Digital Ocean's OpenAI-compatible endpoint; adds DO config/env. No runtime change, fully unit-tested."
+  },
+  {
+    "id": "override-persistence-api",
+    "title": "Persistence: DB model, migration, web API, bot service",
+    "path": ".build/plan/02-override-persistence-api.md",
+    "summary": "Add the channel_model_overrides table (legacy schema) + Alembic migration, GET/PUT/DELETE web API endpoints (validating model_key against the catalog and budgets >= 0), and a bot-side ModelOverrideService wired into bot.d. Data layer works end to end; unused by UI/runtime yet."
+  },
+  {
+    "id": "slash-command-modal",
+    "title": "Admin slash command + model-selection modal",
+    "path": ".build/plan/03-slash-command-modal.md",
+    "summary": "Add the admin-gated /setmodel command that opens a modal to pick a model for the current channel and set daily+hourly token budgets (0 = unlimited), persisting via the stage-02 service; registers the modal custom_id in the events.py dispatch. Includes a select-in-modal vs two-step fallback decision."
+  },
+  {
+    "id": "enforcement-budgets",
+    "title": "Apply the override + enforce token budgets in the chat runtime",
+    "path": ".build/plan/04-enforcement-budgets.md",
+    "summary": "Make chat_engine use the override model (per-model agent cache) and enforce daily/hourly token budgets via Redis fixed-window counters (0 = unlimited), incrementing usage after each turn; channels without an override are unchanged. Completes the feature."
+  }
+]
