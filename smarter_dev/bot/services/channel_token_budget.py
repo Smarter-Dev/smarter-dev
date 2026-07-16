@@ -79,6 +79,21 @@ async def over_budget_reset_epoch(
     return latest_reset_epoch
 
 
+async def current_window_usage(redis: Redis, channel_id: str) -> tuple[int, int]:
+    """Tokens ``channel_id`` has consumed in the current (hour, day) windows.
+
+    Reads the live counters without mutating them — backs the ``/bot-usage``
+    display. Windows with no writes yet read as 0.
+    """
+    now_epoch = datetime.now(UTC).timestamp()
+    usage = []
+    for scope, window_seconds in _WINDOWS:
+        key = budget_key(channel_id, scope, _window_index(now_epoch, window_seconds))
+        usage.append(await _consumed(redis, key))
+    hour_used, day_used = usage
+    return hour_used, day_used
+
+
 async def add_usage(redis: Redis, channel_id: str, tokens: int) -> None:
     """Add ``tokens`` to ``channel_id``'s current hour and day windows.
 
