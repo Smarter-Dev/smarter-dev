@@ -13,14 +13,22 @@ Responsibilities:
 from __future__ import annotations
 
 import logging
+from datetime import UTC
+from datetime import datetime
 from typing import TYPE_CHECKING
+from typing import Any
 
 import hikari
 import lightbulb
+from redis.exceptions import RedisError
 
 from smarter_dev.bot.services.chat_engine_registry import get_chat_engine_registry
 from smarter_dev.bot.services.chat_memory import get_chat_memory
 from smarter_dev.bot.services.rate_limiter import rate_limiter
+from smarter_dev.bot.services.user_message_limit import claim_notice_throttle
+from smarter_dev.bot.services.user_message_limit import format_over_limit_notice
+from smarter_dev.bot.services.user_message_limit import over_limit_status
+from smarter_dev.bot.services.user_message_limit import record_directed_messages
 from smarter_dev.bot.utils.stop_detection import (
     is_channel_on_cooldown,
     is_stop_request,
@@ -69,6 +77,94 @@ async def _voice_send(
         reply_to_message_id=reply_to,
         instruction=instruction,
     )
+
+
+def _chat_limit_redis(bot: Any) -> Any | None:
+    """The shared chat-memory Redis used for the per-user message limit.
+
+    Returns None when Redis is unavailable (the limit then simply doesn't
+    apply — a missing counter must never silence the bot).
+    """
+    data = getattr(bot, "d", None)
+    if not isinstance(data, dict):
+        return None
+    return data.get("chat_memory_redis")
+
+
+async def _reject_when_over_limit(bot: Any, event: hikari.MessageCreateEvent) -> bool:
+    """True when the author is over the rolling message limit (drop the message).
+
+    The first rejection of an over-limit episode pings the user with how long
+    the counted window was and when they can try again; the throttle keeps
+    every later rejection silent until the limit frees. Fail-soft: any Redis
+    trouble reads as "under limit".
+    """
+    redis = _chat_limit_redis(bot)
+    if redis is None:
+        return False
+    user_id = str(event.message.author.id)
+    try:
+        status = await over_limit_status(redis, user_id)
+    except RedisError:
+        logger.warning(
+            "Failed to check message limit for user %s — allowing message",
+            user_id,
+            exc_info=True,
+        )
+        return False
+    if status is None:
+        return False
+
+    try:
+        first_rejection_of_episode = await claim_notice_throttle(
+            redis, user_id, status.retry_epoch
+        )
+    except RedisError:
+        logger.warning(
+            "Failed to claim limit-notice throttle for user %s",
+            user_id,
+            exc_info=True,
+        )
+        first_rejection_of_episode = False
+    if first_rejection_of_episode:
+        notice = format_over_limit_notice(
+            user_id, status, datetime.now(UTC).timestamp()
+        )
+        try:
+            await bot.rest.create_message(
+                event.channel_id,
+                notice,
+                reply=event.message,
+                user_mentions=[event.message.author.id],
+            )
+        except Exception:
+            logger.exception("Failed to send message-limit notice")
+    return True
+
+
+async def _record_engaged_message(bot: Any, event: hikari.MessageCreateEvent) -> None:
+    """Count an @mention/reply engagement against its author's rolling limit.
+
+    Engagements are charged here — before the agent runs — so they count even
+    when the run later fails; the agent's rankings re-record the same message
+    id post-run, which the sorted set dedupes. Best-effort: Redis trouble
+    skips the charge rather than blocking the engagement.
+    """
+    redis = _chat_limit_redis(bot)
+    if redis is None:
+        return
+    try:
+        await record_directed_messages(
+            redis,
+            str(event.message.author.id),
+            {str(event.message.id): event.message.created_at.timestamp()},
+        )
+    except RedisError:
+        logger.warning(
+            "Failed to record message-limit charge for user %s",
+            event.message.author.id,
+            exc_info=True,
+        )
 
 
 def _bot_was_engaged(event: hikari.MessageCreateEvent, bot_user_id: int) -> bool:
@@ -134,6 +230,16 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
                 logger.exception("Failed to send rate-limit message")
             return
 
+        if await _reject_when_over_limit(plugin.bot, event):
+            logger.info(
+                "User %s over the rolling message limit — dropping engagement "
+                "in channel %s",
+                event.message.author.id,
+                event.channel_id,
+            )
+            return
+        await _record_engaged_message(plugin.bot, event)
+
         # Distinguish "engine doesn't exist yet" (first activation in this
         # engagement) from "engine is already running and the user is
         # @mentioning again" — the two need different plumbing.
@@ -161,6 +267,12 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
     # idle-message counter so memory can detect staleness on the next activation.
     engine = await registry.get(event.channel_id)
     if engine is not None and engine.active:
+        # An over-limit user's in-session follow-ups are dropped before the
+        # agent sees them — otherwise one mention would buy unlimited answers
+        # for the rest of the engagement. Only users who recently conversed
+        # with the bot can be over the limit, so bystanders are never blocked.
+        if await _reject_when_over_limit(plugin.bot, event):
+            return
         await engine.observe(event)
         return
 

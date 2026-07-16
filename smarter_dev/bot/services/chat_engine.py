@@ -62,6 +62,8 @@ from smarter_dev.bot.services.chat_conversation_persistence import end_engagemen
 from smarter_dev.bot.services.chat_conversation_persistence import persist_turn
 from smarter_dev.bot.services.chat_conversation_persistence import start_engagement
 from smarter_dev.bot.services.chat_memory import get_chat_memory
+from smarter_dev.bot.services.user_message_limit import DIRECTED_SCORE_THRESHOLD
+from smarter_dev.bot.services.user_message_limit import record_directed_messages
 from smarter_dev.bot.utils.stop_detection import is_stop_request
 from smarter_dev.bot.utils.stop_detection import set_channel_cooldown
 
@@ -441,9 +443,10 @@ class ChannelEngine:
 
             # Resolve any admin per-channel override and enforce its token
             # budget before we spend a model call. A channel with no override
-            # falls through unchanged (default model, no budget checks).
+            # falls through unchanged (default model, no budget checks) —
+            # though its token usage is still metered after the run.
             override = await self._get_channel_override()
-            budget_redis = self._budget_redis() if override is not None else None
+            budget_redis = self._budget_redis()
             if override is not None and budget_redis is not None:
                 budget_reset_epoch = await over_budget_reset_epoch(
                     budget_redis,
@@ -554,12 +557,16 @@ class ChannelEngine:
 
             output = result.output
             tokens = _extract_tokens(result.usage())
-            # Charge this turn's chat tokens against the channel's budget. Only
-            # override channels are metered (no override → no tracking overhead).
+            # Meter this turn's chat tokens against the channel's usage windows.
+            # Every channel is metered (so ``/bot-usage`` always has numbers);
+            # the budgets that *enforce* only exist on override channels.
             # Compaction runs on its own summarizer model and its tokens are not
             # in ``result.usage()``, so they are not counted here.
-            if override is not None and budget_redis is not None:
+            if budget_redis is not None:
                 await self._record_budget_usage(budget_redis, tokens)
+            await self._charge_directed_messages(
+                output, drained, first_activation=first_activation
+            )
             logger.info(
                 "[%s] Chat agent returned response=%s continue_watching=%s "
                 "max_score=%s tokens=%s",
@@ -937,6 +944,62 @@ class ChannelEngine:
                 self.channel_id,
                 exc_info=True,
             )
+
+    async def _charge_directed_messages(
+        self,
+        output: TurnDecision,
+        drained: list[hikari.Message],
+        *,
+        first_activation: bool,
+    ) -> None:
+        """Count this turn's bot-directed messages against their authors' limits.
+
+        Every ranked message scoring >= DIRECTED_SCORE_THRESHOLD was (per the
+        agent) aimed at the bot, so it costs its author one slot in the rolling
+        per-user message limit — this is what makes in-session follow-ups
+        count toward the limit, not just @mention engagements. Members are
+        message ids, so a mention already charged at the gate never
+        double-counts. Best-effort: Redis trouble must never break the turn.
+        """
+        redis = self._budget_redis()
+        if redis is None:
+            return
+        turn_messages = list(drained)
+        if first_activation and self.activation_message is not None:
+            turn_messages.append(self.activation_message)
+        author_and_epoch_by_message_id: dict[str, tuple[str, float]] = {}
+        for message in turn_messages:
+            author = getattr(message, "author", None)
+            if author is None or getattr(author, "is_bot", False):
+                continue
+            created_at = getattr(message, "created_at", None)
+            sent_epoch = (
+                created_at.timestamp()
+                if created_at is not None
+                else datetime.now(UTC).timestamp()
+            )
+            author_and_epoch_by_message_id[str(message.id)] = (
+                str(author.id),
+                sent_epoch,
+            )
+        charges_by_user: dict[str, dict[str, float]] = {}
+        for ranking in output.rankings:
+            if ranking.score < DIRECTED_SCORE_THRESHOLD:
+                continue
+            charged = author_and_epoch_by_message_id.get(ranking.message_id)
+            if charged is None:
+                continue
+            user_id, sent_epoch = charged
+            charges_by_user.setdefault(user_id, {})[ranking.message_id] = sent_epoch
+        for user_id, message_epochs in charges_by_user.items():
+            try:
+                await record_directed_messages(redis, user_id, message_epochs)
+            except RedisError:
+                logger.warning(
+                    "Failed to record message-limit charges for user %s",
+                    user_id,
+                    exc_info=True,
+                )
 
     async def _maybe_notice_budget_exhausted(
         self, redis: Any, *, reset_epoch: int, reply_to: int | None

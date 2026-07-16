@@ -11,6 +11,8 @@ from smarter_dev.bot.services.channel_token_budget import (
     HOUR_WINDOW_SECONDS,
     add_usage,
     budget_key,
+    current_window_usage,
+    next_window_reset_epoch,
     over_budget_reset_epoch,
 )
 
@@ -158,3 +160,32 @@ async def test_channels_do_not_share_budget():
 
 def test_budget_key_shape():
     assert budget_key("42", "hour", 7) == "modelbudget:42:hour:7"
+
+
+@pytest.mark.asyncio
+async def test_current_window_usage_reads_zero_before_any_writes():
+    redis = _FakeRedis()
+    assert await current_window_usage(redis, "chan") == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_current_window_usage_reflects_recorded_tokens():
+    redis = _FakeRedis()
+    await add_usage(redis, "chan", 100)
+    await add_usage(redis, "chan", 50)
+    assert await current_window_usage(redis, "chan") == (150, 150)
+
+
+@pytest.mark.asyncio
+async def test_current_window_usage_is_per_channel():
+    redis = _FakeRedis()
+    await add_usage(redis, "chan-a", 100)
+    assert await current_window_usage(redis, "chan-b") == (0, 0)
+
+
+def test_next_window_reset_epoch_is_the_next_wall_boundary():
+    now = time.time()
+    for window_seconds in (HOUR_WINDOW_SECONDS, DAY_WINDOW_SECONDS):
+        _assert_is_next_boundary(
+            next_window_reset_epoch(now, window_seconds), window_seconds
+        )
