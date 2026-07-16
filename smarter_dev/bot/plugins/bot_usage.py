@@ -1,6 +1,8 @@
-"""``/bot-usage`` slash command — personal message allowance + channel token usage.
+"""``/bot-usage`` and ``/bot-usage-info`` slash commands.
 
-Available to everyone; responds ephemerally. Shows two things:
+Both available to everyone. ``/bot-usage`` responds ephemerally with the
+invoker's personal numbers; ``/bot-usage-info`` posts its leaderboard
+publicly so the channel can discuss it. ``/bot-usage`` shows two things:
 
 - The invoker's rolling per-user message counter (see
   :mod:`~smarter_dev.bot.services.user_message_limit`), framed over the hours
@@ -216,12 +218,21 @@ async def build_usage_leaderboard(bot: Any, guild_id: str, range_key: str) -> st
         return f"Usage data is {_UNAVAILABLE}."
 
     entries = payload.get("entries", [])
+    window_total = format_compact_tokens(int(payload.get("total_tokens_in_window", 0)))
+    all_time_total = format_compact_tokens(
+        int(payload.get("total_tokens_all_time", 0))
+    )
     if not entries:
-        return f"No bot token usage recorded in the last {range_key}."
+        return (
+            f"No bot token usage recorded in the last {range_key} "
+            f"({all_time_total} tokens all time)."
+        )
 
     lines = [
         f"**Bot token usage — last {range_key}** "
-        f"(top {len(entries)} channels)"
+        f"(top {len(entries)} channels)",
+        f"-# {window_total} tokens in the last {range_key} · "
+        f"{all_time_total} all time",
     ]
     for position, entry in enumerate(entries, start=1):
         tokens = format_compact_tokens(int(entry["total_tokens"]))
@@ -244,11 +255,15 @@ async def build_usage_leaderboard(bot: Any, guild_id: str, range_key: str) -> st
 )
 @lightbulb.implements(lightbulb.SlashCommand)
 async def bot_usage_info(ctx: lightbulb.Context) -> None:
-    """Show the per-channel token leaderboard for the chosen range."""
+    """Show the per-channel token leaderboard for the chosen range.
+
+    Posts publicly (unlike ``/bot-usage``) so the channel can see and
+    discuss the leaderboard.
+    """
     report = await build_usage_leaderboard(
         ctx.bot, str(ctx.guild_id), ctx.options.range
     )
-    await ctx.respond(report, flags=hikari.MessageFlag.EPHEMERAL)
+    await ctx.respond(report)
 
 
 def load(bot: lightbulb.BotApp) -> None:

@@ -202,16 +202,19 @@ def _leaderboard_bot(payload=None, status_code=200):
 async def test_leaderboard_renders_top_channels_for_the_range():
     bot, api = _leaderboard_bot(
         {
+            "total_tokens_all_time": 14_200_000,
+            "total_tokens_in_window": 2_100_000,
             "entries": [
                 {"channel_id": "111", "channel_name": "general", "total_tokens": 512_000},
                 {"channel_id": "222", "channel_name": None, "total_tokens": 76_000},
-            ]
+            ],
         }
     )
 
     report = await build_usage_leaderboard(bot, "G", "week")
 
     assert "**Bot token usage — last week** (top 2 channels)" in report
+    assert "-# 2.1m tokens in the last week · 14.2m all time" in report
     assert "1. <#111> — 512k" in report
     assert "2. <#222> — 76k" in report
     api.get.assert_awaited_once_with(
@@ -230,9 +233,13 @@ async def test_leaderboard_ranges_map_to_days():
 
 @pytest.mark.asyncio
 async def test_leaderboard_empty_window_says_so():
-    bot, _ = _leaderboard_bot({"entries": []})
+    bot, _ = _leaderboard_bot(
+        {"entries": [], "total_tokens_all_time": 14_200_000, "total_tokens_in_window": 0}
+    )
     report = await build_usage_leaderboard(bot, "G", "day")
-    assert report == "No bot token usage recorded in the last day."
+    assert report == (
+        "No bot token usage recorded in the last day (14.2m tokens all time)."
+    )
 
 
 @pytest.mark.asyncio
@@ -247,7 +254,7 @@ async def test_leaderboard_degrades_on_api_failure():
 
 
 @pytest.mark.asyncio
-async def test_leaderboard_command_responds_ephemerally():
+async def test_leaderboard_command_responds_publicly():
     ctx = Mock()
     ctx.guild_id = "G"
     ctx.respond = AsyncMock()
@@ -261,7 +268,8 @@ async def test_leaderboard_command_responds_ephemerally():
     ctx.respond.assert_awaited_once()
     args, kwargs = ctx.respond.await_args
     assert "last month" in args[0]
-    assert kwargs["flags"] == hikari.MessageFlag.EPHEMERAL
+    # No ephemeral flag — the leaderboard is a real message others can see.
+    assert "flags" not in kwargs
 
 
 @pytest.mark.asyncio

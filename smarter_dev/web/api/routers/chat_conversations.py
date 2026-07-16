@@ -291,6 +291,35 @@ async def channel_usage_leaderboard(
     return (await db.execute(stmt)).all()
 
 
+async def guild_total_tokens(
+    db: AsyncSession, *, guild_id: str, since: datetime | None = None
+) -> int:
+    """The guild's summed chat tokens (input+output) across every channel.
+
+    ``since`` bounds the window; None sums all time.
+    """
+    stmt = (
+        select(
+            func.coalesce(
+                func.sum(
+                    ChatAgentTurn.chat_tokens_input
+                    + ChatAgentTurn.chat_tokens_output
+                ),
+                0,
+            )
+        )
+        .select_from(ChatAgentTurn)
+        .join(
+            ChatAgentEngagement,
+            ChatAgentTurn.engagement_id == ChatAgentEngagement.id,
+        )
+        .where(ChatAgentEngagement.guild_id == guild_id)
+    )
+    if since is not None:
+        stmt = stmt.where(ChatAgentTurn.started_at >= since)
+    return int(await db.scalar(stmt) or 0)
+
+
 @router.get("/usage-leaderboard", response_model=ChatUsageLeaderboardResponse)
 async def usage_leaderboard(
     request: Request,
@@ -308,6 +337,10 @@ async def usage_leaderboard(
     return ChatUsageLeaderboardResponse(
         since=since,
         days=days,
+        total_tokens_all_time=await guild_total_tokens(db, guild_id=guild_id),
+        total_tokens_in_window=await guild_total_tokens(
+            db, guild_id=guild_id, since=since
+        ),
         entries=[
             ChatUsageLeaderboardEntry(
                 channel_id=row.channel_id,

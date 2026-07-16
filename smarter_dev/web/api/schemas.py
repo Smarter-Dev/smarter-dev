@@ -875,10 +875,17 @@ class ChatUsageLeaderboardEntry(BaseAPIModel):
 
 
 class ChatUsageLeaderboardResponse(BaseAPIModel):
-    """Top channels by chat-token usage since ``since`` (``days`` ago)."""
+    """Top channels by chat-token usage since ``since`` (``days`` ago).
+
+    ``total_tokens_in_window`` sums the whole window across every channel
+    (not just the listed top N); ``total_tokens_all_time`` is the guild's
+    summed chat tokens with no time filter.
+    """
 
     since: datetime
     days: int
+    total_tokens_all_time: int
+    total_tokens_in_window: int
     entries: list[ChatUsageLeaderboardEntry]
 
 
