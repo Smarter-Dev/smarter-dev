@@ -119,10 +119,9 @@ uv run pytest
 
 # Generate a new project migration after editing models
 uv run alembic -c alembic/main/alembic.ini revision --autogenerate -m "describe change"
-# (or alembic/legacy/alembic.ini for legacy tables)
 ```
 
-When editing models, decide which alembic config owns the table by checking the `MAIN_TABLES` / `LEGACY_TABLES` sets in each `env.py`. New tables go in `MAIN_TABLES` unless they're legacy.
+`alembic/main` owns every project model table — add new tables to `MAIN_TABLES` in `alembic/main/env.py` (guarded by `tests/test_migration_ownership.py`). The `alembic/legacy` tree is closed: it owns no tables and receives no new revisions; it remains only so already-deployed legacy databases stay migratable until decommission.
 
 ## Troubleshooting
 
