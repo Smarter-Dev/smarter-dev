@@ -4654,7 +4654,7 @@ class ChannelModelOverride(Base):
     reopening the modal edits the existing row rather than stacking duplicates.
 
     ``model_key`` is a stable ``key`` from
-    :data:`smarter_dev.bot.agents.model_catalog.MODEL_CATALOG`; the wire
+    :data:`smarter_dev.shared.model_catalog.MODEL_CATALOG`; the wire
     ``model_id`` is resolved from it at request time, so re-verifying a model's
     wire id never needs a migration here.
     """
@@ -4673,6 +4673,10 @@ class ChannelModelOverride(Base):
     guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
     channel_id: Mapped[str] = mapped_column(String(20), nullable=False)
     model_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    # A ReasoningLevel value (e.g. "high"), or NULL to use the model's default.
+    # Resolved/clamped against the selected model at request time, so a level the
+    # model no longer supports never needs a migration here.
+    reasoning_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # 0 == unlimited for both budgets (enforced in the chat runtime).
     daily_token_budget: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"

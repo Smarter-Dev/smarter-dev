@@ -47,30 +47,36 @@ async def _consumed(redis: Redis, key: str) -> int:
     return int(await redis.get(key) or 0)
 
 
-async def is_over_budget(
+async def over_budget_reset_epoch(
     redis: Redis,
     channel_id: str,
     daily_budget: int,
     hourly_budget: int,
-) -> bool:
-    """Whether ``channel_id`` has met or exceeded either active budget.
+) -> int | None:
+    """When ``channel_id``'s spent budget frees, or None while under budget.
 
-    Returns True if a non-zero budget's current window has consumed tokens
-    ``>=`` that budget. A ``0`` budget is unlimited and never blocks, so with
-    both budgets ``0`` this always returns False.
+    Checks each non-zero budget's current window; when one or more have
+    consumed tokens ``>=`` their budget, returns the epoch second at which the
+    last of those windows rolls over — the moment the channel unblocks (the
+    wall-clock boundaries make this exact). A ``0`` budget is unlimited and
+    never blocks, so with both budgets ``0`` this always returns None.
     """
     now_epoch = datetime.now(UTC).timestamp()
     checks = (
         (hourly_budget, "hour", HOUR_WINDOW_SECONDS),
         (daily_budget, "day", DAY_WINDOW_SECONDS),
     )
+    latest_reset_epoch: int | None = None
     for budget, scope, window_seconds in checks:
         if budget <= 0:
             continue
-        key = budget_key(channel_id, scope, _window_index(now_epoch, window_seconds))
+        window_index = _window_index(now_epoch, window_seconds)
+        key = budget_key(channel_id, scope, window_index)
         if await _consumed(redis, key) >= budget:
-            return True
-    return False
+            window_reset_epoch = (window_index + 1) * window_seconds
+            if latest_reset_epoch is None or window_reset_epoch > latest_reset_epoch:
+                latest_reset_epoch = window_reset_epoch
+    return latest_reset_epoch
 
 
 async def add_usage(redis: Redis, channel_id: str, tokens: int) -> None:

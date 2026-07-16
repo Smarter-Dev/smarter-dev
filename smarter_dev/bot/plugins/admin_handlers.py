@@ -15,28 +15,16 @@ from typing import Any
 import hikari
 import lightbulb
 
+from smarter_dev.bot.plugins.admin_gate import deny_if_not_admin
 from smarter_dev.shared.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 plugin = lightbulb.Plugin("admin_handlers")
 
-
-def is_admin(permissions: hikari.Permissions) -> bool:
-    return bool(permissions & hikari.Permissions.ADMINISTRATOR)
-
-
-async def _deny_if_not_admin(ctx: lightbulb.Context) -> bool:
-    if not isinstance(ctx.member, hikari.InteractionMember):
-        await ctx.respond("This command only works in a server.", flags=hikari.MessageFlag.EPHEMERAL)
-        return True
-    if not is_admin(lightbulb.utils.permissions_for(ctx.member)):
-        await ctx.respond(
-            "You need the Administrator permission to manage admin handlers.",
-            flags=hikari.MessageFlag.EPHEMERAL,
-        )
-        return True
-    return False
+ADMIN_DENIAL_MESSAGE = (
+    "You need the Administrator permission to manage admin handlers."
+)
 
 
 def _api_client():
@@ -146,7 +134,7 @@ async def install_admin_result(api: Any, guild_id: str, admin_id: str, result: A
 )
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def create_admin_handler(ctx: lightbulb.Context, request: str) -> None:
-    if await _deny_if_not_admin(ctx):
+    if await deny_if_not_admin(ctx, ADMIN_DENIAL_MESSAGE):
         return
     await ctx.respond(
         hikari.ResponseType.DEFERRED_MESSAGE_CREATE, flags=hikari.MessageFlag.EPHEMERAL
@@ -173,7 +161,7 @@ async def create_admin_handler(ctx: lightbulb.Context, request: str) -> None:
 @lightbulb.command("list", "List admin handlers in this server")
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def list_admin_handlers(ctx: lightbulb.Context) -> None:
-    if await _deny_if_not_admin(ctx):
+    if await deny_if_not_admin(ctx, ADMIN_DENIAL_MESSAGE):
         return
     api = _api_client()
     resp = await api.get("/admin/handlers", params={"guild_id": str(ctx.guild_id)})
@@ -193,7 +181,7 @@ async def list_admin_handlers(ctx: lightbulb.Context) -> None:
 @lightbulb.command("delete", "Delete an admin handler", pass_options=True)
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def delete_admin_handler(ctx: lightbulb.Context, handler_id: str) -> None:
-    if await _deny_if_not_admin(ctx):
+    if await deny_if_not_admin(ctx, ADMIN_DENIAL_MESSAGE):
         return
     api = _api_client()
     resp = await api.delete(f"/admin/handlers/{handler_id}")

@@ -12,6 +12,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator, field_serializer
 
+from smarter_dev.shared.model_catalog import ReasoningLevel, is_valid_model_key
+
 
 class BaseAPIModel(BaseModel):
     """Base model for all API schemas with common configuration."""
@@ -877,20 +879,33 @@ class ChannelModelOverrideWrite(BaseAPIModel):
     """
 
     model_key: str = Field(description="Stable catalog key for the model")
+    reasoning_level: str | None = Field(
+        None,
+        description="ReasoningLevel value (e.g. 'high'); null uses the model default",
+    )
     daily_token_budget: int = Field(
-        0, ge=0, description="Daily token cap (0 = unlimited)"
+        0, ge=0, le=2_147_483_647, description="Daily token cap (0 = unlimited)"
     )
     hourly_token_budget: int = Field(
-        0, ge=0, description="Hourly token cap (0 = unlimited)"
+        0, ge=0, le=2_147_483_647, description="Hourly token cap (0 = unlimited)"
     )
 
     @field_validator("model_key")
     @classmethod
     def _model_key_in_catalog(cls, value: str) -> str:
-        from smarter_dev.bot.agents.model_catalog import is_valid_model_key
-
         if not is_valid_model_key(value):
             raise ValueError(f"unknown model key: {value!r}")
+        return value
+
+    @field_validator("reasoning_level")
+    @classmethod
+    def _reasoning_level_is_known(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            ReasoningLevel(value)
+        except ValueError:
+            raise ValueError(f"unknown reasoning level: {value!r}")
         return value
 
 
@@ -900,6 +915,9 @@ class ChannelModelOverrideRead(BaseAPIModel):
     guild_id: str = Field(description="Discord guild ID")
     channel_id: str = Field(description="Discord channel ID")
     model_key: str = Field(description="Stable catalog key for the model")
+    reasoning_level: str | None = Field(
+        None, description="Selected reasoning level, or null for the model default"
+    )
     daily_token_budget: int = Field(description="Daily token cap (0 = unlimited)")
     hourly_token_budget: int = Field(description="Hourly token cap (0 = unlimited)")
     created_at: datetime = Field(description="Override creation timestamp")

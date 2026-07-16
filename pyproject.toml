@@ -142,6 +142,7 @@ markers = [
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
     "llm: marks tests that use LLM APIs (expensive, skip by default with '-m \"not llm\"')",
+    "do_live: marks live tests that hit DigitalOcean serverless inference (needs DIGITALOCEAN_INFERENCE_API_KEY; select with '-m do_live')",
 ]
 
 [tool.coverage.run]

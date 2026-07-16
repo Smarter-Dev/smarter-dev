@@ -7,6 +7,7 @@ skips a turn for budget, and when it meters usage.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -75,11 +76,12 @@ def _result(output, *, input_tokens=0, output_tokens=0):
     )
 
 
-def _override(model_key: str, *, daily=0, hourly=0):
+def _override(model_key: str, *, daily=0, hourly=0, reasoning_level=None):
     return SimpleNamespace(
         model_key=model_key,
         daily_token_budget=daily,
         hourly_token_budget=hourly,
+        reasoning_level=reasoning_level,
     )
 
 
@@ -166,15 +168,41 @@ async def test_override_present_builds_agent_for_override_model(
     with get_agent as get_agent_mock, _patches(
         agent_mock=agent_mock, fake_memory=fake_memory
     )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
-        "smarter_dev.bot.services.chat_engine.is_over_budget",
-        new=AsyncMock(return_value=False),
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=None),
     ), patch(
         "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
     ):
         await engine._run_once(first_activation=True)
 
-    get_agent_mock.assert_called_once_with("gpt-5.4")
+    get_agent_mock.assert_called_once_with("gpt-5.4", None)
     agent_mock.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_override_reasoning_threads_to_agent(fake_memory, fake_redis):
+    """A channel override's reasoning level is passed through to the agent."""
+    agent_mock = MagicMock()
+    agent_mock.run = AsyncMock(return_value=_result(_send()))
+    engine, _ = _make_engine(
+        _override("gpt-5-4", reasoning_level="high"), fake_redis
+    )
+
+    get_agent = patch(
+        "smarter_dev.bot.services.chat_engine.get_chat_agent",
+        return_value=agent_mock,
+    )
+    with get_agent as get_agent_mock, _patches(
+        agent_mock=agent_mock, fake_memory=fake_memory
+    )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=None),
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
+    ):
+        await engine._run_once(first_activation=True)
+
+    get_agent_mock.assert_called_once_with("gpt-5.4", "high")
 
 
 @pytest.mark.asyncio
@@ -187,8 +215,8 @@ async def test_over_budget_skips_the_turn(fake_memory, fake_redis):
     with _patches(agent_mock=agent_mock, fake_memory=fake_memory)[0], _patches(
         agent_mock=agent_mock, fake_memory=fake_memory
     )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
-        "smarter_dev.bot.services.chat_engine.is_over_budget",
-        new=AsyncMock(return_value=True),
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=1_800_000_000),
     ), patch(
         "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
     ) as add_usage_mock:
@@ -196,9 +224,12 @@ async def test_over_budget_skips_the_turn(fake_memory, fake_redis):
 
     agent_mock.run.assert_not_called()
     add_usage_mock.assert_not_called()
-    # A single throttled notice is posted (SET NX won the throttle key).
+    # A single throttled notice is posted (SET NX won the throttle key), and it
+    # carries a Discord relative timestamp counting down to the budget reset.
     fake_redis.set.assert_awaited_once()
     engine.bot.rest.create_message.assert_awaited_once()
+    notice = engine.bot.rest.create_message.await_args.kwargs["content"]
+    assert "<t:1800000000:R>" in notice
 
 
 @pytest.mark.asyncio
@@ -213,8 +244,8 @@ async def test_under_budget_runs_and_meters_usage(fake_memory, fake_redis):
     with _patches(agent_mock=agent_mock, fake_memory=fake_memory)[0], _patches(
         agent_mock=agent_mock, fake_memory=fake_memory
     )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
-        "smarter_dev.bot.services.chat_engine.is_over_budget",
-        new=AsyncMock(return_value=False),
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=None),
     ), patch(
         "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
     ) as add_usage_mock:
@@ -238,16 +269,96 @@ async def test_no_override_uses_default_and_skips_budget(fake_memory, fake_redis
     with get_agent as get_agent_mock, _patches(
         agent_mock=agent_mock, fake_memory=fake_memory
     )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
-        "smarter_dev.bot.services.chat_engine.is_over_budget",
-        new=AsyncMock(return_value=False),
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=None),
     ) as over_budget_mock, patch(
         "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
     ) as add_usage_mock:
         await engine._run_once(first_activation=True)
 
-    get_agent_mock.assert_called_once_with(None)
+    get_agent_mock.assert_called_once_with(None, None)
     over_budget_mock.assert_not_called()
     add_usage_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_persisted_turn_records_override_model_name(fake_memory, fake_redis):
+    """The persisted turn is priced against the override's wire model id, not
+    the default model (regression: the model was read off RunUsage, which never
+    carries it, so every overridden turn was recorded under the default)."""
+    agent_mock = MagicMock()
+    agent_mock.run = AsyncMock(
+        return_value=_result(_send(), input_tokens=10, output_tokens=5)
+    )
+    engine, _ = _make_engine(_override("gpt-5-4", daily=1000), fake_redis)
+
+    start_engagement = AsyncMock(return_value="engagement-1")
+    persist_turn = AsyncMock()
+    with _patches(agent_mock=agent_mock, fake_memory=fake_memory)[0], _patches(
+        agent_mock=agent_mock, fake_memory=fake_memory
+    )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=None),
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.start_engagement", new=start_engagement
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.persist_turn", new=persist_turn
+    ):
+        await engine._run_once(first_activation=True)
+
+    persist_turn.assert_awaited_once()
+    assert persist_turn.await_args.kwargs["chat_model_name"] == "gpt-5.4"
+
+
+@pytest.mark.asyncio
+async def test_over_budget_on_first_activation_recovers_when_budget_frees(
+    fake_memory, fake_redis
+):
+    """Over budget on the very first activation must not permanently lose the
+    engagement: once the budget window frees, the next fire still starts the
+    engagement and persists its turn (regression: first_activation was consumed
+    on the skipped turn, so engagement_id stayed None forever)."""
+    agent_mock = MagicMock()
+    agent_mock.run = AsyncMock(
+        return_value=_result(_send(), input_tokens=10, output_tokens=5)
+    )
+    engine, _ = _make_engine(_override("gpt-5-4", hourly=100), fake_redis)
+
+    budget_reset = AsyncMock(return_value=1_800_000_000)
+    start_engagement = AsyncMock(return_value="engagement-1")
+    persist_turn = AsyncMock()
+    with _patches(agent_mock=agent_mock, fake_memory=fake_memory)[0], _patches(
+        agent_mock=agent_mock, fake_memory=fake_memory
+    )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=budget_reset,
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.start_engagement", new=start_engagement
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.persist_turn", new=persist_turn
+    ):
+        engine.start()
+        # First activation lands while the channel is over budget.
+        engine.trigger_initial(engine.activation_message)
+        await asyncio.sleep(0.05)
+        # Turn skipped: no model call, no engagement, nothing persisted.
+        agent_mock.run.assert_not_awaited()
+        start_engagement.assert_not_awaited()
+        persist_turn.assert_not_awaited()
+
+        # Budget frees; the engine fires again on the next activity.
+        budget_reset.return_value = None
+        engine.fire_now()
+        await asyncio.sleep(0.05)
+        await engine.shutdown()
+
+    agent_mock.run.assert_awaited_once()
+    start_engagement.assert_awaited_once()
+    persist_turn.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -265,12 +376,12 @@ async def test_unknown_model_key_falls_back_to_default(fake_memory, fake_redis):
     with get_agent as get_agent_mock, _patches(
         agent_mock=agent_mock, fake_memory=fake_memory
     )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
-        "smarter_dev.bot.services.chat_engine.is_over_budget",
-        new=AsyncMock(return_value=False),
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=None),
     ), patch(
         "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
     ):
         await engine._run_once(first_activation=True)
 
-    get_agent_mock.assert_called_once_with(None)
+    get_agent_mock.assert_called_once_with(None, None)
     agent_mock.run.assert_awaited_once()

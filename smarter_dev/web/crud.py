@@ -5928,7 +5928,7 @@ class ModerationActionOperations:
 # Channel model override operations
 # ============================================================================
 #
-# One row per channel (unique ``channel_id``): the admin ``/model`` command's
+# One row per channel (unique ``channel_id``): the admin ``/setmodel`` command's
 # PUT is an upsert so reopening the modal edits the existing row. These are
 # plain functions (not an Operations class) taking an ``AsyncSession``; the
 # caller owns the transaction and commits.
@@ -5954,10 +5954,12 @@ async def upsert_channel_model_override(
     model_key: str,
     daily_token_budget: int,
     hourly_token_budget: int,
+    reasoning_level: str | None = None,
 ) -> ChannelModelOverride:
     """Insert or update the single override row for ``channel_id``.
 
     Loads (or creates) the row internally so no caller-owned object is mutated.
+    ``reasoning_level`` of ``None`` means "use the model's default level".
     """
     record = await get_channel_model_override(session, guild_id, channel_id)
     if record is None:
@@ -5965,6 +5967,7 @@ async def upsert_channel_model_override(
             guild_id=guild_id,
             channel_id=channel_id,
             model_key=model_key,
+            reasoning_level=reasoning_level,
             daily_token_budget=daily_token_budget,
             hourly_token_budget=hourly_token_budget,
         )
@@ -5972,6 +5975,7 @@ async def upsert_channel_model_override(
     else:
         record.guild_id = guild_id
         record.model_key = model_key
+        record.reasoning_level = reasoning_level
         record.daily_token_budget = daily_token_budget
         record.hourly_token_budget = hourly_token_budget
     await session.flush()

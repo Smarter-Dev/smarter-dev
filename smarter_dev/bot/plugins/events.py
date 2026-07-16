@@ -13,6 +13,7 @@ from typing import Any
 import hikari
 
 from smarter_dev.bot.plugins.model_override import handle_model_override_modal_submit
+from smarter_dev.bot.plugins.model_override import handle_model_override_reasoning_select
 from smarter_dev.bot.plugins.model_override import handle_model_override_select
 from smarter_dev.bot.views.beacon_views import handle_beacon_modal_submit
 
@@ -250,6 +251,8 @@ async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> 
             await handle_daily_quest_submit_interaction(event)
         elif custom_id == "model_override_select":
             await handle_model_override_select(event)
+        elif custom_id.startswith("model_override_reasoning:"):
+            await handle_model_override_reasoning_select(event)
         else:
             logger.warning(f"Unhandled component interaction: {custom_id}")
 

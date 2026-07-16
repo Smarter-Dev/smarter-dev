@@ -44,6 +44,18 @@ def test_same_model_id_returns_cached_instance():
     assert first is second
 
 
+def test_reasoning_level_partitions_the_agent_cache():
+    """Same model, different reasoning levels -> distinct agents; same level -> one."""
+    _reset_cache()
+    high = get_chat_agent("gpt-5.4", "high")
+    high_again = get_chat_agent("gpt-5.4", "high")
+    low = get_chat_agent("gpt-5.4", "low")
+    default = get_chat_agent("gpt-5.4")
+    assert high is high_again
+    assert high is not low
+    assert high is not default
+
+
 def test_none_resolves_to_env_default_and_is_singleton_equivalent(monkeypatch):
     """A no-override channel keeps reusing one default agent, and the default
     resolves to the same cached instance as passing its wire id explicitly."""
