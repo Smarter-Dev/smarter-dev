@@ -177,10 +177,10 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
     ),
     CatalogModel(
         key="deepseek-v4",
-        label="DeepSeek V4 Pro",
+        label="DeepSeek V4 Flash",
         family="DeepSeek",
         provider=ModelProvider.DIGITALOCEAN,
-        model_id="deepseek-v4-pro",
+        model_id="deepseek-4-flash",
         reasoning_levels=_OPEN_EFFORT,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
