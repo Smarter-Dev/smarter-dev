@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic_ai.messages import ModelRequest
 
 from smarter_dev.bot.agents.chat_models import (
     Author,
@@ -269,7 +270,8 @@ async def test_initial_activation_fires_agent_exactly_once(fake_bot, fake_memory
 
 @pytest.mark.asyncio
 async def test_initial_activation_calls_initial_builder(fake_bot, fake_memory):
-    """First activation uses build_initial_input with empty history."""
+    """First activation uses build_initial_input; the pre-engagement channel
+    history is folded into message_history, one ModelRequest per message."""
     captured: dict = {}
 
     async def fake_run(*, user_prompt, message_history, deps):
@@ -294,7 +296,12 @@ async def test_initial_activation_calls_initial_builder(fake_bot, fake_memory):
 
     initial_builder.assert_awaited_once()
     followup_builder.assert_not_awaited()
-    assert captured["history"] == []
+    # build_agent_call folds the builder's channel_history into
+    # message_history: the one prior message becomes a ModelRequest, and the
+    # activation message becomes the user_prompt.
+    [prior_request] = captured["history"]
+    assert isinstance(prior_request, ModelRequest)
+    assert "prior message" in prior_request.parts[0].content
     fake_memory.reset_idle_counter.assert_awaited_with(42)
     fake_memory.write_topic.assert_awaited_with(42, "greeting")
     fake_memory.write_notes.assert_awaited_with(42, "user said hi")
@@ -336,8 +343,10 @@ async def test_followup_turn_loads_history_and_uses_followup_builder(
 
     assert initial_builder.await_count == 1
     assert followup_builder.await_count >= 1
-    # Turn 1 had no history; turn 2 picked up the prior history snapshot.
-    assert history_calls[0] == []
+    # Turn 1's history is the folded pre-engagement channel_history (one
+    # ModelRequest); turn 2 picked up the prior history snapshot from memory.
+    [turn_one_request] = history_calls[0]
+    assert isinstance(turn_one_request, ModelRequest)
     assert history_calls[1] == ["prior_a", "prior_b"]
 
 
