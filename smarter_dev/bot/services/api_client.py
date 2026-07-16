@@ -24,6 +24,50 @@ from smarter_dev.bot.services.models import ServiceHealth
 
 logger = logging.getLogger(__name__)
 
+# API key shapes accepted by the bot during the legacy-key sunset.
+#
+# - Legacy: ``sk-`` + exactly 43 base64url chars (46 total) minted by the
+#   legacy web API (smarter_dev/web/security.py).
+# - Skrift: ``sk_`` + secrets.token_urlsafe(32) (43 chars today). A range is
+#   accepted so a future padding change in the Skrift key service does not lock
+#   the bot out. See docs/v2/legacy-sunset/runbooks/01-rotate-bot-key.md.
+#
+# The bot only checks shape here; the web API is the source of truth for whether
+# a key is actually valid. Accepting both prefixes lets the production key be
+# rotated from sk- to sk_ without sequencing a bot redeploy.
+_LEGACY_KEY_PREFIX = "sk-"
+_SKRIFT_KEY_PREFIX = "sk_"
+_LEGACY_KEY_LENGTH = 46
+_MIN_KEY_LENGTH = 20
+_MAX_KEY_LENGTH = 200
+_BASE64URL_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+)
+
+
+def is_valid_api_key_format(api_key: str) -> bool:
+    """Return True if ``api_key`` matches a legacy or Skrift key shape.
+
+    Accepts either the legacy ``sk-`` key (exactly 46 chars) or a Skrift
+    ``sk_`` key (sk_ + 17..197 base64url chars). The token portion after the
+    prefix must be pure base64url so obviously malformed values are rejected
+    before a request is ever sent.
+    """
+    if not isinstance(api_key, str) or not api_key:
+        return False
+    if not (_MIN_KEY_LENGTH <= len(api_key) <= _MAX_KEY_LENGTH):
+        return False
+
+    prefix = api_key[:3]
+    token_part = api_key[3:]
+
+    if prefix == _LEGACY_KEY_PREFIX and len(api_key) != _LEGACY_KEY_LENGTH:
+        return False
+    if prefix not in (_LEGACY_KEY_PREFIX, _SKRIFT_KEY_PREFIX):
+        return False
+
+    return all(char in _BASE64URL_CHARS for char in token_part)
+
 
 class RetryConfig:
     """Configuration for retry behavior."""
@@ -78,7 +122,8 @@ class APIClient(APIClientProtocol):
 
         Args:
             base_url: Base URL for API endpoints
-            api_key: Secure API key for authentication (sk-xxxxx format)
+            api_key: Secure API key for authentication (legacy ``sk-`` or
+                Skrift ``sk_`` format)
             retry_config: Retry configuration
             default_timeout: Default request timeout in seconds
             max_connections: Maximum number of connections
@@ -86,9 +131,13 @@ class APIClient(APIClientProtocol):
         """
         self._base_url = base_url.rstrip("/")
 
-        # Validate API key format for security
-        if not api_key.startswith("sk-") or len(api_key) != 46:
-            raise ValueError("Invalid API key format. Expected 'sk-' prefix with 43 characters.")
+        # Validate API key format for security. Both the legacy sk- key and
+        # Skrift-native sk_ keys are accepted during the key-rotation window.
+        if not is_valid_api_key_format(api_key):
+            raise ValueError(
+                "Invalid API key format. Expected a legacy 'sk-' key "
+                "(46 chars) or a Skrift 'sk_' key."
+            )
 
         self._api_key = api_key
         self._retry_config = retry_config or RetryConfig()

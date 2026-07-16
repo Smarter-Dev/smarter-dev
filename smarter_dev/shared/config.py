@@ -139,7 +139,12 @@ class Settings(BaseSettings):
     # Bot API Authentication
     bot_api_key: str = Field(
         default="",
-        description="Secure API key for bot to authenticate with web API (sk-xxxxx format)",
+        description=(
+            "Secure API key for the bot to authenticate with the web API. "
+            "Accepts either a legacy 'sk-' key or a Skrift-native 'sk_' key "
+            "during the key-rotation window (see "
+            "docs/v2/legacy-sunset/runbooks/01-rotate-bot-key.md)."
+        ),
     )
 
     # Web Application
