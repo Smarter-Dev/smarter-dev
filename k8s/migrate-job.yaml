@@ -23,11 +23,13 @@ spec:
         - name: migrate
           image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
           workingDir: /app
-          # --only main: apply this project's app-schema migrations (handlers,
-          # sudo, etc.). Skrift-core/legacy migrations are excluded — they load
-          # Skrift's app.yaml (which interpolates many env vars) and change only
-          # on a Skrift upgrade; run those manually when needed.
-          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/migrate.py --only main"]
+          # Apply this project's app-schema migrations on both databases:
+          # `main` (smarter-dev, skrift schema) and `legacy` (bc_websites,
+          # public schema — the bot/admin tables, e.g. channel_model_overrides).
+          # Skrift-core steps stay excluded — they load Skrift's app.yaml
+          # (which interpolates many env vars) and change only on a Skrift
+          # upgrade; run those manually when needed.
+          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/migrate.py --only main --only legacy"]
           envFrom:
             - configMapRef:
                 name: smarter-dev-config
