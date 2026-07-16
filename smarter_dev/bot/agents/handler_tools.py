@@ -71,16 +71,14 @@ async def register_handler(
 ) -> str:
     """Create or update a persistent handler from a plain-language description.
 
-    Describe the desired behavior clearly and completely — a separate authoring
-    system sees this channel's existing handlers and decides whether to edit one
-    of them or create a new, named one; you do NOT write code and do NOT pick
-    which handler to touch. Trigger types: "new message", "reaction add"
-    (event); "schedule", "timer" (time) — these are hints, the author decides.
-    For time triggers put the timing in ``settings`` — schedule:
+    Describe the behavior clearly and completely — a separate authoring
+    system (which sees the channel's existing handlers) decides whether to
+    edit or create one; you never write code or pick which handler to
+    touch. Trigger types: "new message", "reaction add" (event);
+    "schedule", "timer" (time). Put timing in ``settings`` — schedule:
     {"interval_seconds": N} or {"daily_time": "HH:MM"} (UTC); timer:
-    {"delay_seconds": N} or {"fire_at": "<ISO-8601 UTC>"}.
-
-    Returns a success summary naming the handler, or an error to relay plainly.
+    {"delay_seconds": N} or {"fire_at": "<ISO-8601 UTC>"}. Returns a
+    success summary naming the handler, or an error to relay plainly.
     """
     canonical = _canonical_trigger(trigger_type)
     if canonical is None:

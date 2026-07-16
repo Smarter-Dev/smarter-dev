@@ -155,20 +155,12 @@ async def web_read(
 ) -> dict[str, str]:
     """Fetch a URL and return an instruction-guided summary of its content.
 
-    Works for web pages, PDFs, YouTube links, and image/audio files (e.g. the
-    URLs surfaced on a message's ``<attachment>`` tags). The content is fetched
-    — readable page text, PDF text, YouTube metadata, or an image/audio file —
-    and then condensed by a fast model according to ``instruction``. You get the
-    summary/description back, NOT the raw file, so the instruction must carry
-    the intent. In ``instruction`` tell the reader:
-    - what to look for (the specific facts or answer you need from this page),
-    - what to ignore (navigation, ads, unrelated sections, comment threads),
-    - whether to include exact quotations or just paraphrase, and
-    - how much detail you want (e.g. "a couple of sentences", "one paragraph") —
-      keep it small; summaries max out around 5 paragraphs.
-
-    If the page can't be summarized, or doesn't contain what you asked for, the
-    summary will say so instead of guessing. Returns a dict with ``url``,
+    Handles web pages, PDFs, YouTube links, and image/audio files (e.g.
+    ``<attachment>`` URLs). A fast model condenses the content per
+    ``instruction`` — you get the summary back, never the raw file — so say
+    what to look for, what to ignore, quote-vs-paraphrase, and how much
+    detail (keep it small; ~5 paragraphs max). If the page lacks what you
+    asked for, the summary says so instead of guessing. Returns ``url``,
     ``title``, and ``summary`` (or ``error`` on fetch failure).
     """
     # Attachment URLs are rendered into XML attributes (``&`` -> ``&amp;``), and
@@ -367,23 +359,14 @@ async def report_behavior(
 async def run_code(ctx: RunContext[ChatDeps], reason: str, code: str) -> str:
     """Run Python in a secure sandbox (Pydantic Monty) and return its output.
 
-    Use this for any real computation instead of working it out in your head:
-    arithmetic, date/time math, regex checks, parsing or transforming data,
-    counting, sorting, etc. You get back stdout plus the value of the final
-    expression (like a notebook cell), or the error if it fails.
-
-    ``reason`` is a short, plain-language note (5-10 words) shown to the channel
-    as a status message explaining why you're running code (e.g. "Calculating
-    the 30-day total"). Write it for a human, not as a code comment.
-
-    The sandbox is a RESTRICTED subset of Python:
-    - Allowed stdlib only (import if needed): sys, os, typing, asyncio, re,
-      datetime, json. No third-party packages, no ``class``, no ``match``.
-    - def / async def, loops, comprehensions, f-strings, and the built-in
-      containers all work. There is NO filesystem, network, or env access, and
-      a few seconds of runtime — keep it to pure computation.
-
-    Surface results with the final expression or ``print()``.
+    Use for any real computation (arithmetic, date math, regex, parsing,
+    counting) instead of head-math. Returns stdout plus the final
+    expression's value (like a notebook cell), or the error. ``reason`` is a
+    short human status line (5-10 words) shown in-channel, e.g.
+    "Calculating the 30-day total". RESTRICTED Python subset: allowed
+    stdlib only (sys, os, typing, asyncio, re, datetime, json), no
+    third-party packages, no ``class``/``match``, no filesystem/network/env
+    access, a few seconds of runtime — pure computation only.
     """
     await _post_status(ctx, reason)
     logger.info(
@@ -470,23 +453,17 @@ def _format_remaining(status: dict) -> str:
 async def generate_image(ctx: RunContext[ChatDeps], prompt: str) -> str:
     """Generate an image and attach it to your reply this turn.
 
-    STRICT policy: only diagrams/illustrations whose SUBJECT is SOFTWARE,
-    COMPUTER SCIENCE, or MATH (data structures, algorithms, architecture/
-    protocol diagrams, state machines, DB schemas, UML, math/geometry figures,
-    complexity or loss curves, logic/truth tables). A chart counts ONLY if it
-    plots code/CS/math data. NEVER for other-science diagrams (biology/anatomy,
-    physics, chemistry), non-technical charts (finance, stocks, demographics,
-    sports), politics, off-topic subjects, art/decoration, memes, logos, or real
-    people — those are rejected.
-
-    ``prompt`` is a detailed description of the image to draw. It is reviewed by
-    a separate system before anything is generated; if it's rejected you get an
-    explanation back and NO image (no quota spent) — don't retry the same
-    prompt. Generation is limited to a few images per hour per server; the
-    return value always tells you how many remain and, when none do, when the
-    next one is allowed. Respect it — once it says 0 remain, do not call this
-    again until the stated time. On success the image is attached to the message
-    you send this turn, so introduce/explain it in your reply.
+    STRICT policy: only diagrams whose SUBJECT is SOFTWARE, CS, or MATH
+    (data structures, algorithms, architecture/protocol diagrams, state
+    machines, DB schemas, UML, math figures, complexity curves; charts only
+    when plotting code/CS/math data). NEVER other-science diagrams,
+    non-technical charts, politics, off-topic subjects, art/memes/logos, or
+    real people. ``prompt`` is a detailed illustrator brief, reviewed
+    before generation — a rejection returns an explanation, spends no
+    quota, and must not be retried verbatim. Rate-limited per server; the
+    return value says how many images remain (once it says 0, don't call
+    again until the stated time). On success the image attaches to this
+    turn's message — introduce it in your reply.
     """
     guild_id = str(ctx.deps.guild_id)
     async with _quota_api(ctx) as api:

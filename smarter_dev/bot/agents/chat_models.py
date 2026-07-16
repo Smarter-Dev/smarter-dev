@@ -155,191 +155,123 @@ class FollowupAgentInput(BaseModel):
 
 
 class BlogTopicCandidate(BaseModel):
-    """A claim shaken loose by this conversation that a post could be built on.
-
-    Strictly observational. You are NOT picking the angle, deciding on a
-    thesis, or pitching a take — you're filing what was said / asked /
-    observed so a downstream agent can form a falsifiable hypothesis
-    from it. Skip charity entries; the bar is "would this still be a
-    real question worth investigating in three months?".
-    """
+    """A claim from this conversation a post could be built on — strictly
+    observational, no angle or thesis (see the system prompt's blog
+    section for the full rules)."""
 
     headline: str = Field(
         description=(
-            "One line — descriptive, not editorial. Names the topic; "
-            "doesn't pitch a take. No marketing fluff, no clickbait."
+            "One descriptive, non-editorial line naming the topic — no "
+            "take, no clickbait."
         ),
     )
     observation: str = Field(
         description=(
-            "What was actually observed in chat. For a user question: "
-            "the question itself plus what they're tripping on. For a "
-            "misconception: the wrong belief, spelled out. For news: the "
-            "specific event / change someone surfaced. Two to four "
-            "sentences. Quote or paraphrase faithfully — do NOT add "
-            "interpretation or argue a side."
+            "What was actually said / asked / surfaced, 2-4 sentences, "
+            "quoted or paraphrased faithfully — no interpretation, no "
+            "side-taking."
         ),
     )
     scope: str = Field(
         description=(
-            "Neutral surface-area description. One to three sentences: "
-            "what a post on this would cover. NOT 'the take' — just "
-            "the territory."
+            "Neutral 1-3 sentences: the territory a post would cover, "
+            "not the take."
         ),
     )
     evidence: list[str] = Field(
         default_factory=list,
         description=(
-            "References that ground the observation. Discord-message "
-            "links / message ids when the source is the conversation, "
-            "or URLs when someone shared a link. Empty list is OK if "
-            "the observation stands on its own ('Bob asked X')."
+            "Discord message ids/links or URLs grounding the observation; "
+            "empty is fine."
         ),
     )
     category: Literal["concept", "misconception", "news"] | None = Field(
         default=None,
         description=(
-            "'concept' — a coding concept the conversation pointed at. "
-            "'misconception' — a wrong mental model someone is holding. "
-            "'news' — a current event / release / change. "
-            "Leave None if it doesn't cleanly fit."
+            "concept | misconception | news; None if it doesn't cleanly fit."
         ),
     )
 
 
 class MessageScore(BaseModel):
-    """Per-message DIRECTEDNESS score for a single new `<message>` this turn.
-
-    This is a cheap structural classification — "was this message aimed at
-    me?" — NOT a judgement about whether the content is interesting or
-    deserves an answer. Keep the two separate: score direction here, decide
-    what (if anything) to say in `response`. Mixing the two is what makes
-    the agent talk itself into a reply it then forgets to send, or score a
-    direct ping a 10 and stay silent anyway.
-    """
+    """DIRECTEDNESS score for one new `<message>` — direction only, not
+    whether the content deserves an answer (that's `response`)."""
 
     message_id: str = Field(
-        description="Discord message id this score refers to. Must match a `<message>` in this turn's input.",
+        description="Id of a `<message>` in this turn's input.",
     )
     score: int = Field(
         ge=1,
         le=10,
         description=(
-            "1-10: how directly was this message aimed at YOU, judged from "
-            "its structural attributes alone (mentions-bot, reply-to-self, "
-            "reply-to-user-id, whether it continues an exchange you were in). "
-            "This measures DIRECTION, not how good a reply you could write. "
-            "Anchor points: "
-            "10 = explicit direct address (@mention, or reply-to-self); "
-            "7-9 = clearly your turn (continuation of an exchange you were "
-            "having, or an @mention without a pointed question); "
-            "5-6 = arguably for you, could go either way; "
-            "3-4 = related to your context but addressed to someone else (a "
-            "user replying to another user about a topic you helped with); "
-            "1-2 = clearly NOT for you (unrelated banter, two users talking "
-            "to each other, bystander observation)."
+            "1-10: how directly this message was aimed at YOU, judged from "
+            "structural attributes only — see the system prompt's anchors "
+            "(10 = @mention/reply-to-self … 1-2 = clearly not for you)."
         ),
     )
     reasoning: str = Field(
         description=(
-            "ONE sentence, structural only: cite the attribute(s) that set "
-            "the score — 'has mentions-bot=true', 'reply-to-user-id=2, not "
-            "me', 'continues exchange with the self=true message above'. Do "
-            "NOT describe what you would say back or whether the topic is "
-            "worth a reply — that decision belongs in `response`, not here."
+            "ONE sentence citing the structural attribute(s) that set the "
+            "score — not what you'd say back."
         ),
     )
 
 
 class ResponseBody(BaseModel):
-    """The actual message the agent wants to send this turn.
-
-    Populated on a `TurnDecision` only when the agent decides to respond
-    (at least one `MessageScore.score >= 5`). At least one of
-    ``message`` or ``voice_summary`` must be non-empty.
-    """
+    """The message the agent sends this turn. At least one of ``message``
+    or ``voice_summary`` must be non-empty."""
 
     target_message_id: str = Field(
         description=(
-            "The message id this response is answering. MUST be the id of "
-            "a `MessageScore` entry in this turn's rankings with "
-            "`score >= 5`. Pick the highest-scoring one when several "
-            "qualify."
+            "Id of the message this answers — MUST match a ranking with "
+            "`score >= 5` (highest when several qualify)."
         ),
     )
     reply_directly: bool = Field(
         default=False,
         description=(
-            "True → send as a Discord reply that points at "
-            "`target_message_id` (a visible reply pointer in the UI). "
-            "Use this when the conversation has drifted and a plain "
-            "channel message would lose the connection (e.g. several "
-            "messages have arrived since the one you're answering). "
-            "Default False: send as a regular channel message — clean "
-            "and natural when you're answering the freshest message and "
-            "your reply will land directly under it anyway."
+            "True → send as a visible Discord reply to `target_message_id` "
+            "(use when the conversation drifted past it). Default False: "
+            "plain channel message."
         ),
     )
     message: str | None = Field(
         default=None,
         description=(
-            "Plain-text message body to post to Discord — ONLY the prose "
-            "meant for the user, nothing else. Leave None if the user "
-            "only wanted a voice reply. This field is the user-facing "
-            "text and stops the moment your reply to them stops: do NOT "
-            "append, echo, or embed any other field of this schema "
-            "(target_message_id, reply_directly, not_cs_topic_brief_answer, "
-            "voice_summary, topic, etc.), their values, or any "
-            "JSON/key-value structure into this string. Those belong in "
-            "their own fields; putting them here leaks raw schema into the "
-            "chat."
+            "Plain-text reply to post — ONLY the prose meant for the user. "
+            "Never echo other schema fields, their values, or any JSON/"
+            "key-value structure into this string; that leaks raw schema "
+            "into chat. None if the user only wanted voice."
         ),
     )
     voice_summary: str | None = Field(
         default=None,
         description=(
-            "Short, spoken-style SUMMARY to send as a Discord voice "
-            "message via TTS. Default to None. Only set when ONE of "
-            "these is true: (a) the user explicitly asked for voice in "
-            "the message you're responding to RIGHT NOW (a previous "
-            "voice exchange does NOT carry forward), (b) voice is "
-            "genuinely the best medium for this specific answer (e.g. "
-            "pronouncing a word, demonstrating intonation), or (c) the "
-            "bit lands better spoken — a one-line zinger / punchline "
-            "where the surprise IS the audio; in that case send ONLY "
-            "voice_summary, no message. Otherwise leave None and use "
-            "`message`. Voice should be a few sentences max, never "
-            "paragraphs / code / long-form. If the reply needs detail "
-            "AND voice was requested, set BOTH: `message` for the full "
-            "text, `voice_summary` for a 1-3 sentence spoken digest."
+            "Short spoken-style TTS summary, a few sentences max — never "
+            "paragraphs or code. Default None. Set ONLY when (a) the user "
+            "asked for voice in the message you're answering RIGHT NOW "
+            "(doesn't carry forward), (b) voice is genuinely the better "
+            "medium (pronunciation, intonation), or (c) a one-line zinger "
+            "lands better spoken (then send ONLY voice, no message). If "
+            "detail is needed AND voice was asked for, set both: full text "
+            "in `message`, 1-3 sentence digest here."
         ),
     )
     voice_instruction: str | None = Field(
         default=None,
         description=(
-            "Stage direction passed to the TTS model to shape HOW the "
-            "voice sounds — tone, pace, energy, emotion, accent, "
-            "persona. Only meaningful alongside voice_summary. Examples: "
-            "\"mock-serious deadpan delivery\", \"excitedly, like "
-            "sharing good news\", \"slow and considered with a pause "
-            "before the punch line\", \"overly-caffeinated tech-bro "
-            "persona, slightly frantic\". Leave None for the default "
-            "warm, casual, peer-developer voice."
+            "TTS stage direction — tone / pace / emotion / persona (e.g. "
+            "\"mock-serious deadpan\"). Only meaningful with "
+            "voice_summary; None = default warm casual voice."
         ),
     )
     not_cs_topic_brief_answer: bool = Field(
         default=False,
         description=(
-            "Set True when the user is asking about something OUTSIDE "
-            "software / computer science (life advice, sports, trivia, "
-            "recipe help, banter, hellos, opinions on movies, random "
-            "shower thoughts, etc.). When True, your `message` MUST be "
-            "**at most 2 sentences** — friendly and in-and-out, no "
-            "paragraph essays. Leave False for coding / debugging / "
-            "tooling / architecture / AI / dev-ops / language / library "
-            "questions, where you answer with the depth the question "
-            "warrants. Borderline (community process questions, "
-            "career-shaped questions): default True and stay short."
+            "True when the question is OUTSIDE software/CS (banter, trivia, "
+            "life advice; borderline community/career counts too) — caps "
+            "`message` at 2 sentences. False for coding questions, which "
+            "get the depth they warrant."
         ),
     )
 
@@ -356,43 +288,24 @@ class ResponseBody(BaseModel):
 
 
 class TurnDecision(BaseModel):
-    """The agent's full decision for one turn — a single funnel, not two
-    independent judgements.
-
-    Step 1: `rankings` classifies each new message's DIRECTION (was it aimed
-    at me?). Step 2: `response` is the one place you decide whether and what
-    to say. The two steps are sequential, not parallel — don't re-litigate
-    in step 2 whether the message was "really" for you; that's settled by
-    the score. If the top-scoring new message is directed at you (>= 5) and
-    it's something you'd actually weigh in on, you respond. Otherwise you
-    stay silent. Silence is a choice you MAKE here, never a field you let
-    default by forgetting to fill `response`.
-    """
+    """One turn's decision: score each new message's direction, then decide
+    what (if anything) to say — the funnel the system prompt describes.
+    Silence is a choice you make by setting `response = None`, never a
+    field you forget to fill."""
 
     rankings: list[MessageScore] = Field(
         description=(
-            "One MessageScore per NEW `<message>` in this turn's input "
-            "(activation_message on first turn, every new_message on "
-            "follow-up turns). Score DIRECTION only — who the message was "
-            "aimed at. Scoring is mandatory and comes first; the response "
-            "decision flows from it."
+            "One MessageScore per NEW `<message>` this turn. Direction "
+            "only; the response decision flows from it."
         ),
     )
     response: ResponseBody | None = Field(
         default=None,
         description=(
-            "The turn's one decisive output, and the ONLY place you decide "
-            "what to say. Populate it to speak; set it to None to stay "
-            "silent. This is where the turn's thinking lives — don't talk "
-            "yourself into a reply in the rankings and then leave this "
-            "empty. "
-            "RULES: must be None when every ranking scored < 5 (nothing was "
-            "aimed at you — staying silent is correct). When the highest "
-            "ranked NEW message scored >= 5, that message was directed at "
-            "you: respond unless it's non-CS chatter or banter you're "
-            "deliberately letting pass (see the system prompt). When you do "
-            "respond, `target_message_id` must match a ranking with "
-            "`score >= 5` (pick the highest)."
+            "Populate to speak; None to stay silent. Must be None when "
+            "every ranking scored < 5; when the top NEW message scored "
+            ">= 5 it was directed at you — respond unless you're "
+            "deliberately letting off-topic chatter pass (system prompt)."
         ),
     )
     continue_watching: bool = Field(
@@ -410,15 +323,10 @@ class TurnDecision(BaseModel):
     notes: str | None = Field(
         default=None,
         description=(
-            "Per-person thread tracker. Format: 'alice: <thread + "
-            "status>; bob: <thread + status>; carol: <thread + status>'. "
-            "Accumulate as new threads emerge — don't replace. Drop a "
-            "thread only when it has clearly concluded. This is durable "
-            "memory across engagements; write it for your future self to "
-            "remember WHO is asking about WHAT, not to summarise what "
-            "was said (your conversation history covers that). Leave "
-            "None to preserve the existing notes unchanged when nothing "
-            "needs updating."
+            "Per-person thread tracker: 'alice: <thread + status>; bob: "
+            "…'. Accumulate, don't replace; drop only concluded threads. "
+            "Durable memory of WHO is asking about WHAT — not a summary "
+            "of what was said. None = keep existing notes unchanged."
         ),
     )
     blog_topic_candidates: list[BlogTopicCandidate] = Field(

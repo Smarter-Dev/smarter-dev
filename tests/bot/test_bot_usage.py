@@ -15,6 +15,8 @@ import pytest
 from redis.exceptions import RedisError
 
 from smarter_dev.bot.plugins import bot_usage as bot_usage_plugin
+from smarter_dev.bot.plugins.bot_usage import LEADERBOARD_LIMIT
+from smarter_dev.bot.plugins.bot_usage import build_usage_leaderboard
 from smarter_dev.bot.services.channel_token_budget import HOUR_WINDOW_SECONDS
 from smarter_dev.bot.plugins.bot_usage import build_usage_report
 from smarter_dev.bot.plugins.bot_usage import format_compact_tokens
@@ -180,6 +182,86 @@ async def test_report_degrades_on_override_api_error():
 # --------------------------------------------------------------------------- #
 # Slash command
 # --------------------------------------------------------------------------- #
+
+
+# --------------------------------------------------------------------------- #
+# /bot-usage-info leaderboard
+# --------------------------------------------------------------------------- #
+
+
+def _leaderboard_bot(payload=None, status_code=200):
+    api = MagicMock()
+    response = SimpleNamespace(
+        status_code=status_code, json=lambda: payload or {"entries": []}
+    )
+    api.get = AsyncMock(return_value=response)
+    return SimpleNamespace(d={"api_client": api}), api
+
+
+@pytest.mark.asyncio
+async def test_leaderboard_renders_top_channels_for_the_range():
+    bot, api = _leaderboard_bot(
+        {
+            "entries": [
+                {"channel_id": "111", "channel_name": "general", "total_tokens": 512_000},
+                {"channel_id": "222", "channel_name": None, "total_tokens": 76_000},
+            ]
+        }
+    )
+
+    report = await build_usage_leaderboard(bot, "G", "week")
+
+    assert "**Bot token usage — last week** (top 2 channels)" in report
+    assert "1. <#111> — 512k" in report
+    assert "2. <#222> — 76k" in report
+    api.get.assert_awaited_once_with(
+        "/chat-conversations/usage-leaderboard",
+        params={"guild_id": "G", "days": 7, "limit": LEADERBOARD_LIMIT},
+    )
+
+
+@pytest.mark.asyncio
+async def test_leaderboard_ranges_map_to_days():
+    for range_key, days in (("day", 1), ("month", 30), ("year", 365)):
+        bot, api = _leaderboard_bot()
+        await build_usage_leaderboard(bot, "G", range_key)
+        assert api.get.await_args.kwargs["params"]["days"] == days
+
+
+@pytest.mark.asyncio
+async def test_leaderboard_empty_window_says_so():
+    bot, _ = _leaderboard_bot({"entries": []})
+    report = await build_usage_leaderboard(bot, "G", "day")
+    assert report == "No bot token usage recorded in the last day."
+
+
+@pytest.mark.asyncio
+async def test_leaderboard_degrades_on_api_failure():
+    bot, _ = _leaderboard_bot(status_code=500)
+    assert "unavailable right now" in await build_usage_leaderboard(bot, "G", "day")
+
+    no_api_bot = SimpleNamespace(d={})
+    assert "unavailable right now" in await build_usage_leaderboard(
+        no_api_bot, "G", "day"
+    )
+
+
+@pytest.mark.asyncio
+async def test_leaderboard_command_responds_ephemerally():
+    ctx = Mock()
+    ctx.guild_id = "G"
+    ctx.respond = AsyncMock()
+    ctx.options = SimpleNamespace(range="month")
+    ctx.bot, _ = _leaderboard_bot(
+        {"entries": [{"channel_id": "111", "channel_name": None, "total_tokens": 10}]}
+    )
+
+    await bot_usage_plugin.bot_usage_info(ctx)
+
+    ctx.respond.assert_awaited_once()
+    args, kwargs = ctx.respond.await_args
+    assert "last month" in args[0]
+    assert kwargs["flags"] == hikari.MessageFlag.EPHEMERAL
 
 
 @pytest.mark.asyncio
