@@ -30,7 +30,7 @@ Flags:
 | postgres | podman `postgres:15-alpine` on port **55432**, container `smarter_dev_harness_postgres`, no named volume. Init scripts from `scripts/postgres-init/` create both databases (`smarter_dev` main + `bc_websites` legacy) with `skrift` schemas — the same layout as prod. |
 | redis | podman `redis:7-alpine` on port **56379**, container `smarter_dev_harness_redis`. |
 | migrations | `scripts/migrate.py` (all four trees: skrift-main, main, skrift-legacy, legacy) run as subprocesses with `DATABASE_URL`/`LEGACY_DATABASE_URL` pointed at the harness DBs. |
-| seed | `scripts/local_harness/seed.py` — legacy tables (bytes config/balances/transactions, squads + memberships, sale events, forum agents + responses + notification topics + subscriptions, campaigns + challenges, scheduled + repeating messages, audit-log/AoC/attachment-filter configs, help conversations, channel model overrides, a **known-plaintext `sk-` API key**) and main-DB tables (quests + daily quest, feature flags, chat-agent engagement, member activity, channel handler, Skrift setup-complete settings). Prod's leftover `public.campaign_signups` table in the legacy DB is recreated so the legacy admin page matches prod. |
+| seed | `scripts/local_harness/seed.py` — legacy tables (bytes config/balances/transactions, squads + memberships, sale events, forum agents + responses + notification topics + subscriptions, campaigns + challenges, scheduled + repeating messages, audit-log/AoC/attachment-filter configs, help conversations, channel model overrides, a **known-plaintext legacy `sk-` API key**) and main-DB tables (quests + daily quest, feature flags, chat-agent engagement, member activity, channel handler, Skrift setup-complete settings, plus a **known-plaintext Skrift-native `sk_` service API key** in `skrift.api_keys` owned by a `bot@smarter.dev` service user — during the phase-01 dual-verify window both key shapes must authenticate). Prod's leftover `public.campaign_signups` table in the legacy DB is recreated so the legacy admin page matches prod. |
 | app | `hypercorn scripts.local_harness.harness_app:app` on port **8791** with `SKRIFT_ENV=development`. `harness_app` is `main:app` plus one patch: the legacy admin's `DiscordClient.base_url` is pointed at the local mock Discord server. |
 | mock Discord | `scripts/local_harness/mock_discord.py` on port **8792** — serves the guild/roles/channels fixtures the legacy `/bot-admin` views fetch, so every page renders fully offline. |
 
@@ -38,13 +38,15 @@ Ports/container names are deliberately far from the dev compose (5434/6380),
 so the harness never collides with a running dev stack. Nothing ever touches
 remote infrastructure.
 
-## What it checks (117 checks)
+## What it checks (121 checks)
 
 All expectations live in **`scripts/local_harness/expectations.py`** as three
 data-driven tables:
 
 1. **`API_CHECKS`** — every bot-consumed `/api` endpoint group with Bearer
-   auth: health, auth validate/status, bad/malformed/missing key → 401/403,
+   auth: health, auth validate/status (with both the legacy `sk-` and the
+   Skrift-native `sk_` seeded keys), bad/malformed/missing/unknown-`sk_`
+   key → 401/403,
    bytes (balance/daily/transactions/leaderboard/config), squads
    (list/detail/join/members/lookup/leave), challenges (pending + upcoming
    announcements, detail, mark-announced/released, scoreboards, upcoming
@@ -81,9 +83,11 @@ Edit **only** `scripts/local_harness/expectations.py` (and, if the seeded
 data must change, `seed.py`/`config.py`) in the *same change* that alters the
 behavior. Examples for later sunset phases:
 
-- **New API key format** (Skrift-native `sk_` keys): change
-  `config.BOT_API_KEY` derivation + the seed row (Skrift `api_keys` table in
-  the main DB instead of legacy `public.api_keys`), and keep the
+- **New API key format** (Skrift-native `sk_` keys): done for the phase-01
+  dual-verify window — `config.SKRIFT_BOT_API_KEY` + the `skrift.api_keys`
+  seed (`seed.py:_seed_skrift_bot_api_key`) sit alongside the legacy
+  `public.api_keys` row and both authenticate. In phase 05 drop the legacy
+  seed row, `config.BOT_API_KEY`, and the legacy-key checks; keep the
   bad/malformed-key 401 checks.
 - **Removed `/bot-admin`**: replace `LEGACY_ADMIN_PAGES` entries with
   the redirect/410 behavior you expect (e.g.

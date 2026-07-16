@@ -63,10 +63,38 @@ def _deterministic_api_key(seed: str) -> str:
     return f"sk-{token}"
 
 
+def _deterministic_skrift_api_key(seed: str) -> str:
+    """Derive a valid-format Skrift API key (sk_ + 43 base64url chars).
+
+    Same derivation trick as the legacy key: deterministic so the seed
+    subprocess and the checks process agree on the plaintext without storing
+    a literal key in the repo.
+    """
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    token = base64.urlsafe_b64encode(digest + digest).decode("ascii")[:43]
+    return f"sk_{token}"
+
+
 # Known-plaintext key seeded into legacy public.api_keys — what the bot uses.
 BOT_API_KEY = _deterministic_api_key("smarter-dev-local-harness-bot-key")
 # Valid format, never seeded — must always 401.
 UNKNOWN_API_KEY = _deterministic_api_key("smarter-dev-local-harness-unknown")
+
+# Known-plaintext Skrift-native key seeded into main-DB skrift.api_keys.
+# During the phase-01 dual-verify window the API must accept BOTH this and
+# the legacy BOT_API_KEY above (the legacy row is dropped in phase 05).
+SKRIFT_BOT_API_KEY = _deterministic_skrift_api_key(
+    "smarter-dev-local-harness-skrift-bot-key"
+)
+# Valid Skrift format, never seeded — must always 401.
+UNKNOWN_SKRIFT_API_KEY = _deterministic_skrift_api_key(
+    "smarter-dev-local-harness-skrift-unknown"
+)
+
+# Owner of the seeded Skrift service key (mirrors the prod recommendation in
+# docs/v2/legacy-sunset/runbooks/01-rotate-bot-key.md).
+BOT_SERVICE_USER_EMAIL = "bot@smarter.dev"
+BOT_SERVICE_NAME = "discord-bot"
 
 # ---------------------------------------------------------------------------
 # Well-known seed identifiers (fixed so the check table can be static)
