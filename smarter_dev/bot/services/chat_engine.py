@@ -443,9 +443,10 @@ class ChannelEngine:
 
             # Resolve any admin per-channel override and enforce its token
             # budget before we spend a model call. A channel with no override
-            # falls through unchanged (default model, no budget checks).
+            # falls through unchanged (default model, no budget checks) —
+            # though its token usage is still metered after the run.
             override = await self._get_channel_override()
-            budget_redis = self._budget_redis() if override is not None else None
+            budget_redis = self._budget_redis()
             if override is not None and budget_redis is not None:
                 budget_reset_epoch = await over_budget_reset_epoch(
                     budget_redis,
@@ -556,11 +557,12 @@ class ChannelEngine:
 
             output = result.output
             tokens = _extract_tokens(result.usage())
-            # Charge this turn's chat tokens against the channel's budget. Only
-            # override channels are metered (no override → no tracking overhead).
+            # Meter this turn's chat tokens against the channel's usage windows.
+            # Every channel is metered (so ``/bot-usage`` always has numbers);
+            # the budgets that *enforce* only exist on override channels.
             # Compaction runs on its own summarizer model and its tokens are not
             # in ``result.usage()``, so they are not counted here.
-            if override is not None and budget_redis is not None:
+            if budget_redis is not None:
                 await self._record_budget_usage(budget_redis, tokens)
             await self._charge_directed_messages(
                 output, drained, first_activation=first_activation

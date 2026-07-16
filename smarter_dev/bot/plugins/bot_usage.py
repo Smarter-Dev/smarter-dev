@@ -7,8 +7,9 @@ Available to everyone; responds ephemerally. Shows two things:
   the counted messages actually span ("32/60 messages in the last hour").
 - The channel's chat-token consumption for the current hour and day windows
   against its configured budgets ("76k/100k this hour · 512k/1m today").
-  Token usage is only metered on channels with a model override, so channels
-  without one say so instead of showing numbers.
+  Every channel is metered; without a ``/setmodel`` budget the allowance
+  reads "unlimited", and a maxed-out budget window shows a live countdown
+  to its wall-clock reset.
 
 Every data source is fail-soft: a Redis or API hiccup degrades that line to
 "unavailable" rather than failing the command.
@@ -25,7 +26,10 @@ import hikari
 import lightbulb
 from redis.exceptions import RedisError
 
+from smarter_dev.bot.services.channel_token_budget import DAY_WINDOW_SECONDS
+from smarter_dev.bot.services.channel_token_budget import HOUR_WINDOW_SECONDS
 from smarter_dev.bot.services.channel_token_budget import current_window_usage
+from smarter_dev.bot.services.channel_token_budget import next_window_reset_epoch
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.user_message_limit import USER_MESSAGE_LIMIT
 from smarter_dev.bot.services.user_message_limit import counted_messages
@@ -71,6 +75,18 @@ def _render_budget_side(budget: int) -> str:
     return format_compact_tokens(budget) if budget > 0 else "unlimited"
 
 
+def _render_window_usage(
+    used: int, budget: int, label: str, now_epoch: float, window_seconds: int
+) -> str:
+    """One window's "76k/100k this hour" — plus, once a budgeted window is
+    maxed, a live countdown to its wall-clock reset."""
+    rendered = f"{format_compact_tokens(used)}/{_render_budget_side(budget)} {label}"
+    if budget > 0 and used >= budget:
+        reset_epoch = next_window_reset_epoch(now_epoch, window_seconds)
+        rendered += f" (resets <t:{reset_epoch}:R>)"
+    return rendered
+
+
 async def _messages_line(bot: Any, user_id: str) -> str:
     """The invoker's "32/60 messages in the last hour" line."""
     redis = _chat_memory_redis(bot)
@@ -100,10 +116,6 @@ async def _channel_tokens_line(bot: Any, guild_id: str, channel_id: str) -> str:
                 exc_info=True,
             )
             return f"**Bot usage here:** {_UNAVAILABLE}"
-    if override is None:
-        return (
-            "**Bot usage here:** not metered — this channel has no token budget"
-        )
     redis = _chat_memory_redis(bot)
     if redis is None:
         return f"**Bot usage here:** {_UNAVAILABLE}"
@@ -114,15 +126,17 @@ async def _channel_tokens_line(bot: Any, guild_id: str, channel_id: str) -> str:
             "Failed to read token usage for channel %s", channel_id, exc_info=True
         )
         return f"**Bot usage here:** {_UNAVAILABLE}"
-    hour = (
-        f"{format_compact_tokens(hour_used)}"
-        f"/{_render_budget_side(override.hourly_token_budget)}"
+    # No override → no budgets to enforce; usage still shows, over "unlimited".
+    hourly_budget = override.hourly_token_budget if override is not None else 0
+    daily_budget = override.daily_token_budget if override is not None else 0
+    now_epoch = datetime.now(UTC).timestamp()
+    hour = _render_window_usage(
+        hour_used, hourly_budget, "this hour", now_epoch, HOUR_WINDOW_SECONDS
     )
-    day = (
-        f"{format_compact_tokens(day_used)}"
-        f"/{_render_budget_side(override.daily_token_budget)}"
+    day = _render_window_usage(
+        day_used, daily_budget, "today", now_epoch, DAY_WINDOW_SECONDS
     )
-    return f"**Bot usage here:** {hour} this hour · {day} today"
+    return f"**Bot usage here:** {hour} · {day}"
 
 
 async def build_usage_report(
