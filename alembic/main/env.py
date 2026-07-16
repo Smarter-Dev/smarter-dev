@@ -22,26 +22,53 @@ import smarter_dev.web.models  # noqa: F401  -- registers all models with Base.m
 # Tables this alembic config owns. The single Base.metadata is shared with the
 # legacy config; partition is enforced via `include_object` so each migration
 # only touches its own tables.
+#
+# This tree owns every model in smarter_dev/web/models.py EXCEPT the legacy
+# `api_keys` model: that table NAME belongs to Skrift's own `skrift.api_keys`
+# (created by Skrift core migrations) and the legacy model is deleted in the
+# decommission phase. Ownership is guarded by tests/test_migration_ownership.py.
 MAIN_TABLES: frozenset[str] = frozenset({
+    "admin_handlers",
+    "advent_of_code_configs",
+    "advent_of_code_threads",
     "agent_conversations",
     "agent_messages",
+    "attachment_filter_configs",
+    "audit_log_configs",
     "authoring_pipeline_runs",
     "author_profiles",
     "blog_post_meta",
     "blog_post_tags",
+    "bytes_balances",
+    "bytes_configs",
+    "bytes_transactions",
     "campaign_signups",
+    "campaigns",
     "candidate_blog_topics",
+    "challenge_inputs",
+    "challenge_submissions",
+    "challenges",
+    "channel_handlers",
+    "channel_model_overrides",
     "chat_agent_compaction_events",
     "chat_agent_engagements",
     "chat_agent_turns",
     "daily_quests",
     "feature_flags",
+    "forum_agent_responses",
+    "forum_agents",
+    "forum_notification_topics",
+    "forum_user_subscriptions",
+    "handler_runs",
+    "help_conversations",
+    "member_activity",
     "moderation_actions",
     "moderation_configs",
     "quest_inputs",
     "quest_progress",
     "quest_submissions",
     "quests",
+    "repeating_messages",
     "research_sessions",
     "resource_categories",
     "resource_creators",
@@ -53,10 +80,17 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "resource_tools",
     "scan_service_usage",
     "scan_user_profiles",
-    "sudo_subscriptions",
+    "scheduled_messages",
+    "security_logs",
+    "squad_memberships",
+    "squad_sale_events",
+    "squads",
+    "sudo_membership_reminders",
+    "sudo_memberships",
     "tags",
     "tracked_link_counters",
     "user_profiles",
+    "webhook_events_processed",
 })
 
 SCHEMA = "skrift"

@@ -21,32 +21,11 @@ from smarter_dev.shared.database import Base
 from smarter_dev.shared.config import get_settings
 import smarter_dev.web.models  # noqa: F401  -- registers all models with Base.metadata
 
-LEGACY_TABLES: frozenset[str] = frozenset({
-    "advent_of_code_configs",
-    "advent_of_code_threads",
-    "api_keys",
-    "attachment_filter_configs",
-    "audit_log_configs",
-    "bytes_balances",
-    "bytes_configs",
-    "bytes_transactions",
-    "campaigns",
-    "channel_model_overrides",
-    "challenge_inputs",
-    "challenge_submissions",
-    "challenges",
-    "forum_agent_responses",
-    "forum_agents",
-    "forum_notification_topics",
-    "forum_user_subscriptions",
-    "help_conversations",
-    "repeating_messages",
-    "scheduled_messages",
-    "security_logs",
-    "squad_memberships",
-    "squad_sale_events",
-    "squads",
-})
+# This tree is CLOSED: ownership of every legacy table moved to alembic/main
+# (db-consolidation phase). The empty set means autogenerate against this tree
+# emits nothing — existing revision files still run so already-deployed legacy
+# databases stay migratable until the tree is deleted in the decommission phase.
+LEGACY_TABLES: frozenset[str] = frozenset()
 
 SCHEMA = "public"
 # Distinct from Skrift's `alembic_version` (which lives in this DB's `skrift` schema)
