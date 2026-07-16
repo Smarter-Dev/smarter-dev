@@ -31,6 +31,7 @@ class ModelProvider(enum.Enum):
     GOOGLE = "google"
     OPENAI = "openai"
     DIGITALOCEAN = "digitalocean"
+    ANTHROPIC = "anthropic"
 
 
 class ReasoningLevel(enum.Enum):
@@ -116,7 +117,7 @@ class CatalogModel:
         return bool(self.reasoning_levels)
 
 
-# The seven model families the admin override exposes.
+# The model families the admin override exposes.
 MODEL_FAMILIES: tuple[str, ...] = (
     "Kimi",
     "GLM",
@@ -125,6 +126,7 @@ MODEL_FAMILIES: tuple[str, ...] = (
     "Qwen",
     "Gemini",
     "GPT",
+    "Claude",
 )
 
 
@@ -147,12 +149,21 @@ _GEMINI_THINKING = (
     ReasoningLevel.HIGH,
 )
 _OPEN_EFFORT = (ReasoningLevel.LOW, ReasoningLevel.MEDIUM, ReasoningLevel.HIGH)
+# Claude Sonnet 5 exposes the full effort ladder (thinking is adaptive by
+# default and effort tunes its depth); Haiku 4.5 has no effort knob at all.
+_CLAUDE_EFFORT = (
+    ReasoningLevel.LOW,
+    ReasoningLevel.MEDIUM,
+    ReasoningLevel.HIGH,
+    ReasoningLevel.XHIGH,
+    ReasoningLevel.MAX,
+)
 
 
 # Curated catalog. Kept <= 24 entries so the whole set fits in one Discord
 # string-select (25-option limit, leaving room for a "server default" sentinel).
-# Gemini -> Google, GPT -> OpenAI, everything else -> Digital Ocean's
-# OpenAI-compatible serverless inference. Model ids reflect the latest releases
+# Gemini -> Google, GPT -> OpenAI, Claude -> Anthropic, everything else ->
+# Digital Ocean's OpenAI-compatible serverless inference. Model ids reflect the latest releases
 # as of mid-2026 (verified against provider/DO model listings); they are wire
 # ids and can be re-verified without a migration.
 MODEL_CATALOG: tuple[CatalogModel, ...] = (
@@ -291,6 +302,23 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         model_id="gpt-5.6-terra",
         reasoning_levels=_OPENAI_56,
         default_reasoning=ReasoningLevel.MEDIUM,
+    ),
+    # --- Claude via Anthropic ---
+    CatalogModel(
+        key="claude-haiku-4-5",
+        label="Claude Haiku 4.5",
+        family="Claude",
+        provider=ModelProvider.ANTHROPIC,
+        model_id="claude-haiku-4-5",
+    ),
+    CatalogModel(
+        key="claude-sonnet-5",
+        label="Claude Sonnet 5",
+        family="Claude",
+        provider=ModelProvider.ANTHROPIC,
+        model_id="claude-sonnet-5",
+        reasoning_levels=_CLAUDE_EFFORT,
+        default_reasoning=ReasoningLevel.HIGH,
     ),
 )
 
