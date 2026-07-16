@@ -16,6 +16,7 @@ import pytest
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.bot.plugins import model_override
+from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.models import ChannelModelOverride
 from smarter_dev.bot.views.model_override_views import SENTINEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_MODEL_DEFAULT
@@ -239,6 +240,20 @@ async def test_select_sentinel_clears_override():
     event.interaction.create_modal_response.assert_not_called()
 
 
+async def test_select_sentinel_clear_failure_reports_to_admin():
+    """An API failure clearing the override must answer the interaction with a
+    friendly error, not escape to the (broken) generic modal error responder."""
+    service = AsyncMock()
+    service.clear_override.side_effect = APIError("boom", status_code=500)
+    event = _component_event([SENTINEL_DEFAULT], service)
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.handle_model_override_select(event)
+
+    event.interaction.create_initial_response.assert_awaited_once()
+    _, kwargs = event.interaction.create_initial_response.call_args
+    assert "Couldn't remove the override" in kwargs["content"]
+
+
 async def test_select_no_reasoning_model_opens_budget_modal():
     service = AsyncMock()
     service.get_override.return_value = None
@@ -368,6 +383,24 @@ async def test_modal_submit_persists_selected_reasoning_level():
         "G", "C", REASONING_KEY, 0, 0, reasoning_level="high"
     )
     event.interaction.create_initial_response.assert_awaited_once()
+
+
+async def test_modal_submit_save_failure_reports_to_admin():
+    """An API failure saving the override must answer the interaction with a
+    friendly error, not escape to the (broken) generic modal error responder."""
+    service = AsyncMock()
+    service.set_override.side_effect = APIError("boom", status_code=500)
+    event = _modal_event(
+        f"model_override_modal:G:C:{NO_REASONING_KEY}:",
+        {"daily_budget": "1500", "hourly_budget": "0"},
+        service,
+    )
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.handle_model_override_modal_submit(event)
+
+    event.interaction.create_initial_response.assert_awaited_once()
+    _, kwargs = event.interaction.create_initial_response.call_args
+    assert "Couldn't save the override" in kwargs["content"]
 
 
 async def test_modal_submit_rejects_invalid_budget():

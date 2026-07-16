@@ -174,7 +174,18 @@ async def handle_model_override_select(
 
     if selected == SENTINEL_DEFAULT:
         service = _get_override_service(event.app)
-        await service.clear_override(guild_id, channel_id)
+        try:
+            await service.clear_override(guild_id, channel_id)
+        except APIError as exc:
+            logger.error(
+                "Failed to clear model override for channel %s: %s", channel_id, exc
+            )
+            await interaction.create_initial_response(
+                hikari.ResponseType.MESSAGE_UPDATE,
+                content="❌ Couldn't remove the override — please try again shortly.",
+                components=[],
+            )
+            return
         await interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_UPDATE,
             content="✅ Removed this channel's model override — using the server default.",
@@ -315,14 +326,26 @@ async def handle_model_override_modal_submit(
         return
 
     service = _get_override_service(event.app)
-    await service.set_override(
-        guild_id,
-        channel_id,
-        model_key,
-        daily_budget,
-        hourly_budget,
-        reasoning_level=reasoning_level,
-    )
+    try:
+        await service.set_override(
+            guild_id,
+            channel_id,
+            model_key,
+            daily_budget,
+            hourly_budget,
+            reasoning_level=reasoning_level,
+        )
+    except APIError as exc:
+        # Without this, the failure surfaces as Discord's generic
+        # "This interaction failed" (the events.py fallback responder is
+        # broken) and the admin gets no explanation.
+        logger.error("Failed to save model override for channel %s: %s", channel_id, exc)
+        await interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_CREATE,
+            content="❌ Couldn't save the override — please try again shortly.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
+        return
 
     await interaction.create_initial_response(
         hikari.ResponseType.MESSAGE_CREATE,
