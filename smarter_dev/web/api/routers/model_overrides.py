@@ -66,6 +66,7 @@ async def put_model_override(
         guild_id=guild_id,
         channel_id=channel_id,
         model_key=body.model_key,
+        reasoning_level=body.reasoning_level,
         daily_token_budget=body.daily_token_budget,
         hourly_token_budget=body.hourly_token_budget,
     )

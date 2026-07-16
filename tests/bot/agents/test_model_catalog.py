@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
-from smarter_dev.bot.agents.model_catalog import (
+from smarter_dev.shared.model_catalog import (
+    ALL_REASONING_LEVELS,
     MODEL_CATALOG,
     MODEL_FAMILIES,
     CatalogModel,
     ModelProvider,
+    ReasoningLevel,
     catalog_by_key,
     get_model,
     is_valid_model_key,
     models_by_family,
+    parse_reasoning_level,
+    resolve_reasoning_level,
 )
 
 _DIGITALOCEAN_FAMILIES = {"Kimi", "GLM", "DeepSeek", "Gemma", "Qwen"}
@@ -23,6 +27,55 @@ def test_catalog_entries_are_well_formed():
         assert model.label, f"empty label on {model!r}"
         assert model.model_id, f"empty model_id on {model!r}"
         assert model.family in MODEL_FAMILIES
+
+
+def test_reasoning_defaults_are_supported():
+    for model in MODEL_CATALOG:
+        if model.default_reasoning is not None:
+            assert model.default_reasoning in model.reasoning_levels
+        assert model.supports_reasoning == bool(model.reasoning_levels)
+
+
+def test_reasoning_levels_are_ordered_subsets_of_the_ladder():
+    ladder = list(ReasoningLevel)
+    for model in MODEL_CATALOG:
+        ranks = [ladder.index(level) for level in model.reasoning_levels]
+        assert ranks == sorted(ranks), f"{model.key} reasoning levels out of order"
+
+
+def test_all_reasoning_levels_is_the_full_ladder():
+    assert ALL_REASONING_LEVELS == tuple(ReasoningLevel)
+
+
+def test_parse_reasoning_level_round_trips_and_degrades():
+    assert parse_reasoning_level("high") is ReasoningLevel.HIGH
+    assert parse_reasoning_level(None) is None
+    assert parse_reasoning_level("") is None
+    assert parse_reasoning_level("bogus") is None
+
+
+def test_resolve_reasoning_level_falls_back_to_default():
+    glm = get_model("glm-5-2")
+    assert resolve_reasoning_level(glm, None) is glm.default_reasoning
+
+
+def test_resolve_reasoning_level_keeps_supported_choice():
+    gpt = get_model("gpt-5-4")
+    assert resolve_reasoning_level(gpt, ReasoningLevel.XHIGH) is ReasoningLevel.XHIGH
+
+
+def test_resolve_reasoning_level_clamps_unsupported_to_nearest():
+    gemini = get_model("gemini-3-flash")  # caps at HIGH
+    assert resolve_reasoning_level(gemini, ReasoningLevel.MAX) is ReasoningLevel.HIGH
+    glm = get_model("glm-5-2")  # LOW/MEDIUM/HIGH only
+    assert resolve_reasoning_level(glm, ReasoningLevel.NONE) is ReasoningLevel.LOW
+
+
+def test_resolve_reasoning_level_none_for_models_without_reasoning():
+    gemma = get_model("gemma-4-31b")
+    assert gemma.supports_reasoning is False
+    assert resolve_reasoning_level(gemma, ReasoningLevel.HIGH) is None
+    assert resolve_reasoning_level(gemma, None) is None
 
 
 def test_keys_are_unique():

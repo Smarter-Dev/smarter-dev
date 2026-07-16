@@ -601,7 +601,8 @@ class ChannelModelOverride:
     """An admin-set LLM model override + token budgets for one channel.
 
     Mirrors the web API's ``ChannelModelOverrideRead``. ``model_key`` is a stable
-    catalog key; budgets are token caps where ``0`` means unlimited.
+    catalog key; ``reasoning_level`` is a ``ReasoningLevel`` value or ``None``
+    (use the model's default); budgets are token caps where ``0`` means unlimited.
     """
 
     guild_id: str
@@ -609,6 +610,7 @@ class ChannelModelOverride:
     model_key: str
     daily_token_budget: int
     hourly_token_budget: int
+    reasoning_level: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -619,6 +621,7 @@ class ChannelModelOverride:
             guild_id=data["guild_id"],
             channel_id=data["channel_id"],
             model_key=data["model_key"],
+            reasoning_level=data.get("reasoning_level"),
             daily_token_budget=data["daily_token_budget"],
             hourly_token_budget=data["hourly_token_budget"],
             created_at=_parse_iso_datetime(data.get("created_at")),

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from smarter_dev.bot.services.channel_token_budget import (
@@ -9,8 +11,14 @@ from smarter_dev.bot.services.channel_token_budget import (
     HOUR_WINDOW_SECONDS,
     add_usage,
     budget_key,
-    is_over_budget,
+    over_budget_reset_epoch,
 )
+
+
+def _assert_is_next_boundary(reset_epoch: int, window_seconds: int) -> None:
+    """The epoch is wall-aligned to ``window_seconds`` and in its next window."""
+    assert reset_epoch % window_seconds == 0
+    assert time.time() < reset_epoch <= time.time() + window_seconds
 
 
 class _FakePipeline:
@@ -101,37 +109,51 @@ async def test_add_usage_zero_or_negative_is_noop():
 async def test_zero_budgets_never_block():
     redis = _FakeRedis()
     await add_usage(redis, "chan", 10_000_000)
-    assert await is_over_budget(redis, "chan", 0, 0) is False
+    assert await over_budget_reset_epoch(redis, "chan", 0, 0) is None
 
 
 @pytest.mark.asyncio
-async def test_hourly_budget_blocks_even_when_day_is_under():
+async def test_hourly_budget_blocks_until_the_next_hour_boundary():
     redis = _FakeRedis()
     await add_usage(redis, "chan", 500)
     # Hourly cap of 500 is met; daily cap of 1_000_000 is far off.
-    assert await is_over_budget(redis, "chan", 1_000_000, 500) is True
+    reset_epoch = await over_budget_reset_epoch(redis, "chan", 1_000_000, 500)
+    assert reset_epoch is not None
+    _assert_is_next_boundary(reset_epoch, HOUR_WINDOW_SECONDS)
 
 
 @pytest.mark.asyncio
-async def test_day_budget_blocks_when_day_usage_meets_cap():
+async def test_day_budget_blocks_until_the_next_day_boundary():
     redis = _FakeRedis()
     await add_usage(redis, "chan", 500)
     # Hourly unlimited (0); daily cap of 500 is met.
-    assert await is_over_budget(redis, "chan", 500, 0) is True
+    reset_epoch = await over_budget_reset_epoch(redis, "chan", 500, 0)
+    assert reset_epoch is not None
+    _assert_is_next_boundary(reset_epoch, DAY_WINDOW_SECONDS)
+
+
+@pytest.mark.asyncio
+async def test_both_budgets_spent_blocks_until_the_day_boundary():
+    redis = _FakeRedis()
+    await add_usage(redis, "chan", 500)
+    # Both caps met — the unblock moment is the later (day) boundary.
+    reset_epoch = await over_budget_reset_epoch(redis, "chan", 500, 500)
+    assert reset_epoch is not None
+    _assert_is_next_boundary(reset_epoch, DAY_WINDOW_SECONDS)
 
 
 @pytest.mark.asyncio
 async def test_under_budget_does_not_block():
     redis = _FakeRedis()
     await add_usage(redis, "chan", 100)
-    assert await is_over_budget(redis, "chan", 1000, 1000) is False
+    assert await over_budget_reset_epoch(redis, "chan", 1000, 1000) is None
 
 
 @pytest.mark.asyncio
 async def test_channels_do_not_share_budget():
     redis = _FakeRedis()
     await add_usage(redis, "chan-a", 500)
-    assert await is_over_budget(redis, "chan-b", 0, 500) is False
+    assert await over_budget_reset_epoch(redis, "chan-b", 0, 500) is None
 
 
 def test_budget_key_shape():

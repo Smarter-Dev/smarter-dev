@@ -39,6 +39,7 @@ from typing import Any
 
 import hikari
 from pydantic_ai.usage import RunUsage
+from redis.exceptions import RedisError
 
 from smarter_dev.bot.agents.chat_agent import DEFAULT_MODEL as CHAT_DEFAULT_MODEL
 from smarter_dev.bot.agents.chat_agent import MODEL_ENV_VAR as CHAT_MODEL_ENV_VAR
@@ -53,9 +54,10 @@ from smarter_dev.bot.agents.chat_models import ResponseBody
 from smarter_dev.bot.agents.chat_models import TurnDecision
 from smarter_dev.bot.agents.chat_tools import ChatDeps
 from smarter_dev.bot.agents.chat_tools import GeneratedImage
-from smarter_dev.bot.agents.model_catalog import get_model
+from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.bot.services.channel_token_budget import add_usage
-from smarter_dev.bot.services.channel_token_budget import is_over_budget
+from smarter_dev.bot.services.exceptions import APIError
+from smarter_dev.bot.services.channel_token_budget import over_budget_reset_epoch
 from smarter_dev.bot.services.chat_conversation_persistence import end_engagement
 from smarter_dev.bot.services.chat_conversation_persistence import persist_turn
 from smarter_dev.bot.services.chat_conversation_persistence import start_engagement
@@ -76,9 +78,11 @@ MAX_RUNTIME = timedelta(hours=2)
 # SET NX EX) caps that notice to once per hour per channel so a busy channel
 # can't be spammed while the budget stays spent.
 BUDGET_NOTICE_COOLDOWN_SECONDS = 60 * 60
-_BUDGET_EXHAUSTED_NOTICE = (
+# ``{reset_tag}`` is a Discord relative timestamp (``<t:epoch:R>``) that the
+# client renders as a live countdown ("in 25 minutes") to the window boundary.
+_BUDGET_EXHAUSTED_NOTICE_TEMPLATE = (
     "This channel's model token budget is used up for now — I'll pick back "
-    "up once it resets."
+    "up {reset_tag}."
 )
 
 # Appended to a text reply when a generated image can't be attached because the
@@ -337,15 +341,28 @@ class ChannelEngine:
                     )
                     break
 
-                await self._run_once(first_activation=first_activation)
-                first_activation = False
+                activation_consumed = await self._run_once(
+                    first_activation=first_activation
+                )
+                # Only retire the first-activation flag once a turn actually
+                # ran. A turn skipped before the engagement was started (e.g.
+                # over budget) leaves it set, so once the budget frees the next
+                # fire still starts the engagement and persists its turns.
+                if activation_consumed:
+                    first_activation = False
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Chat engine crashed for channel %s", self.channel_id)
             await self._deactivate(send_notes_clear=True, reason="crash")
 
-    async def _run_once(self, *, first_activation: bool) -> None:
+    async def _run_once(self, *, first_activation: bool) -> bool:
+        """Run one agent turn. Returns whether the first activation was consumed.
+
+        Almost always True; False only when the turn was skipped *before* the
+        engagement could start (over budget), so the runner keeps
+        ``first_activation`` set and retries the initial turn on the next fire.
+        """
         async with self.run_lock:
             turn_started_at = datetime.now(UTC)
             # Snapshot queue; new messages can keep arriving while we run.
@@ -375,7 +392,7 @@ class ChannelEngine:
                             "trigger_message set — aborting fire",
                             self.channel_id,
                         )
-                        return
+                        return True
                     agent_input = await build_initial_input(
                         bot=self.bot,
                         channel_id=self.channel_id,
@@ -387,7 +404,7 @@ class ChannelEngine:
                 else:
                     if not drained:
                         # Engine fired with nothing new to react to. Skip.
-                        return
+                        return True
                     agent_input = await build_followup_input(
                         bot=self.bot,
                         channel_id=self.channel_id,
@@ -405,7 +422,7 @@ class ChannelEngine:
                     "preparing your message.",
                     reply_to=error_reply_to,
                 )
-                return
+                return True
 
             new_count = (
                 len(agent_input.channel_history) + 1
@@ -428,23 +445,42 @@ class ChannelEngine:
             override = await self._get_channel_override()
             budget_redis = self._budget_redis() if override is not None else None
             if override is not None and budget_redis is not None:
-                over_budget = await is_over_budget(
+                budget_reset_epoch = await over_budget_reset_epoch(
                     budget_redis,
                     str(self.channel_id),
                     override.daily_token_budget,
                     override.hourly_token_budget,
                 )
-                if over_budget:
+                if budget_reset_epoch is not None:
                     logger.info(
                         "[%s] Channel %s over model token budget — skipping turn",
                         request_id,
                         self.channel_id,
                     )
                     await self._maybe_notice_budget_exhausted(
-                        budget_redis, reply_to=error_reply_to
+                        budget_redis,
+                        reset_epoch=budget_reset_epoch,
+                        reply_to=error_reply_to,
                     )
-                    return
+                    # Skipped before start_engagement — report the first
+                    # activation as NOT consumed so the engagement still starts
+                    # (and turns persist) once the budget window resets.
+                    return False
             override_model_id = self._resolve_override_model_id(override)
+            # Only carry the override's reasoning level when its model actually
+            # applied — a stale model_key falls back to the default model, which
+            # keeps its own reasoning config.
+            override_reasoning = (
+                override.reasoning_level
+                if override is not None and override_model_id is not None
+                else None
+            )
+            # The model this turn actually runs on: the override's wire id when
+            # one applied, otherwise the configured default. Persisted with the
+            # turn so the dashboard prices tokens against the right model.
+            resolved_model_name = override_model_id or os.environ.get(
+                CHAT_MODEL_ENV_VAR, CHAT_DEFAULT_MODEL
+            )
 
             # Start engagement persistence on the very first turn — gives us
             # an engagement_id we attach to every persisted turn that follows.
@@ -468,7 +504,7 @@ class ChannelEngine:
                     activation_message_id=int(trigger.id) if trigger else 0,
                 )
 
-            agent = get_chat_agent(override_model_id)
+            agent = get_chat_agent(override_model_id, override_reasoning)
             deps = ChatDeps(
                 bot=self.bot,
                 channel_id=self.channel_id,
@@ -512,7 +548,7 @@ class ChannelEngine:
                         "Sorry, couldn't generate a reply for that one — try again?",
                         reply_to=error_reply_to,
                     )
-                return
+                return True
             self._last_model_call_at = datetime.now(UTC)
             compaction_events = drain_collection()
 
@@ -558,13 +594,8 @@ class ChannelEngine:
                 chat_usage = result.usage()
                 chat_in = int(getattr(chat_usage, "input_tokens", 0) or 0)
                 chat_out = int(getattr(chat_usage, "output_tokens", 0) or 0)
-                chat_model = (
-                    getattr(chat_usage, "requests", None)
-                    and getattr(chat_usage, "model", None)
-                    or os.environ.get(CHAT_MODEL_ENV_VAR, CHAT_DEFAULT_MODEL)
-                )
 
-                voice = dispatch.voice or _VoiceOutcome(sent_ok=False) if False else dispatch.voice
+                voice = dispatch.voice
                 duration_ms = int(
                     (datetime.now(UTC) - turn_started_at).total_seconds() * 1000
                 )
@@ -585,7 +616,7 @@ class ChannelEngine:
                         duration_ms=duration_ms,
                         chat_tokens_input=chat_in,
                         chat_tokens_output=chat_out,
-                        chat_model_name=chat_model,
+                        chat_model_name=resolved_model_name,
                         voice_tokens_input=(
                             voice.tokens_input if voice else 0
                         ),
@@ -613,10 +644,11 @@ class ChannelEngine:
                     send_notes_clear=True,
                     reason=dispatch.deactivate_reason,
                 )
-                return
+                return True
 
         # After releasing run_lock, re-check fire conditions immediately.
         await self._maybe_refire()
+        return True
 
     async def _apply_output(
         self, output: TurnDecision, images: list[GeneratedImage] | None = None
@@ -868,7 +900,7 @@ class ChannelEngine:
             return await service.get_override(
                 str(self.guild_id), str(self.channel_id)
             )
-        except Exception:
+        except APIError:
             logger.warning(
                 "Failed to read model override for channel %s — using default",
                 self.channel_id,
@@ -899,7 +931,7 @@ class ChannelEngine:
         """Add ``tokens`` to the channel's budget windows (best-effort)."""
         try:
             await add_usage(redis, str(self.channel_id), tokens)
-        except Exception:
+        except RedisError:
             logger.warning(
                 "Failed to record token budget usage for channel %s",
                 self.channel_id,
@@ -907,13 +939,15 @@ class ChannelEngine:
             )
 
     async def _maybe_notice_budget_exhausted(
-        self, redis: Any, *, reply_to: int | None
+        self, redis: Any, *, reset_epoch: int, reply_to: int | None
     ) -> None:
         """Post the budget-exhausted notice, throttled to once per hour.
 
-        A Redis ``SET NX EX`` acts as the per-channel throttle: only the call
-        that wins the key posts, so repeated over-budget turns stay silent until
-        the cooldown lapses. Any Redis hiccup skips the notice (never blocks).
+        The notice embeds ``reset_epoch`` as a Discord relative timestamp so
+        readers see a live countdown to the budget reset. A Redis ``SET NX EX``
+        acts as the per-channel throttle: only the call that wins the key posts,
+        so repeated over-budget turns stay silent until the cooldown lapses.
+        Any Redis hiccup skips the notice (never blocks).
         """
         try:
             won = await redis.set(
@@ -922,7 +956,7 @@ class ChannelEngine:
                 nx=True,
                 ex=BUDGET_NOTICE_COOLDOWN_SECONDS,
             )
-        except Exception:
+        except RedisError:
             logger.debug(
                 "could not claim budget-notice throttle for channel %s",
                 self.channel_id,
@@ -930,7 +964,10 @@ class ChannelEngine:
             )
             return
         if won:
-            await self._post_error(_BUDGET_EXHAUSTED_NOTICE, reply_to=reply_to)
+            notice = _BUDGET_EXHAUSTED_NOTICE_TEMPLATE.format(
+                reset_tag=f"<t:{reset_epoch}:R>"
+            )
+            await self._post_error(notice, reply_to=reply_to)
 
     def _shared_api_client(self) -> Any | None:
         """The bot's shared APIClient (set on ``bot.d``), or None if absent.

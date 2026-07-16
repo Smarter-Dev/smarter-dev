@@ -75,6 +75,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: openai-api-key
+                  - name: DIGITALOCEAN_INFERENCE_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: digitalocean-inference-api-key
                   - name: ANTHROPIC_API_KEY
                     valueFrom:
                       secretKeyRef:
