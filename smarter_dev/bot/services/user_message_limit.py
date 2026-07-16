@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
+from math import ceil
 
 from redis.asyncio import Redis
 
@@ -88,6 +89,51 @@ async def record_directed_messages(
         await pipe.execute()
 
 
+async def _trimmed_count(redis: Redis, key: str, now_epoch: float) -> int:
+    """Live count for ``key``: age out old entries, then count the survivors."""
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.zremrangebyscore(key, "-inf", now_epoch - LIMIT_WINDOW_SECONDS)
+        pipe.zcard(key)
+        _, counted = await pipe.execute()
+    return counted
+
+
+async def counted_messages(redis: Redis, user_id: str) -> tuple[int, float | None]:
+    """``user_id``'s live counter: (messages in the window, oldest send epoch).
+
+    The oldest epoch is None when nothing is counted — there is no window to
+    describe. Backs the ``/bot-usage`` display.
+    """
+    now_epoch = datetime.now(UTC).timestamp()
+    key = limit_key(user_id)
+    counted = await _trimmed_count(redis, key, now_epoch)
+    if counted == 0:
+        return 0, None
+    entries = await redis.zrange(key, 0, 0, withscores=True)
+    if not entries:
+        return 0, None
+    _, oldest_epoch = entries[0]
+    return counted, float(oldest_epoch)
+
+
+def format_counted_window(oldest_epoch: float | None, now_epoch: float) -> str:
+    """Human framing of the span a message counter covers.
+
+    Reads as "the last hour" / "the last N hours", where N is the hours since
+    the oldest counted message, rounded up and capped at the window length.
+    With nothing counted there is no span to shrink to, so the full window is
+    named.
+    """
+    window_hours = LIMIT_WINDOW_SECONDS // 3600
+    if oldest_epoch is None:
+        return f"the last {window_hours} hours"
+    span_hours = ceil(max(0.0, now_epoch - oldest_epoch) / 3600)
+    span_hours = min(max(span_hours, 1), window_hours)
+    if span_hours == 1:
+        return "the last hour"
+    return f"the last {span_hours} hours"
+
+
 async def over_limit_status(redis: Redis, user_id: str) -> OverLimitStatus | None:
     """``user_id``'s over-limit details, or None while they may still send.
 
@@ -99,10 +145,7 @@ async def over_limit_status(redis: Redis, user_id: str) -> OverLimitStatus | Non
     """
     now_epoch = datetime.now(UTC).timestamp()
     key = limit_key(user_id)
-    async with redis.pipeline(transaction=True) as pipe:
-        pipe.zremrangebyscore(key, "-inf", now_epoch - LIMIT_WINDOW_SECONDS)
-        pipe.zcard(key)
-        _, counted = await pipe.execute()
+    counted = await _trimmed_count(redis, key, now_epoch)
     if counted < USER_MESSAGE_LIMIT:
         return None
     freeing_index = counted - USER_MESSAGE_LIMIT

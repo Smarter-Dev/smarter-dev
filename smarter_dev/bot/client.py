@@ -1180,6 +1180,10 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         bot.load_extensions("smarter_dev.bot.plugins.model_override")
         logger.info("✓ Loaded model override plugin")
 
+        logger.info("Loading bot usage plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.bot_usage")
+        logger.info("✓ Loaded bot usage plugin")
+
         logger.info("✓ All plugins loaded successfully")
     except Exception as e:
         logger.error(f"Failed to load plugins: {e}")

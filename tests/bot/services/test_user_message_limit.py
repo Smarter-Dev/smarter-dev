@@ -10,6 +10,8 @@ from smarter_dev.bot.services.user_message_limit import (
     LIMIT_WINDOW_SECONDS,
     USER_MESSAGE_LIMIT,
     claim_notice_throttle,
+    counted_messages,
+    format_counted_window,
     format_over_limit_notice,
     limit_key,
     notice_throttle_key,
@@ -250,3 +252,59 @@ async def test_notice_throttle_ttl_never_drops_below_a_minute():
     redis = _FakeRedis()
     assert await claim_notice_throttle(redis, "u1", int(time.time()) - 50) is True
     assert redis.expiries[notice_throttle_key("u1")] == 60
+
+
+@pytest.mark.asyncio
+async def test_counted_messages_empty_counter_has_no_window():
+    redis = _FakeRedis()
+    assert await counted_messages(redis, "u1") == (0, None)
+
+
+@pytest.mark.asyncio
+async def test_counted_messages_reports_count_and_oldest():
+    redis = _FakeRedis()
+    now = time.time()
+    oldest_epoch = now - 900
+    await _seed_messages(redis, "u1", [oldest_epoch, now - 300, now - 30])
+
+    counted, window_started = await counted_messages(redis, "u1")
+    assert counted == 3
+    assert window_started == pytest.approx(oldest_epoch)
+
+
+@pytest.mark.asyncio
+async def test_counted_messages_trims_aged_out_entries():
+    redis = _FakeRedis()
+    now = time.time()
+    await _seed_messages(
+        redis, "u1", [now - LIMIT_WINDOW_SECONDS - 10, now - 60]
+    )
+
+    counted, window_started = await counted_messages(redis, "u1")
+    assert counted == 1
+    assert window_started == pytest.approx(now - 60)
+
+
+def test_counted_window_with_no_messages_names_the_full_window():
+    assert format_counted_window(None, 1_700_000_000.0) == "the last 4 hours"
+
+
+def test_counted_window_under_an_hour_reads_singular():
+    now = 1_700_000_000.0
+    assert format_counted_window(now - 30 * 60, now) == "the last hour"
+
+
+def test_counted_window_rounds_hours_up():
+    now = 1_700_000_000.0
+    assert format_counted_window(now - 61 * 60, now) == "the last 2 hours"
+    assert format_counted_window(now - 150 * 60, now) == "the last 3 hours"
+
+
+def test_counted_window_is_capped_at_the_window_length():
+    now = 1_700_000_000.0
+    assert format_counted_window(now - LIMIT_WINDOW_SECONDS, now) == "the last 4 hours"
+    # Defensive: an epoch slightly past the window still caps at 4.
+    assert (
+        format_counted_window(now - LIMIT_WINDOW_SECONDS - 90, now)
+        == "the last 4 hours"
+    )
