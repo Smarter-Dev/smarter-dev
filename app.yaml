@@ -89,6 +89,16 @@ controllers:
   - smarter_dev.web.blog_controller:BlogController
   - smarter_dev.web.blogging_agent_admin:BloggingAgentAdminController
 
+# Skrift-native API keys (sk_ prefix, skrift.api_keys in the main DB).
+# The built-in admin UI at /admin/api-keys is auto-registered with
+# skrift.admin.controller:AdminController above; the bot API's verify_api_key
+# checks these keys first and falls back to legacy sk- keys during rotation
+# (docs/v2/legacy-sunset/01-skrift-api-keys.md).
+api_keys:
+  enabled: true
+  default_expiration_days: 365
+  max_keys_per_user: 10
+
 # Partials system (SPA navigation)
 partials:
   enabled: true

@@ -962,9 +962,11 @@ class SecurityLog(Base):
     )
     
     # Related entities
+    # No ForeignKey: during the key-system migration this column may hold
+    # Skrift-native key IDs (main DB, skrift.api_keys) as well as legacy
+    # public.api_keys IDs, so it is a plain correlation column.
     api_key_id: Mapped[Optional[UUID]] = mapped_column(
         PostgresUUID(as_uuid=True),
-        ForeignKey("api_keys.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
         doc="API key involved in the action (if applicable)"
