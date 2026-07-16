@@ -247,30 +247,8 @@ async def test_leaderboard_degrades_on_api_failure():
 
 
 @pytest.mark.asyncio
-async def test_leaderboard_command_is_admin_gated():
+async def test_leaderboard_command_responds_ephemerally():
     ctx = Mock()
-    ctx.member = Mock(spec=hikari.InteractionMember)
-    ctx.guild_id = "G"
-    ctx.respond = AsyncMock()
-    ctx.options = SimpleNamespace(range="day")
-    ctx.bot, api = _leaderboard_bot()
-
-    with patch(
-        "lightbulb.utils.permissions_for",
-        return_value=hikari.Permissions.NONE,
-    ):
-        await bot_usage_plugin.bot_usage_info(ctx)
-
-    ctx.respond.assert_awaited_once()
-    args, kwargs = ctx.respond.await_args
-    assert "Administrator" in args[0]
-    api.get.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_leaderboard_command_responds_ephemerally_for_admins():
-    ctx = Mock()
-    ctx.member = Mock(spec=hikari.InteractionMember)
     ctx.guild_id = "G"
     ctx.respond = AsyncMock()
     ctx.options = SimpleNamespace(range="month")
@@ -278,11 +256,7 @@ async def test_leaderboard_command_responds_ephemerally_for_admins():
         {"entries": [{"channel_id": "111", "channel_name": None, "total_tokens": 10}]}
     )
 
-    with patch(
-        "lightbulb.utils.permissions_for",
-        return_value=hikari.Permissions.ADMINISTRATOR,
-    ):
-        await bot_usage_plugin.bot_usage_info(ctx)
+    await bot_usage_plugin.bot_usage_info(ctx)
 
     ctx.respond.assert_awaited_once()
     args, kwargs = ctx.respond.await_args

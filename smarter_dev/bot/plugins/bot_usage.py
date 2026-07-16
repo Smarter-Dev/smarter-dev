@@ -26,7 +26,6 @@ import hikari
 import lightbulb
 from redis.exceptions import RedisError
 
-from smarter_dev.bot.plugins.admin_gate import deny_if_not_admin
 from smarter_dev.bot.services.channel_token_budget import DAY_WINDOW_SECONDS
 from smarter_dev.bot.services.channel_token_budget import HOUR_WINDOW_SECONDS
 from smarter_dev.bot.services.channel_token_budget import current_window_usage
@@ -170,16 +169,12 @@ async def bot_usage(ctx: lightbulb.Context) -> None:
 
 
 # ---------------------------------------------------------------------------
-# /bot-usage-info — per-channel token leaderboard (admin only)
+# /bot-usage-info — per-channel token leaderboard
 
 LEADERBOARD_LIMIT = 20
 
 # Command option value → how many days back the leaderboard window reaches.
 LEADERBOARD_RANGES = {"day": 1, "week": 7, "month": 30, "year": 365}
-
-LEADERBOARD_DENIAL_MESSAGE = (
-    "You need the Administrator permission to view the usage leaderboard."
-)
 
 
 def _api_client(bot: Any) -> Any | None:
@@ -245,13 +240,11 @@ async def build_usage_leaderboard(bot: Any, guild_id: str, range_key: str) -> st
 )
 @lightbulb.command(
     "bot-usage-info",
-    "Top channels/threads by bot token usage (admin only)",
+    "Top channels/threads by bot token usage",
 )
 @lightbulb.implements(lightbulb.SlashCommand)
 async def bot_usage_info(ctx: lightbulb.Context) -> None:
-    """Show admins the per-channel token leaderboard for the chosen range."""
-    if await deny_if_not_admin(ctx, LEADERBOARD_DENIAL_MESSAGE):
-        return
+    """Show the per-channel token leaderboard for the chosen range."""
     report = await build_usage_leaderboard(
         ctx.bot, str(ctx.guild_id), ctx.options.range
     )
