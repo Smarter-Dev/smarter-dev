@@ -68,6 +68,13 @@ controllers:
   - smarter_dev.web.blog_controller:BlogController
   - smarter_dev.web.blogging_agent_admin:BloggingAgentAdminController
 
+# Skrift-native API keys — mirrors app.yaml (built-in admin UI at
+# /admin/api-keys auto-registers with AdminController).
+api_keys:
+  enabled: true
+  default_expiration_days: 365
+  max_keys_per_user: 10
+
 middleware:
   - smarter_dev.web.middleware.partial:create_partial_middleware
   - smarter_dev.web.banner_middleware:SudoLaunchBannerMiddleware

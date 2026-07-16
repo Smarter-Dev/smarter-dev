@@ -63,49 +63,77 @@ def hash_api_key(api_key: str) -> str:
     return hashlib.sha256(api_key.encode('utf-8')).hexdigest()
 
 
+LEGACY_API_KEY_PREFIX = "sk-"
+SKRIFT_API_KEY_PREFIX = "sk_"
+
+# Legacy keys are exactly sk- + 43 base64url chars from token_urlsafe(32).
+LEGACY_API_KEY_LENGTH = 46
+
+# Skrift keys are sk_ + secrets.token_urlsafe(32) (43 chars today). Accept a
+# small range around that so a future padding change in the Skrift service
+# doesn't lock the bot out, while still requiring >= 240 bits of entropy.
+SKRIFT_API_KEY_TOKEN_MIN_LENGTH = 40
+SKRIFT_API_KEY_TOKEN_MAX_LENGTH = 64
+
+_BASE64URL_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+)
+
+
+def _is_base64url(token_part: str) -> bool:
+    """Check that every character is a valid base64url character."""
+    return all(char in _BASE64URL_CHARS for char in token_part)
+
+
 def validate_api_key_format(api_key: str) -> bool:
     """Validate API key format without revealing timing information.
-    
+
+    Accepts both key shapes in circulation during the legacy sunset:
+
+    - Legacy: ``sk-`` + exactly 43 base64url chars (46 total)
+    - Skrift: ``sk_`` + 40-64 base64url chars (token_urlsafe(32) => 43)
+
     Args:
         api_key: API key to validate
-        
+
     Returns:
         bool: True if format is valid, False otherwise
-        
+
     Note:
-        This performs constant-time validation to prevent
-        timing attacks that could reveal information about
-        valid key formats.
+        Prefix checks use constant-time comparison to avoid
+        leaking information about valid key formats.
     """
     # Check basic format requirements
     if not isinstance(api_key, str):
         return False
-    
+
     # Check for empty or None
     if not api_key:
         return False
-    
-    # Check length (sk- + 43 chars from token_urlsafe(32))
-    if len(api_key) != 46:
+
+    if len(api_key) < 4:
         return False
-    
-    # Check prefix using constant-time comparison
-    if not secrets.compare_digest(api_key[:3], "sk-"):
-        return False
-    
-    # Validate the token part contains only valid base64url characters
-    # base64url uses: A-Z, a-z, 0-9, -, _
+
+    prefix = api_key[:3]
     token_part = api_key[3:]
-    if len(token_part) != 43:
-        return False
-    
-    # Check each character is valid for base64url
-    valid_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
-    for char in token_part:
-        if char not in valid_chars:
+
+    # LEGACY-FALLBACK: remove the sk- shape after key rotation (see runbook
+    # docs/v2/legacy-sunset/runbooks/01-key-rotation.md)
+    if secrets.compare_digest(prefix, LEGACY_API_KEY_PREFIX):
+        if len(api_key) != LEGACY_API_KEY_LENGTH:
             return False
-    
-    return True
+        return _is_base64url(token_part)
+
+    if secrets.compare_digest(prefix, SKRIFT_API_KEY_PREFIX):
+        if not (
+            SKRIFT_API_KEY_TOKEN_MIN_LENGTH
+            <= len(token_part)
+            <= SKRIFT_API_KEY_TOKEN_MAX_LENGTH
+        ):
+            return False
+        return _is_base64url(token_part)
+
+    return False
 
 
 def secure_compare_hashes(provided_hash: str, stored_hash: str) -> bool:
