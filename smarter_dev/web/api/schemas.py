@@ -866,6 +866,22 @@ class ChatAgentTurnCreateResponse(BaseAPIModel):
     summarizer_cost_usd_total: str
 
 
+class ChatUsageLeaderboardEntry(BaseAPIModel):
+    """One channel/thread's summed chat tokens for the leaderboard window."""
+
+    channel_id: str
+    channel_name: str | None = None
+    total_tokens: int
+
+
+class ChatUsageLeaderboardResponse(BaseAPIModel):
+    """Top channels by chat-token usage since ``since`` (``days`` ago)."""
+
+    since: datetime
+    days: int
+    entries: list[ChatUsageLeaderboardEntry]
+
+
 # ============================================================================
 # Channel Model Override Schemas
 # ============================================================================

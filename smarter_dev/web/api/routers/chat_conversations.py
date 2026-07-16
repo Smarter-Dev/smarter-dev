@@ -1,20 +1,21 @@
 """Chat-agent conversation API endpoints.
 
 POST endpoints used by the Discord bot to persist engagements and turns
-into the Skrift DB (NOT the legacy DB). The operator dashboard reads
-directly from the DB; these endpoints exist only for the bot writer.
+into the Skrift DB (NOT the legacy DB), plus the usage-leaderboard read
+backing ``/bot-usage-info``. The operator dashboard reads directly from
+the DB.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select, update
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.database import get_skrift_db_session
@@ -25,6 +26,8 @@ from smarter_dev.web.api.schemas import (
     ChatAgentEngagementStartResponse,
     ChatAgentTurnCreate,
     ChatAgentTurnCreateResponse,
+    ChatUsageLeaderboardEntry,
+    ChatUsageLeaderboardResponse,
 )
 from smarter_dev.web.models import (
     CandidateBlogTopic,
@@ -252,4 +255,65 @@ async def create_turn(
         chat_cost_usd=str(chat_cost),
         voice_cost_usd=str(voice_cost),
         summarizer_cost_usd_total=str(summarizer_cost_total),
+    )
+
+
+async def channel_usage_leaderboard(
+    db: AsyncSession, *, guild_id: str, since: datetime, limit: int
+):
+    """Top channels/threads by chat tokens spent since ``since``.
+
+    Sums each turn's chat input+output tokens (voice/compaction buckets are
+    excluded — this mirrors what the bot-side budget meter counts), grouped
+    by the engagement's channel_id, descending. ``channel_name`` is the
+    engagements' most recent non-null snapshot, for display fallback.
+    """
+    total_tokens = func.sum(
+        ChatAgentTurn.chat_tokens_input + ChatAgentTurn.chat_tokens_output
+    ).label("total_tokens")
+    stmt = (
+        select(
+            ChatAgentEngagement.channel_id,
+            func.max(ChatAgentEngagement.channel_name).label("channel_name"),
+            total_tokens,
+        )
+        .select_from(ChatAgentTurn)
+        .join(
+            ChatAgentEngagement,
+            ChatAgentTurn.engagement_id == ChatAgentEngagement.id,
+        )
+        .where(ChatAgentEngagement.guild_id == guild_id)
+        .where(ChatAgentTurn.started_at >= since)
+        .group_by(ChatAgentEngagement.channel_id)
+        .order_by(total_tokens.desc())
+        .limit(limit)
+    )
+    return (await db.execute(stmt)).all()
+
+
+@router.get("/usage-leaderboard", response_model=ChatUsageLeaderboardResponse)
+async def usage_leaderboard(
+    request: Request,
+    api_key: APIKey,
+    db: SkriftSession,
+    guild_id: str,
+    days: int = Query(default=1, ge=1, le=366),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> ChatUsageLeaderboardResponse:
+    """Top channels by chat-token usage over the last ``days`` days."""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = await channel_usage_leaderboard(
+        db, guild_id=guild_id, since=since, limit=limit
+    )
+    return ChatUsageLeaderboardResponse(
+        since=since,
+        days=days,
+        entries=[
+            ChatUsageLeaderboardEntry(
+                channel_id=row.channel_id,
+                channel_name=row.channel_name,
+                total_tokens=int(row.total_tokens or 0),
+            )
+            for row in rows
+        ],
     )
