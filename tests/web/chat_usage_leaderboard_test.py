@@ -8,6 +8,7 @@ from datetime import timedelta
 
 from smarter_dev.web.api.routers.chat_conversations import (
     channel_usage_leaderboard,
+    guild_total_tokens,
 )
 from smarter_dev.web.models import ChatAgentEngagement, ChatAgentTurn
 
@@ -127,3 +128,33 @@ async def test_channel_name_snapshot_is_surfaced(db_session):
 
     rows = await _leaderboard(db_session)
     assert rows[0].channel_name == "general"
+
+
+async def test_guild_total_sums_all_time_across_channels(db_session):
+    first = _engagement(channel_id="C1")
+    second = _engagement(channel_id="C2")
+    old = datetime.now(UTC) - timedelta(days=400)
+    db_session.add_all(
+        [
+            first,
+            second,
+            _turn(first, 100, 50),
+            _turn(second, 200, 0, started_at=old),
+        ]
+    )
+    await db_session.commit()
+
+    assert await guild_total_tokens(db_session, guild_id="G1") == 350
+    assert await guild_total_tokens(db_session, guild_id="other") == 0
+
+
+async def test_guild_total_respects_the_window(db_session):
+    engagement = _engagement(channel_id="C1")
+    old = datetime.now(UTC) - timedelta(days=10)
+    db_session.add_all(
+        [engagement, _turn(engagement, 100, 0), _turn(engagement, 900, 0, started_at=old)]
+    )
+    await db_session.commit()
+
+    since = datetime.now(UTC) - timedelta(days=7)
+    assert await guild_total_tokens(db_session, guild_id="G1", since=since) == 100
