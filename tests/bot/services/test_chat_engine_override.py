@@ -102,6 +102,13 @@ def fake_memory():
 def fake_redis():
     r = MagicMock()
     r.set = AsyncMock(return_value=True)
+    # The engine also records per-user message-limit charges through a
+    # pipeline on this same Redis — make that path awaitable and inert.
+    pipe = MagicMock()
+    pipe.execute = AsyncMock(return_value=[0, True])
+    pipe.__aenter__ = AsyncMock(return_value=pipe)
+    pipe.__aexit__ = AsyncMock(return_value=False)
+    r.pipeline = MagicMock(return_value=pipe)
     return r
 
 
