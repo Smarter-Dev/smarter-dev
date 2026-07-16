@@ -22,6 +22,8 @@ _DO_MODEL = get_model("kimi-k2-6")  # open weights, no reasoning knob
 _DO_REASONING_MODEL = get_model("glm-5-2")  # open weights with reasoning knob
 _GOOGLE_MODEL = get_model("gemini-3-1-flash-lite")
 _OPENAI_MODEL = get_model("gpt-5-4")
+_ANTHROPIC_MODEL = get_model("claude-sonnet-5")
+_ANTHROPIC_NO_REASONING_MODEL = get_model("claude-haiku-4-5")
 
 
 def test_digitalocean_threads_base_url_and_key(monkeypatch):
@@ -107,6 +109,19 @@ def test_openai_model_reads_openai_key(monkeypatch):
     )
 
 
+def test_anthropic_model_reads_anthropic_key(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-secret")
+    with (
+        patch.object(model_router, "AnthropicModel") as anthropic_model,
+        patch.object(model_router, "AnthropicProvider") as provider,
+    ):
+        build_model_for(_ANTHROPIC_MODEL)
+    provider.assert_called_once_with(api_key="ant-secret")
+    anthropic_model.assert_called_once_with(
+        _ANTHROPIC_MODEL.model_id, provider=provider.return_value
+    )
+
+
 def test_unhandled_provider_raises():
     bogus = CatalogModel(
         key="x",
@@ -131,6 +146,12 @@ def test_model_settings_per_provider_uses_model_default():
     # Open reasoning model routes reasoning through the chat-model settings.
     do_settings = model_settings_for(_DO_REASONING_MODEL)
     assert do_settings["openai_reasoning_effort"] == "medium"
+    # Claude Sonnet 5 defaults to high effort with adaptive thinking.
+    anthropic_settings = model_settings_for(_ANTHROPIC_MODEL)
+    assert anthropic_settings["anthropic_thinking"] == {"type": "adaptive"}
+    assert anthropic_settings["anthropic_effort"] == "high"
+    # Claude Haiku 4.5 has no effort knob -> no settings at all.
+    assert model_settings_for(_ANTHROPIC_NO_REASONING_MODEL) is None
 
 
 def test_model_settings_applies_selected_reasoning_level():
@@ -140,6 +161,8 @@ def test_model_settings_applies_selected_reasoning_level():
     assert google_settings["google_thinking_config"] == {"thinking_level": "LOW"}
     do_settings = model_settings_for(_DO_REASONING_MODEL, ReasoningLevel.HIGH)
     assert do_settings["openai_reasoning_effort"] == "high"
+    anthropic_settings = model_settings_for(_ANTHROPIC_MODEL, ReasoningLevel.MAX)
+    assert anthropic_settings["anthropic_effort"] == "max"
 
 
 def test_model_settings_clamps_unsupported_reasoning_level():

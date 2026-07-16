@@ -4,6 +4,7 @@ Routing by :class:`~smarter_dev.shared.model_catalog.ModelProvider`:
 
 - ``GOOGLE``       -> ``GoogleModel`` + ``GoogleProvider`` (Gemini keys).
 - ``OPENAI``       -> ``OpenAIResponsesModel`` + ``OpenAIProvider`` (OpenAI key).
+- ``ANTHROPIC``    -> ``AnthropicModel`` + ``AnthropicProvider`` (Anthropic key).
 - ``DIGITALOCEAN`` -> ``OpenAIChatModel`` pointed at DO's OpenAI-compatible
   serverless-inference Chat Completions endpoint. DO exposes
   ``/v1/chat/completions`` (not OpenAI's Responses API), so the chat model —
@@ -20,6 +21,7 @@ from __future__ import annotations
 import os
 
 from pydantic_ai.models import Model
+from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.models.openai import (
     OpenAIChatModel,
@@ -28,6 +30,7 @@ from pydantic_ai.models.openai import (
     OpenAIResponsesModelSettings,
 )
 from pydantic_ai.profiles.openai import OpenAIModelProfile
+from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
@@ -52,6 +55,11 @@ def build_model_for(model: CatalogModel) -> Model:
         return OpenAIResponsesModel(
             model.model_id,
             provider=OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY") or ""),
+        )
+    if model.provider is ModelProvider.ANTHROPIC:
+        return AnthropicModel(
+            model.model_id,
+            provider=AnthropicProvider(api_key=os.getenv("ANTHROPIC_API_KEY") or ""),
         )
     if model.provider is ModelProvider.DIGITALOCEAN:
         settings = get_settings()
@@ -96,4 +104,10 @@ def model_settings_for(
         )
     if model.provider is ModelProvider.OPENAI:
         return OpenAIResponsesModelSettings(openai_reasoning_effort=effective.value)
+    if model.provider is ModelProvider.ANTHROPIC:
+        # Claude 4.6+ thinking is adaptive; effort tunes its depth.
+        return AnthropicModelSettings(
+            anthropic_thinking={"type": "adaptive"},
+            anthropic_effort=effective.value,
+        )
     return OpenAIChatModelSettings(openai_reasoning_effort=effective.value)

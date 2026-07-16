@@ -116,6 +116,8 @@ def test_provider_routing_by_family():
             assert model.provider is ModelProvider.GOOGLE
         elif model.family == "GPT":
             assert model.provider is ModelProvider.OPENAI
+        elif model.family == "Claude":
+            assert model.provider is ModelProvider.ANTHROPIC
         elif model.family in _DIGITALOCEAN_FAMILIES:
             assert model.provider is ModelProvider.DIGITALOCEAN
         else:  # pragma: no cover - guarded by test_catalog_entries_are_well_formed
