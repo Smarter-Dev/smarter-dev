@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -13,6 +15,7 @@ import pytest
 from redis.exceptions import RedisError
 
 from smarter_dev.bot.plugins import bot_usage as bot_usage_plugin
+from smarter_dev.bot.services.channel_token_budget import HOUR_WINDOW_SECONDS
 from smarter_dev.bot.plugins.bot_usage import build_usage_report
 from smarter_dev.bot.plugins.bot_usage import format_compact_tokens
 from smarter_dev.bot.services.exceptions import APIError
@@ -85,8 +88,6 @@ def test_format_compact_tokens(count, rendered):
 
 @pytest.mark.asyncio
 async def test_report_shows_counter_over_its_actual_span():
-    import time
-
     bot = _bot(redis=MagicMock(), override=_override(daily=1_000_000, hourly=100_000))
     counters = _patch_counters(
         counted=(32, time.time() - 30 * 60), window_usage=(76_000, 512_000)
@@ -111,16 +112,34 @@ async def test_report_zero_budget_reads_unlimited():
 
 
 @pytest.mark.asyncio
-async def test_report_without_override_says_not_metered():
+async def test_report_without_override_shows_usage_over_unlimited():
     bot = _bot(redis=MagicMock(), override=None)
-    counters = _patch_counters()
+    counters = _patch_counters(window_usage=(76_000, 512_000))
     with counters[0], counters[1]:
         report = await build_usage_report(bot, "200", "G", "C")
 
-    assert "not metered — this channel has no token budget" in report
+    assert "**Bot usage here:** 76k/unlimited this hour · 512k/unlimited today" in report
     # The personal counter still renders.
     assert f"**Your messages:** 0/{USER_MESSAGE_LIMIT}" in report
     assert "in the last 4 hours" in report
+
+
+@pytest.mark.asyncio
+async def test_report_maxed_budget_window_shows_its_reset_countdown():
+    bot = _bot(redis=MagicMock(), override=_override(daily=1_000_000, hourly=100_000))
+    counters = _patch_counters(window_usage=(100_000, 512_000))
+    with counters[0], counters[1]:
+        report = await build_usage_report(bot, "200", "G", "C")
+
+    match = re.search(r"100k/100k this hour \(resets <t:(\d+):R>\)", report)
+    assert match, report
+    reset_epoch = int(match.group(1))
+    # The countdown targets the next wall-clock hour boundary.
+    assert reset_epoch % HOUR_WINDOW_SECONDS == 0
+    assert time.time() < reset_epoch <= time.time() + HOUR_WINDOW_SECONDS
+    # The unmaxed day window carries no countdown.
+    assert "512k/1m today" in report
+    assert report.count("resets") == 1
 
 
 @pytest.mark.asyncio

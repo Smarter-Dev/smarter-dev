@@ -1,9 +1,11 @@
-"""Per-channel LLM token budgets, backed by Redis fixed-window counters.
+"""Per-channel LLM token usage windows and budgets, backed by Redis counters.
 
-An admin can cap how many chat tokens a channel spends per hour and per day
-(see the ``/setmodel`` override). Enforcement runs bot-side inside
-:mod:`chat_engine`, so this module talks to the bot's Redis directly rather than
-round-tripping the web API every turn.
+Every channel's chat-token spend is metered into hour and day windows (threads
+count as their own channels). An admin can additionally cap the spend per hour
+and per day via the ``/setmodel`` override — only channels with an override
+have budgets enforced. Enforcement runs bot-side inside :mod:`chat_engine`, so
+this module talks to the bot's Redis directly rather than round-tripping the
+web API every turn.
 
 Same shape as :mod:`smarter_dev.web.image_quota`: an ``INCRBY`` per turn with
 ``EXPIRE ... NX`` so the first hit of a window fixes its expiry and later hits
@@ -33,6 +35,11 @@ def _window_index(now_epoch: float, window_seconds: int) -> int:
 def budget_key(channel_id: str, scope: str, window_index: int) -> str:
     """Redis key for one channel's ``scope`` ("hour"/"day") window."""
     return f"modelbudget:{channel_id}:{scope}:{window_index}"
+
+
+def next_window_reset_epoch(now_epoch: float, window_seconds: int) -> int:
+    """Epoch second the current wall-aligned ``window_seconds`` window rolls over."""
+    return (_window_index(now_epoch, window_seconds) + 1) * window_seconds
 
 
 # Ordered (scope, window length) pairs — the two windows every channel tracks.
@@ -73,7 +80,7 @@ async def over_budget_reset_epoch(
         window_index = _window_index(now_epoch, window_seconds)
         key = budget_key(channel_id, scope, window_index)
         if await _consumed(redis, key) >= budget:
-            window_reset_epoch = (window_index + 1) * window_seconds
+            window_reset_epoch = next_window_reset_epoch(now_epoch, window_seconds)
             if latest_reset_epoch is None or window_reset_epoch > latest_reset_epoch:
                 latest_reset_epoch = window_reset_epoch
     return latest_reset_epoch

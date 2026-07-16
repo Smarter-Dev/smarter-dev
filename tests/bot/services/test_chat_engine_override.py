@@ -263,10 +263,15 @@ async def test_under_budget_runs_and_meters_usage(fake_memory, fake_redis):
 
 
 @pytest.mark.asyncio
-async def test_no_override_uses_default_and_skips_budget(fake_memory, fake_redis):
-    """No override → default agent, no budget check, no usage metering."""
+async def test_no_override_uses_default_and_skips_enforcement_but_meters(
+    fake_memory, fake_redis
+):
+    """No override → default agent and no budget *enforcement*, but the turn's
+    token usage is still metered so ``/bot-usage`` has numbers everywhere."""
     agent_mock = MagicMock()
-    agent_mock.run = AsyncMock(return_value=_result(_send()))
+    agent_mock.run = AsyncMock(
+        return_value=_result(_send(), input_tokens=100, output_tokens=50)
+    )
     engine, service = _make_engine(None, fake_redis)
 
     get_agent = patch(
@@ -285,7 +290,7 @@ async def test_no_override_uses_default_and_skips_budget(fake_memory, fake_redis
 
     get_agent_mock.assert_called_once_with(None, None)
     over_budget_mock.assert_not_called()
-    add_usage_mock.assert_not_called()
+    add_usage_mock.assert_awaited_once_with(fake_redis, "42", 150)
 
 
 @pytest.mark.asyncio
