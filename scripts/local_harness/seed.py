@@ -4,9 +4,11 @@ Run as a subprocess by ``run.py`` with DATABASE_URL / LEGACY_DATABASE_URL
 pointing at the harness postgres. Seeds:
 
 - legacy DB (public schema): the bot-economy/admin tables plus a
-  known-plaintext ``sk-`` API key the checks authenticate with.
+  known-plaintext legacy ``sk-`` API key the checks authenticate with.
 - main DB (skrift schema): quests, feature flags, chat-agent engagements,
-  member activity, and a channel handler.
+  member activity, a channel handler, and a known-plaintext Skrift-native
+  ``sk_`` service API key (dual-verify window: both key shapes must
+  authenticate until the legacy row is dropped in phase 05).
 
 The Skrift admin user is NOT seeded here — the checks log in through the dev
 dummy auth provider, which creates the user and grants the admin role itself.
@@ -22,6 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from scripts.local_harness import config
 from skrift.db.models.setting import Setting
+from skrift.db.models.user import User
+from skrift.db.services import api_key_service
 from skrift.db.services.setting_service import (
     SETUP_COMPLETED_AT_KEY,
     SITE_NAME_KEY,
@@ -305,6 +309,43 @@ async def _create_legacy_leftover_tables(database_url: str) -> None:
     await engine.dispose()
 
 
+async def _seed_skrift_bot_api_key(database_url: str) -> None:
+    """Seed the Skrift-native ``sk_`` service key the checks authenticate with.
+
+    Mirrors production minting — ``api_key_service.create_api_key`` with a
+    dedicated service-owner user — then re-keys the row to the deterministic
+    ``config.SKRIFT_BOT_API_KEY``: the random raw key ``create_api_key``
+    returns would be lost across the seed/checks process boundary, so the row
+    must hash a plaintext both processes can derive.
+    """
+    engine = create_async_engine(database_url).execution_options(
+        schema_translate_map={None: "skrift"}
+    )
+    session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with session_maker() as session:
+        service_user = User(
+            email=config.BOT_SERVICE_USER_EMAIL,
+            name="Harness Bot Service",
+            is_active=True,
+        )
+        session.add(service_user)
+        await session.commit()
+
+        skrift_api_key, _raw_key, _raw_refresh = await api_key_service.create_api_key(
+            session,
+            service_user.id,
+            config.BOT_SERVICE_NAME,
+            description="Known-plaintext Skrift key for local smoke checks",
+            scoped_permissions=["bot:read", "bot:write"],
+            principal_type="service",
+            service_name=config.BOT_SERVICE_NAME,
+        )
+        skrift_api_key.key_hash = hash_api_key(config.SKRIFT_BOT_API_KEY)
+        skrift_api_key.key_prefix = config.SKRIFT_BOT_API_KEY[:12]
+        await session.commit()
+    await engine.dispose()
+
+
 async def _insert_all(database_url: str, rows: list[object], *, skrift_schema: bool) -> None:
     engine = create_async_engine(database_url)
     if skrift_schema:
@@ -320,6 +361,7 @@ async def seed() -> None:
     await _create_legacy_leftover_tables(config.LEGACY_DATABASE_URL)
     await _insert_all(config.LEGACY_DATABASE_URL, _legacy_rows(), skrift_schema=False)
     await _insert_all(config.MAIN_DATABASE_URL, _main_rows(), skrift_schema=True)
+    await _seed_skrift_bot_api_key(config.MAIN_DATABASE_URL)
 
 
 if __name__ == "__main__":

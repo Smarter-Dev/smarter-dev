@@ -6,8 +6,10 @@ is one row; the runner in ``checks.py`` interprets them in order.
 
 - ``ApiCheck.path`` is relative to /api and may contain ``{saved:name}``
   placeholders filled from values captured by earlier checks (``save_key``).
-- ``auth`` selects the Authorization header: ``bot`` (seeded known key),
-  ``unknown_key`` (valid format, not in DB), ``malformed_key``, or ``none``.
+- ``auth`` selects the Authorization header: ``bot`` (seeded legacy sk- key),
+  ``skrift_bot`` (seeded Skrift-native sk_ key), ``unknown_key`` /
+  ``unknown_skrift_key`` (valid format, not in DB), ``malformed_key``, or
+  ``none``.
 - ``validate`` (optional) receives the parsed JSON body and returns an error
   string, or None when the body is acceptable.
 """
@@ -86,8 +88,19 @@ API_CHECKS: tuple[ApiCheck, ...] = (
              validate=_expect_field("status", "healthy")),
     ApiCheck("auth-status-valid-key", "GET", "/auth/status",
              validate=_expect_keys("authenticated")),
+    # Dual-verify window (phase 01): the seeded Skrift-native sk_ key must
+    # authenticate alongside the legacy sk- key above; drop the legacy checks
+    # in phase 05.
+    ApiCheck("auth-status-skrift-key", "GET", "/auth/status",
+             auth="skrift_bot", validate=_expect_field("authenticated", True)),
+    ApiCheck("auth-validate-skrift-key", "POST", "/auth/validate",
+             auth="skrift_bot", validate=_expect_field("valid", True)),
+    ApiCheck("bytes-config-skrift-key", "GET", f"/guilds/{_G}/bytes/config",
+             auth="skrift_bot", validate=_expect_field("daily_amount", 10)),
     ApiCheck("auth-unknown-key-401", "GET", "/auth/status",
              auth="unknown_key", expect_status=(401,)),
+    ApiCheck("auth-unknown-skrift-key-401", "GET", "/auth/status",
+             auth="unknown_skrift_key", expect_status=(401,)),
     ApiCheck("auth-malformed-key-401", "GET", f"/guilds/{_G}/bytes/config",
              auth="malformed_key", expect_status=(401,)),
     ApiCheck("auth-missing-key-401", "GET", f"/guilds/{_G}/bytes/config",

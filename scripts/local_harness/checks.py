@@ -30,7 +30,9 @@ from scripts.local_harness.expectations import (
 
 _AUTH_HEADERS: dict[str, dict[str, str]] = {
     "bot": {"Authorization": f"Bearer {config.BOT_API_KEY}"},
+    "skrift_bot": {"Authorization": f"Bearer {config.SKRIFT_BOT_API_KEY}"},
     "unknown_key": {"Authorization": f"Bearer {config.UNKNOWN_API_KEY}"},
+    "unknown_skrift_key": {"Authorization": f"Bearer {config.UNKNOWN_SKRIFT_API_KEY}"},
     "malformed_key": {"Authorization": "Bearer not-a-valid-key"},
     "none": {},
 }

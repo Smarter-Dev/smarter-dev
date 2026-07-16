@@ -10,8 +10,12 @@ What this does:
   2. Mark Skrift setup complete (sets `setup_completed_at` in
      `skrift.settings`) so the dispatcher serves the real app instead
      of redirecting `/api/*` to the setup wizard.
-  3. Insert a `local-bot` row in `bc_websites.public.api_keys` with
-     scopes `bot:read,bot:write` (or rotate the existing one).
+  3. Mint a Skrift-native `discord-bot` service key (`sk_...`) in the
+     main DB `skrift.api_keys` table, owned by a dedicated
+     `bot@smarter.dev` service user (or rotate the existing one).
+     Legacy `sk-` keys are no longer minted here — the dual-verify web
+     API still accepts them, but new local setups go straight to the
+     Skrift key system (docs/v2/legacy-sunset/01-skrift-api-keys.md).
   4. Write `BOT_API_KEY=<plaintext>` into `.env` so the bot service
      picks it up on next start.
 
@@ -29,15 +33,24 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import re
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from skrift.db.models.api_key import APIKey as SkriftAPIKey
+from skrift.db.models.user import User
+from skrift.db.services import api_key_service
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = REPO_ROOT / ".env"
-BOT_KEY_NAME = "local-bot"
+BOT_SERVICE_NAME = "discord-bot"
+BOT_SERVICE_USER_EMAIL = "bot@smarter.dev"
 BOT_KEY_SCOPES = ["bot:read", "bot:write"]
 BOT_KEY_DESCRIPTION = "Local development bot key (managed by scripts/bootstrap.py)."
 
@@ -113,79 +126,99 @@ async def _mark_setup_complete() -> str:
         await engine.dispose()
 
 
+async def _get_or_create_bot_service_user(session: AsyncSession) -> User:
+    """Fetch (or create) the dedicated service user that owns the bot key."""
+    existing_user = (
+        await session.execute(select(User).where(User.email == BOT_SERVICE_USER_EMAIL))
+    ).scalar_one_or_none()
+    if existing_user is not None:
+        return existing_user
+
+    service_user = User(
+        email=BOT_SERVICE_USER_EMAIL,
+        name=BOT_SERVICE_NAME,
+        is_active=True,
+    )
+    session.add(service_user)
+    await session.commit()
+    return service_user
+
+
+async def provision_skrift_bot_key(
+    session: AsyncSession, env_key: str | None, rotate: bool
+) -> tuple[str, str]:
+    """Reuse, rotate, or create the Skrift-native bot service key.
+
+    Keys live in the main DB ``skrift.api_keys`` table (the session must be
+    bound there), minted via ``api_key_service.create_api_key`` with
+    ``principal_type='service'`` and owned by the ``bot@smarter.dev`` service
+    user, mirroring docs/v2/legacy-sunset/runbooks/01-rotate-bot-key.md.
+
+    Returns (raw_plaintext_key, status) where status is one of:
+        'reused' | 'rotated' | 'created'
+    """
+    service_user = await _get_or_create_bot_service_user(session)
+
+    active_bot_keys = list(
+        (
+            await session.execute(
+                select(SkriftAPIKey).where(
+                    SkriftAPIKey.service_name == BOT_SERVICE_NAME,
+                    SkriftAPIKey.principal_type == "service",
+                    SkriftAPIKey.is_active.is_(True),
+                )
+            )
+        ).scalars().all()
+    )
+
+    # If .env already holds a key whose hash matches an active row, the
+    # existing setup is consistent; reuse without rotation.
+    if env_key and not rotate:
+        env_key_hash = hashlib.sha256(env_key.encode("utf-8")).hexdigest()
+        if any(key.key_hash == env_key_hash for key in active_bot_keys):
+            return env_key, "reused"
+
+    # Either there's no usable row, no matching .env key, or the user
+    # requested rotation: deactivate the stale rows and mint a fresh key.
+    for stale_key in active_bot_keys:
+        stale_key.is_active = False
+    status = "rotated" if active_bot_keys else "created"
+
+    _api_key, raw_key, _raw_refresh = await api_key_service.create_api_key(
+        session,
+        service_user.id,
+        BOT_SERVICE_NAME,
+        description=BOT_KEY_DESCRIPTION,
+        scoped_permissions=BOT_KEY_SCOPES,
+        principal_type="service",
+        service_name=BOT_SERVICE_NAME,
+    )
+    return raw_key, status
+
+
 async def _provision_bot_key(rotate: bool) -> tuple[str, str]:
-    """Insert or rotate the bot API key in the legacy DB.
+    """Provision the Skrift-native bot API key against the main DB.
 
     Returns (full_plaintext_key, status) where status is one of:
         'reused' | 'rotated' | 'created'
     """
-    from sqlalchemy import select
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-
     from smarter_dev.shared.config import get_settings
     from smarter_dev.shared.database import (
         convert_postgres_url_for_asyncpg,
         create_async_engine,
     )
-    from smarter_dev.web.models import APIKey
-    from smarter_dev.web.security import generate_secure_api_key, hash_api_key
 
     settings = get_settings()
-    db_url = convert_postgres_url_for_asyncpg(settings.effective_legacy_database_url)
-    engine = create_async_engine(db_url)
+    db_url = convert_postgres_url_for_asyncpg(settings.effective_database_url)
+    engine = create_async_engine(db_url).execution_options(
+        schema_translate_map={None: "skrift"}
+    )
 
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-            existing = (
-                await session.execute(
-                    select(APIKey).where(
-                        APIKey.name == BOT_KEY_NAME,
-                        APIKey.is_active.is_(True),
-                    )
-                )
-            ).scalar_one_or_none()
-
-            env_key = _read_env_bot_key()
-
-            # If a row exists AND .env already holds a key whose hash matches it,
-            # the existing setup is consistent; reuse without rotation.
-            if existing and env_key and not rotate:
-                if hash_api_key(env_key) == existing.key_hash:
-                    return env_key, "reused"
-
-            # Either there's no row, no matching .env key, or the user requested
-            # rotation. Generate a fresh key, swap in (or create) the row.
-            full_key, key_hash, key_prefix = generate_secure_api_key()
-
-            if existing:
-                existing.key_hash = key_hash
-                existing.key_prefix = key_prefix
-                existing.scopes = BOT_KEY_SCOPES
-                existing.description = BOT_KEY_DESCRIPTION
-                existing.is_active = True
-                existing.revoked_at = None
-                status = "rotated"
-            else:
-                session.add(
-                    APIKey(
-                        name=BOT_KEY_NAME,
-                        description=BOT_KEY_DESCRIPTION,
-                        key_hash=key_hash,
-                        key_prefix=key_prefix,
-                        scopes=BOT_KEY_SCOPES,
-                        is_active=True,
-                        rate_limit_per_second=100,
-                        rate_limit_per_minute=2000,
-                        rate_limit_per_15_minutes=20000,
-                        rate_limit_per_hour=50000,
-                        usage_count=0,
-                        created_by="scripts/bootstrap.py",
-                    )
-                )
-                status = "created"
-
-            await session.commit()
-            return full_key, status
+            return await provision_skrift_bot_key(
+                session, env_key=_read_env_bot_key(), rotate=rotate
+            )
     finally:
         await engine.dispose()
 
@@ -220,7 +253,7 @@ def main() -> None:
     print(
         textwrap.dedent(
             f"""\
-            ==> bot API key {key_status} ({BOT_KEY_NAME})
+            ==> bot API key {key_status} (Skrift service key '{BOT_SERVICE_NAME}')
                 scopes:   {", ".join(BOT_KEY_SCOPES)}
                 prefix:   {full_key[:12]}...
                 .env:     BOT_API_KEY updated at {ENV_FILE}
