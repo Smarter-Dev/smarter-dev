@@ -26,6 +26,7 @@ import hikari
 import lightbulb
 from redis.exceptions import RedisError
 
+from smarter_dev.bot.plugins.admin_gate import deny_if_not_admin
 from smarter_dev.bot.services.channel_token_budget import DAY_WINDOW_SECONDS
 from smarter_dev.bot.services.channel_token_budget import HOUR_WINDOW_SECONDS
 from smarter_dev.bot.services.channel_token_budget import current_window_usage
@@ -164,6 +165,95 @@ async def bot_usage(ctx: lightbulb.Context) -> None:
         str(ctx.author.id),
         str(ctx.guild_id),
         str(ctx.channel_id),
+    )
+    await ctx.respond(report, flags=hikari.MessageFlag.EPHEMERAL)
+
+
+# ---------------------------------------------------------------------------
+# /bot-usage-info — per-channel token leaderboard (admin only)
+
+LEADERBOARD_LIMIT = 20
+
+# Command option value → how many days back the leaderboard window reaches.
+LEADERBOARD_RANGES = {"day": 1, "week": 7, "month": 30, "year": 365}
+
+LEADERBOARD_DENIAL_MESSAGE = (
+    "You need the Administrator permission to view the usage leaderboard."
+)
+
+
+def _api_client(bot: Any) -> Any | None:
+    """The bot's shared APIClient, or None when unavailable (fail-soft)."""
+    data = getattr(bot, "d", None)
+    if not isinstance(data, dict):
+        return None
+    return data.get("api_client")
+
+
+async def build_usage_leaderboard(bot: Any, guild_id: str, range_key: str) -> str:
+    """The `/bot-usage-info` response: top channels by chat tokens.
+
+    Reads the persisted turn data via the web API — the Redis meters only
+    hold the current hour/day windows, so anything longer comes from the
+    database. Failures degrade to a friendly one-liner.
+    """
+    days = LEADERBOARD_RANGES.get(range_key, 1)
+    api = _api_client(bot)
+    if api is None:
+        return f"Usage data is {_UNAVAILABLE}."
+    try:
+        resp = await api.get(
+            "/chat-conversations/usage-leaderboard",
+            params={
+                "guild_id": guild_id,
+                "days": days,
+                "limit": LEADERBOARD_LIMIT,
+            },
+        )
+        if resp.status_code >= 400:
+            raise APIError(f"usage-leaderboard returned {resp.status_code}")
+        payload = resp.json()
+    except Exception:
+        logger.warning(
+            "Failed to fetch usage leaderboard for guild %s", guild_id,
+            exc_info=True,
+        )
+        return f"Usage data is {_UNAVAILABLE}."
+
+    entries = payload.get("entries", [])
+    if not entries:
+        return f"No bot token usage recorded in the last {range_key}."
+
+    lines = [
+        f"**Bot token usage — last {range_key}** "
+        f"(top {len(entries)} channels)"
+    ]
+    for position, entry in enumerate(entries, start=1):
+        tokens = format_compact_tokens(int(entry["total_tokens"]))
+        lines.append(f"{position}. <#{entry['channel_id']}> — {tokens}")
+    return "\n".join(lines)
+
+
+@plugin.command
+@lightbulb.option(
+    "range",
+    "Time range for the leaderboard",
+    type=hikari.OptionType.STRING,
+    choices=list(LEADERBOARD_RANGES),
+    required=False,
+    default="day",
+)
+@lightbulb.command(
+    "bot-usage-info",
+    "Top channels/threads by bot token usage (admin only)",
+)
+@lightbulb.implements(lightbulb.SlashCommand)
+async def bot_usage_info(ctx: lightbulb.Context) -> None:
+    """Show admins the per-channel token leaderboard for the chosen range."""
+    if await deny_if_not_admin(ctx, LEADERBOARD_DENIAL_MESSAGE):
+        return
+    report = await build_usage_leaderboard(
+        ctx.bot, str(ctx.guild_id), ctx.options.range
     )
     await ctx.respond(report, flags=hikari.MessageFlag.EPHEMERAL)
 
