@@ -187,16 +187,19 @@ admin_routes = [
     Route(
         "/conversations", admin_required(conversations_list), name="admin_conversations"
     ),
-    Route(
-        "/conversations/{conversation_id}",
-        admin_required(conversation_detail),
-        name="admin_conversation_detail",
-    ),
+    # NOTE: /conversations/cleanup must be registered BEFORE the
+    # /conversations/{conversation_id} catch-all or Starlette routes
+    # "cleanup" into the detail view as a (non-UUID) conversation id.
     Route(
         "/conversations/cleanup",
         admin_required(cleanup_expired_conversations),
         methods=["GET", "POST"],
         name="admin_conversation_cleanup",
+    ),
+    Route(
+        "/conversations/{conversation_id}",
+        admin_required(conversation_detail),
+        name="admin_conversation_detail",
     ),
     # Campaign signups
     Route(
