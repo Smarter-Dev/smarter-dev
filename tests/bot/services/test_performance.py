@@ -491,7 +491,7 @@ class TestPerformanceAPIClient:
             
             api_client = APIClient(
                 base_url="http://test",
-                api_key="sk-" + "a" * 43,
+                api_key="sk_" + "a" * 43,
                 retry_config=retry_config
             )
             

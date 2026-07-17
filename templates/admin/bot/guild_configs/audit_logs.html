@@ -1,0 +1,85 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Audit Log Config - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Audit Log Configuration</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Guild</div>
+            <div class="sk-panel-body">
+                <div style="display:flex; align-items:center; gap:1rem;">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" style="width:48px; height:48px; border-radius:50%;">
+                    {% endif %}
+                    <div>
+                        <strong>{{ guild.name }}</strong>
+                        <div class="sk-text-muted"><code>{{ guild.id }}</code></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <form method="post" action="/admin/bot/guilds/{{ guild.id }}/audit-logs">
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Audit Log Channel</div>
+                <div class="sk-panel-body">
+                    <label for="audit_channel_id">Log Channel</label>
+                    <select id="audit_channel_id" name="audit_channel_id">
+                        <option value="">Disabled - No audit logs</option>
+                        {% for channel in channels %}
+                        <option value="{{ channel.id }}" {% if config.audit_channel_id == channel.id %}selected{% endif %}># {{ channel.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <small class="sk-text-muted">Choose a text channel for audit logs. If no channel is selected, audit logging is disabled.</small>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Member Events</div>
+                <div class="sk-panel-body">
+                    <label><input type="checkbox" name="log_member_join" {% if config.log_member_join %}checked{% endif %}> Member Joins</label>
+                    <label><input type="checkbox" name="log_member_leave" {% if config.log_member_leave %}checked{% endif %}> Member Leaves</label>
+                    <label><input type="checkbox" name="log_member_ban" {% if config.log_member_ban %}checked{% endif %}> Member Bans</label>
+                    <label><input type="checkbox" name="log_member_unban" {% if config.log_member_unban %}checked{% endif %}> Member Unbans</label>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Message Events</div>
+                <div class="sk-panel-body">
+                    <label><input type="checkbox" name="log_message_edit" {% if config.log_message_edit %}checked{% endif %}> Message Edits</label>
+                    <label><input type="checkbox" name="log_message_delete" {% if config.log_message_delete %}checked{% endif %}> Message Deletions</label>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">User Change Events</div>
+                <div class="sk-panel-body">
+                    <label><input type="checkbox" name="log_username_change" {% if config.log_username_change %}checked{% endif %}> Username Changes</label>
+                    <label><input type="checkbox" name="log_nickname_change" {% if config.log_nickname_change %}checked{% endif %}> Nickname Changes</label>
+                    <label><input type="checkbox" name="log_role_change" {% if config.log_role_change %}checked{% endif %}> Role Changes</label>
+                </div>
+            </div>
+
+            <div style="margin-top:1rem;">
+                <button type="submit" class="sk-btn">Save Configuration</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

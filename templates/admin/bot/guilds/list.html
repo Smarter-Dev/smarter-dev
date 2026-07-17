@@ -1,0 +1,60 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Guilds - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Guilds</h1>
+            <p>Discord servers the bot is a member of</p>
+        </hgroup>
+
+        {% if error %}
+        <div class="sk-panel" style="margin-bottom:1rem;">
+            <div class="sk-panel-body">
+                <p class="sk-no-items">{{ error }}</p>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">All Guilds</div>
+            <div class="sk-panel-body">
+                {% if guilds %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Guild</th>
+                            <th>Guild ID</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for guild in guilds %}
+                        <tr>
+                            <td>
+                                <div style="display:flex; align-items:center; gap:0.6rem;">
+                                    {% if guild.icon_url %}
+                                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" style="width:32px; height:32px; border-radius:50%;">
+                                    {% endif %}
+                                    <strong>{{ guild.name }}</strong>
+                                </div>
+                            </td>
+                            <td><code>{{ guild.id }}</code></td>
+                            <td>
+                                <a href="/admin/bot/guilds/{{ guild.id }}" class="sk-btn-outline sk-btn-small">Manage</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">The bot is not currently in any Discord servers.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

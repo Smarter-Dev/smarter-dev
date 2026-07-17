@@ -31,11 +31,6 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://smarter_dev:smarter_dev_password@localhost:5432/smarter_dev",
         description="Database connection URL",
     )
-    legacy_database_url: Optional[str] = Field(
-        default=None,
-        description="Legacy bot-admin database URL (falls back to database_url)",
-    )
-    
     # Redis
     redis_url: str = Field(
         default="redis://:smarter_dev_redis_password@localhost:6379/0",
@@ -139,7 +134,11 @@ class Settings(BaseSettings):
     # Bot API Authentication
     bot_api_key: str = Field(
         default="",
-        description="Secure API key for bot to authenticate with web API (sk-xxxxx format)",
+        description=(
+            "Secure API key for the bot to authenticate with the web API "
+            "(a Skrift-native 'sk_' key; see "
+            "docs/v2/legacy-sunset/runbooks/01-rotate-bot-key.md)."
+        ),
     )
 
     # Web Application
@@ -337,13 +336,6 @@ class Settings(BaseSettings):
         if self.is_testing and self.test_database_url:
             return self.test_database_url
         return self.database_url
-
-    @property
-    def effective_legacy_database_url(self) -> str:
-        """Get the legacy bot-admin database URL, falling back to database_url."""
-        if self.is_testing and self.test_database_url:
-            return self.test_database_url
-        return self.legacy_database_url or self.database_url
 
     @property
     def effective_redis_url(self) -> str:

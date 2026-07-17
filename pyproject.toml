@@ -33,7 +33,6 @@ dependencies = [
     "alembic>=1.16.4",
     "asyncpg>=0.30.0",
     "greenlet>=3.2.3",
-    "fastapi>=0.116.1",
     "httpx>=0.28.1",
     "redis>=6.2.0",
     "genai-prices>=0.0.55",
@@ -59,7 +58,6 @@ bot = [
 
 # Web API dependencies
 web = [
-    "fastapi>=0.104.0",
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.28.0",
     "alembic>=1.12.0",

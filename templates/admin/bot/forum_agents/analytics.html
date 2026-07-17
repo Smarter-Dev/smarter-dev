@@ -1,0 +1,111 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ agent.name }} Analytics - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>{{ agent.name }} Analytics</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}/forum-agents">&larr; Forum Agents</a></p>
+        </hgroup>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Overview</div>
+            <div class="sk-panel-body">
+                <div style="display:flex; gap:0.5rem; align-items:center;">
+                    <strong>{{ agent.name }}</strong>
+                    <span class="sk-badge">{{ 'Active' if agent.is_active else 'Inactive' }}</span>
+                </div>
+                <div class="sk-text-muted" style="font-size:0.85rem; margin-top:0.5rem;">
+                    Threshold: {{ (agent.response_threshold * 100)|int }}% &middot;
+                    Max/hour: {{ agent.max_responses_per_hour }} &middot;
+                    Created by: {{ agent.created_by }}
+                    {% if agent.created_at %} &middot; Created {{ agent.created_at.strftime("%Y-%m-%d") }}{% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Statistics</div>
+            <div class="sk-panel-body">
+                <table class="sk-admin-table">
+                    <tbody>
+                        <tr><th>Total Evaluations</th><td>{{ "{:,}".format(analytics.total_evaluations) }}</td></tr>
+                        <tr><th>Total Responses</th><td>{{ "{:,}".format(analytics.total_responses) }}</td></tr>
+                        <tr><th>Response Rate</th><td>{{ (analytics.response_rate * 100)|round(1) }}%</td></tr>
+                        <tr><th>Average Confidence</th><td>{% if analytics.avg_confidence is not none %}{{ (analytics.avg_confidence * 100)|round }}%{% else %}N/A{% endif %}</td></tr>
+                        <tr><th>Total Tokens Used</th><td>{{ "{:,}".format(analytics.total_tokens) }}</td></tr>
+                        <tr><th>Avg Response Time</th><td>{% if analytics.average_response_time_ms != "N/A" %}{{ analytics.average_response_time_ms|round }} ms{% else %}N/A{% endif %}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">System Prompt</div>
+            <div class="sk-panel-body">
+                <div style="max-height:200px; overflow-y:auto; white-space:pre-wrap; font-size:0.85rem;">{{ agent.system_prompt }}</div>
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Recent Activity ({{ recent_responses|length }})</div>
+            <div class="sk-panel-body">
+                {% if recent_responses %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr><th>Post</th><th>Author</th><th>Confidence</th><th>Responded</th><th>Tokens</th><th>When</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                        {% for response in recent_responses %}
+                        <tr>
+                            <td>{{ response.post_title[:50] }}{% if response.post_title|length > 50 %}&hellip;{% endif %}</td>
+                            <td>{{ response.author_display_name }}</td>
+                            <td>{% if response.confidence_score is not none %}{{ (response.confidence_score * 100)|int }}%{% else %}N/A{% endif %}</td>
+                            <td>{{ 'Yes' if response.responded else 'No' }}</td>
+                            <td>{{ "{:,}".format(response.tokens_used) }}</td>
+                            <td class="sk-text-muted" title="{{ response.created_at.isoformat() if response.created_at else '' }}">{% if response.created_at %}{{ response.created_at.strftime("%m/%d %H:%M") }}{% endif %}</td>
+                            <td><button type="button" class="sk-btn-outline sk-btn-small" onclick="viewResponseDetails('{{ response.id }}')">Details</button></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No responses recorded yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function viewResponseDetails(responseId) {
+    fetch('/admin/bot/forum-responses/' + responseId + '/details')
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                alert(data.error);
+                return;
+            }
+            const lines = [
+                'Agent: ' + data.agent_name,
+                'Post: ' + data.post_title,
+                'Author: ' + data.author_display_name,
+                'Confidence: ' + (data.confidence_score !== null ? Math.round(data.confidence_score * 100) + '%' : 'N/A'),
+                'Responded: ' + (data.responded ? 'Yes' : 'No'),
+                'Tokens: ' + data.tokens_used,
+                '',
+                'Reasoning:',
+                data.decision_reasoning,
+                '',
+                'Response:',
+                data.response_content
+            ];
+            alert(lines.join('\n'));
+        })
+        .catch(() => alert('Failed to load response details'));
+}
+</script>
+{% endblock %}

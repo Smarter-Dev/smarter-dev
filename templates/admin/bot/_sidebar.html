@@ -2,7 +2,17 @@
     <h3 style="font-size:0.85rem; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:1rem; color:var(--sk-text-muted, #888);">Bot Admin</h3>
     <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:0.25rem;">
         <li><a href="/admin/bot" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'overview' %} font-weight:bold;{% endif %}">Overview</a></li>
+        <li><a href="/admin/bot/guilds" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'guilds' %} font-weight:bold;{% endif %}">Guilds</a></li>
         {% if guild_id %}
+        <li><a href="/admin/bot/guilds/{{ guild_id }}/bytes" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'bytes' %} font-weight:bold;{% endif %}">Bytes Config</a></li>
+        <li><a href="/admin/bot/guilds/{{ guild_id }}/squads" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'squads' %} font-weight:bold;{% endif %}">Squads</a></li>
+        <li><a href="/admin/bot/guilds/{{ guild_id }}/squad-sale-events" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'sale_events' %} font-weight:bold;{% endif %}">Squad Sale Events</a></li>
+        <li><a href="/admin/bot/guilds/{{ guild_id }}/forum-agents" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'forum_agents' %} font-weight:bold;{% endif %}">Forum Agents</a></li>
+        <li><a href="/admin/bot/guilds/{{ guild_id }}/campaigns" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'campaigns' %} font-weight:bold;{% endif %}">Campaigns</a></li>
+        <li><a href="/admin/bot/guilds/{{ guild_id }}/repeating-messages" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'repeating_messages' %} font-weight:bold;{% endif %}">Repeating Messages</a></li>
+        <li><a href="/admin/bot/guilds/{{ guild_id }}/audit-logs" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'audit_logs' %} font-weight:bold;{% endif %}">Audit Logs</a></li>
+        <li><a href="/admin/bot/guilds/{{ guild_id }}/advent-of-code" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'advent_of_code' %} font-weight:bold;{% endif %}">Advent of Code</a></li>
+        <li><a href="/admin/bot/guilds/{{ guild_id }}/attachment-filter" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'attachment_filter' %} font-weight:bold;{% endif %}">Attachment Filter</a></li>
         <li><a href="/admin/bot/moderation/{{ guild_id }}" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'moderation' %} font-weight:bold;{% endif %}">Moderation Config</a></li>
         <li><a href="/admin/bot/mod-actions/{{ guild_id }}" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'mod_actions' %} font-weight:bold;{% endif %}">Mod Actions</a></li>
         {% endif %}

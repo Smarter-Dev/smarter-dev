@@ -1,0 +1,90 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Advent of Code Config - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Advent of Code Configuration</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Guild</div>
+            <div class="sk-panel-body">
+                <div style="display:flex; align-items:center; gap:1rem;">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" style="width:48px; height:48px; border-radius:50%;">
+                    {% endif %}
+                    <div>
+                        <strong>{{ guild.name }}</strong>
+                        <div class="sk-text-muted"><code>{{ guild.id }}</code></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <form method="post" action="/admin/bot/guilds/{{ guild.id }}/advent-of-code">
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Forum Channel</div>
+                <div class="sk-panel-body">
+                    <label for="forum_channel_id">AoC Forum Channel</label>
+                    <select id="forum_channel_id" name="forum_channel_id">
+                        <option value="">None selected</option>
+                        {% for channel in forum_channels %}
+                        <option value="{{ channel.id }}" {% if config.forum_channel_id == channel.id %}selected{% endif %}># {{ channel.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <small class="sk-text-muted">
+                        Choose a forum channel where daily Advent of Code discussion threads will be automatically created.
+                        {% if not forum_channels %}No forum channels were found for this guild.{% endif %}
+                    </small>
+
+                    <label style="margin-top:1rem; display:block;">
+                        <input type="checkbox" name="is_active" {% if config.is_active %}checked{% endif %}>
+                        Enable automatic thread creation
+                    </label>
+                </div>
+            </div>
+
+            <div style="margin-top:1rem;">
+                <button type="submit" class="sk-btn">Save Configuration</button>
+            </div>
+        </form>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Posted Threads</div>
+            <div class="sk-panel-body">
+                {% if threads %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr><th>Day</th><th>Title</th><th>Created</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for thread in threads %}
+                        <tr>
+                            <td>Day {{ thread.day }} <span class="sk-text-muted">({{ thread.year }})</span></td>
+                            <td>{{ thread.thread_title }}</td>
+                            <td><span class="sk-text-muted">{{ thread.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No threads have been posted yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

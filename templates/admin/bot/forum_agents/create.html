@@ -1,0 +1,132 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Create Forum Agent - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Create Forum Agent</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}/forum-agents">&larr; Forum Agents</a></p>
+        </hgroup>
+
+        {% if errors %}
+        <div class="sk-flash-list">
+            {% for err in errors %}
+            <div class="sk-flash sk-flash-error">{{ err }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-body">
+                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/forum-agents/create">
+                    <label for="name">Agent Name</label>
+                    <input type="text" id="name" name="name" maxlength="100" required
+                           value="{{ form_data.name if form_data else '' }}">
+
+                    <label for="description">Description</label>
+                    <input type="text" id="description" name="description" maxlength="500"
+                           value="{{ form_data.description if form_data else '' }}">
+
+                    <label for="system_prompt">System Prompt</label>
+                    <textarea id="system_prompt" name="system_prompt" rows="8" required
+                              placeholder="You are a helpful AI assistant that monitors forum posts...">{{ form_data.system_prompt if form_data else '' }}</textarea>
+
+                    <label>Monitored Forum Channel IDs</label>
+                    <div id="forum-channels-container">
+                        {% set forums = form_data.monitored_forums if form_data else [] %}
+                        {% if forums %}
+                        {% for forum_id in forums %}
+                        <input type="text" name="monitored_forums[]" placeholder="Forum channel ID (e.g. 123456789)" value="{{ forum_id }}" style="margin-bottom:0.25rem;">
+                        {% endfor %}
+                        {% else %}
+                        <input type="text" name="monitored_forums[]" placeholder="Forum channel ID (e.g. 123456789)" style="margin-bottom:0.25rem;">
+                        {% endif %}
+                    </div>
+                    <button type="button" class="sk-btn-outline sk-btn-small" onclick="addForumChannel()">Add Forum Channel</button>
+                    <small class="sk-text-muted" style="display:block;">Leave empty to monitor all forum channels.</small>
+
+                    <label for="response_threshold">Response Threshold (0.0 - 1.0)</label>
+                    <input type="number" id="response_threshold" name="response_threshold" step="0.05" min="0" max="1"
+                           value="{{ form_data.response_threshold if form_data else '0.7' }}">
+
+                    <label for="max_responses_per_hour">Max Responses Per Hour</label>
+                    <input type="number" id="max_responses_per_hour" name="max_responses_per_hour" min="0" max="100"
+                           value="{{ form_data.max_responses_per_hour if form_data else '5' }}">
+
+                    <label style="display:flex; align-items:center; gap:0.5rem;">
+                        <input type="checkbox" name="enable_responses" value="on"
+                               {% if not form_data or form_data.enable_responses == 'on' %}checked{% endif %}> Enable responses
+                    </label>
+                    <label style="display:flex; align-items:center; gap:0.5rem;">
+                        <input type="checkbox" name="enable_user_tagging" value="on"
+                               {% if form_data and form_data.enable_user_tagging == 'on' %}checked{% endif %}> Enable user tagging
+                    </label>
+                    <small class="sk-text-muted" style="display:block;">At least one mode must be enabled.</small>
+
+                    <details style="margin-top:0.75rem;">
+                        <summary class="sk-linklike">Notification Topics (required when user tagging is enabled)</summary>
+                        <div id="topics-container" style="margin-top:0.5rem;">
+                            {% set topics = form_data.notification_topics if form_data else [] %}
+                            {% set descriptions = form_data.notification_topic_descriptions if form_data else [] %}
+                            {% if topics %}
+                            {% for topic in topics %}
+                            <div style="display:flex; gap:0.5rem; margin-bottom:0.25rem;">
+                                <input type="text" name="notification_topics[]" placeholder="Topic name" maxlength="100" value="{{ topic }}">
+                                <input type="text" name="notification_topic_descriptions[]" placeholder="Optional description" maxlength="500" value="{{ descriptions[loop.index0] if descriptions|length > loop.index0 else '' }}">
+                            </div>
+                            {% endfor %}
+                            {% else %}
+                            <div style="display:flex; gap:0.5rem; margin-bottom:0.25rem;">
+                                <input type="text" name="notification_topics[]" placeholder="Topic name" maxlength="100">
+                                <input type="text" name="notification_topic_descriptions[]" placeholder="Optional description" maxlength="500">
+                            </div>
+                            {% endif %}
+                        </div>
+                        <button type="button" class="sk-btn-outline sk-btn-small" onclick="addTopic()">Add Topic</button>
+                        <small class="sk-text-muted" style="display:block;">Max 25 topics.</small>
+                    </details>
+
+                    <label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.75rem;">
+                        <input type="checkbox" name="is_active" value="on"
+                               {% if not form_data or form_data.is_active %}checked{% endif %}> Active immediately
+                    </label>
+
+                    <div style="margin-top:1rem;">
+                        <button type="submit" class="sk-btn">Create Agent</button>
+                        <a href="/admin/bot/guilds/{{ guild.id }}/forum-agents" class="sk-btn-outline">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function addForumChannel() {
+    const container = document.getElementById('forum-channels-container');
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.name = 'monitored_forums[]';
+    input.placeholder = 'Forum channel ID (e.g. 123456789)';
+    input.style.marginBottom = '0.25rem';
+    container.appendChild(input);
+}
+function addTopic() {
+    const container = document.getElementById('topics-container');
+    if (container.querySelectorAll('input[name="notification_topics[]"]').length >= 25) {
+        alert('Maximum 25 topics allowed');
+        return;
+    }
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.gap = '0.5rem';
+    row.style.marginBottom = '0.25rem';
+    row.innerHTML = '<input type="text" name="notification_topics[]" placeholder="Topic name" maxlength="100">' +
+                    '<input type="text" name="notification_topic_descriptions[]" placeholder="Optional description" maxlength="500">';
+    container.appendChild(row);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,122 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Bytes Config - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Bytes Configuration</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Guild</div>
+            <div class="sk-panel-body">
+                <div style="display:flex; align-items:center; gap:1rem;">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" style="width:48px; height:48px; border-radius:50%;">
+                    {% endif %}
+                    <div>
+                        <strong>{{ guild.name }}</strong>
+                        <div class="sk-text-muted"><code>{{ guild.id }}</code></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <form method="post" action="/admin/bot/guilds/{{ guild.id }}/bytes">
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Basic Settings</div>
+                <div class="sk-panel-body">
+                    <label for="starting_balance">Starting Balance (bytes)</label>
+                    <input type="number" id="starting_balance" name="starting_balance"
+                           value="{{ config.starting_balance }}" min="0" max="10000" required>
+                    <small class="sk-text-muted">Initial balance for new users.</small>
+
+                    <label for="daily_amount">Daily Reward Amount (bytes)</label>
+                    <input type="number" id="daily_amount" name="daily_amount"
+                           value="{{ config.daily_amount }}" min="1" max="1000" required>
+                    <small class="sk-text-muted">Base daily reward before streak bonuses.</small>
+
+                    <label for="max_transfer">Maximum Transfer (bytes)</label>
+                    <input type="number" id="max_transfer" name="max_transfer"
+                           value="{{ config.max_transfer }}" min="1" max="100000" required>
+                    <small class="sk-text-muted">Maximum amount per transfer.</small>
+
+                    <label for="transfer_cooldown_hours">Transfer Cooldown (hours)</label>
+                    <input type="number" id="transfer_cooldown_hours" name="transfer_cooldown_hours"
+                           value="{{ config.transfer_cooldown_hours }}" min="0" max="168">
+                    <small class="sk-text-muted">Cooldown between transfers (0 = no cooldown).</small>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Streak Bonuses</div>
+                <div class="sk-panel-body">
+                    <p class="sk-text-muted">Multipliers applied to daily rewards based on streak length.</p>
+                    {% if config.streak_bonuses %}
+                    <table class="sk-admin-table">
+                        <thead>
+                            <tr><th>Streak Days</th><th>Multiplier</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for days, multiplier in config.streak_bonuses.items() %}
+                            <tr>
+                                <td>{{ days }} days</td>
+                                <td>
+                                    <input type="number" name="streak_{{ days }}_bonus"
+                                           value="{{ multiplier }}" min="1" max="50">
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <p class="sk-no-items">No streak bonuses configured.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Role-Based Rewards</div>
+                <div class="sk-panel-body">
+                    {% if config.role_rewards %}
+                    <table class="sk-admin-table">
+                        <thead>
+                            <tr><th>Role ID</th><th>Bonus (bytes)</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for role_id, bonus in config.role_rewards.items() %}
+                            <tr>
+                                <td><code>{{ role_id }}</code></td>
+                                <td>
+                                    <input type="number" name="role_reward_{{ role_id }}"
+                                           value="{{ bonus }}" min="0" max="1000">
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% else %}
+                    <p class="sk-no-items">No role rewards configured.</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div style="margin-top:1rem;">
+                <button type="submit" class="sk-btn">Save Configuration</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,128 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ guild.name }} - Guilds - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>{{ guild.name }}</h1>
+            <p><a href="/admin/bot/guilds">&larr; All guilds</a></p>
+        </hgroup>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Guild Info</div>
+            <div class="sk-panel-body">
+                <div style="display:flex; align-items:center; gap:1rem;">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" style="width:64px; height:64px; border-radius:50%;">
+                    {% endif %}
+                    <div>
+                        <div><strong>Guild ID:</strong> <code>{{ guild.id }}</code></div>
+                        {% if guild.description %}
+                        <div><strong>Description:</strong> {{ guild.description }}</div>
+                        {% endif %}
+                        {% if guild.member_count is not none %}
+                        <div><strong>Members:</strong> {{ "{:,}".format(guild.member_count) }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Economy Stats</div>
+            <div class="sk-panel-body">
+                <table class="sk-admin-table">
+                    <tbody>
+                        <tr><th>Active Users</th><td>{{ "{:,}".format(stats.total_users) }}</td></tr>
+                        <tr><th>Total Balance</th><td>{{ "{:,}".format(stats.total_balance) }} bytes</td></tr>
+                        <tr><th>Transactions</th><td>{{ "{:,}".format(stats.total_transactions) }}</td></tr>
+                        <tr><th>Active Squads</th><td>{{ stats.squad_count }}</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Top Users by Balance</div>
+            <div class="sk-panel-body">
+                {% if top_users %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr><th>#</th><th>User ID</th><th>Balance</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for user in top_users %}
+                        <tr>
+                            <td>{{ user.rank }}</td>
+                            <td><code>{{ user.user_id }}</code></td>
+                            <td>{{ "{:,}".format(user.balance) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No users found with bytes balances.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Recent Transactions</div>
+            <div class="sk-panel-body">
+                {% if recent_transactions %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr><th>When</th><th>From</th><th>To</th><th>Amount</th><th>Reason</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for tx in recent_transactions[:10] %}
+                        <tr>
+                            <td>{{ tx.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+                            <td>{{ tx.giver_username }}</td>
+                            <td>{{ tx.receiver_username }}</td>
+                            <td>{{ "{:,}".format(tx.amount) }}</td>
+                            <td>{{ tx.reason or "" }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No transactions found for this guild.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Squads</div>
+            <div class="sk-panel-body">
+                {% if squads %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr><th>Name</th><th>Members</th><th>Switch Cost</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for squad in squads %}
+                        <tr>
+                            <td>
+                                <strong>{{ squad.name }}</strong>
+                                {% if squad.description %}<div class="sk-text-muted">{{ squad.description }}</div>{% endif %}
+                            </td>
+                            <td>
+                                {{ squad.member_count }}{% if squad.max_members %} / {{ squad.max_members }}{% endif %}
+                            </td>
+                            <td>{{ squad.switch_cost }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No squads configured for this guild.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

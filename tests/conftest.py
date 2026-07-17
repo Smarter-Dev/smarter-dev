@@ -305,37 +305,6 @@ def mock_redis_manager() -> Mock:
 
 
 @pytest.fixture
-async def api_client(test_settings) -> AsyncGenerator[AsyncClient, None]:
-    """Create an async HTTP client for API testing."""
-    # Import here to avoid circular imports
-    from smarter_dev.web.api.app import api
-    from httpx import ASGITransport
-    from unittest.mock import patch
-    
-    # Mock database initialization to avoid conflicts
-    with patch('smarter_dev.web.api.app.init_database'), \
-         patch('smarter_dev.web.api.app.close_database'), \
-         patch('smarter_dev.shared.config.get_settings', return_value=test_settings):
-        
-        # Set test settings on the app
-        api.state.settings = test_settings
-        
-        try:
-            async with AsyncClient(
-                transport=ASGITransport(app=api),
-                base_url="http://test"
-            ) as client:
-                yield client
-        finally:
-            # Clean up API state
-            try:
-                if hasattr(api, 'state'):
-                    api.state.settings = None
-            except Exception:
-                pass
-
-
-@pytest.fixture
 def mock_discord_bot() -> Mock:
     """Create a mock Discord bot."""
     bot = Mock()
