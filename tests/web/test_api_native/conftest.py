@@ -20,11 +20,13 @@ from litestar.testing import TestClient, create_test_client
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.api.schemas import SquadCostInfo
+from smarter_dev.web.api_native import advent_of_code as advent_of_code_module
 from smarter_dev.web.api_native import bytes as bytes_module
 from smarter_dev.web.api_native import challenges as challenges_module
 from smarter_dev.web.api_native import messages as messages_module
 from smarter_dev.web.api_native import quests as quests_module
 from smarter_dev.web.api_native import squads as squads_module
+from smarter_dev.web.api_native.advent_of_code import AdventOfCodeController
 from smarter_dev.web.api_native.bytes import BytesController
 from smarter_dev.web.api_native.challenges import ChallengeController
 from smarter_dev.web.api_native.messages import (
@@ -331,6 +333,50 @@ def quest_squad_ops_mock() -> Iterator[Mock]:
         instance = Mock()
         factory.return_value = instance
         instance.get_user_squad = AsyncMock()
+        yield instance
+
+
+# --------------------------------------------------------------------------- #
+# Advent of Code fixtures (unit U6 — advent_of_code router)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def aoc_client(session_mock: AsyncMock) -> Iterator[TestClient]:
+    """Client serving the Advent of Code controller with auth guards bypassed.
+
+    The AoC routes share the ``advent_of_code.BOT_API_GUARDS`` list by reference,
+    so emptying it before the app is built removes guards for these tests only.
+    Auth is covered separately by ``test_auth.py``.
+    """
+    original_guards = list(advent_of_code_module.BOT_API_GUARDS)
+    advent_of_code_module.BOT_API_GUARDS.clear()
+    try:
+        with create_test_client(
+            route_handlers=[AdventOfCodeController],
+            plugins=[PydanticPlugin()],
+            dependencies={
+                "db_session": Provide(lambda: session_mock, sync_to_thread=False)
+            },
+        ) as client:
+            yield client
+    finally:
+        advent_of_code_module.BOT_API_GUARDS[:] = original_guards
+
+
+@pytest.fixture
+def aoc_ops_mock() -> Iterator[Mock]:
+    """Patch ``AdventOfCodeConfigOperations`` in the native AoC module."""
+    with patch(
+        "smarter_dev.web.api_native.advent_of_code.AdventOfCodeConfigOperations"
+    ) as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.get_active_configs = AsyncMock()
+        instance.get_or_create_config = AsyncMock()
+        instance.get_posted_thread = AsyncMock()
+        instance.record_posted_thread = AsyncMock()
+        instance.get_guild_threads = AsyncMock()
         yield instance
 
 
