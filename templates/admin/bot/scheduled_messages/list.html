@@ -1,0 +1,107 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Scheduled Messages - {{ campaign.title }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>{{ campaign.title }} &mdash; Scheduled Messages</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges">&larr; {{ campaign.title }}</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Campaign</div>
+            <div class="sk-panel-body">
+                <p>{{ campaign.description }}</p>
+                <table class="sk-admin-table">
+                    <tbody>
+                        <tr><th>Starts</th><td>{{ campaign.start_time.strftime("%Y-%m-%d %H:%M") }} UTC</td></tr>
+                        <tr><th>Release Cadence</th><td>{{ campaign.release_cadence_hours }} hours</td></tr>
+                        <tr><th>Status</th><td>
+                            {% if campaign.is_active %}
+                                {% if campaign.is_started %}
+                                <span class="sk-pill sk-pill-published">Running</span>
+                                {% else %}
+                                <span class="sk-pill sk-pill-draft">Scheduled</span>
+                                {% endif %}
+                            {% else %}
+                            <span class="sk-pill sk-pill-draft">Inactive</span>
+                            {% endif %}
+                        </td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div style="margin:1rem 0;">
+            <a href="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/create" class="sk-btn">Add Scheduled Message</a>
+            <a href="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" class="sk-btn-outline">Challenges</a>
+            <a href="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/edit" class="sk-btn-outline">Campaign Settings</a>
+        </div>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Scheduled Messages ({{ scheduled_messages|length }})</div>
+            <div class="sk-panel-body">
+                {% if scheduled_messages %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Scheduled Time</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for message in scheduled_messages %}
+                        <tr>
+                            <td>
+                                <strong>{{ message.title }}</strong>
+                                {% if message.description %}
+                                <div class="sk-text-muted">{{ message.description[:100] }}{% if message.description|length > 100 %}...{% endif %}</div>
+                                {% endif %}
+                            </td>
+                            <td>{{ message.scheduled_time.strftime("%Y-%m-%d %H:%M") }} UTC</td>
+                            <td>
+                                {% if message.is_sent %}
+                                <span class="sk-pill sk-pill-published">Sent</span>
+                                {% if message.sent_at %}
+                                <div class="sk-text-muted" style="font-size:0.85rem;">{{ message.sent_at.strftime("%Y-%m-%d %H:%M") }} UTC</div>
+                                {% endif %}
+                                {% else %}
+                                <span class="sk-pill sk-pill-draft">Scheduled</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="sk-text-muted">{{ message.created_at.strftime("%Y-%m-%d") }}</div>
+                                <div class="sk-text-muted" style="font-size:0.85rem;">by {{ message.created_by }}</div>
+                            </td>
+                            <td style="white-space:nowrap;">
+                                <a href="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/{{ message.id }}/edit" class="sk-btn-outline sk-btn-small">Edit</a>
+                                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/{{ message.id }}/delete" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this scheduled message?')">
+                                    <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No scheduled messages yet. Create your first scheduled message for this campaign.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

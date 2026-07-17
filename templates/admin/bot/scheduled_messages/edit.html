@@ -1,0 +1,55 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Edit Scheduled Message - {{ scheduled_message.title }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Edit Scheduled Message</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages">&larr; Scheduled Messages</a></p>
+        </hgroup>
+
+        {% if errors %}
+        <div class="sk-flash sk-flash-error">
+            <strong>Please correct the following errors:</strong>
+            <ul style="margin:0.5rem 0 0 1rem;">
+                {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">{{ scheduled_message.title }}</div>
+            <div class="sk-panel-body">
+                {% if scheduled_message.is_sent %}
+                <div class="sk-flash sk-flash-info">This message has already been sent{% if scheduled_message.sent_at %} at {{ scheduled_message.sent_at.strftime("%Y-%m-%d %H:%M") }} UTC{% endif %}.</div>
+                {% endif %}
+                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages/{{ scheduled_message.id }}/edit">
+                    <label for="title">Message Title</label>
+                    <input type="text" id="title" name="title" maxlength="200"
+                           value="{{ form_data.title if form_data else scheduled_message.title }}" required>
+
+                    <label for="description">Primary Message Content</label>
+                    <textarea id="description" name="description" rows="6" required>{{ form_data.description if form_data else scheduled_message.description }}</textarea>
+                    <small class="sk-text-muted">Sent to all squad announcement channels.</small>
+
+                    <label for="announcement_channel_message">Campaign Channel Message (Optional)</label>
+                    <textarea id="announcement_channel_message" name="announcement_channel_message" rows="6">{{ form_data.announcement_channel_message if form_data else (scheduled_message.announcement_channel_message or '') }}</textarea>
+                    <small class="sk-text-muted">Optional. Different message for campaign announcement channels. Leave empty to reuse the primary message.</small>
+
+                    <label for="scheduled_time">Scheduled Time (UTC)</label>
+                    <input type="datetime-local" id="scheduled_time" name="scheduled_time"
+                           value="{{ form_data.scheduled_time if form_data else scheduled_message.scheduled_time.strftime('%Y-%m-%dT%H:%M') }}" required>
+
+                    <div style="margin-top:1rem;">
+                        <button type="submit" class="sk-btn">Update Scheduled Message</button>
+                        <a href="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/scheduled-messages" class="sk-btn-outline">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
