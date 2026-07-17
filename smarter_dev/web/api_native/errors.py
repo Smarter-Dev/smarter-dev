@@ -51,7 +51,7 @@ def _request_id(request: Request) -> str:
     return request.headers.get("x-request-id") or str(uuid4())
 
 
-def _error_response(detail: str, error_type: str, request_id: str) -> dict:
+def _error_response(detail: str, error_type: str, request_id: str | None) -> dict:
     """Serialize an ``ErrorResponse`` exactly as the FastAPI schema did."""
     return {
         "detail": detail,
@@ -60,6 +60,29 @@ def _error_response(detail: str, error_type: str, request_id: str) -> dict:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "request_id": request_id,
     }
+
+
+def nested_validation_error(detail: str) -> BotApiException:
+    """400 nested body with ``request_id=None``.
+
+    Mirrors ``smarter_dev.web.api.exceptions.create_validation_error`` when
+    invoked **without** a request (as the forum routers do): the ``detail`` is a
+    full ``ErrorResponse`` mapping and ``request_id`` is ``None``.
+    """
+    return BotApiException(
+        400, {"detail": _error_response(detail, "validation_error", None)}
+    )
+
+
+def nested_not_found_error(detail: str) -> BotApiException:
+    """404 nested body with ``request_id=None``.
+
+    Mirrors ``smarter_dev.web.api.exceptions.create_not_found_error`` when
+    invoked without a request (the forum routers' ``"Forum agent not found"``).
+    """
+    return BotApiException(
+        404, {"detail": _error_response(detail, "not_found_error", None)}
+    )
 
 
 def validation_error(request: Request, detail: str) -> BotApiException:
