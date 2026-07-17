@@ -344,6 +344,16 @@ SKRIFT_ADMIN_PAGES: tuple[AdminPageCheck, ...] = (
     AdminPageCheck("admin-bot-squads", f"/admin/bot/guilds/{_G}/squads"),
     AdminPageCheck("admin-bot-squad-sale-events",
                    f"/admin/bot/guilds/{_G}/squad-sale-events"),
+    AdminPageCheck("admin-bot-forum-agents",
+                   f"/admin/bot/guilds/{_G}/forum-agents"),
+    AdminPageCheck("admin-bot-forum-agent-create",
+                   f"/admin/bot/guilds/{_G}/forum-agents/create"),
+    AdminPageCheck(
+        "admin-bot-forum-agent-edit",
+        f"/admin/bot/guilds/{_G}/forum-agents/{config.FORUM_AGENT_ID}/edit"),
+    AdminPageCheck(
+        "admin-bot-forum-agent-analytics",
+        f"/admin/bot/guilds/{_G}/forum-agents/{config.FORUM_AGENT_ID}/analytics"),
     AdminPageCheck("admin-bot-moderation", f"/admin/bot/moderation/{_G}"),
     AdminPageCheck("admin-bot-mod-actions", f"/admin/bot/mod-actions/{_G}"),
     AdminPageCheck("admin-handlers", "/admin/handlers"),
