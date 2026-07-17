@@ -26,6 +26,8 @@ from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import TestClient, create_test_client
 
 from smarter_dev.web.api_native.bytes import BytesController
+from smarter_dev.web.api_native.challenges import ChallengeController
+from smarter_dev.web.api_native.quests import QuestController
 from smarter_dev.web.api_native.squads import (
     SquadController,
     SquadSaleEventController,
@@ -93,4 +95,54 @@ def test_squad_non_sk_bearer_rejected(guarded_squad_client: TestClient):
 
 def test_sale_events_missing_authorization_header_rejected(guarded_squad_client: TestClient):
     response = guarded_squad_client.get(f"/api/guilds/{_GUILD}/squad-sale-events/")
+    assert response.status_code == 401
+
+
+@pytest.fixture
+def guarded_quest_client() -> Iterator[TestClient]:
+    """Client serving the quest controller with its real auth guards."""
+    with create_test_client(
+        route_handlers=[QuestController],
+        plugins=[PydanticPlugin()],
+        dependencies={"db_session": Provide(lambda: Mock(), sync_to_thread=False)},
+    ) as client:
+        yield client
+
+
+def test_quest_missing_authorization_header_rejected(guarded_quest_client: TestClient):
+    response = guarded_quest_client.get(f"/api/quests/daily/current?guild_id={_GUILD}")
+    assert response.status_code == 401
+
+
+def test_quest_non_sk_bearer_rejected(guarded_quest_client: TestClient):
+    response = guarded_quest_client.get(
+        f"/api/quests/daily/current?guild_id={_GUILD}",
+        headers={"Authorization": "Bearer not-a-skrift-key"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.fixture
+def guarded_challenge_client() -> Iterator[TestClient]:
+    """Client serving the challenge controller with its real auth guards."""
+    with create_test_client(
+        route_handlers=[ChallengeController],
+        plugins=[PydanticPlugin()],
+        dependencies={"db_session": Provide(lambda: Mock(), sync_to_thread=False)},
+    ) as client:
+        yield client
+
+
+def test_challenge_missing_authorization_header_rejected(
+    guarded_challenge_client: TestClient,
+):
+    response = guarded_challenge_client.get("/api/challenges/pending-announcements")
+    assert response.status_code == 401
+
+
+def test_challenge_non_sk_bearer_rejected(guarded_challenge_client: TestClient):
+    response = guarded_challenge_client.get(
+        "/api/challenges/pending-announcements",
+        headers={"Authorization": "Bearer not-a-skrift-key"},
+    )
     assert response.status_code == 401

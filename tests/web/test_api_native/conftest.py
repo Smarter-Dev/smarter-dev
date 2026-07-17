@@ -21,8 +21,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.api.schemas import SquadCostInfo
 from smarter_dev.web.api_native import bytes as bytes_module
+from smarter_dev.web.api_native import challenges as challenges_module
+from smarter_dev.web.api_native import quests as quests_module
 from smarter_dev.web.api_native import squads as squads_module
 from smarter_dev.web.api_native.bytes import BytesController
+from smarter_dev.web.api_native.challenges import ChallengeController
+from smarter_dev.web.api_native.quests import QuestController
 from smarter_dev.web.api_native.squads import SquadController, SquadSaleEventController
 
 
@@ -249,4 +253,159 @@ def sale_event_ops_mock() -> Iterator[Mock]:
         factory.return_value = instance
         instance.get_sale_events_by_guild = AsyncMock()
         instance.get_sale_event_by_id = AsyncMock()
+        yield instance
+
+
+# --------------------------------------------------------------------------- #
+# Quest fixtures (unit U5)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def quest_client(session_mock: AsyncMock) -> Iterator[TestClient]:
+    """Client serving the quest controller with auth guards bypassed.
+
+    The quest routes share the ``quests.BOT_API_GUARDS`` list by reference, so
+    emptying it before the app is built removes guards for these tests only.
+    Auth is covered separately by ``test_auth.py`` (the bytes controller).
+    """
+    original_guards = list(quests_module.BOT_API_GUARDS)
+    quests_module.BOT_API_GUARDS.clear()
+    try:
+        with create_test_client(
+            route_handlers=[QuestController],
+            plugins=[PydanticPlugin()],
+            dependencies={
+                "db_session": Provide(lambda: session_mock, sync_to_thread=False)
+            },
+        ) as client:
+            yield client
+    finally:
+        quests_module.BOT_API_GUARDS[:] = original_guards
+
+
+@pytest.fixture
+def quest_ops_mock() -> Iterator[Mock]:
+    """Patch ``QuestOperations`` in the native quests module."""
+    with patch("smarter_dev.web.api_native.quests.QuestOperations") as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.get_daily_quest = AsyncMock()
+        instance.get_daily_quest_by_id = AsyncMock()
+        instance.get_upcoming_daily_quests = AsyncMock()
+        instance.mark_daily_quest_announced = AsyncMock()
+        instance.mark_daily_quest_active = AsyncMock()
+        yield instance
+
+
+@pytest.fixture
+def quest_input_ops_mock() -> Iterator[Mock]:
+    """Patch ``QuestInputOperations`` in the native quests module."""
+    with patch("smarter_dev.web.api_native.quests.QuestInputOperations") as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.get_or_create_input = AsyncMock()
+        yield instance
+
+
+@pytest.fixture
+def quest_submission_ops_mock() -> Iterator[Mock]:
+    """Patch ``QuestSubmissionOperations`` in the native quests module."""
+    with patch("smarter_dev.web.api_native.quests.QuestSubmissionOperations") as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.submit_solution = AsyncMock()
+        instance.get_daily_quest_scoreboard = AsyncMock()
+        yield instance
+
+
+@pytest.fixture
+def quest_squad_ops_mock() -> Iterator[Mock]:
+    """Patch ``SquadOperations`` in the native quests module."""
+    with patch("smarter_dev.web.api_native.quests.SquadOperations") as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.get_user_squad = AsyncMock()
+        yield instance
+
+
+# --------------------------------------------------------------------------- #
+# Challenge fixtures (unit U4)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def challenge_client(session_mock: AsyncMock) -> Iterator[TestClient]:
+    """Client serving the challenge controller with auth guards bypassed.
+
+    The challenge routes share the ``challenges.BOT_API_GUARDS`` list by
+    reference, so emptying it before the app is built removes guards for these
+    tests only. Auth is covered separately by ``test_auth.py``.
+    """
+    original_guards = list(challenges_module.BOT_API_GUARDS)
+    challenges_module.BOT_API_GUARDS.clear()
+    try:
+        with create_test_client(
+            route_handlers=[ChallengeController],
+            plugins=[PydanticPlugin()],
+            dependencies={
+                "db_session": Provide(lambda: session_mock, sync_to_thread=False)
+            },
+        ) as client:
+            yield client
+    finally:
+        challenges_module.BOT_API_GUARDS[:] = original_guards
+
+
+@pytest.fixture
+def campaign_ops_mock() -> Iterator[Mock]:
+    """Patch ``CampaignOperations`` in the native challenges module."""
+    with patch("smarter_dev.web.api_native.challenges.CampaignOperations") as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.get_upcoming_announcements = AsyncMock()
+        instance.get_pending_announcements = AsyncMock()
+        instance.mark_challenge_released = AsyncMock()
+        instance.mark_challenge_announced = AsyncMock()
+        instance.get_most_recent_campaign = AsyncMock()
+        instance.get_challenge_with_campaign = AsyncMock()
+        instance.get_campaign_challenge_count = AsyncMock()
+        yield instance
+
+
+@pytest.fixture
+def challenge_submission_ops_mock() -> Iterator[Mock]:
+    """Patch ``ChallengeSubmissionOperations`` in the native challenges module."""
+    with patch(
+        "smarter_dev.web.api_native.challenges.ChallengeSubmissionOperations"
+    ) as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.get_campaign_scoreboard = AsyncMock()
+        instance.get_detailed_campaign_scoreboard = AsyncMock()
+        instance.get_campaign_submission_count = AsyncMock()
+        instance.submit_solution = AsyncMock()
+        yield instance
+
+
+@pytest.fixture
+def challenge_input_ops_mock() -> Iterator[Mock]:
+    """Patch ``ChallengeInputOperations`` in the native challenges module."""
+    with patch(
+        "smarter_dev.web.api_native.challenges.ChallengeInputOperations"
+    ) as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.get_existing_input = AsyncMock()
+        instance.get_or_create_input = AsyncMock()
+        yield instance
+
+
+@pytest.fixture
+def challenge_squad_ops_mock() -> Iterator[Mock]:
+    """Patch ``SquadOperations`` in the native challenges module."""
+    with patch("smarter_dev.web.api_native.challenges.SquadOperations") as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.get_user_squad = AsyncMock()
         yield instance
