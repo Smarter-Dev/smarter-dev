@@ -100,13 +100,19 @@ async def register_handler(
     Describe the behavior clearly and completely — a separate authoring
     system (which sees the channel's existing handlers) decides whether to
     edit or create one; you never write code or pick which handler to
-    touch. Trigger types: "new message", "reaction add" (event);
-    "schedule", "timer" (time). Member/thread events (someone joins,
-    leaves, a role changes, a thread is created) are admin-only — they
-    need /adminhandler, not this tool. Put timing in ``settings`` — schedule:
-    {"interval_seconds": N} or {"daily_time": "HH:MM"} (UTC); timer:
-    {"delay_seconds": N} or {"fire_at": "<ISO-8601 UTC>"}. Returns a
-    success summary naming the handler, or an error to relay plainly.
+    touch. Include every concrete Discord ID the behavior involves — the
+    user IDs behind any mentions or names, and the channel/thread IDs
+    behind any channel references visible in your context — written as
+    plain snowflakes in the description (e.g. "user 1234567890 (@zech)").
+    The authoring system targets by ID; usernames and channel names alone
+    are ambiguous and go stale. Trigger types: "new message", "reaction
+    add" (event); "schedule", "timer" (time). Member/thread events
+    (someone joins, leaves, a role changes, a thread is created) are
+    admin-only — they need /adminhandler, not this tool. Put timing in
+    ``settings`` — schedule: {"interval_seconds": N} or {"daily_time":
+    "HH:MM"} (UTC); timer: {"delay_seconds": N} or {"fire_at": "<ISO-8601
+    UTC>"}. Returns a success summary naming the handler, or an error to
+    relay plainly.
     """
     if _admin_only_trigger(trigger_type):
         return f"error: {_ADMIN_ONLY_REDIRECT}"

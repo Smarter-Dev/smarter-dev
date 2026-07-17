@@ -145,6 +145,12 @@ When a spawn_agent reply decides what the script does next:
 - Put any matching logic (does this message contain "huzzah"?) in the script itself, with cheap
   guards FIRST, before any expensive call, so an agent or web-read only runs when it should.
   This matters most for message/reaction triggers, which fire constantly.
+- TARGET BY ID, NEVER BY NAME. When the behavior singles out a known user or channel/thread,
+  compare snowflake ids — context["author_id"] == "1234567890", a channel/thread id constant —
+  never context["author_name"], display names, or channel names. Names change, collide, and can
+  be spoofed by renaming; ids are stable. The request should state the ids (e.g. "user
+  1234567890 (@zech)"); if it targets a specific user but gives no id, set feasible=false asking
+  for the id rather than guessing from a name.
 - Use only real emoji from the provided list (call list_channel_emojis to see them).
 - When editing, the returned script REPLACES the target's script wholesale — carry forward the
   behavior the edit doesn't touch, and the result must still satisfy every limit; if it can't,

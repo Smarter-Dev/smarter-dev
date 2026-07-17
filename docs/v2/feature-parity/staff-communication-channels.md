@@ -89,13 +89,21 @@ Seven extensions, ordered by how many capabilities consume them. All new emit fu
   ```
   REST mapping: `POST /channels/{parent}/threads` with `{"type": 12, "name": ..., "auto_archive_duration": ...}`; `PATCH /channels/{thread}`; `PUT`/`DELETE /channels/{thread}/thread-members/{user}`; `GET /channels/{thread}/thread-members?with_member=true` (the `with_member` flag returns member objects whose `roles` populate `role_ids`, so `!lock` needs no second fetch).
 - **Failure semantics:** `add/remove_thread_member` and `edit_thread` return `False` on 403/404 (unknown thread, missing perms) — expected outcomes the script branches on. `create_private_thread` raises on failure (nothing sensible to do without a thread id) and `get_thread_members` returns `[]` on 404. Infrastructure failures (rate-limit exhaustion, 5xx) raise as today.
-- **Budget:** new counter `thread_ops` on `HandlerBudget` with `spend_thread_op()`; `ADMIN_MAX_THREAD_OPS = 25` (default 0 for standard handlers, like mod actions). Every one of the five functions spends one — including `get_thread_members`, which keeps read amplification bounded without a second cap. 25 covers a `!lock` sweep of a realistically-sized mod thread; a giant thread breaches loud mid-sweep, which is the correct behavior.
-- **Windowed cap:** new `guild_thread_creates_key(guild_id)` with `GUILD_THREAD_CREATES_PER_MIN = 2` on `create_private_thread` only — thread creation is the spammy primitive; edits/membership are bounded by the per-fire counter.
-- **Run record:** add `thread_ops` column to `HandlerRun` (alembic migration) and to `HandlerBudget.usage()`.
+- **Budget (reconciled onto `threads-and-member-events.md` §5.3, which shipped first):** the `thread_ops` counter, `spend_thread_op()`, the `HandlerRun.thread_ops` column, and `usage()` wiring **already exist** — do not re-introduce them. This family's mutating functions (`create_private_thread`, `edit_thread`, `add/remove_thread_member`) spend the existing counter; `get_thread_members` is a read and spends `discord_reads` instead (consistent with `list_threads`; `ADMIN_MAX_DISCORD_READS = 5` covers the one membership fetch a `!lock` sweep needs). Shipping this family raises `ADMIN_MAX_THREAD_OPS` from 10 to 25 in the same change — a `!lock` sweep is 1 + N removals; a giant thread breaches loud mid-sweep, which is the correct behavior.
+- **Windowed cap (reconciled):** all mutating ops here ride the shipped `guild_thread_ops_key(guild_id)` / `GUILD_THREAD_OPS_PER_MIN = 30` window like every other thread mutation. `create_private_thread` **additionally** gets the tighter `guild_thread_creates_key(guild_id)` / `GUILD_THREAD_CREATES_PER_MIN = 2` — private-thread creation is the spammy primitive and the shared 30/min is too loose for it specifically.
+- **Verification rail (inherited):** `edit_thread`, `add/remove_thread_member`, and `get_thread_members` take script-supplied thread ids and go through `AdminActor._verify_thread_target` (is-a-thread + in-this-guild, cached per fire) exactly like the shipped close/lock/reopen/delete family. `close_thread`/`lock_thread`/`reopen_thread` already shipped — `edit_thread` adds only rename/auto-archive on top and shares `_patch_thread`'s 404 → `False` contract.
+- **Run record:** already shipped (`threads-and-member-events.md` §6); no new migration for the counter.
 - **Lint/judge:** admin author/judge prompts gain the vocabulary; judge guidance: membership loops must be bounded by the member list itself (never `while`), and `edit_thread(archived=True)` after posting the closing message, not before (a post into an archived thread 403s).
 - **Consumed by:** rows 13, 14, 15.
 
 ### E6 — Thread-aware message-trigger dispatch
+
+> **SHIPPED** by `threads-and-member-events.md` §4 (2026-07-17), with one context-shape
+> difference: the shipped fields are `thread_id`, `thread_name`, and `is_thread`
+> (boolean) — there is no `thread_parent_channel_id` field, because the dispatch
+> `channel_id` *is* the parent. Scripts written against this sketch should read
+> `is_thread` instead of null-checking `thread_parent_channel_id`. The rest of this
+> section is retained for the original rationale only.
 
 - **What:** `!archive`/`!lock` are typed *inside* a thread. Today `on_message` dispatches on the raw `event.channel_id`; a thread's id differs from its parent's, so channel-scoped handlers never fire and context can't distinguish threads.
 - **Design (bot-side, `handler_events.py`):** resolve the message channel from the gateway cache (`bot.cache.get_thread(channel_id)` / `get_guild_channel`); when it is a thread:
@@ -329,11 +337,11 @@ Ship in four phases, each independently valuable. Tests-first throughout; the ha
 - Pre-ship check: grep installed handler scripts for intentional role pings (expect none).
 
 **Phase 2 — Mod Chat** (no DM machinery needed, so it lands first of the two features).
-1. `HandlerBudget.spend_thread_op` + `thread_ops` in `usage()` — pure, test caps/breach/deadline interplay first.
-2. `HandlerRun.thread_ops` column + alembic migration (test upgrade/downgrade).
-3. Emitter/actor thread REST methods — tests with a fake `_request`: correct routes/payloads; 403/404 → `False`/`[]` (expected outcomes); 5xx → raises (fail fast); `get_thread_members` passes `with_member=true` and maps `role_ids`.
-4. Runtime wiring — tests: functions absent without `actor`; each spends `thread_ops`; breach mid-`!lock`-sweep yields `cap_exceeded` with prior removals kept ("effects stay"); `create_private_thread` hits the guild thread-create window.
-5. E6 thread-aware dispatch — pure context-builder tests: thread message → parent-channel dispatch key + `thread_id`/`thread_parent_channel_id`/`thread_name`; non-thread → fields absent; cache-miss on channel resolution → dispatch as plain message (never drop).
+1. ~~`HandlerBudget.spend_thread_op` + `thread_ops` in `usage()`~~ — **shipped** by `threads-and-member-events.md`; only the `ADMIN_MAX_THREAD_OPS` 10 → 25 raise remains (one-line change + test).
+2. ~~`HandlerRun.thread_ops` column + alembic migration~~ — **shipped**.
+3. Emitter/actor thread REST methods — tests with a fake `_request`: correct routes/payloads; 403/404 → `False`/`[]` (expected outcomes); 5xx → raises (fail fast); `get_thread_members` passes `with_member=true` and maps `role_ids`; all thread-id-taking methods go through the shipped `_verify_thread_target` rail.
+4. Runtime wiring — tests: functions absent without `actor`; mutations spend `thread_ops`, `get_thread_members` spends `discord_reads`; breach mid-`!lock`-sweep yields `cap_exceeded` with prior removals kept ("effects stay"); `create_private_thread` hits the shared guild thread-op window AND the tighter thread-create window.
+5. ~~E6 thread-aware dispatch~~ — **shipped** (`is_thread` context shape; see the E6 note above).
 6. E7 context fields — pure builder tests. **`author_role_ids` is load-bearing here** (the `!archive`/`!lock` invoker gate, rows 14/15/19) and must land before step 7; verify it is populated for thread messages too (`event.member` on the thread message). The mention fields remain the optional part.
 7. Prompt updates, then author the `mod-chat` handler in a test guild. Critical failure paths to cover in script-level tests (run the sketch through `run_handler_script` with a fake emitter): unconfigured keys → explanatory message, no thread ops; `!archive` outside a mod thread → no-op; **non-mod thread member (added via `!modchat` mention) types `!archive`/`!lock` → no-op, zero thread ops**; `edit_thread` ordering (message before archive); `!lock` with all-mods membership → zero removals.
 

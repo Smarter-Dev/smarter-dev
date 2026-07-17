@@ -289,6 +289,17 @@ semantics. `create_thread`/`create_post` **raise** on any failure — a create r
 thread id and has nothing sensible to return without one (mirrors staff-comms
 `create_private_thread`).
 
+**Target verification rail (host-side, in `AdminActor`):** every mutating thread op
+first resolves its target with one `GET /channels/{id}` (`_verify_thread_target`,
+cached per fire so a close-then-lock sweep pays one fetch per thread) and requires a
+thread channel type (10/11/12) **in the actor's own guild**. A non-thread target (a
+laundered constant aiming `DELETE /channels/{id}` at a text channel would delete it
+wholesale) or a foreign-guild thread raises `AdminActionError` — loud, erroring the
+fire; a 404 on the verification fetch is the gone-target `False` no-op. Like the
+`send_message` parent check, the fetch is a host rail, **not** metered against
+`discord_reads`. The judge/lint targeting rails (§7) remain the first line; this is
+the structural backstop beneath them.
+
 ### 5.3 Budgets & windowed caps
 
 Two new `HandlerBudget` counters (`smarter_dev/web/handler_budget.py`), following the
@@ -371,12 +382,13 @@ query keeps `HANDLER_EVENT_TRIGGERS` unchanged).
   consumer demands them (they slot into `thread_ops` cleanly).
 - **Lifecycle E2 (role mutation) and E3 (durable timers)** — already fully specced in
   `member-lifecycle-and-role-automation.md`; nothing here changes them.
-- **Staff-comms E5 reconciliation** — `create_private_thread`, thread membership ops
-  (`add/remove_thread_member`, `get_thread_members`), and that sketch's
-  `thread_ops`/`GUILD_THREAD_CREATES_PER_MIN` numbers must be reconciled onto this
-  document's `thread_ops` counter and `hcap:threadop` window before mod-chat is built
-  (per the index's build-once rule); this document's budgets and dispatch context are
-  the baseline.
+- **Staff-comms E5 reconciliation** — **done (2026-07-17)**: that document's E5/E6 now
+  build on this one's `thread_ops` counter, `hcap:threadop` window, and
+  `_verify_thread_target` rail. Remaining deltas live there and ship with mod-chat:
+  the `ADMIN_MAX_THREAD_OPS` 10 → 25 raise, `get_thread_members` metering as
+  `discord_reads`, and the extra `GUILD_THREAD_CREATES_PER_MIN = 2` window on
+  `create_private_thread` (layered on top of the shared 30/min thread-op window). Its
+  E6 is shipped by §4 here (`is_thread` shape).
 
 ## 9. Implementation order & TDD notes
 

@@ -87,53 +87,115 @@ async def test_error_status_raises_admin_action_error():
 # -- thread operations ------------------------------------------------------
 
 
-async def test_close_thread_archives():
+def _thread_actor(
+    requests: list[httpx.Request],
+    channel_payload: dict | None = None,
+    get_status: int = 200,
+    mutate_status: int = 200,
+) -> AdminActor:
+    """Actor whose transport answers GET /channels/{id} with a channel object.
+
+    Every mutating thread op first verifies its target through that GET; the
+    default payload is a public thread in the actor's own guild.
+    """
+
+    payload = channel_payload or {"type": 11, "guild_id": "G1"}
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "GET":
+            if get_status >= 400:
+                return httpx.Response(get_status)
+            return httpx.Response(get_status, json=payload)
+        return httpx.Response(mutate_status)
+
+    return AdminActor(
+        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+    )
+
+
+async def test_close_thread_verifies_then_archives():
     requests: list[httpx.Request] = []
-    result = await _actor(requests, status_code=200).close_thread("T1")
+    result = await _thread_actor(requests).close_thread("T1")
     assert result is True
-    request = requests[0]
-    assert request.method == "PATCH"
-    assert request.url.path.endswith("/channels/T1")
-    assert json.loads(request.content) == {"archived": True}
+    verify, mutate = requests
+    assert verify.method == "GET"
+    assert verify.url.path.endswith("/channels/T1")
+    assert mutate.method == "PATCH"
+    assert mutate.url.path.endswith("/channels/T1")
+    assert json.loads(mutate.content) == {"archived": True}
 
 
 async def test_lock_thread_locks_and_archives():
     requests: list[httpx.Request] = []
-    result = await _actor(requests, status_code=200).lock_thread("T1")
+    result = await _thread_actor(requests).lock_thread("T1")
     assert result is True
-    assert json.loads(requests[0].content) == {"locked": True, "archived": True}
+    assert json.loads(requests[-1].content) == {"locked": True, "archived": True}
 
 
 async def test_reopen_thread_unarchives():
     requests: list[httpx.Request] = []
-    result = await _actor(requests, status_code=200).reopen_thread("T1")
+    result = await _thread_actor(requests).reopen_thread("T1")
     assert result is True
-    request = requests[0]
-    assert request.method == "PATCH"
-    assert json.loads(request.content) == {"archived": False}
+    mutate = requests[-1]
+    assert mutate.method == "PATCH"
+    assert json.loads(mutate.content) == {"archived": False}
 
 
 async def test_delete_thread_deletes():
     requests: list[httpx.Request] = []
-    result = await _actor(requests, status_code=200).delete_thread("T1")
+    result = await _thread_actor(requests).delete_thread("T1")
     assert result is True
-    request = requests[0]
-    assert request.method == "DELETE"
-    assert request.url.path.endswith("/channels/T1")
+    mutate = requests[-1]
+    assert mutate.method == "DELETE"
+    assert mutate.url.path.endswith("/channels/T1")
 
 
-async def test_thread_ops_return_false_on_404():
+async def test_thread_ops_return_false_on_gone_target():
     """A janitor sweeping an already-deleted thread is a silent no-op."""
-    for status in (404,):
-        assert await _actor([], status_code=status).close_thread("T1") is False
-        assert await _actor([], status_code=status).lock_thread("T1") is False
-        assert await _actor([], status_code=status).reopen_thread("T1") is False
-        assert await _actor([], status_code=status).delete_thread("T1") is False
+    for op in ("close_thread", "lock_thread", "reopen_thread", "delete_thread"):
+        requests: list[httpx.Request] = []
+        actor = _thread_actor(requests, get_status=404)
+        assert await getattr(actor, op)("T1") is False
+        assert [r.method for r in requests] == ["GET"], "must not mutate a gone target"
+
+
+async def test_thread_ops_return_false_when_mutation_hits_404():
+    """Thread deleted between verification and mutation: still a no-op."""
+    requests: list[httpx.Request] = []
+    assert await _thread_actor(requests, mutate_status=404).close_thread("T1") is False
 
 
 async def test_thread_ops_raise_on_non_404_error():
     for status in (403, 500):
         with pytest.raises(AdminActionError):
-            await _actor([], status_code=status).close_thread("T1")
+            await _thread_actor([], mutate_status=status).close_thread("T1")
         with pytest.raises(AdminActionError):
-            await _actor([], status_code=status).delete_thread("T1")
+            await _thread_actor([], mutate_status=status).delete_thread("T1")
+
+
+async def test_thread_ops_reject_non_thread_channel():
+    """DELETE /channels/{id} on a text channel would delete it wholesale."""
+    for op in ("close_thread", "lock_thread", "reopen_thread", "delete_thread"):
+        requests: list[httpx.Request] = []
+        actor = _thread_actor(requests, channel_payload={"type": 0, "guild_id": "G1"})
+        with pytest.raises(AdminActionError, match="not a thread"):
+            await getattr(actor, op)("C1")
+        assert [r.method for r in requests] == ["GET"], "must not touch a non-thread"
+
+
+async def test_thread_ops_reject_thread_outside_guild():
+    requests: list[httpx.Request] = []
+    actor = _thread_actor(requests, channel_payload={"type": 11, "guild_id": "G2"})
+    with pytest.raises(AdminActionError, match="outside guild"):
+        await actor.delete_thread("T1")
+    assert [r.method for r in requests] == ["GET"]
+
+
+async def test_thread_verification_cached_across_ops():
+    """A close-then-lock sweep fetches the channel once, not per mutation."""
+    requests: list[httpx.Request] = []
+    actor = _thread_actor(requests)
+    await actor.close_thread("T1")
+    await actor.lock_thread("T1")
+    assert [r.method for r in requests] == ["GET", "PATCH", "PATCH"]
