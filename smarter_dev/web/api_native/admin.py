@@ -1,20 +1,21 @@
-"""Native Litestar port of the admin bot API (stats, API keys, conversations).
+"""Native Litestar admin bot API (help-conversation audit).
 
-Ports the legacy FastAPI ``routers/admin.py`` (prefix ``/admin``) — part of
-unit U9 in docs/v2/legacy-sunset/04-api-rewrite.md. Preserves the exact paths,
+Ported from the legacy FastAPI ``routers/admin.py`` (prefix ``/admin``) — unit
+U9 in docs/v2/legacy-sunset/04-api-rewrite.md. Preserves the exact paths,
 verbs, status codes, and request/response shapes so the bot client
 (``POST /admin/conversations`` from ``bot/client.py`` / ``plugins/llm.py`` /
 ``plugins/help.py``) and any external caller need zero changes:
 
-- ``GET    /api/admin/stats`` → API-key usage statistics.
-- ``POST   /api/admin/api-keys`` → 201, mint a legacy-table key (full key shown once).
-- ``GET    /api/admin/api-keys`` → paginated listing.
-- ``GET/PUT/PATCH /api/admin/api-keys/{key_id}`` → read/update metadata.
-- ``DELETE /api/admin/api-keys/{key_id}`` → 200, revoke (409 if already revoked).
 - ``POST   /api/admin/conversations`` → 201, store a help-agent conversation.
 - ``GET    /api/admin/conversations`` → paginated listing with filters.
 - ``GET    /api/admin/conversations/stats`` → conversation analytics.
 - ``GET    /api/admin/conversations/{conversation_id}`` → single conversation.
+
+The legacy-table API key endpoints (``GET /stats`` and the ``/api-keys``
+CRUD) were REMOVED in the phase-05 decommission: they operated on the legacy
+``public.api_keys`` table, which no longer exists, and Skrift's built-in
+``/admin/api-keys`` UI manages the Skrift-native keys. The bot and harness
+never called them.
 
 Auth-scope parity (SENSITIVE): the legacy ``verify_admin_permissions`` demanded
 an ``admin:read``/``admin:write``/``admin:manage`` scope on every endpoint
@@ -27,15 +28,6 @@ so a future narrow key can be minted without code change. A valid key lacking
 the permission now answers 401 (Skrift guard) where FastAPI answered 403 —
 accepted in 04-api-rewrite.md ("401-parity"); the bot treats both as auth
 failures.
-
-LEGACY KEY TABLE: the ``/api-keys`` CRUD operates on the legacy-shaped
-``api_keys`` table (``models.APIKey``), exactly like the FastAPI router. After
-the phase-02 DB consolidation that table is unreachable in deployed
-environments, so these endpoints 500 there — identical to the current FastAPI
-behavior. Plan U9 marks them as candidates for REMOVAL at switchover (option
-(a): Skrift's ``/admin/api-keys`` UI replaces them; the bot and harness never
-call them) — keep or drop is a switchover-commit decision, ported here for
-byte parity in the meantime.
 
 INTENTIONAL FIX — ``GET /conversations/stats``: the FastAPI router declared
 ``/conversations/{conversation_id}`` BEFORE ``/conversations/stats``, so the
@@ -57,7 +49,7 @@ from __future__ import annotations
 import math
 from datetime import datetime, timedelta, timezone
 
-from litestar import Controller, Request, delete, get, patch, post, put
+from litestar import Controller, Request, get, post
 from litestar.params import Parameter
 from litestar.status_codes import HTTP_200_OK, HTTP_201_CREATED
 from sqlalchemy import func, or_, select
@@ -66,13 +58,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from skrift.auth.guards import APIKeyOnly, Permission
 
 from smarter_dev.web.api_native.schemas import (
-    AdminStatsResponse,
-    APIKeyCreate,
-    APIKeyCreateResponse,
-    APIKeyListResponse,
-    APIKeyResponse,
-    APIKeyRevokeResponse,
-    APIKeyUpdate,
     HelpConversationCreate,
     HelpConversationCreateResponse,
     HelpConversationListResponse,
@@ -86,10 +71,7 @@ from smarter_dev.web.api_native.errors import (
     parse_uuid_path,
     plain_error,
 )
-from smarter_dev.web.crud import APIKeyOperations
-from smarter_dev.web.models import APIKey as APIKeyModel
 from smarter_dev.web.models import HelpConversation
-from smarter_dev.web.security import generate_secure_api_key
 from smarter_dev.web.security_logger import get_security_logger
 
 # Permissions granted to the bot's Skrift service key (see roles.py
@@ -107,202 +89,10 @@ BOT_API_ADMIN_GUARDS = [bot_api_auth_guard, APIKeyOnly(), Permission(BOT_API_ADM
 
 
 class AdminController(Controller):
-    """System administration: key management, stats, conversation audit."""
+    """System administration: help-conversation audit."""
 
     path = "/api/admin"
     exception_handlers = BOT_API_EXCEPTION_HANDLERS
-
-    # ------------------------------------------------------------------ #
-    # Stats
-    # ------------------------------------------------------------------ #
-
-    @get("/stats", status_code=HTTP_200_OK, guards=BOT_API_ADMIN_GUARDS)
-    async def get_admin_stats(
-        self,
-        db_session: AsyncSession,
-    ) -> AdminStatsResponse:
-        """API-key usage statistics for the admin dashboard."""
-        stats = await APIKeyOperations().get_admin_stats(db_session)
-        return AdminStatsResponse(
-            total_api_keys=stats.get("total_api_keys", 0),
-            active_api_keys=stats.get("active_api_keys", 0),
-            revoked_api_keys=stats.get("revoked_api_keys", 0),
-            expired_api_keys=stats.get("expired_api_keys", 0),
-            total_api_requests=stats.get("total_api_requests", 0),
-            api_requests_today=stats.get("api_requests_today", 0),
-            top_api_consumers=stats.get("top_api_consumers", []),
-        )
-
-    # ------------------------------------------------------------------ #
-    # Legacy-table API key CRUD (switchover removal candidate — see module doc)
-    # ------------------------------------------------------------------ #
-
-    @post("/api-keys", status_code=HTTP_201_CREATED, guards=BOT_API_ADMIN_GUARDS)
-    async def create_api_key(
-        self,
-        request: Request,
-        db_session: AsyncSession,
-        data: APIKeyCreate,
-    ) -> APIKeyCreateResponse:
-        """Mint a legacy-table key; the full key value is only returned once."""
-        caller = await resolve_request_api_key(request)
-        full_key, key_hash, key_prefix = generate_secure_api_key()
-
-        new_api_key = APIKeyModel(
-            name=data.name,
-            description=data.description,
-            key_hash=key_hash,
-            key_prefix=key_prefix,
-            scopes=data.scopes,
-            rate_limit_per_hour=data.rate_limit_per_hour,
-            expires_at=data.expires_at,
-            created_by=caller.display_name,  # Track who created the key
-            is_active=True,
-            usage_count=0,
-        )
-        db_session.add(new_api_key)
-        await db_session.commit()
-        await db_session.refresh(new_api_key)
-
-        await get_security_logger().log_api_key_created(
-            session=db_session,
-            api_key=new_api_key,
-            user_identifier=caller.display_name,
-            request=request,
-        )
-
-        response_data = APIKeyResponse.model_validate(new_api_key)
-        return APIKeyCreateResponse(**response_data.model_dump(), api_key=full_key)
-
-    @get("/api-keys", status_code=HTTP_200_OK, guards=BOT_API_ADMIN_GUARDS)
-    async def list_api_keys(
-        self,
-        request: Request,
-        db_session: AsyncSession,
-        page: int = Parameter(default=1, ge=1),
-        size: int = Parameter(default=20, ge=1, le=100),
-        active_only: bool = False,
-        search: str | None = None,
-    ) -> APIKeyListResponse:
-        """Paginated key listing (no sensitive material)."""
-        caller = await resolve_request_api_key(request)
-        await get_security_logger().log_admin_operation(
-            session=db_session,
-            operation="list_api_keys",
-            user_identifier=caller.display_name,
-            request=request,
-            success=True,
-        )
-
-        offset = (page - 1) * size
-        keys, total = await APIKeyOperations().list_api_keys(
-            db=db_session,
-            offset=offset,
-            limit=size,
-            active_only=active_only,
-            search=search,
-        )
-        key_responses = [APIKeyResponse.model_validate(key) for key in keys]
-        pages = math.ceil(total / size) if total > 0 else 1
-        return APIKeyListResponse(
-            items=key_responses, total=total, page=page, size=size, pages=pages
-        )
-
-    @get("/api-keys/{key_id:str}", status_code=HTTP_200_OK, guards=BOT_API_ADMIN_GUARDS)
-    async def get_api_key(
-        self,
-        db_session: AsyncSession,
-        key_id: str,
-    ) -> APIKeyResponse:
-        """Single-key detail (no sensitive material)."""
-        parsed_key_id = parse_uuid_path(key_id, "key_id")
-        target_key = await APIKeyOperations().get_api_key_by_id(
-            session=db_session, key_id=parsed_key_id
-        )
-        if not target_key:
-            raise plain_error(404, "API key not found")
-        return APIKeyResponse.model_validate(target_key)
-
-    async def _apply_api_key_update(
-        self,
-        db_session: AsyncSession,
-        key_id: str,
-        data: APIKeyUpdate,
-    ) -> APIKeyResponse:
-        """Shared PUT/PATCH body — the legacy PATCH delegated to the PUT logic."""
-        parsed_key_id = parse_uuid_path(key_id, "key_id")
-        target_key = await APIKeyOperations().get_api_key_by_id(
-            session=db_session, key_id=parsed_key_id
-        )
-        if not target_key:
-            raise plain_error(404, "API key not found")
-
-        update_dict = data.model_dump(exclude_unset=True)
-        for field_name, value in update_dict.items():
-            setattr(target_key, field_name, value)
-        target_key.updated_at = datetime.now(timezone.utc)
-
-        await db_session.commit()
-        await db_session.refresh(target_key)
-        return APIKeyResponse.model_validate(target_key)
-
-    @put("/api-keys/{key_id:str}", status_code=HTTP_200_OK, guards=BOT_API_ADMIN_GUARDS)
-    async def update_api_key(
-        self,
-        db_session: AsyncSession,
-        key_id: str,
-        data: APIKeyUpdate,
-    ) -> APIKeyResponse:
-        """Update key metadata/permissions; the key value itself is immutable."""
-        return await self._apply_api_key_update(db_session, key_id, data)
-
-    @patch("/api-keys/{key_id:str}", status_code=HTTP_200_OK, guards=BOT_API_ADMIN_GUARDS)
-    async def partial_update_api_key(
-        self,
-        db_session: AsyncSession,
-        key_id: str,
-        data: APIKeyUpdate,
-    ) -> APIKeyResponse:
-        """Partial update — same semantics as PUT (legacy delegated identically)."""
-        return await self._apply_api_key_update(db_session, key_id, data)
-
-    @delete("/api-keys/{key_id:str}", status_code=HTTP_200_OK, guards=BOT_API_ADMIN_GUARDS)
-    async def revoke_api_key(
-        self,
-        request: Request,
-        db_session: AsyncSession,
-        key_id: str,
-    ) -> APIKeyRevokeResponse:
-        """Permanently deactivate a key (irreversible; 409 if already revoked)."""
-        caller = await resolve_request_api_key(request)
-        parsed_key_id = parse_uuid_path(key_id, "key_id")
-        target_key = await APIKeyOperations().get_api_key_by_id(
-            session=db_session, key_id=parsed_key_id
-        )
-        if not target_key:
-            raise plain_error(404, "API key not found")
-        if not target_key.is_active:
-            raise plain_error(409, "API key is already revoked")
-
-        revoked_at = datetime.now(timezone.utc)
-        target_key.is_active = False
-        target_key.revoked_at = revoked_at
-        target_key.updated_at = revoked_at
-        await db_session.commit()
-
-        await get_security_logger().log_api_key_deleted(
-            session=db_session,
-            api_key_id=parsed_key_id,
-            api_key_name=target_key.name,
-            user_identifier=caller.display_name,
-            request=request,
-        )
-
-        return APIKeyRevokeResponse(
-            message="API key revoked successfully",
-            key_id=str(parsed_key_id),
-            revoked_at=revoked_at,
-        )
 
     # ------------------------------------------------------------------ #
     # Help conversations

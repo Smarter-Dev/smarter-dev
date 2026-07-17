@@ -57,6 +57,11 @@ PYTHONPATH=/app uv run --no-sync python scripts/copy_legacy_data.py
 PYTHONPATH=/app uv run --no-sync python scripts/copy_legacy_data.py --execute
 ```
 
+> Phase-05 note: this cutover was completed and `LEGACY_DATABASE_URL` was
+> removed from settings and manifests. The script now takes the source
+> explicitly — append `--source-url '<bc_websites URL>'` to both commands if
+> the copy ever needs to be re-run against a restored backup.
+
 - Exit code 0 + the printed report showing `after == source` for every table
   means verification passed.
 - Non-zero exit: read the `VERIFICATION FAILED` line. If the run was merely

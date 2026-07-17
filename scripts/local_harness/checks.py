@@ -28,12 +28,9 @@ from scripts.local_harness.expectations import (
 )
 
 _AUTH_HEADERS: dict[str, dict[str, str]] = {
-    # "bot" is the Skrift-native sk_ service key — the bot's only key shape
-    # after the phase-02 DB consolidation.
+    # "bot" is the Skrift-native sk_ service key — the only key shape the
+    # API accepts.
     "bot": {"Authorization": f"Bearer {config.SKRIFT_BOT_API_KEY}"},
-    # Retired legacy sk- key: never seeded post-flip, must always 401.
-    "legacy_bot": {"Authorization": f"Bearer {config.LEGACY_BOT_API_KEY}"},
-    "unknown_key": {"Authorization": f"Bearer {config.UNKNOWN_API_KEY}"},
     "unknown_skrift_key": {"Authorization": f"Bearer {config.UNKNOWN_SKRIFT_API_KEY}"},
     "malformed_key": {"Authorization": "Bearer not-a-valid-key"},
     "none": {},

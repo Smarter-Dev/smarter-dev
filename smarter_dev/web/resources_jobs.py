@@ -24,7 +24,7 @@ from skrift.notifications import notify_user
 from skrift.workers import handler
 from sqlalchemy import select
 
-from smarter_dev.shared.database import get_skrift_db_session_context
+from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.models import AgentConversation, AgentMessage
 from smarter_dev.web.resources_agent import begin_run, run_resources_pipeline
 from smarter_dev.web.sdanswer import enrich_answer
@@ -89,7 +89,7 @@ async def run_resources_job(payload: ResourcesRunPayload) -> dict:
                 "`RESOURCE_AGENT_STUB=1`; no Gemini call was made."
             )
         else:
-            async with get_skrift_db_session_context() as history_session:
+            async with get_db_session_context() as history_session:
                 prior_q = await history_session.execute(
                     select(AgentMessage)
                     .where(AgentMessage.conversation_id == conversation_id)
@@ -111,7 +111,7 @@ async def run_resources_job(payload: ResourcesRunPayload) -> dict:
                 owner_user_id=str(owner_user_id),
             )
 
-        async with get_skrift_db_session_context() as bg_session:
+        async with get_db_session_context() as bg_session:
             conversation = await bg_session.get(AgentConversation, conversation_id)
             if conversation is None:
                 return {"status": "missing"}

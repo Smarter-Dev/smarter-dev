@@ -25,7 +25,7 @@ def _remove_container(name: str) -> None:
 
 
 def start_postgres() -> None:
-    """Start the harness postgres with both databases (via repo init scripts)."""
+    """Start the harness postgres (schema init via repo init scripts)."""
     _remove_container(config.POSTGRES_CONTAINER)
     init_dir = config.REPO_ROOT / "scripts" / "postgres-init"
     _run(
@@ -56,18 +56,24 @@ def start_redis() -> None:
 
 
 def wait_for_postgres(timeout_seconds: float = 60.0) -> None:
-    """Wait until both databases accept connections (init scripts done)."""
+    """Wait until the database is up AND the init scripts have completed.
+
+    Probes for the ``skrift`` schema (created by scripts/postgres-init) rather
+    than bare connectivity, because the entrypoint's temporary init server
+    already accepts socket connections while the init scripts are running.
+    """
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
-        legacy_ready = _run(
+        schema_probe = _run(
             [
                 "podman", "exec", config.POSTGRES_CONTAINER,
-                "psql", "-U", config.DB_USER, "-d", config.LEGACY_DB_NAME,
-                "-c", "SELECT 1",
+                "psql", "-tA", "-U", config.DB_USER, "-d", config.MAIN_DB_NAME,
+                "-c",
+                "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'skrift'",
             ],
             check=False,
         )
-        if legacy_ready.returncode == 0:
+        if schema_probe.returncode == 0 and "1" in schema_probe.stdout:
             return
         time.sleep(0.5)
     raise InfraError(

@@ -2,8 +2,8 @@
 
     uv run python scripts/local_harness/run.py [--keep-up] [--skip-infra]
 
-Pipeline: podman infra -> migrations (all four trees) -> seed -> boot app ->
-readiness -> checks -> teardown. Non-zero exit if any check fails.
+Pipeline: podman infra -> migrations (Skrift core + main app) -> seed ->
+boot app -> readiness -> checks -> teardown. Non-zero exit if any check fails.
 
 Flags:
     --keep-up    leave containers + app running after the checks (debugging);
@@ -33,7 +33,7 @@ from scripts.local_harness.mock_discord import start_mock_discord_server  # noqa
 
 
 def run_migrations() -> None:
-    """Apply all four migration trees against the harness databases."""
+    """Apply both migration trees against the harness database."""
     result = subprocess.run(
         [sys.executable, "scripts/migrate.py"],
         cwd=str(REPO_ROOT),
@@ -85,8 +85,7 @@ def print_keep_up_help() -> None:
         "\n--keep-up: everything left running for debugging\n"
         f"  app:           {config.APP_BASE_URL}\n"
         f"  api:           {config.API_BASE_URL} (Bearer {config.SKRIFT_BOT_API_KEY})\n"
-        f"  main db:       {config.MAIN_DATABASE_URL}\n"
-        f"  legacy db:     {config.LEGACY_DATABASE_URL}\n"
+        f"  db:            {config.MAIN_DATABASE_URL}\n"
         f"  redis:         {config.REDIS_URL}\n"
         f"  mock discord:  {config.MOCK_DISCORD_BASE_URL}\n"
         f"  skrift admin:  log in at {config.APP_BASE_URL}/auth/dummy/login "
@@ -111,7 +110,7 @@ def main() -> int:
         if not args.skip_infra:
             print("==> starting podman postgres + redis")
             infra.start_all()
-            print("==> running migrations (skrift-main, main, skrift-legacy, legacy)")
+            print("==> running migrations (skrift-main, main)")
             run_migrations()
             print("==> seeding representative data")
             run_seed()

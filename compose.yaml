@@ -47,7 +47,6 @@ services:
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/smarter_dev
-      - LEGACY_DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/bc_websites
       - REDIS_URL=redis://:smarter_dev_redis_password@redis:6379/0
     ports:
       - "8002:8000"
@@ -71,7 +70,6 @@ services:
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/smarter_dev
-      - LEGACY_DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/bc_websites
       - REDIS_URL=redis://:smarter_dev_redis_password@redis:6379/0
       - API_BASE_URL=http://web:8000/api
     volumes:

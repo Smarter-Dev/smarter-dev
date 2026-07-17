@@ -7,10 +7,8 @@ is one row; the runner in ``checks.py`` interprets them in order.
 - ``ApiCheck.path`` is relative to /api and may contain ``{saved:name}``
   placeholders filled from values captured by earlier checks (``save_key``).
 - ``auth`` selects the Authorization header: ``bot`` (seeded Skrift-native
-  sk_ key — the only accepted key shape since the phase-02 DB
-  consolidation), ``legacy_bot`` (retired legacy sk- key, must 401),
-  ``unknown_key`` / ``unknown_skrift_key`` (valid format, not in DB),
-  ``malformed_key``, or ``none``.
+  sk_ key — the only accepted key shape), ``unknown_skrift_key`` (valid
+  format, not in DB), ``malformed_key``, or ``none``.
 - ``validate`` (optional) receives the parsed JSON body and returns an error
   string, or None when the body is acceptable.
 """
@@ -91,12 +89,8 @@ API_CHECKS: tuple[ApiCheck, ...] = (
              validate=_expect_field("authenticated", True)),
     ApiCheck("auth-validate", "POST", "/auth/validate",
              validate=_expect_field("valid", True)),
-    # Phase 02 (DB consolidation): the legacy sk- key table is unreachable
-    # from the runtime database, so the retired legacy key must cleanly 401.
-    ApiCheck("auth-legacy-key-401", "GET", "/auth/status",
-             auth="legacy_bot", expect_status=(401,)),
-    ApiCheck("auth-unknown-key-401", "GET", "/auth/status",
-             auth="unknown_key", expect_status=(401,)),
+    # Only seeded Skrift sk_ keys authenticate; a well-formed but unseeded
+    # key must cleanly 401.
     ApiCheck("auth-unknown-skrift-key-401", "GET", "/auth/status",
              auth="unknown_skrift_key", expect_status=(401,)),
     ApiCheck("auth-malformed-key-401", "GET", f"/guilds/{_G}/bytes/config",

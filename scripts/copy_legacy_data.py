@@ -6,9 +6,10 @@ never run this against a real database.
 
 Behavior:
 
-- Source: ``LEGACY_DATABASE_URL`` (bc_websites, ``public`` schema).
+- Source: the ``--source-url`` CLI argument (bc_websites, ``public`` schema —
+  the app no longer carries a legacy database URL in its settings).
   Target: ``DATABASE_URL`` (main DB) with ``schema_translate_map
-  {None: "skrift"}``. Both read via ``smarter_dev.shared.config.get_settings``.
+  {None: "skrift"}``, read via ``smarter_dev.shared.config.get_settings``.
 - Dry-run by default: prints the FK-dependency copy order and per-table
   source/target row counts, writes nothing. Pass ``--execute`` to copy.
 - Copies 23 of the 24 legacy tables, parents before children (order derived
@@ -46,9 +47,9 @@ logger = logging.getLogger("copy_legacy_data")
 TARGET_SCHEMA = "skrift"
 DEFAULT_BATCH_SIZE = 1000
 
-# The 24 tables that live in bc_websites ``public`` (alembic/legacy's former
-# ownership set; that frozenset is now closed/empty, so the authoritative
-# list lives here for the one-time copy).
+# The 24 tables that live in bc_websites ``public`` (the deleted
+# alembic/legacy tree's former ownership set; the authoritative list lives
+# here for the one-time copy).
 LEGACY_SOURCE_TABLE_NAMES: frozenset[str] = frozenset({
     "advent_of_code_configs",
     "advent_of_code_threads",
@@ -185,7 +186,7 @@ async def run_copy(
     if source_url == target_url:
         raise ValueError(
             "source and target database URLs are identical — refusing to copy a "
-            "database onto itself (is LEGACY_DATABASE_URL set?)"
+            "database onto itself (pass the legacy bc_websites URL as --source-url)"
         )
     ordered_tables = fk_ordered_copy_tables()
     mode = "EXECUTE" if execute else "DRY-RUN"
@@ -264,9 +265,17 @@ def _print_report(results: list[TableCopyResult], *, execute: bool) -> None:
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Copy legacy bot tables from LEGACY_DATABASE_URL (public schema) to "
+            "Copy legacy bot tables from --source-url (public schema) to "
             "DATABASE_URL (skrift schema). Dry-run by default."
         )
+    )
+    parser.add_argument(
+        "--source-url",
+        required=True,
+        help=(
+            "SQLAlchemy URL of the legacy bc_websites database (public schema); "
+            "the app settings no longer carry a legacy database URL"
+        ),
     )
     parser.add_argument(
         "--execute",
@@ -286,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     args = build_argument_parser().parse_args(argv)
     settings = get_settings()
-    source_url = settings.effective_legacy_database_url
+    source_url = args.source_url
     target_url = settings.effective_database_url
     try:
         results = asyncio.run(

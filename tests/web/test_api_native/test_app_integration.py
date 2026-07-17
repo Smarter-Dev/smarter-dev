@@ -190,11 +190,11 @@ def app_client(integration_session_maker) -> Iterator[TestClient]:
         # Guard/introspection key lookups and the rate limiter's sessions all
         # target the test database instead of the process-global engine.
         patch(
-            "smarter_dev.web.api_native.auth.get_skrift_db_session_context",
+            "smarter_dev.web.api_native.auth.get_db_session_context",
             side_effect=lambda: integration_session_maker(),
         ),
         patch(
-            "smarter_dev.web.api_native.rate_limiting.get_skrift_db_session_context",
+            "smarter_dev.web.api_native.rate_limiting.get_db_session_context",
             side_effect=lambda: integration_session_maker(),
         ),
         patch(

@@ -35,8 +35,7 @@ from scripts.copy_legacy_data import (
 from scripts.local_harness import config as harness_config
 from scripts.local_harness.seed import _adopted_bot_rows
 from smarter_dev.shared.database import Base
-from smarter_dev.web.models import APIKey, BytesConfig, Squad, SquadMembership
-from smarter_dev.web.security import hash_api_key
+from smarter_dev.web.models import BytesConfig, Squad, SquadMembership
 
 # The FK-dependency-ordered copy list (parents before children). Derived
 # programmatically in the script from Base.metadata.sorted_tables; pinned
@@ -160,7 +159,11 @@ def copy_test_postgres() -> None:
 
 @pytest.fixture
 async def source_engine(copy_test_postgres) -> AsyncGenerator[AsyncEngine, None]:
-    """Fresh source DB (public schema) with all 24 legacy tables per test."""
+    """Fresh source DB (public schema) with the 23 copyable legacy tables.
+
+    The 24th legacy table (``api_keys``) has no model anymore — its ORM class
+    was deleted with the legacy key system — so it cannot be created here.
+    """
     engine = create_async_engine(SOURCE_URL)
     async with engine.begin() as connection:
         await connection.run_sync(
@@ -205,23 +208,16 @@ async def target_engine(copy_test_postgres) -> AsyncGenerator[AsyncEngine, None]
 
 
 async def _seed_source(source_engine: AsyncEngine) -> None:
-    """Seed the harness's representative bot-table rows plus an api_keys row.
+    """Seed the harness's representative bot-table rows.
 
-    The legacy api_keys row is added here (the harness no longer seeds one)
-    so the copy's api_keys exclusion stays exercised against real data.
+    The legacy ``api_keys`` model was deleted in the phase-05 decommission,
+    so no ORM row can be seeded for it; the exclusion is still pinned by the
+    name-set assertions in ``TestCopySetDefinition`` and by the target-schema
+    ``to_regclass('skrift.api_keys')`` check below.
     """
-    legacy_api_key_row = APIKey(
-        name="Copy Test Legacy Key",
-        description="Source-only row: must never be copied",
-        key_hash=hash_api_key(harness_config.LEGACY_BOT_API_KEY),
-        key_prefix=harness_config.LEGACY_BOT_API_KEY[:12],
-        scopes=["bot:read"],
-        is_active=True,
-        created_by="copy-test",
-    )
     session_maker = async_sessionmaker(source_engine, expire_on_commit=False)
     async with session_maker() as session:
-        session.add_all([*_adopted_bot_rows(), legacy_api_key_row])
+        session.add_all(_adopted_bot_rows())
         await session.commit()
 
 

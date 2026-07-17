@@ -1,20 +1,17 @@
 """Seed representative data into the harness database.
 
 Run as a subprocess by ``run.py`` with DATABASE_URL pointing at the harness
-postgres. Since the phase-02 DB consolidation every runtime table lives in
-the main DB's ``skrift`` schema, so ALL seeds land there:
+postgres. Every runtime table lives in the single database's ``skrift``
+schema, so ALL seeds land there:
 
 - the adopted bot-economy/admin tables (bytes, squads, campaigns, forum
-  agents, ...) that used to live in the legacy database,
+  agents, ...) that used to live in the retired legacy database,
 - quests, feature flags, chat-agent engagements, member activity, a channel
   handler, and the known-plaintext Skrift-native ``sk_`` service API key the
   checks authenticate with.
 
-No legacy ``sk-`` key is seeded: the legacy api_keys table is unreachable
-after the flip (``skrift.api_keys`` is Skrift core's own table), so the
-retired legacy key must 401 — see the auth checks in ``expectations.py``.
-The legacy database receives no seeds; it exists only so the closed
-``alembic/legacy`` tree still applies during ``scripts/migrate.py``.
+Only Skrift ``sk_`` keys exist — the legacy key system was deleted in the
+phase-05 decommission; unseeded keys must 401 (see ``expectations.py``).
 
 The Skrift admin user is NOT seeded here — the checks log in through the dev
 dummy auth provider, which creates the user and grants the admin role itself.

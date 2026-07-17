@@ -15,7 +15,7 @@ from datetime import datetime
 
 import hikari
 
-from smarter_dev.shared.database import get_db_session_context, get_skrift_db_session_context
+from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import AuditLogConfigOperations, ModerationActionOperations
 
 mod_action_ops = ModerationActionOperations()
@@ -212,7 +212,7 @@ async def log_member_leave(
 
     # Check audit log for kick (member leave could be voluntary or a kick)
     try:
-        async with get_skrift_db_session_context() as session:
+        async with get_db_session_context() as session:
             try:
                 async for entry in bot.rest.fetch_audit_log(
                     event.guild_id, event_type=hikari.AuditLogEventType.MEMBER_KICK
@@ -277,7 +277,7 @@ async def log_member_ban(
 
     # Record ban in moderation actions (from audit log / external source)
     try:
-        async with get_skrift_db_session_context() as session:
+        async with get_db_session_context() as session:
             # Try to get the moderator from Discord audit log
             moderator_id = None
             moderator_name = None
@@ -343,7 +343,7 @@ async def log_member_unban(
 
     # Record unban in moderation actions
     try:
-        async with get_skrift_db_session_context() as session:
+        async with get_db_session_context() as session:
             moderator_id = None
             moderator_name = None
             reason = None
@@ -497,7 +497,7 @@ async def log_member_update(
     if old_timeout != new_timeout and new_timeout is not None:
         # User was timed out — record it
         try:
-            async with get_skrift_db_session_context() as session:
+            async with get_db_session_context() as session:
                 moderator_id = None
                 moderator_name = None
                 reason = None

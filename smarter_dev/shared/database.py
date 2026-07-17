@@ -4,9 +4,6 @@ Since the phase-02 database consolidation (docs/v2/legacy-sunset/
 02-db-consolidation.md) the application runs against a single database:
 ``DATABASE_URL`` with every schema-less table translated into the ``skrift``
 schema — identical to the sessions Litestar injects into Skrift controllers.
-The legacy ``LEGACY_DATABASE_URL`` remains in config solely for
-``scripts/copy_legacy_data.py`` and the closed ``alembic/legacy`` tree;
-no runtime code path may open a session against it.
 """
 
 from __future__ import annotations
@@ -217,27 +214,6 @@ def get_db_session_context():
     """Get a database session context manager (main DB, skrift schema)."""
     session_maker = get_session_maker()
     return session_maker()
-
-
-def get_skrift_db_session_context():
-    """Alias of :func:`get_db_session_context`.
-
-    Kept for call-site compatibility during the legacy sunset; both names
-    now produce identical sessions against the single primary database.
-    Delete in the decommission phase.
-    """
-    return get_db_session_context()
-
-
-async def get_skrift_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Alias of :func:`get_db_session`.
-
-    Kept for call-site (FastAPI ``Depends``) compatibility during the legacy
-    sunset; both names now produce identical sessions against the single
-    primary database. Delete in the decommission phase.
-    """
-    async for session in get_db_session():
-        yield session
 
 
 async def init_database() -> None:

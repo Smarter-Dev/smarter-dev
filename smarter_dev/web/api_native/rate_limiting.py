@@ -51,7 +51,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.database import get_db_session_context
-from smarter_dev.shared.database import get_skrift_db_session_context
+from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.models import SecurityLog
 from smarter_dev.web.security_logger import get_security_logger
 
@@ -247,7 +247,7 @@ async def check_rate_limits(
 
 async def _resolve_rate_limited_key(scope: Scope, token: str) -> RateLimitedKey | None:
     """Verify the bearer against the Skrift key table; None when invalid."""
-    async with get_skrift_db_session_context() as skrift_session:
+    async with get_db_session_context() as skrift_session:
         skrift_api_key = await skrift_api_key_service.verify_api_key(
             skrift_session, token, client_ip=get_client_ip(scope)
         )

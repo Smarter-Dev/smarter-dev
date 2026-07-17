@@ -33,11 +33,11 @@ def _spawn_converge(user_id) -> None:
     session here.
     """
     async def _run() -> None:
-        from smarter_dev.shared.database import get_skrift_db_session_context
+        from smarter_dev.shared.database import get_db_session_context
         from smarter_dev.web.billing.converge import converge
 
         try:
-            async with get_skrift_db_session_context() as session:
+            async with get_db_session_context() as session:
                 await converge(session, user_id)
         except Exception:
             logger.exception("post-login converge failed for user %s", user_id)

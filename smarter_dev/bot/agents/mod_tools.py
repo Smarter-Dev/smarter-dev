@@ -22,7 +22,7 @@ import hikari
 import lightbulb
 
 from smarter_dev.bot.plugins.timeout import parse_duration
-from smarter_dev.shared.database import get_skrift_db_session_context
+from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import ModerationActionOperations
 from smarter_dev.web.models import ModerationAction
 
@@ -186,7 +186,7 @@ def create_moderation_tools(
         ai_context_summary: str | None = None,
     ) -> ModerationAction:
         """Record a moderation action in the database."""
-        async with get_skrift_db_session_context() as session:
+        async with get_db_session_context() as session:
             action = await mod_action_ops.create_action(
                 session,
                 guild_id=guild_id,
@@ -501,7 +501,7 @@ def create_moderation_tools(
             dict with user's moderation history
         """
         try:
-            async with get_skrift_db_session_context() as session:
+            async with get_db_session_context() as session:
                 actions = await mod_action_ops.get_actions_for_user(session, guild_id, user_id, limit=20)
                 warn_count = await mod_action_ops.count_warns_for_user(session, guild_id, user_id)
 

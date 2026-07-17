@@ -1,11 +1,12 @@
 """Parity tests for the native (Litestar) admin controller.
 
 Exercises ``smarter_dev.web.api_native.admin`` against a real in-memory SQLite
-database (legacy key table + help conversations + security logs all live in the
-shared ``Base.metadata``), asserting the status codes and JSON bodies the
-FastAPI ``routers/admin.py`` produced. The caller-identity seam
-(``resolve_request_api_key``) is patched — guard behavior is covered by
-``test_auth.py``-style guard tests at the bottom.
+database (help conversations + security logs live in the shared
+``Base.metadata``), asserting the status codes and JSON bodies the FastAPI
+``routers/admin.py`` produced. The legacy-table API key endpoints were removed
+in the phase-05 decommission, so only the conversation routes remain. The
+caller-identity seam (``resolve_request_api_key``) is patched — guard behavior
+is covered by ``test_auth.py``-style guard tests at the bottom.
 
 Behavior note: ``GET /api/admin/conversations/stats`` is asserted REACHABLE
 here. On the FastAPI mount the route was shadowed by
@@ -85,17 +86,6 @@ def client(db_session, caller_key_mock) -> Iterator[TestClient]:
         admin_module.BOT_API_ADMIN_GUARDS[:] = original_guards
 
 
-def _key_body(**over):
-    body = {
-        "name": "Bot Production Key",
-        "description": "Key for the production bot",
-        "scopes": ["bot:read", "bot:write"],
-        "rate_limit_per_hour": 5000,
-    }
-    body.update(over)
-    return body
-
-
 def _conversation_body(**over):
     body = {
         "session_id": "sess-1",
@@ -110,118 +100,6 @@ def _conversation_body(**over):
     }
     body.update(over)
     return body
-
-
-# --------------------------------------------------------------------------- #
-# API key CRUD (legacy key table)
-# --------------------------------------------------------------------------- #
-
-
-def test_create_api_key_returns_full_key_once(client):
-    resp = client.post("/api/admin/api-keys", json=_key_body())
-    assert resp.status_code == 201
-    data = resp.json()
-    assert data["name"] == "Bot Production Key"
-    assert data["scopes"] == ["bot:read", "bot:write"]
-    assert data["api_key"].startswith("sk-")
-    assert data["key_prefix"] == data["api_key"][:12]
-    assert data["is_active"] is True
-    assert data["usage_count"] == 0
-    assert data["created_by"] == CALLER_KEY_NAME
-
-
-def test_create_api_key_rejects_unknown_scope(client):
-    resp = client.post(
-        "/api/admin/api-keys", json=_key_body(scopes=["galaxy:conquer"])
-    )
-    assert resp.status_code == 422
-
-
-def test_list_api_keys_paginates(client):
-    for n in range(3):
-        client.post("/api/admin/api-keys", json=_key_body(name=f"Key {n}"))
-    resp = client.get("/api/admin/api-keys", params={"page": 1, "size": 2})
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total"] == 3
-    assert data["page"] == 1
-    assert data["size"] == 2
-    assert data["pages"] == 2
-    assert len(data["items"]) == 2
-    assert all("api_key" not in item for item in data["items"])
-
-
-def test_get_api_key_detail_and_404(client):
-    created = client.post("/api/admin/api-keys", json=_key_body())
-    key_id = created.json()["id"]
-
-    detail = client.get(f"/api/admin/api-keys/{key_id}")
-    assert detail.status_code == 200
-    assert detail.json()["id"] == key_id
-
-    missing = client.get("/api/admin/api-keys/00000000-0000-0000-0000-000000000000")
-    assert missing.status_code == 404
-    assert missing.json() == {"detail": "API key not found"}
-
-
-def test_get_api_key_malformed_id_is_422(client):
-    resp = client.get("/api/admin/api-keys/not-a-uuid")
-    assert resp.status_code == 422
-
-
-def test_put_and_patch_update_api_key(client):
-    created = client.post("/api/admin/api-keys", json=_key_body())
-    key_id = created.json()["id"]
-
-    updated = client.put(
-        f"/api/admin/api-keys/{key_id}", json={"name": "Renamed Key"}
-    )
-    assert updated.status_code == 200
-    assert updated.json()["name"] == "Renamed Key"
-
-    patched = client.patch(
-        f"/api/admin/api-keys/{key_id}", json={"rate_limit_per_hour": 900}
-    )
-    assert patched.status_code == 200
-    assert patched.json()["rate_limit_per_hour"] == 900
-    assert patched.json()["name"] == "Renamed Key"  # untouched by the patch
-
-
-def test_revoke_api_key_then_conflict(client):
-    created = client.post("/api/admin/api-keys", json=_key_body())
-    key_id = created.json()["id"]
-
-    revoked = client.delete(f"/api/admin/api-keys/{key_id}")
-    assert revoked.status_code == 200
-    body = revoked.json()
-    assert body["message"] == "API key revoked successfully"
-    assert body["key_id"] == key_id
-
-    again = client.delete(f"/api/admin/api-keys/{key_id}")
-    assert again.status_code == 409
-    assert again.json() == {"detail": "API key is already revoked"}
-
-    missing = client.delete("/api/admin/api-keys/00000000-0000-0000-0000-000000000000")
-    assert missing.status_code == 404
-
-
-# --------------------------------------------------------------------------- #
-# Stats
-# --------------------------------------------------------------------------- #
-
-
-def test_admin_stats_counts_keys(client):
-    client.post("/api/admin/api-keys", json=_key_body(name="Active Key"))
-    created = client.post("/api/admin/api-keys", json=_key_body(name="Doomed Key"))
-    client.delete(f"/api/admin/api-keys/{created.json()['id']}")
-
-    resp = client.get("/api/admin/stats")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["total_api_keys"] == 2
-    assert data["active_api_keys"] == 1
-    assert data["revoked_api_keys"] == 1
-    assert isinstance(data["top_api_consumers"], list)
 
 
 # --------------------------------------------------------------------------- #
@@ -324,8 +202,10 @@ def guarded_client() -> Iterator[TestClient]:
         yield test_client
 
 
-def test_admin_stats_missing_authorization_header_rejected(guarded_client):
-    assert guarded_client.get("/api/admin/stats").status_code == 401
+def test_admin_conversations_read_missing_authorization_header_rejected(
+    guarded_client,
+):
+    assert guarded_client.get("/api/admin/conversations").status_code == 401
 
 
 def test_admin_conversations_write_missing_authorization_header_rejected(
@@ -337,9 +217,9 @@ def test_admin_conversations_write_missing_authorization_header_rejected(
     assert response.status_code == 401
 
 
-def test_admin_api_keys_non_sk_bearer_rejected(guarded_client):
+def test_admin_conversations_non_sk_bearer_rejected(guarded_client):
     response = guarded_client.get(
-        "/api/admin/api-keys",
+        "/api/admin/conversations",
         headers={"Authorization": "Bearer not-a-skrift-key"},
     )
     assert response.status_code == 401
