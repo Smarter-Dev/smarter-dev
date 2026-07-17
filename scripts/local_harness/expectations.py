@@ -377,6 +377,13 @@ SKRIFT_ADMIN_PAGES: tuple[AdminPageCheck, ...] = (
         "admin-bot-scheduled-message-edit",
         f"/admin/bot/guilds/{_G}/campaigns/{config.CAMPAIGN_ID}"
         f"/scheduled-messages/{config.SCHEDULED_MESSAGE_ID}/edit"),
+    AdminPageCheck("admin-bot-repeating-messages",
+                   f"/admin/bot/guilds/{_G}/repeating-messages"),
+    AdminPageCheck("admin-bot-repeating-message-create",
+                   f"/admin/bot/guilds/{_G}/repeating-messages/create"),
+    AdminPageCheck(
+        "admin-bot-repeating-message-edit",
+        f"/admin/bot/guilds/{_G}/repeating-messages/{config.REPEATING_MESSAGE_ID}/edit"),
     AdminPageCheck("admin-bot-moderation", f"/admin/bot/moderation/{_G}"),
     AdminPageCheck("admin-bot-mod-actions", f"/admin/bot/mod-actions/{_G}"),
     AdminPageCheck("admin-handlers", "/admin/handlers"),
