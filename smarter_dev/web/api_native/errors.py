@@ -20,7 +20,7 @@ controllers stay wire-compatible:
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from litestar import Request, Response
 from litestar.exceptions import ValidationException
@@ -132,6 +132,23 @@ def secure_database_error(exc: Exception) -> BotApiException:
     return plain_error(
         500, _verbose_or_generic(f"Database error: {exc}", "Internal server error")
     )
+
+
+def parse_uuid_path(value: str, field_name: str) -> UUID:
+    """Parse a UUID path segment, matching FastAPI's 422 on bad format.
+
+    Legacy routes declared UUID-typed path params, so a malformed UUID produced
+    a 422 ``RequestValidationError``. Declaring the Litestar param as ``str``
+    and parsing here reproduces that 422 (via
+    :func:`handle_validation_exception`) instead of a route-miss 404.
+    """
+    try:
+        return UUID(value)
+    except ValueError as parse_error:
+        raise ValidationException(
+            detail=f"Invalid {field_name} format",
+            extra=[{"key": field_name, "message": "value is not a valid uuid"}],
+        ) from parse_error
 
 
 def validate_discord_id(request: Request, value: str, field_name: str = "ID") -> str:
