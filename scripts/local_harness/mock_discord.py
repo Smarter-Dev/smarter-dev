@@ -1,8 +1,9 @@
-"""Tiny in-process mock of the Discord REST API for the legacy admin pages.
+"""Tiny in-process mock of the Discord REST API for the admin pages.
 
-The legacy /bot-admin views fetch guilds, roles, and channels from Discord.
-``harness_app`` points ``DiscordClient.base_url`` here so every page can
-render fully offline. Only the read endpoints the admin uses are implemented.
+The Skrift ``/admin/bot`` guild pages fetch guilds, roles, and channels from
+Discord. ``harness_app`` points ``DiscordAdminClient.api_base`` here so every
+page can render fully offline. Only the read endpoints the admin uses are
+implemented.
 """
 
 from __future__ import annotations

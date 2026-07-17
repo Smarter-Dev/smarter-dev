@@ -21,7 +21,7 @@ from skrift.admin.navigation import ADMIN_NAV_TAG
 from skrift.auth.guards import auth_guard, Permission
 from skrift.flash import flash_error, flash_success, get_flash_messages
 
-from smarter_dev.web.admin.discord import get_discord_client
+from smarter_dev.web.discord_admin_client import get_admin_discord_client
 from smarter_dev.web.models import AdminHandler, ChannelHandler, HandlerRun
 
 # How far back the per-handler error log reaches, and how many rows to keep per
@@ -99,9 +99,9 @@ class HandlersAdminController(Controller):
 
         # Guilds the bot is in, by name. Fall back to the guild ids that have
         # handlers (shown as ids) if the Discord API is unavailable.
-        client = get_discord_client()
+        client = get_admin_discord_client()
         try:
-            bot_guilds = await client.get_bot_guilds()
+            bot_guilds = await client.list_bot_guilds()
             guilds = [{"id": g.id, "name": g.name} for g in bot_guilds]
         except Exception:  # noqa: BLE001 — degrade gracefully without the API
             flash_error(request, "Couldn't reach Discord; showing guild ids only.")

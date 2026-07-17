@@ -405,72 +405,16 @@ SKRIFT_ADMIN_PAGES: tuple[AdminPageCheck, ...] = (
     AdminPageCheck("admin-blogging-runs", "/admin/blogging-agent/runs"),
 )
 
-# Every legacy /bot-admin page reachable by GET for an admin session.
-LEGACY_ADMIN_PAGES: tuple[AdminPageCheck, ...] = (
-    AdminPageCheck("bot-admin-dashboard", "/bot-admin/"),
-    AdminPageCheck("bot-admin-guilds", "/bot-admin/guilds"),
-    AdminPageCheck("bot-admin-guild-detail", f"/bot-admin/guilds/{_G}"),
-    AdminPageCheck("bot-admin-bytes-config", f"/bot-admin/guilds/{_G}/bytes"),
-    AdminPageCheck("bot-admin-squads-config", f"/bot-admin/guilds/{_G}/squads"),
-    AdminPageCheck("bot-admin-audit-logs", f"/bot-admin/guilds/{_G}/audit-logs"),
-    AdminPageCheck("bot-admin-attachment-filter",
-                   f"/bot-admin/guilds/{_G}/attachment-filter"),
-    AdminPageCheck("bot-admin-squad-sale-events",
-                   f"/bot-admin/guilds/{_G}/squad-sale-events"),
-    AdminPageCheck("bot-admin-forum-agents", f"/bot-admin/guilds/{_G}/forum-agents"),
-    AdminPageCheck("bot-admin-forum-agent-create",
-                   f"/bot-admin/guilds/{_G}/forum-agents/create"),
-    AdminPageCheck(
-        "bot-admin-forum-agent-edit",
-        f"/bot-admin/guilds/{_G}/forum-agents/{config.FORUM_AGENT_ID}/edit"),
-    AdminPageCheck(
-        "bot-admin-forum-agent-analytics",
-        f"/bot-admin/guilds/{_G}/forum-agents/{config.FORUM_AGENT_ID}/analytics"),
-    # /bot-admin/api-keys was removed in phase 02: key management lives in
-    # Skrift's built-in /admin/api-keys (checked above in SKRIFT_ADMIN_PAGES).
-    AdminPageCheck("bot-admin-conversations", "/bot-admin/conversations"),
-    AdminPageCheck(
-        "bot-admin-conversation-detail",
-        f"/bot-admin/conversations/{config.HELP_CONVERSATION_ID}"),
-    AdminPageCheck("bot-admin-conversation-cleanup", "/bot-admin/conversations/cleanup"),
-    AdminPageCheck("bot-admin-campaign-signups", "/bot-admin/campaign-signups"),
-    AdminPageCheck("bot-admin-campaigns", f"/bot-admin/guilds/{_G}/campaigns"),
-    AdminPageCheck("bot-admin-campaign-create",
-                   f"/bot-admin/guilds/{_G}/campaigns/create"),
-    AdminPageCheck(
-        "bot-admin-campaign-edit",
-        f"/bot-admin/guilds/{_G}/campaigns/{config.CAMPAIGN_ID}/edit"),
-    AdminPageCheck(
-        "bot-admin-campaign-challenges",
-        f"/bot-admin/guilds/{_G}/campaigns/{config.CAMPAIGN_ID}/challenges"),
-    AdminPageCheck(
-        "bot-admin-challenge-create",
-        f"/bot-admin/guilds/{_G}/campaigns/{config.CAMPAIGN_ID}/challenges/create"),
-    AdminPageCheck(
-        "bot-admin-scheduled-messages",
-        f"/bot-admin/guilds/{_G}/campaigns/{config.CAMPAIGN_ID}/scheduled-messages"),
-    AdminPageCheck(
-        "bot-admin-scheduled-message-create",
-        f"/bot-admin/guilds/{_G}/campaigns/{config.CAMPAIGN_ID}/scheduled-messages/create"),
-    AdminPageCheck(
-        "bot-admin-scheduled-message-edit",
-        f"/bot-admin/guilds/{_G}/campaigns/{config.CAMPAIGN_ID}"
-        f"/scheduled-messages/{config.SCHEDULED_MESSAGE_ID}/edit"),
-    AdminPageCheck("bot-admin-repeating-messages",
-                   f"/bot-admin/guilds/{_G}/repeating-messages"),
-    AdminPageCheck("bot-admin-repeating-message-create",
-                   f"/bot-admin/guilds/{_G}/repeating-messages/create"),
-    AdminPageCheck(
-        "bot-admin-repeating-message-edit",
-        f"/bot-admin/guilds/{_G}/repeating-messages/{config.REPEATING_MESSAGE_ID}/edit"),
-    AdminPageCheck("bot-admin-advent-of-code",
-                   f"/bot-admin/guilds/{_G}/advent-of-code"),
+# The legacy Starlette /bot-admin mount was removed in phase 03; every feature
+# now lives under Skrift's /admin/bot (checked in SKRIFT_ADMIN_PAGES). The whole
+# /bot-admin tree must be gone.
+BOT_ADMIN_GONE_PAGES: tuple[AdminPageCheck, ...] = (
+    AdminPageCheck("bot-admin-gone-root", "/bot-admin/", expect_status=(404,)),
+    AdminPageCheck("bot-admin-gone-guilds", "/bot-admin/guilds", expect_status=(404,)),
 )
 
 # Unauthenticated requests to protected admin surfaces must NOT return 200.
 UNAUTHENTICATED_PAGES: tuple[AdminPageCheck, ...] = (
     AdminPageCheck("skrift-admin-anon-redirects", "/admin/",
-                   expect_status=(302, 303, 307, 401, 403)),
-    AdminPageCheck("bot-admin-anon-redirects", "/bot-admin/",
                    expect_status=(302, 303, 307, 401, 403)),
 )
