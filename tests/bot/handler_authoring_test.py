@@ -305,6 +305,19 @@ def test_describe_trigger_cadence_phrasing():
     assert "One-shot" in describe_trigger("timer", {"delay_seconds": 120})
 
 
+def test_describe_trigger_member_and_thread_cadence():
+    join = describe_trigger("member_join", {})
+    assert "EVERY member join" in join and "raid" in join.lower()
+    leave = describe_trigger("member_leave", {})
+    assert "EVERY member leave" in leave and "ban wave" in leave.lower()
+    rules = describe_trigger("member_rules_accepted", {})
+    assert "idempotent" in rules
+    role = describe_trigger("member_role_change", {})
+    assert "actually change" in role and "low frequency" in role.lower()
+    thread = describe_trigger("thread_create", {})
+    assert "EVERY new thread/post" in thread
+
+
 # -- admin creation pipeline ---------------------------------------------------
 
 from smarter_dev.bot.agents.handler_authoring import (
@@ -448,6 +461,47 @@ async def test_admin_pipeline_judge_reject():
     )
     assert not result.ok
     assert "no condition" in result.error
+
+
+async def test_admin_pipeline_accepts_member_trigger():
+    # The admin vocabulary includes the five member/thread triggers; a
+    # member_join create plan is accepted and its cadence reaches the judge.
+    seen = {}
+
+    async def judge(script, trigger_context):
+        seen["ctx"] = trigger_context
+        return _verdict(reason="ok")
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods when someone joins",
+        existing_handlers=[],
+        author=_admin_author_returning(
+            _admin_plan(
+                trigger_type="member_join",
+                name="join-alert",
+                script='await send_message("welcome", "MODCHAT")\n',
+            )
+        ),
+        judge=judge,
+    )
+    assert result.ok
+    assert result.trigger_type == "member_join"
+    assert "EVERY member join" in seen["ctx"]
+
+
+async def test_standard_pipeline_rejects_admin_only_trigger():
+    # Even if the standard author mistakenly emits an admin-only trigger, the
+    # standard pipeline rejects it — the vocabulary stays the four base types.
+    result = await run_creation_pipeline(
+        request="alert on join",
+        trigger_type="message",
+        settings={},
+        existing_handlers=[],
+        author=_author_returning(_plan(trigger_type="member_join")),
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "invalid trigger" in result.error
 
 
 # -- checklist verdict + dual-judge merge --------------------------------------

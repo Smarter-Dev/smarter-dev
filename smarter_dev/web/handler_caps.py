@@ -30,6 +30,15 @@ HANDLER_FIRES_PER_MIN_REACTION = 4
 # need a high fire ceiling; the global agent/min cap still bounds expensive work.
 ADMIN_FIRES_PER_MIN = 120
 
+# Guild-wide gate on member lifecycle events (join/leave/rules/role) before a
+# fire is even enqueued, so a raid degrades to declined dispatches rather than a
+# fire-queue explosion. member_leave draws from the same window (join and leave
+# burst together in a raid + ban wave).
+GUILD_MEMBER_EVENTS_PER_MIN = 60
+# Guild-wide gate on mutating thread ops (create/close/lock/reopen/delete),
+# enforced in the runtime wrapper before the REST call.
+GUILD_THREAD_OPS_PER_MIN = 30
+
 # Creation ceilings. Named handlers removed the single-listener bound, so the
 # number of handlers is capped outright — enforced at the create endpoints.
 MAX_HANDLERS_PER_CHANNEL = 10
@@ -59,8 +68,20 @@ def handler_error_notice_key(handler_id: str) -> str:
     return f"hcap:errnotice:{handler_id}"
 
 
+def guild_member_events_key(guild_id: str) -> str:
+    return f"hcap:memberevt:{guild_id}"
+
+
+def guild_thread_ops_key(guild_id: str) -> str:
+    return f"hcap:threadop:{guild_id}"
+
+
 def fires_per_min_for_trigger(trigger_type: str) -> int:
-    """Per-handler fire ceiling, tighter for reaction triggers."""
+    """Per-handler fire ceiling, tighter for reaction triggers.
+
+    The five admin-only member/thread triggers fall through to the default
+    message ceiling of 10 (§3.4) — no special-casing.
+    """
     return (
         HANDLER_FIRES_PER_MIN_REACTION
         if trigger_type == "reaction"

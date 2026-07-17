@@ -8,13 +8,25 @@ chokepoint is what makes "code is the only emitter" and "agents only gather"
 true in practice.
 
 Script-facing surface (Monty external functions):
-- ``send_message(content)`` -> message id
+- ``send_message(content)`` -> message id (may also target a thread of the
+  handler's home channel; admin handlers may target any channel in the guild)
 - ``add_reaction(message_id, emoji)`` -> True
 - ``post_voice(text)`` -> True
 - ``spawn_agent(prompt, has_tools=False)`` -> plaintext str
+- ``list_threads(channel_id=None)`` -> list[dict] of the channel's threads
+  (home channel when omitted; a foreign channel needs an admin handler). Spends
+  the discord_reads budget; a gone channel yields ``[]`` without erroring.
+- ``create_thread(name, message_id=None)`` -> thread id and
+  ``create_post(title, content, tag_names=None)`` -> thread id, both on the home
+  channel, spending the message budget + channel window like ``send_message``.
 - ``memory_get(key, default=None)`` / ``memory_set(key, value)`` /
   ``memory_all()`` / ``memory_delete(key)`` -> persistent per-handler key/value
   store that survives across fires.
+
+Admin handlers (``actor`` set) additionally get ``close_thread`` /
+``lock_thread`` / ``reopen_thread`` / ``delete_thread`` -> bool (each spends the
+thread_ops budget + guild thread-op window before the REST call; a gone thread
+yields ``False`` without erroring the fire).
 
 Script-facing data (Monty input): ``context`` — a plain dict describing the
 trigger (its keys depend on ``context["trigger_type"]``).
@@ -45,9 +57,11 @@ from smarter_dev.web.handler_budget import CapExceeded, HandlerBudget
 from smarter_dev.web.handler_caps import (
     CHANNEL_MESSAGES_PER_MIN,
     GLOBAL_AGENT_CALLS_PER_MIN,
+    GUILD_THREAD_OPS_PER_MIN,
     WindowedLimiter,
     channel_message_key,
     global_agent_key,
+    guild_thread_ops_key,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
 from smarter_dev.web.handler_memory import HandlerMemory
@@ -138,6 +152,9 @@ class HandlerExecution:
     emitter: DiscordEmitter
     limiter: WindowedLimiter
     agent_runner: AgentRunner = _no_agent
+    # The admin handler's channel scope. Empty means guild-wide; a non-empty
+    # scope bounds which channels admin list_threads(channel_id) may read.
+    channel_ids: list[str] = field(default_factory=list)
     # Set only for admin handlers; presence enables the moderation functions and
     # lets send_message target any channel.
     actor: AdminActor | None = None
@@ -148,6 +165,10 @@ class HandlerExecution:
     # exception that crosses out of an external function (losing its type), so
     # we record the real CapExceeded on the host side before re-raising.
     breach: CapExceeded | None = None
+    # Per-execution cache of a thread's parent channel id, so the send_message
+    # home-thread relaxation verifies each target once per fire. This is a host
+    # rail (one cached fetch), NOT metered against discord_reads.
+    _thread_parent_cache: dict[str, str | None] = field(default_factory=dict)
 
     def external_functions(self) -> dict[str, Callable[..., Any]]:
         funcs = {
@@ -155,6 +176,9 @@ class HandlerExecution:
             "add_reaction": self._guard(self._add_reaction),
             "post_voice": self._guard(self._post_voice),
             "spawn_agent": self._guard(self._spawn_agent),
+            "list_threads": self._guard(self._list_threads),
+            "create_thread": self._guard(self._create_thread),
+            "create_post": self._guard(self._create_post),
             "memory_get": self._guard(self._memory_get),
             "memory_set": self._guard(self._memory_set),
             "memory_all": self._guard(self._memory_all),
@@ -169,6 +193,10 @@ class HandlerExecution:
                     "ban_user": self._guard(self._ban_user),
                     "kick_user": self._guard(self._kick_user),
                     "timeout_user": self._guard(self._timeout_user),
+                    "close_thread": self._guard(self._close_thread),
+                    "lock_thread": self._guard(self._lock_thread),
+                    "reopen_thread": self._guard(self._reopen_thread),
+                    "delete_thread": self._guard(self._delete_thread),
                 }
             )
         return funcs
@@ -188,13 +216,17 @@ class HandlerExecution:
 
     async def _send_message(self, content: str, channel_id: str | None = None) -> str:
         target = str(channel_id) if channel_id else self.channel_id
-        # Standard handlers may only post to their own channel; admin handlers
-        # (actor set) may post anywhere in the guild (e.g. mod-chat).
+        # Standard handlers may only post to their own channel or a thread OF
+        # that channel; admin handlers (actor set) may post anywhere in the guild
+        # (e.g. mod-chat). The thread-of-home verdict is cached per fire so
+        # repeated sends into the same thread don't re-fetch its parent.
         if self.actor is None and target != self.channel_id:
-            raise CapExceeded(
-                "cross_channel_send",
-                "standard handlers can only post to their own channel",
-            )
+            if not await self._is_home_channel_thread(target):
+                raise CapExceeded(
+                    "cross_channel_send",
+                    "standard handlers can only post to their own channel "
+                    "or a thread of it",
+                )
         self.budget.spend_message()
         within = await self.limiter.hit(
             channel_message_key(target), CHANNEL_MESSAGES_PER_MIN
@@ -205,6 +237,104 @@ class HandlerExecution:
                 f"channel hit its {CHANNEL_MESSAGES_PER_MIN} messages/min cap",
             )
         return await self.emitter.create_message(target, str(content))
+
+    async def _is_home_channel_thread(self, channel_id: str) -> bool:
+        """Whether ``channel_id`` is a thread whose parent is the home channel.
+
+        Host rail behind the ``send_message`` relaxation: cached per execution so
+        repeated sends into the same thread cost one parent fetch, and NOT metered
+        against the ``discord_reads`` budget.
+        """
+        if channel_id not in self._thread_parent_cache:
+            self._thread_parent_cache[channel_id] = (
+                await self.emitter.get_thread_parent_id(channel_id)
+            )
+        return self._thread_parent_cache[channel_id] == self.channel_id
+
+    # -- thread reads/creates (both tiers, home-channel scoped by default) --
+
+    async def _list_threads(self, channel_id: str | None = None) -> list[dict]:
+        """Active + recently-archived threads of a channel; spends a discord read.
+
+        ``channel_id`` omitted (or falsy) -> the handler's HOME channel, allowed
+        for both tiers. A foreign ``channel_id`` requires an admin handler (actor
+        set); a standard handler naming another channel raises the same
+        ``cross_channel_send`` cap ``send_message`` uses. For an admin handler the
+        target must be within its ``channel_ids`` scope (empty scope = guild-wide,
+        and the runtime still verifies the channel belongs to this guild so a
+        foreign-guild id can't leak archived threads) — otherwise
+        ``out_of_scope_channel`` is raised. The scope rail is a host check (not
+        metered) and runs before the read is spent. A gone channel (404) flows
+        through from the emitter as ``[]`` and does NOT error the fire.
+        """
+        target = str(channel_id) if channel_id else self.channel_id
+        if target != self.channel_id:
+            if self.actor is None:
+                raise CapExceeded(
+                    "cross_channel_send",
+                    "standard handlers can only list threads of their own channel",
+                )
+            if not await self._admin_channel_in_scope(target):
+                raise CapExceeded(
+                    "out_of_scope_channel",
+                    "admin list_threads target is outside the handler's channel "
+                    "scope / guild",
+                )
+        self.budget.spend_discord_read()
+        return await self.emitter.list_threads(target)
+
+    async def _admin_channel_in_scope(self, channel_id: str) -> bool:
+        """Whether an admin handler may read ``channel_id``'s threads.
+
+        A non-empty ``channel_ids`` scope is an exact allow-list (pure check). An
+        empty scope is guild-wide, so the channel is verified to belong to this
+        fire's guild via one host fetch (NOT metered against discord_reads).
+        """
+        if self.channel_ids:
+            return channel_id in self.channel_ids
+        return await self.emitter.get_channel_guild_id(channel_id) == self.guild_id
+
+    async def _create_thread(self, name: str, message_id: str | None = None) -> str:
+        """Create a thread on the HOME channel; return its id.
+
+        A create is an emit: it spends the message budget and the home channel's
+        per-minute message window exactly like ``send_message``. Raises on any
+        REST failure (a create has no sensible falsy return).
+        """
+        await self._spend_home_channel_emit()
+        message = str(message_id) if message_id else None
+        return await self.emitter.create_thread(self.channel_id, str(name), message)
+
+    async def _create_post(
+        self, title: str, content: str, tag_names: list[str] | None = None
+    ) -> str:
+        """Create a forum post on the HOME channel; return its thread id.
+
+        Spends the message budget and the home channel's message window like
+        ``send_message``. An unknown forum tag name raises ``ValueError`` from the
+        emitter (fail fast); any REST failure raises (no falsy return for a create).
+        """
+        await self._spend_home_channel_emit()
+        return await self.emitter.create_post(
+            self.channel_id, str(title), str(content), tag_names
+        )
+
+    async def _spend_home_channel_emit(self) -> None:
+        """Meter a thread create (create_thread/create_post): the message budget
+        and the channel's per-minute message window (matching ``send_message``),
+        then the guild thread-op window — creation is a mutating thread op and
+        must not escape the guild ceiling just because it spends the message
+        budget rather than the thread_ops counter (spec §5.3)."""
+        self.budget.spend_message()
+        within = await self.limiter.hit(
+            channel_message_key(self.channel_id), CHANNEL_MESSAGES_PER_MIN
+        )
+        if not within:
+            raise CapExceeded(
+                "channel_messages_per_min",
+                f"channel hit its {CHANNEL_MESSAGES_PER_MIN} messages/min cap",
+            )
+        await self._hit_guild_thread_ops_window()
 
     # -- admin-only moderation functions (only present when self.actor is set) --
 
@@ -224,6 +354,50 @@ class HandlerExecution:
     async def _timeout_user(self, user_id: str, duration_seconds: int = 600) -> str:
         self.budget.spend_mod_action()
         return await self.actor.timeout_user(str(user_id), int(duration_seconds))
+
+    # -- admin-only thread mutations (only present when self.actor is set) --
+
+    async def _close_thread(self, thread_id: str) -> bool:
+        """Archive a thread. A gone thread (404) is a silent no-op -> False."""
+        await self._spend_thread_op()
+        return await self.actor.close_thread(str(thread_id))
+
+    async def _lock_thread(self, thread_id: str) -> bool:
+        """Lock and archive a thread. A gone thread (404) -> False."""
+        await self._spend_thread_op()
+        return await self.actor.lock_thread(str(thread_id))
+
+    async def _reopen_thread(self, thread_id: str) -> bool:
+        """Unarchive a thread. A gone thread (404) -> False."""
+        await self._spend_thread_op()
+        return await self.actor.reopen_thread(str(thread_id))
+
+    async def _delete_thread(self, thread_id: str) -> bool:
+        """Delete a thread. A gone thread (404) is a silent no-op -> False."""
+        await self._spend_thread_op()
+        return await self.actor.delete_thread(str(thread_id))
+
+    async def _spend_thread_op(self) -> None:
+        """Meter a mutating thread op (close/lock/reopen/delete): per-fire
+        thread_ops budget then the guild thread-op window, before the REST call —
+        a breach of either fails the fire mid-flight, the same shape the
+        channel-message window uses."""
+        self.budget.spend_thread_op()
+        await self._hit_guild_thread_ops_window()
+
+    async def _hit_guild_thread_ops_window(self) -> None:
+        """Charge the guild thread-op window, raising ``CapExceeded`` on breach.
+
+        Shared by every mutating thread op (create/close/lock/reopen/delete) so
+        all six draw the one guild ceiling (spec §5.3)."""
+        within = await self.limiter.hit(
+            guild_thread_ops_key(self.guild_id), GUILD_THREAD_OPS_PER_MIN
+        )
+        if not within:
+            raise CapExceeded(
+                "guild_thread_ops_per_min",
+                f"guild hit its {GUILD_THREAD_OPS_PER_MIN} thread-ops/min cap",
+            )
 
     async def _add_reaction(self, message_id: str, emoji: str) -> bool:
         # Reactions are emits too — metered against the per-fire emit cap, but
@@ -281,6 +455,7 @@ async def run_handler_script(
     agent_runner: AgentRunner = _no_agent,
     budget: HandlerBudget | None = None,
     actor: AdminActor | None = None,
+    channel_ids: list[str] | None = None,
     memory: dict[str, Any] | None = None,
 ) -> HandlerResult:
     """Compile and run ``script`` in Monty with every rail enforced.
@@ -305,6 +480,7 @@ async def run_handler_script(
         limiter=limiter,
         agent_runner=agent_runner,
         actor=actor,
+        channel_ids=list(channel_ids or []),
         memory=handler_memory,
     )
     started = time.monotonic()

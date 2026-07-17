@@ -49,6 +49,11 @@ One input variable is provided:
                 context["author_id"], context["author_name"],
                 context["attachments"] — files posted with the message, each
                 {"url", "content_type", "filename"} (empty list if none)
+                THREADS: context["is_thread"] is true when the message was typed
+                inside a thread of this channel (with context["thread_id"] and
+                context["thread_name"]); false otherwise. The handler still runs
+                on the parent channel, so send_message() posts to the parent —
+                to reply INTO the thread, pass send_message(text, context["thread_id"]).
                 ACTIVITY FACTS (platform-tracked — use these instead of keeping
                 your own per-user records in memory):
                 context["author_is_first_message"] — true when this is the
@@ -62,11 +67,25 @@ One input variable is provided:
 
 These async functions are provided — you MUST `await` every call:
 
-  await send_message(content: str) -> str
+  await send_message(content: str, channel_id: str = None) -> str
       Post a message to the channel. Returns the new message's id (use it if you
-      then want to react to your own message).
+      then want to react to your own message). You may pass channel_id ONLY to
+      post into a THREAD of this channel (e.g. context["thread_id"], or a
+      thread id from list_threads) — any other channel is rejected. Omit
+      channel_id to post to the channel itself.
   await add_reaction(message_id: str, emoji: str) -> bool
       Add a reaction to a message. Custom emoji: pass "name:id". Unicode: pass the character.
+  await list_threads() -> list[dict]
+      Active + recently-archived threads/posts of THIS channel (hard cap 50), each
+      {"thread_id", "name", "created_at", "archived", "locked", "owner_id",
+      "message_count", "applied_tag_names"}. Use it to find a thread to post into
+      or to detect duplicates before creating one.
+  await create_thread(name: str, message_id: str = None) -> str   # returns the new thread id
+      Start a thread on this channel — off message_id if given, else a standalone
+      public thread. Counts as a message emit (see the caps).
+  await create_post(title: str, content: str, tag_names: list = None) -> str   # forum post id
+      FORUM channels only: open a forum post. tag_names must be real tags of the
+      channel — an unknown name errors. Counts as a message emit.
   await post_voice(text: str) -> bool
       Post a voice message (may be unavailable — prefer send_message).
   await spawn_agent(prompt: str, has_tools: bool = False) -> str
@@ -102,7 +121,7 @@ Only your script can emit to the channel (send_message / add_reaction / post_voi
 direct web access from the script — gather only by calling spawn_agent.
 
 ## Hard limits — a script may not exceed, per single firing:
-- 3 messages sent (send_message / add_reaction / post_voice all count)
+- 3 messages sent (send_message / add_reaction / post_voice / create_thread / create_post all count)
 - 3 web searches and 3 web reads — these are SHARED with any agents you spawn (an agent that
   reads 2 pages leaves you 1)
 - 2 agent calls (spawn_agent)
@@ -126,6 +145,12 @@ When a spawn_agent reply decides what the script does next:
 - Put any matching logic (does this message contain "huzzah"?) in the script itself, with cheap
   guards FIRST, before any expensive call, so an agent or web-read only runs when it should.
   This matters most for message/reaction triggers, which fire constantly.
+- TARGET BY ID, NEVER BY NAME. When the behavior singles out a known user or channel/thread,
+  compare snowflake ids — context["author_id"] == "1234567890", a channel/thread id constant —
+  never context["author_name"], display names, or channel names. Names change, collide, and can
+  be spoofed by renaming; ids are stable. The request should state the ids (e.g. "user
+  1234567890 (@zech)"); if it targets a specific user but gives no id, set feasible=false asking
+  for the id rather than guessing from a name.
 - Use only real emoji from the provided list (call list_channel_emojis to see them).
 - When editing, the returned script REPLACES the target's script wholesale — carry forward the
   behavior the edit doesn't touch, and the result must still satisfy every limit; if it can't,

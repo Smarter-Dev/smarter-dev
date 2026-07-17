@@ -12,12 +12,18 @@ still hide an unbounded memory key. Walk ALL categories even after finding a fai
    reset is NOT pruning if the structure can grow past the cap BETWEEN resets on a busy guild.
 4. `guards_effective` — cheap guards run before expensive work AND actually filter. Trace each
    guard: a condition that is true for essentially every message (e.g. `author_joined_at`, which
-   is set for every member) is a broken guard even if the code looks defensive.
+   is set for every member) is a broken guard even if the code looks defensive. On a `member_join`
+   handler (fires on EVERY join, bursts during raids) a handler that emits with no guard is
+   effectively unconditional — fail this unless the target is explicitly a join-log channel.
 5. `agent_verdict_safe` — if a spawn_agent reply gates any action: the check must be anchored
    (startswith/exact — reject `"X" in reply`), and member content must be delimited and marked
    untrusted. Set true when no agent reply gates anything.
 6. `actions_appropriate` — ban/kick only for new/untrusted accounts on clear evidence;
-   established members (including long-dormant ones) get delete/timeout + a mod report.
+   established members (including long-dormant ones) get delete/timeout + a mod report. Thread
+   ops fit the same test: `delete_thread` is irreversible, so its target MUST come from trigger
+   context or a `list_threads` result — a hardcoded thread-id literal or id arithmetic is an
+   unreviewable destructive action; fail this and say so. An unconditional emit on `member_join`
+   (raid frequency) is spam here unless the destination is explicitly a join-log.
 7. `transparent` — no encoded or opaque blobs anywhere.
 
 You are given a "Trigger context" line describing how often the handler runs. Judge the script
@@ -72,6 +78,27 @@ literal loops/fan-outs that blow these (e.g. banning in an unbounded loop, loopi
 - Disproportionate automation: auto-banning ESTABLISHED members (not new accounts / first-time
   posters) on a model verdict alone. For that cohort expect delete + timeout + a mod-channel
   report instead; reject and say so.
+
+## Reject unsafe member/thread-event handlers
+The five member/thread triggers (`member_join`, `member_leave`, `member_rules_accepted`,
+`member_role_change`, `thread_create`) are admin-only. Judge them against their frequency:
+- Raid-frequency spam: `member_join` (and `member_leave`) fire on EVERY join/leave and burst during
+  raids and ban waves. Reject a `member_join` handler that messages unconditionally — it floods a
+  channel during a raid — UNLESS the target is explicitly a join-log channel. Expect a real guard
+  (account age, missing avatar, a specific role) that makes the common join silent.
+- Non-idempotent rules handlers: `member_rules_accepted` uses at-least-once delivery and can fire
+  more than once per member after a cache miss. Reject a handler whose action isn't safe to repeat
+  (e.g. it hands out a one-time reward or posts a welcome with no dedupe guard).
+- Hardcoded destructive thread targets: a `delete_thread` (or close/lock) target must come from
+  trigger context or a `list_threads` result — reject a hardcoded thread-id literal or id
+  arithmetic as an unreviewable destructive action.
+- Name-based targeting of a specific person or channel: when the behavior singles out a known
+  user/channel, the script must compare snowflake ids (`context["author_id"]`,
+  `context["member_id"]`, a channel-id constant) — reject gates on usernames, display names, or
+  channel names (names change, collide, and can be spoofed by renaming). This is a hard fail when
+  the name gate feeds ban/kick/timeout/delete.
+- No home channel on member events: the four `member_*` triggers have no home channel, so a bare
+  `send_message(content)` with no channel_id would fail at runtime. Every send must name a channel.
 
 Approve only if you can read everything the script does, it stays within the admin limits, gates
 destructive actions on sensible conditions, and does nothing unsafe.

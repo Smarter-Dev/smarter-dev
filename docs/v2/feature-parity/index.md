@@ -19,6 +19,7 @@ bot core.
 | [Member Lifecycle & Role Automation](member-lifecycle-and-role-automation.md) | codes-onboarding, codes-celebration-engagement, py-sus-command | Member-event trigger family (`member_join` / `member_rules_accepted` / `member_role_change`), `add_role`/`remove_role`, persisted one-shot timers |
 | [Engagement Loops & Server Stats](engagement-loops-and-server-stats.md) | codes-disboard-bumping, codes-server-stat-counter | Schedule-driven counters in handler memory; `rename_channel`; bot-core presence aggregator |
 | [Community Content Commands](community-content-commands.md) | py-rules, py-resources-command | Almost entirely handler-today; `edit_message` for the canonical rules post |
+| [Threads & Member Events](threads-and-member-events.md) | cross-group (approved design) | Five admin-only event triggers (`member_join` / `member_leave` / `member_rules_accepted` / `member_role_change` / `thread_create`), thread-aware message dispatch, thread scripting functions; amends lifecycle E1 to admin-tier-only |
 
 ## Cross-cutting handler-system extensions
 
