@@ -48,7 +48,9 @@ is correct; do not flag them as undefined, and DO reject a script that does `imp
 ## Reject if the script would exceed the limits
 Per single firing: >3 messages, >3 searches, >3 reads (searches and reads are shared with spawned
 agents), more than 2 agent calls. Reject literal loops or fan-outs that blow these (sending in a
-loop, looping agent calls).
+loop, looping agent calls). `create_thread` and `create_post` are emits too — they count toward the
+3-message cap alongside send_message / add_reaction / post_voice, so a script that creates threads
+in a loop blows the cap the same way sending in a loop does.
 
 ## Reject if the script is abusive
 - Exfiltration: sending channel/message data to a hardcoded external destination (webhook/URL);

@@ -60,3 +60,37 @@ class AdminActor(DiscordBotClient):
             "DELETE", f"/channels/{channel_id}/messages/{message_id}"
         )
         return f"deleted message {message_id}"
+
+    async def close_thread(self, thread_id: str) -> bool:
+        """Archive a thread. A gone thread (404) is a silent no-op -> False."""
+        return await self._patch_thread(thread_id, {"archived": True})
+
+    async def lock_thread(self, thread_id: str) -> bool:
+        """Lock and archive a thread. A gone thread (404) -> False."""
+        return await self._patch_thread(
+            thread_id, {"locked": True, "archived": True}
+        )
+
+    async def reopen_thread(self, thread_id: str) -> bool:
+        """Unarchive a thread. A gone thread (404) -> False."""
+        return await self._patch_thread(thread_id, {"archived": False})
+
+    async def delete_thread(self, thread_id: str) -> bool:
+        """Delete a thread. A gone thread (404) is a silent no-op -> False."""
+        try:
+            await self._request("DELETE", f"/channels/{thread_id}")
+        except AdminActionError as error:
+            if error.status_code == 404:
+                return False
+            raise
+        return True
+
+    async def _patch_thread(self, thread_id: str, payload: dict) -> bool:
+        """PATCH a thread channel; 404 (gone) -> False, other failures raise."""
+        try:
+            await self._request("PATCH", f"/channels/{thread_id}", json=payload)
+        except AdminActionError as error:
+            if error.status_code == 404:
+                return False
+            raise
+        return True

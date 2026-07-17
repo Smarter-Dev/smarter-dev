@@ -48,6 +48,11 @@ _OPAQUE_MIN_LEN = 120
 _BASE64ISH = re.compile(r"^[A-Za-z0-9+/=_-]+$")
 _HEXISH = re.compile(r"^[0-9a-fA-F]+$")
 
+# delete_thread(...) whose first argument opens with a string quote — a
+# hardcoded destructive target. `f"..."` is not matched (the `f` precedes the
+# quote), so dynamic references are left for the judge.
+_DELETE_THREAD_LITERAL = re.compile(r"\bdelete_thread\s*\(\s*['\"]")
+
 
 def _string_literals(script: str) -> list[str]:
     out: list[str] = []
@@ -66,6 +71,13 @@ def check_static(script: str) -> str | None:
     for token in _BANNED_TOKENS:
         if re.search(rf"\b{re.escape(token)}\b", script):
             return f"script uses banned construct '{token}'"
+
+    # delete_thread is irreversible: its target must come from trigger context or
+    # a list_threads result, never a hardcoded id literal (an unreviewable
+    # destructive target). A quoted first argument is exactly that literal; a
+    # variable, subscript, or f-string reference passes through to the judge.
+    if _DELETE_THREAD_LITERAL.search(script):
+        return "script calls delete_thread() with a hardcoded thread id literal"
 
     for literal in _string_literals(script):
         compact = literal.strip()

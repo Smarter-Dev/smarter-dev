@@ -28,7 +28,10 @@ from smarter_dev.web.handler_schedule import ScheduleError, validate_interval
 
 logger = logging.getLogger(__name__)
 
-# The chatbot's trigger_type vocabulary mapped to canonical handler types.
+# The chatbot's trigger_type vocabulary mapped to canonical handler types. The
+# five member/thread event triggers are ADMIN-ONLY (see threads-and-member-events
+# spec) and deliberately absent here — a member cannot register them via the chat
+# tool; _admin_only_trigger routes them to a redirect instead of a bad mapping.
 _TRIGGER_ALIASES = {
     "new message": "message",
     "message": "message",
@@ -37,6 +40,29 @@ _TRIGGER_ALIASES = {
     "schedule": "schedule",
     "timer": "timer",
 }
+
+# Names (canonical and natural-language) for the admin-only member/thread
+# triggers. A member asking for one is pointed at /adminhandler, not told the
+# trigger is unknown — it exists, it's just not theirs to register.
+_ADMIN_ONLY_TRIGGERS = frozenset(
+    {
+        "member_join", "member join", "member joins",
+        "member_leave", "member leave", "member leaves",
+        "member_rules_accepted", "member rules accepted", "rules accepted",
+        "member_role_change", "member role change", "role change",
+        "thread_create", "thread create", "new thread", "forum post",
+    }
+)
+
+_ADMIN_ONLY_REDIRECT = (
+    "that trigger requires an admin handler — ask a server admin to set it up "
+    "via /adminhandler"
+)
+
+
+def _admin_only_trigger(trigger_type: str) -> bool:
+    """Whether this is one of the five admin-only member/thread triggers."""
+    return trigger_type.strip().lower() in _ADMIN_ONLY_TRIGGERS
 
 
 def _api_client(ctx: RunContext[ChatDeps]):
@@ -75,11 +101,15 @@ async def register_handler(
     system (which sees the channel's existing handlers) decides whether to
     edit or create one; you never write code or pick which handler to
     touch. Trigger types: "new message", "reaction add" (event);
-    "schedule", "timer" (time). Put timing in ``settings`` — schedule:
+    "schedule", "timer" (time). Member/thread events (someone joins,
+    leaves, a role changes, a thread is created) are admin-only — they
+    need /adminhandler, not this tool. Put timing in ``settings`` — schedule:
     {"interval_seconds": N} or {"daily_time": "HH:MM"} (UTC); timer:
     {"delay_seconds": N} or {"fire_at": "<ISO-8601 UTC>"}. Returns a
     success summary naming the handler, or an error to relay plainly.
     """
+    if _admin_only_trigger(trigger_type):
+        return f"error: {_ADMIN_ONLY_REDIRECT}"
     canonical = _canonical_trigger(trigger_type)
     if canonical is None:
         return f"error: unknown trigger type {trigger_type!r}"
