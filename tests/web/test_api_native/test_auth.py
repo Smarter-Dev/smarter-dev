@@ -31,6 +31,8 @@ from smarter_dev.web.api_native.forum import (
     ForumAgentController,
     ForumNotificationController,
 )
+from smarter_dev.web.api_native.image_quota import ImageQuotaController
+from smarter_dev.web.api_native.model_overrides import ChannelModelOverrideController
 from smarter_dev.web.api_native.quests import QuestController
 from smarter_dev.web.api_native.squads import (
     SquadController,
@@ -39,6 +41,7 @@ from smarter_dev.web.api_native.squads import (
 
 _GUILD = "123456789012345678"
 _FORUM = "222222222222222222"
+_CHANNEL = "555000111222333444"
 
 
 @pytest.fixture
@@ -184,5 +187,90 @@ def test_forum_notification_topics_missing_authorization_header_rejected(
 ):
     response = guarded_forum_client.get(
         f"/api/guilds/{_GUILD}/forum-channels/{_FORUM}/notification-topics"
+    )
+    assert response.status_code == 401
+
+
+@pytest.fixture
+def guarded_model_override_client() -> Iterator[TestClient]:
+    """Client serving the model-override controller with its real auth guards."""
+    with create_test_client(
+        route_handlers=[ChannelModelOverrideController],
+        plugins=[PydanticPlugin()],
+        dependencies={"db_session": Provide(lambda: Mock(), sync_to_thread=False)},
+    ) as client:
+        yield client
+
+
+def _override_url() -> str:
+    return f"/api/guilds/{_GUILD}/channels/{_CHANNEL}/model-override"
+
+
+def test_model_override_get_missing_authorization_header_rejected(
+    guarded_model_override_client: TestClient,
+):
+    response = guarded_model_override_client.get(_override_url())
+    assert response.status_code == 401
+
+
+def test_model_override_put_missing_authorization_header_rejected(
+    guarded_model_override_client: TestClient,
+):
+    response = guarded_model_override_client.put(
+        _override_url(), json={"model_key": "kimi-k2-6"}
+    )
+    assert response.status_code == 401
+
+
+def test_model_override_delete_missing_authorization_header_rejected(
+    guarded_model_override_client: TestClient,
+):
+    response = guarded_model_override_client.delete(_override_url())
+    assert response.status_code == 401
+
+
+def test_model_override_non_sk_bearer_rejected(
+    guarded_model_override_client: TestClient,
+):
+    response = guarded_model_override_client.get(
+        _override_url(), headers={"Authorization": "Bearer not-a-skrift-key"}
+    )
+    assert response.status_code == 401
+
+
+@pytest.fixture
+def guarded_image_quota_client() -> Iterator[TestClient]:
+    """Client serving the image-quota controller with its real auth guards."""
+    with create_test_client(
+        route_handlers=[ImageQuotaController],
+        plugins=[PydanticPlugin()],
+    ) as client:
+        yield client
+
+
+def test_image_quota_missing_authorization_header_rejected(
+    guarded_image_quota_client: TestClient,
+):
+    response = guarded_image_quota_client.get(
+        f"/api/image-generations/quota?guild_id={_GUILD}"
+    )
+    assert response.status_code == 401
+
+
+def test_image_quota_reserve_missing_authorization_header_rejected(
+    guarded_image_quota_client: TestClient,
+):
+    response = guarded_image_quota_client.post(
+        "/api/image-generations/reserve", json={"guild_id": _GUILD}
+    )
+    assert response.status_code == 401
+
+
+def test_image_quota_non_sk_bearer_rejected(
+    guarded_image_quota_client: TestClient,
+):
+    response = guarded_image_quota_client.get(
+        f"/api/image-generations/quota?guild_id={_GUILD}",
+        headers={"Authorization": "Bearer not-a-skrift-key"},
     )
     assert response.status_code == 401
