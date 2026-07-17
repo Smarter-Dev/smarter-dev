@@ -72,6 +72,10 @@ in a loop blows the cap the same way sending in a loop does.
   anchored (`reply.strip().startswith(...)` or an exact match). Reject a substring test like
   `"MATCH" in reply` — the agent answering "no match" satisfies it and the script takes the
   wrong branch.
+- Name-based user gates: a script that singles out a specific known person must compare
+  `context["author_id"]` against a snowflake id constant, never `context["author_name"]` or a
+  display name — the day that person (or an impostor) renames, the gate targets the wrong
+  people. Reject name comparisons where a known individual is clearly intended.
 
 ## Reject if the handler would be annoying (frequency × value)
 Weigh how often it runs against how useful each run is. A member shares this channel with others.

@@ -8,12 +8,15 @@ any of this.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import ClassVar
 from urllib.parse import quote
 
 from smarter_dev.web.discord_rest import DiscordBotClient, DiscordRestError
+
+# Discord channel types 10/11/12: announcement, public, and private threads.
+_THREAD_CHANNEL_TYPES = frozenset({10, 11, 12})
 
 
 class AdminActionError(DiscordRestError):
@@ -25,6 +28,7 @@ class AdminActor(DiscordBotClient):
     """Performs moderation actions for one guild via Discord REST."""
 
     guild_id: str
+    _verified_thread_ids: set[str] = field(default_factory=set, init=False)
 
     user_agent: ClassVar[str] = "SmarterDev-AdminHandlers/1.0"
     error_type: ClassVar[type[DiscordRestError]] = AdminActionError
@@ -77,6 +81,8 @@ class AdminActor(DiscordBotClient):
 
     async def delete_thread(self, thread_id: str) -> bool:
         """Delete a thread. A gone thread (404) is a silent no-op -> False."""
+        if not await self._verify_thread_target(thread_id):
+            return False
         try:
             await self._request("DELETE", f"/channels/{thread_id}")
         except AdminActionError as error:
@@ -87,10 +93,43 @@ class AdminActor(DiscordBotClient):
 
     async def _patch_thread(self, thread_id: str, payload: dict) -> bool:
         """PATCH a thread channel; 404 (gone) -> False, other failures raise."""
+        if not await self._verify_thread_target(thread_id):
+            return False
         try:
             await self._request("PATCH", f"/channels/{thread_id}", json=payload)
         except AdminActionError as error:
             if error.status_code == 404:
                 return False
             raise
+        return True
+
+    async def _verify_thread_target(self, thread_id: str) -> bool:
+        """Confirm the target is a thread in this actor's guild before mutating.
+
+        Scripts supply thread ids; without this rail a laundered constant could
+        aim PATCH/DELETE /channels/{id} at a regular channel (deleting it
+        wholesale) or at another guild the bot inhabits. A gone target (404)
+        -> False, matching the mutations' silent no-op contract; a non-thread
+        or foreign-guild target raises. Verified ids are cached for the fire so
+        sweeps pay one fetch per thread.
+        """
+        if thread_id in self._verified_thread_ids:
+            return True
+        try:
+            response = await self._request("GET", f"/channels/{thread_id}")
+        except AdminActionError as error:
+            if error.status_code == 404:
+                return False
+            raise
+        channel = response.json()
+        if channel.get("type") not in _THREAD_CHANNEL_TYPES:
+            raise AdminActionError(
+                f"thread op target {thread_id} is not a thread "
+                f"(channel type {channel.get('type')})"
+            )
+        if str(channel.get("guild_id")) != self.guild_id:
+            raise AdminActionError(
+                f"thread op target {thread_id} is outside guild {self.guild_id}"
+            )
+        self._verified_thread_ids.add(thread_id)
         return True

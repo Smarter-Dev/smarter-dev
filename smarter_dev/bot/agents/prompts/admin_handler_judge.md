@@ -92,6 +92,11 @@ The five member/thread triggers (`member_join`, `member_leave`, `member_rules_ac
 - Hardcoded destructive thread targets: a `delete_thread` (or close/lock) target must come from
   trigger context or a `list_threads` result — reject a hardcoded thread-id literal or id
   arithmetic as an unreviewable destructive action.
+- Name-based targeting of a specific person or channel: when the behavior singles out a known
+  user/channel, the script must compare snowflake ids (`context["author_id"]`,
+  `context["member_id"]`, a channel-id constant) — reject gates on usernames, display names, or
+  channel names (names change, collide, and can be spoofed by renaming). This is a hard fail when
+  the name gate feeds ban/kick/timeout/delete.
 - No home channel on member events: the four `member_*` triggers have no home channel, so a bare
   `send_message(content)` with no channel_id would fail at runtime. Every send must name a channel.
 

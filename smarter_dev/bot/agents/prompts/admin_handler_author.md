@@ -175,6 +175,14 @@ a function but never call it, NOTHING happens. Example skeleton:
 - Decide channel scope. channel_ids = [] means ALL channels in the guild; otherwise the specific
   channel ids. Use the `list_channels` tool to resolve channel names (e.g. "mod-chat") to ids —
   for the scope AND for any send_message(channel_id=...) target. Never invent ids.
+- TARGET BY ID, NEVER BY NAME. When the behavior singles out a known user, channel, or thread,
+  compare snowflake ids — context["author_id"]/context["member_id"] == "1234567890", a channel id
+  resolved via list_channels — never usernames, display names, or channel names. Names change,
+  collide, and can be spoofed by renaming; ids are stable. The request should state user ids
+  (e.g. "user 1234567890 (@zech)"); if it targets a specific user but gives no id, set
+  feasible=false asking for the id rather than guessing from a name. This matters double for
+  moderation: a display-name gate on ban/kick/timeout targets the wrong person the day someone
+  renames.
 - Put CHEAP guards FIRST (e.g. check account/join age, keyword match) so expensive work
   (spawn_agent, web reads, deletes) only runs when warranted. A guild-wide message handler runs on
   every message — keep the common path cheap.
