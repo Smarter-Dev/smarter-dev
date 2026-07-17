@@ -88,6 +88,39 @@ def test_deleted_legacy_trees_stay_deleted() -> None:
     )
 
 
+# Tokens that only made sense before the decommission; deployment docs must
+# not describe the deleted FastAPI/Starlette mounts or the second database.
+STALE_DOC_TOKENS = (
+    "bc_websites",
+    "LEGACY_DATABASE_URL",
+    "alembic/legacy",
+    "bot-admin",
+    "FastAPI",
+    "Starlette",
+)
+
+
+def _stale_doc_tokens_in(text: str) -> list[str]:
+    return [token for token in STALE_DOC_TOKENS if token in text]
+
+
+def test_readme_describes_decommissioned_architecture() -> None:
+    """README (05-decommission.md item 9) matches the shipped single-DB app."""
+    readme_text = (REPO_ROOT / "README.md").read_text()
+    assert _stale_doc_tokens_in(readme_text) == []
+    assert "Litestar" in readme_text, "README must describe the native /api controllers"
+    assert "sk_" in readme_text, "README must describe the Skrift-native bot key"
+
+
+def test_local_harness_docstring_describes_single_app_layout() -> None:
+    """The harness package docstring no longer names the deleted legacy mounts."""
+    harness_init_text = (
+        REPO_ROOT / "scripts" / "local_harness" / "__init__.py"
+    ).read_text()
+    assert _stale_doc_tokens_in(harness_init_text) == []
+    assert "single database" in harness_init_text
+
+
 def test_settings_has_no_legacy_database_fields() -> None:
     """The legacy URL field and its property are gone from Settings."""
     assert "legacy_database_url" not in Settings.model_fields
