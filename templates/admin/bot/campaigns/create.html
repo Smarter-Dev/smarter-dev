@@ -1,0 +1,67 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Create Campaign - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Create Campaign</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}/campaigns">&larr; Campaigns</a></p>
+        </hgroup>
+
+        {% if errors %}
+        <div class="sk-flash sk-flash-error">
+            <strong>Please correct the following errors:</strong>
+            <ul style="margin:0.5rem 0 0 1rem;">
+                {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">New Campaign</div>
+            <div class="sk-panel-body">
+                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/campaigns/create">
+                    <label for="title">Campaign Title</label>
+                    <input type="text" id="title" name="title" maxlength="200"
+                           value="{{ form_data.title if form_data else '' }}" required>
+
+                    <label for="description">Description</label>
+                    <textarea id="description" name="description" rows="4" required>{{ form_data.description if form_data else '' }}</textarea>
+
+                    <label for="start_time">Start Time (UTC)</label>
+                    <input type="datetime-local" id="start_time" name="start_time"
+                           value="{{ form_data.start_time if form_data else '' }}" required>
+
+                    <label for="release_cadence_hours">Release Cadence (hours)</label>
+                    <input type="number" id="release_cadence_hours" name="release_cadence_hours"
+                           min="1" max="168"
+                           value="{{ form_data.release_cadence_hours if form_data else '24' }}" required>
+
+                    <label>Announcement Channels</label>
+                    {% if channels %}
+                    <div style="max-height:220px; overflow-y:auto; border:1px solid var(--sk-border-color, #e0e0e0); border-radius:4px; padding:0.5rem;">
+                        {% for channel in channels %}
+                        <label style="display:block; font-weight:normal;">
+                            <input type="checkbox" name="announcement_channels" value="{{ channel.id }}"
+                                   {% if form_data and channel.id in form_data.announcement_channels %}checked{% endif %}>
+                            #{{ channel.name }}
+                        </label>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="sk-text-muted">No suitable channels found. Make sure the bot can view channels in this server.</p>
+                    {% endif %}
+
+                    <div style="margin-top:1rem;">
+                        <button type="submit" class="sk-btn">Create Campaign</button>
+                        <a href="/admin/bot/guilds/{{ guild.id }}/campaigns" class="sk-btn-outline">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

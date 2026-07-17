@@ -3172,7 +3172,7 @@ class CampaignOperations:
             
         except IntegrityError as e:
             await self.session.rollback()
-            if "uq_campaigns_guild_title" in str(e):
+            if "uq_campaigns_guild_title" in str(e) or "unique" in str(e).lower():
                 raise ConflictError(f"Campaign with title '{title}' already exists in this guild")
             raise DatabaseOperationError(f"Failed to create campaign: {e}") from e
         except Exception as e:
@@ -3290,7 +3290,7 @@ class CampaignOperations:
             
         except IntegrityError as e:
             await self.session.rollback()
-            if "uq_campaigns_guild_title" in str(e):
+            if "uq_campaigns_guild_title" in str(e) or "unique" in str(e).lower():
                 raise ConflictError(f"Campaign with this title already exists in the guild")
             raise DatabaseOperationError(f"Failed to update campaign: {e}") from e
         except Exception as e:
