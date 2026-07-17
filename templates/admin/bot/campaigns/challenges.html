@@ -1,0 +1,105 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Challenges - {{ campaign.title }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>{{ campaign.title }} &mdash; Challenges</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}/campaigns">&larr; Campaigns</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Campaign</div>
+            <div class="sk-panel-body">
+                <p>{{ campaign.description }}</p>
+                <table class="sk-admin-table">
+                    <tbody>
+                        <tr><th>Starts</th><td>{{ campaign.start_time.strftime("%Y-%m-%d %H:%M") }} UTC</td></tr>
+                        <tr><th>Cadence</th><td>
+                            {% if campaign.release_cadence_hours < 24 %}
+                            {{ campaign.release_cadence_hours }} hours
+                            {% else %}
+                            {{ campaign.release_cadence_hours // 24 }} day{% if campaign.release_cadence_hours // 24 > 1 %}s{% endif %}
+                            {% endif %}
+                        </td></tr>
+                        <tr><th>Channels</th><td>{{ campaign.announcement_channels|length }} channels</td></tr>
+                        <tr><th>Status</th><td>
+                            {% if campaign.is_active %}
+                                {% if campaign.is_started %}
+                                <span class="sk-pill sk-pill-published">Running</span>
+                                {% else %}
+                                <span class="sk-pill sk-pill-draft">Scheduled</span>
+                                {% endif %}
+                            {% else %}
+                            <span class="sk-pill sk-pill-draft">Inactive</span>
+                            {% endif %}
+                        </td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div style="margin:1rem 0;">
+            <a href="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges/create" class="sk-btn">Add Challenge</a>
+            <a href="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/edit" class="sk-btn-outline">Campaign Settings</a>
+        </div>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Challenges ({{ challenges|length }})</div>
+            <div class="sk-panel-body">
+                {% if challenges %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Order</th>
+                            <th>Challenge</th>
+                            <th>Release Status</th>
+                            <th>Release Time</th>
+                            <th>Created</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for challenge in challenges %}
+                        <tr>
+                            <td>{{ challenge.order_position }}</td>
+                            <td>
+                                <strong>{{ challenge.title }}</strong>
+                                {% if challenge.description %}
+                                <div class="sk-text-muted">{{ challenge.description[:80] }}{% if challenge.description|length > 80 %}...{% endif %}</div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if challenge.is_released %}
+                                <span class="sk-pill sk-pill-published">Released</span>
+                                {% else %}
+                                <span class="sk-pill sk-pill-draft">Pending</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% set release_time = challenge.calculate_release_time(campaign.start_time, campaign.release_cadence_hours) %}
+                                {{ release_time.strftime("%Y-%m-%d %H:%M") }} UTC
+                            </td>
+                            <td>{{ challenge.created_at.strftime("%Y-%m-%d") }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No challenges yet. Add your first challenge to get this campaign started.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
