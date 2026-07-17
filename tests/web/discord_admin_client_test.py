@@ -98,6 +98,59 @@ async def test_get_guild_other_error_raises_admin_error_not_not_found():
     assert not isinstance(exc_info.value, GuildNotFoundError)
 
 
+async def test_get_guild_roles_shapes_and_sorts_by_position():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/guilds/42/roles")
+        body = json.dumps(
+            [
+                {
+                    "id": "low",
+                    "name": "Low",
+                    "color": 0,
+                    "position": 1,
+                    "managed": False,
+                    "mentionable": False,
+                },
+                {
+                    "id": "high",
+                    "name": "High",
+                    "color": 0x00FF00,
+                    "position": 5,
+                    "managed": True,
+                    "mentionable": True,
+                },
+            ]
+        )
+        return httpx.Response(200, text=body)
+
+    client = DiscordAdminClient(bot_token="tok", transport=_json_transport(handler))
+    roles = await client.get_guild_roles("42")
+
+    # Highest position first.
+    assert [r.id for r in roles] == ["high", "low"]
+    assert roles[0].color_hex == "#00ff00"
+    assert roles[1].color_hex == "#99aab5"
+
+
+async def test_get_announcement_channels_filters_to_text_types():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/guilds/42/channels")
+        body = json.dumps(
+            [
+                {"id": "text", "name": "general", "type": 0, "position": 1},
+                {"id": "voice", "name": "Voice", "type": 2, "position": 0},
+                {"id": "announce", "name": "news", "type": 5, "position": 2},
+            ]
+        )
+        return httpx.Response(200, text=body)
+
+    client = DiscordAdminClient(bot_token="tok", transport=_json_transport(handler))
+    channels = await client.get_announcement_channels("42")
+
+    # Voice (type 2) is filtered out; text + announcement remain, position-sorted.
+    assert [c.id for c in channels] == ["text", "announce"]
+
+
 async def test_api_base_override_is_used():
     seen: list[str] = []
 

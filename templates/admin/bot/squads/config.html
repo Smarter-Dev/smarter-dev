@@ -1,0 +1,192 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Squads - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% macro role_options(selected_id) %}
+<option value="">Select a role...</option>
+{% for role in guild_roles %}
+{% if not role.managed and role.name != "@everyone" %}
+<option value="{{ role.id }}"{% if selected_id and role.id == selected_id %} selected{% endif %}>
+    {{ role.name }}{% if role.color %} ({{ role.color_hex }}){% endif %}
+</option>
+{% endif %}
+{% endfor %}
+{% endmacro %}
+
+{% macro channel_options(selected_id) %}
+<option value="">No announcement channel</option>
+{% for channel in channels %}
+<option value="{{ channel.id }}"{% if selected_id and channel.id == selected_id %} selected{% endif %}>#{{ channel.name }}</option>
+{% endfor %}
+{% endmacro %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Squad Management</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Create Squad</div>
+            <div class="sk-panel-body">
+                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/squads">
+                    <input type="hidden" name="action" value="create">
+
+                    <label for="create_name">Squad Name</label>
+                    <input type="text" id="create_name" name="name" maxlength="100" required>
+
+                    <label for="create_role_id">Discord Role</label>
+                    <select id="create_role_id" name="role_id" required>{{ role_options(None) }}</select>
+
+                    <label for="create_description">Description</label>
+                    <textarea id="create_description" name="description" rows="2" maxlength="500"></textarea>
+
+                    <label for="create_welcome_message">Welcome Message</label>
+                    <textarea id="create_welcome_message" name="welcome_message" rows="2" maxlength="500"></textarea>
+
+                    <label for="create_announcement_channel">Announcement Channel</label>
+                    <select id="create_announcement_channel" name="announcement_channel">{{ channel_options(None) }}</select>
+
+                    <label for="create_switch_cost">Switch Cost (bytes)</label>
+                    <input type="number" id="create_switch_cost" name="switch_cost" value="50" min="0" max="10000">
+
+                    <label for="create_max_members">Max Members</label>
+                    <input type="number" id="create_max_members" name="max_members" placeholder="Unlimited" min="1" max="1000">
+
+                    <label style="display:flex; align-items:center; gap:0.5rem;">
+                        <input type="checkbox" name="is_default" value="on"> Set as default squad
+                    </label>
+                    <small class="sk-text-muted">Only one default squad is allowed per guild.</small>
+
+                    <div style="margin-top:1rem;">
+                        <button type="submit" class="sk-btn">Create Squad</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Current Squads ({{ squads|length }})</div>
+            <div class="sk-panel-body">
+                {% if squads %}
+                {% for squad in squads %}
+                <div class="sk-panel" style="margin-bottom:1rem;">
+                    <div class="sk-panel-body">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
+                            <strong>{{ squad.name }}</strong>
+                            <span>
+                                {% if not squad.is_active %}<span class="sk-badge">Inactive</span>{% endif %}
+                                {% if squad.is_default %}<span class="sk-badge">Default</span>{% endif %}
+                            </span>
+                        </div>
+                        {% if squad.description %}<p class="sk-text-muted">{{ squad.description }}</p>{% endif %}
+                        <div class="sk-text-muted" style="font-size:0.85rem;">
+                            Switch cost: {{ squad.switch_cost }} &middot;
+                            Max members: {{ squad.max_members if squad.max_members else "Unlimited" }} &middot;
+                            Role ID: <code>{{ squad.role_id }}</code>
+                        </div>
+
+                        <div style="display:flex; gap:0.5rem; margin-top:0.75rem; align-items:center;">
+                            <form method="post" action="/admin/bot/guilds/{{ guild.id }}/squads" style="display:inline;">
+                                <input type="hidden" name="action" value="update">
+                                <input type="hidden" name="squad_id" value="{{ squad.id }}">
+                                <input type="hidden" name="name" value="{{ squad.name }}">
+                                <input type="hidden" name="description" value="{{ squad.description or '' }}">
+                                <input type="hidden" name="welcome_message" value="{{ squad.welcome_message or '' }}">
+                                <input type="hidden" name="announcement_channel" value="{{ squad.announcement_channel or '' }}">
+                                <input type="hidden" name="switch_cost" value="{{ squad.switch_cost }}">
+                                {% if squad.max_members %}<input type="hidden" name="max_members" value="{{ squad.max_members }}">{% endif %}
+                                {% if not squad.is_active %}<input type="hidden" name="is_active" value="on">{% endif %}
+                                {% if squad.is_default %}<input type="hidden" name="is_default" value="on">{% endif %}
+                                <button type="submit" class="sk-btn-outline sk-btn-small">{{ 'Deactivate' if squad.is_active else 'Activate' }}</button>
+                            </form>
+                            <form method="post" action="/admin/bot/guilds/{{ guild.id }}/squads" style="display:inline;"
+                                  onsubmit="return confirm('Delete squad {{ squad.name }}? This removes all members.');">
+                                <input type="hidden" name="action" value="delete">
+                                <input type="hidden" name="squad_id" value="{{ squad.id }}">
+                                <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete</button>
+                            </form>
+                        </div>
+
+                        <details style="margin-top:0.75rem;">
+                            <summary class="sk-linklike">Edit</summary>
+                            <form method="post" action="/admin/bot/guilds/{{ guild.id }}/squads" style="margin-top:0.5rem;">
+                                <input type="hidden" name="action" value="update">
+                                <input type="hidden" name="squad_id" value="{{ squad.id }}">
+
+                                <label>Squad Name</label>
+                                <input type="text" name="name" value="{{ squad.name }}" maxlength="100" required>
+
+                                <label>Description</label>
+                                <textarea name="description" rows="2" maxlength="500">{{ squad.description or '' }}</textarea>
+
+                                <label>Welcome Message</label>
+                                <textarea name="welcome_message" rows="2" maxlength="500">{{ squad.welcome_message or '' }}</textarea>
+
+                                <label>Announcement Channel</label>
+                                <select name="announcement_channel">{{ channel_options(squad.announcement_channel) }}</select>
+
+                                <label>Switch Cost (bytes)</label>
+                                <input type="number" name="switch_cost" value="{{ squad.switch_cost }}" min="0" max="10000">
+
+                                <label>Max Members</label>
+                                <input type="number" name="max_members" value="{{ squad.max_members or '' }}" placeholder="Unlimited" min="1" max="1000">
+
+                                <label style="display:flex; align-items:center; gap:0.5rem;">
+                                    <input type="checkbox" name="is_active" value="on"{% if squad.is_active %} checked{% endif %}> Active
+                                </label>
+                                <label style="display:flex; align-items:center; gap:0.5rem;">
+                                    <input type="checkbox" name="is_default" value="on"{% if squad.is_default %} checked{% endif %}> Default squad
+                                </label>
+
+                                <div style="margin-top:0.75rem;">
+                                    <button type="submit" class="sk-btn">Save Changes</button>
+                                </div>
+                            </form>
+                        </details>
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <p class="sk-no-items">No squads configured.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Squad Members ({{ squad_members|length }})</div>
+            <div class="sk-panel-body">
+                {% if squad_members %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr><th>Username</th><th>Squad</th><th>Joined</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for member in squad_members %}
+                        <tr>
+                            <td>{{ member.username or 'Unknown User' }}<div class="sk-text-muted" style="font-size:0.8rem;">ID: {{ member.user_id }}</div></td>
+                            <td>{{ member.squad_name }}</td>
+                            <td>{{ member.joined_at.strftime("%Y-%m-%d %H:%M") }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No squad members yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

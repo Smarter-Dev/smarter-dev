@@ -1,0 +1,142 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Squad Sale Events - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Squad Sale Events</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if active_events %}
+        <div class="sk-panel">
+            <div class="sk-panel-head">Currently Active Sales</div>
+            <div class="sk-panel-body">
+                {% for event in active_events %}
+                <div style="margin-bottom:0.75rem;">
+                    <strong>{{ event.name }}</strong> &mdash;
+                    Join {{ event.join_discount_percent }}% / Switch {{ event.switch_discount_percent }}%
+                    {% if event.time_remaining_hours %}<span class="sk-badge">{{ event.time_remaining_hours }}h remaining</span>{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Create Sale Event</div>
+            <div class="sk-panel-body">
+                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/squad-sale-events">
+                    <label for="create_name">Event Name</label>
+                    <input type="text" id="create_name" name="name" maxlength="100" required>
+
+                    <label for="create_description">Description</label>
+                    <textarea id="create_description" name="description" rows="2" maxlength="500"></textarea>
+
+                    <label for="create_start_time">Start Time</label>
+                    <input type="datetime-local" id="create_start_time" name="start_time" required>
+
+                    <label for="create_duration_hours">Duration (hours)</label>
+                    <input type="number" id="create_duration_hours" name="duration_hours" value="24" min="1" max="720" required>
+
+                    <label for="create_join_discount">Join Discount %</label>
+                    <input type="number" id="create_join_discount" name="join_discount_percent" value="0" min="0" max="100">
+
+                    <label for="create_switch_discount">Switch Discount %</label>
+                    <input type="number" id="create_switch_discount" name="switch_discount_percent" value="0" min="0" max="100">
+
+                    <div style="margin-top:1rem;">
+                        <button type="submit" class="sk-btn">Create Sale Event</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Sale Events ({{ events|length }})</div>
+            <div class="sk-panel-body">
+                {% if events %}
+                {% for event in events %}
+                <div class="sk-panel" style="margin-bottom:1rem;">
+                    <div class="sk-panel-body">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
+                            <strong>{{ event.name }}</strong>
+                            <span>
+                                {% if event.is_currently_active %}<span class="sk-badge">Active</span>
+                                {% elif event.has_ended %}<span class="sk-badge">Ended</span>
+                                {% elif not event.has_started %}<span class="sk-badge">Upcoming</span>
+                                {% elif not event.is_active %}<span class="sk-badge">Disabled</span>
+                                {% endif %}
+                            </span>
+                        </div>
+                        {% if event.description %}<p class="sk-text-muted">{{ event.description }}</p>{% endif %}
+                        <div class="sk-text-muted" style="font-size:0.85rem;">
+                            Join {{ event.join_discount_percent }}% / Switch {{ event.switch_discount_percent }}% &middot;
+                            Start: {{ event.start_time.strftime('%Y-%m-%d %H:%M UTC') }} &middot;
+                            End: {{ event.end_time.strftime('%Y-%m-%d %H:%M UTC') }} &middot;
+                            Duration: {{ event.duration_hours }}h &middot;
+                            By: {{ event.created_by }}
+                        </div>
+
+                        <div style="display:flex; gap:0.5rem; margin-top:0.75rem; align-items:center;">
+                            <form method="post" action="/admin/bot/guilds/{{ guild.id }}/squad-sale-events/{{ event.id }}/toggle" style="display:inline;">
+                                <button type="submit" class="sk-btn-outline sk-btn-small">{{ 'Disable' if event.is_active else 'Enable' }}</button>
+                            </form>
+                            <form method="post" action="/admin/bot/guilds/{{ guild.id }}/squad-sale-events/{{ event.id }}/delete" style="display:inline;"
+                                  onsubmit="return confirm('Delete sale event {{ event.name }}?');">
+                                <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete</button>
+                            </form>
+                        </div>
+
+                        <details style="margin-top:0.75rem;">
+                            <summary class="sk-linklike">Edit</summary>
+                            <form method="post" action="/admin/bot/guilds/{{ guild.id }}/squad-sale-events/{{ event.id }}/edit" style="margin-top:0.5rem;">
+                                <label>Event Name</label>
+                                <input type="text" name="name" value="{{ event.name }}" maxlength="100" required>
+
+                                <label>Description</label>
+                                <textarea name="description" rows="2" maxlength="500">{{ event.description }}</textarea>
+
+                                <label>Start Time</label>
+                                <input type="datetime-local" name="start_time" value="{{ event.start_time.strftime('%Y-%m-%dT%H:%M') }}" required>
+
+                                <label>Duration (hours)</label>
+                                <input type="number" name="duration_hours" value="{{ event.duration_hours }}" min="1" max="720" required>
+
+                                <label>Join Discount %</label>
+                                <input type="number" name="join_discount_percent" value="{{ event.join_discount_percent }}" min="0" max="100">
+
+                                <label>Switch Discount %</label>
+                                <input type="number" name="switch_discount_percent" value="{{ event.switch_discount_percent }}" min="0" max="100">
+
+                                <label style="display:flex; align-items:center; gap:0.5rem;">
+                                    <input type="checkbox" name="is_active" value="true"{% if event.is_active %} checked{% endif %}> Active
+                                </label>
+
+                                <div style="margin-top:0.75rem;">
+                                    <button type="submit" class="sk-btn">Update Sale Event</button>
+                                </div>
+                            </form>
+                        </details>
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <p class="sk-no-items">No sale events found.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
