@@ -41,15 +41,18 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from skrift.auth.services import assign_role_to_user, sync_roles_to_database
 from skrift.db.models.api_key import APIKey as SkriftAPIKey
 from skrift.db.models.user import User
 from skrift.db.services import api_key_service
+
+import smarter_dev.web.roles  # noqa: F401 — registers the bot-service role for the sync below
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = REPO_ROOT / ".env"
 BOT_SERVICE_NAME = "discord-bot"
 BOT_SERVICE_USER_EMAIL = "bot@smarter.dev"
-BOT_KEY_SCOPES = ["bot:read", "bot:write"]
+BOT_KEY_SCOPES = ["bot-api", "bot-api-admin"]
 BOT_KEY_DESCRIPTION = "Local development bot key (managed by scripts/bootstrap.py)."
 
 
@@ -156,6 +159,13 @@ async def provision_skrift_bot_key(
         'reused' | 'rotated' | 'created'
     """
     service_user = await _get_or_create_bot_service_user(session)
+
+    # Skrift resolves a key's effective permissions as key-scope ∩ user-actual,
+    # so the owning service user must hold the bot-service role or the scoped
+    # bot-api permissions resolve to nothing and every API call 401s.
+    await sync_roles_to_database(session)
+    if not await assign_role_to_user(session, service_user.id, "bot-service"):
+        raise RuntimeError("bot-service role missing after role sync")
 
     active_bot_keys = list(
         (
