@@ -1,0 +1,83 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Conversation Cleanup - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Conversation Cleanup</h1>
+    <p><a href="/admin/help-conversations">&larr; Back to Help Conversations</a></p>
+</hgroup>
+
+{% if flash_messages %}
+<div class="sk-flash-list">
+    {% for msg in flash_messages %}
+    <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:.75rem; margin-bottom:1rem;">
+    <div class="sk-panel"><div class="sk-panel-body">
+        <div class="sk-text-muted" style="text-transform:uppercase; font-size:.75rem;">Total</div>
+        <div style="font-size:1.5rem; font-weight:600;">{{ "{:,}".format(total_count) }}</div>
+        <div class="sk-text-muted"><small>All stored conversations</small></div>
+    </div></div>
+    <div class="sk-panel"><div class="sk-panel-body">
+        <div class="sk-text-muted" style="text-transform:uppercase; font-size:.75rem;">Standard &middot; 30d</div>
+        <div style="font-size:1.5rem; font-weight:600;">{{ "{:,}".format(standard_count) }}</div>
+        <div class="sk-text-muted"><small>Standard retention</small></div>
+    </div></div>
+    <div class="sk-panel"><div class="sk-panel-body">
+        <div class="sk-text-muted" style="text-transform:uppercase; font-size:.75rem;">Minimal &middot; 7d</div>
+        <div style="font-size:1.5rem; font-weight:600;">{{ "{:,}".format(minimal_count) }}</div>
+        <div class="sk-text-muted"><small>Minimal retention</small></div>
+    </div></div>
+    <div class="sk-panel"><div class="sk-panel-body">
+        <div class="sk-text-muted" style="text-transform:uppercase; font-size:.75rem;">Sensitive &middot; 3d</div>
+        <div style="font-size:1.5rem; font-weight:600;">{{ "{:,}".format(sensitive_count) }}</div>
+        <div class="sk-text-muted"><small>Sensitive retention</small></div>
+    </div></div>
+</div>
+
+<div class="sk-panel">
+    <div class="sk-panel-head">Data Retention Cleanup</div>
+    <div class="sk-panel-body">
+        {% if expired_count > 0 %}
+        <div class="sk-flash sk-flash-warning">
+            <strong>{{ expired_count }} expired conversation{{ 's' if expired_count != 1 else '' }} found.</strong>
+            These have exceeded their retention period and can be safely removed.
+        </div>
+
+        <h4>Retention Policies</h4>
+        <ul>
+            <li><strong>Standard:</strong> 30 days &mdash; general help conversations</li>
+            <li><strong>Minimal:</strong> 7 days &mdash; basic queries and routine interactions</li>
+            <li><strong>Sensitive:</strong> 3 days &mdash; conversations flagged as sensitive</li>
+        </ul>
+
+        <form method="post" action="/admin/help-conversations/cleanup"
+              onsubmit="return confirm('Delete {{ expired_count }} expired conversation{{ 's' if expired_count != 1 else '' }}? This cannot be undone.');">
+            <button type="submit" class="sk-btn sk-btn-danger">
+                Delete {{ expired_count }} Expired Conversation{{ 's' if expired_count != 1 else '' }}
+            </button>
+        </form>
+        {% else %}
+        <div class="sk-flash sk-flash-success">
+            <strong>No expired conversations.</strong>
+            All stored conversations are within their retention periods.
+        </div>
+
+        <h4>Retention Policies</h4>
+        <ul>
+            <li><strong>Standard:</strong> 30 days &mdash; general help conversations</li>
+            <li><strong>Minimal:</strong> 7 days &mdash; basic queries and routine interactions</li>
+            <li><strong>Sensitive:</strong> 3 days &mdash; conversations flagged as sensitive</li>
+        </ul>
+
+        <p class="sk-text-muted">
+            <small>Cleanup runs automatically, but you can trigger it manually here if needed.</small>
+        </p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
