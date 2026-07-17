@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from smarter_dev.web.handler_caps import (
+    GUILD_MEMBER_EVENTS_PER_MIN,
+    GUILD_THREAD_OPS_PER_MIN,
     WindowedLimiter,
     fires_per_min_for_trigger,
+    guild_member_events_key,
+    guild_thread_ops_key,
     HANDLER_FIRES_PER_MIN_MESSAGE,
     HANDLER_FIRES_PER_MIN_REACTION,
 )
@@ -79,3 +83,27 @@ def test_reaction_triggers_have_tighter_fire_ceiling():
     assert fires_per_min_for_trigger("reaction") == HANDLER_FIRES_PER_MIN_REACTION
     assert fires_per_min_for_trigger("message") == HANDLER_FIRES_PER_MIN_MESSAGE
     assert HANDLER_FIRES_PER_MIN_REACTION < HANDLER_FIRES_PER_MIN_MESSAGE
+
+
+def test_new_triggers_pinned_at_ten_fires_per_min():
+    # §3.4: the five new triggers use the default (non-reaction) fire ceiling of
+    # 10 — pinned so a future refactor cannot silently move it.
+    for trigger in (
+        "member_join",
+        "member_leave",
+        "member_rules_accepted",
+        "member_role_change",
+        "thread_create",
+    ):
+        assert fires_per_min_for_trigger(trigger) == 10
+        assert fires_per_min_for_trigger(trigger) == HANDLER_FIRES_PER_MIN_MESSAGE
+
+
+def test_guild_member_events_window():
+    assert GUILD_MEMBER_EVENTS_PER_MIN == 60
+    assert guild_member_events_key("G1") == "hcap:memberevt:G1"
+
+
+def test_guild_thread_ops_window():
+    assert GUILD_THREAD_OPS_PER_MIN == 30
+    assert guild_thread_ops_key("G1") == "hcap:threadop:G1"

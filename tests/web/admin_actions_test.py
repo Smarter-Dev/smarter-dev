@@ -82,3 +82,58 @@ async def test_error_status_raises_admin_action_error():
     requests: list[httpx.Request] = []
     with pytest.raises(AdminActionError):
         await _actor(requests, status_code=403).kick_user("U1")
+
+
+# -- thread operations ------------------------------------------------------
+
+
+async def test_close_thread_archives():
+    requests: list[httpx.Request] = []
+    result = await _actor(requests, status_code=200).close_thread("T1")
+    assert result is True
+    request = requests[0]
+    assert request.method == "PATCH"
+    assert request.url.path.endswith("/channels/T1")
+    assert json.loads(request.content) == {"archived": True}
+
+
+async def test_lock_thread_locks_and_archives():
+    requests: list[httpx.Request] = []
+    result = await _actor(requests, status_code=200).lock_thread("T1")
+    assert result is True
+    assert json.loads(requests[0].content) == {"locked": True, "archived": True}
+
+
+async def test_reopen_thread_unarchives():
+    requests: list[httpx.Request] = []
+    result = await _actor(requests, status_code=200).reopen_thread("T1")
+    assert result is True
+    request = requests[0]
+    assert request.method == "PATCH"
+    assert json.loads(request.content) == {"archived": False}
+
+
+async def test_delete_thread_deletes():
+    requests: list[httpx.Request] = []
+    result = await _actor(requests, status_code=200).delete_thread("T1")
+    assert result is True
+    request = requests[0]
+    assert request.method == "DELETE"
+    assert request.url.path.endswith("/channels/T1")
+
+
+async def test_thread_ops_return_false_on_404():
+    """A janitor sweeping an already-deleted thread is a silent no-op."""
+    for status in (404,):
+        assert await _actor([], status_code=status).close_thread("T1") is False
+        assert await _actor([], status_code=status).lock_thread("T1") is False
+        assert await _actor([], status_code=status).reopen_thread("T1") is False
+        assert await _actor([], status_code=status).delete_thread("T1") is False
+
+
+async def test_thread_ops_raise_on_non_404_error():
+    for status in (403, 500):
+        with pytest.raises(AdminActionError):
+            await _actor([], status_code=status).close_thread("T1")
+        with pytest.raises(AdminActionError):
+            await _actor([], status_code=status).delete_thread("T1")

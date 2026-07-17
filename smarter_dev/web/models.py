@@ -4301,10 +4301,27 @@ class AuthoringPipelineRun(Base):
 # Agentic handler system
 # ---------------------------------------------------------------------------
 
-# Allowed trigger families for a member-created handler.
+# Allowed trigger families for a member-created (standard-tier) handler. This
+# vocabulary does not grow — the five member/thread triggers below are admin-only.
 HANDLER_TRIGGER_TYPES = ("message", "reaction", "schedule", "timer")
-# Event triggers are single-listener per channel; time triggers coexist.
+# Event (gateway-dispatched) triggers for the standard tier; time triggers coexist.
 HANDLER_EVENT_TRIGGERS = ("message", "reaction")
+
+# Admin-tier-only gateway triggers: guild-shaped member lifecycle events plus
+# thread creation (see docs/v2/feature-parity/threads-and-member-events.md §6).
+# Standard create paths reject these; only the admin tier admits them.
+ADMIN_ONLY_TRIGGER_TYPES = (
+    "member_join",
+    "member_leave",
+    "member_rules_accepted",
+    "member_role_change",
+    "thread_create",
+)
+# The admin tier's full trigger vocabulary: the standard four plus the five above.
+ADMIN_HANDLER_TRIGGER_TYPES = HANDLER_TRIGGER_TYPES + ADMIN_ONLY_TRIGGER_TYPES
+# Admin event (gateway-dispatched) triggers: standard events plus the five new
+# ones, used by the admin active-channels query. Time triggers stay excluded.
+ADMIN_HANDLER_EVENT_TRIGGERS = HANDLER_EVENT_TRIGGERS + ADMIN_ONLY_TRIGGER_TYPES
 
 
 class ChannelHandler(Base):
@@ -4400,6 +4417,10 @@ class HandlerRun(Base):
     agent_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Moderation actions (ban/kick/timeout/delete) — admin handlers only.
     mod_actions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Metered Discord reads (list_threads) and mutating thread ops
+    # (create/close/lock/reopen/delete thread).
+    discord_reads: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    thread_ops: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
@@ -4418,7 +4439,9 @@ class AdminHandler(Base):
     __tablename__ = "admin_handlers"
     __table_args__ = (
         CheckConstraint(
-            "trigger_type IN ('message', 'reaction', 'schedule', 'timer')",
+            "trigger_type IN ('message', 'reaction', 'schedule', 'timer', "
+            "'member_join', 'member_leave', 'member_rules_accepted', "
+            "'member_role_change', 'thread_create')",
             name="ck_admin_handlers_trigger_type",
         ),
         Index("ix_admin_handlers_guild_id", "guild_id"),

@@ -30,7 +30,7 @@ from pydantic_ai.providers.google import GoogleProvider
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.web.handler_lint import lint_script
-from smarter_dev.web.models import HANDLER_TRIGGER_TYPES
+from smarter_dev.web.models import ADMIN_HANDLER_TRIGGER_TYPES, HANDLER_TRIGGER_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -191,7 +191,9 @@ class AdminHandlerPlan(BaseModel):
         default="", description="Short kebab-case name for a new handler (action='create')"
     )
     trigger_type: str = Field(
-        default="message", description="message | reaction | schedule | timer"
+        default="message",
+        description="message | reaction | schedule | timer | member_join | "
+        "member_leave | member_rules_accepted | member_role_change | thread_create",
     )
     channel_ids: list[str] = Field(
         default_factory=list, description="Channel scope; empty = all channels"
@@ -254,13 +256,16 @@ def _resolve_plan_target(
     trigger_type: str,
     settings: dict,
     existing_handlers: list[dict],
+    allowed_trigger_types: tuple[str, ...] = HANDLER_TRIGGER_TYPES,
 ) -> tuple[str, None] | tuple[None, _ResolvedTarget]:
     """Validate edit-vs-create against the handlers the author was shown.
 
     Returns ``(error, None)`` or ``(None, resolved)``. On edit the target's
     trigger wins (a handler cannot change trigger type) and its settings are
     kept unless the plan supplies new ones. On create the name must be new
-    (case-insensitive) among the existing handlers.
+    (case-insensitive) among the existing handlers, and the trigger must be in
+    ``allowed_trigger_types`` — the standard tier's four, or the admin tier's
+    extended vocabulary (which adds the member/thread event triggers).
     """
     if action == "edit":
         target = next(
@@ -288,7 +293,7 @@ def _resolve_plan_target(
     taken = {h["name"].casefold() for h in existing_handlers}
     if cleaned_name.casefold() in taken:
         return f"a handler named {cleaned_name!r} already exists — the author should edit it", None
-    if trigger_type not in HANDLER_TRIGGER_TYPES:
+    if trigger_type not in allowed_trigger_types:
         return f"the author chose an invalid trigger {trigger_type!r}", None
     return None, _ResolvedTarget(
         action="create",
@@ -374,6 +379,23 @@ def describe_trigger(trigger_type: str, settings: dict) -> str:
         if "fire_at" in settings:
             return f"One-shot: fires a single time at {settings['fire_at']}."
         return "One-shot: fires a single time."
+    if trigger_type == "member_join":
+        return (
+            "Fires on EVERY member join — bursts hard during raids. A handler that "
+            "messages unconditionally here is spam at raid frequency unless the "
+            "target channel is explicitly a join-log."
+        )
+    if trigger_type == "member_leave":
+        return "Fires on EVERY member leave — bursts during raids and ban waves."
+    if trigger_type == "member_rules_accepted":
+        return (
+            "Fires once per member on rules acceptance — may duplicate after cache "
+            "misses; the script must be idempotent."
+        )
+    if trigger_type == "member_role_change":
+        return "Fires only when a member's roles actually change — low frequency."
+    if trigger_type == "thread_create":
+        return "Fires on EVERY new thread/post in the channel."
     return f"Trigger: {trigger_type}."
 
 
@@ -722,6 +744,7 @@ async def run_admin_creation_pipeline(
         trigger_type=plan.trigger_type,
         settings=plan.settings,
         existing_handlers=existing_handlers,
+        allowed_trigger_types=ADMIN_HANDLER_TRIGGER_TYPES,
     )
     if error is not None:
         logger.info("admin plan rejected: %s", error)

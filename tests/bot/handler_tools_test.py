@@ -80,6 +80,19 @@ async def test_register_unknown_trigger(monkeypatch):
     assert out.startswith("error: unknown trigger")
 
 
+@pytest.mark.parametrize(
+    "trigger",
+    ["member_join", "member join", "thread_create", "new thread", "member_role_change"],
+)
+async def test_register_admin_only_trigger_redirects(monkeypatch, trigger):
+    # The five member/thread triggers are admin-only: a member registering one
+    # here gets pointed at /adminhandler, not a generic "unknown trigger".
+    api = _FakeAPI()
+    out = await ht.register_handler(_ctx(api), "alert on it", trigger)
+    assert "admin handler" in out and "/adminhandler" in out
+    assert api.posted == [] and api.updated == []
+
+
 async def test_register_creates_named_handler(monkeypatch):
     seen = {}
 

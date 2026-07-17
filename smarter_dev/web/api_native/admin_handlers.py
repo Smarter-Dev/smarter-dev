@@ -49,7 +49,7 @@ from smarter_dev.web.api_native.errors import (
 )
 from smarter_dev.web.handler_caps import MAX_ADMIN_HANDLERS_PER_GUILD
 from smarter_dev.web.handler_schedule import ScheduleError, first_fire_at
-from smarter_dev.web.models import HANDLER_TRIGGER_TYPES, AdminHandler
+from smarter_dev.web.models import ADMIN_HANDLER_TRIGGER_TYPES, AdminHandler
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +170,7 @@ class AdminHandlerController(Controller):
         db_session: AsyncSession,
         data: CreateAdminHandlerRequest,
     ) -> AdminHandlerResponse:
-        if data.trigger_type not in HANDLER_TRIGGER_TYPES:
+        if data.trigger_type not in ADMIN_HANDLER_TRIGGER_TYPES:
             raise plain_error(422, "unknown trigger_type")
         name = _normalized_name(data.name)
 

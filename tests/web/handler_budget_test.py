@@ -6,7 +6,15 @@ import time
 
 import pytest
 
-from smarter_dev.web.handler_budget import CapExceeded, HandlerBudget
+from smarter_dev.web.handler_budget import (
+    ADMIN_MAX_DISCORD_READS,
+    ADMIN_MAX_THREAD_OPS,
+    CapExceeded,
+    DEFAULT_MAX_DISCORD_READS,
+    DEFAULT_MAX_THREAD_OPS,
+    HandlerBudget,
+    admin_budget,
+)
 
 
 def test_messages_cap_raises_on_breach():
@@ -78,4 +86,68 @@ def test_usage_snapshot():
         "web_reads": 0,
         "agent_calls": 1,
         "mod_actions": 0,
+        "discord_reads": 0,
+        "thread_ops": 0,
     }
+
+
+def test_discord_read_cap_raises_on_breach():
+    budget = HandlerBudget(max_discord_reads=2)
+    budget.spend_discord_read()
+    budget.spend_discord_read()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_discord_read()
+    assert exc.value.cap == "discord_reads"
+    assert budget.discord_reads == 2
+
+
+def test_default_thread_ops_budget_is_zero_for_standard_tier():
+    # Standard handlers have no mutating thread ops, like mod_actions.
+    assert DEFAULT_MAX_THREAD_OPS == 0
+    budget = HandlerBudget()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_thread_op()
+    assert exc.value.cap == "thread_ops"
+    assert budget.thread_ops == 0
+
+
+def test_default_discord_reads_budget():
+    assert DEFAULT_MAX_DISCORD_READS == 2
+    budget = HandlerBudget()
+    budget.spend_discord_read()
+    budget.spend_discord_read()
+    with pytest.raises(CapExceeded):
+        budget.spend_discord_read()
+
+
+def test_admin_budget_raises_thread_and_read_ceilings():
+    assert ADMIN_MAX_DISCORD_READS == 5
+    assert ADMIN_MAX_THREAD_OPS == 10
+    budget = admin_budget()
+    for _ in range(ADMIN_MAX_THREAD_OPS):
+        budget.spend_thread_op()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_thread_op()
+    assert exc.value.cap == "thread_ops"
+    for _ in range(ADMIN_MAX_DISCORD_READS):
+        budget.spend_discord_read()
+    with pytest.raises(CapExceeded):
+        budget.spend_discord_read()
+
+
+def test_new_counters_appear_in_usage_after_spend():
+    budget = admin_budget()
+    budget.spend_discord_read()
+    budget.spend_thread_op()
+    usage = budget.usage()
+    assert usage["discord_reads"] == 1
+    assert usage["thread_ops"] == 1
+
+
+def test_thread_op_checks_deadline_first():
+    budget = admin_budget()
+    budget.wall_clock_seconds = 0.0
+    budget.started_at = time.monotonic() - 1.0
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_thread_op()
+    assert exc.value.cap == "wall_clock"

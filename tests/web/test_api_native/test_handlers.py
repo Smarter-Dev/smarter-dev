@@ -379,3 +379,229 @@ def test_active_channels(client):
     channels = resp.json()["channels"]
     assert ["C1", "message"] in channels
     assert ["C1", "reaction"] in channels
+
+
+# --- admin-only member/thread triggers (threads-and-member-events.md §3) -------
+
+
+class _KeyAwareLimiter:
+    """Allows every key except the per-guild member-events window.
+
+    Simulates a raid: the ``hcap:memberevt:{guild}`` window is exhausted while
+    per-handler fire windows stay open, isolating the guild gate under test.
+    """
+
+    def __init__(self, redis=None):
+        self.hits: list[tuple[str, int]] = []
+
+    async def hit(self, key, limit):
+        self.hits.append((key, limit))
+        return "memberevt" not in key
+
+
+async def test_dispatch_member_event_matches_admin_by_guild_bypassing_scope(
+    client, db_session
+):
+    from smarter_dev.web.models import AdminHandler
+
+    # Scope names a specific channel, but a member event has no channel: the
+    # scope check is bypassed and the handler still matches by guild + trigger.
+    db_session.add(AdminHandler(
+        guild_id="G1", name="join-gate", trigger_type="member_join", settings={},
+        channel_ids=["SOMECHAN"], description="gate joins",
+        script="await send_message('welcome', 'LOGCHAN')\n", created_by_admin="A1",
+    ))
+    # A handler in a DIFFERENT guild must not fire.
+    db_session.add(AdminHandler(
+        guild_id="G2", name="other", trigger_type="member_join", settings={},
+        channel_ids=[], description="other guild", script="pass\n",
+        created_by_admin="A2",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "",
+            "trigger_type": "member_join",
+            "trigger_context": {"trigger_type": "member_join", "member_id": "U9"},
+        },
+    )
+    body = resp.json()
+    assert body["dispatched"] is True
+    assert len(body["handler_ids"]) == 1
+    # The fire carries no home channel — every send must name its target.
+    payload, _ = client.submitted[0]  # type: ignore[attr-defined]
+    assert payload.channel_id == ""
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    ["member_join", "member_leave", "member_rules_accepted", "member_role_change"],
+)
+async def test_dispatch_member_events_decline_past_guild_window(
+    client, db_session, monkeypatch, trigger
+):
+    from smarter_dev.web.models import AdminHandler
+
+    monkeypatch.setattr(
+        handlers_module, "WindowedLimiter", lambda redis: _KeyAwareLimiter()
+    )
+    db_session.add(AdminHandler(
+        guild_id="G1", name="gate", trigger_type=trigger, settings={},
+        channel_ids=[], description="gate", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "",
+            "trigger_type": trigger,
+            "trigger_context": {"trigger_type": trigger},
+        },
+    )
+    # Guild window exhausted → declined before any fire is enqueued.
+    assert resp.json()["dispatched"] is False
+    assert len(client.submitted) == 0  # type: ignore[attr-defined]
+
+
+async def test_dispatch_thread_create_scope_matches_parent(client, db_session):
+    from smarter_dev.web.models import AdminHandler
+
+    db_session.add(AdminHandler(
+        guild_id="G1", name="forum-triage", trigger_type="thread_create", settings={},
+        channel_ids=["PARENT"], description="triage", script="pass\n",
+        created_by_admin="A1",
+    ))
+    # Scoped to a different parent channel → must not fire.
+    db_session.add(AdminHandler(
+        guild_id="G1", name="other-forum", trigger_type="thread_create", settings={},
+        channel_ids=["OTHER"], description="other", script="pass\n",
+        created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "PARENT",  # bot dispatches thread_create on the parent
+            "trigger_type": "thread_create",
+            "trigger_context": {
+                "trigger_type": "thread_create",
+                "parent_channel_id": "PARENT",
+            },
+        },
+    )
+    body = resp.json()
+    assert body["dispatched"] is True
+    assert len(body["handler_ids"]) == 1
+    payload, _ = client.submitted[0]  # type: ignore[attr-defined]
+    assert payload.channel_id == "PARENT"
+
+
+async def test_dispatch_thread_create_empty_scope_matches_any_parent(
+    client, db_session
+):
+    from smarter_dev.web.models import AdminHandler
+
+    db_session.add(AdminHandler(
+        guild_id="G1", name="all-forums", trigger_type="thread_create", settings={},
+        channel_ids=[], description="all", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "ANYPARENT",
+            "trigger_type": "thread_create",
+            "trigger_context": {"trigger_type": "thread_create"},
+        },
+    )
+    assert resp.json()["dispatched"] is True
+
+
+async def test_dispatch_thread_create_not_gated_by_member_window(
+    client, db_session, monkeypatch
+):
+    from smarter_dev.web.models import AdminHandler
+
+    # Even with the member-events window exhausted, thread_create is unaffected —
+    # it is bounded by the per-handler fire cap and the thread-op caps, not this.
+    monkeypatch.setattr(
+        handlers_module, "WindowedLimiter", lambda redis: _KeyAwareLimiter()
+    )
+    db_session.add(AdminHandler(
+        guild_id="G1", name="all-forums", trigger_type="thread_create", settings={},
+        channel_ids=[], description="all", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "ANYPARENT",
+            "trigger_type": "thread_create",
+            "trigger_context": {"trigger_type": "thread_create"},
+        },
+    )
+    assert resp.json()["dispatched"] is True
+
+
+async def test_active_channels_member_event_always_guild_scoped(client, db_session):
+    from smarter_dev.web.models import AdminHandler
+
+    # A member_join handler surfaces as a guild trigger even when channel_ids is
+    # set — its dispatch guard is per-guild (a member event has no channel).
+    db_session.add(AdminHandler(
+        guild_id="G1", name="join-gate", trigger_type="member_join", settings={},
+        channel_ids=["SOMECHAN"], description="gate", script="pass\n",
+        created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    resp = client.get("/api/handlers/active-channels")
+    body = resp.json()
+    assert ["G1", "member_join"] in body["guild_triggers"]
+    assert ["SOMECHAN", "member_join"] not in body["channels"]
+
+
+async def test_active_channels_thread_create_follows_channel_split(client, db_session):
+    from smarter_dev.web.models import AdminHandler
+
+    db_session.add(AdminHandler(
+        guild_id="G1", name="scoped-forum", trigger_type="thread_create", settings={},
+        channel_ids=["PARENT"], description="s", script="pass\n", created_by_admin="A1",
+    ))
+    db_session.add(AdminHandler(
+        guild_id="G1", name="wide-forum", trigger_type="thread_create", settings={},
+        channel_ids=[], description="w", script="pass\n", created_by_admin="A2",
+    ))
+    await db_session.commit()
+
+    resp = client.get("/api/handlers/active-channels")
+    body = resp.json()
+    assert ["PARENT", "thread_create"] in body["channels"]
+    assert ["G1", "thread_create"] in body["guild_triggers"]
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    [
+        "member_join",
+        "member_leave",
+        "member_rules_accepted",
+        "member_role_change",
+        "thread_create",
+    ],
+)
+def test_create_standard_rejects_admin_only_triggers(client, trigger):
+    resp = client.post("/api/handlers", json=_event_body(trigger_type=trigger))
+    assert resp.status_code == 422
+    assert resp.json() == {"detail": "unknown trigger_type"}
