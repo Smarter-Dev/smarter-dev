@@ -178,6 +178,7 @@ async def run_copy(
     *,
     execute: bool,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    skip_table_names: frozenset[str] = frozenset(),
 ) -> list[TableCopyResult]:
     """Copy (or, when ``execute`` is False, only inspect) all adopted tables.
 
@@ -188,8 +189,17 @@ async def run_copy(
             "source and target database URLs are identical — refusing to copy a "
             "database onto itself (pass the legacy bc_websites URL as --source-url)"
         )
-    ordered_tables = fk_ordered_copy_tables()
+    unknown_skip_names = skip_table_names - COPY_TABLE_NAMES
+    if unknown_skip_names:
+        raise ValueError(
+            f"--skip-table names not in the copy set: {sorted(unknown_skip_names)}"
+        )
+    ordered_tables = [
+        table for table in fk_ordered_copy_tables() if table.name not in skip_table_names
+    ]
     mode = "EXECUTE" if execute else "DRY-RUN"
+    if skip_table_names:
+        logger.info("skipping tables by operator request: %s", ", ".join(sorted(skip_table_names)))
     logger.info("%s: copying %d tables (api_keys excluded)", mode, len(ordered_tables))
     logger.info("planned order: %s", ", ".join(table.name for table in ordered_tables))
 
@@ -288,6 +298,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
         default=DEFAULT_BATCH_SIZE,
         help=f"rows per insert batch (default {DEFAULT_BATCH_SIZE})",
     )
+    parser.add_argument(
+        "--skip-table",
+        action="append",
+        default=[],
+        metavar="TABLE",
+        help=(
+            "table name to exclude from the copy and its verification "
+            "(repeatable); the skip is recorded in the log for the audit trail"
+        ),
+    )
     return parser
 
 
@@ -299,7 +319,13 @@ def main(argv: list[str] | None = None) -> int:
     target_url = settings.effective_database_url
     try:
         results = asyncio.run(
-            run_copy(source_url, target_url, execute=args.execute, batch_size=args.batch_size)
+            run_copy(
+                source_url,
+                target_url,
+                execute=args.execute,
+                batch_size=args.batch_size,
+                skip_table_names=frozenset(args.skip_table),
+            )
         )
     except CopyVerificationError as error:
         logger.error("VERIFICATION FAILED: %s", error)
