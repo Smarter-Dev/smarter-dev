@@ -38,7 +38,18 @@ api_key, raw_key, _refresh = await create_api_key(
 print(raw_key)  # sk_... — record it ONCE, it is not recoverable
 ```
 
-Scope the key per phase 04's scoping decisions once those land.
+Scoping (phase 04 decision, REQUIRED after the `/api` switchover): the native
+controllers guard on the `bot-api` permission (`bot-api-admin` for admin-ish
+paths), and Skrift intersects a key's scoped permissions with the owning
+user's actual permissions. So:
+
+1. Assign the `bot-service` role (defined in `smarter_dev/web/roles.py`,
+   grants `bot-api` + `bot-api-admin`) to the service-owner user — via the
+   admin users UI or `skrift.auth.services.assign_role_to_user`.
+2. Mint the key with `scoped_permissions=["bot-api", "bot-api-admin"]` (add
+   the kwarg to the `create_api_key` call above).
+
+A key without both of these answers 401 on every guarded `/api` route.
 
 ## 3. Rotate the k8s secret
 
@@ -61,10 +72,12 @@ means something still holds the old key.
 
 ## 5. Remove the legacy fallback (code change, gated by phases 04/05)
 
-- Delete the `sk-` branch in `verify_api_key`
-  (`smarter_dev/web/api/dependencies.py`, marked `LEGACY-FALLBACK`).
-- Delete the legacy shape in `smarter_dev/web/security.py`
-  `validate_api_key_format` (marked `LEGACY-FALLBACK`) and in
-  `smarter_dev/bot/services/api_client.py`.
-- Deactivate all rows in legacy `public.api_keys`.
-- The fallback must outlive any rollback window for phase 02's deploy.
+- ~~Delete the `sk-` branch in `verify_api_key`~~ **DONE** — the phase 04
+  switchover deleted `smarter_dev/web/api/` (including `dependencies.py`)
+  outright; the native `/api` accepts only Skrift `sk_` keys. **The bot must
+  already be on its `sk_` key (steps 2–4) before that build deploys.**
+- Still pending (phase 05 decommission):
+  - Delete the legacy shape in `smarter_dev/web/security.py`
+    `validate_api_key_format` (marked `LEGACY-FALLBACK`) and in
+    `smarter_dev/bot/services/api_client.py`.
+  - Deactivate all rows in legacy `public.api_keys`.

@@ -4,14 +4,10 @@ Preserves the exact paths, verbs, status codes, and request/response schemas
 of the FastAPI implementation so ``smarter_dev/bot/services/bytes_service.py``
 needs zero changes. See docs/v2/legacy-sunset/04-api-rewrite.md (unit U2).
 
-NOT registered in ``app.yaml`` yet — the FastAPI mount still owns ``/api``.
-This module exists for isolated parity tests until the atomic switchover.
-
-Rate-limiting parity is deferred to the switchover commit (plan section
-"Rate-limiting parity", option A): the multi-tier limiter keys off the
-authenticated key's per-window fields, which the Skrift ``auth_guard`` does not
-yet surface. The FastAPI mount still enforces those windows in production until
-switchover, so no window is dropped in the interim.
+Rate-limiting parity (plan section "Rate-limiting parity", option A): in the
+FastAPI app only the bytes router applied ``apply_rate_limiting``, so the
+ported :class:`~smarter_dev.web.api_native.rate_limiting.MultiTierRateLimitMiddleware`
+is attached to this controller only — same windows, headers, and 429 body.
 """
 
 from __future__ import annotations
@@ -21,15 +17,16 @@ from typing import Annotated
 
 from litestar import Controller, Request, delete, get, post, put
 from litestar.di import Provide
+from litestar.middleware import DefineMiddleware
 from litestar.params import Parameter
 from litestar.status_codes import HTTP_200_OK
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skrift.auth.guards import APIKeyOnly, Permission, auth_guard
+from skrift.auth.guards import APIKeyOnly, Permission
 
 from smarter_dev.bot.services.streak_service import StreakService
 from smarter_dev.shared.date_provider import get_date_provider
-from smarter_dev.web.api.schemas import (
+from smarter_dev.web.api_native.schemas import (
     BytesBalanceResponse,
     BytesConfigResponse,
     BytesConfigUpdate,
@@ -42,6 +39,8 @@ from smarter_dev.web.api.schemas import (
     SuccessResponse,
     TransactionHistoryResponse,
 )
+from smarter_dev.web.api_native.rate_limiting import MultiTierRateLimitMiddleware
+from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import (
     BOT_API_EXCEPTION_HANDLERS,
     conflict_error,
@@ -67,7 +66,7 @@ BOT_API_PERMISSION = "bot-api"
 # controller-only declaration would silently fall back to session auth. Every
 # bytes route therefore reuses this list. See the skrift-auth skill and
 # docs/v2/legacy-sunset/04-api-rewrite.md ("Auth model").
-BOT_API_GUARDS = [auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
+BOT_API_GUARDS = [bot_api_auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
 
 
 async def provide_validated_guild_id(guild_id: str) -> str:
@@ -86,6 +85,9 @@ class BytesController(Controller):
     path = "/api/guilds/{guild_id:str}/bytes"
     exception_handlers = BOT_API_EXCEPTION_HANDLERS
     dependencies = {"validated_guild_id": Provide(provide_validated_guild_id)}
+    # Legacy parity: the FastAPI app rate limited only the bytes router, so
+    # the ported multi-tier limiter wraps only this controller.
+    middleware = [DefineMiddleware(MultiTierRateLimitMiddleware)]
 
     @get("/balance/{user_id:str}", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
     async def get_balance(

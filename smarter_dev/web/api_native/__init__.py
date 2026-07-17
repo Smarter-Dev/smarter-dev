@@ -1,8 +1,9 @@
-"""Native Litestar controllers replacing the legacy FastAPI ``/api`` mount.
+"""Native Litestar controllers owning the ``/api`` bot API.
 
-Built incrementally during phase 04 of the legacy sunset
-(docs/v2/legacy-sunset/04-api-rewrite.md). Every controller declares its
-final ``/api/...`` path but is NOT registered in ``app.yaml`` yet — the legacy
-FastAPI mount keeps owning ``/api`` until the atomic switchover commit. Until
-then these controllers exist only for isolated parity tests.
+Built during phase 04 of the legacy sunset
+(docs/v2/legacy-sunset/04-api-rewrite.md) as one-for-one ports of the retired
+FastAPI routers, then registered in ``app.yaml`` / ``app.development.yaml`` at
+the atomic switchover that deleted ``smarter_dev/web/api/``. Every controller
+declares its full ``/api/...`` path and guards with Skrift API-key auth
+(``Bearer sk_...`` only).
 """

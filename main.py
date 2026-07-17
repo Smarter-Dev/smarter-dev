@@ -4,8 +4,8 @@ Uses Skrift CMS as the ASGI framework. Controllers, page types, and
 middleware are configured in app.yaml (or app.development.yaml when
 SKRIFT_ENV=development).
 
-The FastAPI API is mounted at /api via the ASGI handler registered
-in smarter_dev.web.controllers.
+The bot API at /api is served by the native Litestar controllers in
+smarter_dev.web.api_native, registered in the app yamls.
 """
 
 from skrift.asgi import app  # noqa: F401

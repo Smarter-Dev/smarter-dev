@@ -50,13 +50,6 @@ bodies via :func:`errors.plain_error`; malformed UUID path segments answer 422
 via :func:`errors.parse_uuid_path`; request-model validation failures answer
 422 via the shared exception handlers. The legacy broad ``except`` → 500
 wrappers on the conversation endpoints are ported as-is (parity port).
-
-NOT registered in ``app.yaml`` yet — the FastAPI mount still owns ``/api``. This
-module exists for isolated parity tests until the atomic switchover.
-
-Rate-limiting parity is deferred to the switchover commit (see the plan's
-"Rate-limiting parity" section); the FastAPI mount still enforces those windows
-in production until switchover.
 """
 
 from __future__ import annotations
@@ -70,9 +63,9 @@ from litestar.status_codes import HTTP_200_OK, HTTP_201_CREATED
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skrift.auth.guards import APIKeyOnly, Permission, auth_guard
+from skrift.auth.guards import APIKeyOnly, Permission
 
-from smarter_dev.web.api.schemas import (
+from smarter_dev.web.api_native.schemas import (
     AdminStatsResponse,
     APIKeyCreate,
     APIKeyCreateResponse,
@@ -86,7 +79,7 @@ from smarter_dev.web.api.schemas import (
     HelpConversationResponse,
     HelpConversationStatsResponse,
 )
-from smarter_dev.web.api_native.auth import resolve_request_api_key
+from smarter_dev.web.api_native.auth import bot_api_auth_guard, resolve_request_api_key
 from smarter_dev.web.api_native.errors import (
     BOT_API_EXCEPTION_HANDLERS,
     BotApiException,
@@ -110,7 +103,7 @@ BOT_API_ADMIN_PERMISSION = "bot-api-admin"
 # ``auth_guard`` inspects ``route_handler.guards`` to find the ``APIKeyOnly``
 # marker — controller-level guards do not populate that attribute. See the bytes
 # controller and docs/v2/legacy-sunset/04-api-rewrite.md ("Auth model").
-BOT_API_ADMIN_GUARDS = [auth_guard, APIKeyOnly(), Permission(BOT_API_ADMIN_PERMISSION)]
+BOT_API_ADMIN_GUARDS = [bot_api_auth_guard, APIKeyOnly(), Permission(BOT_API_ADMIN_PERMISSION)]
 
 
 class AdminController(Controller):

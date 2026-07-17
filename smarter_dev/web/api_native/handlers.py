@@ -28,13 +28,6 @@ These endpoints already used the Skrift session (``get_skrift_db_session``) and
 run inside the Skrift ASGI app where the worker runtime is configured, so the
 Litestar-injected ``db_session`` and ``skrift.workers`` submit/cancel calls are
 unchanged.
-
-NOT registered in ``app.yaml`` yet — the FastAPI mount still owns ``/api``. This
-module exists for isolated parity tests until the atomic switchover.
-
-Rate-limiting parity is deferred to the switchover commit (see the plan's
-"Rate-limiting parity" section); the FastAPI mount still enforces those windows
-in production until switchover.
 """
 
 from __future__ import annotations
@@ -49,12 +42,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skrift.auth.guards import APIKeyOnly, Permission, auth_guard
+from skrift.auth.guards import APIKeyOnly, Permission
 from skrift.workers import get_handle
 from skrift.workers import submit as worker_submit
 
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
+from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import (
     BOT_API_EXCEPTION_HANDLERS,
     parse_uuid_path,
@@ -95,7 +89,7 @@ BOT_API_PERMISSION = "bot-api"
 # ``auth_guard`` inspects ``route_handler.guards`` to find the ``APIKeyOnly``
 # marker — controller-level guards do not populate that attribute. See the bytes
 # controller and docs/v2/legacy-sunset/04-api-rewrite.md ("Auth model").
-BOT_API_GUARDS = [auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
+BOT_API_GUARDS = [bot_api_auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
 
 
 class CreateHandlerRequest(BaseModel):
