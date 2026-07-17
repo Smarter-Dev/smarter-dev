@@ -5,6 +5,8 @@
         <li><a href="/admin/bot/guilds" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'guilds' %} font-weight:bold;{% endif %}">Guilds</a></li>
         {% if guild_id %}
         <li><a href="/admin/bot/guilds/{{ guild_id }}/bytes" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'bytes' %} font-weight:bold;{% endif %}">Bytes Config</a></li>
+        <li><a href="/admin/bot/guilds/{{ guild_id }}/squads" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'squads' %} font-weight:bold;{% endif %}">Squads</a></li>
+        <li><a href="/admin/bot/guilds/{{ guild_id }}/squad-sale-events" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'sale_events' %} font-weight:bold;{% endif %}">Squad Sale Events</a></li>
         <li><a href="/admin/bot/moderation/{{ guild_id }}" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'moderation' %} font-weight:bold;{% endif %}">Moderation Config</a></li>
         <li><a href="/admin/bot/mod-actions/{{ guild_id }}" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'mod_actions' %} font-weight:bold;{% endif %}">Mod Actions</a></li>
         {% endif %}
