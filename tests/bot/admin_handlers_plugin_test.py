@@ -97,6 +97,35 @@ async def test_install_edits_existing_admin_handler():
     assert payload["channel_ids"] == ["MODCHAT"]
 
 
+async def test_install_creates_member_event_handler():
+    # The install step is trigger-agnostic: a member_join admin handler installs
+    # exactly like a message one, carrying the new trigger type to the API.
+    api = _FakeAPI()
+    api.post_response = _Resp(
+        201,
+        {
+            "handler_id": "AH3",
+            "name": "join-alert",
+            "trigger_type": "member_join",
+            "channel_ids": [],
+            "description": "alerts mods on join",
+        },
+    )
+    line = await install_admin_result(
+        api,
+        "G1",
+        "A1",
+        _result(
+            trigger_type="member_join",
+            name="join-alert",
+            description="alerts mods on join",
+        ),
+    )
+    assert "join-alert" in line and "Created" in line
+    _, payload = api.posted[0]
+    assert payload["trigger_type"] == "member_join"
+
+
 async def test_install_relays_api_failure():
     api = _FakeAPI()
     api.post_response = _Resp(409, text="name taken")

@@ -28,6 +28,10 @@ DEFAULT_MAX_AGENT_CONTEXT_BYTES = 32 * 1024
 DEFAULT_WALL_CLOCK_SECONDS = 60.0
 # Standard handlers have no moderation powers, so zero mod actions.
 DEFAULT_MAX_MOD_ACTIONS = 0
+# Metered Discord reads (list_threads). Standard handlers get a couple; mutating
+# thread ops are zero for them, exactly like mod actions.
+DEFAULT_MAX_DISCORD_READS = 2
+DEFAULT_MAX_THREAD_OPS = 0
 
 # Admin handlers are admin-created and trusted: looser per-fire caps, and a
 # moderation-action budget (bans/kicks/timeouts/deletes), e.g. cleaning up a
@@ -35,6 +39,8 @@ DEFAULT_MAX_MOD_ACTIONS = 0
 ADMIN_MAX_MESSAGES = 5
 ADMIN_MAX_AGENT_CALLS = 3
 ADMIN_MAX_MOD_ACTIONS = 25
+ADMIN_MAX_DISCORD_READS = 5
+ADMIN_MAX_THREAD_OPS = 10
 ADMIN_WALL_CLOCK_SECONDS = 120.0
 
 
@@ -66,12 +72,16 @@ class HandlerBudget:
     max_agent_context_bytes: int = DEFAULT_MAX_AGENT_CONTEXT_BYTES
     wall_clock_seconds: float = DEFAULT_WALL_CLOCK_SECONDS
     max_mod_actions: int = DEFAULT_MAX_MOD_ACTIONS
+    max_discord_reads: int = DEFAULT_MAX_DISCORD_READS
+    max_thread_ops: int = DEFAULT_MAX_THREAD_OPS
 
     messages_sent: int = 0
     web_searches: int = 0
     web_reads: int = 0
     agent_calls: int = 0
     mod_actions: int = 0
+    discord_reads: int = 0
+    thread_ops: int = 0
 
     started_at: float = field(default_factory=time.monotonic)
 
@@ -138,6 +148,26 @@ class HandlerBudget:
             )
         self.mod_actions += 1
 
+    def spend_discord_read(self) -> None:
+        """Account for one metered Discord read (e.g. list_threads)."""
+        self.check_deadline()
+        if self.discord_reads >= self.max_discord_reads:
+            raise CapExceeded(
+                "discord_reads",
+                f"handler hit its {self.max_discord_reads}-discord-read cap",
+            )
+        self.discord_reads += 1
+
+    def spend_thread_op(self) -> None:
+        """Account for one mutating thread op (create/close/lock/reopen/delete)."""
+        self.check_deadline()
+        if self.thread_ops >= self.max_thread_ops:
+            raise CapExceeded(
+                "thread_ops",
+                f"handler hit its {self.max_thread_ops}-thread-op cap",
+            )
+        self.thread_ops += 1
+
     def enforce_agent_context(self, argument: str) -> None:
         """Reject an agent argument larger than the context-bytes cap.
 
@@ -161,6 +191,8 @@ class HandlerBudget:
             "web_reads": self.web_reads,
             "agent_calls": self.agent_calls,
             "mod_actions": self.mod_actions,
+            "discord_reads": self.discord_reads,
+            "thread_ops": self.thread_ops,
         }
 
 
@@ -170,5 +202,7 @@ def admin_budget() -> "HandlerBudget":
         max_messages=ADMIN_MAX_MESSAGES,
         max_agent_calls=ADMIN_MAX_AGENT_CALLS,
         max_mod_actions=ADMIN_MAX_MOD_ACTIONS,
+        max_discord_reads=ADMIN_MAX_DISCORD_READS,
+        max_thread_ops=ADMIN_MAX_THREAD_OPS,
         wall_clock_seconds=ADMIN_WALL_CLOCK_SECONDS,
     )

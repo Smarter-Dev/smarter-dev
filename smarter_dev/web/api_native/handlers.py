@@ -56,9 +56,11 @@ from smarter_dev.web.api_native.errors import (
 )
 from smarter_dev.web.handler_caps import (
     ADMIN_FIRES_PER_MIN,
+    GUILD_MEMBER_EVENTS_PER_MIN,
     MAX_HANDLERS_PER_CHANNEL,
     WindowedLimiter,
     fires_per_min_for_trigger,
+    guild_member_events_key,
     handler_fire_key,
 )
 from smarter_dev.web.handler_schedule import (
@@ -73,6 +75,8 @@ from smarter_dev.web.member_activity import (
     record_activity,
 )
 from smarter_dev.web.models import (
+    ADMIN_HANDLER_EVENT_TRIGGERS,
+    ADMIN_ONLY_TRIGGER_TYPES,
     HANDLER_EVENT_TRIGGERS,
     HANDLER_TRIGGER_TYPES,
     AdminHandler,
@@ -80,6 +84,15 @@ from smarter_dev.web.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+# The guild-shaped member lifecycle triggers: dispatched with ``channel_id=""``
+# (a member event has no channel), matched admin-only by guild + trigger, and
+# gated by the per-guild ``GUILD_MEMBER_EVENTS_PER_MIN`` raid window. This is
+# ``ADMIN_ONLY_TRIGGER_TYPES`` minus ``thread_create`` — the odd one out, which
+# keys off a parent channel and is scope-matched like a normal channel trigger.
+MEMBER_EVENT_TRIGGERS = tuple(
+    trigger for trigger in ADMIN_ONLY_TRIGGER_TYPES if trigger != "thread_create"
+)
 
 # Permission granted to the bot's Skrift service key (see roles.py `bot-service`
 # role and the phase-01 key-mint runbook).
@@ -337,6 +350,18 @@ class HandlerController(Controller):
         limiter = WindowedLimiter(redis=get_redis_client())
         dispatched: list[str] = []
 
+        is_member_event = data.trigger_type in MEMBER_EVENT_TRIGGERS
+        is_admin_only = data.trigger_type in ADMIN_ONLY_TRIGGER_TYPES
+
+        # Member lifecycle events are gated by a per-guild raid window BEFORE any
+        # fire is enqueued, so a raid + ban wave degrades to declined dispatches
+        # rather than a fire-queue explosion (all four member_* triggers share the
+        # window). thread_create is not under this gate.
+        if is_member_event and not await limiter.hit(
+            guild_member_events_key(data.guild_id), GUILD_MEMBER_EVENTS_PER_MIN
+        ):
+            return {"dispatched": False, "handler_ids": []}
+
         # Message triggers carry the author: enrich the context with activity
         # facts ("first message ever", "days since last message") read BEFORE
         # recording this message, so scripts get platform truth instead of
@@ -350,32 +375,38 @@ class HandlerController(Controller):
             await record_activity(db_session, data.guild_id, str(author_id), now)
             await db_session.commit()
 
-        # Standard tier: every enabled handler for this (channel, trigger)
-        # fires, each behind its own windowed cap.
-        standard_rows = (
-            await db_session.execute(
-                select(ChannelHandler).where(
-                    ChannelHandler.channel_id == data.channel_id,
-                    ChannelHandler.trigger_type == data.trigger_type,
-                    ChannelHandler.enabled.is_(True),
+        # Standard tier: every enabled handler for this (channel, trigger) fires,
+        # each behind its own windowed cap. The five admin-only member/thread
+        # triggers are never in the standard vocabulary, so skip the query for
+        # them (no ChannelHandler can match).
+        if not is_admin_only:
+            standard_rows = (
+                await db_session.execute(
+                    select(ChannelHandler).where(
+                        ChannelHandler.channel_id == data.channel_id,
+                        ChannelHandler.trigger_type == data.trigger_type,
+                        ChannelHandler.enabled.is_(True),
+                    )
                 )
-            )
-        ).scalars().all()
-        for standard in standard_rows:
-            if not await limiter.hit(
-                handler_fire_key(str(standard.id)),
-                fires_per_min_for_trigger(standard.trigger_type),
-            ):
-                continue
-            await worker_submit(
-                HandlerFirePayload(
-                    handler_id=str(standard.id), trigger_context=trigger_context
+            ).scalars().all()
+            for standard in standard_rows:
+                if not await limiter.hit(
+                    handler_fire_key(str(standard.id)),
+                    fires_per_min_for_trigger(standard.trigger_type),
+                ):
+                    continue
+                await worker_submit(
+                    HandlerFirePayload(
+                        handler_id=str(standard.id), trigger_context=trigger_context
+                    )
                 )
-            )
-            dispatched.append(str(standard.id))
+                dispatched.append(str(standard.id))
 
-        # Admin tier: every enabled admin handler for this guild+trigger whose
-        # scope includes this channel ([] / null = all channels).
+        # Admin tier: every enabled admin handler for this guild+trigger. For
+        # member_* events (channel_id="") the scope check is bypassed — the event
+        # has no channel for a scope to mean anything, so they match by guild
+        # alone. Every other trigger (including thread_create, dispatched with the
+        # parent channel) matches when its scope includes the channel ([] = all).
         admin_rows = (
             await db_session.execute(
                 select(AdminHandler).where(
@@ -386,9 +417,10 @@ class HandlerController(Controller):
             )
         ).scalars().all()
         for admin_handler in admin_rows:
-            scope = admin_handler.channel_ids or []
-            if scope and data.channel_id not in scope:
-                continue
+            if not is_member_event:
+                scope = admin_handler.channel_ids or []
+                if scope and data.channel_id not in scope:
+                    continue
             if not await limiter.hit(
                 handler_fire_key(str(admin_handler.id)), ADMIN_FIRES_PER_MIN
             ):
@@ -434,13 +466,19 @@ class HandlerController(Controller):
                     AdminHandler.channel_ids,
                 ).where(
                     AdminHandler.enabled.is_(True),
-                    AdminHandler.trigger_type.in_(HANDLER_EVENT_TRIGGERS),
+                    AdminHandler.trigger_type.in_(ADMIN_HANDLER_EVENT_TRIGGERS),
                 )
             )
         ).all()
         guild_triggers: list[list[str]] = []
         for guild_id, trigger, channel_ids in admin_rows:
-            if channel_ids:
+            # member_* handlers always surface as (guild_id, trigger) — their
+            # dispatch guard is per-guild regardless of channel_ids. Everything
+            # else (message/reaction/thread_create) follows the scoped/guild-wide
+            # split: listed channels become channel entries, empty scope = guild.
+            if trigger in MEMBER_EVENT_TRIGGERS:
+                guild_triggers.append([guild_id, trigger])
+            elif channel_ids:
                 channels.extend([channel_id, trigger] for channel_id in channel_ids)
             else:
                 guild_triggers.append([guild_id, trigger])

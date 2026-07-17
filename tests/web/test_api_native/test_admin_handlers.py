@@ -240,3 +240,25 @@ def test_create_scheduled_admin_handler_schedules_fire(client):
     resp = client.post("/api/admin/handlers", json=body)
     assert resp.status_code == 201
     assert resp.json()["channel_ids"] == ["MODCHAT"]
+
+
+@pytest.mark.parametrize(
+    "trigger",
+    [
+        "member_join",
+        "member_leave",
+        "member_rules_accepted",
+        "member_role_change",
+        "thread_create",
+    ],
+)
+def test_create_admin_accepts_new_event_triggers(client, trigger):
+    """Admin tier admits the five member/thread triggers; they are event
+    triggers, so no first fire is scheduled (unlike ``schedule``/``timer``)."""
+    resp = client.post(
+        "/api/admin/handlers",
+        json=_body(trigger_type=trigger, script="await send_message('hi', 'LOG')\n"),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["trigger_type"] == trigger
+    assert len(client.submitted) == 0  # type: ignore[attr-defined]

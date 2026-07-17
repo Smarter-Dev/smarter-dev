@@ -164,13 +164,351 @@ async def _dispatch(
         logger.debug("handler dispatch failed", exc_info=True)
 
 
+# Channel types that are threads (dispatch keys off their PARENT channel).
+_THREAD_CHANNEL_TYPES = (
+    hikari.ChannelType.GUILD_PUBLIC_THREAD,
+    hikari.ChannelType.GUILD_PRIVATE_THREAD,
+    hikari.ChannelType.GUILD_NEWS_THREAD,
+)
+
+
+def _has_custom_avatar(entity: Any) -> bool:
+    """True when the user set a non-default avatar (global or per-guild)."""
+    return (
+        getattr(entity, "avatar_hash", None) is not None
+        or getattr(entity, "guild_avatar_hash", None) is not None
+    )
+
+
+def _iso_or_none(value: Any) -> str | None:
+    """ISO-8601 string for a datetime, or None when absent."""
+    return value.isoformat() if value is not None else None
+
+
+def _roles_beyond_everyone(member: Any) -> list[str]:
+    """Role ids a member actually holds, excluding @everyone.
+
+    hikari always appends the @everyone role — whose id equals the guild id — to
+    ``Member.role_ids``, so it is never a real role for rules-acceptance or
+    leave-notice purposes and must be filtered out before either reasons about
+    "roles held".
+    """
+    everyone_role_id = str(getattr(member, "guild_id", "") or "")
+    return [str(role_id) for role_id in member.role_ids if str(role_id) != everyone_role_id]
+
+
+# ---------------------------------------------------------------------------
+# Member-event context builders (pure — unit-testable without a gateway)
+# ---------------------------------------------------------------------------
+
+
+def guild_member_counts(guild: Any) -> tuple[int | None, int | None]:
+    """(total, human) member counts from the gateway cache, best-effort.
+
+    Returns (None, None) when the guild is not cached; the human count is
+    derived from the cached member view and may lag a large guild.
+    """
+    if guild is None:
+        return None, None
+    total = getattr(guild, "member_count", None)
+    members = guild.get_members()
+    human = (
+        sum(1 for m in members.values() if not m.is_bot) if members else None
+    )
+    return total, human
+
+
+def member_join_context(
+    member: Any, guild_member_count: int | None, guild_human_member_count: int | None
+) -> dict:
+    """member_join context (fires for bots too, flagged is_bot)."""
+    return {
+        "trigger_type": "member_join",
+        "member_id": str(member.id),
+        "username": member.username,
+        "display_name": member.display_name,
+        "is_bot": bool(member.is_bot),
+        "account_created_at": _snowflake_created_at(int(member.id)),
+        "has_custom_avatar": _has_custom_avatar(member),
+        "guild_member_count": guild_member_count,
+        "guild_human_member_count": guild_human_member_count,
+    }
+
+
+def member_leave_context(user: Any, old_member: Any, role_names: list[str]) -> dict:
+    """member_leave context; informational — fires always, partial on cache miss.
+
+    On cache miss (``old_member`` is None) the join history and roles are
+    unknown, so ``joined_at``/``role_ids``/``role_names`` are empty and
+    ``cache_incomplete`` is True. ``account_created_at`` is always available
+    from the snowflake.
+    """
+    cache_incomplete = old_member is None
+    joined_at = None
+    role_ids: list[str] = []
+    if old_member is not None:
+        joined_at = _iso_or_none(old_member.joined_at)
+        role_ids = _roles_beyond_everyone(old_member)
+    return {
+        "trigger_type": "member_leave",
+        "member_id": str(user.id),
+        "username": user.username,
+        "display_name": getattr(user, "display_name", None) or user.username,
+        "is_bot": bool(user.is_bot),
+        "account_created_at": _snowflake_created_at(int(user.id)),
+        "joined_at": joined_at,
+        "role_ids": role_ids,
+        "role_names": role_names,
+        "cache_incomplete": cache_incomplete,
+    }
+
+
+def _rules_accepted_context(member: Any) -> dict:
+    return {
+        "trigger_type": "member_rules_accepted",
+        "member_id": str(member.id),
+        "username": member.username,
+        "display_name": member.display_name,
+        "nickname": member.nickname,
+        "account_created_at": _snowflake_created_at(int(member.id)),
+        "has_custom_avatar": _has_custom_avatar(member),
+        "joined_at": _iso_or_none(member.joined_at),
+    }
+
+
+def _became_rules_accepted(old_member: Any, new_member: Any) -> bool:
+    """Whether this update is the member's rules-acceptance moment.
+
+    With cached history: fires on the pending True -> False transition. On
+    cache miss uses the at-least-once heuristic — fire iff the member is not
+    pending and holds no roles beyond @everyone (role_ids excludes @everyone).
+    Duplicate fires are possible on cache misses; handlers must be idempotent.
+    """
+    if new_member.is_pending:
+        return False
+    if old_member is None:
+        return not _roles_beyond_everyone(new_member)
+    return bool(old_member.is_pending)
+
+
+def member_update_deltas(old_member: Any, new_member: Any) -> list[tuple[str, dict]]:
+    """Which member_* triggers a MemberUpdate fires, with pure (id-level) context.
+
+    Returns a list of (trigger_type, context) pairs. ``member_role_change``
+    contexts carry only the id-level delta here; the listener enriches them
+    with guild-derived role names, boost flags, and counts. A cache miss (no
+    ``old_member``) yields no role_change delta — the structural boost re-fire
+    guard.
+    """
+    deltas: list[tuple[str, dict]] = []
+    if _became_rules_accepted(old_member, new_member):
+        deltas.append(("member_rules_accepted", _rules_accepted_context(new_member)))
+    if old_member is not None:
+        old_ids = {str(r) for r in old_member.role_ids}
+        new_ids = {str(r) for r in new_member.role_ids}
+        added = [str(r) for r in new_member.role_ids if str(r) not in old_ids]
+        removed = [str(r) for r in old_member.role_ids if str(r) not in new_ids]
+        if added or removed:
+            deltas.append(
+                (
+                    "member_role_change",
+                    {
+                        "trigger_type": "member_role_change",
+                        "member_id": str(new_member.id),
+                        "member_display_name": new_member.display_name,
+                        "added_role_ids": added,
+                        "removed_role_ids": removed,
+                    },
+                )
+            )
+    return deltas
+
+
+def resolve_role_names(guild: Any, role_ids: list[str]) -> list[str]:
+    """Resolve role ids to names via the guild cache; empty when guild uncached.
+
+    An id whose role is not cached falls back to the id string so a name list
+    is never silently short.
+    """
+    if guild is None:
+        return []
+    names: list[str] = []
+    for role_id in role_ids:
+        role = guild.get_role(int(role_id))
+        names.append(role.name if role is not None else str(role_id))
+    return names
+
+
+def _includes_boost_role(guild: Any, role_ids: list[str]) -> bool:
+    if guild is None:
+        return False
+    for role_id in role_ids:
+        role = guild.get_role(int(role_id))
+        if role is not None and getattr(role, "is_premium_subscriber_role", False):
+            return True
+    return False
+
+
+def _boosting_member_count(guild: Any) -> int | None:
+    if guild is None:
+        return None
+    members = guild.get_members()
+    if not members:
+        return None
+    return sum(
+        1 for m in members.values() if getattr(m, "premium_since", None) is not None
+    )
+
+
+def _role_member_counts(guild: Any, role_ids: set[str]) -> dict[str, int]:
+    if guild is None:
+        return {}
+    members = guild.get_members()
+    counts: dict[str, int] = {}
+    for role_id in role_ids:
+        target = int(role_id)
+        counts[str(role_id)] = sum(
+            1 for m in members.values() if target in {int(r) for r in m.role_ids}
+        )
+    return counts
+
+
+def enrich_role_change_context(
+    context: dict, old_member: Any, new_member: Any, guild: Any
+) -> dict:
+    """Add guild-derived role names, boost flag, and counts to a role_change ctx.
+
+    Pure: returns a new dict, leaving ``context`` untouched.
+    """
+    added_ids = context["added_role_ids"]
+    removed_ids = context["removed_role_ids"]
+    return {
+        **context,
+        "added_role_names": resolve_role_names(guild, added_ids),
+        "removed_role_names": resolve_role_names(guild, removed_ids),
+        "is_boost_role_added": _includes_boost_role(guild, added_ids),
+        "premium_subscription_count": (
+            getattr(guild, "premium_subscription_count", None)
+            if guild is not None
+            else None
+        ),
+        "boosting_member_count": _boosting_member_count(guild),
+        "role_member_counts": _role_member_counts(
+            guild, set(added_ids) | set(removed_ids)
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# thread_create context + helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_forum_channel(channel: Any) -> bool:
+    return (
+        channel is not None
+        and getattr(channel, "type", None) == hikari.ChannelType.GUILD_FORUM
+    )
+
+
+def _is_thread_channel(channel: Any) -> bool:
+    return channel is not None and getattr(channel, "type", None) in _THREAD_CHANNEL_TYPES
+
+
+def _resolve_forum_tag_names(forum_channel: Any, tag_ids: list[str]) -> list[str]:
+    """Map applied tag ids to names against a forum channel's available tags."""
+    if forum_channel is None or not tag_ids:
+        return []
+    tag_names_by_id = {
+        str(tag.id): tag.name
+        for tag in getattr(forum_channel, "available_tags", None) or []
+    }
+    return [tag_names_by_id.get(tag_id, tag_id) for tag_id in tag_ids]
+
+
+def thread_create_context(
+    thread: Any,
+    creator: Any,
+    starter_message_content: str,
+    is_forum_post: bool,
+    applied_tag_names: list[str],
+) -> dict:
+    """thread_create context (regular threads and forum posts alike)."""
+    return {
+        "trigger_type": "thread_create",
+        "thread_id": str(thread.id),
+        "thread_name": thread.name,
+        "parent_channel_id": str(thread.parent_id),
+        "creator_id": str(thread.owner_id) if thread.owner_id is not None else "",
+        "creator_username": creator.username if creator is not None else "",
+        "creator_display_name": (
+            getattr(creator, "display_name", None) or creator.username
+            if creator is not None
+            else ""
+        ),
+        "is_forum_post": is_forum_post,
+        "applied_tag_ids": [str(t) for t in getattr(thread, "applied_tag_ids", None) or []],
+        "applied_tag_names": applied_tag_names,
+        "starter_message_content": starter_message_content,
+        "created_at": _iso_or_none(getattr(thread, "created_at", None)) or "",
+    }
+
+
+def message_thread_fields(thread_channel: Any) -> dict:
+    """Extra message-context fields naming the enclosing thread (or is_thread=False)."""
+    if thread_channel is None:
+        return {"is_thread": False}
+    return {
+        "is_thread": True,
+        "thread_id": str(thread_channel.id),
+        "thread_name": thread_channel.name,
+    }
+
+
+def _get_guild_channel(bot: Any, channel_id: Any) -> Any:
+    try:
+        return bot.cache.get_guild_channel(channel_id)
+    except Exception:  # noqa: BLE001 — a cache miss must never crash dispatch
+        return None
+
+
+def _get_thread_channel(bot: Any, channel_id: Any) -> Any:
+    # Threads live behind cache.get_thread() — get_guild_channel() never returns
+    # them — so a message's channel is resolved here, not via _get_guild_channel.
+    try:
+        channel = bot.cache.get_thread(channel_id)
+    except Exception:  # noqa: BLE001 — a cache miss must never crash dispatch
+        return None
+    return channel if _is_thread_channel(channel) else None
+
+
+def _get_thread_creator(bot: Any, guild_id: Any, owner_id: Any) -> Any:
+    if owner_id is None:
+        return None
+    try:
+        member = bot.cache.get_member(guild_id, owner_id)
+        if member is not None:
+            return member
+        return bot.cache.get_user(owner_id)
+    except Exception:  # noqa: BLE001 — best-effort creator resolution
+        return None
+
+
+def _get_starter_message_content(bot: Any, message_id: Any) -> str:
+    # For a forum post the starter message's id equals the thread's id.
+    try:
+        message = bot.cache.get_message(message_id)
+    except Exception:  # noqa: BLE001 — starter content is best-effort
+        return ""
+    return getattr(message, "content", None) or "" if message is not None else ""
+
+
 @plugin.listener(hikari.StartedEvent)
 async def start_activity_flush(_: hikari.StartedEvent) -> None:
     asyncio.create_task(_activity.run(_get_api_client()))
 
 
-@plugin.listener(hikari.GuildMessageCreateEvent)
-async def on_message(event: hikari.GuildMessageCreateEvent) -> None:
+async def dispatch_message(bot: Any, event: Any) -> None:
     # Only user actions fire triggers.
     if not event.is_human:
         return
@@ -191,24 +529,98 @@ async def on_message(event: hikari.GuildMessageCreateEvent) -> None:
         }
         for a in msg.attachments
     ]
-    await _dispatch(
-        str(event.channel_id),
-        str(event.guild_id),
-        "message",
-        {
-            "trigger_type": "message",
-            "message_content": msg.content or "",
-            "message_id": str(msg.id),
-            "author_id": str(msg.author.id),
-            "author_name": msg.author.username,
-            # For admin handlers that gate on new accounts / recent joiners.
-            "author_account_created_at": _snowflake_created_at(int(msg.author.id)),
-            "author_joined_at": joined_at,
-            # Files posted with the message — scripts can read these via the
-            # gathering agent's web_read tool (it handles image/pdf/audio urls).
-            "attachments": attachments,
-        },
+    thread_channel = _get_thread_channel(bot, event.channel_id)
+    context = {
+        "trigger_type": "message",
+        "message_content": msg.content or "",
+        "message_id": str(msg.id),
+        "author_id": str(msg.author.id),
+        "author_name": msg.author.username,
+        # For admin handlers that gate on new accounts / recent joiners.
+        "author_account_created_at": _snowflake_created_at(int(msg.author.id)),
+        "author_joined_at": joined_at,
+        # Files posted with the message — scripts can read these via the
+        # gathering agent's web_read tool (it handles image/pdf/audio urls).
+        "attachments": attachments,
+        **message_thread_fields(thread_channel),
+    }
+    # A message inside a thread dispatches to the thread's PARENT channel (a
+    # single fire whose home channel is the parent, §4); a non-thread message
+    # dispatches to its own channel. Either way it's exactly one dispatch.
+    dispatch_channel_id = (
+        str(thread_channel.parent_id)
+        if thread_channel is not None
+        else str(event.channel_id)
     )
+    await _dispatch(dispatch_channel_id, str(event.guild_id), "message", context)
+
+
+@plugin.listener(hikari.GuildMessageCreateEvent)
+async def on_message(event: hikari.GuildMessageCreateEvent) -> None:
+    await dispatch_message(plugin.bot, event)
+
+
+@plugin.listener(hikari.MemberCreateEvent)
+async def on_member_join(event: hikari.MemberCreateEvent) -> None:
+    total, human = guild_member_counts(event.get_guild())
+    context = member_join_context(event.member, total, human)
+    # Guild-scoped: no home channel (channel_id="").
+    await _dispatch("", str(event.guild_id), "member_join", context)
+
+
+@plugin.listener(hikari.MemberDeleteEvent)
+async def on_member_leave(event: hikari.MemberDeleteEvent) -> None:
+    guild = event.get_guild()
+    old_member = event.old_member
+    # Resolve names for the same @everyone-filtered set the context reports, so
+    # role_ids and role_names stay aligned.
+    role_names = (
+        resolve_role_names(guild, _roles_beyond_everyone(old_member))
+        if old_member is not None
+        else []
+    )
+    context = member_leave_context(event.user, old_member, role_names)
+    await _dispatch("", str(event.guild_id), "member_leave", context)
+
+
+@plugin.listener(hikari.MemberUpdateEvent)
+async def on_member_update(event: hikari.MemberUpdateEvent) -> None:
+    guild = event.get_guild()
+    for trigger_type, context in member_update_deltas(event.old_member, event.member):
+        if trigger_type == "member_role_change":
+            context = enrich_role_change_context(
+                context, event.old_member, event.member, guild
+            )
+        await _dispatch("", str(event.guild_id), trigger_type, context)
+
+
+async def dispatch_thread_create(bot: Any, event: Any) -> None:
+    # Discord re-sends THREAD_CREATE when the bot merely gains access to an
+    # existing thread; only a genuinely new thread carries newly_created.
+    if not getattr(event, "newly_created", True):
+        return
+    thread = event.thread
+    parent_channel = _get_guild_channel(bot, thread.parent_id)
+    is_forum_post = _is_forum_channel(parent_channel)
+    tag_ids = [str(t) for t in getattr(thread, "applied_tag_ids", None) or []]
+    applied_tag_names = _resolve_forum_tag_names(parent_channel, tag_ids)
+    creator = _get_thread_creator(bot, event.guild_id, thread.owner_id)
+    # A forum post's starter message shares the thread's id (Discord contract).
+    starter_content = (
+        _get_starter_message_content(bot, thread.id) if is_forum_post else ""
+    )
+    context = thread_create_context(
+        thread, creator, starter_content, is_forum_post, applied_tag_names
+    )
+    # Dispatch keys off the PARENT channel (§3.3).
+    await _dispatch(
+        str(thread.parent_id), str(event.guild_id), "thread_create", context
+    )
+
+
+@plugin.listener(hikari.GuildThreadCreateEvent)
+async def on_thread_create(event: hikari.GuildThreadCreateEvent) -> None:
+    await dispatch_thread_create(plugin.bot, event)
 
 
 @plugin.listener(hikari.GuildReactionAddEvent)

@@ -73,7 +73,9 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
     from smarter_dev.web.handler_runtime import run_handler_script
 
     budget = admin_budget()
-    emitter = DiscordEmitter(bot_token=settings.discord_bot_token)
+    # The emitter carries the fire's guild so list_threads() can hit the
+    # guild-scoped active-threads endpoint; without it the URL is malformed.
+    emitter = DiscordEmitter(bot_token=settings.discord_bot_token, guild_id=guild_id)
     redis = get_redis_client()
     limiter = WindowedLimiter(redis=redis)
     actor = AdminActor(bot_token=settings.discord_bot_token, guild_id=guild_id)
@@ -83,6 +85,7 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
         payload.trigger_context,
         channel_id=channel_id,
         guild_id=guild_id,
+        channel_ids=channel_ids,
         emitter=emitter,
         limiter=limiter,
         agent_runner=run_gathering_agent,
@@ -105,6 +108,8 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
                 web_reads=result.usage["web_reads"],
                 agent_calls=result.usage["agent_calls"],
                 mod_actions=result.usage.get("mod_actions", 0),
+                discord_reads=result.usage.get("discord_reads", 0),
+                thread_ops=result.usage.get("thread_ops", 0),
                 duration_ms=result.duration_ms,
                 finished_at=datetime.now(timezone.utc),
             )

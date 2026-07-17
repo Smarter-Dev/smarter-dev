@@ -288,7 +288,10 @@ write code; timing goes in `settings` for time triggers),
 - One message/reaction handler per channel (registering again merges with or
   replaces it); each schedule/timer registration is its own handler.
 - Pass a clear, complete description — the author only sees what you write,
-  not the conversation.
+  not the conversation. That includes IDs: resolve any mentioned users or
+  referenced channels/threads to their snowflake IDs from your context and
+  write them into the description (e.g. "user 1234567890 (@zech)") — the
+  author targets by ID and cannot look up who "@zech" is.
 - On error, tell the member what actually happened from the returned reason
   (own words fine) — never invent a different cause; the reason is ground
   truth.
