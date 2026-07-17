@@ -22,10 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from smarter_dev.web.api.schemas import SquadCostInfo
 from smarter_dev.web.api_native import bytes as bytes_module
 from smarter_dev.web.api_native import challenges as challenges_module
+from smarter_dev.web.api_native import messages as messages_module
 from smarter_dev.web.api_native import quests as quests_module
 from smarter_dev.web.api_native import squads as squads_module
 from smarter_dev.web.api_native.bytes import BytesController
 from smarter_dev.web.api_native.challenges import ChallengeController
+from smarter_dev.web.api_native.messages import (
+    RepeatingMessageController,
+    ScheduledMessageController,
+)
 from smarter_dev.web.api_native.quests import QuestController
 from smarter_dev.web.api_native.squads import SquadController, SquadSaleEventController
 
@@ -408,4 +413,89 @@ def challenge_squad_ops_mock() -> Iterator[Mock]:
         instance = Mock()
         factory.return_value = instance
         instance.get_user_squad = AsyncMock()
+        yield instance
+
+
+# --------------------------------------------------------------------------- #
+# Messaging fixtures (unit U6 — scheduled + repeating messages)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def scheduled_client(session_mock: AsyncMock) -> Iterator[TestClient]:
+    """Client serving the scheduled-message controller with guards bypassed.
+
+    The routes share the ``messages.BOT_API_GUARDS`` list by reference, so
+    emptying it before the app is built removes guards for these tests only.
+    Auth is covered separately by ``test_auth.py``.
+    """
+    original_guards = list(messages_module.BOT_API_GUARDS)
+    messages_module.BOT_API_GUARDS.clear()
+    try:
+        with create_test_client(
+            route_handlers=[ScheduledMessageController],
+            plugins=[PydanticPlugin()],
+            dependencies={
+                "db_session": Provide(lambda: session_mock, sync_to_thread=False)
+            },
+        ) as client:
+            yield client
+    finally:
+        messages_module.BOT_API_GUARDS[:] = original_guards
+
+
+@pytest.fixture
+def repeating_client(session_mock: AsyncMock) -> Iterator[TestClient]:
+    """Client serving the repeating-message controller with guards bypassed.
+
+    The routes share the ``messages.BOT_API_GUARDS`` list by reference, so
+    emptying it before the app is built removes guards for these tests only.
+    Auth is covered separately by ``test_auth.py``.
+    """
+    original_guards = list(messages_module.BOT_API_GUARDS)
+    messages_module.BOT_API_GUARDS.clear()
+    try:
+        with create_test_client(
+            route_handlers=[RepeatingMessageController],
+            plugins=[PydanticPlugin()],
+            dependencies={
+                "db_session": Provide(lambda: session_mock, sync_to_thread=False)
+            },
+        ) as client:
+            yield client
+    finally:
+        messages_module.BOT_API_GUARDS[:] = original_guards
+
+
+@pytest.fixture
+def scheduled_ops_mock() -> Iterator[Mock]:
+    """Patch ``ScheduledMessageOperations`` in the native messages module."""
+    with patch(
+        "smarter_dev.web.api_native.messages.ScheduledMessageOperations"
+    ) as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.get_upcoming_scheduled_messages = AsyncMock()
+        instance.get_pending_scheduled_messages = AsyncMock()
+        instance.mark_scheduled_message_sent = AsyncMock()
+        instance.get_scheduled_message_with_campaign = AsyncMock()
+        yield instance
+
+
+@pytest.fixture
+def repeating_ops_mock() -> Iterator[Mock]:
+    """Patch ``RepeatingMessageOperations`` in the native messages module."""
+    with patch(
+        "smarter_dev.web.api_native.messages.RepeatingMessageOperations"
+    ) as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.get_due_repeating_messages = AsyncMock()
+        instance.mark_message_sent = AsyncMock()
+        instance.create_repeating_message = AsyncMock()
+        instance.get_guild_repeating_messages = AsyncMock()
+        instance.get_repeating_message = AsyncMock()
+        instance.update_repeating_message = AsyncMock()
+        instance.delete_repeating_message = AsyncMock()
+        instance.toggle_repeating_message = AsyncMock()
         yield instance
