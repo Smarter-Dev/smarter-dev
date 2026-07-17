@@ -335,6 +335,51 @@ class TestLegacyFallbackAuthentication:
 
         assert response.status_code == 401
 
+    async def test_legacy_key_rejected_when_legacy_table_unreachable(
+        self, skrift_api_client: AsyncClient, bot_headers: dict[str, str]
+    ):
+        """Post-consolidation (phase 02) the primary DB has no legacy-shaped
+        api_keys table; the SQL-layer failure must surface as a clean 401,
+        never a 500. crud wraps SQL errors in DatabaseOperationError, so both
+        the raw and the wrapped shapes must be handled."""
+        from sqlalchemy.exc import ProgrammingError
+
+        from smarter_dev.web.crud import DatabaseOperationError
+
+        sql_error = ProgrammingError(
+            "SELECT ...", {}, Exception("column api_keys.is_active does not exist")
+        )
+        wrapped_error = DatabaseOperationError(f"Failed to get API key: {sql_error}")
+        wrapped_error.__cause__ = sql_error
+
+        for lookup_failure in (sql_error, wrapped_error):
+            with patch(
+                "smarter_dev.web.crud.APIKeyOperations.get_api_key_by_hash",
+                side_effect=lookup_failure,
+            ):
+                response = await skrift_api_client.post(
+                    "/auth/validate", headers=bot_headers
+                )
+
+            assert response.status_code == 401, repr(lookup_failure)
+
+    async def test_legacy_key_lookup_reraises_non_sql_failures(
+        self, skrift_api_client: AsyncClient, bot_headers: dict[str, str]
+    ):
+        """DatabaseOperationError not caused by a SQL-layer error is a real
+        fault and must not be silently converted into a 401."""
+        from smarter_dev.web.crud import DatabaseOperationError
+
+        with patch(
+            "smarter_dev.web.crud.APIKeyOperations.get_api_key_by_hash",
+            side_effect=DatabaseOperationError("Failed to get API key: boom"),
+        ):
+            response = await skrift_api_client.post(
+                "/auth/validate", headers=bot_headers
+            )
+
+        assert response.status_code == 500
+
     async def test_garbage_token_rejected(self, skrift_api_client: AsyncClient):
         response = await skrift_api_client.post(
             "/auth/validate", headers={"Authorization": "Bearer garbage-token"}

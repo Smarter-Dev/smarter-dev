@@ -16,9 +16,6 @@ from smarter_dev.web.admin.views import (
     guild_detail,
     bytes_config,
     squads_config,
-    api_keys_list,
-    api_keys_create,
-    api_keys_delete,
     conversations_list,
     conversation_detail,
     cleanup_expired_conversations,
@@ -169,20 +166,9 @@ admin_routes = [
         methods=["POST"],
         name="admin_forum_agents_bulk",
     ),
-    # API key management
-    Route("/api-keys", admin_required(api_keys_list), name="admin_api_keys"),
-    Route(
-        "/api-keys/create",
-        admin_required(api_keys_create),
-        methods=["GET", "POST"],
-        name="admin_api_keys_create",
-    ),
-    Route(
-        "/api-keys/{key_id}/delete",
-        admin_required(api_keys_delete),
-        methods=["POST"],
-        name="admin_api_keys_delete",
-    ),
+    # API key management moved to Skrift's built-in /admin/api-keys UI
+    # (phase 01/02 of the legacy sunset — the legacy api_keys table is
+    # unreachable after the DB consolidation).
     # Conversation management
     Route(
         "/conversations", admin_required(conversations_list), name="admin_conversations"

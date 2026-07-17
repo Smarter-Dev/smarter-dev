@@ -1,11 +1,19 @@
-"""Database setup and configuration using async SQLAlchemy."""
+"""Database setup and configuration using async SQLAlchemy.
+
+Since the phase-02 database consolidation (docs/v2/legacy-sunset/
+02-db-consolidation.md) the application runs against a single database:
+``DATABASE_URL`` with every schema-less table translated into the ``skrift``
+schema — identical to the sessions Litestar injects into Skrift controllers.
+The legacy ``LEGACY_DATABASE_URL`` remains in config solely for
+``scripts/copy_legacy_data.py`` and the closed ``alembic/legacy`` tree;
+no runtime code path may open a session against it.
+"""
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime
 from typing import AsyncGenerator
-from typing import Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 from sqlalchemy import DateTime
@@ -27,6 +35,10 @@ from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Every schema-less table lives in the "skrift" schema of the main database,
+# matching the sessions Litestar injects into Skrift controllers.
+SKRIFT_SCHEMA_TRANSLATE_MAP: dict[None, str] = {None: "skrift"}
 
 
 def convert_postgres_url_for_asyncpg(database_url: str) -> str:
@@ -81,7 +93,7 @@ class Base(DeclarativeBase):
     """Base class for all database models with common timestamp fields."""
 
     metadata = MetaData(naming_convention=NAMING_CONVENTION)
-    
+
     # Common timestamp fields for all models
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -99,20 +111,17 @@ class Base(DeclarativeBase):
 
 
 # Global engine and session maker
-_engine: Optional[AsyncEngine] = None
-_session_maker: Optional[async_sessionmaker[AsyncSession]] = None
+_engine: AsyncEngine | None = None
+_session_maker: async_sessionmaker[AsyncSession] | None = None
 
 
-def create_engine(settings: Settings, *, use_legacy_db: bool = True) -> AsyncEngine:
-    """Create async SQLAlchemy engine with proper configuration.
+def create_engine(settings: Settings) -> AsyncEngine:
+    """Create async SQLAlchemy engine against the primary DATABASE_URL.
 
     Args:
         settings: Application settings
-        use_legacy_db: When True, use the legacy database URL for the
-            bot-admin's own tables (public schema). When False, use the
-            primary database URL (for Skrift).
     """
-    database_url = settings.effective_legacy_database_url if use_legacy_db else settings.effective_database_url
+    database_url = settings.effective_database_url
 
     # Convert PostgreSQL URL to asyncpg-compatible format
     cleaned_url = convert_postgres_url_for_asyncpg(database_url)
@@ -139,7 +148,7 @@ def create_engine(settings: Settings, *, use_legacy_db: bool = True) -> AsyncEng
         })
 
     engine = create_async_engine(cleaned_url, **engine_kwargs)
-    
+
     # Set up event listeners
     @event.listens_for(engine.sync_engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
@@ -152,16 +161,23 @@ def create_engine(settings: Settings, *, use_legacy_db: bool = True) -> AsyncEng
             cursor.execute("PRAGMA temp_store=MEMORY")
             cursor.execute("PRAGMA mmap_size=268435456")  # 256MB
             cursor.close()
-    
+
     return engine
 
 
+def create_skrift_schema_engine(settings: Settings) -> AsyncEngine:
+    """Create the primary engine with the skrift schema translate map applied."""
+    return create_engine(settings).execution_options(
+        schema_translate_map=SKRIFT_SCHEMA_TRANSLATE_MAP
+    )
+
+
 def get_engine() -> AsyncEngine:
-    """Get the global database engine."""
+    """Get the global database engine (main DB, skrift schema)."""
     global _engine
     if _engine is None:
         settings = get_settings()
-        _engine = create_engine(settings)
+        _engine = create_skrift_schema_engine(settings)
     return _engine
 
 
@@ -180,7 +196,11 @@ def get_session_maker() -> async_sessionmaker[AsyncSession]:
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """Get a database session for dependency injection."""
+    """Get a database session for dependency injection.
+
+    Sessions target the primary DATABASE_URL with the ``skrift`` schema
+    translate map — identical to what Litestar injects into controllers.
+    """
     session_maker = get_session_maker()
     async with session_maker() as session:
         try:
@@ -194,71 +214,48 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 def get_db_session_context():
-    """Get a database session context manager."""
+    """Get a database session context manager (main DB, skrift schema)."""
     session_maker = get_session_maker()
     return session_maker()
 
 
-# Skrift-schema engine and session maker (for background tasks that need the main DB)
-_skrift_engine: Optional[AsyncEngine] = None
-_skrift_session_maker: Optional[async_sessionmaker[AsyncSession]] = None
-
-
 def get_skrift_db_session_context():
-    """Get a database session context for the Skrift schema.
+    """Alias of :func:`get_db_session_context`.
 
-    Unlike ``get_db_session_context`` (which targets the legacy database),
-    this creates sessions against the primary DATABASE_URL with the
-    ``skrift`` schema translate map, matching what Litestar injects.
+    Kept for call-site compatibility during the legacy sunset; both names
+    now produce identical sessions against the single primary database.
+    Delete in the decommission phase.
     """
-    global _skrift_engine, _skrift_session_maker
-    if _skrift_session_maker is None:
-        settings = get_settings()
-        _skrift_engine = create_engine(settings, use_legacy_db=False)
-        _skrift_session_maker = async_sessionmaker(
-            _skrift_engine.execution_options(
-                schema_translate_map={None: "skrift"}
-            ),
-            class_=AsyncSession,
-            expire_on_commit=False,
-            autoflush=False,
-        )
-    return _skrift_session_maker()
+    return get_db_session_context()
 
 
 async def get_skrift_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency for getting a Skrift-schema database session.
+    """Alias of :func:`get_db_session`.
 
-    Provides a session against the primary DATABASE_URL with the
-    ``skrift`` schema translate map, matching what Litestar injects.
+    Kept for call-site (FastAPI ``Depends``) compatibility during the legacy
+    sunset; both names now produce identical sessions against the single
+    primary database. Delete in the decommission phase.
     """
-    async with get_skrift_db_session_context() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+    async for session in get_db_session():
+        yield session
 
 
 async def init_database() -> None:
     """Initialize database connection and create tables if needed."""
     global _engine, _session_maker
-    
+
     settings = get_settings()
     logger.info(f"Initializing database connection to {settings.effective_database_url}")
-    
+
     # Create engine and session maker
-    _engine = create_engine(settings)
+    _engine = create_skrift_schema_engine(settings)
     _session_maker = async_sessionmaker(
         _engine,
         class_=AsyncSession,
         expire_on_commit=False,
         autoflush=False,
     )
-    
+
     # Test connection
     try:
         async with _engine.begin() as conn:
@@ -272,7 +269,7 @@ async def init_database() -> None:
 async def close_database() -> None:
     """Close database connections."""
     global _engine, _session_maker
-    
+
     if _engine:
         logger.info("Closing database connections")
         await _engine.dispose()
@@ -284,10 +281,10 @@ async def create_tables() -> None:
     """Create all database tables."""
     logger.info("Creating database tables")
     engine = get_engine()
-    
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
+
     logger.info("Database tables created successfully")
 
 
@@ -295,10 +292,10 @@ async def drop_tables() -> None:
     """Drop all database tables."""
     logger.info("Dropping database tables")
     engine = get_engine()
-    
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
-    
+
     logger.info("Database tables dropped successfully")
 
 
@@ -307,13 +304,13 @@ class DatabaseManager:
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.engine: Optional[AsyncEngine] = None
-        self.session_maker: Optional[async_sessionmaker[AsyncSession]] = None
+        self.engine: AsyncEngine | None = None
+        self.session_maker: async_sessionmaker[AsyncSession] | None = None
 
     async def init(self) -> None:
         """Initialize database connection."""
         logger.info("Initializing database manager")
-        self.engine = create_engine(self.settings)
+        self.engine = create_skrift_schema_engine(self.settings)
         self.session_maker = async_sessionmaker(
             self.engine,
             class_=AsyncSession,
@@ -333,7 +330,7 @@ class DatabaseManager:
         """Get a database session."""
         if not self.session_maker:
             raise RuntimeError("Database manager not initialized")
-        
+
         async with self.session_maker() as session:
             try:
                 yield session
@@ -347,7 +344,7 @@ class DatabaseManager:
         """Create all database tables."""
         if not self.engine:
             raise RuntimeError("Database manager not initialized")
-        
+
         logger.info("Creating database tables")
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -356,7 +353,7 @@ class DatabaseManager:
         """Drop all database tables."""
         if not self.engine:
             raise RuntimeError("Database manager not initialized")
-        
+
         logger.info("Dropping database tables")
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)

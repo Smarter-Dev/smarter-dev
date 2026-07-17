@@ -33,9 +33,10 @@ from scripts.copy_legacy_data import (
     run_copy,
 )
 from scripts.local_harness import config as harness_config
-from scripts.local_harness.seed import _legacy_rows
+from scripts.local_harness.seed import _adopted_bot_rows
 from smarter_dev.shared.database import Base
-from smarter_dev.web.models import BytesConfig, Squad, SquadMembership
+from smarter_dev.web.models import APIKey, BytesConfig, Squad, SquadMembership
+from smarter_dev.web.security import hash_api_key
 
 # The FK-dependency-ordered copy list (parents before children). Derived
 # programmatically in the script from Base.metadata.sorted_tables; pinned
@@ -204,10 +205,23 @@ async def target_engine(copy_test_postgres) -> AsyncGenerator[AsyncEngine, None]
 
 
 async def _seed_source(source_engine: AsyncEngine) -> None:
-    """Seed the harness's representative legacy rows (includes an api_keys row)."""
+    """Seed the harness's representative bot-table rows plus an api_keys row.
+
+    The legacy api_keys row is added here (the harness no longer seeds one)
+    so the copy's api_keys exclusion stays exercised against real data.
+    """
+    legacy_api_key_row = APIKey(
+        name="Copy Test Legacy Key",
+        description="Source-only row: must never be copied",
+        key_hash=hash_api_key(harness_config.LEGACY_BOT_API_KEY),
+        key_prefix=harness_config.LEGACY_BOT_API_KEY[:12],
+        scopes=["bot:read"],
+        is_active=True,
+        created_by="copy-test",
+    )
     session_maker = async_sessionmaker(source_engine, expire_on_commit=False)
     async with session_maker() as session:
-        session.add_all(_legacy_rows())
+        session.add_all([*_adopted_bot_rows(), legacy_api_key_row])
         await session.commit()
 
 

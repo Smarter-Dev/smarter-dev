@@ -1,14 +1,20 @@
-"""Seed representative data into the harness databases.
+"""Seed representative data into the harness database.
 
-Run as a subprocess by ``run.py`` with DATABASE_URL / LEGACY_DATABASE_URL
-pointing at the harness postgres. Seeds:
+Run as a subprocess by ``run.py`` with DATABASE_URL pointing at the harness
+postgres. Since the phase-02 DB consolidation every runtime table lives in
+the main DB's ``skrift`` schema, so ALL seeds land there:
 
-- legacy DB (public schema): the bot-economy/admin tables plus a
-  known-plaintext legacy ``sk-`` API key the checks authenticate with.
-- main DB (skrift schema): quests, feature flags, chat-agent engagements,
-  member activity, a channel handler, and a known-plaintext Skrift-native
-  ``sk_`` service API key (dual-verify window: both key shapes must
-  authenticate until the legacy row is dropped in phase 05).
+- the adopted bot-economy/admin tables (bytes, squads, campaigns, forum
+  agents, ...) that used to live in the legacy database,
+- quests, feature flags, chat-agent engagements, member activity, a channel
+  handler, and the known-plaintext Skrift-native ``sk_`` service API key the
+  checks authenticate with.
+
+No legacy ``sk-`` key is seeded: the legacy api_keys table is unreachable
+after the flip (``skrift.api_keys`` is Skrift core's own table), so the
+retired legacy key must 401 — see the auth checks in ``expectations.py``.
+The legacy database receives no seeds; it exists only so the closed
+``alembic/legacy`` tree still applies during ``scripts/migrate.py``.
 
 The Skrift admin user is NOT seeded here — the checks log in through the dev
 dummy auth provider, which creates the user and grants the admin role itself.
@@ -33,9 +39,7 @@ from skrift.db.services.setting_service import (
 )
 from smarter_dev.web.models import (
     AdventOfCodeConfig,
-    CampaignSignup,
     AdventOfCodeThread,
-    APIKey,
     AttachmentFilterConfig,
     AuditLogConfig,
     BytesBalance,
@@ -68,7 +72,8 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _legacy_rows() -> list[object]:
+def _adopted_bot_rows() -> list[object]:
+    """Rows for the bot tables adopted into the skrift schema in phase 02."""
     now = _now()
     return [
         BytesConfig(
@@ -118,15 +123,6 @@ def _legacy_rows() -> list[object]:
             squad_id=UUID(config.SQUAD_ID),
             user_id=config.USER_ID,
             guild_id=config.GUILD_ID,
-        ),
-        APIKey(
-            name="Harness Bot Key",
-            description="Known-plaintext key for local smoke checks",
-            key_hash=hash_api_key(config.BOT_API_KEY),
-            key_prefix=config.BOT_API_KEY[:12],
-            scopes=["bot:read", "bot:write", "admin:read", "admin:write"],
-            is_active=True,
-            created_by="local-harness",
         ),
         HelpConversation(
             id=UUID(config.HELP_CONVERSATION_ID),
@@ -292,23 +288,6 @@ def _main_rows() -> list[object]:
     ]
 
 
-async def _create_legacy_leftover_tables(database_url: str) -> None:
-    """Mirror prod's bc_websites leftovers that migrations no longer create.
-
-    ``campaign_signups`` moved to the main DB (skrift schema) but the legacy
-    /bot-admin page still reads it from the legacy DB, where prod retains the
-    historical table. Create it here so the harness matches prod's layout.
-    """
-    engine = create_async_engine(database_url)
-    async with engine.begin() as connection:
-        await connection.run_sync(
-            lambda sync_connection: CampaignSignup.__table__.create(
-                sync_connection, checkfirst=True
-            )
-        )
-    await engine.dispose()
-
-
 async def _seed_skrift_bot_api_key(database_url: str) -> None:
     """Seed the Skrift-native ``sk_`` service key the checks authenticate with.
 
@@ -358,12 +337,13 @@ async def _insert_all(database_url: str, rows: list[object], *, skrift_schema: b
 
 
 async def seed() -> None:
-    await _create_legacy_leftover_tables(config.LEGACY_DATABASE_URL)
-    await _insert_all(config.LEGACY_DATABASE_URL, _legacy_rows(), skrift_schema=False)
+    await _insert_all(
+        config.MAIN_DATABASE_URL, _adopted_bot_rows(), skrift_schema=True
+    )
     await _insert_all(config.MAIN_DATABASE_URL, _main_rows(), skrift_schema=True)
     await _seed_skrift_bot_api_key(config.MAIN_DATABASE_URL)
 
 
 if __name__ == "__main__":
     asyncio.run(seed())
-    print("seeded harness data into legacy + main databases")
+    print("seeded harness data into the main database (skrift schema)")
