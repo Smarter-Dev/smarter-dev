@@ -37,6 +37,7 @@ from skrift.db.services.setting_service import (
     SITE_NAME_KEY,
     SITE_THEME_KEY,
 )
+from smarter_dev.shared.date_provider import get_date_provider
 from smarter_dev.web.models import (
     AdventOfCodeConfig,
     AdventOfCodeThread,
@@ -72,6 +73,20 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _quest_today() -> date:
+    """Today's date as the server computes it.
+
+    The /quests endpoints filter on ``get_date_provider().today()``, which
+    uses the configured ``quest_timezone`` (UTC by default) — NOT the
+    machine's local date.  Seeding with ``date.today()`` broke whenever the
+    local calendar day differed from the quest-timezone day (e.g. evenings
+    in US timezones), so all seeded dates go through the same provider the
+    app uses.  ``run.py`` launches the seeder and the app with an identical
+    environment, so both resolve the same ``quest_timezone``.
+    """
+    return get_date_provider().today()
+
+
 def _adopted_bot_rows() -> list[object]:
     """Rows for the bot tables adopted into the skrift schema in phase 02."""
     now = _now()
@@ -87,7 +102,7 @@ def _adopted_bot_rows() -> list[object]:
             balance=1000,
             total_received=1000,
             streak_count=3,
-            last_daily=date.today() - timedelta(days=1),
+            last_daily=_quest_today() - timedelta(days=1),
         ),
         BytesBalance(
             guild_id=config.GUILD_ID,
@@ -257,7 +272,7 @@ def _main_rows() -> list[object]:
             id=UUID(config.DAILY_QUEST_ID),
             guild_id=config.GUILD_ID,
             quest_id=UUID(config.QUEST_ID),
-            active_date=date.today(),
+            active_date=_quest_today(),
             expires_at=now + timedelta(days=1),
             is_active=True,
         ),
