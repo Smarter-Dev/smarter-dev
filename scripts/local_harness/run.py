@@ -84,7 +84,7 @@ def print_keep_up_help() -> None:
     print(
         "\n--keep-up: everything left running for debugging\n"
         f"  app:           {config.APP_BASE_URL}\n"
-        f"  api:           {config.API_BASE_URL} (Bearer {config.BOT_API_KEY})\n"
+        f"  api:           {config.API_BASE_URL} (Bearer {config.SKRIFT_BOT_API_KEY})\n"
         f"  main db:       {config.MAIN_DATABASE_URL}\n"
         f"  legacy db:     {config.LEGACY_DATABASE_URL}\n"
         f"  redis:         {config.REDIS_URL}\n"

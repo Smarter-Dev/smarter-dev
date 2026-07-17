@@ -6,10 +6,11 @@ is one row; the runner in ``checks.py`` interprets them in order.
 
 - ``ApiCheck.path`` is relative to /api and may contain ``{saved:name}``
   placeholders filled from values captured by earlier checks (``save_key``).
-- ``auth`` selects the Authorization header: ``bot`` (seeded legacy sk- key),
-  ``skrift_bot`` (seeded Skrift-native sk_ key), ``unknown_key`` /
-  ``unknown_skrift_key`` (valid format, not in DB), ``malformed_key``, or
-  ``none``.
+- ``auth`` selects the Authorization header: ``bot`` (seeded Skrift-native
+  sk_ key — the only accepted key shape since the phase-02 DB
+  consolidation), ``legacy_bot`` (retired legacy sk- key, must 401),
+  ``unknown_key`` / ``unknown_skrift_key`` (valid format, not in DB),
+  ``malformed_key``, or ``none``.
 - ``validate`` (optional) receives the parsed JSON body and returns an error
   string, or None when the body is acceptable.
 """
@@ -87,16 +88,13 @@ API_CHECKS: tuple[ApiCheck, ...] = (
     ApiCheck("health", "GET", "/health", auth="none",
              validate=_expect_field("status", "healthy")),
     ApiCheck("auth-status-valid-key", "GET", "/auth/status",
-             validate=_expect_keys("authenticated")),
-    # Dual-verify window (phase 01): the seeded Skrift-native sk_ key must
-    # authenticate alongside the legacy sk- key above; drop the legacy checks
-    # in phase 05.
-    ApiCheck("auth-status-skrift-key", "GET", "/auth/status",
-             auth="skrift_bot", validate=_expect_field("authenticated", True)),
-    ApiCheck("auth-validate-skrift-key", "POST", "/auth/validate",
-             auth="skrift_bot", validate=_expect_field("valid", True)),
-    ApiCheck("bytes-config-skrift-key", "GET", f"/guilds/{_G}/bytes/config",
-             auth="skrift_bot", validate=_expect_field("daily_amount", 10)),
+             validate=_expect_field("authenticated", True)),
+    ApiCheck("auth-validate", "POST", "/auth/validate",
+             validate=_expect_field("valid", True)),
+    # Phase 02 (DB consolidation): the legacy sk- key table is unreachable
+    # from the runtime database, so the retired legacy key must cleanly 401.
+    ApiCheck("auth-legacy-key-401", "GET", "/auth/status",
+             auth="legacy_bot", expect_status=(401,)),
     ApiCheck("auth-unknown-key-401", "GET", "/auth/status",
              auth="unknown_key", expect_status=(401,)),
     ApiCheck("auth-unknown-skrift-key-401", "GET", "/auth/status",
@@ -371,8 +369,8 @@ LEGACY_ADMIN_PAGES: tuple[AdminPageCheck, ...] = (
     AdminPageCheck(
         "bot-admin-forum-agent-analytics",
         f"/bot-admin/guilds/{_G}/forum-agents/{config.FORUM_AGENT_ID}/analytics"),
-    AdminPageCheck("bot-admin-api-keys", "/bot-admin/api-keys"),
-    AdminPageCheck("bot-admin-api-keys-create", "/bot-admin/api-keys/create"),
+    # /bot-admin/api-keys was removed in phase 02: key management lives in
+    # Skrift's built-in /admin/api-keys (checked above in SKRIFT_ADMIN_PAGES).
     AdminPageCheck("bot-admin-conversations", "/bot-admin/conversations"),
     AdminPageCheck(
         "bot-admin-conversation-detail",

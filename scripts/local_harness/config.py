@@ -75,14 +75,15 @@ def _deterministic_skrift_api_key(seed: str) -> str:
     return f"sk_{token}"
 
 
-# Known-plaintext key seeded into legacy public.api_keys — what the bot uses.
-BOT_API_KEY = _deterministic_api_key("smarter-dev-local-harness-bot-key")
+# Retired legacy-format key. Never seeded since the phase-02 DB
+# consolidation (the legacy api_keys table is unreachable from the runtime
+# database) — the checks assert it 401s.
+LEGACY_BOT_API_KEY = _deterministic_api_key("smarter-dev-local-harness-bot-key")
 # Valid format, never seeded — must always 401.
 UNKNOWN_API_KEY = _deterministic_api_key("smarter-dev-local-harness-unknown")
 
-# Known-plaintext Skrift-native key seeded into main-DB skrift.api_keys.
-# During the phase-01 dual-verify window the API must accept BOTH this and
-# the legacy BOT_API_KEY above (the legacy row is dropped in phase 05).
+# Known-plaintext Skrift-native key seeded into main-DB skrift.api_keys —
+# the only key shape the API accepts after the phase-02 flip.
 SKRIFT_BOT_API_KEY = _deterministic_skrift_api_key(
     "smarter-dev-local-harness-skrift-bot-key"
 )

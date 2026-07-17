@@ -5,13 +5,23 @@ database session management, bot token authentication, and guild access verifica
 
 API key verification is dual-source during the legacy sunset:
 
-- Skrift-native ``sk_`` keys are verified against the main DB (``skrift``
-  schema) via :mod:`skrift.db.services.api_key_service`.
-- Legacy ``sk-`` keys fall back to the legacy ``public.api_keys`` table.
+- Skrift-native ``sk_`` keys are verified against the ``skrift.api_keys``
+  table via :mod:`skrift.db.services.api_key_service`.
+- Legacy ``sk-`` keys fall back to the legacy-shaped ``api_keys`` table
+  reachable from the primary database session.
 
 Both branches return an :class:`AuthenticatedKey` so downstream consumers
 (rate limiter, security logger, routers) never need to know which table the
 key came from.
+
+Phase-02 note (docs/v2/legacy-sunset/02-db-consolidation.md): the session
+accessors now target only the primary DATABASE_URL (skrift schema), where no
+legacy-shaped ``api_keys`` table exists — ``skrift.api_keys`` belongs to
+Skrift core. In deployed environments the legacy fallback therefore always
+rejects with 401 (bot keys are rotated to ``sk_`` before the DB cutover, see
+runbooks/01-key-rotation.md). The fallback code survives only for the legacy
+test suite, which runs against a single-schema SQLite database where the
+legacy table still exists; it is deleted with the API rewrite (phase 04/05).
 """
 
 from __future__ import annotations
@@ -24,6 +34,7 @@ from uuid import UUID as UUIDType
 
 from fastapi import Depends, HTTPException, Security, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.db.services import api_key_service as skrift_api_key_service
@@ -182,7 +193,7 @@ async def _verify_skrift_api_key(request: Request, token: str) -> AuthenticatedK
     """Verify an ``sk_`` token against the Skrift-native api_keys table.
 
     Opens a short-lived main-DB (skrift schema) session for the lookup; the
-    request-scoped legacy session stays untouched for downstream consumers.
+    request-scoped session stays untouched for downstream consumers.
     """
     client_ip = request.client.host if request.client else None
 
@@ -208,15 +219,46 @@ async def _verify_legacy_api_key(
     token: str,
     session: AsyncSession
 ) -> AuthenticatedKey:
-    """Verify an ``sk-`` token against the legacy public.api_keys table.
+    """Verify an ``sk-`` token against the legacy-shaped api_keys table.
 
     LEGACY-FALLBACK: remove after key rotation
     (see docs/v2/legacy-sunset/runbooks/01-key-rotation.md).
+
+    After the phase-02 DB consolidation the primary database exposes no
+    legacy-shaped ``api_keys`` table (``skrift.api_keys`` is Skrift core's
+    own, differently shaped table), so on a real deployment this lookup
+    fails at the SQL layer — translated below into the same 401 an unknown
+    key gets. The happy path only functions in the legacy test suite's
+    single-schema SQLite databases.
     """
-    from smarter_dev.web.crud import APIKeyOperations
+    from smarter_dev.web.crud import APIKeyOperations, DatabaseOperationError
 
     token_hash = hash_api_key(token)
-    api_key = await APIKeyOperations().get_api_key_by_hash(session, token_hash)
+    try:
+        api_key = await APIKeyOperations().get_api_key_by_hash(session, token_hash)
+    except (OperationalError, ProgrammingError, DatabaseOperationError) as lookup_error:
+        # crud wraps SQL errors in DatabaseOperationError; unwrap to decide.
+        sql_error = (
+            lookup_error.__cause__
+            if isinstance(lookup_error, DatabaseOperationError)
+            else lookup_error
+        )
+        if not isinstance(sql_error, (OperationalError, ProgrammingError)):
+            raise
+        # The legacy api_keys table/columns are unreachable from the primary
+        # DB — expected post-consolidation. Reject like any other invalid key.
+        await session.rollback()
+        logger.info(
+            "legacy-api-key-auth: legacy table unreachable after DB "
+            "consolidation, rejecting sk- key: %s",
+            sql_error.__class__.__name__,
+        )
+        await _log_authentication_failed(
+            request,
+            failed_key_prefix=token[:10],
+            reason="Legacy API key rejected: legacy key table retired"
+        )
+        raise _authentication_failed_error("Invalid or revoked API key")
 
     if not api_key:
         await _log_authentication_failed(
@@ -262,7 +304,7 @@ async def verify_api_key(
     Args:
         request: FastAPI request object
         credentials: HTTP authorization credentials from request header
-        session: Legacy database session, kept as the request session for
+        session: Primary-DB request session, kept as the request session for
             downstream consumers (rate limiter, security logs) in both branches
 
     Returns:
@@ -312,8 +354,8 @@ async def verify_api_key(
     )
 
     # Store API key in request state for use by other dependencies.
-    # request.state.db_session stays the legacy session in both branches:
-    # its consumers (multi-tier rate limiter) read/write legacy-DB tables.
+    # request.state.db_session stays the request session in both branches:
+    # its consumers (multi-tier rate limiter) read/write security_logs.
     request.state.api_key = authenticated_key
     request.state.db_session = session
 
