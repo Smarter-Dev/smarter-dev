@@ -27,6 +27,10 @@ from litestar.testing import TestClient, create_test_client
 
 from smarter_dev.web.api_native.bytes import BytesController
 from smarter_dev.web.api_native.challenges import ChallengeController
+from smarter_dev.web.api_native.forum import (
+    ForumAgentController,
+    ForumNotificationController,
+)
 from smarter_dev.web.api_native.quests import QuestController
 from smarter_dev.web.api_native.squads import (
     SquadController,
@@ -34,6 +38,7 @@ from smarter_dev.web.api_native.squads import (
 )
 
 _GUILD = "123456789012345678"
+_FORUM = "222222222222222222"
 
 
 @pytest.fixture
@@ -144,5 +149,40 @@ def test_challenge_non_sk_bearer_rejected(guarded_challenge_client: TestClient):
     response = guarded_challenge_client.get(
         "/api/challenges/pending-announcements",
         headers={"Authorization": "Bearer not-a-skrift-key"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.fixture
+def guarded_forum_client() -> Iterator[TestClient]:
+    """Client serving the forum controllers with their real auth guards."""
+    with create_test_client(
+        route_handlers=[ForumAgentController, ForumNotificationController],
+        plugins=[PydanticPlugin()],
+        dependencies={"db_session": Provide(lambda: Mock(), sync_to_thread=False)},
+    ) as client:
+        yield client
+
+
+def test_forum_agents_missing_authorization_header_rejected(
+    guarded_forum_client: TestClient,
+):
+    response = guarded_forum_client.get(f"/api/guilds/{_GUILD}/forum-agents")
+    assert response.status_code == 401
+
+
+def test_forum_agents_non_sk_bearer_rejected(guarded_forum_client: TestClient):
+    response = guarded_forum_client.get(
+        f"/api/guilds/{_GUILD}/forum-agents",
+        headers={"Authorization": "Bearer not-a-skrift-key"},
+    )
+    assert response.status_code == 401
+
+
+def test_forum_notification_topics_missing_authorization_header_rejected(
+    guarded_forum_client: TestClient,
+):
+    response = guarded_forum_client.get(
+        f"/api/guilds/{_GUILD}/forum-channels/{_FORUM}/notification-topics"
     )
     assert response.status_code == 401

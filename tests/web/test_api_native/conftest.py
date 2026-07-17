@@ -23,12 +23,17 @@ from smarter_dev.web.api.schemas import SquadCostInfo
 from smarter_dev.web.api_native import advent_of_code as advent_of_code_module
 from smarter_dev.web.api_native import bytes as bytes_module
 from smarter_dev.web.api_native import challenges as challenges_module
+from smarter_dev.web.api_native import forum as forum_module
 from smarter_dev.web.api_native import messages as messages_module
 from smarter_dev.web.api_native import quests as quests_module
 from smarter_dev.web.api_native import squads as squads_module
 from smarter_dev.web.api_native.advent_of_code import AdventOfCodeController
 from smarter_dev.web.api_native.bytes import BytesController
 from smarter_dev.web.api_native.challenges import ChallengeController
+from smarter_dev.web.api_native.forum import (
+    ForumAgentController,
+    ForumNotificationController,
+)
 from smarter_dev.web.api_native.messages import (
     RepeatingMessageController,
     ScheduledMessageController,
@@ -544,4 +549,67 @@ def repeating_ops_mock() -> Iterator[Mock]:
         instance.update_repeating_message = AsyncMock()
         instance.delete_repeating_message = AsyncMock()
         instance.toggle_repeating_message = AsyncMock()
+        yield instance
+
+
+# --------------------------------------------------------------------------- #
+# Forum fixtures (unit U7 — forum agents + notifications)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def forum_channel_id() -> str:
+    """A valid Discord-snowflake-shaped forum channel id."""
+    return "222222222222222222"
+
+
+@pytest.fixture
+def forum_client(session_mock: AsyncMock) -> Iterator[TestClient]:
+    """Client serving the forum-agent controller with auth guards bypassed.
+
+    The forum routes share the ``forum.BOT_API_GUARDS`` list by reference, so
+    emptying it before the app is built removes guards for these tests only.
+    Auth is covered separately by ``test_auth.py``.
+    """
+    original_guards = list(forum_module.BOT_API_GUARDS)
+    forum_module.BOT_API_GUARDS.clear()
+    try:
+        with create_test_client(
+            route_handlers=[ForumAgentController],
+            plugins=[PydanticPlugin()],
+            dependencies={
+                "db_session": Provide(lambda: session_mock, sync_to_thread=False)
+            },
+        ) as client:
+            yield client
+    finally:
+        forum_module.BOT_API_GUARDS[:] = original_guards
+
+
+@pytest.fixture
+def forum_notification_client(session_mock: AsyncMock) -> Iterator[TestClient]:
+    """Client serving the forum-notification controller with guards bypassed."""
+    original_guards = list(forum_module.BOT_API_GUARDS)
+    forum_module.BOT_API_GUARDS.clear()
+    try:
+        with create_test_client(
+            route_handlers=[ForumNotificationController],
+            plugins=[PydanticPlugin()],
+            dependencies={
+                "db_session": Provide(lambda: session_mock, sync_to_thread=False)
+            },
+        ) as client:
+            yield client
+    finally:
+        forum_module.BOT_API_GUARDS[:] = original_guards
+
+
+@pytest.fixture
+def forum_agent_ops_mock() -> Iterator[Mock]:
+    """Patch ``ForumAgentOperations`` in the native forum module."""
+    with patch("smarter_dev.web.api_native.forum.ForumAgentOperations") as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.list_agents = AsyncMock()
+        instance.get_agent = AsyncMock()
         yield instance
