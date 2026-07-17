@@ -82,6 +82,7 @@ controllers:
   - smarter_dev.web.jina_cache_admin:JinaCacheAdminController
   - smarter_dev.web.usage_admin:UsageAdminController
   - smarter_dev.web.bot_admin_skrift:BotAdminController
+  - smarter_dev.web.bot_admin.guilds:GuildAdminController
   - smarter_dev.web.handlers_admin:HandlersAdminController
   - smarter_dev.web.quests_admin:QuestsAdminController
   - smarter_dev.web.chat_conversations_admin:ChatConversationsAdminController
