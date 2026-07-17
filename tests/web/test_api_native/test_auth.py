@@ -25,8 +25,11 @@ from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import TestClient, create_test_client
 
+from smarter_dev.web.api_native.activity import ActivityController
 from smarter_dev.web.api_native.bytes import BytesController
 from smarter_dev.web.api_native.challenges import ChallengeController
+from smarter_dev.web.api_native.chat_conversations import ChatConversationController
+from smarter_dev.web.api_native.members import MemberController
 from smarter_dev.web.api_native.forum import (
     ForumAgentController,
     ForumNotificationController,
@@ -271,6 +274,101 @@ def test_image_quota_non_sk_bearer_rejected(
 ):
     response = guarded_image_quota_client.get(
         f"/api/image-generations/quota?guild_id={_GUILD}",
+        headers={"Authorization": "Bearer not-a-skrift-key"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.fixture
+def guarded_chat_client() -> Iterator[TestClient]:
+    """Client serving the chat-conversation controller with its real guards.
+
+    Covers both guard tiers: the leaderboard read carries ``Permission(
+    "bot-api")`` and the engagement write carries ``Permission("bot-api-admin")``
+    — a credential-shape failure short-circuits both before any DB lookup.
+    """
+    with create_test_client(
+        route_handlers=[ChatConversationController],
+        plugins=[PydanticPlugin()],
+        dependencies={"db_session": Provide(lambda: Mock(), sync_to_thread=False)},
+    ) as client:
+        yield client
+
+
+def test_chat_leaderboard_missing_authorization_header_rejected(
+    guarded_chat_client: TestClient,
+):
+    response = guarded_chat_client.get(
+        f"/api/chat-conversations/usage-leaderboard?guild_id={_GUILD}"
+    )
+    assert response.status_code == 401
+
+
+def test_chat_leaderboard_non_sk_bearer_rejected(guarded_chat_client: TestClient):
+    response = guarded_chat_client.get(
+        f"/api/chat-conversations/usage-leaderboard?guild_id={_GUILD}",
+        headers={"Authorization": "Bearer not-a-skrift-key"},
+    )
+    assert response.status_code == 401
+
+
+def test_chat_engagement_write_missing_authorization_header_rejected(
+    guarded_chat_client: TestClient,
+):
+    response = guarded_chat_client.post(
+        "/api/chat-conversations/engagements", json={}
+    )
+    assert response.status_code == 401
+
+
+@pytest.fixture
+def guarded_activity_client() -> Iterator[TestClient]:
+    """Client serving the activity controller with its real auth guards."""
+    with create_test_client(
+        route_handlers=[ActivityController],
+        plugins=[PydanticPlugin()],
+        dependencies={"db_session": Provide(lambda: Mock(), sync_to_thread=False)},
+    ) as client:
+        yield client
+
+
+def test_activity_batch_missing_authorization_header_rejected(
+    guarded_activity_client: TestClient,
+):
+    response = guarded_activity_client.post("/api/activity/batch", json={"events": []})
+    assert response.status_code == 401
+
+
+def test_activity_batch_non_sk_bearer_rejected(guarded_activity_client: TestClient):
+    response = guarded_activity_client.post(
+        "/api/activity/batch",
+        json={"events": []},
+        headers={"Authorization": "Bearer not-a-skrift-key"},
+    )
+    assert response.status_code == 401
+
+
+@pytest.fixture
+def guarded_member_client() -> Iterator[TestClient]:
+    """Client serving the member controller with its real auth guards."""
+    with create_test_client(
+        route_handlers=[MemberController],
+        plugins=[PydanticPlugin()],
+        dependencies={"db_session": Provide(lambda: Mock(), sync_to_thread=False)},
+    ) as client:
+        yield client
+
+
+def test_member_delete_missing_authorization_header_rejected(
+    guarded_member_client: TestClient,
+):
+    response = guarded_member_client.delete(f"/api/guilds/{_GUILD}/members/{_GUILD}")
+    assert response.status_code == 401
+
+
+def test_member_delete_non_sk_bearer_rejected(guarded_member_client: TestClient):
+    response = guarded_member_client.delete(
+        f"/api/guilds/{_GUILD}/members/{_GUILD}",
         headers={"Authorization": "Bearer not-a-skrift-key"},
     )
     assert response.status_code == 401
