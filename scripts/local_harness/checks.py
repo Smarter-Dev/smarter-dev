@@ -1,27 +1,26 @@
 """Executes the data-driven expectations against the booted app.
 
-Three HTTP identities:
+Two HTTP identities:
 - API checks: Bearer keys against the mounted FastAPI /api.
 - Skrift admin: a real login through the dev dummy auth provider (creates the
   admin user + role, so no user seeding is required).
-- Legacy /bot-admin: a forged Starlette session cookie signed with the known
-  harness WEB_SESSION_SECRET, matching SessionMiddleware's format exactly.
+
+The legacy Starlette /bot-admin mount was removed in phase 03, so its
+forged-cookie identity is gone; the /bot-admin tree is now asserted absent
+(404) with the anonymous client.
 """
 
 from __future__ import annotations
 
-import base64
-import json
 import re
 from dataclasses import dataclass
 
 import httpx
-import itsdangerous
 
 from scripts.local_harness import config
 from scripts.local_harness.expectations import (
     API_CHECKS,
-    LEGACY_ADMIN_PAGES,
+    BOT_ADMIN_GONE_PAGES,
     SKRIFT_ADMIN_PAGES,
     UNAUTHENTICATED_PAGES,
     AdminPageCheck,
@@ -131,23 +130,6 @@ def build_skrift_admin_client() -> httpx.Client:
     return client
 
 
-def build_legacy_admin_client() -> httpx.Client:
-    """Forge the Starlette SessionMiddleware cookie for an admin session."""
-    session_payload = {
-        "user_id": config.LEGACY_ADMIN_DISCORD_ID,
-        "is_admin": True,
-        "username": config.LEGACY_ADMIN_USERNAME,
-        "discord_id": config.LEGACY_ADMIN_DISCORD_ID,
-        "auth_method": "discord_oauth",
-    }
-    signer = itsdangerous.TimestampSigner(config.WEB_SESSION_SECRET)
-    encoded = base64.b64encode(json.dumps(session_payload).encode("utf-8"))
-    cookie_value = signer.sign(encoded).decode("utf-8")
-    client = httpx.Client(base_url=config.APP_BASE_URL, timeout=30.0)
-    client.cookies.set("session", cookie_value)
-    return client
-
-
 def run_admin_page_checks(
     client: httpx.Client, pages: tuple[AdminPageCheck, ...]
 ) -> list[CheckResult]:
@@ -180,13 +162,8 @@ def run_all_checks() -> list[CheckResult]:
     finally:
         skrift_admin.close()
 
-    legacy_admin = build_legacy_admin_client()
-    try:
-        results.extend(run_admin_page_checks(legacy_admin, LEGACY_ADMIN_PAGES))
-    finally:
-        legacy_admin.close()
-
     with httpx.Client(base_url=config.APP_BASE_URL, timeout=30.0) as anonymous:
+        results.extend(run_admin_page_checks(anonymous, BOT_ADMIN_GONE_PAGES))
         results.extend(run_admin_page_checks(anonymous, UNAUTHENTICATED_PAGES))
 
     return results

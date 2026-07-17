@@ -223,12 +223,3 @@ async def api_mount(scope: Scope, receive: Receive, send: Send) -> None:
 
     _normalize_mounted_path(scope)
     await api(scope, receive, send)
-
-
-@asgi("/bot-admin", is_mount=True, copy_scope=True)
-async def bot_admin_mount(scope: Scope, receive: Receive, send: Send) -> None:
-    """Mount the legacy Starlette admin interface as an ASGI sub-application."""
-    from smarter_dev.web.admin.app import create_admin_app
-
-    _normalize_mounted_path(scope)
-    await create_admin_app()(scope, receive, send)

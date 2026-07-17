@@ -135,10 +135,6 @@ MODEL_OVERRIDE_MODEL_KEY = "kimi-k2-6"
 ADMIN_EMAIL = "harness-admin@example.com"
 ADMIN_NAME = "Harness Admin"
 
-# Legacy admin forged-session identity
-LEGACY_ADMIN_USERNAME = "harness-legacy-admin"
-LEGACY_ADMIN_DISCORD_ID = "444400000000000009"
-
 
 def harness_env() -> dict[str, str]:
     """Environment for every harness subprocess (migrate, seed, app)."""
@@ -159,8 +155,9 @@ def harness_env() -> dict[str, str]:
             "WEB_SESSION_SECRET": WEB_SESSION_SECRET,
             # Skrift's own Settings.secret_key (sessions/CSRF); dev-only value.
             "SECRET_KEY": "harness-skrift-secret-key",
-            # Any non-empty token satisfies get_discord_client(); actual calls
-            # are redirected to the local mock via HARNESS_DISCORD_API_BASE_URL.
+            # Any non-empty token satisfies get_admin_discord_client(); actual
+            # calls are redirected to the local mock via
+            # HARNESS_DISCORD_API_BASE_URL.
             "DISCORD_BOT_TOKEN": "harness-dummy-bot-token",
             "HARNESS_DISCORD_API_BASE_URL": MOCK_DISCORD_BASE_URL,
         }
