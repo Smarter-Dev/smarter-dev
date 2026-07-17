@@ -19,8 +19,11 @@ from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import TestClient, create_test_client
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.web.api.schemas import SquadCostInfo
 from smarter_dev.web.api_native import bytes as bytes_module
+from smarter_dev.web.api_native import squads as squads_module
 from smarter_dev.web.api_native.bytes import BytesController
+from smarter_dev.web.api_native.squads import SquadController, SquadSaleEventController
 
 
 @pytest.fixture
@@ -149,3 +152,101 @@ def transaction_data(guild_id: str, user_id: str, user_id_2: str) -> dict[str, A
         "amount": 25,
         "reason": "Test payment",
     }
+
+
+# --------------------------------------------------------------------------- #
+# Squad fixtures (unit U3)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def role_id() -> str:
+    """A valid Discord-snowflake-shaped role id."""
+    return "555555555555555555"
+
+
+@pytest.fixture
+def sample_squad_data(guild_id: str, role_id: str) -> dict[str, Any]:
+    """Representative squad attributes (parity with the FastAPI suite)."""
+    return {
+        "guild_id": guild_id,
+        "role_id": role_id,
+        "name": "Test Squad",
+        "description": "A test squad for testing",
+        "welcome_message": None,
+        "announcement_channel": None,
+        "max_members": 10,
+        "switch_cost": 50,
+        "is_active": True,
+        "is_default": False,
+    }
+
+
+async def _bypass_cost_info(switch_cost: int, guild_id: str, session: Any) -> dict[str, Any]:
+    """Stand in for ``squads.build_cost_info`` so tests skip sale-event lookups.
+
+    Mirrors the FastAPI suite's ``_add_cost_info_to_squad`` patch.
+    """
+    no_cost = SquadCostInfo(
+        original_cost=switch_cost,
+        current_cost=switch_cost,
+        discount_percent=None,
+        active_sale=None,
+        is_on_sale=False,
+    )
+    return {"join_cost_info": no_cost, "switch_cost_info": no_cost}
+
+
+@pytest.fixture
+def squad_client(session_mock: AsyncMock) -> Iterator[TestClient]:
+    """Client serving the squad + sale-event controllers with guards bypassed.
+
+    Both controllers share the ``squads.BOT_API_GUARDS`` list by reference, so
+    emptying it before the app is built removes guards for these tests only.
+    ``build_cost_info`` is patched to skip sale-event lookups. Auth is covered
+    separately by ``test_auth.py`` (the bytes controller's guards).
+    """
+    original_guards = list(squads_module.BOT_API_GUARDS)
+    squads_module.BOT_API_GUARDS.clear()
+    try:
+        with patch(
+            "smarter_dev.web.api_native.squads.build_cost_info", _bypass_cost_info
+        ):
+            with create_test_client(
+                route_handlers=[SquadController, SquadSaleEventController],
+                plugins=[PydanticPlugin()],
+                dependencies={
+                    "db_session": Provide(lambda: session_mock, sync_to_thread=False)
+                },
+            ) as client:
+                yield client
+    finally:
+        squads_module.BOT_API_GUARDS[:] = original_guards
+
+
+@pytest.fixture
+def squad_ops_mock() -> Iterator[Mock]:
+    """Patch ``SquadOperations`` in the native squads module."""
+    with patch("smarter_dev.web.api_native.squads.SquadOperations") as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.get_squad = AsyncMock()
+        instance.get_guild_squads = AsyncMock()
+        instance.create_squad = AsyncMock()
+        instance.join_squad = AsyncMock()
+        instance.leave_squad = AsyncMock()
+        instance.get_user_squad = AsyncMock()
+        instance.get_squad_members = AsyncMock()
+        instance._get_squad_member_count = AsyncMock()
+        yield instance
+
+
+@pytest.fixture
+def sale_event_ops_mock() -> Iterator[Mock]:
+    """Patch ``SquadSaleEventOperations`` in the native squads module."""
+    with patch("smarter_dev.web.api_native.squads.SquadSaleEventOperations") as factory:
+        instance = Mock()
+        factory.return_value = instance
+        instance.get_sale_events_by_guild = AsyncMock()
+        instance.get_sale_event_by_id = AsyncMock()
+        yield instance
