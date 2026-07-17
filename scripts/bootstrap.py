@@ -6,16 +6,14 @@ Runs migrations and provisions a bot API key so a fresh
 sequence yields a working stack.
 
 What this does:
-  1. Apply migrations via `scripts/migrate.py` (Skrift + main + legacy).
+  1. Apply migrations via `scripts/migrate.py` (Skrift core + main app).
   2. Mark Skrift setup complete (sets `setup_completed_at` in
      `skrift.settings`) so the dispatcher serves the real app instead
      of redirecting `/api/*` to the setup wizard.
   3. Mint a Skrift-native `discord-bot` service key (`sk_...`) in the
-     main DB `skrift.api_keys` table, owned by a dedicated
-     `bot@smarter.dev` service user (or rotate the existing one).
-     Legacy `sk-` keys are no longer minted here — the dual-verify web
-     API still accepts them, but new local setups go straight to the
-     Skrift key system (docs/v2/legacy-sunset/01-skrift-api-keys.md).
+     `skrift.api_keys` table, owned by a dedicated `bot@smarter.dev`
+     service user (or rotate the existing one). Skrift keys are the only
+     keys the API accepts (docs/v2/legacy-sunset/01-skrift-api-keys.md).
   4. Write `BOT_API_KEY=<plaintext>` into `.env` so the bot service
      picks it up on next start.
 

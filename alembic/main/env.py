@@ -19,14 +19,14 @@ from smarter_dev.shared.database import Base
 from smarter_dev.shared.config import get_settings
 import smarter_dev.web.models  # noqa: F401  -- registers all models with Base.metadata
 
-# Tables this alembic config owns. The single Base.metadata is shared with the
-# legacy config; partition is enforced via `include_object` so each migration
-# only touches its own tables.
+# Tables this alembic config owns; enforced via `include_object` so each
+# migration only touches its own tables.
 #
-# This tree owns every model in smarter_dev/web/models.py EXCEPT the legacy
-# `api_keys` model: that table NAME belongs to Skrift's own `skrift.api_keys`
-# (created by Skrift core migrations) and the legacy model is deleted in the
-# decommission phase. Ownership is guarded by tests/test_migration_ownership.py.
+# This tree owns every model in smarter_dev/web/models.py. The `api_keys`
+# table NAME belongs to Skrift's own `skrift.api_keys` (created by Skrift core
+# migrations) and must never appear here; the legacy model of that name was
+# deleted in the decommission phase. Ownership is guarded by
+# tests/test_migration_ownership.py.
 MAIN_TABLES: frozenset[str] = frozenset({
     "admin_handlers",
     "advent_of_code_configs",

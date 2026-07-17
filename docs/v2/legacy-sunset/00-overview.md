@@ -1,5 +1,12 @@
 # 00 — Legacy Sunset: Overview
 
+> **STATUS: all code phases (01–05) are COMPLETE.** The repo contains no
+> legacy admin, legacy FastAPI, legacy keys, legacy alembic tree, or
+> `LEGACY_DATABASE_URL` plumbing (enforced by
+> `tests/test_single_database_runtime.py`). The only remaining work is the
+> human-only runbook `runbooks/05-final-decommission.md` (final backup →
+> secret retirement → drop bc_websites).
+
 Goal: retire the two legacy subsystems still mounted inside the Skrift app and
 the second database that exists only to serve them.
 

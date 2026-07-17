@@ -136,7 +136,7 @@ def rate_limited_client(
                 fake_service,
             ),
             patch(
-                "smarter_dev.web.api_native.rate_limiting.get_skrift_db_session_context",
+                "smarter_dev.web.api_native.rate_limiting.get_db_session_context",
                 side_effect=lambda: security_log_session_maker(),
             ),
             patch(

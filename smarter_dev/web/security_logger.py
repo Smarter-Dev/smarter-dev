@@ -15,10 +15,24 @@ from uuid import UUID
 from litestar import Request
 from sqlalchemy import select, delete, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Protocol
 
-from smarter_dev.web.models import SecurityLog, APIKey
+from smarter_dev.web.models import SecurityLog
 
 logger = logging.getLogger(__name__)
+
+
+class AuthenticatedKeyLike(Protocol):
+    """The slice of an authenticated API key the logger consumes.
+
+    Satisfied by ``api_native.rate_limiting.RateLimitedKey`` (built from the
+    Skrift-native key); the legacy ``APIKey`` model that used to fill this
+    role was deleted in the phase-05 decommission.
+    """
+
+    id: UUID
+    key_prefix: str
+    created_by: str
 
 
 class SecurityLogger:
@@ -109,83 +123,6 @@ class SecurityLogger:
             self.logger.error(f"Failed to log security event: {e}")
             return None
 
-    async def log_api_key_created(
-        self,
-        session: AsyncSession,
-        api_key: APIKey,
-        user_identifier: str,
-        request: Optional[Request] = None
-    ) -> SecurityLog:
-        """Log API key creation event."""
-        return await self.log_event(
-            session=session,
-            action="api_key_created",
-            success=True,
-            details=f"API key '{api_key.name}' created with scopes: {', '.join(api_key.scopes)}",
-            api_key_id=api_key.id,
-            user_identifier=user_identifier,
-            ip_address=request.client.host if request and request.client else None,
-            user_agent=request.headers.get("user-agent") if request else None,
-            request_id=request.headers.get("x-request-id") if request else None,
-            event_metadata={
-                "api_key_name": api_key.name,
-                "scopes": api_key.scopes,
-                "rate_limit": api_key.rate_limit_per_hour
-            }
-        )
-
-    async def log_api_key_deleted(
-        self,
-        session: AsyncSession,
-        api_key_id: UUID,
-        api_key_name: str,
-        user_identifier: str,
-        request: Optional[Request] = None
-    ) -> SecurityLog:
-        """Log API key deletion event."""
-        return await self.log_event(
-            session=session,
-            action="api_key_deleted",
-            success=True,
-            details=f"API key '{api_key_name}' deleted",
-            api_key_id=api_key_id,
-            user_identifier=user_identifier,
-            ip_address=request.client.host if request and request.client else None,
-            user_agent=request.headers.get("user-agent") if request else None,
-            request_id=request.headers.get("x-request-id") if request else None,
-            event_metadata={"api_key_name": api_key_name}
-        )
-
-    async def log_api_key_used(
-        self,
-        session: AsyncSession,
-        api_key: APIKey,
-        request: Request,
-        success: bool = True,
-        error_message: Optional[str] = None
-    ) -> SecurityLog:
-        """Log API key usage event."""
-        details = f"API key '{api_key.key_prefix}***' used successfully"
-        if not success and error_message:
-            details = f"API key '{api_key.key_prefix}***' usage failed: {error_message}"
-        
-        return await self.log_event(
-            session=session,
-            action="api_key_used",
-            success=success,
-            details=details,
-            api_key_id=api_key.id,
-            user_identifier=api_key.created_by,
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent", "unknown"),
-            request_id=request.headers.get("x-request-id"),
-            event_metadata={
-                "api_key_prefix": api_key.key_prefix,
-                "endpoint": str(request.url.path),
-                "method": request.method
-            }
-        )
-
     async def log_authentication_failed(
         self,
         session: Optional[AsyncSession],
@@ -213,7 +150,7 @@ class SecurityLogger:
     async def log_api_request(
         self,
         session: AsyncSession,
-        api_key: APIKey,
+        api_key: AuthenticatedKeyLike,
         request: Request,
         success: bool = True
     ) -> SecurityLog:
@@ -234,11 +171,11 @@ class SecurityLogger:
                 "query_params": dict(request.query_params)
             }
         )
-    
+
     async def log_rate_limit_exceeded(
         self,
         session: AsyncSession,
-        api_key: APIKey,
+        api_key: AuthenticatedKeyLike,
         request: Request,
         current_usage: int,
         limit: int,

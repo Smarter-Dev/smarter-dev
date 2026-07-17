@@ -50,7 +50,7 @@ from skrift.db.services import api_key_service as skrift_api_key_service
 from skrift.lib.client_ip import get_client_ip
 
 from smarter_dev.shared.config import get_settings
-from smarter_dev.shared.database import get_skrift_db_session_context
+from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.api_native.schemas import HealthResponse, TokenResponse
 from smarter_dev.web.api_native.errors import (
     BOT_API_EXCEPTION_HANDLERS,
@@ -134,7 +134,7 @@ async def resolve_request_api_key(request: Request):
     if not token:
         raise plain_error(401, "Authentication failed")
 
-    async with get_skrift_db_session_context() as skrift_session:
+    async with get_db_session_context() as skrift_session:
         api_key = await skrift_api_key_service.verify_api_key(
             skrift_session,
             token,

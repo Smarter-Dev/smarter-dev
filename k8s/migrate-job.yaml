@@ -23,28 +23,21 @@ spec:
         - name: migrate
           image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
           workingDir: /app
-          # Apply this project's app-schema migrations on both databases:
-          # `main` (smarter-dev, skrift schema) and `legacy` (bc_websites,
-          # public schema — the bot/admin tables, e.g. channel_model_overrides).
-          # Skrift-core steps stay excluded — they load Skrift's app.yaml
-          # (which interpolates many env vars) and change only on a Skrift
-          # upgrade; run those manually when needed.
-          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/migrate.py --only main --only legacy"]
+          # Apply this project's app-schema migrations on the single database
+          # (smarter-dev, skrift schema). The Skrift-core step stays excluded —
+          # it loads Skrift's app.yaml (which interpolates many env vars) and
+          # changes only on a Skrift upgrade; run that manually when needed.
+          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/migrate.py --only main"]
           envFrom:
             - configMapRef:
                 name: smarter-dev-config
           env:
-            # DB URLs use the admin (doadmin) direct connection — DDL needs it.
+            # The DB URL uses the admin (doadmin) direct connection — DDL needs it.
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: smarter-dev-migrate-secrets
                   key: database-url
-            - name: LEGACY_DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: smarter-dev-migrate-secrets
-                  key: legacy-database-url
             # Everything else mirrors the web deployment so settings load.
             - name: REDIS_URL
               valueFrom:

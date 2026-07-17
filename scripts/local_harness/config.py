@@ -33,13 +33,9 @@ DB_PASSWORD = "smarter_dev_password"
 REDIS_PASSWORD = "smarter_dev_redis_password"
 
 MAIN_DB_NAME = "smarter_dev"
-LEGACY_DB_NAME = "bc_websites"
 
 MAIN_DATABASE_URL = (
     f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@localhost:{POSTGRES_PORT}/{MAIN_DB_NAME}"
-)
-LEGACY_DATABASE_URL = (
-    f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}@localhost:{POSTGRES_PORT}/{LEGACY_DB_NAME}"
 )
 REDIS_URL = f"redis://:{REDIS_PASSWORD}@localhost:{REDIS_PORT}/0"
 
@@ -52,38 +48,20 @@ MOCK_DISCORD_BASE_URL = f"http://127.0.0.1:{MOCK_DISCORD_PORT}"
 WEB_SESSION_SECRET = "harness-web-session-secret"
 
 
-def _deterministic_api_key(seed: str) -> str:
-    """Derive a valid-format legacy API key (sk- + 43 base64url chars).
-
-    Deterministic so checks and seeds agree without storing a literal
-    key in the repo; derived keys are local-harness-only credentials.
-    """
-    digest = hashlib.sha256(seed.encode("utf-8")).digest()
-    token = base64.urlsafe_b64encode(digest + digest).decode("ascii")[:43]
-    return f"sk-{token}"
-
-
 def _deterministic_skrift_api_key(seed: str) -> str:
     """Derive a valid-format Skrift API key (sk_ + 43 base64url chars).
 
-    Same derivation trick as the legacy key: deterministic so the seed
-    subprocess and the checks process agree on the plaintext without storing
-    a literal key in the repo.
+    Deterministic so the seed subprocess and the checks process agree on the
+    plaintext without storing a literal key in the repo; derived keys are
+    local-harness-only credentials.
     """
     digest = hashlib.sha256(seed.encode("utf-8")).digest()
     token = base64.urlsafe_b64encode(digest + digest).decode("ascii")[:43]
     return f"sk_{token}"
 
 
-# Retired legacy-format key. Never seeded since the phase-02 DB
-# consolidation (the legacy api_keys table is unreachable from the runtime
-# database) — the checks assert it 401s.
-LEGACY_BOT_API_KEY = _deterministic_api_key("smarter-dev-local-harness-bot-key")
-# Valid format, never seeded — must always 401.
-UNKNOWN_API_KEY = _deterministic_api_key("smarter-dev-local-harness-unknown")
-
-# Known-plaintext Skrift-native key seeded into main-DB skrift.api_keys —
-# the only key shape the API accepts after the phase-02 flip.
+# Known-plaintext Skrift-native key seeded into skrift.api_keys —
+# the only key shape the API accepts.
 SKRIFT_BOT_API_KEY = _deterministic_skrift_api_key(
     "smarter-dev-local-harness-skrift-bot-key"
 )
@@ -150,7 +128,6 @@ def harness_env() -> dict[str, str]:
             "SKRIFT_ENV": "development",
             "ENVIRONMENT": "development",
             "DATABASE_URL": MAIN_DATABASE_URL,
-            "LEGACY_DATABASE_URL": LEGACY_DATABASE_URL,
             "REDIS_URL": REDIS_URL,
             "WEB_SESSION_SECRET": WEB_SESSION_SECRET,
             # Skrift's own Settings.secret_key (sessions/CSRF); dev-only value.

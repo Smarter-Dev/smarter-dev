@@ -1,5 +1,15 @@
 # 05 — Decommission: delete the legacy plumbing
 
+> **STATUS: code deletions COMPLETE** (see `runbooks/05-final-decommission.md`
+> for the remaining human-only deploy steps). Notes vs. the plan below: the
+> copy script now takes `--source-url` instead of `LEGACY_DATABASE_URL`; the
+> U9 legacy-key admin endpoints (`/api/admin/stats` + `/api-keys` CRUD) were
+> removed along with `crud.APIKeyOperations`, the `APIKey` model, and the
+> `sk-` helpers in `security.py`; the dead `legacy:` block in `app.yaml` was
+> removed (Skrift only reads subdomain sites from `sites:`, so nothing in
+> this deployment ever served legacy.smarter.dev); the dead
+> `ADMIN_USERNAME`/`ADMIN_PASSWORD` env plumbing was also swept.
+
 Final phase. Everything here is pure removal; prerequisites are 01–04 deployed
 and soaked (recommend ≥ 2 weeks after the 02 cutover before dropping the DB).
 

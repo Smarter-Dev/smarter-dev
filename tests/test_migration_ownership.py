@@ -1,18 +1,15 @@
 """Guard tests for alembic migration-tree table ownership.
 
-The project has two alembic trees sharing one ``Base.metadata``
-(``alembic/main`` and ``alembic/legacy``) plus Skrift core's own migrations
-from the installed ``skrift`` package. Partition rules:
+The project has one alembic tree (``alembic/main``) plus Skrift core's own
+migrations from the installed ``skrift`` package (the ``alembic/legacy`` tree
+was deleted in the phase-05 decommission). Partition rules:
 
-- ``alembic/main`` owns every model table in ``smarter_dev/web/models.py``
-  except the legacy ``api_keys`` model — that table name belongs to Skrift's
-  own ``skrift.api_keys`` (created by Skrift core migrations); the legacy
-  model is deleted in the decommission phase.
-- ``alembic/legacy`` is closed: it owns nothing and receives no new revisions.
+- ``alembic/main`` owns every model table in ``smarter_dev/web/models.py``.
+- Skrift core owns its own table names (e.g. ``api_keys``); the main tree may
+  never claim one.
 
-These tests parse the ``MAIN_TABLES`` / ``LEGACY_TABLES`` literals out of the
-env.py files with ``ast`` because importing an alembic env module executes
-migrations.
+These tests parse the ``MAIN_TABLES`` literal out of env.py with ``ast``
+because importing an alembic env module executes migrations.
 """
 
 from __future__ import annotations
@@ -28,7 +25,6 @@ from smarter_dev.shared.database import Base
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MAIN_ENV_PATH = REPO_ROOT / "alembic" / "main" / "env.py"
-LEGACY_ENV_PATH = REPO_ROOT / "alembic" / "legacy" / "env.py"
 
 
 def load_ownership_frozenset(env_path: Path, variable_name: str) -> frozenset[str]:
@@ -103,17 +99,11 @@ def test_main_tables_has_no_phantom_entries() -> None:
 def test_main_tables_does_not_claim_skrift_owned_names() -> None:
     """The main tree must never own a table name Skrift core migrations own.
 
-    In particular the legacy ``api_keys`` model must stay out of MAIN_TABLES:
-    ``skrift.api_keys`` (a different shape) already exists in the main DB.
+    In particular ``api_keys`` must stay out of MAIN_TABLES: ``skrift.api_keys``
+    is Skrift core's own table (the legacy model of the same name is deleted).
     """
     main_tables = load_ownership_frozenset(MAIN_ENV_PATH, "MAIN_TABLES")
     doubly_owned = main_tables & skrift_owned_table_names()
     assert doubly_owned == frozenset(), (
         f"tables owned by both alembic/main and Skrift core: {sorted(doubly_owned)}"
     )
-
-
-def test_legacy_tree_is_closed() -> None:
-    """alembic/legacy owns nothing; ownership moved to alembic/main."""
-    legacy_tables = load_ownership_frozenset(LEGACY_ENV_PATH, "LEGACY_TABLES")
-    assert legacy_tables == frozenset()

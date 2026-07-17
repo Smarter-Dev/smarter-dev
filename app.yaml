@@ -231,7 +231,3 @@ agents:
   # durability win — there's nothing to recover for an agent run that
   # the parent is blocking on anyway.
   default_subagent_dispatch: inline
-
-# Legacy site — existing Starlette app serves from subdomain
-legacy:
-  subdomain: legacy.smarter.dev

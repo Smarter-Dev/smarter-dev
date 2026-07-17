@@ -7,7 +7,7 @@ import logging
 import hikari
 import lightbulb
 
-from smarter_dev.shared.database import get_skrift_db_session_context
+from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import ModerationActionOperations
 
 logger = logging.getLogger(__name__)
@@ -118,7 +118,7 @@ async def warn_user(ctx: lightbulb.Context) -> None:
 
     # Record the warning in the moderation actions table
     try:
-        async with get_skrift_db_session_context() as session:
+        async with get_db_session_context() as session:
             await mod_action_ops.create_action(
                 session,
                 guild_id=str(guild.id),
@@ -136,7 +136,7 @@ async def warn_user(ctx: lightbulb.Context) -> None:
 
     # Get warn count for context
     try:
-        async with get_skrift_db_session_context() as session:
+        async with get_db_session_context() as session:
             warn_count = await mod_action_ops.count_warns_for_user(
                 session, str(guild.id), str(target_user.id)
             )

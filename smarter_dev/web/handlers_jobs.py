@@ -22,7 +22,7 @@ from skrift.workers import handler
 from skrift.workers import submit as worker_submit
 
 from smarter_dev.shared.config import get_settings
-from smarter_dev.shared.database import get_skrift_db_session_context
+from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.handler_budget import HandlerBudget
 from smarter_dev.web.handler_caps import ERROR_NOTICE_WINDOW_SECONDS, WindowedLimiter
@@ -55,7 +55,7 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
         return {"status": "disabled"}
 
     handler_id = UUID(payload.handler_id)
-    async with get_skrift_db_session_context() as session:
+    async with get_db_session_context() as session:
         record = await session.get(ChannelHandler, handler_id)
         if record is None or not record.enabled:
             # Missing/disabled also breaks any recurring schedule chain.
@@ -88,7 +88,7 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
         memory=memory,
     )
 
-    async with get_skrift_db_session_context() as session:
+    async with get_db_session_context() as session:
         session.add(
             HandlerRun(
                 handler_id=handler_id,
@@ -144,7 +144,7 @@ async def _reschedule(handler_id: UUID, handler_settings: dict) -> None:
         scheduled_for=nxt,
         job_id=job_id,
     )
-    async with get_skrift_db_session_context() as session:
+    async with get_db_session_context() as session:
         record = await session.get(ChannelHandler, handler_id)
         if record is not None and record.enabled:
             record.scheduled_job_id = job_id

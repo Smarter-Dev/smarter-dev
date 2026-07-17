@@ -564,7 +564,7 @@ class TestIntegrationSquads:
         ) as client:
             api_client = APIClient(
                 base_url="http://test",
-                api_key="sk-" + "a" * 43,
+                api_key="sk_" + "a" * 43,
                 retry_config=RetryConfig(max_retries=1, base_delay=0.1)
             )
             api_client._client = client
@@ -721,7 +721,7 @@ class TestIntegrationPerformance:
         ) as client:
             api_client = APIClient(
                 base_url="http://test",
-                api_key="sk-" + "a" * 43,
+                api_key="sk_" + "a" * 43,
                 retry_config=RetryConfig(max_retries=0, base_delay=0.01)
             )
             api_client._client = client
@@ -869,7 +869,7 @@ class TestIntegrationErrorScenarios:
         ) as client:
             api_client = APIClient(
                 base_url="http://test",
-                api_key="sk-" + "a" * 43,
+                api_key="sk_" + "a" * 43,
                 retry_config=RetryConfig(max_retries=2, base_delay=0.01)
             )
             api_client._client = client
