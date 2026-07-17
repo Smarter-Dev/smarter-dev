@@ -24,9 +24,13 @@ from smarter_dev.web.api_native import advent_of_code as advent_of_code_module
 from smarter_dev.web.api_native import bytes as bytes_module
 from smarter_dev.web.api_native import challenges as challenges_module
 from smarter_dev.web.api_native import forum as forum_module
+from smarter_dev.web.api_native import image_quota as image_quota_module
 from smarter_dev.web.api_native import messages as messages_module
+from smarter_dev.web.api_native import model_overrides as model_overrides_module
 from smarter_dev.web.api_native import quests as quests_module
 from smarter_dev.web.api_native import squads as squads_module
+from smarter_dev.web.api_native.image_quota import ImageQuotaController
+from smarter_dev.web.api_native.model_overrides import ChannelModelOverrideController
 from smarter_dev.web.api_native.advent_of_code import AdventOfCodeController
 from smarter_dev.web.api_native.bytes import BytesController
 from smarter_dev.web.api_native.challenges import ChallengeController
@@ -613,3 +617,162 @@ def forum_agent_ops_mock() -> Iterator[Mock]:
         instance.list_agents = AsyncMock()
         instance.get_agent = AsyncMock()
         yield instance
+
+
+# --------------------------------------------------------------------------- #
+# Model-override fixtures (unit U8 — model_overrides router)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def model_override_client(session_mock: AsyncMock) -> Iterator[TestClient]:
+    """Client serving the model-override controller with auth guards bypassed.
+
+    The routes share the ``model_overrides.BOT_API_GUARDS`` list by reference, so
+    emptying it before the app is built removes guards for these tests only.
+    Auth is covered separately by ``test_auth.py``.
+    """
+    original_guards = list(model_overrides_module.BOT_API_GUARDS)
+    model_overrides_module.BOT_API_GUARDS.clear()
+    try:
+        with create_test_client(
+            route_handlers=[ChannelModelOverrideController],
+            plugins=[PydanticPlugin()],
+            dependencies={
+                "db_session": Provide(lambda: session_mock, sync_to_thread=False)
+            },
+        ) as client:
+            yield client
+    finally:
+        model_overrides_module.BOT_API_GUARDS[:] = original_guards
+
+
+@pytest.fixture
+def model_override_crud_mock() -> Iterator[Mock]:
+    """Patch the three crud functions the model-override controller calls.
+
+    Returns a namespace ``Mock`` whose ``get`` / ``upsert`` / ``delete``
+    attributes are the patched ``AsyncMock``s.
+    """
+    with (
+        patch(
+            "smarter_dev.web.api_native.model_overrides.get_channel_model_override",
+            new=AsyncMock(),
+        ) as get_mock,
+        patch(
+            "smarter_dev.web.api_native.model_overrides.upsert_channel_model_override",
+            new=AsyncMock(),
+        ) as upsert_mock,
+        patch(
+            "smarter_dev.web.api_native.model_overrides.delete_channel_model_override",
+            new=AsyncMock(),
+        ) as delete_mock,
+    ):
+        namespace = Mock()
+        namespace.get = get_mock
+        namespace.upsert = upsert_mock
+        namespace.delete = delete_mock
+        yield namespace
+
+
+# --------------------------------------------------------------------------- #
+# Image-quota fixtures (unit U8 — image_quota router)
+# --------------------------------------------------------------------------- #
+
+
+class _FakePipeline:
+    """Mimics redis.asyncio pipeline: queued sync ops, awaited execute()."""
+
+    def __init__(self, store: dict, expiries: dict) -> None:
+        self._store = store
+        self._expiries = expiries
+        self._ops: list[tuple] = []
+
+    async def __aenter__(self) -> "_FakePipeline":
+        return self
+
+    async def __aexit__(self, *exc) -> bool:
+        return False
+
+    def incr(self, key: str) -> "_FakePipeline":
+        self._ops.append(("incr", key))
+        return self
+
+    def expire(self, key: str, seconds: int, nx: bool = False) -> "_FakePipeline":
+        self._ops.append(("expire", key, seconds, nx))
+        return self
+
+    async def execute(self) -> list:
+        results: list = []
+        for op in self._ops:
+            if op[0] == "incr":
+                self._store[op[1]] = self._store.get(op[1], 0) + 1
+                results.append(self._store[op[1]])
+            else:
+                _, key, seconds, nx = op
+                if nx and key in self._expiries:
+                    results.append(False)
+                else:
+                    self._expiries[key] = seconds
+                    results.append(True)
+        self._ops.clear()
+        return results
+
+
+class _FakeRedis:
+    """Minimal in-memory async Redis stand-in (mirrors image_quota_test.py)."""
+
+    def __init__(self) -> None:
+        self.store: dict = {}
+        self.expiries: dict = {}
+
+    def pipeline(self, transaction: bool = True) -> _FakePipeline:
+        return _FakePipeline(self.store, self.expiries)
+
+    async def get(self, key: str):
+        return self.store.get(key)
+
+    async def ttl(self, key: str) -> int:
+        if key not in self.store:
+            return -2
+        return self.expiries.get(key, -1)
+
+    async def incr(self, key: str) -> int:
+        self.store[key] = self.store.get(key, 0) + 1
+        return self.store[key]
+
+    async def decr(self, key: str) -> int:
+        self.store[key] = self.store.get(key, 0) - 1
+        return self.store[key]
+
+
+@pytest.fixture
+def fake_redis() -> _FakeRedis:
+    """Stateful fake Redis shared across requests within a test."""
+    return _FakeRedis()
+
+
+@pytest.fixture
+def image_quota_client(fake_redis: _FakeRedis) -> Iterator[TestClient]:
+    """Client serving the image-quota controller with auth guards bypassed.
+
+    ``get_redis_client`` is patched to hand back the shared ``fake_redis`` so the
+    real ``ImageQuotaLimiter`` runs against durable in-memory state. The routes
+    share the ``image_quota.BOT_API_GUARDS`` list by reference, so emptying it
+    before the app is built removes guards for these tests only. Auth is covered
+    separately by ``test_auth.py``.
+    """
+    original_guards = list(image_quota_module.BOT_API_GUARDS)
+    image_quota_module.BOT_API_GUARDS.clear()
+    try:
+        with patch(
+            "smarter_dev.web.api_native.image_quota.get_redis_client",
+            return_value=fake_redis,
+        ):
+            with create_test_client(
+                route_handlers=[ImageQuotaController],
+                plugins=[PydanticPlugin()],
+            ) as client:
+                yield client
+    finally:
+        image_quota_module.BOT_API_GUARDS[:] = original_guards
