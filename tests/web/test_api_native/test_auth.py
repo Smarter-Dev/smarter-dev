@@ -26,6 +26,10 @@ from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import TestClient, create_test_client
 
 from smarter_dev.web.api_native.bytes import BytesController
+from smarter_dev.web.api_native.squads import (
+    SquadController,
+    SquadSaleEventController,
+)
 
 _GUILD = "123456789012345678"
 
@@ -60,4 +64,33 @@ def test_session_cookie_does_not_authenticate_api(guarded_client: TestClient):
         f"/api/guilds/{_GUILD}/bytes/config",
         headers={"Authorization": "Basic dXNlcjpwYXNz"},
     )
+    assert response.status_code == 401
+
+
+@pytest.fixture
+def guarded_squad_client() -> Iterator[TestClient]:
+    """Client serving the squad + sale-event controllers with real auth guards."""
+    with create_test_client(
+        route_handlers=[SquadController, SquadSaleEventController],
+        plugins=[PydanticPlugin()],
+        dependencies={"db_session": Provide(lambda: Mock(), sync_to_thread=False)},
+    ) as client:
+        yield client
+
+
+def test_squad_missing_authorization_header_rejected(guarded_squad_client: TestClient):
+    response = guarded_squad_client.get(f"/api/guilds/{_GUILD}/squads/")
+    assert response.status_code == 401
+
+
+def test_squad_non_sk_bearer_rejected(guarded_squad_client: TestClient):
+    response = guarded_squad_client.get(
+        f"/api/guilds/{_GUILD}/squads/",
+        headers={"Authorization": "Bearer not-a-skrift-key"},
+    )
+    assert response.status_code == 401
+
+
+def test_sale_events_missing_authorization_header_rejected(guarded_squad_client: TestClient):
+    response = guarded_squad_client.get(f"/api/guilds/{_GUILD}/squad-sale-events/")
     assert response.status_code == 401

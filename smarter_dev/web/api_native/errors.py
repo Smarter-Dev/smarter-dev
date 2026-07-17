@@ -81,6 +81,36 @@ def plain_error(status_code: int, detail: str) -> BotApiException:
     return BotApiException(status_code, {"detail": detail})
 
 
+def _verbose_or_generic(verbose_detail: str, generic_detail: str) -> str:
+    """Return the verbose detail only in verbose development, else the generic.
+
+    Mirrors ``smarter_dev.web.api.security_utils.create_generic_error_response``:
+    detailed messages are exposed solely when ``verbose_errors_enabled`` and
+    ``is_development`` are both set.
+    """
+    settings = get_settings()
+    if settings.verbose_errors_enabled and settings.is_development:
+        return verbose_detail
+    return generic_detail
+
+
+def secure_validation_error(message: str) -> BotApiException:
+    """400 plain body — mirrors ``security_utils.create_validation_error``."""
+    return plain_error(400, _verbose_or_generic(message, "Invalid request"))
+
+
+def secure_not_found_error(resource: str = "Resource") -> BotApiException:
+    """404 plain body — mirrors ``security_utils.create_not_found_error``."""
+    return plain_error(404, _verbose_or_generic(f"{resource} not found", "Not found"))
+
+
+def secure_database_error(exc: Exception) -> BotApiException:
+    """500 plain body — mirrors ``security_utils.create_database_error``."""
+    return plain_error(
+        500, _verbose_or_generic(f"Database error: {exc}", "Internal server error")
+    )
+
+
 def validate_discord_id(request: Request, value: str, field_name: str = "ID") -> str:
     """Validate a Discord snowflake, raising the nested 400 the FastAPI API used."""
     try:
