@@ -1,0 +1,67 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Create Repeating Message - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Create Repeating Message</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}/repeating-messages">&larr; Repeating Messages</a></p>
+        </hgroup>
+
+        {% if errors %}
+        <div class="sk-flash sk-flash-error">
+            <strong>Please correct the following errors:</strong>
+            <ul style="margin:0.5rem 0 0 1rem;">
+                {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">New Repeating Message</div>
+            <div class="sk-panel-body">
+                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/repeating-messages/create">
+                    <label for="channel_id">Channel</label>
+                    <select id="channel_id" name="channel_id" required>
+                        <option value="">Select a channel</option>
+                        {% for channel in channels %}
+                        <option value="{{ channel.id }}" {% if form_data and form_data.channel_id == channel.id %}selected{% endif %}>{{ channel.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <small class="sk-text-muted">Discord channel where the message will be sent.</small>
+
+                    <label for="role_id">Role to Mention (Optional)</label>
+                    <select id="role_id" name="role_id">
+                        <option value="">No role mention</option>
+                        {% for role in roles %}
+                        <option value="{{ role.id }}" {% if form_data and form_data.role_id == role.id %}selected{% endif %}>{{ role.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <small class="sk-text-muted">Optional role to ping with each message.</small>
+
+                    <label for="message_content">Message Content</label>
+                    <textarea id="message_content" name="message_content" rows="5" required>{{ form_data.message_content if form_data else '' }}</textarea>
+                    <small class="sk-text-muted">The message text that will be sent repeatedly.</small>
+
+                    <label for="start_time">Start Time (UTC)</label>
+                    <input type="datetime-local" id="start_time" name="start_time"
+                           value="{{ form_data.start_time if form_data else '' }}" required>
+
+                    <label for="interval_minutes">Repeat Every (minutes)</label>
+                    <input type="number" id="interval_minutes" name="interval_minutes" min="1"
+                           value="{{ form_data.interval_minutes if form_data else '60' }}" required>
+                    <small class="sk-text-muted">How often to repeat the message (minimum 1 minute).</small>
+
+                    <div style="margin-top:1rem;">
+                        <button type="submit" class="sk-btn">Create Repeating Message</button>
+                        <a href="/admin/bot/guilds/{{ guild.id }}/repeating-messages" class="sk-btn-outline">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

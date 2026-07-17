@@ -1,0 +1,69 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Forum Agents - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Forum Agents</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a></p>
+        </hgroup>
+
+        <p class="sk-text-muted">
+            AI-powered agents that monitor forum channels and respond to posts.
+        </p>
+
+        <div style="margin:1rem 0;">
+            <a href="/admin/bot/guilds/{{ guild.id }}/forum-agents/create" class="sk-btn">Create Agent</a>
+        </div>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Forum Agents ({{ agents|length }})</div>
+            <div class="sk-panel-body">
+                {% if agents %}
+                {% for agent in agents %}
+                <div class="sk-panel" style="margin-bottom:1rem;{% if not agent.is_active %} opacity:0.6;{% endif %}">
+                    <div class="sk-panel-body">
+                        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
+                            <strong>{{ agent.name }}</strong>
+                            <span class="sk-badge">{{ 'Active' if agent.is_active else 'Inactive' }}</span>
+                        </div>
+                        {% if agent.description %}<p class="sk-text-muted">{{ agent.description }}</p>{% endif %}
+
+                        <div class="sk-text-muted" style="font-size:0.85rem; margin:0.5rem 0;">
+                            Forums: {{ agent.monitored_forums|length or 'All' }} &middot;
+                            Threshold: {{ (agent.response_threshold * 100)|int }}% &middot;
+                            Max/hour: {{ agent.max_responses_per_hour }} &middot;
+                            Responses: {{ 'on' if agent.enable_responses else 'off' }} &middot;
+                            Tagging: {{ 'on' if agent.enable_user_tagging else 'off' }}
+                        </div>
+
+                        <div style="margin:0.5rem 0;">
+                            <div class="sk-text-muted" style="font-size:0.8rem;">System Prompt</div>
+                            <div style="font-size:0.85rem; max-height:60px; overflow-y:auto;">{{ agent.system_prompt[:150] }}{% if agent.system_prompt|length > 150 %}&hellip;{% endif %}</div>
+                        </div>
+
+                        <div style="display:flex; gap:0.5rem; margin-top:0.75rem; align-items:center; flex-wrap:wrap;">
+                            <a href="/admin/bot/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/edit" class="sk-btn-outline sk-btn-small">Edit</a>
+                            <a href="/admin/bot/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/analytics" class="sk-btn-outline sk-btn-small">Analytics</a>
+                            <form method="post" action="/admin/bot/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/toggle" style="display:inline;">
+                                <button type="submit" class="sk-btn-outline sk-btn-small">{{ 'Disable' if agent.is_active else 'Enable' }}</button>
+                            </form>
+                            <form method="post" action="/admin/bot/guilds/{{ guild.id }}/forum-agents/{{ agent.id }}/delete" style="display:inline;"
+                                  onsubmit="return confirm('Delete agent {{ agent.name }}? This cannot be undone.');">
+                                <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+                {% else %}
+                <p class="sk-no-items">No forum agents configured. Create your first agent to start monitoring forum posts.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

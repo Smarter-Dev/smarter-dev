@@ -19,7 +19,7 @@ import lightbulb
 from smarter_dev.bot.agents.mod_tools import build_triage_report_embed
 from smarter_dev.bot.agents.moderation_agent import run_moderation_agent
 from smarter_dev.bot.utils.messages import gather_message_context
-from smarter_dev.shared.database import get_skrift_db_session_context
+from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import ModerationConfigOperations
 from smarter_dev.web.models import ModerationConfig
 
@@ -36,7 +36,7 @@ mod_config_ops = ModerationConfigOperations()
 async def _load_configs() -> None:
     """Load all active moderation configs into memory."""
     try:
-        async with get_skrift_db_session_context() as session:
+        async with get_db_session_context() as session:
             configs = await mod_config_ops.get_all_active_configs(session)
             _guild_configs.clear()
             for config in configs:
@@ -58,7 +58,7 @@ async def refresh_config(guild_id: str) -> None:
     Call this from the admin save endpoint to update the cache.
     """
     try:
-        async with get_skrift_db_session_context() as session:
+        async with get_db_session_context() as session:
             config = await mod_config_ops.get_config(session, guild_id)
             if config and config.is_active:
                 _guild_configs[guild_id] = {

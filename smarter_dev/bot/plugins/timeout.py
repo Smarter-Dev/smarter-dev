@@ -9,7 +9,7 @@ from datetime import timedelta
 import hikari
 import lightbulb
 
-from smarter_dev.shared.database import get_skrift_db_session_context
+from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import ModerationActionOperations
 
 logger = logging.getLogger(__name__)
@@ -232,7 +232,7 @@ async def timeout_user(ctx: lightbulb.Context) -> None:
 
         # Record the timeout action in moderation actions table
         try:
-            async with get_skrift_db_session_context() as session:
+            async with get_db_session_context() as session:
                 await mod_action_ops.create_action(
                     session,
                     guild_id=str(guild.id),

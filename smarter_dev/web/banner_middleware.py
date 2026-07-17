@@ -14,7 +14,7 @@ import logging
 from litestar.connection import Request
 from litestar.types import ASGIApp, Receive, Scope, Send
 
-from smarter_dev.shared.database import get_skrift_db_session_context
+from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web import feature_flags
 from smarter_dev.web.feature_flags_admin import SEEDED_FLAGS
 
@@ -45,7 +45,7 @@ class SudoLaunchBannerMiddleware:
         active = False
         try:
             request: Request = Request(scope, receive)
-            async with get_skrift_db_session_context() as session:
+            async with get_db_session_context() as session:
                 active = await feature_flags.is_enabled(
                     session,
                     "sudo_launch",

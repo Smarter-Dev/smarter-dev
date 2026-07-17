@@ -1,0 +1,48 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Create Challenge - {{ campaign.title }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Create Challenge</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges">&larr; {{ campaign.title }}</a></p>
+        </hgroup>
+
+        {% if errors %}
+        <div class="sk-flash sk-flash-error">
+            <strong>Please correct the following errors:</strong>
+            <ul style="margin:0.5rem 0 0 1rem;">
+                {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">New Challenge in {{ campaign.title }}</div>
+            <div class="sk-panel-body">
+                <form method="post" enctype="multipart/form-data"
+                      action="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges/create">
+                    <label for="title">Challenge Title</label>
+                    <input type="text" id="title" name="title" maxlength="200"
+                           value="{{ form_data.title if form_data else '' }}" required>
+
+                    <label for="description">Description</label>
+                    <textarea id="description" name="description" rows="6" required>{{ form_data.description if form_data else '' }}</textarea>
+
+                    <label for="python_script">Python Script (optional)</label>
+                    <input type="file" id="python_script" name="python_script" accept=".py">
+                    <div class="sk-text-muted" style="font-size:0.85rem;">Optional: upload a .py script related to this challenge.</div>
+
+                    <div style="margin-top:1rem;">
+                        <button type="submit" class="sk-btn">Create Challenge</button>
+                        <a href="/admin/bot/guilds/{{ guild.id }}/campaigns/{{ campaign.id }}/challenges" class="sk-btn-outline">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

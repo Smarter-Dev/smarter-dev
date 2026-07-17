@@ -766,174 +766,6 @@ class SquadMembership(Base):
         super().__init__(**kwargs)
 
 
-class APIKey(Base):
-    """API key model for secure authentication and access control.
-    
-    Stores cryptographically secure API keys with hashing, scoping,
-    and usage tracking capabilities. Designed for enterprise-grade
-    API authentication with proper security practices.
-    """
-    
-    __tablename__ = "api_keys"
-    
-    # Primary key
-    id: Mapped[UUID] = mapped_column(
-        PostgresUUID(as_uuid=True),
-        primary_key=True,
-        default=uuid4,
-        doc="Unique identifier for the API key"
-    )
-    
-    # Key identification and naming
-    name: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-        doc="Human-readable name for the API key (e.g., 'Discord Bot', 'Admin Dashboard')"
-    )
-    description: Mapped[Optional[str]] = mapped_column(
-        String(500),
-        nullable=True,
-        doc="Optional description of the API key's purpose and usage"
-    )
-    
-    # Secure key storage
-    key_hash: Mapped[str] = mapped_column(
-        String(64),
-        nullable=False,
-        unique=True,
-        doc="SHA-256 hash of the API key for secure storage"
-    )
-    key_prefix: Mapped[str] = mapped_column(
-        String(12),
-        nullable=False,
-        doc="First 12 characters of the key for display (e.g., 'sk-abc123de')"
-    )
-    
-    # Access control
-    scopes: Mapped[list] = mapped_column(
-        JSON,
-        nullable=False,
-        default=list,
-        doc="List of permission scopes (e.g., ['bytes:read', 'squads:write'])"
-    )
-    is_active: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=True,
-        doc="Whether the API key is active and can be used"
-    )
-    
-    # Expiration and lifecycle
-    expires_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        doc="Optional expiration timestamp for the API key"
-    )
-    revoked_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        doc="Timestamp when the API key was revoked (if revoked)"
-    )
-    
-    # Usage tracking
-    last_used_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True),
-        nullable=True,
-        doc="Timestamp of the last successful API request using this key"
-    )
-    usage_count: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=0,
-        doc="Total number of successful API requests using this key"
-    )
-    
-    # Multi-tier rate limiting
-    rate_limit_per_second: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=10,
-        doc="Maximum number of requests allowed per second for this key"
-    )
-    rate_limit_per_minute: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=180,
-        doc="Maximum number of requests allowed per minute for this key"
-    )
-    rate_limit_per_15_minutes: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=2500,
-        doc="Maximum number of requests allowed per 15 minutes for this key"
-    )
-    
-    # Legacy rate limiting (kept for backward compatibility)
-    rate_limit_per_hour: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=10000,
-        doc="Maximum number of requests allowed per hour for this key (legacy)"
-    )
-    
-    # Audit trail
-    created_by: Mapped[str] = mapped_column(
-        String(100),
-        nullable=False,
-        doc="Username or identifier of who created this API key"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-        doc="Timestamp when the API key was created"
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
-        doc="Timestamp when the API key was last modified"
-    )
-    
-    # Database constraints and indexes
-    __table_args__ = (
-        Index("ix_api_keys_hash", "key_hash"),
-        Index("ix_api_keys_active", "is_active", postgresql_where="is_active = true"),
-        Index("ix_api_keys_prefix", "key_prefix"),
-        Index("ix_api_keys_created_by", "created_by"),
-        UniqueConstraint("key_hash", name="uq_api_keys_hash"),
-    )
-    
-    def __init__(self, **kwargs):
-        """Initialize APIKey with default timestamps."""
-        now = datetime.now(timezone.utc)
-        kwargs.setdefault('created_at', now)
-        kwargs.setdefault('updated_at', now)
-        super().__init__(**kwargs)
-    
-    @property
-    def is_expired(self) -> bool:
-        """Check if the API key has expired."""
-        if self.expires_at is None:
-            return False
-        expires = self.expires_at
-        # Handle timezone-naive datetimes (e.g. from SQLite) by assuming UTC
-        if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
-        return datetime.now(timezone.utc) > expires
-    
-    @property
-    def is_valid(self) -> bool:
-        """Check if the API key is valid (active and not expired)."""
-        return self.is_active and not self.is_expired
-    
-    def __repr__(self) -> str:
-        """String representation of the API key."""
-        status = "active" if self.is_valid else "inactive"
-        return f"<APIKey(name='{self.name}', prefix='{self.key_prefix}', status='{status}')>"
-
-
 class SecurityLog(Base):
     """Security log entries for audit trail and monitoring.
     
@@ -962,9 +794,11 @@ class SecurityLog(Base):
     )
     
     # Related entities
+    # No ForeignKey: during the key-system migration this column may hold
+    # Skrift-native key IDs (main DB, skrift.api_keys) as well as legacy
+    # public.api_keys IDs, so it is a plain correlation column.
     api_key_id: Mapped[Optional[UUID]] = mapped_column(
         PostgresUUID(as_uuid=True),
-        ForeignKey("api_keys.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
         doc="API key involved in the action (if applicable)"

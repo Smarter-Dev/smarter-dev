@@ -1,0 +1,112 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Conversation {{ conversation.id }} - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Conversation Details</h1>
+    <p><a href="/admin/help-conversations">&larr; Back to Help Conversations</a></p>
+</hgroup>
+
+{% if flash_messages %}
+<div class="sk-flash-list">
+    {% for msg in flash_messages %}
+    <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div style="display:grid; grid-template-columns:minmax(0, 22rem) minmax(0, 1fr); gap:1rem; align-items:start;">
+    <div class="sk-panel">
+        <div class="sk-panel-head">Conversation Info</div>
+        <div class="sk-panel-body">
+            <dl style="margin:0;">
+                <dt class="sk-text-muted">User</dt>
+                <dd><strong>{{ conversation.user_username }}</strong><br><small class="sk-text-muted">{{ conversation.user_id }}</small></dd>
+
+                <dt class="sk-text-muted">Guild</dt>
+                <dd><strong>{{ guild.name }}</strong><br><small class="sk-text-muted">{{ conversation.guild_id }}</small></dd>
+
+                <dt class="sk-text-muted">Channel</dt>
+                <dd><small class="sk-text-muted">{{ conversation.channel_id }}</small></dd>
+
+                <dt class="sk-text-muted">Interaction Type</dt>
+                <dd>
+                    {% if conversation.interaction_type == 'slash_command' %}
+                    <span class="sk-pill">Slash Command</span>
+                    {% else %}
+                    <span class="sk-pill sk-pill-published">Mention</span>
+                    {% endif %}
+                </dd>
+
+                <dt class="sk-text-muted">Started</dt>
+                <dd>{{ conversation.started_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</dd>
+
+                <dt class="sk-text-muted">Tokens Used</dt>
+                <dd>{{ conversation.tokens_used }}</dd>
+
+                {% if conversation.response_time_ms %}
+                <dt class="sk-text-muted">Response Time</dt>
+                <dd>{{ conversation.response_time_ms }}ms</dd>
+                {% endif %}
+
+                <dt class="sk-text-muted">Resolution Status</dt>
+                <dd>
+                    {% if conversation.is_resolved %}
+                    <span class="sk-pill sk-pill-published">Resolved</span>
+                    {% else %}
+                    <span class="sk-pill">Unresolved</span>
+                    {% endif %}
+                </dd>
+
+                <dt class="sk-text-muted">Retention Policy</dt>
+                <dd><span class="sk-pill">{{ conversation.retention_policy|title }}</span></dd>
+
+                {% if conversation.expires_at %}
+                <dt class="sk-text-muted">Expires</dt>
+                <dd>{{ conversation.expires_at.strftime('%Y-%m-%d') }}</dd>
+                {% endif %}
+            </dl>
+        </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:1rem;">
+        {% if conversation.context_messages %}
+        <div class="sk-panel">
+            <div class="sk-panel-head">Context Messages</div>
+            <div class="sk-panel-body">
+                {% for message in conversation.context_messages %}
+                <div style="padding:.4rem 0; border-bottom:1px solid var(--sk-color-border);">
+                    <div style="display:flex; justify-content:space-between;">
+                        <strong>{{ message.author }}</strong>
+                        <small class="sk-text-muted">{{ message.timestamp[:19] }}</small>
+                    </div>
+                    <div class="sk-text-muted" style="margin-top:.15rem; white-space:pre-wrap;">{{ message.content }}</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">User Question</div>
+            <div class="sk-panel-body">
+                <div style="font-weight:600; margin-bottom:.35rem;">{{ conversation.user_username }}</div>
+                <div style="white-space:pre-wrap;">{{ conversation.user_question }}</div>
+            </div>
+        </div>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">
+                Bot Response
+                <span class="sk-text-muted" style="font-weight:normal;">
+                    &middot; {{ conversation.tokens_used }} tokens{% if conversation.response_time_ms %} &middot; {{ conversation.response_time_ms }}ms{% endif %}
+                </span>
+            </div>
+            <div class="sk-panel-body">
+                <div style="white-space:pre-wrap;">{{ conversation.bot_response }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

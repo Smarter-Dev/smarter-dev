@@ -5,7 +5,7 @@ This guide explains how to deploy the Smarter Dev application to a Kubernetes cl
 ## Architecture
 
 The application consists of two main services:
-- **Web Service**: Starlette/FastAPI web application with admin interface
+- **Web Service**: Skrift CMS (Litestar) web application — public site, `/api` bot API, and `/admin` interface
 - **Bot Service**: Discord bot for community interaction
 
 Both services share the same database and Redis instance but run as independent containers.
@@ -31,16 +31,20 @@ cp k8s/secrets.template.yaml k8s/secrets.yaml
 
 Edit `k8s/secrets.yaml` and replace ALL placeholder values with actual secrets:
 
-- `database-url`: PostgreSQL connection string
-- `redis-url`: Redis connection string  
+- `database-url`: PostgreSQL connection string (the single application
+  database; app tables live in its `skrift` schema)
+- `redis-url`: Redis connection string
 - `discord-bot-token`: Discord bot token from Discord Developer Portal
 - `discord-application-id`: Discord application ID
 - `discord-client-id`: Discord OAuth client ID (for admin interface)
 - `discord-client-secret`: Discord OAuth client secret
 - `api-secret-key`: Strong random string for API authentication
 - `web-session-secret`: Strong random string for web sessions
-- `admin-username`: Admin interface username
-- `admin-password`: Secure admin password
+- `bot-api-key`: Skrift-native `sk_` service key the bot uses against `/api`
+  (minted per docs/v2/legacy-sunset/runbooks/01-rotate-bot-key.md)
+
+A separate `smarter-dev-migrate-secrets` secret holds the admin
+(`doadmin`) `database-url` used only by the migrate job.
 
 ### 2. Apply secrets to cluster
 
@@ -80,11 +84,15 @@ Every push to `main` triggers `.github/workflows/deploy.yaml`, which deploys
 1. Builds `smarter-dev-website` and `smarter-dev-bot` images, each tagged with
    the 7-char commit SHA.
 2. Pushes both images to Docker Hub.
-3. Runs `kubectl apply` on `k8s/deploy.yaml` (web) and `k8s/deploy-bot.yaml`
+3. Applies `k8s/migrate-job.yaml`, which runs
+   `scripts/migrate.py --only main` (this project's alembic tree against the
+   single database; Skrift-core migrations are run manually on Skrift
+   upgrades) and blocks the rollout on failure.
+4. Runs `kubectl apply` on `k8s/deploy.yaml` (web) and `k8s/deploy-bot.yaml`
    (bot). Because the image tag in each manifest changes on every commit, the
    pod template changes, so Kubernetes performs a **rolling restart of both the
    web and the bot Deployments**.
-4. Blocks on `kubectl rollout status` for both `deployment/smarter-dev-website`
+5. Blocks on `kubectl rollout status` for both `deployment/smarter-dev-website`
    and `deployment/smarter-dev-bot`.
 
 **The bot is restarted automatically by a push to `main` in production.** Manual
@@ -205,4 +213,5 @@ The application uses Pydantic Settings to automatically load these from the envi
 ### Admin interface not working
 - Check `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET`
 - Verify `DISCORD_REDIRECT_URI` matches your OAuth app settings
-- Ensure admin credentials are set correctly
+- The admin lives at `/admin` (Skrift's built-in interface); access requires
+  a user with the administrator role

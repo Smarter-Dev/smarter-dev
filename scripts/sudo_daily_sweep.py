@@ -15,7 +15,7 @@ import asyncio
 import logging
 import sys
 
-from smarter_dev.shared.database import get_skrift_db_session_context
+from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.billing.webhooks import run_daily_sweep
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -23,7 +23,7 @@ logger = logging.getLogger("sudo_daily_sweep")
 
 
 async def main() -> int:
-    async with get_skrift_db_session_context() as session:
+    async with get_db_session_context() as session:
         summary = await run_daily_sweep(session)
     logger.info("sweep summary: %s", summary)
     return 0

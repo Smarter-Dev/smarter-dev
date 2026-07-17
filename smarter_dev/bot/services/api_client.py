@@ -24,6 +24,41 @@ from smarter_dev.bot.services.models import ServiceHealth
 
 logger = logging.getLogger(__name__)
 
+# The only API key shape the web API accepts: Skrift-native ``sk_`` +
+# secrets.token_urlsafe(32) (43 chars today). A length range is accepted so a
+# future padding change in the Skrift key service does not lock the bot out.
+# See docs/v2/legacy-sunset/runbooks/01-rotate-bot-key.md.
+#
+# The bot only checks shape here; the web API is the source of truth for
+# whether a key is actually valid.
+_SKRIFT_KEY_PREFIX = "sk_"
+_MIN_KEY_LENGTH = 20
+_MAX_KEY_LENGTH = 200
+_BASE64URL_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+)
+
+
+def is_valid_api_key_format(api_key: str) -> bool:
+    """Return True if ``api_key`` matches the Skrift ``sk_`` key shape.
+
+    Accepts ``sk_`` + 17..197 base64url chars. The token portion after the
+    prefix must be pure base64url so obviously malformed values are rejected
+    before a request is ever sent.
+    """
+    if not isinstance(api_key, str) or not api_key:
+        return False
+    if not (_MIN_KEY_LENGTH <= len(api_key) <= _MAX_KEY_LENGTH):
+        return False
+
+    prefix = api_key[:3]
+    token_part = api_key[3:]
+
+    if prefix != _SKRIFT_KEY_PREFIX:
+        return False
+
+    return all(char in _BASE64URL_CHARS for char in token_part)
+
 
 class RetryConfig:
     """Configuration for retry behavior."""
@@ -78,7 +113,7 @@ class APIClient(APIClientProtocol):
 
         Args:
             base_url: Base URL for API endpoints
-            api_key: Secure API key for authentication (sk-xxxxx format)
+            api_key: Secure API key for authentication (Skrift ``sk_`` format)
             retry_config: Retry configuration
             default_timeout: Default request timeout in seconds
             max_connections: Maximum number of connections
@@ -86,9 +121,12 @@ class APIClient(APIClientProtocol):
         """
         self._base_url = base_url.rstrip("/")
 
-        # Validate API key format for security
-        if not api_key.startswith("sk-") or len(api_key) != 46:
-            raise ValueError("Invalid API key format. Expected 'sk-' prefix with 43 characters.")
+        # Validate API key format for security. Only Skrift-native sk_ keys
+        # are accepted since the legacy-key decommission.
+        if not is_valid_api_key_format(api_key):
+            raise ValueError(
+                "Invalid API key format. Expected a Skrift 'sk_' key."
+            )
 
         self._api_key = api_key
         self._retry_config = retry_config or RetryConfig()

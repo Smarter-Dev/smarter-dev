@@ -1,0 +1,22 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Guild Error - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Guild Unavailable</h1>
+            <p><a href="/admin/bot/guilds">&larr; All guilds</a></p>
+        </hgroup>
+
+        <div class="sk-panel">
+            <div class="sk-panel-body">
+                <p class="sk-no-items">{{ error }}</p>
+                {% if error_code %}<p class="sk-text-muted">Error code: {{ error_code }}</p>{% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

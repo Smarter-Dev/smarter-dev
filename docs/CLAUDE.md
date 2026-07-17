@@ -7,16 +7,16 @@ The Smarter Dev Discord Bot is a comprehensive system that combines Discord bot 
 ### Architecture
 
 ```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Discord Bot   │    │   Web API       │    │  Admin Interface│
-│  (Hikari +      │◄──►│  (FastAPI)      │◄──►│  (Starlette)    │
-│   Lightbulb)    │    │                 │    │                 │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         │              ┌─────────────────┐              │
-         │              │   PostgreSQL    │              │
-         └──────────────┤   Database      │──────────────┘
-                        │                 │
+┌─────────────────┐    ┌──────────────────────────────────────────┐
+│   Discord Bot   │    │        Skrift CMS (Litestar)             │
+│  (Hikari +      │◄──►│  /api  bot API (native controllers)      │
+│   Lightbulb)    │    │  /admin  admin interface (+ /admin/bot)  │
+└─────────────────┘    └──────────────────────────────────────────┘
+         │                       │
+         │              ┌─────────────────┐
+         └──────────────┤   PostgreSQL    │
+                        │ (single DB,     │
+                        │  skrift schema) │
                         └─────────────────┘
                                 │
                         ┌─────────────────┐
@@ -28,9 +28,13 @@ The Smarter Dev Discord Bot is a comprehensive system that combines Discord bot 
 
 **Core Components:**
 - **Discord Bot**: Hikari + Lightbulb for Discord interactions
-- **Web API**: FastAPI mounted on existing Starlette app
-- **Admin Interface**: Authenticated web pages for guild configuration
-- **Database**: PostgreSQL with minimal data storage
+- **Web App**: Skrift CMS (Litestar) — the public site, the `/api` bot API
+  (`smarter_dev/web/api_native/` Litestar controllers), and the `/admin`
+  interface (Skrift's built-in admin plus the `/admin/bot` controllers).
+  The legacy FastAPI `/api` mount and Starlette `/bot-admin` app were
+  removed in the legacy sunset (docs/v2/legacy-sunset/).
+- **Database**: a single PostgreSQL database; all app tables live in the
+  `skrift` schema (the legacy `bc_websites` database was decommissioned)
 - **Message Queue**: Redis for real-time updates
 
 ### Key Features
@@ -533,15 +537,18 @@ smarter_dev/
 
 ## API Documentation
 
-The API uses FastAPI with automatic OpenAPI documentation available at:
-- Swagger UI: `http://localhost:8000/api/docs`
-- ReDoc: `http://localhost:8000/api/redoc`
+The API is served by native Litestar controllers under `/api`
+(`smarter_dev/web/api_native/`). The legacy FastAPI mount and its Swagger UI
+(`/api/docs`, `/api/redoc`) were removed in the legacy sunset; there is no
+generated API docs page — the controllers and the harness expectations
+(`scripts/local_harness/expectations.py`) are the reference.
 
 ### Authentication
 
-API endpoints require Bearer token authentication:
+API endpoints require Bearer token authentication with a Skrift-native
+`sk_` service key (managed at `/admin/api-keys`):
 ```http
-Authorization: Bearer <bot-token>
+Authorization: Bearer sk_...
 ```
 
 ### Base URL Structure

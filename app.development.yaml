@@ -38,8 +38,30 @@ controllers:
   - smarter_dev.web.account_controller:AccountController
   - smarter_dev.web.account_controller:BillingController
   - smarter_dev.web.feature_flags_admin:FeatureFlagsAdminController
-  - smarter_dev.web.controllers:api_mount
-  - smarter_dev.web.controllers:bot_admin_mount
+  # Native bot API (/api) — Litestar controllers replacing the FastAPI mount
+  # (docs/v2/legacy-sunset/04-api-rewrite.md switchover).
+  - smarter_dev.web.api_native.auth:ApiHealthController
+  - smarter_dev.web.api_native.auth:AuthController
+  - smarter_dev.web.api_native.bytes:BytesController
+  - smarter_dev.web.api_native.squads:SquadController
+  - smarter_dev.web.api_native.squads:SquadSaleEventController
+  - smarter_dev.web.api_native.members:MemberController
+  - smarter_dev.web.api_native.challenges:ChallengeController
+  - smarter_dev.web.api_native.quests:QuestController
+  - smarter_dev.web.api_native.messages:ScheduledMessageController
+  - smarter_dev.web.api_native.messages:RepeatingMessageController
+  - smarter_dev.web.api_native.advent_of_code:AdventOfCodeController
+  - smarter_dev.web.api_native.forum:ForumAgentController
+  - smarter_dev.web.api_native.forum:ForumNotificationController
+  - smarter_dev.web.api_native.chat_conversations:ChatConversationController
+  - smarter_dev.web.api_native.image_quota:ImageQuotaController
+  - smarter_dev.web.api_native.activity:ActivityController
+  - smarter_dev.web.api_native.model_overrides:ChannelModelOverrideController
+  - smarter_dev.web.api_native.handlers:HandlerController
+  - smarter_dev.web.api_native.admin_handlers:AdminHandlerController
+  - smarter_dev.web.api_native.admin:AdminController
+  - smarter_dev.web.api_native.billing:PolarWebhookController
+  - smarter_dev.web.api_native.billing:SudoConvergeController
   - smarter_dev.web.resources_controller:resources_index
   - smarter_dev.web.agent_api:ResourcesAgentApiController
   - smarter_dev.web.agent_api:AgentConversationApiController
@@ -61,12 +83,28 @@ controllers:
   - smarter_dev.web.jina_cache_admin:JinaCacheAdminController
   - smarter_dev.web.usage_admin:UsageAdminController
   - smarter_dev.web.bot_admin_skrift:BotAdminController
+  - smarter_dev.web.bot_admin.guilds:GuildAdminController
+  - smarter_dev.web.bot_admin.bytes_config:BytesConfigAdminController
+  - smarter_dev.web.bot_admin.squads:SquadsAdminController
+  - smarter_dev.web.bot_admin.forum_agents:ForumAgentsAdminController
+  - smarter_dev.web.bot_admin.campaigns:CampaignsAdminController
+  - smarter_dev.web.bot_admin.scheduled_messages:ScheduledMessagesAdminController
+  - smarter_dev.web.bot_admin.repeating_messages:RepeatingMessagesAdminController
+  - smarter_dev.web.bot_admin.guild_configs:GuildConfigsAdminController
+  - smarter_dev.web.bot_admin.help_conversations:HelpConversationsAdminController
   - smarter_dev.web.handlers_admin:HandlersAdminController
   - smarter_dev.web.quests_admin:QuestsAdminController
   - smarter_dev.web.chat_conversations_admin:ChatConversationsAdminController
   - smarter_dev.web.mod_actions_admin:ModActionsAdminController
   - smarter_dev.web.blog_controller:BlogController
   - smarter_dev.web.blogging_agent_admin:BloggingAgentAdminController
+
+# Skrift-native API keys — mirrors app.yaml (built-in admin UI at
+# /admin/api-keys auto-registers with AdminController).
+api_keys:
+  enabled: true
+  default_expiration_days: 365
+  max_keys_per_user: 10
 
 middleware:
   - smarter_dev.web.middleware.partial:create_partial_middleware

@@ -1,15 +1,14 @@
 """Custom page controllers for Smarter Dev.
 
-Handles custom logic routes, redirects, and mounts the FastAPI API.
+Handles custom logic routes and redirects. The bot API lives in native
+Litestar controllers under ``smarter_dev.web.api_native``.
 """
 
 import logging
 
 from litestar import Controller, Request, get, post
 from litestar.exceptions import NotFoundException
-from litestar.handlers import asgi
 from litestar.response import Redirect, Template
-from litestar.types import Receive, Scope, Send
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,30 +30,6 @@ import smarter_dev.web.hooks_sudo  # noqa: F401  — registers Skrift action hoo
 import smarter_dev.web.account_hooks  # noqa: F401  — registers account page section hooks
 
 logger = logging.getLogger(__name__)
-
-
-def _normalize_mounted_path(scope: Scope) -> None:
-    """Normalize mounted sub-app paths without breaking explicit trailing slashes.
-
-    Litestar can present the mounted path with a trailing slash even when the
-    client requested a non-slash route. Preserve paths that the client actually
-    requested with a trailing slash, since the mounted FastAPI app has
-    ``redirect_slashes=False`` for strict route matching.
-    """
-    path = scope.get("path", "/")
-    if path == "/" or not path.endswith("/"):
-        return
-
-    raw_path = scope.get("raw_path", b"")
-    if isinstance(raw_path, (bytes, bytearray)):
-        raw_path_text = raw_path.decode("latin-1")
-    else:
-        raw_path_text = str(raw_path or "")
-
-    if raw_path_text.endswith("/"):
-        return
-
-    scope["path"] = path.rstrip("/")
 
 
 # Description used when sudo_launch is auto-created on first read. Centralised
@@ -214,21 +189,3 @@ class SudoController(Controller):
 @get("/discord")
 async def discord_redirect() -> Redirect:
     return Redirect("https://discord.gg/de8kajxbYS")
-
-
-@asgi("/api", is_mount=True, copy_scope=True)
-async def api_mount(scope: Scope, receive: Receive, send: Send) -> None:
-    """Mount the FastAPI API as an ASGI sub-application."""
-    from smarter_dev.web.api.app import api
-
-    _normalize_mounted_path(scope)
-    await api(scope, receive, send)
-
-
-@asgi("/bot-admin", is_mount=True, copy_scope=True)
-async def bot_admin_mount(scope: Scope, receive: Receive, send: Send) -> None:
-    """Mount the legacy Starlette admin interface as an ASGI sub-application."""
-    from smarter_dev.web.admin.app import create_admin_app
-
-    _normalize_mounted_path(scope)
-    await create_admin_app()(scope, receive, send)
