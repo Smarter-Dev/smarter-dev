@@ -43,3 +43,18 @@ register_role(
     display_name="Quests Manager",
     description="Can create, edit, schedule, and delete quests",
 )
+
+# ── Bot service key ──────────────────────────────────────────
+# Permissions granted to the Discord bot's Skrift service key. The native
+# ``/api`` controllers (docs/v2/legacy-sunset/04-api-rewrite.md) guard on
+# ``bot-api``; admin-ish write paths additionally require ``bot-api-admin`` so a
+# future narrow key can be minted without code change. The phase-01 runbook
+# mints the key with these scoped_permissions.
+
+register_role(
+    "bot-service",
+    "bot-api",
+    "bot-api-admin",
+    display_name="Bot Service",
+    description="Discord bot service account — full native bot API access",
+)
