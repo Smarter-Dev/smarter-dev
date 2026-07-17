@@ -1,0 +1,131 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Help Conversations - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Help Conversations</h1>
+    <p>{{ total }} conversation{{ 's' if total != 1 else '' }}</p>
+</hgroup>
+
+{% if flash_messages %}
+<div class="sk-flash-list">
+    {% for msg in flash_messages %}
+    <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<p>
+    <a role="button" href="/admin/help-conversations/cleanup" class="sk-btn sk-btn-outline sk-btn-small">
+        Retention cleanup &rarr;
+    </a>
+</p>
+
+<form method="get" action="/admin/help-conversations" class="hc-filter-form"
+      style="display:flex; gap:.75rem; align-items:flex-end; flex-wrap:wrap; margin-bottom:1rem;">
+    <label>
+        <span class="sk-text-muted" style="display:block; font-size:.8rem; margin-bottom:.15rem;">Guild</span>
+        <select name="guild_id" style="min-width:12rem;">
+            <option value="">All guilds</option>
+            {% for guild in guilds %}
+            <option value="{{ guild.id }}" {{ 'selected' if filters.guild_id == guild.id else '' }}>{{ guild.name }}</option>
+            {% endfor %}
+        </select>
+    </label>
+    <label>
+        <span class="sk-text-muted" style="display:block; font-size:.8rem; margin-bottom:.15rem;">User ID</span>
+        <input type="text" name="user_id" value="{{ filters.user_id or '' }}" placeholder="Discord user ID" style="min-width:12rem;">
+    </label>
+    <label>
+        <span class="sk-text-muted" style="display:block; font-size:.8rem; margin-bottom:.15rem;">Type</span>
+        <select name="interaction_type" style="min-width:9rem;">
+            <option value="">All types</option>
+            <option value="slash_command" {{ 'selected' if filters.interaction_type == 'slash_command' else '' }}>Slash Command</option>
+            <option value="mention" {{ 'selected' if filters.interaction_type == 'mention' else '' }}>Mention</option>
+        </select>
+    </label>
+    <label>
+        <span class="sk-text-muted" style="display:block; font-size:.8rem; margin-bottom:.15rem;">Search</span>
+        <input type="text" name="search" value="{{ filters.search or '' }}" placeholder="Question / response / user" style="min-width:14rem;">
+    </label>
+    <label style="display:flex; align-items:center; gap:.35rem;">
+        <input type="checkbox" name="resolved_only" value="true" {{ 'checked' if filters.resolved_only else '' }}>
+        <span>Resolved only</span>
+    </label>
+    <button type="submit" class="sk-btn sk-btn-outline">Filter</button>
+    <a role="button" href="/admin/help-conversations" class="sk-btn sk-btn-outline">Clear</a>
+</form>
+
+{% if conversations %}
+<table class="sk-admin-table">
+    <thead>
+        <tr>
+            <th>User</th>
+            <th>Guild</th>
+            <th>Type</th>
+            <th>Question</th>
+            <th>Tokens</th>
+            <th>Response time</th>
+            <th>Started</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for conversation in conversations %}
+        <tr>
+            <td>
+                <strong>{{ conversation.user_username }}</strong>
+                <br><small class="sk-text-muted">{{ conversation.user_id }}</small>
+            </td>
+            <td><small class="sk-text-muted">{{ conversation.guild_id }}</small></td>
+            <td>
+                {% if conversation.interaction_type == 'slash_command' %}
+                <span class="sk-pill">Slash Command</span>
+                {% elif conversation.interaction_type == 'mention' %}
+                <span class="sk-pill sk-pill-published">Mention</span>
+                {% else %}
+                <span class="sk-pill">{{ conversation.interaction_type }}</span>
+                {% endif %}
+            </td>
+            <td>
+                <div style="max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                    {{ conversation.user_question }}
+                </div>
+            </td>
+            <td>{{ conversation.tokens_used }}</td>
+            <td>
+                {% if conversation.response_time_ms %}
+                <small class="sk-text-muted">{{ conversation.response_time_ms }}ms</small>
+                {% else %}
+                <small class="sk-text-muted">&mdash;</small>
+                {% endif %}
+            </td>
+            <td><small class="sk-text-muted">{{ conversation.started_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+            <td>
+                <a role="button" href="/admin/help-conversations/{{ conversation.id }}" class="sk-btn sk-btn-outline sk-btn-small">
+                    View
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+{% if total_pages > 1 %}
+{% set qs = '&guild_id=' ~ (filters.guild_id or '') ~ '&user_id=' ~ (filters.user_id or '') ~ '&interaction_type=' ~ (filters.interaction_type or '') ~ '&search=' ~ (filters.search or '') ~ ('&resolved_only=true' if filters.resolved_only else '') %}
+<nav style="display:flex; gap:.5rem; justify-content:center; margin-top:1rem;">
+    {% if page > 1 %}
+    <a role="button" href="?page={{ page - 1 }}{{ qs }}" class="sk-btn sk-btn-outline sk-btn-small">&laquo; Prev</a>
+    {% endif %}
+    <span class="sk-text-muted" style="align-self:center;">page {{ page }} / {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a role="button" href="?page={{ page + 1 }}{{ qs }}" class="sk-btn sk-btn-outline sk-btn-small">Next &raquo;</a>
+    {% endif %}
+</nav>
+{% endif %}
+
+{% else %}
+<p class="sk-no-items">No help conversations match the current filters.</p>
+{% endif %}
+{% endblock %}

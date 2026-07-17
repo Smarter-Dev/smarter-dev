@@ -395,6 +395,12 @@ SKRIFT_ADMIN_PAGES: tuple[AdminPageCheck, ...] = (
     AdminPageCheck("admin-quests", "/admin/quests"),
     AdminPageCheck("admin-quests-create", "/admin/quests/create"),
     AdminPageCheck("admin-chat-conversations", "/admin/chat-conversations"),
+    AdminPageCheck("admin-help-conversations", "/admin/help-conversations"),
+    AdminPageCheck(
+        "admin-help-conversation-detail",
+        f"/admin/help-conversations/{config.HELP_CONVERSATION_ID}"),
+    AdminPageCheck("admin-help-conversation-cleanup",
+                   "/admin/help-conversations/cleanup"),
     AdminPageCheck("admin-blogging-topics", "/admin/blogging-agent/topics"),
     AdminPageCheck("admin-blogging-runs", "/admin/blogging-agent/runs"),
 )
