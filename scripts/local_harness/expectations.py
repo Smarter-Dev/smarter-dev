@@ -340,6 +340,7 @@ SKRIFT_ADMIN_PAGES: tuple[AdminPageCheck, ...] = (
     AdminPageCheck("admin-bot", "/admin/bot"),
     AdminPageCheck("admin-bot-guilds", "/admin/bot/guilds"),
     AdminPageCheck("admin-bot-guild-detail", f"/admin/bot/guilds/{_G}"),
+    AdminPageCheck("admin-bot-bytes-config", f"/admin/bot/guilds/{_G}/bytes"),
     AdminPageCheck("admin-bot-moderation", f"/admin/bot/moderation/{_G}"),
     AdminPageCheck("admin-bot-mod-actions", f"/admin/bot/mod-actions/{_G}"),
     AdminPageCheck("admin-handlers", "/admin/handlers"),
