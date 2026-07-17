@@ -1,0 +1,86 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Attachment Filter Config - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Attachment Filter Configuration</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Guild</div>
+            <div class="sk-panel-body">
+                <div style="display:flex; align-items:center; gap:1rem;">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" style="width:48px; height:48px; border-radius:50%;">
+                    {% endif %}
+                    <div>
+                        <strong>{{ guild.name }}</strong>
+                        <div class="sk-text-muted"><code>{{ guild.id }}</code></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <form method="post" action="/admin/bot/guilds/{{ guild.id }}/attachment-filter">
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Filter Status</div>
+                <div class="sk-panel-body">
+                    <p class="sk-text-muted">Three-tier filtering: ignored extensions are allowed, warn extensions trigger a warning only, all other extensions are deleted with a warning.</p>
+                    <label>
+                        <input type="checkbox" name="is_active" {% if config.is_active %}checked{% endif %}>
+                        Enable attachment filtering
+                    </label>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Ignored Extensions</div>
+                <div class="sk-panel-body">
+                    <label for="ignored_extensions">Extensions (one per line or comma-separated)</label>
+                    <textarea id="ignored_extensions" name="ignored_extensions" rows="6" placeholder=".png&#10;.jpg&#10;.pdf">{{ config.ignored_extensions | join('\n') if config.ignored_extensions else '' }}</textarea>
+                    <small class="sk-text-muted">Completely allowed, no action taken.</small>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Warn Extensions</div>
+                <div class="sk-panel-body">
+                    <label for="warn_extensions">Extensions (one per line or comma-separated)</label>
+                    <textarea id="warn_extensions" name="warn_extensions" rows="6" placeholder=".zip&#10;.rar&#10;.docx">{{ config.warn_extensions | join('\n') if config.warn_extensions else '' }}</textarea>
+                    <small class="sk-text-muted">A warning is sent, but the message is not deleted.</small>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Custom Messages</div>
+                <div class="sk-panel-body">
+                    <label for="warn_message">Warn Message</label>
+                    <textarea id="warn_message" name="warn_message" rows="2" placeholder="Leave empty for default message">{{ config.warn_message or '' }}</textarea>
+                    <small class="sk-text-muted">Supports {user}, {extension}, {filename} placeholders.</small>
+
+                    <label for="delete_message" style="margin-top:1rem; display:block;">Delete Message</label>
+                    <textarea id="delete_message" name="delete_message" rows="2" placeholder="Leave empty for default message">{{ config.delete_message or '' }}</textarea>
+                    <small class="sk-text-muted">Supports {user}, {extension}, {filename} placeholders.</small>
+                </div>
+            </div>
+
+            <div style="margin-top:1rem;">
+                <button type="submit" class="sk-btn">Save Configuration</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
