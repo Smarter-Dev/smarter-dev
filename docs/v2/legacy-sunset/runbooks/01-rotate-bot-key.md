@@ -101,8 +101,10 @@ something still holds the old `sk-` key — investigate before proceeding.
 This is a code change, deferred until after the rollback window for phase 02's
 deploy has closed:
 
-- Delete the `sk-` fallback branch in `verify_api_key`
-  (`smarter_dev/web/api/dependencies.py`, marked `LEGACY-FALLBACK`).
+- ~~Delete the `sk-` fallback branch in `verify_api_key`~~ **DONE** — the
+  phase 04 switchover deleted `smarter_dev/web/api/` outright; the native
+  `/api` accepts only Skrift `sk_` keys, so the bot must already be rotated
+  (steps 1–6) before that build deploys.
 - Delete the legacy shape in `smarter_dev/web/security.py`
   `validate_api_key_format` (marked `LEGACY-FALLBACK`) and the legacy `sk-`
   branch/`_LEGACY_KEY_PREFIX` handling in

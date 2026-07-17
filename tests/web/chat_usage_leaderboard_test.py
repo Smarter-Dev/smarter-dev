@@ -6,7 +6,7 @@ from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 
-from smarter_dev.web.api.routers.chat_conversations import (
+from smarter_dev.web.api_native.chat_conversations import (
     channel_usage_leaderboard,
     guild_total_tokens,
 )

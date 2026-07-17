@@ -19,7 +19,7 @@ from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import TestClient, create_test_client
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from smarter_dev.web.api.schemas import SquadCostInfo
+from smarter_dev.web.api_native.schemas import SquadCostInfo
 from smarter_dev.web.api_native import advent_of_code as advent_of_code_module
 from smarter_dev.web.api_native import bytes as bytes_module
 from smarter_dev.web.api_native import challenges as challenges_module

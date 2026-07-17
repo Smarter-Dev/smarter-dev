@@ -17,13 +17,6 @@ via ``get_skrift_db_session``.
 
 Auth parity: the legacy endpoint required only a valid key (no scope gate), so
 this port takes the base :data:`BOT_API_GUARDS` (``Permission("bot-api")``).
-
-NOT registered in ``app.yaml`` yet — the FastAPI mount still owns ``/api``. This
-module exists for isolated parity tests until the atomic switchover.
-
-Rate-limiting parity is deferred to the switchover commit (see the plan's
-"Rate-limiting parity" section); the FastAPI mount still enforces those windows
-in production until switchover.
 """
 
 from __future__ import annotations
@@ -35,8 +28,9 @@ from litestar.status_codes import HTTP_200_OK
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skrift.auth.guards import APIKeyOnly, Permission, auth_guard
+from skrift.auth.guards import APIKeyOnly, Permission
 
+from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.member_activity import record_activity
 
@@ -48,7 +42,7 @@ BOT_API_PERMISSION = "bot-api"
 # ``auth_guard`` inspects ``route_handler.guards`` to find the ``APIKeyOnly``
 # marker — controller-level guards do not populate that attribute. See the bytes
 # controller and docs/v2/legacy-sunset/04-api-rewrite.md ("Auth model").
-BOT_API_GUARDS = [auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
+BOT_API_GUARDS = [bot_api_auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
 
 
 class ActivityEvent(BaseModel):

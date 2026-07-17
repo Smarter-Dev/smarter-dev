@@ -27,20 +27,22 @@ headers answer **401** from ``auth_guard`` where ``HTTPBearer(auto_error=True)``
 answered 403. Legacy ``sk-`` keys are rejected (Skrift's guard only accepts
 ``sk_``), matching the harness ``auth-legacy-key-401`` check.
 
-NOT registered in ``app.yaml`` yet — the FastAPI mount still owns ``/api``. This
-module exists for isolated parity tests until the atomic switchover.
-
-Rate-limiting parity is deferred to the switchover commit (see the plan's
-"Rate-limiting parity" section); the FastAPI mount still enforces those windows
-in production until switchover.
+Failed-auth audit parity: :func:`bot_api_auth_guard` wraps Skrift's
+``auth_guard`` and records rejected requests in ``security_logs``, replacing
+the legacy ``verify_api_key`` hookup (see the guard's docstring for what was
+intentionally dropped).
 """
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
 from litestar import Controller, Request, get, post
+from litestar.connection import ASGIConnection
+from litestar.exceptions import NotAuthorizedException
+from litestar.handlers import BaseRouteHandler
 from litestar.status_codes import HTTP_200_OK
 
 from skrift.auth.guards import APIKeyOnly, Permission, auth_guard
@@ -49,7 +51,7 @@ from skrift.lib.client_ip import get_client_ip
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_skrift_db_session_context
-from smarter_dev.web.api.schemas import HealthResponse, TokenResponse
+from smarter_dev.web.api_native.schemas import HealthResponse, TokenResponse
 from smarter_dev.web.api_native.errors import (
     BOT_API_EXCEPTION_HANDLERS,
     BotApiException,
@@ -60,11 +62,51 @@ from smarter_dev.web.api_native.errors import (
 # role and the phase-01 key-mint runbook).
 BOT_API_PERMISSION = "bot-api"
 
+
+async def bot_api_auth_guard(
+    connection: ASGIConnection, route_handler: BaseRouteHandler
+) -> None:
+    """Skrift ``auth_guard`` plus the legacy failed-auth security log.
+
+    The legacy FastAPI ``verify_api_key`` recorded every failed authentication
+    in the ``security_logs`` table via
+    ``security_logger.log_authentication_failed``. Skrift's guard rejects
+    silently, so this wrapper ports that hookup: on ``NotAuthorizedException``
+    it writes the failure row (own short-lived session — never the request's)
+    and re-raises unchanged. Success-path per-request usage logging
+    (``log_api_key_used``) is intentionally dropped: its only consumer was the
+    legacy admin stats over the retired legacy key table, and the rate limiter
+    keeps its own ``api_request`` rows for the windows it counts.
+    """
+    from smarter_dev.web.security_logger import get_security_logger
+
+    try:
+        await auth_guard(connection, route_handler)
+    except NotAuthorizedException as auth_error:
+        authorization_header = connection.headers.get("authorization", "")
+        token = ""
+        if authorization_header.startswith("Bearer "):
+            token = authorization_header[7:].strip()
+        try:
+            await get_security_logger().log_authentication_failed(
+                session=None,  # Separate session for reliability
+                failed_key_prefix=token[:10],
+                request=Request(connection.scope),
+                reason=str(auth_error.detail),
+            )
+        except Exception as log_error:
+            # Never let audit logging mask the 401 itself.
+            logging.getLogger(__name__).warning(
+                "Failed to log bot API authentication failure: %s", log_error
+            )
+        raise
+
+
 # Guards are declared PER ROUTE (not only on the controller) because Skrift's
 # ``auth_guard`` inspects ``route_handler.guards`` to find the ``APIKeyOnly``
 # marker — controller-level guards do not populate that attribute. See the bytes
 # controller and docs/v2/legacy-sunset/04-api-rewrite.md ("Auth model").
-BOT_API_GUARDS = [auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
+BOT_API_GUARDS = [bot_api_auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
 
 # Rate-limit view reported for Skrift-native keys. The Skrift api_keys table
 # carries no per-window limits, so key introspection reports the same fixed
@@ -161,6 +203,7 @@ class AuthController(Controller):
 
 __all__ = [
     "ApiHealthController",
+    "bot_api_auth_guard",
     "AuthController",
     "BOT_API_GUARDS",
     "BotApiException",

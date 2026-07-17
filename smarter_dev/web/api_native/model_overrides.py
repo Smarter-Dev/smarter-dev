@@ -10,9 +10,6 @@ external caller) needs zero changes:
 - ``PUT    /api/guilds/{guild_id}/channels/{channel_id}/model-override`` → upsert, 200.
 - ``DELETE /api/guilds/{guild_id}/channels/{channel_id}/model-override`` → 204 (idempotent).
 
-NOT registered in ``app.yaml`` yet — the FastAPI mount still owns ``/api``. This
-module exists for isolated parity tests until the atomic switchover.
-
 Error-shape parity: the legacy GET answered a missing override with
 ``create_not_found_error("Model override", channel_id)`` — a nested
 ``{"detail": {ErrorResponse}}`` body with ``request_id=None`` (the router passed
@@ -21,10 +18,6 @@ no request). :func:`errors.nested_not_found_error` reproduces that byte-for-byte
 Status-code parity note: FastAPI declared the DELETE with ``204`` and the
 GET/PUT default to 200; the upsert commits AFTER serializing the row (mirroring
 the legacy ordering) to avoid touching the Skrift-injected session post-commit.
-
-Rate-limiting parity is deferred to the switchover commit (see the plan's
-"Rate-limiting parity" section); the FastAPI mount still enforces those windows
-in production until switchover.
 """
 
 from __future__ import annotations
@@ -33,12 +26,13 @@ from litestar import Controller, delete, get, put
 from litestar.status_codes import HTTP_200_OK, HTTP_204_NO_CONTENT
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skrift.auth.guards import APIKeyOnly, Permission, auth_guard
+from skrift.auth.guards import APIKeyOnly, Permission
 
-from smarter_dev.web.api.schemas import (
+from smarter_dev.web.api_native.schemas import (
     ChannelModelOverrideRead,
     ChannelModelOverrideWrite,
 )
+from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import (
     BOT_API_EXCEPTION_HANDLERS,
     nested_not_found_error,
@@ -57,7 +51,7 @@ BOT_API_PERMISSION = "bot-api"
 # ``auth_guard`` inspects ``route_handler.guards`` to find the ``APIKeyOnly``
 # marker — controller-level guards do not populate that attribute. See the bytes
 # controller and docs/v2/legacy-sunset/04-api-rewrite.md ("Auth model").
-BOT_API_GUARDS = [auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
+BOT_API_GUARDS = [bot_api_auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
 
 
 class ChannelModelOverrideController(Controller):

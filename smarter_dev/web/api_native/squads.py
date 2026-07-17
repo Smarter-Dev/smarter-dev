@@ -6,9 +6,6 @@ the FastAPI implementation so ``smarter_dev/bot/services/squads_service.py`` (an
 any external caller) needs zero changes. See docs/v2/legacy-sunset/04-api-rewrite.md
 (unit U3 — the trailing-slash canary).
 
-NOT registered in ``app.yaml`` yet — the FastAPI mount still owns ``/api``. This
-module exists for isolated parity tests until the atomic switchover.
-
 Error-shape parity notes:
 - ``squads.py`` funnels every ``crud`` failure through the *secure* plain-body
   helpers (``security_utils.create_*``) — ``{"detail": "<string>"}`` — so the
@@ -23,10 +20,6 @@ Error-shape parity notes:
   ``HTTPException`` subclasses ``Exception``, the intended 404 for a missing
   event is swallowed into that 500 — a faithful reproduction is documented in
   :meth:`SquadSaleEventController.get_sale_event`.
-
-Rate-limiting parity is deferred to the switchover commit (see the bytes module
-and the plan's "Rate-limiting parity" section); the FastAPI mount still enforces
-those windows in production until switchover.
 """
 
 from __future__ import annotations
@@ -41,9 +34,9 @@ from litestar.status_codes import HTTP_200_OK
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skrift.auth.guards import APIKeyOnly, Permission, auth_guard
+from skrift.auth.guards import APIKeyOnly, Permission
 
-from smarter_dev.web.api.schemas import (
+from smarter_dev.web.api_native.schemas import (
     ActiveSaleEventResponse,
     SquadCostInfo,
     SquadCreate,
@@ -57,6 +50,7 @@ from smarter_dev.web.api.schemas import (
     SuccessResponse,
     UserSquadResponse,
 )
+from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import (
     BOT_API_EXCEPTION_HANDLERS,
     plain_error,
@@ -82,7 +76,7 @@ BOT_API_PERMISSION = "bot-api"
 # ``auth_guard`` inspects ``route_handler.guards`` to find the ``APIKeyOnly``
 # marker — controller-level guards do not populate that attribute. See the bytes
 # controller and docs/v2/legacy-sunset/04-api-rewrite.md ("Auth model").
-BOT_API_GUARDS = [auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
+BOT_API_GUARDS = [bot_api_auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
 
 
 async def provide_validated_guild_id(guild_id: str) -> str:

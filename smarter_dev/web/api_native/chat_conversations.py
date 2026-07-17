@@ -30,13 +30,6 @@ Error-shape parity: the legacy 404 (unknown engagement) came from a bare
 :func:`errors.plain_error`. A malformed ``engagement_id`` path segment answers
 422 (the FastAPI ``UUID`` path param validated before the handler ran),
 reproduced via :func:`_parse_uuid_path`.
-
-NOT registered in ``app.yaml`` yet — the FastAPI mount still owns ``/api``. This
-module exists for isolated parity tests until the atomic switchover.
-
-Rate-limiting parity is deferred to the switchover commit (see the plan's
-"Rate-limiting parity" section); the FastAPI mount still enforces those windows
-in production until switchover.
 """
 
 from __future__ import annotations
@@ -52,9 +45,9 @@ from litestar.status_codes import HTTP_200_OK, HTTP_201_CREATED
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skrift.auth.guards import APIKeyOnly, Permission, auth_guard
+from skrift.auth.guards import APIKeyOnly, Permission
 
-from smarter_dev.web.api.schemas import (
+from smarter_dev.web.api_native.schemas import (
     ChatAgentEngagementEnd,
     ChatAgentEngagementStart,
     ChatAgentEngagementStartResponse,
@@ -63,6 +56,7 @@ from smarter_dev.web.api.schemas import (
     ChatUsageLeaderboardEntry,
     ChatUsageLeaderboardResponse,
 )
+from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import (
     BOT_API_EXCEPTION_HANDLERS,
     plain_error,
@@ -86,8 +80,8 @@ BOT_API_ADMIN_PERMISSION = "bot-api-admin"
 # ``auth_guard`` inspects ``route_handler.guards`` to find the ``APIKeyOnly``
 # marker — controller-level guards do not populate that attribute. See the bytes
 # controller and docs/v2/legacy-sunset/04-api-rewrite.md ("Auth model").
-BOT_API_GUARDS = [auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
-BOT_API_ADMIN_GUARDS = [auth_guard, APIKeyOnly(), Permission(BOT_API_ADMIN_PERMISSION)]
+BOT_API_GUARDS = [bot_api_auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
+BOT_API_ADMIN_GUARDS = [bot_api_auth_guard, APIKeyOnly(), Permission(BOT_API_ADMIN_PERMISSION)]
 
 
 def _parse_uuid_path(value: str, field_name: str) -> UUID:

@@ -29,6 +29,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from scripts.local_harness import config
+from skrift.auth.services import assign_role_to_user, sync_roles_to_database
 from skrift.db.models.setting import Setting
 from skrift.db.models.user import User
 from skrift.db.services import api_key_service
@@ -38,6 +39,8 @@ from skrift.db.services.setting_service import (
     SITE_THEME_KEY,
 )
 from smarter_dev.shared.date_provider import get_date_provider
+
+import smarter_dev.web.roles  # noqa: F401 — registers the bot-service role for the sync below
 from smarter_dev.web.models import (
     AdventOfCodeConfig,
     AdventOfCodeThread,
@@ -306,8 +309,12 @@ def _main_rows() -> list[object]:
 async def _seed_skrift_bot_api_key(database_url: str) -> None:
     """Seed the Skrift-native ``sk_`` service key the checks authenticate with.
 
-    Mirrors production minting — ``api_key_service.create_api_key`` with a
-    dedicated service-owner user — then re-keys the row to the deterministic
+    Mirrors production minting per runbooks/01-key-rotation.md step 2: the
+    native ``/api`` controllers guard on ``bot-api`` / ``bot-api-admin`` and
+    Skrift intersects a key's scoped permissions with the owning user's
+    actual permissions, so the service-owner user gets the ``bot-service``
+    role (synced here — the app has not booted yet) and the key is minted with
+    both permissions scoped. The row is then re-keyed to the deterministic
     ``config.SKRIFT_BOT_API_KEY``: the random raw key ``create_api_key``
     returns would be lost across the seed/checks process boundary, so the row
     must hash a plaintext both processes can derive.
@@ -325,12 +332,20 @@ async def _seed_skrift_bot_api_key(database_url: str) -> None:
         session.add(service_user)
         await session.commit()
 
+        await sync_roles_to_database(session)
+        role_assigned = await assign_role_to_user(
+            session, service_user.id, "bot-service"
+        )
+        if not role_assigned:
+            raise RuntimeError("bot-service role missing after role sync")
+        await session.commit()
+
         skrift_api_key, _raw_key, _raw_refresh = await api_key_service.create_api_key(
             session,
             service_user.id,
             config.BOT_SERVICE_NAME,
             description="Known-plaintext Skrift key for local smoke checks",
-            scoped_permissions=["bot:read", "bot:write"],
+            scoped_permissions=["bot-api", "bot-api-admin"],
             principal_type="service",
             service_name=config.BOT_SERVICE_NAME,
         )
