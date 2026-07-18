@@ -52,7 +52,11 @@ otherwise ``CapExceeded("role_not_allowed")`` before any budget/window/REST; the
 spends the role_changes budget + guild role-change window before the REST call; a
 gone member yields ``False`` without erroring the fire), plus ``ban_user(user_id,
 reason=None, delete_message_seconds=0)`` which can purge the banned member's
-recent messages, plus ``guild_memory_get`` /
+recent messages, plus ``send_dm(user_id, content)`` -> bool (DM a user — the most
+abuse-sensitive emit, so its own cap family: spends the shared per-fire message
+pool, a per-recipient 30/hour window, and a global 10/min window before the REST
+call; returns ``False`` on closed DMs / no mutual guild / unknown user without
+erroring the fire, so a relay script branches to ❌), plus ``guild_memory_get`` /
 ``guild_memory_set`` / ``guild_memory_all`` / ``guild_memory_delete`` — a
 guild-scoped key/value store SHARED by every admin handler in the guild (for
 state that must cross handler rows, e.g. a DM-relay bind target), bounded by the
@@ -87,7 +91,10 @@ import pydantic_monty as monty
 from smarter_dev.web.handler_budget import CapExceeded, HandlerBudget
 from smarter_dev.web.handler_caps import (
     CHANNEL_MESSAGES_PER_MIN,
+    DM_USER_WINDOW_SECONDS,
+    DMS_PER_USER_PER_HOUR,
     GLOBAL_AGENT_CALLS_PER_MIN,
+    GLOBAL_DMS_PER_MIN,
     GUILD_ROLE_CHANGES_PER_MIN,
     GUILD_THREAD_OPS_PER_MIN,
     HANDLER_TIMERS_PER_HOUR,
@@ -97,7 +104,9 @@ from smarter_dev.web.handler_caps import (
     WindowedLimiter,
     channel_message_key,
     channel_rename_key,
+    dm_user_key,
     global_agent_key,
+    global_dm_key,
     guild_role_changes_key,
     guild_thread_ops_key,
     handler_timer_arm_key,
@@ -224,6 +233,11 @@ class HandlerExecution:
     # fixed at 60s. Falls back to self.limiter (with a per-call window override) in
     # run_handler_script when the fire job doesn't inject a dedicated one.
     timer_limiter: WindowedLimiter | None = None
+    # Separate 3600s-window limiter for send_dm's per-recipient HOUR cap;
+    # self.limiter is fixed at 60s (which carries the global per-minute DM cap).
+    # Admin-only; standard fires never construct send_dm so this stays unused.
+    # Falls back to self.limiter with a per-call window override when unset.
+    dm_user_limiter: WindowedLimiter | None = None
     # The admin handler's channel scope. Empty means guild-wide; a non-empty
     # scope bounds which channels admin list_threads(channel_id) may read.
     channel_ids: list[str] = field(default_factory=list)
@@ -284,6 +298,7 @@ class HandlerExecution:
                     "timeout_user": self._guard(self._timeout_user),
                     "add_role": self._guard(self._add_role),
                     "remove_role": self._guard(self._remove_role),
+                    "send_dm": self._guard(self._send_dm),
                     "close_thread": self._guard(self._close_thread),
                     "lock_thread": self._guard(self._lock_thread),
                     "reopen_thread": self._guard(self._reopen_thread),
@@ -613,6 +628,37 @@ class HandlerExecution:
                 f"guild hit its {GUILD_ROLE_CHANGES_PER_MIN} role-changes/min cap",
             )
 
+    # -- admin-only DM emit (only present when self.actor is set) --
+
+    async def _send_dm(self, user_id: str, content: str) -> bool:
+        """DM a user; return whether it was delivered.
+
+        The most abuse-sensitive emit, so admin handlers only with its own cap
+        family. Spends the shared per-fire message pool, then two windows before
+        the REST call: a per-recipient HOUR window (``dm_user_limiter``, a 3600s
+        instance) and the global per-minute window (``self.limiter``). The
+        emitter returns ``False`` on 403 (DMs closed / no mutual guild) / 404
+        (unknown user) — an *expected* outcome the script branches to ❌ on, NOT a
+        cap breach and NOT an error. Cap breaches raise ``CapExceeded`` (rails,
+        not branches)."""
+        self.budget.spend_message()
+        dm_limiter = self.dm_user_limiter or self.limiter
+        within_user = await dm_limiter.hit(
+            dm_user_key(str(user_id)), DMS_PER_USER_PER_HOUR, DM_USER_WINDOW_SECONDS
+        )
+        if not within_user:
+            raise CapExceeded(
+                "dm_user_per_hour",
+                f"user hit its {DMS_PER_USER_PER_HOUR} DMs/hour cap",
+            )
+        within_global = await self.limiter.hit(global_dm_key(), GLOBAL_DMS_PER_MIN)
+        if not within_global:
+            raise CapExceeded(
+                "global_dms_per_min",
+                f"system hit its {GLOBAL_DMS_PER_MIN} DMs/min cap",
+            )
+        return bool(await self.emitter.send_dm(str(user_id), str(content)))
+
     async def _add_reaction(self, message_id: str, emoji: str) -> bool:
         # Reactions are emits too — metered against the per-fire emit cap, but
         # not against the per-channel *message* window (they are not messages).
@@ -737,6 +783,7 @@ async def run_handler_script(
     handler_id: str = "",
     timer_scheduler: TimerScheduler = _no_timer,
     timer_limiter: WindowedLimiter | None = None,
+    dm_user_limiter: WindowedLimiter | None = None,
     budget: HandlerBudget | None = None,
     actor: AdminActor | None = None,
     channel_ids: list[str] | None = None,
@@ -772,6 +819,7 @@ async def run_handler_script(
         handler_id=handler_id,
         timer_scheduler=timer_scheduler,
         timer_limiter=timer_limiter or limiter,
+        dm_user_limiter=dm_user_limiter or limiter,
         actor=actor,
         channel_ids=list(channel_ids or []),
         allowed_role_ids=list(allowed_role_ids or []),

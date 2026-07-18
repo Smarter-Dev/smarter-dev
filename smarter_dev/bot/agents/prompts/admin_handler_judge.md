@@ -129,5 +129,19 @@ The five member/thread triggers (`member_join`, `member_leave`, `member_rules_ac
 - No home channel on member events: the four `member_*` triggers have no home channel, so a bare
   `send_message(content)` with no channel_id would fail at runtime. Every send must name a channel.
 
+## Reject unsafe dm_message / send_dm handlers
+`dm_message` (fires when any user DMs the bot) is admin-only, guild-scoped, and has NO home channel
+(like member events — a bare `send_message(content)` fails; every send must name a channel).
+- DM content is FULLY UNTRUSTED and user-controlled at any frequency. `context["content"]` must
+  never gate a moderation action (ban/kick/timeout/delete) without the same anchored parsing you
+  demand of agent replies (startswith/exact, delimited, marked untrusted) — reject a `"X" in content`
+  gate that drives an action. There is no `author_role_ids` on a DM, so a DM handler cannot gate on
+  the sender's roles.
+- `send_dm` targeting: `send_dm(context["author_id"], ...)` on a `dm_message` fire is the intended
+  relay reply and is LOW-RISK. `send_dm` to an id derived from anything else is unsolicited outbound
+  DM — reject unless the handler description explicitly justifies who is DMed and why. Reject any
+  `send_dm` in an unbounded loop or dripping unsolicited messages (the per-user hour and global
+  per-minute caps are runaway rails, not a licence to spam).
+
 Approve only if you can read everything the script does, it stays within the admin limits, gates
 destructive actions on sensible conditions, and does nothing unsafe.

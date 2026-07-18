@@ -56,9 +56,11 @@ from smarter_dev.web.api_native.errors import (
 )
 from smarter_dev.web.handler_caps import (
     ADMIN_FIRES_PER_MIN,
+    DM_FIRES_PER_AUTHOR_PER_MIN,
     GUILD_MEMBER_EVENTS_PER_MIN,
     MAX_HANDLERS_PER_CHANNEL,
     WindowedLimiter,
+    dm_trigger_author_key,
     fires_per_min_for_trigger,
     guild_member_events_key,
     handler_fire_key,
@@ -85,14 +87,27 @@ from smarter_dev.web.models import (
 
 logger = logging.getLogger(__name__)
 
+# Admin-only triggers that key off a channel rather than being guild-scoped:
+# thread_create (dispatched with its parent channel) and dm_message (its own
+# per-author window, NOT the member raid gate). Excluded from MEMBER_EVENT_TRIGGERS.
+_NON_MEMBER_ADMIN_TRIGGERS = ("thread_create", "dm_message")
+
 # The guild-shaped member lifecycle triggers: dispatched with ``channel_id=""``
 # (a member event has no channel), matched admin-only by guild + trigger, and
-# gated by the per-guild ``GUILD_MEMBER_EVENTS_PER_MIN`` raid window. This is
-# ``ADMIN_ONLY_TRIGGER_TYPES`` minus ``thread_create`` — the odd one out, which
-# keys off a parent channel and is scope-matched like a normal channel trigger.
+# gated by the per-guild ``GUILD_MEMBER_EVENTS_PER_MIN`` raid window. dm_message is
+# deliberately NOT here — it is guild-scoped in dispatch but has its OWN
+# per-(handler, author) window (see GUILD_SCOPED_ADMIN_TRIGGERS), not the raid gate.
 MEMBER_EVENT_TRIGGERS = tuple(
-    trigger for trigger in ADMIN_ONLY_TRIGGER_TYPES if trigger != "thread_create"
+    trigger
+    for trigger in ADMIN_ONLY_TRIGGER_TYPES
+    if trigger not in _NON_MEMBER_ADMIN_TRIGGERS
 )
+
+# Admin triggers dispatched with NO home channel (``channel_id=""``), so the
+# admin scope check is bypassed and the handler surfaces as a (guild_id, trigger)
+# guild-trigger in active-channels: the member_* events plus dm_message (a DM has
+# no guild channel to scope against).
+GUILD_SCOPED_ADMIN_TRIGGERS = MEMBER_EVENT_TRIGGERS + ("dm_message",)
 
 # Permission granted to the bot's Skrift service key (see roles.py `bot-service`
 # role and the phase-01 key-mint runbook).
@@ -367,6 +382,7 @@ class HandlerController(Controller):
         dispatched: list[str] = []
 
         is_member_event = data.trigger_type in MEMBER_EVENT_TRIGGERS
+        is_guild_scoped = data.trigger_type in GUILD_SCOPED_ADMIN_TRIGGERS
         is_admin_only = data.trigger_type in ADMIN_ONLY_TRIGGER_TYPES
 
         # Member lifecycle events are gated by a per-guild raid window BEFORE any
@@ -447,9 +463,19 @@ class HandlerController(Controller):
                 "include_bot_messages"
             ):
                 continue
-            if not is_member_event:
+            if not is_guild_scoped:
                 scope = admin_handler.channel_ids or []
                 if scope and data.channel_id not in scope:
+                    continue
+            # dm_message: a per-(handler, author) minute window so a user spamming
+            # DMs burns their OWN window (a declined dispatch) rather than the
+            # handler's global fire budget. Enforced before the fire cap below,
+            # which still applies on top. A DM always carries author_id.
+            if data.trigger_type == "dm_message" and author_id:
+                if not await limiter.hit(
+                    dm_trigger_author_key(str(admin_handler.id), str(author_id)),
+                    DM_FIRES_PER_AUTHOR_PER_MIN,
+                ):
                     continue
             if not await limiter.hit(
                 handler_fire_key(str(admin_handler.id)), ADMIN_FIRES_PER_MIN
@@ -507,11 +533,13 @@ class HandlerController(Controller):
         ).all()
         guild_triggers: list[list[str]] = []
         for guild_id, trigger, channel_ids in admin_rows:
-            # member_* handlers always surface as (guild_id, trigger) — their
-            # dispatch guard is per-guild regardless of channel_ids. Everything
-            # else (message/reaction/thread_create) follows the scoped/guild-wide
-            # split: listed channels become channel entries, empty scope = guild.
-            if trigger in MEMBER_EVENT_TRIGGERS:
+            # Guild-scoped admin triggers (member_* and dm_message) always surface
+            # as (guild_id, trigger) — their dispatch guard is per-guild regardless
+            # of channel_ids (a member event / DM has no channel to scope against).
+            # Everything else (message/reaction/thread_create) follows the
+            # scoped/guild-wide split: listed channels become channel entries,
+            # empty scope = guild.
+            if trigger in GUILD_SCOPED_ADMIN_TRIGGERS:
                 guild_triggers.append([guild_id, trigger])
             elif channel_ids:
                 channels.extend([channel_id, trigger] for channel_id in channel_ids)

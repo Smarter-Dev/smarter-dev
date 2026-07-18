@@ -295,6 +295,13 @@ async def test_judge_receives_trigger_cadence():
     assert "every 5 minutes" in seen["ctx"]
 
 
+def test_describe_trigger_dm_message():
+    line = describe_trigger("dm_message", {})
+    assert "EVERY DM" in line
+    assert "user-controlled" in line
+    assert "untrusted" in line
+
+
 def test_describe_trigger_cadence_phrasing():
     assert "EVERY user message" in describe_trigger("message", {})
     assert "EVERY user reaction" in describe_trigger("reaction", {})

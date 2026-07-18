@@ -748,3 +748,64 @@ async def test_handler_run_records_timers_scheduled(monkeypatch, test_engine):
     runs = await _load_runs(test_engine, handler_id)
     assert len(runs) == 1
     assert runs[0].timers_scheduled == 1
+
+
+async def test_dm_message_admin_fire_skips_error_notice(monkeypatch):
+    # A dm_message fire has NO home channel (channel_id="") so a broken handler's
+    # error notice is never posted — critically, never into the user's DM. The
+    # fire's channel_id must be "" and NOT the dm_channel_id.
+    record = SimpleNamespace(
+        enabled=True,
+        script="pass",
+        guild_id="G5",
+        trigger_type="dm_message",
+        channel_ids=[],
+        settings={},
+        memory={},
+    )
+    notify_channel_ids: list = []
+
+    async def fake_run(script, context, **kwargs):
+        return HandlerResult(
+            outcome="error", usage=dict(_USAGE), duration_ms=1, error="boom"
+        )
+
+    async def fake_agent(*args, **kwargs):
+        return ""
+
+    async def fake_notify(**kwargs):
+        notify_channel_ids.append(kwargs["channel_id"])
+        return False
+
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+    monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
+    monkeypatch.setattr(admin_handlers_jobs, "notify_handler_error", fake_notify)
+    monkeypatch.setattr(
+        admin_handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+    monkeypatch.setattr(
+        admin_handlers_jobs,
+        "get_db_session_context",
+        lambda: _FakeSessionCtx(record),
+    )
+    monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: object())
+    monkeypatch.setattr(
+        admin_handlers_jobs, "WindowedLimiter", lambda **kwargs: object()
+    )
+
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(
+            admin_handler_id=str(uuid4()),
+            channel_id="",
+            trigger_context={
+                "trigger_type": "dm_message",
+                "author_id": "U9",
+                "dm_channel_id": "DM123",
+            },
+        )
+    )
+    # notify_handler_error was called with the EMPTY channel (which short-circuits
+    # to a no-op), never with the DM channel id.
+    assert notify_channel_ids == [""]

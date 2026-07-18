@@ -24,6 +24,7 @@ from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.handler_budget import admin_budget
 from smarter_dev.web.handler_caps import (
+    DM_USER_WINDOW_SECONDS,
     ERROR_NOTICE_WINDOW_SECONDS,
     TIMER_ARMING_WINDOW_SECONDS,
     WindowedLimiter,
@@ -96,6 +97,12 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
     timer_limiter = WindowedLimiter(
         redis=redis, window_seconds=TIMER_ARMING_WINDOW_SECONDS
     )
+    # send_dm's per-recipient cap is a 3600s window; the shared 60s limiter above
+    # carries only its global per-minute cap (same separate-instance pattern as
+    # the timer window).
+    dm_user_limiter = WindowedLimiter(
+        redis=redis, window_seconds=DM_USER_WINDOW_SECONDS
+    )
 
     async def schedule_timer(fire_at: datetime, refire_context: dict) -> None:
         await worker_submit(
@@ -121,6 +128,7 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
         handler_id=str(handler_id),
         timer_scheduler=schedule_timer,
         timer_limiter=timer_limiter,
+        dm_user_limiter=dm_user_limiter,
         budget=budget,
         actor=actor,
         memory=memory,

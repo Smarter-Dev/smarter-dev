@@ -58,14 +58,23 @@ def test_standard_trigger_vocabulary_unchanged():
     assert HANDLER_EVENT_TRIGGERS == ("message", "reaction")
 
 
-def test_admin_only_trigger_types_are_the_five_new_ones():
+def test_admin_only_trigger_types_include_member_thread_and_dm():
     assert ADMIN_ONLY_TRIGGER_TYPES == (
         "member_join",
         "member_leave",
         "member_rules_accepted",
         "member_role_change",
         "thread_create",
+        "dm_message",
     )
+
+
+def test_dm_message_is_admin_only_not_standard():
+    # A member-authored channel handler must never see other users' DMs, so
+    # dm_message is admin-only and stays out of the standard vocabulary (§E1).
+    assert "dm_message" in ADMIN_HANDLER_TRIGGER_TYPES
+    assert "dm_message" not in HANDLER_TRIGGER_TYPES
+    assert "dm_message" in ADMIN_HANDLER_EVENT_TRIGGERS
 
 
 def test_admin_trigger_tuple_is_the_union_of_standard_and_new():

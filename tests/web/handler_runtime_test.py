@@ -74,6 +74,15 @@ class _FakeEmitter:
         self.parent_calls.append(thread_id)
         return self.parent_by_thread.get(thread_id)
 
+    # (user_id, content) for each send_dm; ``dm_result`` is what the emitter
+    # returns (a message id str on success, or False on a closed door).
+    dm_sends: list = field(default_factory=list)
+    dm_result: object = "dm-msg-id"
+
+    async def send_dm(self, user_id: str, content: str):
+        self.dm_sends.append((user_id, content))
+        return self.dm_result
+
 
 @dataclass
 class _StubLimiter:
@@ -128,11 +137,13 @@ class _FakeActor:
 async def _run(
     script, *, budget=None, emitter=None, limiter=None, agent_runner=None,
     actor=None, channel_ids=None, allowed_role_ids=None,
-    timer_scheduler=None, timer_limiter=None, handler_id=None,
+    timer_scheduler=None, timer_limiter=None, dm_user_limiter=None, handler_id=None,
 ):
     emitter = emitter or _FakeEmitter()
     limiter = limiter or _StubLimiter()
     kwargs = {}
+    if dm_user_limiter is not None:
+        kwargs["dm_user_limiter"] = dm_user_limiter
     if agent_runner is not None:
         kwargs["agent_runner"] = agent_runner
     if actor is not None:
@@ -1111,3 +1122,116 @@ async def test_schedule_timer_available_to_admin_tier():
     )
     assert result.outcome == "ok", result.error
     assert len(recorder.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# send_dm — admin-only DM emit with its own cap family (E2)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _CountingLimiter:
+    """Enforces whatever limit is passed to hit(), counting per key."""
+
+    counts: dict = field(default_factory=dict)
+    calls: list = field(default_factory=list)
+
+    async def hit(self, key, limit, window_seconds=None):
+        self.calls.append((key, limit, window_seconds))
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return self.counts[key] <= limit
+
+
+async def test_send_dm_absent_without_actor():
+    # send_dm is admin-only — a standard fire never gets it.
+    script = 'await send_dm("U9", "hi")\n'
+    result, _, _ = await _run(script)
+    assert result.outcome == "error"
+    assert "send_dm" in result.error
+
+
+async def test_send_dm_present_for_admin():
+    script = 'ok = await send_dm("U9", "hello")\n'
+    emitter = _FakeEmitter()
+    result, emitter, _ = await _run(
+        script, budget=admin_budget(), actor=_FakeActor(), emitter=emitter
+    )
+    assert result.outcome == "ok"
+    assert emitter.dm_sends == [("U9", "hello")]
+
+
+async def test_send_dm_spends_message_pool_and_hits_both_windows():
+    script = 'await send_dm("U9", "hi")\n'
+    limiter = _StubLimiter()          # the global per-minute window
+    dm_user_limiter = _StubLimiter()  # the per-recipient hour window
+    result, _, _ = await _run(
+        script, budget=admin_budget(), actor=_FakeActor(),
+        limiter=limiter, dm_user_limiter=dm_user_limiter,
+    )
+    assert result.outcome == "ok"
+    # One message-pool unit spent.
+    assert result.usage["messages_sent"] == 1
+    # The per-recipient HOUR window (3600s) is hit on the dedicated limiter.
+    assert ("hcap:dmuser:U9", 30, 3600) in dm_user_limiter.calls
+    # The global per-minute window rides the shared 60s limiter (no override).
+    assert ("hcap:dm:global", 10, None) in limiter.calls
+
+
+async def test_send_dm_30_pass_31st_raises_per_user_cap():
+    # A realistic staff<->user relay conversation passes; a runaway breaches loud.
+    script = (
+        "async def run():\n"
+        "    for i in range(31):\n"
+        '        await send_dm("U9", "reply")\n'
+        "await run()\n"
+    )
+    emitter = _FakeEmitter()
+    result, emitter, _ = await _run(
+        script,
+        budget=HandlerBudget(max_messages=1000),
+        actor=_FakeActor(),
+        emitter=emitter,
+        limiter=_StubLimiter(),            # global window never trips here
+        dm_user_limiter=_CountingLimiter(),
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "dm_user_per_hour"
+    # The 31st never reached the emitter (window checked before the REST call).
+    assert len(emitter.dm_sends) == 30
+
+
+async def test_send_dm_global_minute_cap_raises():
+    script = (
+        "async def run():\n"
+        "    for i in range(11):\n"
+        '        await send_dm("U9", "drip")\n'
+        "await run()\n"
+    )
+    result, _, _ = await _run(
+        script,
+        budget=HandlerBudget(max_messages=1000),
+        actor=_FakeActor(),
+        limiter=_CountingLimiter(),         # global 10/min window trips at the 11th
+        dm_user_limiter=_StubLimiter(),
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "global_dms_per_min"
+
+
+async def test_send_dm_returns_false_does_not_raise():
+    # A closed door (emitter False) is an expected value the script branches on,
+    # NOT a cap breach or an error — the fire ends ok.
+    script = (
+        'delivered = await send_dm("U9", "hi")\n'
+        "if delivered:\n"
+        '    await send_message("logged")\n'
+    )
+    emitter = _FakeEmitter()
+    emitter.dm_result = False
+    result, emitter, _ = await _run(
+        script, budget=admin_budget(), actor=_FakeActor(), emitter=emitter
+    )
+    assert result.outcome == "ok"
+    assert result.cap is None
+    assert emitter.dm_sends == [("U9", "hi")]
+    assert emitter.messages == []  # the delivered branch did not run
