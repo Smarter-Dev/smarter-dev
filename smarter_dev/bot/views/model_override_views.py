@@ -8,12 +8,13 @@ initial message select; everything else lives in one follow-up *settings panel*
 response filter go in a modal:
 
 1. ``/chat-bot-settings`` responds (ephemeral) with a message string-select of
-   models (``create_model_select_message``), plus a "server default" sentinel.
+   models (``create_model_select_message``), plus a "server default" sentinel
+   and a Next button so the preselected model can be accepted unchanged.
 2. Picking a model swaps the message for the settings panel
    (``create_settings_panel``): an optional reasoning select (reasoning-capable
    models only), a fallback-model select, and a button row with an auto-respond
-   toggle and a "Budgets & filter…" button. The panel's state (chosen model,
-   reasoning level, auto flag, fallback key) rides in every component's
+   toggle, a "Budgets & filter…" button, and a Save button. The panel's state
+   (chosen model, reasoning level, auto flag, fallback key) rides in every component's
    ``custom_id`` — see :func:`encode_panel_state` / :func:`parse_panel_state` —
    so each select/toggle re-renders the panel with the updated state and no
    server-side session. Picking the server-default sentinel clears the override
@@ -32,10 +33,10 @@ from dataclasses import dataclass
 
 import hikari
 
+from smarter_dev.bot.services.models import ChannelModelOverride
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import models_by_family
 from smarter_dev.shared.model_catalog import parse_reasoning_level
-from smarter_dev.bot.services.models import ChannelModelOverride
 
 # Model-select value that means "remove any override and fall back to the server
 # default model". Kept distinct from every catalog key.
@@ -53,10 +54,12 @@ SENTINEL_NO_FALLBACK = "__no_fallback__"
 # panel prefixes are deliberately short (``cbs_`` = chat-bot-settings) so the
 # encoded state still fits inside Discord's 100-char custom_id limit.
 SELECT_CUSTOM_ID = "model_override_select"
+MODEL_NEXT_CUSTOM_ID_PREFIX = "cbs_model_next"
 REASONING_SELECT_CUSTOM_ID_PREFIX = "cbs_reasoning"
 FALLBACK_SELECT_CUSTOM_ID_PREFIX = "cbs_fallback"
 AUTO_TOGGLE_CUSTOM_ID_PREFIX = "cbs_auto"
 CONTINUE_CUSTOM_ID_PREFIX = "cbs_continue"
+SAVE_CUSTOM_ID_PREFIX = "cbs_save"
 MODAL_CUSTOM_ID_PREFIX = "cbs_modal"
 
 # Prefix for the button the chat engine attaches to a budget-exhausted notice,
@@ -131,7 +134,9 @@ def parse_panel_state(custom_id: str, expected_prefix: str) -> PanelState | None
     )
 
 
-def build_model_options(current_key: str | None) -> list[hikari.impl.SelectOptionBuilder]:
+def build_model_options(
+    current_key: str | None,
+) -> list[hikari.impl.SelectOptionBuilder]:
     """Build the string-select options: the server-default sentinel first, then
     every catalog model grouped by family.
 
@@ -162,8 +167,7 @@ def build_model_options(current_key: str | None) -> list[hikari.impl.SelectOptio
 def create_model_select_message(
     current: ChannelModelOverride | None,
 ) -> list[hikari.impl.MessageActionRowBuilder]:
-    """Build the ephemeral message components: one action row holding the model
-    string-select, pre-selecting the channel's current override if any."""
+    """Build the model select and a button for accepting its current value."""
     current_key = current.model_key if current is not None else None
     action_row = hikari.impl.MessageActionRowBuilder()
     menu = action_row.add_text_menu(
@@ -179,7 +183,13 @@ def create_model_select_message(
             description=option.description,
             is_default=option.is_default,
         )
-    return [action_row]
+    next_row = hikari.impl.MessageActionRowBuilder()
+    next_row.add_interactive_button(
+        hikari.ButtonStyle.PRIMARY,
+        f"{MODEL_NEXT_CUSTOM_ID_PREFIX}:{current_key or SENTINEL_DEFAULT}",
+        label="Next",
+    )
+    return [action_row, next_row]
 
 
 def build_reasoning_options(
@@ -258,9 +268,9 @@ def create_settings_panel(
 
     Holds (in order) an optional reasoning select (reasoning-capable models
     only), a fallback-model select, and a button row with an auto-respond toggle
-    and a "Budgets & filter…" button. The current panel state is encoded into
-    every component's ``custom_id`` so each interaction can re-render the panel
-    without server-side session state.
+    plus "Budgets & filter…" and "Save" buttons. The current panel state is
+    encoded into every component's ``custom_id`` so each interaction can
+    re-render the panel without server-side session state.
     """
     state = encode_panel_state(
         model.key, reasoning_level, auto_respond, fallback_model_key
@@ -311,6 +321,11 @@ def create_settings_panel(
         f"{CONTINUE_CUSTOM_ID_PREFIX}:{state}",
         label="Budgets & filter…",
     )
+    button_row.add_interactive_button(
+        hikari.ButtonStyle.SUCCESS,
+        f"{SAVE_CUSTOM_ID_PREFIX}:{state}",
+        label="Save",
+    )
     rows.append(button_row)
 
     return rows
@@ -337,14 +352,10 @@ def create_settings_modal(
     # Discord rejects a text-input value outside 1-4000 chars, so an empty
     # prefill must be left UNDEFINED (omitted) rather than sent as "".
     daily_prefill = (
-        str(current.daily_token_budget)
-        if current is not None
-        else hikari.UNDEFINED
+        str(current.daily_token_budget) if current is not None else hikari.UNDEFINED
     )
     hourly_prefill = (
-        str(current.hourly_token_budget)
-        if current is not None
-        else hikari.UNDEFINED
+        str(current.hourly_token_budget) if current is not None else hikari.UNDEFINED
     )
     filter_prefill = (
         current.response_filter
