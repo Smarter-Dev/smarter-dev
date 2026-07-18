@@ -9,6 +9,7 @@ import pytest
 from smarter_dev.bot.services.channel_token_budget import (
     DAY_WINDOW_SECONDS,
     HOUR_WINDOW_SECONDS,
+    add_fallback_usage,
     add_usage,
     budget_key,
     current_window_usage,
@@ -181,6 +182,37 @@ async def test_current_window_usage_is_per_channel():
     redis = _FakeRedis()
     await add_usage(redis, "chan-a", 100)
     assert await current_window_usage(redis, "chan-b") == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_fallback_usage_does_not_count_toward_enforced_budget():
+    """Free-fallback spend meters into its own windows, so it never trips the
+    enforced budget — even a huge fallback spend leaves the channel under cap."""
+    redis = _FakeRedis()
+    await add_fallback_usage(redis, "chan", 10_000_000)
+    # Enforced windows are untouched, so the daily/hourly caps are not met.
+    assert await over_budget_reset_epoch(redis, "chan", 500, 500) is None
+    # It lands in the parallel fallback windows, never the enforced ones.
+    assert not any(":hour:" in k or ":day:" in k for k in redis.store)
+    assert [k for k in redis.store if ":hour-fallback:" in k]
+    assert [k for k in redis.store if ":day-fallback:" in k]
+
+
+@pytest.mark.asyncio
+async def test_current_window_usage_sums_enforced_and_fallback_spend():
+    """/bot-usage still reflects every token: enforced plus free-fallback."""
+    redis = _FakeRedis()
+    await add_usage(redis, "chan", 100)
+    await add_fallback_usage(redis, "chan", 40)
+    assert await current_window_usage(redis, "chan") == (140, 140)
+
+
+@pytest.mark.asyncio
+async def test_fallback_usage_zero_or_negative_is_noop():
+    redis = _FakeRedis()
+    await add_fallback_usage(redis, "chan", 0)
+    await add_fallback_usage(redis, "chan", -5)
+    assert redis.store == {}
 
 
 def test_next_window_reset_epoch_is_the_next_wall_boundary():

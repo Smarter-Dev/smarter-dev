@@ -1,7 +1,7 @@
 """Bot-side service for per-channel LLM model overrides.
 
 Wraps the web API's ``/guilds/{guild_id}/channels/{channel_id}/model-override``
-endpoints so the admin ``/setmodel`` slash command (stage 03) and the chat runtime
+endpoints so the admin ``/chat-bot-settings`` slash command (stage 03) and the chat runtime
 (stage 04) can read/write a channel's model + token budgets without touching the
 DB directly.
 
@@ -86,10 +86,15 @@ class ModelOverrideService(BaseService):
         daily_token_budget: int,
         hourly_token_budget: int,
         reasoning_level: str | None = None,
+        auto_respond: bool = False,
+        fallback_model_key: str | None = None,
+        response_filter: str | None = None,
     ) -> ChannelModelOverride:
         """Upsert the channel's override and return the stored value.
 
         ``reasoning_level`` of ``None`` means "use the model's default level".
+        ``auto_respond`` makes the bot reply to any message, not just @mentions;
+        ``fallback_model_key`` and ``response_filter`` default to "unset".
         """
         response = await self._api_client.put(
             self._path(guild_id, channel_id),
@@ -98,6 +103,9 @@ class ModelOverrideService(BaseService):
                 "reasoning_level": reasoning_level,
                 "daily_token_budget": daily_token_budget,
                 "hourly_token_budget": hourly_token_budget,
+                "auto_respond": auto_respond,
+                "fallback_model_key": fallback_model_key,
+                "response_filter": response_filter,
             },
         )
         self._invalidate_override(guild_id, channel_id)

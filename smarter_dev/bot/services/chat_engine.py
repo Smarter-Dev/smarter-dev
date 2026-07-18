@@ -50,12 +50,17 @@ from smarter_dev.bot.agents.chat_compaction import start_collection
 from smarter_dev.bot.agents.chat_context import build_followup_input
 from smarter_dev.bot.agents.chat_context import build_initial_input
 from smarter_dev.bot.agents.chat_input_format import build_agent_call
+from smarter_dev.bot.agents.message_gate import GateMessage
+from smarter_dev.bot.agents.message_gate import filter_messages
 from smarter_dev.bot.agents.chat_models import ResponseBody
 from smarter_dev.bot.agents.chat_models import TurnDecision
 from smarter_dev.bot.agents.chat_tools import ChatDeps
 from smarter_dev.bot.agents.chat_tools import GeneratedImage
 from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.bot.services.channel_token_budget import add_fallback_usage
 from smarter_dev.bot.services.channel_token_budget import add_usage
+from smarter_dev.bot.services.channel_token_budget import fallback_ended_key
+from smarter_dev.bot.services.channel_token_budget import fallback_flag_key
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.channel_token_budget import over_budget_reset_epoch
 from smarter_dev.bot.services.chat_conversation_persistence import end_engagement
@@ -66,6 +71,9 @@ from smarter_dev.bot.services.user_message_limit import DIRECTED_SCORE_THRESHOLD
 from smarter_dev.bot.services.user_message_limit import record_directed_messages
 from smarter_dev.bot.utils.stop_detection import is_stop_request
 from smarter_dev.bot.utils.stop_detection import set_channel_cooldown
+from smarter_dev.bot.views.model_override_views import (
+    MODEL_BUDGET_FALLBACK_CUSTOM_ID_PREFIX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +88,9 @@ MAX_RUNTIME = timedelta(hours=2)
 # SET NX EX) caps that notice to once per hour per channel so a busy channel
 # can't be spammed while the budget stays spent.
 BUDGET_NOTICE_COOLDOWN_SECONDS = 60 * 60
+# How many channel messages immediately preceding the gated candidates are
+# fetched as read-only context for the response-filter gate.
+GATE_GROUNDING_LIMIT = 5
 # ``{reset_tag}`` is a Discord relative timestamp (``<t:epoch:R>``) that the
 # client renders as a live countdown ("in 25 minutes") to the window boundary.
 _BUDGET_EXHAUSTED_NOTICE_TEMPLATE = (
@@ -372,18 +383,76 @@ class ChannelEngine:
                 drained = [q.message for q in self.queue]
                 self.queue.clear()
 
+            memory = get_chat_memory()
+            if first_activation:
+                await memory.reset_idle_counter(self.channel_id)
+
+            # Resolve any admin per-channel override up front: its response
+            # filter (if set) decides which pending messages are worth a turn,
+            # and its budget / fallback model steer the model resolution below.
+            override = await self._get_channel_override()
+            budget_redis = self._budget_redis()
+
+            # Response-filter gate — runs BEFORE any model spend or budget check.
+            # A restricted channel asks the cheap relevance gate which of the
+            # candidate messages the admin's filter allows and drops the rest;
+            # if nothing survives the whole turn is skipped (no model call, no
+            # budget spend, no no-response strike, engagement untouched). Mentions
+            # get no bypass — an off-topic @mention is dropped too.
+            response_filter = (
+                getattr(override, "response_filter", None)
+                if override is not None
+                else None
+            )
+            if response_filter and response_filter.strip():
+                if first_activation:
+                    # Judge the activation trigger together with anything queued
+                    # since it: while the engine is already active every later
+                    # message routes through ``observe`` (never a fresh
+                    # ``trigger_initial``), so the queued messages are the only
+                    # way a later on-topic message can start the engagement when
+                    # the activating message itself was off-topic. The earliest
+                    # survivor becomes the engagement's trigger.
+                    candidates = [
+                        message
+                        for message in [self.activation_message, *drained]
+                        if message is not None
+                    ]
+                    allowed = await self._gate_allows(response_filter, candidates)
+                    survivors = [m for m in candidates if str(m.id) in allowed]
+                    if not survivors:
+                        logger.info(
+                            "Response filter dropped the activation and %d "
+                            "queued message(s) for channel %s — skipping turn "
+                            "(engagement retained)",
+                            len(drained),
+                            self.channel_id,
+                        )
+                        # Retain first_activation (return False) so a later
+                        # on-topic message still starts the engagement.
+                        return False
+                    self.activation_message = survivors[0]
+                else:
+                    allowed = await self._gate_allows(response_filter, drained)
+                    survivors = [m for m in drained if str(m.id) in allowed]
+                    if not survivors:
+                        logger.info(
+                            "Response filter dropped all %d queued message(s) "
+                            "for channel %s — skipping turn",
+                            len(drained),
+                            self.channel_id,
+                        )
+                        return True
+                    drained = survivors
+
             # Best reply-to anchor for any user-facing error message: the
             # activation trigger on first turn, otherwise the freshest
-            # queued message.
+            # surviving queued message.
             error_reply_to: int | None = None
             if first_activation and self.activation_message is not None:
                 error_reply_to = int(self.activation_message.id)
             elif drained:
                 error_reply_to = int(drained[-1].id)
-
-            memory = get_chat_memory()
-            if first_activation:
-                await memory.reset_idle_counter(self.channel_id)
 
             try:
                 if first_activation:
@@ -441,13 +510,28 @@ class ChannelEngine:
                 len(history),
             )
 
-            # Resolve any admin per-channel override and enforce its token
-            # budget before we spend a model call. A channel with no override
-            # falls through unchanged (default model, no budget checks) —
-            # though its token usage is still metered after the run.
-            override = await self._get_channel_override()
-            budget_redis = self._budget_redis()
-            if override is not None and budget_redis is not None:
+            # Enforce the override's token budget (and route around it via the
+            # fallback model) before we spend a model call. Three regimes:
+            #  * a free-fallback window is active — a member opted this channel
+            #    into its fallback model while the primary's budget is spent, so
+            #    budget enforcement is skipped and the fallback model runs;
+            #  * otherwise an over-budget channel skips the turn (offering the
+            #    fallback if one is configured);
+            #  * a channel under budget (or with no override) runs its model.
+            # A channel with no override always falls through unchanged (default
+            # model, no budget checks); its usage is still metered after the run.
+            fallback_active = (
+                await self._fallback_window_active(budget_redis)
+                if override is not None and budget_redis is not None
+                else False
+            )
+            if fallback_active:
+                # Free fallback model in effect — its spend does not count
+                # against the cap, so no budget check. Reasoning stays unset so
+                # the fallback model uses its own default.
+                override_model_id = self._resolve_fallback_model_id(override)
+                override_reasoning = None
+            elif override is not None and budget_redis is not None:
                 budget_reset_epoch = await over_budget_reset_epoch(
                     budget_redis,
                     str(self.channel_id),
@@ -464,20 +548,37 @@ class ChannelEngine:
                         budget_redis,
                         reset_epoch=budget_reset_epoch,
                         reply_to=error_reply_to,
+                        fallback_model_key=getattr(
+                            override, "fallback_model_key", None
+                        ),
                     )
                     # Skipped before start_engagement — report the first
                     # activation as NOT consumed so the engagement still starts
                     # (and turns persist) once the budget window resets.
                     return False
-            override_model_id = self._resolve_override_model_id(override)
-            # Only carry the override's reasoning level when its model actually
-            # applied — a stale model_key falls back to the default model, which
-            # keeps its own reasoning config.
-            override_reasoning = (
-                override.reasoning_level
-                if override is not None and override_model_id is not None
-                else None
-            )
+                # Under budget now. If a prior fallback window just ended,
+                # announce the primary is back once before running its turn —
+                # done only after the budget re-check so a channel that is still
+                # over budget never sees a "primary is back" notice immediately
+                # followed by a "budget exhausted" one (and the one-shot marker
+                # survives so the genuine restoration is announced later).
+                await self._maybe_notice_primary_restored(budget_redis, override)
+                override_model_id = self._resolve_override_model_id(override)
+                # Only carry the override's reasoning level when its model
+                # actually applied — a stale model_key falls back to the default
+                # model, which keeps its own reasoning config.
+                override_reasoning = (
+                    override.reasoning_level
+                    if override_model_id is not None
+                    else None
+                )
+            else:
+                override_model_id = self._resolve_override_model_id(override)
+                override_reasoning = (
+                    override.reasoning_level
+                    if override is not None and override_model_id is not None
+                    else None
+                )
             # The model this turn actually runs on: the override's wire id when
             # one applied, otherwise the configured default. Persisted with the
             # turn so the dashboard prices tokens against the right model.
@@ -561,9 +662,13 @@ class ChannelEngine:
             # Every channel is metered (so ``/bot-usage`` always has numbers);
             # the budgets that *enforce* only exist on override channels.
             # Compaction runs on its own summarizer model and its tokens are not
-            # in ``result.usage()``, so they are not counted here.
+            # in ``result.usage()``, so they are not counted here. A free-fallback
+            # turn meters into display-only windows so its spend still shows in
+            # ``/bot-usage`` but never counts toward the enforced budget.
             if budget_redis is not None:
-                await self._record_budget_usage(budget_redis, tokens)
+                await self._record_budget_usage(
+                    budget_redis, tokens, fallback_active=fallback_active
+                )
             await self._charge_directed_messages(
                 output, drained, first_activation=first_activation
             )
@@ -934,10 +1039,181 @@ class ChannelEngine:
             return None
         return catalog_model.model_id
 
-    async def _record_budget_usage(self, redis: Any, tokens: int) -> None:
-        """Add ``tokens`` to the channel's budget windows (best-effort)."""
+    def _fallback_flag_key(self) -> str:
+        """Redis key for this channel's active free-fallback flag."""
+        return fallback_flag_key(str(self.channel_id))
+
+    def _fallback_ended_key(self) -> str:
+        """Redis key for this channel's "notify when the primary returns" marker."""
+        return fallback_ended_key(str(self.channel_id))
+
+    async def _fallback_window_active(self, redis: Any) -> bool:
+        """Whether the free-fallback flag is set for this channel (best-effort).
+
+        A member sets the flag to opt the channel into its fallback model while
+        the primary's budget is spent; it self-expires at the budget reset. Any
+        Redis trouble reads as "no fallback" so a bad read never silently swaps
+        which model runs.
+        """
         try:
-            await add_usage(redis, str(self.channel_id), tokens)
+            return bool(await redis.exists(self._fallback_flag_key()))
+        except RedisError:
+            logger.debug(
+                "could not read fallback flag for channel %s",
+                self.channel_id,
+                exc_info=True,
+            )
+            return False
+
+    def _resolve_fallback_model_id(self, override: Any | None) -> str | None:
+        """Wire model id for the override's fallback model while the free-fallback
+        window is active.
+
+        A missing or stale ``fallback_model_key`` degrades to the primary
+        override model (with a warning), mirroring ``_resolve_override_model_id``.
+        """
+        fallback_key = (
+            getattr(override, "fallback_model_key", None)
+            if override is not None
+            else None
+        )
+        if fallback_key is None:
+            logger.warning(
+                "Channel %s fallback window active but no fallback model "
+                "configured — using the primary override model",
+                self.channel_id,
+            )
+            return self._resolve_override_model_id(override)
+        catalog_model = get_model(fallback_key)
+        if catalog_model is None:
+            logger.warning(
+                "Channel %s fallback names unknown model_key %r — using the "
+                "primary override model",
+                self.channel_id,
+                fallback_key,
+            )
+            return self._resolve_override_model_id(override)
+        return catalog_model.model_id
+
+    @staticmethod
+    def _to_gate_message(message: Any) -> GateMessage:
+        """Convert a hikari message into a ``GateMessage`` for the response gate."""
+        author = getattr(message, "author", None)
+        author_display = ""
+        if author is not None:
+            author_display = (
+                getattr(author, "username", None)
+                or getattr(author, "display_name", None)
+                or ""
+            )
+        return GateMessage(
+            message_id=str(message.id),
+            author_display=author_display,
+            content=getattr(message, "content", None) or "",
+        )
+
+    async def _fetch_gate_grounding(self, candidates: list[Any]) -> list[GateMessage]:
+        """Fetch up to ``GATE_GROUNDING_LIMIT`` channel messages preceding the
+        gate ``candidates`` as read-only context (oldest-first).
+
+        Any fetch failure degrades to empty grounding (debug log) — the gate
+        still judges the candidates, just without their surrounding context.
+        """
+        candidate_ids = [int(message.id) for message in candidates if message is not None]
+        if not candidate_ids:
+            return []
+        oldest_candidate_id = min(candidate_ids)
+        fetched: list[Any] = []
+        try:
+            iterator = self.bot.rest.fetch_messages(
+                self.channel_id, before=oldest_candidate_id
+            ).limit(GATE_GROUNDING_LIMIT)
+            async for message in iterator:
+                fetched.append(message)
+        except Exception:
+            logger.debug(
+                "could not fetch response-filter grounding for channel %s",
+                self.channel_id,
+                exc_info=True,
+            )
+            return []
+        fetched.reverse()
+        return [self._to_gate_message(message) for message in fetched]
+
+    async def _gate_allows(
+        self, response_filter: str, candidates: list[Any]
+    ) -> set[str]:
+        """Return the ids of ``candidates`` the response filter allows.
+
+        Wraps the (already fail-open) message gate so an unexpected error still
+        runs the turn unfiltered — a wasted reply is far cheaper than a channel
+        that goes mute. ``candidates`` are hikari messages; grounding is up to
+        five channel messages immediately preceding them.
+        """
+        candidate_messages = [
+            self._to_gate_message(message)
+            for message in candidates
+            if message is not None
+        ]
+        if not candidate_messages:
+            return set()
+        grounding = await self._fetch_gate_grounding(candidates)
+        try:
+            allowed = await filter_messages(
+                response_filter, candidate_messages, grounding
+            )
+        except Exception:
+            logger.warning(
+                "response filter gate errored for channel %s — running turn "
+                "unfiltered",
+                self.channel_id,
+                exc_info=True,
+            )
+            return {message.message_id for message in candidate_messages}
+        return set(allowed)
+
+    async def _maybe_notice_primary_restored(
+        self, redis: Any, override: Any
+    ) -> None:
+        """Announce the primary model is answering again once a fallback window
+        has ended, clearing the one-shot marker.
+
+        The marker outlives the fallback flag by a day so the channel still
+        learns its primary is back even when the first post-reset turn is much
+        later. Best-effort: any Redis trouble simply skips the notice.
+        """
+        try:
+            cleared = await redis.delete(self._fallback_ended_key())
+        except RedisError:
+            logger.debug(
+                "could not read fallback-ended marker for channel %s",
+                self.channel_id,
+                exc_info=True,
+            )
+            return
+        if not cleared:
+            return
+        model = get_model(override.model_key)
+        label = model.label if model is not None else override.model_key
+        await self._post_notice(
+            f"Budget reset — **{label}** is answering again.",
+            reply_to=None,
+        )
+
+    async def _record_budget_usage(
+        self, redis: Any, tokens: int, *, fallback_active: bool
+    ) -> None:
+        """Add ``tokens`` to the channel's usage windows (best-effort).
+
+        A free-fallback turn's spend is metered into display-only windows
+        (:func:`add_fallback_usage`) so it still shows in ``/bot-usage`` but
+        never counts toward the enforced budget — otherwise the "free" opt-in
+        would push the enforced day window over its cap and re-block the primary
+        the moment the fallback window closes.
+        """
+        record = add_fallback_usage if fallback_active else add_usage
+        try:
+            await record(redis, str(self.channel_id), tokens)
         except RedisError:
             logger.warning(
                 "Failed to record token budget usage for channel %s",
@@ -1002,7 +1278,12 @@ class ChannelEngine:
                 )
 
     async def _maybe_notice_budget_exhausted(
-        self, redis: Any, *, reset_epoch: int, reply_to: int | None
+        self,
+        redis: Any,
+        *,
+        reset_epoch: int,
+        reply_to: int | None,
+        fallback_model_key: str | None = None,
     ) -> None:
         """Post the budget-exhausted notice, throttled to once per hour.
 
@@ -1010,7 +1291,9 @@ class ChannelEngine:
         readers see a live countdown to the budget reset. A Redis ``SET NX EX``
         acts as the per-channel throttle: only the call that wins the key posts,
         so repeated over-budget turns stay silent until the cooldown lapses.
-        Any Redis hiccup skips the notice (never blocks).
+        Any Redis hiccup skips the notice (never blocks). When
+        ``fallback_model_key`` names a configured fallback, the notice carries a
+        one-press button that opts the channel into that model for free.
         """
         try:
             won = await redis.set(
@@ -1030,7 +1313,32 @@ class ChannelEngine:
             notice = _BUDGET_EXHAUSTED_NOTICE_TEMPLATE.format(
                 reset_tag=f"<t:{reset_epoch}:R>"
             )
-            await self._post_error(notice, reply_to=reply_to)
+            components = self._build_fallback_offer(fallback_model_key, reset_epoch)
+            await self._post_notice(
+                notice, reply_to=reply_to, components=components
+            )
+
+    def _build_fallback_offer(
+        self, fallback_model_key: str | None, reset_epoch: int
+    ) -> list[Any] | None:
+        """One-button action row offering the configured fallback model, or None.
+
+        ``None`` when no fallback is configured (or its key is stale) so the
+        notice posts plain. The button's ``custom_id`` carries only the reset
+        epoch; the handler reads channel/guild from the interaction.
+        """
+        if fallback_model_key is None:
+            return None
+        fallback_model = get_model(fallback_model_key)
+        if fallback_model is None:
+            return None
+        row = hikari.impl.MessageActionRowBuilder()
+        row.add_interactive_button(
+            hikari.ButtonStyle.PRIMARY,
+            f"{MODEL_BUDGET_FALLBACK_CUSTOM_ID_PREFIX}:{reset_epoch}",
+            label=f"Answer with {fallback_model.label} instead"[:80],
+        )
+        return [row]
 
     def _shared_api_client(self) -> Any | None:
         """The bot's shared APIClient (set on ``bot.d``), or None if absent.
@@ -1106,6 +1414,28 @@ class ChannelEngine:
             await self.bot.rest.create_message(self.channel_id, **kwargs)
         except Exception:
             logger.debug("Failed to post error message", exc_info=True)
+
+    async def _post_notice(
+        self,
+        text: str,
+        *,
+        reply_to: int | None = None,
+        components: list[Any] | None = None,
+    ) -> None:
+        """Send a channel notice, optionally carrying interactive components.
+
+        Like :meth:`_post_error` but with component support (the budget-exhausted
+        notice's fallback-offer button). Best-effort: send failures are swallowed.
+        """
+        try:
+            kwargs: dict[str, Any] = {"content": text[:2000]}
+            if reply_to is not None:
+                kwargs["reply"] = reply_to
+            if components is not None:
+                kwargs["components"] = components
+            await self.bot.rest.create_message(self.channel_id, **kwargs)
+        except Exception:
+            logger.debug("Failed to post notice message", exc_info=True)
 
     async def _maybe_refire(self) -> None:
         async with self.queue_lock:

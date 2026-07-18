@@ -54,6 +54,36 @@ async def test_budgets_default_to_zero(db_session):
     assert stored.hourly_token_budget == 0
 
 
+async def test_new_settings_default_off(db_session):
+    db_session.add(_override())
+    await db_session.commit()
+
+    stored = (
+        await db_session.execute(select(ChannelModelOverride))
+    ).scalar_one()
+    assert stored.auto_respond is False
+    assert stored.fallback_model_key is None
+    assert stored.response_filter is None
+
+
+async def test_new_settings_round_trip(db_session):
+    db_session.add(
+        _override(
+            auto_respond=True,
+            fallback_model_key="glm-4-6",
+            response_filter="Only answer coding questions.",
+        )
+    )
+    await db_session.commit()
+
+    stored = (
+        await db_session.execute(select(ChannelModelOverride))
+    ).scalar_one()
+    assert stored.auto_respond is True
+    assert stored.fallback_model_key == "glm-4-6"
+    assert stored.response_filter == "Only answer coding questions."
+
+
 async def test_channel_id_is_unique(db_session):
     db_session.add(_override(channel_id="C1", model_key="kimi-k2"))
     await db_session.commit()

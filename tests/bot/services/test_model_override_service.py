@@ -14,15 +14,19 @@ CHANNEL = "222"
 PATH = f"/guilds/{GUILD}/channels/{CHANNEL}/model-override"
 
 
-def _payload(model_key: str = "kimi-k2", daily: int = 0, hourly: int = 0) -> dict:
+def _payload(model_key: str = "kimi-k2", daily: int = 0, hourly: int = 0, **extra) -> dict:
     return {
         "guild_id": GUILD,
         "channel_id": CHANNEL,
         "model_key": model_key,
         "daily_token_budget": daily,
         "hourly_token_budget": hourly,
+        "auto_respond": False,
+        "fallback_model_key": None,
+        "response_filter": None,
         "created_at": "2026-07-14T00:00:00+00:00",
         "updated_at": "2026-07-14T00:00:00+00:00",
+        **extra,
     }
 
 
@@ -92,10 +96,83 @@ async def test_set_override_puts_and_returns_dto(service, mock_api_client):
             "reasoning_level": "high",
             "daily_token_budget": 100,
             "hourly_token_budget": 10,
+            "auto_respond": False,
+            "fallback_model_key": None,
+            "response_filter": None,
         },
     )
     assert result.model_key == "gpt-5-4"
     assert result.daily_token_budget == 100
+
+
+async def test_get_override_parses_new_settings(service, mock_api_client):
+    mock_api_client.get.return_value = create_mock_response(
+        200,
+        _payload(
+            auto_respond=True,
+            fallback_model_key="glm-4-6",
+            response_filter="Only coding questions.",
+        ),
+    )
+
+    result = await service.get_override(GUILD, CHANNEL)
+
+    assert result.auto_respond is True
+    assert result.fallback_model_key == "glm-4-6"
+    assert result.response_filter == "Only coding questions."
+
+
+async def test_get_override_defaults_new_settings_when_absent(service, mock_api_client):
+    # An older API response that omits the new keys must degrade to the defaults.
+    legacy_payload = _payload()
+    del legacy_payload["auto_respond"]
+    del legacy_payload["fallback_model_key"]
+    del legacy_payload["response_filter"]
+    mock_api_client.get.return_value = create_mock_response(200, legacy_payload)
+
+    result = await service.get_override(GUILD, CHANNEL)
+
+    assert result.auto_respond is False
+    assert result.fallback_model_key is None
+    assert result.response_filter is None
+
+
+async def test_set_override_sends_new_settings(service, mock_api_client):
+    mock_api_client.put.return_value = create_mock_response(
+        200,
+        _payload(
+            auto_respond=True,
+            fallback_model_key="glm-4-6",
+            response_filter="Only coding questions.",
+        ),
+    )
+
+    result = await service.set_override(
+        GUILD,
+        CHANNEL,
+        "gpt-5-4",
+        0,
+        0,
+        auto_respond=True,
+        fallback_model_key="glm-4-6",
+        response_filter="Only coding questions.",
+    )
+
+    mock_api_client.put.assert_awaited_once_with(
+        PATH,
+        json_data={
+            "model_key": "gpt-5-4",
+            "reasoning_level": None,
+            "daily_token_budget": 0,
+            "hourly_token_budget": 0,
+            "auto_respond": True,
+            "fallback_model_key": "glm-4-6",
+            "response_filter": "Only coding questions.",
+        },
+    )
+    assert result.auto_respond is True
+    assert result.fallback_model_key == "glm-4-6"
+    assert result.response_filter == "Only coding questions."
 
 
 async def test_set_override_invalidates_cache(service, mock_api_client):

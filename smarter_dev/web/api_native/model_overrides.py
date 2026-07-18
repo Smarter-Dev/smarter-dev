@@ -92,6 +92,9 @@ class ChannelModelOverrideController(Controller):
             reasoning_level=data.reasoning_level,
             daily_token_budget=data.daily_token_budget,
             hourly_token_budget=data.hourly_token_budget,
+            auto_respond=data.auto_respond,
+            fallback_model_key=data.fallback_model_key,
+            response_filter=data.response_filter,
         )
         # Serialize before commit to avoid session-detachment issues with the
         # Skrift-injected session (mirrors the legacy router's ordering).

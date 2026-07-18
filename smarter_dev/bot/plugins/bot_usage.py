@@ -9,7 +9,7 @@ publicly so the channel can discuss it. ``/bot-usage`` shows two things:
   the counted messages actually span ("32/60 messages in the last hour").
 - The channel's chat-token consumption for the current hour and day windows
   against its configured budgets ("76k/100k this hour · 512k/1m today").
-  Every channel is metered; without a ``/setmodel`` budget the allowance
+  Every channel is metered; without a ``/chat-bot-settings`` budget the allowance
   reads "unlimited", and a maxed-out budget window shows a live countdown
   to its wall-clock reset.
 
