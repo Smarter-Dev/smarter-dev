@@ -305,6 +305,15 @@ def test_describe_trigger_cadence_phrasing():
     assert "One-shot" in describe_trigger("timer", {"delay_seconds": 120})
 
 
+def test_describe_trigger_timer_mentions_self_rearm():
+    # The timer cadence line must surface schedule_timer self re-arm and the
+    # timer-context branch, since ANY trigger can receive a self-armed re-fire.
+    for settings in ({"delay_seconds": 120}, {"fire_at": "2026-06-27T08:00:00+00:00"}, {}):
+        copy = describe_trigger("timer", settings)
+        assert "schedule_timer" in copy
+        assert "timer context" in copy
+
+
 def test_describe_trigger_member_and_thread_cadence():
     join = describe_trigger("member_join", {})
     assert "EVERY member join" in join and "raid" in join.lower()
@@ -610,6 +619,59 @@ async def test_judge_rejects_unconditional_add_role_on_join():
     )
     assert not result.ok
     assert "unconditional role grant" in result.error
+
+
+# -- schedule_timer authoring rails (E3) ---------------------------------------
+
+_TIMER_NO_BRANCH_SCRIPT = (
+    'await add_role(context["member_id"], "888160821673349140", reason="sus")\n'
+    'await schedule_timer(86400, {"user_id": context["member_id"]})\n'
+)
+
+_TIMER_WITH_BRANCH_SCRIPT = (
+    'if context["trigger_type"] == "timer":\n'
+    '    await remove_role(context["payload"]["user_id"], "888160821673349140")\n'
+    'else:\n'
+    '    await add_role(context["member_id"], "888160821673349140", reason="sus")\n'
+    '    await schedule_timer(86400, {"user_id": context["member_id"]})\n'
+)
+
+
+async def test_judge_rejects_schedule_timer_without_timer_branch():
+    # A script that arms a timer but never handles the timer re-fire is a
+    # guaranteed error on every re-fire; the judge (guards_effective) rejects it.
+    plan = _admin_plan(
+        trigger_type="message",
+        settings={"allowed_role_ids": ["888160821673349140"]},
+        script=_TIMER_NO_BRANCH_SCRIPT,
+    )
+    result = await run_admin_creation_pipeline(
+        request="sus a member and remove the role a day later",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(plan),
+        judge=_judge_rejecting(
+            "arms schedule_timer but never handles the timer re-fire branch"
+        ),
+    )
+    assert not result.ok
+    assert "timer re-fire branch" in result.error
+
+
+async def test_pipeline_accepts_schedule_timer_with_timer_branch():
+    result = await run_admin_creation_pipeline(
+        request="sus a member and remove the role a day later",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(
+            _admin_plan(
+                trigger_type="message",
+                settings={"allowed_role_ids": ["888160821673349140"]},
+                script=_TIMER_WITH_BRANCH_SCRIPT,
+            )
+        ),
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert "schedule_timer" in result.script
 
 
 async def test_pipeline_accepts_conditional_literal_role_grant():

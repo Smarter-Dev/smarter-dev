@@ -75,7 +75,14 @@ One input variable is provided:
                 context["author_last_message_at"] — ISO timestamp or null.
     "reaction": context["reaction_emoji"], context["reaction_message_id"],
                 context["reaction_user_id"]
-    "schedule" / "timer": no extra keys.
+    "schedule": no extra keys.
+    "timer":    the trigger's own one-shot fire has no extra keys, BUT a fire the
+                script armed itself with schedule_timer arrives with
+                context["trigger_type"] == "timer", context["payload"] (the dict
+                you passed) and context["scheduled_at"] (ISO time it was armed).
+                ANY handler — message, schedule, timer — can receive a timer fire
+                this way, so if your script calls schedule_timer you MUST branch on
+                context["trigger_type"] == "timer" to handle the re-fire (see below).
 
 These async functions are provided — you MUST `await` every call:
 
@@ -119,6 +126,26 @@ These functions give the handler PERSISTENT MEMORY that survives across firings 
 Memory is private to this one handler and starts empty ({}). Use it for things that must remember
 across fires: counters ("messages seen today"), cooldown timestamps, a running total. Mutating the
 dict from memory_all() does NOT save — you must call memory_set to persist.
+
+This function lets the handler DEFER work to a future one-shot fire of ITSELF (also `await` it):
+
+  await schedule_timer(delay_seconds: int, payload: dict) -> True
+      Durably arm a single re-fire of THIS handler at now + delay_seconds. The re-fire SURVIVES
+      restarts, and arrives with context["trigger_type"] == "timer", context["payload"] == the dict
+      you passed, and context["scheduled_at"]. Use it for "do X in N seconds/hours/days" without
+      keeping a timestamp in memory and polling — e.g. send a follow-up an hour later.
+      RAILS: delay_seconds must be in [60, 2592000] (60s .. 30 days) or the fire ERRORS; payload must
+      be JSON-serializable and ≤ 4 KB; at most 2 timers per fire (and 30/hour across fires).
+      MANDATORY: if you call schedule_timer, your script MUST handle the re-fire branch, e.g.
+
+        if context["trigger_type"] == "timer":
+            uid = context["payload"]["user_id"]
+            await send_message(f"<@{uid}> your hour is up")
+            return
+        # ... normal (message/schedule) path arms the timer:
+        await schedule_timer(3600, {"user_id": context["author_id"]})
+
+      Without that branch the re-fire has nothing to do and just ERRORS every time.
 
 MEMORY IS HARD-CAPPED AT 16 KB — exceeding it makes the fire ERROR, and once full the handler
 errors on every fire and is effectively dead. Therefore:

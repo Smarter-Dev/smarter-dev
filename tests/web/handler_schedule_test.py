@@ -7,12 +7,15 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from smarter_dev.web.handler_schedule import (
+    MAX_TIMER_DELAY_SECONDS,
     MIN_INTERVAL_SECONDS,
     MIN_INTERVAL_WITH_AGENT_SECONDS,
+    MIN_TIMER_DELAY_SECONDS,
     ScheduleError,
     first_fire_at,
     next_fire_at,
     validate_interval,
+    validate_timer_delay,
 )
 
 NOW = datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc)
@@ -66,3 +69,23 @@ def test_interval_floor_tighter_with_agent():
 
 def test_non_recurring_settings_have_no_next():
     assert next_fire_at({"delay_seconds": 60}, NOW) is None
+
+
+# -- script-armed timer delay bounds (schedule_timer, E3) ----------------------
+
+
+def test_validate_timer_delay_accepts_bounds():
+    assert validate_timer_delay(MIN_TIMER_DELAY_SECONDS) == MIN_TIMER_DELAY_SECONDS
+    assert validate_timer_delay(MAX_TIMER_DELAY_SECONDS) == MAX_TIMER_DELAY_SECONDS
+    assert MIN_TIMER_DELAY_SECONDS == 60
+    assert MAX_TIMER_DELAY_SECONDS == 30 * 86400
+
+
+def test_validate_timer_delay_below_floor_raises():
+    with pytest.raises(ScheduleError):
+        validate_timer_delay(MIN_TIMER_DELAY_SECONDS - 1)
+
+
+def test_validate_timer_delay_above_ceiling_raises():
+    with pytest.raises(ScheduleError):
+        validate_timer_delay(MAX_TIMER_DELAY_SECONDS + 1)

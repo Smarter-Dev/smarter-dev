@@ -54,6 +54,14 @@ RENAMES_PER_WINDOW = 2
 MAX_HANDLERS_PER_CHANNEL = 10
 MAX_ADMIN_HANDLERS_PER_GUILD = 20
 
+# Per-handler arming window for script-armed one-shot timers (schedule_timer).
+# Bounds how many timers a single handler can arm across MANY fires — distinct
+# from the per-fire budget counter. A 3600s window keeps a self-defer handler
+# from carpet-bombing the job store. Uses the same WindowedLimiter with a custom
+# window_seconds as the error-notice throttle below.
+HANDLER_TIMERS_PER_HOUR = 30
+TIMER_ARMING_WINDOW_SECONDS = 3600
+
 # When a handler fire errors we post a notice in the channel — but a broken
 # handler errors on every fire, so throttle the notice hard: at most one per
 # handler per window. The window is long enough not to nag, short enough that the
@@ -88,6 +96,10 @@ def guild_thread_ops_key(guild_id: str) -> str:
 
 def guild_role_changes_key(guild_id: str) -> str:
     return f"hcap:rolechg:{guild_id}"
+
+
+def handler_timer_arm_key(handler_id: str) -> str:
+    return f"hcap:timersched:{handler_id}"
 
 
 def channel_rename_key(channel_id: str) -> str:

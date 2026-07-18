@@ -66,7 +66,12 @@ One input variable `context: dict` describes the trigger:
               thread with send_message(text, context["thread_id"]). Non-thread messages carry
               context["is_thread"] == false.
   "reaction": context["reaction_emoji"], context["reaction_message_id"], context["reaction_user_id"].
-  "schedule"/"timer": no extra keys.
+  "schedule": no extra keys.
+  "timer":    the trigger's own one-shot fire has no extra keys, BUT a fire a script armed itself
+              with schedule_timer arrives with context["trigger_type"] == "timer",
+              context["payload"] (the dict it passed) and context["scheduled_at"] (ISO armed time).
+              ANY trigger (message, schedule, member_*, timer) can receive a self-armed timer fire,
+              so a script that calls schedule_timer MUST branch on context["trigger_type"] == "timer".
 
 MEMBER & THREAD EVENT TRIGGERS (admin-only — these five triggers exist ONLY for admin handlers).
 The four member_* triggers are GUILD-scoped and have NO home channel: send_message(content) with no
@@ -186,6 +191,26 @@ Provided async functions — you MUST `await` every call:
       SHARED 16-KB cap across the whole store (a breach ERRORS the fire), and NEVER key it per
       user/message/day without pruning. Keys persist per-key, so two handlers writing DIFFERENT
       keys never conflict; same-key writes are last-write-wins (no hard transactional ordering).
+  PERSISTED SELF-DEFER (durable one-shot re-fire of THIS handler; survives restarts):
+  await schedule_timer(delay_seconds: int, payload: dict) -> True
+      Arm a single re-fire of this handler at now + delay_seconds. The re-fire arrives with
+      context["trigger_type"] == "timer", context["payload"] == the dict you passed, and
+      context["scheduled_at"]. This is the durable replacement for volatile timers — use it for
+      "promote after 2 days", "remove the sus role after 24 h", "follow up in an hour". RAILS:
+      delay_seconds in [60, 2592000] (60s .. 30 days) or the fire ERRORS; payload JSON-serializable
+      and ≤ 4 KB; at most 5 timers/fire (30/hour across fires). schedule_timer does NOT itself grant
+      or remove roles — the re-fire's script does that via add_role/remove_role (put those role ids
+      in allowed_role_ids as usual).
+      MANDATORY: a script that calls schedule_timer MUST handle the re-fire, e.g. a sus handler:
+
+        if context["trigger_type"] == "timer":
+            await remove_role(context["payload"]["user_id"], "644...", reason="sus expired")
+            return
+        # ... on the !sus message: add the role AND arm its removal:
+        await add_role(target_id, "644...", reason="sus")
+        await schedule_timer(86400, {"user_id": target_id})
+
+      Without the timer branch the re-fire has nothing to do and ERRORS every time.
 
 ## Per-fire limits (admin tier)
 - 5 messages, 25 moderation actions, 3 agent calls, 32 KB context into an agent, 120 s wall-clock.
@@ -193,6 +218,7 @@ Provided async functions — you MUST `await` every call:
   thread-op window also caps thread ops server-wide — don't fan out creates/deletes in a loop.
 - 10 role-changes (add_role/remove_role), separate from moderation actions; a guild role-change
   window also caps grants server-wide — never grant roles in an unbounded loop.
+- 5 timers armed per fire (schedule_timer), plus a 30/hour per-handler arming window.
 - ~8 KB total script length.
 
 ## Grantable roles (allowed_role_ids)

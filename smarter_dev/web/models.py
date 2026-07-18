@@ -4425,6 +4425,10 @@ class HandlerRun(Base):
     role_changes: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    # One-shot timers armed via schedule_timer this fire (both tiers).
+    timers_scheduled: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 

@@ -381,11 +381,22 @@ def describe_trigger(trigger_type: str, settings: dict) -> str:
             return f"Recurring forever: fires once daily at {settings['daily_time']} UTC."
         return "Recurring forever on a schedule."
     if trigger_type == "timer":
+        # A handler on ANY trigger can also arm its own one-shot re-fire with
+        # schedule_timer; the re-fire arrives as a timer context, so branch on
+        # context["trigger_type"] == "timer" to handle it.
+        rearm = (
+            " The script may re-arm itself with schedule_timer(delay_seconds, "
+            "payload), which re-fires this handler with a timer context."
+        )
         if "delay_seconds" in settings:
-            return f"One-shot: fires a single time, {_humanize_seconds(int(settings['delay_seconds']))} after creation."
+            return (
+                f"One-shot: fires a single time, "
+                f"{_humanize_seconds(int(settings['delay_seconds']))} after creation."
+                + rearm
+            )
         if "fire_at" in settings:
-            return f"One-shot: fires a single time at {settings['fire_at']}."
-        return "One-shot: fires a single time."
+            return f"One-shot: fires a single time at {settings['fire_at']}." + rearm
+        return "One-shot: fires a single time." + rearm
     if trigger_type == "member_join":
         return (
             "Fires on EVERY member join — bursts hard during raids. A handler that "

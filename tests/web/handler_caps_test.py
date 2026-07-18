@@ -6,14 +6,17 @@ from smarter_dev.web.handler_caps import (
     GUILD_MEMBER_EVENTS_PER_MIN,
     GUILD_ROLE_CHANGES_PER_MIN,
     GUILD_THREAD_OPS_PER_MIN,
+    HANDLER_TIMERS_PER_HOUR,
     RENAME_WINDOW_SECONDS,
     RENAMES_PER_WINDOW,
+    TIMER_ARMING_WINDOW_SECONDS,
     WindowedLimiter,
     channel_rename_key,
     fires_per_min_for_trigger,
     guild_member_events_key,
     guild_role_changes_key,
     guild_thread_ops_key,
+    handler_timer_arm_key,
     HANDLER_FIRES_PER_MIN_MESSAGE,
     HANDLER_FIRES_PER_MIN_REACTION,
 )
@@ -152,3 +155,12 @@ def test_channel_rename_key_shape():
 def test_rename_window_constants_are_two_per_600():
     assert RENAMES_PER_WINDOW == 2
     assert RENAME_WINDOW_SECONDS == 600
+
+
+def test_handler_timer_arm_key_shape():
+    assert handler_timer_arm_key("H1") == "hcap:timersched:H1"
+
+
+def test_timer_arming_window_constants():
+    assert HANDLER_TIMERS_PER_HOUR == 30
+    assert TIMER_ARMING_WINDOW_SECONDS == 3600

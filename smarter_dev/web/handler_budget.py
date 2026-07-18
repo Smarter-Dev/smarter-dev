@@ -36,6 +36,10 @@ DEFAULT_MAX_THREAD_OPS = 0
 # suspenders — the functions aren't even injected for them). Kept OUT of the mod
 # pool so a promotion burst can't starve a ban and vice versa.
 DEFAULT_MAX_ROLE_CHANGES = 0
+# One-shot timers a fire may arm (schedule_timer). Available to both tiers — a
+# standard handler can legitimately self-defer — so the default is non-zero, kept
+# low so a single fire can't fan out into a swarm of persisted refires.
+DEFAULT_MAX_TIMERS = 2
 
 # Admin handlers are admin-created and trusted: looser per-fire caps, and a
 # moderation-action budget (bans/kicks/timeouts/deletes), e.g. cleaning up a
@@ -47,6 +51,9 @@ ADMIN_MAX_DISCORD_READS = 5
 ADMIN_MAX_THREAD_OPS = 10
 # Role changes: a promotion is 2 ops/fire, a multi-target sus a handful.
 ADMIN_MAX_ROLE_CHANGES = 10
+# Timers: a multi-target sus arms one removal timer per target, so admins get
+# more headroom than the standard self-defer default.
+ADMIN_MAX_TIMERS = 5
 ADMIN_WALL_CLOCK_SECONDS = 120.0
 
 
@@ -81,6 +88,7 @@ class HandlerBudget:
     max_discord_reads: int = DEFAULT_MAX_DISCORD_READS
     max_thread_ops: int = DEFAULT_MAX_THREAD_OPS
     max_role_changes: int = DEFAULT_MAX_ROLE_CHANGES
+    max_timers: int = DEFAULT_MAX_TIMERS
 
     messages_sent: int = 0
     web_searches: int = 0
@@ -90,6 +98,7 @@ class HandlerBudget:
     discord_reads: int = 0
     thread_ops: int = 0
     role_changes: int = 0
+    timers_scheduled: int = 0
 
     started_at: float = field(default_factory=time.monotonic)
 
@@ -190,6 +199,21 @@ class HandlerBudget:
             )
         self.role_changes += 1
 
+    def spend_timer(self) -> None:
+        """Account for one armed one-shot timer (schedule_timer).
+
+        A per-fire counter so a single firing can't fan out into an unbounded
+        swarm of persisted refires; distinct from the arming-window rate limit,
+        which bounds a handler's timers across *many* fires.
+        """
+        self.check_deadline()
+        if self.timers_scheduled >= self.max_timers:
+            raise CapExceeded(
+                "timers",
+                f"handler hit its {self.max_timers}-timer cap",
+            )
+        self.timers_scheduled += 1
+
     def enforce_agent_context(self, argument: str) -> None:
         """Reject an agent argument larger than the context-bytes cap.
 
@@ -216,6 +240,7 @@ class HandlerBudget:
             "discord_reads": self.discord_reads,
             "thread_ops": self.thread_ops,
             "role_changes": self.role_changes,
+            "timers_scheduled": self.timers_scheduled,
         }
 
 
@@ -228,5 +253,6 @@ def admin_budget() -> "HandlerBudget":
         max_discord_reads=ADMIN_MAX_DISCORD_READS,
         max_thread_ops=ADMIN_MAX_THREAD_OPS,
         max_role_changes=ADMIN_MAX_ROLE_CHANGES,
+        max_timers=ADMIN_MAX_TIMERS,
         wall_clock_seconds=ADMIN_WALL_CLOCK_SECONDS,
     )
