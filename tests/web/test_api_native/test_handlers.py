@@ -437,6 +437,37 @@ async def test_dispatch_bot_message_fires_only_optin_handlers(client, db_session
     assert len(client.submitted) == 2  # type: ignore[attr-defined]
 
 
+async def test_dispatch_bot_message_records_no_member_activity(client, db_session):
+    from sqlalchemy import select
+
+    from smarter_dev.web.models import ChannelHandler, MemberActivity
+
+    # Activity recording is human-only: an opted-in handler firing on a
+    # bot-authored message must NOT upsert a MemberActivity row for the bot's id
+    # (nor hand the handler human-shaped activity facts).
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="botwatch", trigger_type="message",
+        settings={"include_bot_messages": True}, description="opt-in",
+        script="await send_message('y')\n", created_by="U1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {"author_is_bot": True, "author_id": "BOT9"},
+        },
+    )
+    assert resp.json()["dispatched"] is True
+    rows = (await db_session.execute(
+        select(MemberActivity).where(MemberActivity.user_id == "BOT9")
+    )).scalars().all()
+    assert rows == []
+
+
 async def test_dispatch_human_message_fires_all_message_handlers(client, db_session):
     from smarter_dev.web.models import ChannelHandler
 
@@ -1026,6 +1057,35 @@ async def test_dispatch_mod_action_enqueues_guild_wide_handlers_ignoring_scope(
     assert len(body["handler_ids"]) == 1
     payload, _ = client.submitted[0]  # type: ignore[attr-defined]
     assert payload.channel_id == ""
+    # The fire's context carries the guild id so a mod-log formatter can build a
+    # "Jump To Action" link (the prompt documents context["guild_id"]).
+    assert payload.trigger_context["guild_id"] == "G1"
+
+
+async def test_dispatch_injects_guild_id_into_message_context(client, db_session):
+    from smarter_dev.web.models import ChannelHandler
+
+    # Every gateway-dispatched fire gets context["guild_id"] host-side, so a
+    # !history-style handler can build jump links to a member's mod actions.
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="hist", trigger_type="message",
+        settings={}, description="d", script="await send_message('x')\n",
+        created_by="U1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {"author_id": "U7"},
+        },
+    )
+    assert resp.json()["dispatched"] is True
+    payload, _ = client.submitted[0]  # type: ignore[attr-defined]
+    assert payload.trigger_context["guild_id"] == "G1"
 
 
 async def test_dispatch_mod_action_not_under_member_raid_gate(
@@ -1035,9 +1095,16 @@ async def test_dispatch_mod_action_not_under_member_raid_gate(
 
     # Simulate an exhausted member-events raid window; a mod_action fire must NOT
     # be keyed on it (mod actions are not a raid vector), so it still enqueues.
-    monkeypatch.setattr(
-        handlers_module, "WindowedLimiter", lambda redis: _KeyAwareLimiter()
-    )
+    # Capture the actual limiter instance the endpoint uses so its recorded hits
+    # can be inspected (a fresh _KeyAwareLimiter().hits would always be empty).
+    limiters: list[_KeyAwareLimiter] = []
+
+    def make_limiter(redis):
+        limiter = _KeyAwareLimiter()
+        limiters.append(limiter)
+        return limiter
+
+    monkeypatch.setattr(handlers_module, "WindowedLimiter", make_limiter)
     db_session.add(AdminHandler(
         guild_id="G1", name="mod-log", trigger_type="mod_action", settings={},
         channel_ids=[], description="format", script="pass\n", created_by_admin="A1",
@@ -1055,7 +1122,9 @@ async def test_dispatch_mod_action_not_under_member_raid_gate(
     )
     assert resp.json()["dispatched"] is True
     # The raid window key was never even consulted for a mod_action fire.
-    assert not any("memberevt" in key for key, _ in _KeyAwareLimiter().hits)
+    assert limiters, "the endpoint constructed no limiter"
+    all_hits = [key for limiter in limiters for key, _ in limiter.hits]
+    assert not any("memberevt" in key for key in all_hits)
 
 
 async def test_active_channels_lists_mod_action_as_guild_trigger(client, db_session):

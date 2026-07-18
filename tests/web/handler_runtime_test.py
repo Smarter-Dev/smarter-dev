@@ -1359,3 +1359,24 @@ async def test_list_mod_actions_passes_through_channel_and_trigger_message_ids()
     assert emitter.messages[0][1] == "2"
     assert emitter.messages[1][1] == "None"
     assert result.usage["lookups"] == 1
+
+
+async def test_list_mod_actions_clamps_limit_host_side():
+    actor = _FakeActor()
+    captured = {}
+
+    async def reader(user_id, limit):
+        captured["limit"] = limit
+        return []
+
+    # A script-supplied limit is clamped to [0, 50] before it reaches the reader
+    # (and thus the SQL LIMIT): no unbounded fetch, no negative LIMIT error.
+    for requested, expected in ((999999999, 50), (-1, 0)):
+        result, _, _ = await _run(
+            f"await list_mod_actions('U1', {requested})\n",
+            budget=admin_budget(),
+            actor=actor,
+            mod_action_reader=reader,
+        )
+        assert result.outcome == "ok"
+        assert captured["limit"] == expected
