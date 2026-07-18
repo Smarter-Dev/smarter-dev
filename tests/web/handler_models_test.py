@@ -66,7 +66,16 @@ def test_admin_only_trigger_types_include_member_thread_and_dm():
         "member_role_change",
         "thread_create",
         "dm_message",
+        "message_edit",
     )
+
+
+def test_message_edit_is_admin_only_not_standard():
+    # message_edit is an admin-tier auto-mod trigger; the standard vocabulary
+    # does not grow (§3.3), so a member-authored channel handler can't select it.
+    assert "message_edit" in ADMIN_HANDLER_TRIGGER_TYPES
+    assert "message_edit" not in HANDLER_TRIGGER_TYPES
+    assert "message_edit" in ADMIN_HANDLER_EVENT_TRIGGERS
 
 
 def test_dm_message_is_admin_only_not_standard():

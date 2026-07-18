@@ -117,6 +117,19 @@ Leave channel_ids EMPTY for the member_* triggers (a member event has no channel
               member). CONTENT IS FULLY UNTRUSTED and user-controlled at any frequency — never gate
               a moderation action on DM text without anchored parsing. Reply to the sender with
               send_dm(context["author_id"], ...). Use this for a DM-relay mirror into a staff channel.
+  "message_edit": fires when a HUMAN edits a message (bot/webhook edits never fire). CHANNEL-keyed
+              like thread_create: the fire's home channel is the edited message's channel (a thread
+              edit dispatches to the thread's PARENT), so send_message(content) posts there and you
+              scope handlers by channel_ids on those channel(s) (empty = all). context["message_id"],
+              context["message_content"] (the text NOW — scan THIS, legacy auto-mod only checks the
+              new text), context["old_content"] ("" when the original was not cached — never assume
+              it is present), context["author_id"], context["author_name"],
+              context["author_account_created_at"], context["author_joined_at"] (ISO or null),
+              context["author_role_ids"], context["author_has_manage_messages"] (staff-exemption
+              guard — skip the action when true), context["channel_parent_id"] (category id or null),
+              plus context["is_thread"]/context["thread_id"]/context["thread_name"] when the edit is
+              in a thread. Use this to catch edit-based evasion (e.g. posting clean, then editing in
+              an @everyone ping or a link): delete_message(context["message_id"]) + a warning.
 
 Provided async functions — you MUST `await` every call:
   await send_message(content: str, channel_id: str = None, ping_role_id: str = None) -> str
@@ -293,8 +306,10 @@ a function but never call it, NOTHING happens. Example skeleton:
   {"fire_at": ISO}). "when someone joins" → "member_join"; "when someone leaves/is banned" →
   "member_leave"; "when a member accepts the rules / passes the gate" → "member_rules_accepted";
   "when someone gets/loses a role (or boosts)" → "member_role_change"; "when a thread or forum post
-  is created" → "thread_create"; "when someone DMs the bot / a DM relay" → "dm_message". Leave
-  channel_ids EMPTY for the four member_* triggers AND for dm_message (a DM has no channel).
+  is created" → "thread_create"; "when someone DMs the bot / a DM relay" → "dm_message"; "when a
+  message is edited / catch edited-in pings / edit-based evasion" → "message_edit". Leave
+  channel_ids EMPTY for the four member_* triggers AND for dm_message (a DM has no channel);
+  message_edit IS channel-keyed (scope it by channel_ids like a message handler, empty = all).
 - MEMBER EVENTS HAVE NO HOME CHANNEL. On a member_* trigger, send_message(content) with no
   channel_id FAILS — every send must name a channel constant (resolve names via list_channels).
 - RAID FREQUENCY. member_join and member_leave fire on EVERY join/leave and burst during raids and

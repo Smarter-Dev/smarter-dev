@@ -128,6 +128,13 @@ The five member/thread triggers (`member_join`, `member_leave`, `member_rules_ac
   the name gate feeds ban/kick/timeout/delete.
 - No home channel on member events: the four `member_*` triggers have no home channel, so a bare
   `send_message(content)` with no channel_id would fail at runtime. Every send must name a channel.
+- Edit-frequency spam: `message_edit` fires on EVERY human message edit in scope — high frequency,
+  and edits are a common evasion vector (post clean, then edit in an @everyone ping or a link). It IS
+  channel-keyed (a real home channel, unlike member events), so a bare `send_message(content)` works.
+  Reject an unconditional emit/agent-call/web-read on `message_edit` with no cheap guard, exactly as
+  for `message`. The handler must scan `context["message_content"]` (the text NOW) and honor
+  `context["author_has_manage_messages"]` as a staff exemption before any delete/warn; treat
+  `context["old_content"]` as best-effort ("" when uncached — never gate solely on old vs new).
 
 ## Reject unsafe dm_message / send_dm handlers
 `dm_message` (fires when any user DMs the bot) is admin-only, guild-scoped, and has NO home channel

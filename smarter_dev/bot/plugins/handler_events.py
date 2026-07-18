@@ -792,6 +792,101 @@ async def on_thread_create(event: hikari.GuildThreadCreateEvent) -> None:
 
 
 # ---------------------------------------------------------------------------
+# message_edit trigger (admin-tier auto-mod; automated-and-command-moderation §3.3)
+# ---------------------------------------------------------------------------
+
+
+def message_edit_context(
+    msg: Any,
+    *,
+    old_content: str,
+    author_role_ids: list[str],
+    author_has_manage_messages: bool,
+    channel_parent_id: str | None,
+    author_joined_at: str | None,
+    thread_fields: dict,
+) -> dict:
+    """message_edit trigger context (pure — no cache/REST).
+
+    Carries the message's content NOW (``message_content`` — legacy auto-mod
+    only scans the new text) plus the best-effort cached ``old_content`` and the
+    same author permission/category enrichment as the message trigger, so a
+    handler can apply the same staff-exemption and @everyone guards to an edit
+    that it applies to a fresh message.
+    """
+    return {
+        "trigger_type": "message_edit",
+        "message_id": str(msg.id),
+        "message_content": msg.content or "",
+        "old_content": old_content,
+        "author_id": str(msg.author.id),
+        "author_name": msg.author.username,
+        "author_account_created_at": _snowflake_created_at(int(msg.author.id)),
+        "author_joined_at": author_joined_at,
+        "author_role_ids": author_role_ids,
+        "author_has_manage_messages": author_has_manage_messages,
+        "channel_parent_id": channel_parent_id,
+        **thread_fields,
+    }
+
+
+async def dispatch_message_edit(bot: Any, event: Any) -> None:
+    # Bot/webhook edits never fire — reuses the message trigger's is_human guard,
+    # preserving the no-loop invariant. For an embed/link-unfurl update Discord
+    # reports is_human as UNDEFINED (author unknown); that is falsy, so it is
+    # dropped here too.
+    if not event.is_human:
+        return
+    msg = event.message
+    new_content = msg.content
+    # Suppress no-op edits: Discord re-emits GuildMessageUpdateEvent for
+    # link/embed unfurls (content UNDEFINED) and pin/embed-only updates, both
+    # with UNCHANGED text — firing on those would turn a rare trigger into a
+    # per-message one. Skip when there is no new content, or when the cached old
+    # content matches the new content. On a cache miss we cannot compare, so we
+    # fire with old_content="" (fail toward scanning — the auto-mod stance).
+    if not new_content:
+        return
+    old_message = event.old_message
+    if old_message is not None and old_message.content == new_content:
+        return
+    old_content = old_message.content or "" if old_message is not None else ""
+    # event.member is UNDEFINED (not None) for the author-unknown unfurl case; the
+    # is_human guard above already dropped those, so a truthy member is a real one.
+    member = event.member or None
+    joined_at = None
+    if member is not None and member.joined_at is not None:
+        joined_at = member.joined_at.isoformat()
+    author_role_ids = _roles_beyond_everyone(member) if member is not None else []
+    thread_channel = _get_thread_channel(bot, event.channel_id)
+    context = message_edit_context(
+        msg,
+        old_content=old_content,
+        author_role_ids=author_role_ids,
+        author_has_manage_messages=author_has_manage_messages(member),
+        channel_parent_id=resolve_channel_parent_id(bot, event.channel_id),
+        author_joined_at=joined_at,
+        thread_fields=message_thread_fields(thread_channel),
+    )
+    # An edit inside a thread dispatches to the thread's PARENT channel — a single
+    # fire whose home channel is the parent, so channel-scoped admin handlers
+    # catch edits exactly as they catch messages (§4, mirrors dispatch_message).
+    dispatch_channel_id = (
+        str(thread_channel.parent_id)
+        if thread_channel is not None
+        else str(event.channel_id)
+    )
+    await _dispatch(
+        dispatch_channel_id, str(event.guild_id), "message_edit", context
+    )
+
+
+@plugin.listener(hikari.GuildMessageUpdateEvent)
+async def on_message_edit(event: hikari.GuildMessageUpdateEvent) -> None:
+    await dispatch_message_edit(plugin.bot, event)
+
+
+# ---------------------------------------------------------------------------
 # dm_message context + mutual-guild routing (staff-communication-channels.md E1)
 # ---------------------------------------------------------------------------
 

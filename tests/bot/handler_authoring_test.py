@@ -302,6 +302,14 @@ def test_describe_trigger_dm_message():
     assert "untrusted" in line
 
 
+def test_describe_trigger_message_edit():
+    line = describe_trigger("message_edit", {})
+    assert "EVERY message edit" in line
+    assert "high frequency" in line
+    assert "evasion" in line
+    assert "old_content" in line
+
+
 def test_describe_trigger_cadence_phrasing():
     assert "EVERY user message" in describe_trigger("message", {})
     assert "EVERY user reaction" in describe_trigger("reaction", {})
@@ -503,6 +511,35 @@ async def test_admin_pipeline_accepts_member_trigger():
     assert result.ok
     assert result.trigger_type == "member_join"
     assert "EVERY member join" in seen["ctx"]
+
+
+async def test_admin_pipeline_accepts_message_edit_trigger():
+    # message_edit is in the admin vocabulary; a create plan on it is accepted
+    # and its edit-frequency cadence reaches the judge.
+    seen = {}
+
+    async def judge(script, trigger_context):
+        seen["ctx"] = trigger_context
+        return _verdict(reason="ok")
+
+    result = await run_admin_creation_pipeline(
+        request="delete edits that add @everyone",
+        existing_handlers=[],
+        author=_admin_author_returning(
+            _admin_plan(
+                trigger_type="message_edit",
+                name="edit-ping-catch",
+                script=(
+                    'if "@everyone" in context["message_content"]:\n'
+                    '    await delete_message(context["message_id"])\n'
+                ),
+            )
+        ),
+        judge=judge,
+    )
+    assert result.ok
+    assert result.trigger_type == "message_edit"
+    assert "EVERY message edit" in seen["ctx"]
 
 
 async def test_standard_pipeline_rejects_admin_only_trigger():

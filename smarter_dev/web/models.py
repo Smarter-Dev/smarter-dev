@@ -4320,6 +4320,11 @@ ADMIN_ONLY_TRIGGER_TYPES = (
     "member_role_change",
     "thread_create",
     "dm_message",
+    # Human message edits (hikari.GuildMessageUpdateEvent). Channel-keyed like
+    # thread_create — edits are a common @everyone/evasion vector, so an admin
+    # auto-mod handler must see the new (and best-effort cached old) content.
+    # See docs/v2/feature-parity/automated-and-command-moderation.md §3.3.
+    "message_edit",
 )
 # The admin tier's full trigger vocabulary: the standard four plus the five above.
 ADMIN_HANDLER_TRIGGER_TYPES = HANDLER_TRIGGER_TYPES + ADMIN_ONLY_TRIGGER_TYPES
@@ -4453,7 +4458,8 @@ class AdminHandler(Base):
         CheckConstraint(
             "trigger_type IN ('message', 'reaction', 'schedule', 'timer', "
             "'member_join', 'member_leave', 'member_rules_accepted', "
-            "'member_role_change', 'thread_create', 'dm_message')",
+            "'member_role_change', 'thread_create', 'dm_message', "
+            "'message_edit')",
             name="ck_admin_handlers_trigger_type",
         ),
         Index("ix_admin_handlers_guild_id", "guild_id"),
