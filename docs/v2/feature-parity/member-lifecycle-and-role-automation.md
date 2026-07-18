@@ -72,7 +72,7 @@ extension from §3), `bot-core`, `drop` (recommend not porting — final call is
 | Per-member joined-timestamp persistence (`joined` label) | drop | Superseded: the timer payload carries the member id, so no per-member store exists to size-cap or share; Discord's own `joined_at`/context covers audit needs. |
 | Ready-time reconciliation (`onboard_new_members`) — timer re-arm portion | drop | Re-arming volatile timers from `joined` labels is obsolete by construction with DB-persisted timers (E3). |
 | Ready-time reconciliation (`onboard_new_members`) — downtime recovery + bot-ban checkpoint | handler-extension | The sweep did more than re-arm timers: it onboarded holding-role holders whose acceptance the bot never processed and re-ran the bot check (third ban checkpoint) on them. Persisted timers do NOT fix missed gateway events. Ported as the daily `onboarding-reconcile` admin handler using `get_role_members` (E5, now in scope) — see E6. |
-| Restart role backfill (`assign_missing_roles`) | bot-core (thin, E6) | Recovers members who went `pending → not pending` during bot downtime — a **missed `member_rules_accepted` event**, not a lost timer, so no handler can be triggered by it. E6's startup replay synthesizes the missed trigger through the normal dispatch path, keeping the onboarding handler the single authority; only the "Restarted and added roles to N members" announcement is dropped. |
+| Restart role backfill (`assign_missing_roles`) | bot-core (thin, E6) | Recovers members who went `pending → not pending` during bot downtime — a **missed `member_rules_accepted` event**, not a lost timer, so no handler can be triggered by it. E6's startup replay synthesizes the missed trigger through the normal dispatch path — it assigns no roles itself (trigger synthesis only, confirmed 2026-07-18); the onboarding handler is the single authority for role assignment. Only the "Restarted and added roles to N members" announcement is dropped. |
 | Member-count milestone announcements (`check_for_highscore`) | handler-extension | member_join trigger with `guild_member_count`/`guild_human_member_count` context (E1/E5); high-water mark + re-baseline logic fits per-handler memory; Giphy replaced by a hardcoded gif list + `choice()`. |
 | Milestone suppression during lockdown | drop | smarter-dev has no lockdown concept to gate on; if a lockdown feature lands later, add a memory flag then. |
 | `!reset member counter` command | drop | Rare admin op; deleting/re-creating (or conversationally re-authoring) the milestone handler resets its memory — no shared-memory extension warranted for this alone (Q6). |
@@ -371,8 +371,11 @@ path) is down gets no holding role and no promotion timer, and nothing in E1–E
 at them again. Legacy repaired this at ready-time with `assign_missing_roles` +
 `onboard_new_members`; the port needs an equivalent, split by mechanism:
 
-**Startup replay (bot-core, deliberately thin).** On shard ready, after member chunking
-completes, a pure function
+**Startup replay (bot-core, deliberately thin — trigger synthesis ONLY).** Confirmed by
+Zech (2026-07-18): the bot-core piece performs **no role mutations and no feature behavior
+of any kind** — it exists solely to fire the appropriate handlers for events the bot
+missed. All role assignment lives in the onboarding handler's script via `add_role` (E2).
+On shard ready, after member chunking completes, a pure function
 `find_missed_rules_acceptances(members) -> list[context]` selects cached members with
 `pending == False` and no roles beyond `@everyone`, and dispatches a synthetic
 `member_rules_accepted` for each through the **normal** dispatch path (`_dispatch`). The
