@@ -10,7 +10,7 @@ jobs construct their emitter with the handler's guild id.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -39,6 +39,9 @@ class _FakeSession:
 
     def add(self, obj):
         pass
+
+    async def scalars(self, statement):
+        return []  # empty guild-memory snapshot for the emitter-guild regression
 
     async def commit(self):
         pass
@@ -129,3 +132,229 @@ async def test_admin_fire_sets_emitter_guild_id(monkeypatch, capture_emitter):
         AdminHandlerFirePayload(admin_handler_id=str(uuid4()), channel_id="C1")
     )
     assert capture_emitter["emitter"].guild_id == "G77"
+
+
+# -- guild-shared memory load/persist around an admin fire ---------------------
+
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from smarter_dev.web.handler_guild_memory import (
+    load_guild_memory,
+    persist_guild_memory,
+)
+from smarter_dev.web.models import AdminHandler, ChannelHandler
+
+
+class _RealSessionCtx:
+    """A get_db_session_context() stand-in that yields real sessions on the
+    test engine, so the job's load_guild_memory/persist_guild_memory run real
+    SQL against the guild_handler_memory table."""
+
+    def __init__(self, engine):
+        self._maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        self._session = self._maker()
+        return self._session
+
+    async def __aexit__(self, *exc):
+        await self._session.close()
+        return False
+
+
+def _result_with_guild_memory(writes=None, deletes=None, outcome="ok"):
+    return HandlerResult(
+        outcome=outcome,
+        usage=dict(_USAGE),
+        duration_ms=1,
+        error="boom" if outcome == "error" else None,
+        guild_memory_writes=dict(writes or {}),
+        guild_memory_deletes=list(deletes or []),
+        guild_memory_changed=bool(writes or deletes),
+    )
+
+
+async def _seed_admin_handler(engine, guild_id: str = "G1") -> str:
+    handler_id = str(uuid4())
+    async with async_sessionmaker(engine, expire_on_commit=False)() as s:
+        s.add(
+            AdminHandler(
+                id=UUID(handler_id),
+                guild_id=guild_id,
+                name=f"h-{handler_id[:8]}",
+                trigger_type="message",
+                settings={},
+                channel_ids=["C1"],
+                description="d",
+                script="pass\n",
+                created_by_admin="A1",
+            )
+        )
+        await s.commit()
+    return handler_id
+
+
+def _patch_admin_job(monkeypatch, engine, fake_result, captured=None):
+    async def fake_run(script, context, **kwargs):
+        if captured is not None:
+            captured["guild_memory"] = kwargs.get("guild_memory")
+        return fake_result
+
+    async def fake_agent(*args, **kwargs):
+        return ""
+
+    async def fake_notify(**kwargs):
+        return None
+
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+    monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
+    monkeypatch.setattr(admin_handlers_jobs, "notify_handler_error", fake_notify)
+    monkeypatch.setattr(
+        admin_handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+    monkeypatch.setattr(
+        admin_handlers_jobs, "get_db_session_context", _RealSessionCtx(engine)
+    )
+    monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: object())
+    monkeypatch.setattr(
+        admin_handlers_jobs, "WindowedLimiter", lambda **kwargs: object()
+    )
+
+
+async def _load(engine, guild_id: str) -> dict:
+    async with async_sessionmaker(engine, expire_on_commit=False)() as s:
+        return await load_guild_memory(s, guild_id)
+
+
+async def test_admin_fire_persists_guild_memory_write(monkeypatch, test_engine):
+    handler_id = await _seed_admin_handler(test_engine, "G1")
+    captured = {}
+    _patch_admin_job(
+        monkeypatch,
+        test_engine,
+        _result_with_guild_memory(writes={"relay_bind_target": {"id": "7"}}),
+        captured,
+    )
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+    assert captured["guild_memory"] == {}  # loaded snapshot was empty
+    assert await _load(test_engine, "G1") == {"relay_bind_target": {"id": "7"}}
+
+
+async def test_admin_fire_loads_existing_guild_memory(monkeypatch, test_engine):
+    handler_id = await _seed_admin_handler(test_engine, "G1")
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as s:
+        await persist_guild_memory(s, "G1", {"seen": 3}, [])
+        await s.commit()
+    captured = {}
+    _patch_admin_job(monkeypatch, test_engine, _result_with_guild_memory(), captured)
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+    assert captured["guild_memory"] == {"seen": 3}
+
+
+async def test_admin_fire_persists_guild_memory_delete(monkeypatch, test_engine):
+    handler_id = await _seed_admin_handler(test_engine, "G1")
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as s:
+        await persist_guild_memory(s, "G1", {"gone": 1, "keep": 2}, [])
+        await s.commit()
+    _patch_admin_job(
+        monkeypatch, test_engine, _result_with_guild_memory(deletes=["gone"])
+    )
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+    assert await _load(test_engine, "G1") == {"keep": 2}
+
+
+async def test_guild_memory_write_survives_a_later_script_error(
+    monkeypatch, test_engine
+):
+    handler_id = await _seed_admin_handler(test_engine, "G1")
+    _patch_admin_job(
+        monkeypatch,
+        test_engine,
+        _result_with_guild_memory(writes={"bind": {"id": "9"}}, outcome="error"),
+    )
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+    # Emitted-effects-stay: the write made before the error persisted.
+    assert await _load(test_engine, "G1") == {"bind": {"id": "9"}}
+
+
+async def test_standard_fire_never_touches_guild_memory(monkeypatch, test_engine):
+    # A standard (non-admin) fire has no guild-memory wiring, so even a result
+    # that claims guild-memory changes leaves the table untouched.
+    handler_id = str(uuid4())
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as s:
+        s.add(
+            ChannelHandler(
+                id=UUID(handler_id),
+                guild_id="G1",
+                channel_id="C1",
+                name="std",
+                trigger_type="message",
+                settings={},
+                description="d",
+                script="pass\n",
+                created_by="U1",
+            )
+        )
+        await s.commit()
+
+    async def fake_run(script, context, **kwargs):
+        assert "guild_memory" not in kwargs  # standard job never passes it
+        return _result_with_guild_memory(writes={"x": 1})
+
+    async def fake_agent(*args, **kwargs):
+        return ""
+
+    async def fake_notify(**kwargs):
+        return None
+
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+    monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
+    monkeypatch.setattr(handlers_jobs, "notify_handler_error", fake_notify)
+    monkeypatch.setattr(
+        handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+    monkeypatch.setattr(
+        handlers_jobs, "get_db_session_context", _RealSessionCtx(test_engine)
+    )
+    monkeypatch.setattr(handlers_jobs, "get_redis_client", lambda: object())
+    monkeypatch.setattr(handlers_jobs, "WindowedLimiter", lambda **kwargs: object())
+
+    await handlers_jobs.run_handler_fire(HandlerFirePayload(handler_id=handler_id))
+    assert await _load(test_engine, "G1") == {}
+
+
+async def test_concurrent_different_key_writes_and_same_key_last_write_wins(
+    monkeypatch, test_engine
+):
+    handler_id = await _seed_admin_handler(test_engine, "G1")
+
+    async def _fire(result):
+        _patch_admin_job(monkeypatch, test_engine, result)
+        await admin_handlers_jobs.run_admin_handler_fire(
+            AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+        )
+
+    # Two fires writing DIFFERENT keys — both survive (per-key upsert).
+    await _fire(_result_with_guild_memory(writes={"a": 1}))
+    await _fire(_result_with_guild_memory(writes={"b": 2}))
+    assert await _load(test_engine, "G1") == {"a": 1, "b": 2}
+
+    # Two fires writing the SAME key — last write wins, no error.
+    await _fire(_result_with_guild_memory(writes={"a": 10}))
+    await _fire(_result_with_guild_memory(writes={"a": 20}))
+    assert await _load(test_engine, "G1") == {"a": 20, "b": 2}

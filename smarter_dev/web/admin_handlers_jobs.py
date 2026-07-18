@@ -25,6 +25,10 @@ from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.handler_budget import admin_budget
 from smarter_dev.web.handler_caps import ERROR_NOTICE_WINDOW_SECONDS, WindowedLimiter
 from smarter_dev.web.handler_emitter import DiscordEmitter
+from smarter_dev.web.handler_guild_memory import (
+    load_guild_memory,
+    persist_guild_memory,
+)
 from smarter_dev.web.handler_notify import notify_handler_error
 from smarter_dev.web.handler_schedule import next_fire_at
 from smarter_dev.web.models import AdminHandler, HandlerRun
@@ -63,6 +67,9 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
         channel_ids = list(record.channel_ids or [])
         handler_settings = dict(record.settings or {})
         memory = dict(record.memory or {})
+        # Guild-shared store: snapshotted before the fire so guild_memory_* reads
+        # see a consistent view; changed keys are persisted per key after.
+        guild_memory = await load_guild_memory(session, guild_id)
 
     # For time triggers there's no triggering channel; default to the first
     # scoped channel (the script should target channels explicitly for "all").
@@ -92,6 +99,7 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
         budget=budget,
         actor=actor,
         memory=memory,
+        guild_memory=guild_memory,
     )
 
     async with get_db_session_context() as session:
@@ -118,6 +126,16 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
             record = await session.get(AdminHandler, handler_id)
             if record is not None:
                 record.memory = result.memory
+        # Guild-shared memory persists per changed key regardless of outcome
+        # (emitted effects stay): a bind target set before a later script error
+        # must survive, matching how per-handler memory is persisted above.
+        if result.guild_memory_changed:
+            await persist_guild_memory(
+                session,
+                guild_id,
+                result.guild_memory_writes,
+                result.guild_memory_deletes,
+            )
         await session.commit()
 
     # On an error (not a cap breach), tell the triggering channel so it can be
