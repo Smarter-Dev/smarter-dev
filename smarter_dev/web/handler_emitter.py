@@ -251,6 +251,19 @@ class DiscordEmitter(DiscordBotClient):
         )
         return str(response.json().get("id", ""))
 
+    async def get_guild_member_count(self) -> int:
+        """Approximate total member count of this fire's guild.
+
+        ``GET /guilds/{guild_id}?with_counts=true`` -> ``approximate_member_count``
+        (Discord's lazily-updated figure, fine for a coarse ``1.2k`` display). No
+        gateway intent or member cache needed. A REST error propagates and errors
+        the fire — never a silent 0.
+        """
+        response = await self._request(
+            "GET", f"/guilds/{self.guild_id}", params={"with_counts": "true"}
+        )
+        return int(response.json()["approximate_member_count"])
+
     async def get_channel_guild_id(self, channel_id: str) -> str | None:
         """Guild id that owns ``channel_id``, or ``None`` when gone/not a guild
         channel.

@@ -23,6 +23,11 @@ still hide an unbounded memory key. Walk ALL categories even after finding a fai
    or ERRORS every re-fire; reject it. A sus/onboarding self-defer must act (remove_role /
    add_role) inside the timer branch, reading its target from context["payload"]. Confirm each
    schedule_timer delay is within [60, 2592000].
+   BOT-MESSAGE OPT-IN: if settings["include_bot_messages"] is set, the script MUST guard on a
+   SPECIFIC author_id constant (e.g. the Disboard bot id `302050872383242240`). Reject a bot-message
+   handler that acts on arbitrary bot messages with no specific-author guard — a two-bot reply loop
+   the own-bot exclusion cannot prevent. A cleaner that DELETES everything except a named bot's
+   messages is fine (the bot's own messages never dispatch).
 5. `agent_verdict_safe` — if a spawn_agent reply gates any action: the check must be anchored
    (startswith/exact — reject `"X" in reply`), and member content must be delimited and marked
    untrusted. Set true when no agent reply gates anything.

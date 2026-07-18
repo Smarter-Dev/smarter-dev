@@ -91,13 +91,18 @@ class ActiveChannelsCache:
     """Short-TTL cache of which (channel, trigger) and (guild, trigger) fire.
 
     ``_pairs`` covers standard + channel-scoped admin handlers; ``_guild_triggers``
-    covers admin handlers scoped to all channels in a guild.
+    covers admin handlers scoped to all channels in a guild. The two
+    ``_bot_message_*`` sets are the bot-message opt-in guard: which channels /
+    guilds have a message handler with ``include_bot_messages``, so a bot/webhook
+    message only ever POSTs /dispatch where some handler asked for it.
     """
 
     def __init__(self, ttl_seconds: float = 30.0) -> None:
         self._ttl = ttl_seconds
         self._pairs: set[tuple[str, str]] = set()
         self._guild_triggers: set[tuple[str, str]] = set()
+        self._bot_message_channels: set[str] = set()
+        self._bot_message_guilds: set[str] = set()
         self._expires_at: float = 0.0
 
     def invalidate(self) -> None:
@@ -111,20 +116,47 @@ class ActiveChannelsCache:
             self._guild_triggers = {
                 (str(g), str(t)) for g, t in data.get("guild_triggers", [])
             }
+            self._bot_message_channels = {
+                str(c) for c in data.get("bot_message_channels", [])
+            }
+            self._bot_message_guilds = {
+                str(g) for g in data.get("bot_message_guild_triggers", [])
+            }
             self._expires_at = time.monotonic() + self._ttl
 
-    async def has(
-        self, api: Any, channel_id: str, guild_id: str, trigger_type: str
-    ) -> bool:
+    async def _ensure_fresh(self, api: Any) -> bool:
+        """Refresh the cache when stale; False when the refresh failed."""
         if time.monotonic() >= self._expires_at:
             try:
                 await self._refresh(api)
             except Exception:  # noqa: BLE001 — never let dispatch crash on a cache miss
                 logger.debug("active-channels refresh failed", exc_info=True)
                 return False
+        return True
+
+    async def has(
+        self, api: Any, channel_id: str, guild_id: str, trigger_type: str
+    ) -> bool:
+        if not await self._ensure_fresh(api):
+            return False
         return (
             (str(channel_id), str(trigger_type)) in self._pairs
             or (str(guild_id), str(trigger_type)) in self._guild_triggers
+        )
+
+    async def has_bot_message(
+        self, api: Any, channel_id: str, guild_id: str
+    ) -> bool:
+        """Whether a bot/webhook message here fires some opted-in handler.
+
+        True only when the channel (or the whole guild, for a guild-wide admin
+        handler) has a message handler with ``include_bot_messages``. A refresh
+        failure returns False — the same fail-safe as ``has``."""
+        if not await self._ensure_fresh(api):
+            return False
+        return (
+            str(channel_id) in self._bot_message_channels
+            or str(guild_id) in self._bot_message_guilds
         )
 
 
@@ -145,10 +177,22 @@ def _get_api_client() -> Any:
 
 
 async def _dispatch(
-    channel_id: str, guild_id: str, trigger_type: str, context: dict
+    channel_id: str,
+    guild_id: str,
+    trigger_type: str,
+    context: dict,
+    *,
+    bot_message: bool = False,
 ) -> None:
     api = _get_api_client()
-    if not await _cache.has(api, channel_id, guild_id, trigger_type):
+    # A bot/webhook message uses the opt-in guard (only fires where a handler
+    # asked for bot messages); everything else uses the normal per-trigger guard.
+    present = (
+        await _cache.has_bot_message(api, channel_id, guild_id)
+        if bot_message
+        else await _cache.has(api, channel_id, guild_id, trigger_type)
+    )
+    if not present:
         return
     try:
         await api.post(
@@ -505,6 +549,7 @@ def resolve_channel_parent_id(bot: Any, channel_id: Any) -> str | None:
 def message_context(
     msg: Any,
     *,
+    author_is_bot: bool,
     author_role_ids: list[str],
     author_has_manage_messages: bool,
     mentioned_user_ids: list[str],
@@ -529,6 +574,9 @@ def message_context(
         "message_id": str(msg.id),
         "author_id": str(msg.author.id),
         "author_name": msg.author.username,
+        # True for any non-human author (bot/webhook) that survived the own-bot
+        # anti-loop guard; the /dispatch filter keys off it. False for humans.
+        "author_is_bot": author_is_bot,
         # For admin handlers that gate on new accounts / recent joiners.
         "author_account_created_at": _snowflake_created_at(int(msg.author.id)),
         "author_joined_at": author_joined_at,
@@ -601,15 +649,25 @@ async def start_activity_flush(_: hikari.StartedEvent) -> None:
 
 
 async def dispatch_message(bot: Any, event: Any) -> None:
-    # Only user actions fire triggers.
-    if not event.is_human:
-        return
-    _activity.record(
-        str(event.guild_id),
-        str(event.message.author.id),
-        datetime.now(timezone.utc),
-    )
     msg = event.message
+    me = bot.get_me()
+    # Structural anti-loop invariant: the smarter-dev bot's OWN messages never
+    # fire a handler (post -> fire -> post -> ...), dropped before any opt-in.
+    if me is not None and msg.author.id == me.id:
+        return
+    # A non-human (bot/webhook) message fires only opted-in handlers. When
+    # get_me() is None (pre-READY) the own-bot invariant can't be verified, so a
+    # bot message is dropped — fail closed. Human messages fire unchanged.
+    is_bot_message = not event.is_human
+    if is_bot_message and me is None:
+        return
+    if not is_bot_message:
+        # Activity facts stay human-only — a bot/webhook is not a guild member.
+        _activity.record(
+            str(event.guild_id),
+            str(event.message.author.id),
+            datetime.now(timezone.utc),
+        )
     joined_at = None
     if event.member is not None and event.member.joined_at is not None:
         joined_at = event.member.joined_at.isoformat()
@@ -627,6 +685,7 @@ async def dispatch_message(bot: Any, event: Any) -> None:
     )
     context = message_context(
         msg,
+        author_is_bot=is_bot_message,
         author_role_ids=author_role_ids,
         author_has_manage_messages=author_has_manage_messages(event.member),
         mentioned_user_ids=[str(x) for x in msg.user_mentions_ids],
@@ -645,7 +704,13 @@ async def dispatch_message(bot: Any, event: Any) -> None:
         if thread_channel is not None
         else str(event.channel_id)
     )
-    await _dispatch(dispatch_channel_id, str(event.guild_id), "message", context)
+    await _dispatch(
+        dispatch_channel_id,
+        str(event.guild_id),
+        "message",
+        context,
+        bot_message=is_bot_message,
+    )
 
 
 @plugin.listener(hikari.GuildMessageCreateEvent)

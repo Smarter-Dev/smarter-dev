@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import hikari
 
+from smarter_dev.bot.plugins import handler_events
 from smarter_dev.bot.plugins.handler_events import (
     ActiveChannelsCache,
     _snowflake_created_at,
     author_has_manage_messages,
+    dispatch_message,
     message_context,
     resolve_channel_parent_id,
 )
@@ -25,14 +28,27 @@ class _Resp:
 
 
 class _FakeAPI:
-    def __init__(self, channels, guild_triggers=None):
+    def __init__(
+        self,
+        channels,
+        guild_triggers=None,
+        bot_message_channels=None,
+        bot_message_guild_triggers=None,
+    ):
         self.channels = channels
         self.guild_triggers = guild_triggers or []
+        self.bot_message_channels = bot_message_channels or []
+        self.bot_message_guild_triggers = bot_message_guild_triggers or []
         self.get_calls = 0
 
     async def get(self, path):
         self.get_calls += 1
-        return _Resp({"channels": self.channels, "guild_triggers": self.guild_triggers})
+        return _Resp({
+            "channels": self.channels,
+            "guild_triggers": self.guild_triggers,
+            "bot_message_channels": self.bot_message_channels,
+            "bot_message_guild_triggers": self.bot_message_guild_triggers,
+        })
 
 
 async def test_cache_reports_channel_membership():
@@ -115,6 +131,7 @@ class _Member:
 
 def _base_context(**overrides) -> dict:
     kwargs = {
+        "author_is_bot": False,
         "author_role_ids": [],
         "author_has_manage_messages": False,
         "mentioned_user_ids": [],
@@ -238,3 +255,147 @@ def test_message_context_preserves_existing_fields():
     assert context["attachments"][0]["filename"] == "f"
     assert context["is_thread"] is True
     assert context["thread_id"] == "T1"
+
+
+# -- bot-message opt-in cache (has_bot_message) -----------------------------
+
+
+async def test_active_channels_cache_has_bot_message():
+    api = _FakeAPI(
+        channels=[["C1", "message"]],
+        bot_message_channels=["C1"],
+        bot_message_guild_triggers=["G9"],
+    )
+    cache = ActiveChannelsCache(ttl_seconds=999)
+    # True for a channel or a guild in the bot-message sets.
+    assert await cache.has_bot_message(api, "C1", "G1") is True
+    assert await cache.has_bot_message(api, "ANY", "G9") is True
+    # False when neither the channel nor the guild opted in.
+    assert await cache.has_bot_message(api, "C2", "G1") is False
+
+
+class _FailAPI:
+    async def get(self, path):
+        raise RuntimeError("active-channels unavailable")
+
+
+async def test_has_bot_message_false_on_refresh_failure():
+    cache = ActiveChannelsCache(ttl_seconds=999)
+    # A refresh failure never crashes dispatch — it reads as "not opted in".
+    assert await cache.has_bot_message(_FailAPI(), "C1", "G1") is False
+
+
+# -- dispatch_message bot-message routing -----------------------------------
+
+_BOT_ME_ID = 999000111222333444
+
+
+def _msg_bot_and_event(*, author_id, is_human):
+    author = SimpleNamespace(id=author_id, username="poster")
+    message = SimpleNamespace(
+        id=1234,
+        content="Bump done!",
+        author=author,
+        attachments=[],
+        user_mentions_ids=[],
+        role_mention_ids=[],
+        mentions_everyone=False,
+    )
+    bot = SimpleNamespace(
+        cache=_FakeCache(),
+        get_me=lambda: SimpleNamespace(id=_BOT_ME_ID),
+    )
+    event = SimpleNamespace(
+        is_human=is_human,
+        guild_id=42,
+        channel_id=555,
+        message=message,
+        member=None,
+    )
+    return bot, event
+
+
+@dataclass
+class _DispatchCapture:
+    calls: list = field(default_factory=list)
+
+    async def __call__(
+        self, channel_id, guild_id, trigger_type, context, *, bot_message=False
+    ):
+        self.calls.append(
+            {
+                "channel_id": channel_id,
+                "trigger_type": trigger_type,
+                "context": context,
+                "bot_message": bot_message,
+            }
+        )
+
+
+async def test_dispatch_message_ignores_own_bot_message(monkeypatch):
+    capture = _DispatchCapture()
+    monkeypatch.setattr(handler_events, "_dispatch", capture)
+    # A message authored by the bot itself never dispatches, human-looking or not.
+    for is_human in (True, False):
+        bot, event = _msg_bot_and_event(author_id=_BOT_ME_ID, is_human=is_human)
+        await dispatch_message(bot, event)
+    assert capture.calls == []
+
+
+async def test_dispatch_message_bot_message_dispatches_when_opted_in(monkeypatch):
+    capture = _DispatchCapture()
+    monkeypatch.setattr(handler_events, "_dispatch", capture)
+    # A foreign bot's message (is_human False, not our id) dispatches via the
+    # bot-message route with author_is_bot True.
+    bot, event = _msg_bot_and_event(author_id=302050872383242240, is_human=False)
+    await dispatch_message(bot, event)
+    assert len(capture.calls) == 1
+    call = capture.calls[0]
+    assert call["bot_message"] is True
+    assert call["context"]["author_is_bot"] is True
+    assert call["channel_id"] == "555"
+
+
+async def test_dispatch_message_human_flags_not_bot_and_records_activity(monkeypatch):
+    capture = _DispatchCapture()
+    recorded: list = []
+    monkeypatch.setattr(handler_events, "_dispatch", capture)
+    monkeypatch.setattr(
+        handler_events._activity,
+        "record",
+        lambda g, u, at: recorded.append((g, u)),
+    )
+    bot, event = _msg_bot_and_event(author_id=733364234141827073, is_human=True)
+    await dispatch_message(bot, event)
+    assert len(capture.calls) == 1
+    call = capture.calls[0]
+    assert call["bot_message"] is False
+    assert call["context"]["author_is_bot"] is False
+    # A human message is recorded to the activity batcher.
+    assert recorded == [("42", "733364234141827073")]
+
+
+async def test_dispatch_message_bot_message_not_recorded_to_activity(monkeypatch):
+    capture = _DispatchCapture()
+    recorded: list = []
+    monkeypatch.setattr(handler_events, "_dispatch", capture)
+    monkeypatch.setattr(
+        handler_events._activity,
+        "record",
+        lambda g, u, at: recorded.append((g, u)),
+    )
+    bot, event = _msg_bot_and_event(author_id=302050872383242240, is_human=False)
+    await dispatch_message(bot, event)
+    # A bot/webhook is not a guild member — never recorded as activity.
+    assert recorded == []
+
+
+async def test_dispatch_message_bot_message_skipped_when_get_me_none(monkeypatch):
+    capture = _DispatchCapture()
+    monkeypatch.setattr(handler_events, "_dispatch", capture)
+    # Pre-READY: get_me() is None, so the own-bot invariant can't be verified and
+    # a bot message is dropped (fail closed).
+    bot, event = _msg_bot_and_event(author_id=302050872383242240, is_human=False)
+    bot.get_me = lambda: None
+    await dispatch_message(bot, event)
+    assert capture.calls == []

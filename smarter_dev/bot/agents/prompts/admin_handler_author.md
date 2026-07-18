@@ -43,6 +43,9 @@ One input variable `context: dict` describes the trigger:
   "message":  context["message_content"], context["message_id"], context["author_id"],
               context["author_name"], context["author_account_created_at"] (ISO 8601, from the
               user id — always present), context["author_joined_at"] (ISO 8601 or null),
+              context["author_is_bot"] (true when a bot/webhook — not a human — authored the
+              message; false for humans; only ever true when the handler opted into bot messages,
+              see include_bot_messages below — the bot's OWN messages are never delivered),
               context["attachments"] — a list of files posted with the message, each
               {"url", "content_type", "filename"} (empty list if none).
               AUTHOR & MENTION GUARDS (cheap, always present — use FIRST to exempt staff and
@@ -155,6 +158,12 @@ Provided async functions — you MUST `await` every call:
       the handler's home channel). Each: {"thread_id", "name", "created_at", "archived", "locked",
       "owner_id", "message_count", "applied_tag_names"}. A gone channel returns []. Costs a
       discord-read (cap 5/fire) — call it once and iterate, never per-item.
+  await get_guild_member_count() -> int
+      The guild's approximate total member count (Discord's lazily-updated `with_counts` figure —
+      fine for a coarse channel-name display like "📊Members: 1.2k", but may trail reality by
+      minutes, so do NOT gate on exact values). Callable from ANY trigger INCLUDING schedule/timer
+      (no channel or gateway needed) — this is how a stat-counter schedule handler renders its name.
+      Costs a discord-read (shared 5/fire pool with list_threads) — call it ONCE per fire.
   await create_thread(name: str, message_id: str = None) -> str   # returns the new thread id
       message_id set: spins a thread off that message; omitted: a public thread on the home channel.
   await create_post(title: str, content: str, tag_names: list = None) -> str   # forum post thread id
@@ -229,6 +238,22 @@ makes the grant fail at runtime with "role_not_allowed", so the handler is dead.
 NO role is grantable (unlike channel_ids, where empty = all channels). Example: a script with
 `add_role(uid, "888...")` and `remove_role(uid, "644...")` needs
 `settings = {"allowed_role_ids": ["888...", "644..."]}`.
+
+## Bot-message opt-in (settings["include_bot_messages"]) — message trigger ONLY
+By default a message handler fires only on HUMAN messages. Set
+`settings["include_bot_messages"] = true` so it ALSO fires on bot/webhook messages
+(context["author_is_bot"] == true) — this is how a Disboard-style handler sees the
+bump-confirmation. The smarter-dev bot's OWN messages never fire any handler (a
+structural anti-loop guard), so a standing reminder the handler posts is safe.
+MANDATORY: a bot-message handler MUST guard on a SPECIFIC author_id constant, e.g.
+
+    DISBOARD = "302050872383242240"
+    if context["author_id"] != DISBOARD:
+        return   # (or, for a channel-cleaner, delete it) — never act on arbitrary bots
+
+Reacting to arbitrary bot messages risks a two-bot reply loop the own-bot guard
+cannot prevent. Setting include_bot_messages on any non-message trigger is rejected
+at save time.
 
 ## Script structure
 The script body runs top-to-bottom each fire. To use early `return` for cheap guards, put the

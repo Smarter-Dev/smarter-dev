@@ -16,6 +16,9 @@ Script-facing surface (Monty external functions):
 - ``list_threads(channel_id=None)`` -> list[dict] of the channel's threads
   (home channel when omitted; a foreign channel needs an admin handler). Spends
   the discord_reads budget; a gone channel yields ``[]`` without erroring.
+- ``get_guild_member_count()`` -> int — the guild's approximate total member
+  count (worker-side REST ``with_counts`` read, both tiers). Spends the
+  discord_reads budget; callable from schedule/timer fires (no gateway needed).
 - ``create_thread(name, message_id=None)`` -> thread id and
   ``create_post(title, content, tag_names=None)`` -> thread id, both on the home
   channel, spending the message budget + channel window like ``send_message``.
@@ -255,6 +258,9 @@ class HandlerExecution:
             "post_voice": self._guard(self._post_voice),
             "spawn_agent": self._guard(self._spawn_agent),
             "list_threads": self._guard(self._list_threads),
+            # Both tiers: a cheap read-only guild-count read, usable from a
+            # schedule fire (worker-side REST, no gateway cache required).
+            "get_guild_member_count": self._guard(self._get_guild_member_count),
             "create_thread": self._guard(self._create_thread),
             "create_post": self._guard(self._create_post),
             "memory_get": self._guard(self._memory_get),
@@ -377,6 +383,16 @@ class HandlerExecution:
                 )
         self.budget.spend_discord_read()
         return await self.emitter.list_threads(target)
+
+    async def _get_guild_member_count(self) -> int:
+        """Approximate total guild member count; spends one discord read.
+
+        A worker-side REST read (``with_counts``) available to BOTH tiers and to
+        schedule fires, which have no gateway cache. Metered on the shared
+        discord_reads pool like ``list_threads``; a REST error propagates and
+        errors the fire (no silent 0)."""
+        self.budget.spend_discord_read()
+        return await self.emitter.get_guild_member_count()
 
     async def _admin_channel_in_scope(self, channel_id: str) -> bool:
         """Whether an admin handler may read ``channel_id``'s threads.
