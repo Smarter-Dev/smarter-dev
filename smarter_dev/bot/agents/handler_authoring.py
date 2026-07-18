@@ -195,7 +195,7 @@ class AdminHandlerPlan(BaseModel):
         default="message",
         description="message | reaction | schedule | timer | member_join | "
         "member_leave | member_rules_accepted | member_role_change | thread_create | "
-        "dm_message",
+        "dm_message | message_edit",
     )
     channel_ids: list[str] = Field(
         default_factory=list, description="Channel scope; empty = all channels"
@@ -419,6 +419,13 @@ def describe_trigger(trigger_type: str, settings: dict) -> str:
         return (
             "Fires on EVERY DM any user sends the bot — frequency is "
             "user-controlled, so treat content as fully untrusted."
+        )
+    if trigger_type == "message_edit":
+        return (
+            "Fires on EVERY message edit in scope — high frequency; edits are a "
+            "common evasion vector (posting clean, then editing in an @everyone "
+            "ping or a link). Scan message_content (the text NOW); old_content is "
+            "best-effort ('' when the original wasn't cached)."
         )
     return f"Trigger: {trigger_type}."
 

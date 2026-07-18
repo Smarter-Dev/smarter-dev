@@ -87,10 +87,12 @@ from smarter_dev.web.models import (
 
 logger = logging.getLogger(__name__)
 
-# Admin-only triggers that key off a channel rather than being guild-scoped:
-# thread_create (dispatched with its parent channel) and dm_message (its own
-# per-author window, NOT the member raid gate). Excluded from MEMBER_EVENT_TRIGGERS.
-_NON_MEMBER_ADMIN_TRIGGERS = ("thread_create", "dm_message")
+# Admin-only triggers that are NOT guild-shaped member lifecycle events, so the
+# per-guild raid window must not gate them: thread_create and message_edit
+# (both dispatched with a real home channel — the thread's parent / the edited
+# message's channel) and dm_message (its own per-author window). Excluded from
+# MEMBER_EVENT_TRIGGERS.
+_NON_MEMBER_ADMIN_TRIGGERS = ("thread_create", "dm_message", "message_edit")
 
 # The guild-shaped member lifecycle triggers: dispatched with ``channel_id=""``
 # (a member event has no channel), matched admin-only by guild + trigger, and
@@ -536,9 +538,9 @@ class HandlerController(Controller):
             # Guild-scoped admin triggers (member_* and dm_message) always surface
             # as (guild_id, trigger) — their dispatch guard is per-guild regardless
             # of channel_ids (a member event / DM has no channel to scope against).
-            # Everything else (message/reaction/thread_create) follows the
-            # scoped/guild-wide split: listed channels become channel entries,
-            # empty scope = guild.
+            # Everything else (message/reaction/thread_create/message_edit)
+            # follows the scoped/guild-wide split: listed channels become channel
+            # entries, empty scope = guild.
             if trigger in GUILD_SCOPED_ADMIN_TRIGGERS:
                 guild_triggers.append([guild_id, trigger])
             elif channel_ids:
