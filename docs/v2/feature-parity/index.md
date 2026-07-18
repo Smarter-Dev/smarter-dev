@@ -14,7 +14,7 @@ bot core.
 
 | Plan | Features | Character |
 |---|---|---|
-| [Automated & Command Moderation](automated-and-command-moderation.md) | codes-auto-mod, py-moderation | Spam/scam/TLD/invite engine as admin handlers; `/ban` `/kick` `/purge` in bot core; one `ModerationAction` audit system for manual/AI/handler actions |
+| [Automated & Command Moderation](automated-and-command-moderation.md) | codes-auto-mod, py-moderation | Spam/scam/TLD/invite engine as admin handlers; `/purge` the only bot-core moderation command (dropped `/ban` `/kick` `/timeout remove` 2026-07-18 — native Discord moderation + audit-log ingestion listener records native kick/ban/unban/timeout); one `ModerationAction` audit system for native/manual/AI/handler actions |
 | [Staff Communication Channels](staff-communication-channels.md) | codes-dm-relay, codes-mod-chat | DM bridge (`dm_message` trigger + `send_dm`) and private mod threads (thread-ops emit family) |
 | [Member Lifecycle & Role Automation](member-lifecycle-and-role-automation.md) | codes-onboarding, codes-celebration-engagement, py-sus-command | Member-event trigger family (`member_join` / `member_rules_accepted` / `member_role_change`), `add_role`/`remove_role`, persisted one-shot timers |
 | [Engagement Loops & Server Stats](engagement-loops-and-server-stats.md) | codes-disboard-bumping, codes-server-stat-counter | Schedule-driven counters in handler memory; `rename_channel`. Online-count family (presence aggregator + `GUILD_PRESENCES`) dropped 2026-07-18 — no bot-core work remains |
