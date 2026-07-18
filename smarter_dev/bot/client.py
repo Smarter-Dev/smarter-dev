@@ -14,6 +14,13 @@ import hikari
 import lightbulb
 from aiohttp import web
 
+from smarter_dev.bot.audit_logger import log_member_ban
+from smarter_dev.bot.audit_logger import log_member_join
+from smarter_dev.bot.audit_logger import log_member_leave
+from smarter_dev.bot.audit_logger import log_member_unban
+from smarter_dev.bot.audit_logger import log_member_update
+from smarter_dev.bot.audit_logger import log_message_delete
+from smarter_dev.bot.audit_logger import log_message_edit
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
@@ -455,6 +462,7 @@ def create_bot(settings: Settings | None = None) -> lightbulb.BotApp:
         | hikari.Intents.MESSAGE_CONTENT  # For message content
         | hikari.Intents.GUILD_MESSAGE_REACTIONS  # For message reactions
         | hikari.Intents.DM_MESSAGES  # For the dm_message handler trigger (DM relay)
+        | hikari.Intents.GUILD_MODERATION  # For ban/unban audit-log ingestion
     )
 
     # Create bot instance using Lightbulb BotApp (v2 syntax)
@@ -1590,8 +1598,6 @@ async def run_bot() -> None:
         Also logs the event to the audit log if configured.
         """
         # Log to audit channel
-        from smarter_dev.bot.audit_logger import log_member_leave
-
         try:
             await log_member_leave(bot, event)
         except Exception as e:
@@ -1633,8 +1639,6 @@ async def run_bot() -> None:
         Also logs the event to the audit log if configured.
         """
         # Log to audit channel
-        from smarter_dev.bot.audit_logger import log_member_join
-
         try:
             await log_member_join(bot, event)
         except Exception as e:
@@ -1682,8 +1686,6 @@ async def run_bot() -> None:
     @bot.listen()
     async def on_ban_create(event: hikari.BanCreateEvent) -> None:
         """Log member ban events to audit log."""
-        from smarter_dev.bot.audit_logger import log_member_ban
-
         try:
             await log_member_ban(bot, event)
         except Exception as e:
@@ -1692,8 +1694,6 @@ async def run_bot() -> None:
     @bot.listen()
     async def on_ban_delete(event: hikari.BanDeleteEvent) -> None:
         """Log member unban events to audit log."""
-        from smarter_dev.bot.audit_logger import log_member_unban
-
         try:
             await log_member_unban(bot, event)
         except Exception as e:
@@ -1702,8 +1702,6 @@ async def run_bot() -> None:
     @bot.listen()
     async def on_message_update(event: hikari.GuildMessageUpdateEvent) -> None:
         """Log message edit events to audit log."""
-        from smarter_dev.bot.audit_logger import log_message_edit
-
         try:
             await log_message_edit(bot, event)
         except Exception as e:
@@ -1712,8 +1710,6 @@ async def run_bot() -> None:
     @bot.listen()
     async def on_message_delete(event: hikari.GuildMessageDeleteEvent) -> None:
         """Log message delete events to audit log."""
-        from smarter_dev.bot.audit_logger import log_message_delete
-
         try:
             await log_message_delete(bot, event)
         except Exception as e:
@@ -1722,8 +1718,6 @@ async def run_bot() -> None:
     @bot.listen()
     async def on_member_update(event: hikari.MemberUpdateEvent) -> None:
         """Log member update events (username, nickname, role changes) to audit log."""
-        from smarter_dev.bot.audit_logger import log_member_update
-
         try:
             await log_member_update(bot, event)
         except Exception as e:
