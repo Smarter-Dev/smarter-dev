@@ -17,7 +17,11 @@ from smarter_dev.bot.plugins.model_override import handle_model_override_auto_to
 from smarter_dev.bot.plugins.model_override import handle_model_override_continue
 from smarter_dev.bot.plugins.model_override import handle_model_override_fallback_select
 from smarter_dev.bot.plugins.model_override import handle_model_override_modal_submit
-from smarter_dev.bot.plugins.model_override import handle_model_override_reasoning_select
+from smarter_dev.bot.plugins.model_override import handle_model_override_next
+from smarter_dev.bot.plugins.model_override import (
+    handle_model_override_reasoning_select,
+)
+from smarter_dev.bot.plugins.model_override import handle_model_override_save
 from smarter_dev.bot.plugins.model_override import handle_model_override_select
 from smarter_dev.bot.views.beacon_views import handle_beacon_modal_submit
 
@@ -255,6 +259,8 @@ async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> 
             await handle_daily_quest_submit_interaction(event)
         elif custom_id == "model_override_select":
             await handle_model_override_select(event)
+        elif custom_id.startswith("cbs_model_next:"):
+            await handle_model_override_next(event)
         elif custom_id.startswith("cbs_reasoning:"):
             await handle_model_override_reasoning_select(event)
         elif custom_id.startswith("cbs_fallback:"):
@@ -263,6 +269,8 @@ async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> 
             await handle_model_override_auto_toggle(event)
         elif custom_id.startswith("cbs_continue:"):
             await handle_model_override_continue(event)
+        elif custom_id.startswith("cbs_save:"):
+            await handle_model_override_save(event)
         elif custom_id.startswith("model_budget_fallback:"):
             await handle_model_budget_fallback(event)
         else:
