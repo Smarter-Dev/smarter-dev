@@ -31,6 +31,7 @@ _USAGE = {
     "discord_reads": 0,
     "thread_ops": 0,
     "role_changes": 0,
+    "timers_scheduled": 0,
 }
 
 
@@ -453,3 +454,297 @@ async def test_standard_fire_records_zero_role_changes(monkeypatch, test_engine)
     runs = await _load_runs(test_engine, handler_id)
     assert len(runs) == 1
     assert runs[0].role_changes == 0
+
+
+# -- schedule_timer wiring (persisted one-shot self re-arm, E3) ----------------
+
+from datetime import datetime, timedelta, timezone
+
+from smarter_dev.web.handler_caps import TIMER_ARMING_WINDOW_SECONDS
+
+
+def _patch_std_job(monkeypatch, record, *, fake_run, submits, limiter_kwargs):
+    async def fake_agent(*a, **k):
+        return ""
+
+    async def fake_notify(**kwargs):
+        return None
+
+    async def fake_submit(payload, scheduled_for=None, job_id=None):
+        submits.append((payload, scheduled_for, job_id))
+
+    def fake_limiter(**kwargs):
+        limiter_kwargs.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+    monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
+    monkeypatch.setattr(handlers_jobs, "notify_handler_error", fake_notify)
+    monkeypatch.setattr(handlers_jobs, "worker_submit", fake_submit)
+    monkeypatch.setattr(
+        handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+    monkeypatch.setattr(
+        handlers_jobs, "get_db_session_context", lambda: _FakeSessionCtx(record)
+    )
+    monkeypatch.setattr(handlers_jobs, "get_redis_client", lambda: object())
+    monkeypatch.setattr(handlers_jobs, "WindowedLimiter", fake_limiter)
+
+
+async def test_standard_fire_arms_timer_submits_fire_payload(monkeypatch):
+    record = SimpleNamespace(
+        enabled=True, script="pass", channel_id="C1", guild_id="G1",
+        trigger_type="message", settings={}, memory={},
+    )
+    captured, submits, limiter_kwargs = {}, [], []
+
+    async def fake_run(script, context, **kwargs):
+        captured.update(kwargs)
+        return _ok_result()
+
+    _patch_std_job(
+        monkeypatch, record, fake_run=fake_run, submits=submits,
+        limiter_kwargs=limiter_kwargs,
+    )
+    hid = str(uuid4())
+    await handlers_jobs.run_handler_fire(HandlerFirePayload(handler_id=hid))
+
+    # A dedicated 3600s timer-arming limiter was constructed and injected.
+    assert any(
+        k.get("window_seconds") == TIMER_ARMING_WINDOW_SECONDS for k in limiter_kwargs
+    )
+    assert captured["handler_id"] == hid
+    # Invoke the injected closure: it enqueues a HandlerFirePayload of THIS
+    # handler with the refire context and scheduled_for.
+    fire_at = datetime.now(timezone.utc) + timedelta(seconds=120)
+    refire = {"trigger_type": "timer", "payload": {"user_id": "U1"},
+              "scheduled_at": "2026-07-18T00:00:00+00:00"}
+    await captured["timer_scheduler"](fire_at, refire)
+    assert len(submits) == 1
+    payload, scheduled_for, job_id = submits[0]
+    assert isinstance(payload, HandlerFirePayload)
+    assert payload.handler_id == hid
+    assert payload.trigger_context == refire
+    assert scheduled_for == fire_at
+    assert job_id  # a job id was minted for the durable enqueue
+
+
+async def test_admin_fire_arms_timer_submits_admin_payload(monkeypatch):
+    record = SimpleNamespace(
+        enabled=True, script="pass", guild_id="G1", trigger_type="message",
+        channel_ids=["C1"], settings={}, memory={},
+    )
+    captured, submits, limiter_kwargs = {}, [], []
+
+    async def fake_run(script, context, **kwargs):
+        captured.update(kwargs)
+        return _ok_result()
+
+    async def fake_agent(*a, **k):
+        return ""
+
+    async def fake_notify(**kwargs):
+        return None
+
+    async def fake_submit(payload, scheduled_for=None, job_id=None):
+        submits.append((payload, scheduled_for, job_id))
+
+    def fake_limiter(**kwargs):
+        limiter_kwargs.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+    monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
+    monkeypatch.setattr(admin_handlers_jobs, "notify_handler_error", fake_notify)
+    monkeypatch.setattr(admin_handlers_jobs, "worker_submit", fake_submit)
+    monkeypatch.setattr(
+        admin_handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+
+    async def fake_load_guild_memory(session, guild_id):
+        return {}
+
+    monkeypatch.setattr(
+        admin_handlers_jobs, "load_guild_memory", fake_load_guild_memory
+    )
+    monkeypatch.setattr(
+        admin_handlers_jobs, "get_db_session_context", lambda: _FakeSessionCtx(record)
+    )
+    monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: object())
+    monkeypatch.setattr(admin_handlers_jobs, "WindowedLimiter", fake_limiter)
+
+    hid = str(uuid4())
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=hid, channel_id="C1")
+    )
+    assert any(
+        k.get("window_seconds") == TIMER_ARMING_WINDOW_SECONDS for k in limiter_kwargs
+    )
+    fire_at = datetime.now(timezone.utc) + timedelta(seconds=300)
+    refire = {"trigger_type": "timer", "payload": {"user_id": "U9"},
+              "scheduled_at": "2026-07-18T00:00:00+00:00"}
+    await captured["timer_scheduler"](fire_at, refire)
+    assert len(submits) == 1
+    payload, scheduled_for, job_id = submits[0]
+    assert isinstance(payload, AdminHandlerFirePayload)
+    assert payload.admin_handler_id == hid
+    assert payload.trigger_context == refire
+    assert scheduled_for == fire_at
+
+
+async def test_timer_refire_runs_same_handler_with_payload_context(monkeypatch):
+    record = SimpleNamespace(
+        enabled=True, script="pass", channel_id="C1", guild_id="G1",
+        trigger_type="message", settings={}, memory={},
+    )
+    captured, submits, limiter_kwargs = {}, [], []
+
+    async def fake_run(script, context, **kwargs):
+        captured["context"] = context
+        return _ok_result()
+
+    _patch_std_job(
+        monkeypatch, record, fake_run=fake_run, submits=submits,
+        limiter_kwargs=limiter_kwargs,
+    )
+    timer_ctx = {"trigger_type": "timer", "payload": {"user_id": "U1"},
+                 "scheduled_at": "2026-07-18T00:00:00+00:00"}
+    await handlers_jobs.run_handler_fire(
+        HandlerFirePayload(handler_id=str(uuid4()), trigger_context=timer_ctx)
+    )
+    # The fire job runs the script with the timer context verbatim — nothing
+    # checks it against the row's trigger_type ("message" here).
+    assert captured["context"] == timer_ctx
+
+
+async def test_timer_trigger_row_does_not_reschedule(monkeypatch):
+    # A row whose trigger_type is "timer" is one-shot: only "schedule" rows
+    # enqueue a next occurrence. The mocked run never invokes the scheduler, so
+    # no worker_submit should happen at all.
+    record = SimpleNamespace(
+        enabled=True, script="pass", channel_id="C1", guild_id="G1",
+        trigger_type="timer", settings={"delay_seconds": 120}, memory={},
+    )
+    submits, limiter_kwargs = [], []
+
+    async def fake_run(script, context, **kwargs):
+        return _ok_result()
+
+    _patch_std_job(
+        monkeypatch, record, fake_run=fake_run, submits=submits,
+        limiter_kwargs=limiter_kwargs,
+    )
+    await handlers_jobs.run_handler_fire(
+        HandlerFirePayload(handler_id=str(uuid4()), trigger_context={"trigger_type": "timer"})
+    )
+    assert submits == []
+
+
+async def test_refire_of_deleted_handler_returns_missing_and_emits_nothing(monkeypatch):
+    ran = {}
+
+    async def fake_run(script, context, **kwargs):
+        ran["yes"] = True
+        return _ok_result()
+
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+    monkeypatch.setattr(
+        handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+    # A deleted handler: the row is gone.
+    monkeypatch.setattr(
+        handlers_jobs, "get_db_session_context", lambda: _FakeSessionCtx(None)
+    )
+    result = await handlers_jobs.run_handler_fire(
+        HandlerFirePayload(
+            handler_id=str(uuid4()),
+            trigger_context={"trigger_type": "timer", "payload": {}},
+        )
+    )
+    assert result == {"status": "missing"}
+    assert "yes" not in ran  # nothing ran, nothing emitted
+
+
+async def test_disabled_handler_timer_refire_noops(monkeypatch):
+    ran = {}
+
+    async def fake_run(script, context, **kwargs):
+        ran["yes"] = True
+        return _ok_result()
+
+    record = SimpleNamespace(
+        enabled=False, script="pass", channel_id="C1", guild_id="G1",
+        trigger_type="message", settings={}, memory={},
+    )
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+    monkeypatch.setattr(
+        handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+    monkeypatch.setattr(
+        handlers_jobs, "get_db_session_context", lambda: _FakeSessionCtx(record)
+    )
+    result = await handlers_jobs.run_handler_fire(
+        HandlerFirePayload(
+            handler_id=str(uuid4()),
+            trigger_context={"trigger_type": "timer", "payload": {}},
+        )
+    )
+    assert result == {"status": "missing"}
+    assert "yes" not in ran
+
+
+async def test_handler_run_records_timers_scheduled(monkeypatch, test_engine):
+    handler_id = str(uuid4())
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as s:
+        s.add(
+            ChannelHandler(
+                id=UUID(handler_id),
+                guild_id="G1",
+                channel_id="C1",
+                name="timer-std",
+                trigger_type="message",
+                settings={},
+                description="d",
+                script="pass\n",
+                created_by="U1",
+            )
+        )
+        await s.commit()
+
+    async def fake_run(script, context, **kwargs):
+        return HandlerResult(
+            outcome="ok", usage=dict(_USAGE, timers_scheduled=1), duration_ms=1
+        )
+
+    async def fake_agent(*a, **k):
+        return ""
+
+    async def fake_notify(**kwargs):
+        return None
+
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+    monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
+    monkeypatch.setattr(handlers_jobs, "notify_handler_error", fake_notify)
+    monkeypatch.setattr(
+        handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+    monkeypatch.setattr(
+        handlers_jobs, "get_db_session_context", _RealSessionCtx(test_engine)
+    )
+    monkeypatch.setattr(handlers_jobs, "get_redis_client", lambda: object())
+    monkeypatch.setattr(handlers_jobs, "WindowedLimiter", lambda **kwargs: object())
+
+    await handlers_jobs.run_handler_fire(HandlerFirePayload(handler_id=handler_id))
+    runs = await _load_runs(test_engine, handler_id)
+    assert len(runs) == 1
+    assert runs[0].timers_scheduled == 1

@@ -15,7 +15,11 @@ a failure:
    reset is NOT pruning if the structure can grow past the 16KB cap BETWEEN resets on a busy
    channel.
 4. `guards_effective` — cheap guards run before expensive work AND actually filter; trace each
-   guard for conditions that are true on essentially every message.
+   guard for conditions that are true on essentially every message. TIMER RE-ARM: if the script
+   calls schedule_timer, it MUST handle the re-fire branch (`context["trigger_type"] == "timer"`) —
+   the re-fire runs the SAME script, so a script that arms a timer but never branches on the timer
+   context just re-runs its arming path (or does nothing) and ERRORS every re-fire; reject it here.
+   Also confirm each schedule_timer delay is a literal/derived value within [60, 2592000].
 5. `agent_verdict_safe` — if a spawn_agent reply gates any action: anchored parsing only
    (startswith/exact — reject `"X" in reply`), untrusted content delimited. True when no agent
    reply gates anything.

@@ -17,6 +17,12 @@ still hide an unbounded memory key. Walk ALL categories even after finding a fai
    is set for every member) is a broken guard even if the code looks defensive. On a `member_join`
    handler (fires on EVERY join, bursts during raids) a handler that emits with no guard is
    effectively unconditional — fail this unless the target is explicitly a join-log channel.
+   TIMER RE-ARM: if the script calls schedule_timer, it MUST handle the re-fire branch
+   (`context["trigger_type"] == "timer"`) — the re-fire runs the SAME script, so arming a timer
+   without a timer branch just re-runs the arming path (e.g. re-grants a role and re-arms forever)
+   or ERRORS every re-fire; reject it. A sus/onboarding self-defer must act (remove_role /
+   add_role) inside the timer branch, reading its target from context["payload"]. Confirm each
+   schedule_timer delay is within [60, 2592000].
 5. `agent_verdict_safe` — if a spawn_agent reply gates any action: the check must be anchored
    (startswith/exact — reject `"X" in reply`), and member content must be delimited and marked
    untrusted. Set true when no agent reply gates anything.

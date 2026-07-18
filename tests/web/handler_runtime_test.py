@@ -123,6 +123,7 @@ class _FakeActor:
 async def _run(
     script, *, budget=None, emitter=None, limiter=None, agent_runner=None,
     actor=None, channel_ids=None, allowed_role_ids=None,
+    timer_scheduler=None, timer_limiter=None, handler_id=None,
 ):
     emitter = emitter or _FakeEmitter()
     limiter = limiter or _StubLimiter()
@@ -135,6 +136,12 @@ async def _run(
         kwargs["channel_ids"] = channel_ids
     if allowed_role_ids is not None:
         kwargs["allowed_role_ids"] = allowed_role_ids
+    if timer_scheduler is not None:
+        kwargs["timer_scheduler"] = timer_scheduler
+    if timer_limiter is not None:
+        kwargs["timer_limiter"] = timer_limiter
+    if handler_id is not None:
+        kwargs["handler_id"] = handler_id
     result = await run_handler_script(
         script,
         {
@@ -928,3 +935,145 @@ async def test_ban_user_delete_message_seconds_passthrough():
     result, _, _ = await _run(script, budget=admin_budget(), actor=actor)
     assert result.outcome == "ok", result.error
     assert ("ban", "U1", "bot", 3600) in actor.calls
+
+
+# -- schedule_timer (persisted one-shot self re-arm, E3) -----------------------
+
+import datetime as _dt
+
+from smarter_dev.web.handler_caps import (  # noqa: E402
+    HANDLER_TIMERS_PER_HOUR,
+    TIMER_ARMING_WINDOW_SECONDS,
+    handler_timer_arm_key,
+)
+
+
+@dataclass
+class _TimerRecorder:
+    """Records schedule_timer enqueues; stands in for the fire job's closure."""
+
+    calls: list = field(default_factory=list)
+
+    async def __call__(self, fire_at, refire_context):
+        self.calls.append((fire_at, refire_context))
+
+
+async def test_schedule_timer_submits_refire_with_payload_and_scheduled_at():
+    recorder = _TimerRecorder()
+    before = _dt.datetime.now(_dt.timezone.utc)
+    script = 'await schedule_timer(120, {"user_id": context["author_id"]})\n'
+    result, _, limiter = await _run(
+        script, timer_scheduler=recorder, handler_id="H1"
+    )
+    after = _dt.datetime.now(_dt.timezone.utc)
+    assert result.outcome == "ok", result.error
+    assert result.usage["timers_scheduled"] == 1
+    assert len(recorder.calls) == 1
+    fire_at, ctx = recorder.calls[0]
+    # fire_at ≈ now + 120s.
+    assert before + _dt.timedelta(seconds=120) <= fire_at <= after + _dt.timedelta(seconds=120)
+    assert ctx["trigger_type"] == "timer"
+    assert ctx["payload"] == {"user_id": "U1"}
+    scheduled_at = _dt.datetime.fromisoformat(ctx["scheduled_at"])
+    assert before <= scheduled_at <= after
+    # The arming window was charged with the 3600s override on the handler key.
+    assert (
+        handler_timer_arm_key("H1"),
+        HANDLER_TIMERS_PER_HOUR,
+        TIMER_ARMING_WINDOW_SECONDS,
+    ) in limiter.calls
+
+
+async def test_schedule_timer_below_min_delay_errors():
+    recorder = _TimerRecorder()
+    result, _, _ = await _run(
+        'await schedule_timer(59, {"k": 1})\n', timer_scheduler=recorder
+    )
+    assert result.outcome == "error"
+    assert recorder.calls == []
+    assert result.usage["timers_scheduled"] == 0
+
+
+async def test_schedule_timer_above_max_delay_errors():
+    recorder = _TimerRecorder()
+    result, _, _ = await _run(
+        f"await schedule_timer({30 * 86400 + 1}, {{}})\n", timer_scheduler=recorder
+    )
+    assert result.outcome == "error"
+    assert recorder.calls == []
+
+
+async def test_schedule_timer_non_json_payload_errors():
+    recorder = _TimerRecorder()
+    # A set is not JSON-serializable -> ValueError -> "error".
+    result, _, _ = await _run(
+        'await schedule_timer(120, {"bad": {1, 2}})\n', timer_scheduler=recorder
+    )
+    assert result.outcome == "error"
+    assert recorder.calls == []
+
+
+async def test_schedule_timer_oversize_payload_cap_exceeded():
+    recorder = _TimerRecorder()
+    script = 'await schedule_timer(120, {"blob": "x" * 5000})\n'
+    result, _, _ = await _run(script, timer_scheduler=recorder)
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "timer_payload_size"
+    assert recorder.calls == []
+
+
+async def test_schedule_timer_budget_cap_breaches_standard():
+    recorder = _TimerRecorder()
+    script = "for i in range(3):\n    await schedule_timer(120, {'i': i})\n"
+    result, _, _ = await _run(
+        script, budget=HandlerBudget(max_timers=2), timer_scheduler=recorder
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "timers"
+    # Two armed before the third breached.
+    assert len(recorder.calls) == 2
+
+
+async def test_schedule_timer_arming_window_declined():
+    recorder = _TimerRecorder()
+    result, _, _ = await _run(
+        'await schedule_timer(120, {})\n',
+        timer_scheduler=recorder,
+        timer_limiter=_StubLimiter(allow=False),
+        handler_id="H1",
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "handler_timers_per_hour"
+    assert recorder.calls == []  # denied before the enqueue
+
+
+async def test_schedule_timer_not_configured_raises():
+    # Default _no_timer scheduler: schedule_timer is present but fails loud.
+    result, _, _ = await _run('await schedule_timer(120, {})\n')
+    assert result.outcome == "error"
+
+
+async def test_schedule_timer_denied_budget_does_not_submit():
+    # Ordering: a budget-denied arm never enqueues a job.
+    recorder = _TimerRecorder()
+    result, _, _ = await _run(
+        'await schedule_timer(120, {})\n',
+        budget=HandlerBudget(max_timers=0),
+        timer_scheduler=recorder,
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "timers"
+    assert recorder.calls == []
+
+
+async def test_schedule_timer_available_to_admin_tier():
+    recorder = _TimerRecorder()
+    result, _, _ = await _run(
+        'await schedule_timer(86400, {"user_id": "U9"})\n',
+        budget=admin_budget(),
+        actor=_FakeActor(),
+        timer_scheduler=recorder,
+        handler_id="H2",
+    )
+    assert result.outcome == "ok", result.error
+    assert len(recorder.calls) == 1

@@ -10,10 +10,12 @@ from smarter_dev.web.handler_budget import (
     ADMIN_MAX_DISCORD_READS,
     ADMIN_MAX_ROLE_CHANGES,
     ADMIN_MAX_THREAD_OPS,
+    ADMIN_MAX_TIMERS,
     CapExceeded,
     DEFAULT_MAX_DISCORD_READS,
     DEFAULT_MAX_ROLE_CHANGES,
     DEFAULT_MAX_THREAD_OPS,
+    DEFAULT_MAX_TIMERS,
     HandlerBudget,
     admin_budget,
 )
@@ -91,6 +93,7 @@ def test_usage_snapshot():
         "discord_reads": 0,
         "thread_ops": 0,
         "role_changes": 0,
+        "timers_scheduled": 0,
     }
 
 
@@ -199,4 +202,46 @@ def test_role_change_checks_deadline_first():
     budget.started_at = time.monotonic() - 1.0
     with pytest.raises(CapExceeded) as exc:
         budget.spend_role_change()
+    assert exc.value.cap == "wall_clock"
+
+
+# -- timer arming budget (schedule_timer, E3) ----------------------------------
+
+
+def test_spend_timer_default_cap():
+    # Both tiers can arm timers; the default per-fire ceiling is 2.
+    assert DEFAULT_MAX_TIMERS == 2
+    budget = HandlerBudget()
+    budget.spend_timer()
+    budget.spend_timer()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_timer()
+    assert exc.value.cap == "timers"
+    assert budget.timers_scheduled == 2
+
+
+def test_admin_budget_allows_five_timers():
+    assert ADMIN_MAX_TIMERS == 5
+    budget = admin_budget()
+    assert budget.max_timers == ADMIN_MAX_TIMERS
+    for _ in range(ADMIN_MAX_TIMERS):
+        budget.spend_timer()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_timer()
+    assert exc.value.cap == "timers"
+
+
+def test_usage_includes_timers_scheduled():
+    budget = HandlerBudget()
+    assert budget.usage()["timers_scheduled"] == 0
+    budget.spend_timer()
+    assert budget.usage()["timers_scheduled"] == 1
+
+
+def test_timer_checks_deadline_first():
+    budget = HandlerBudget()
+    budget.wall_clock_seconds = 0.0
+    budget.started_at = time.monotonic() - 1.0
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_timer()
     assert exc.value.cap == "wall_clock"

@@ -22,6 +22,16 @@ Script-facing surface (Monty external functions):
 - ``memory_get(key, default=None)`` / ``memory_set(key, value)`` /
   ``memory_all()`` / ``memory_delete(key)`` -> persistent per-handler key/value
   store that survives across fires.
+- ``schedule_timer(delay_seconds, payload)`` -> True — durably arm a ONE-SHOT
+  re-fire of THIS handler at ``now + delay_seconds`` (both tiers). The re-fire
+  survives worker restarts (it rides the same job store recurring schedules do)
+  and runs the same script with context ``{"trigger_type": "timer", "payload":
+  payload, "scheduled_at": "<ISO armed>"}`` — so a message/member handler can
+  serve its own delayed follow-ups by branching on ``context["trigger_type"]``.
+  ``delay_seconds`` is clamped to ``[60, 30*86400]`` (out of bounds raises,
+  failing the fire), ``payload`` must be JSON-serializable and ≤4 KB, and each
+  fire may arm at most ``max_timers`` (2 standard / 5 admin), with a per-handler
+  30/hour arming window across fires.
 
 Admin handlers (``actor`` set) additionally get ``edit_message(message_id,
 content, channel_id=None)`` -> message id (edits a bot-authored message in place,
@@ -61,6 +71,7 @@ it performs (shared with the script's pool).
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import random
 import time
@@ -76,7 +87,9 @@ from smarter_dev.web.handler_caps import (
     GLOBAL_AGENT_CALLS_PER_MIN,
     GUILD_ROLE_CHANGES_PER_MIN,
     GUILD_THREAD_OPS_PER_MIN,
+    HANDLER_TIMERS_PER_HOUR,
     RENAME_WINDOW_SECONDS,
+    TIMER_ARMING_WINDOW_SECONDS,
     RENAMES_PER_WINDOW,
     WindowedLimiter,
     channel_message_key,
@@ -84,7 +97,9 @@ from smarter_dev.web.handler_caps import (
     global_agent_key,
     guild_role_changes_key,
     guild_thread_ops_key,
+    handler_timer_arm_key,
 )
+from smarter_dev.web.handler_schedule import validate_timer_delay
 from smarter_dev.web.handler_emitter import DiscordEmitter
 from smarter_dev.web.handler_guild_memory import GuildMemory
 from smarter_dev.web.handler_memory import HandlerMemory
@@ -100,13 +115,27 @@ SANDBOX_MAX_MEMORY = 256 * 1024 * 1024
 SANDBOX_MAX_RECURSION_DEPTH = 500
 _DURATION_SLACK_SECONDS = 5.0
 
+# A script-armed timer's payload rides the durable job store as JSON, so it is
+# bounded like HandlerMemory.set: an over-cap payload is a metered breach.
+TIMER_PAYLOAD_MAX_BYTES = 4 * 1024
+
 # An async function (prompt, has_tools, budget) -> plaintext. Injectable so
 # tests can run the runtime fully offline.
 AgentRunner = Callable[[str, bool, HandlerBudget], Awaitable[str]]
 
+# An async function (fire_at, refire_context) -> None that durably enqueues a
+# one-shot re-fire of THIS handler. Injected by the fire job (which owns the
+# payload class and handler_id), keeping the runtime import-clean of the worker
+# submit machinery — the same discipline as AgentRunner.
+TimerScheduler = Callable[[datetime.datetime, dict[str, Any]], Awaitable[None]]
+
 
 async def _no_agent(prompt: str, has_tools: bool, budget: HandlerBudget) -> str:
     raise RuntimeError("no agent runner configured for this handler execution")
+
+
+async def _no_timer(fire_at: datetime.datetime, refire_context: dict[str, Any]) -> None:
+    raise RuntimeError("no timer scheduler configured for this handler execution")
 
 
 def _clock_os(
@@ -182,6 +211,16 @@ class HandlerExecution:
     emitter: DiscordEmitter
     limiter: WindowedLimiter
     agent_runner: AgentRunner = _no_agent
+    # This handler's id — needed only for the per-handler timer-arming window key.
+    # Optional (default "") so existing callers that never arm a timer are unaffected.
+    handler_id: str = ""
+    # Durable one-shot re-fire enqueuer for schedule_timer, injected by the fire
+    # job (default _no_timer raises loud if schedule_timer is called unwired).
+    timer_scheduler: TimerScheduler = _no_timer
+    # Separate 3600s-window limiter for the timer-arming rate cap; self.limiter is
+    # fixed at 60s. Falls back to self.limiter (with a per-call window override) in
+    # run_handler_script when the fire job doesn't inject a dedicated one.
+    timer_limiter: WindowedLimiter | None = None
     # The admin handler's channel scope. Empty means guild-wide; a non-empty
     # scope bounds which channels admin list_threads(channel_id) may read.
     channel_ids: list[str] = field(default_factory=list)
@@ -222,6 +261,9 @@ class HandlerExecution:
             "memory_set": self._guard(self._memory_set),
             "memory_all": self._guard(self._memory_all),
             "memory_delete": self._guard(self._memory_delete),
+            # Available to BOTH tiers: a standard message/schedule/timer handler
+            # can legitimately self-defer (E3).
+            "schedule_timer": self._guard(self._schedule_timer),
         }
         # Randomness as flat globals (Monty can't `import random`); pure compute.
         funcs.update(_random_functions())
@@ -585,6 +627,59 @@ class HandlerExecution:
             )
         return await self.agent_runner(prompt, bool(has_tools), self.budget)
 
+    # -- persisted one-shot self re-arm (schedule_timer, both tiers) --
+
+    async def _schedule_timer(self, delay_seconds: int, payload: dict) -> bool:
+        """Durably arm a one-shot re-fire of THIS handler at now + delay_seconds.
+
+        The re-fire runs the same handler with context ``{"trigger_type": "timer",
+        "payload": payload, "scheduled_at": "<ISO armed>"}`` so scripts branch on
+        ``context["trigger_type"]``. Ordering charges the window and budget BEFORE
+        the enqueue, so a denied arm never enqueues a job:
+
+        1. delay bounds -> ScheduleError (a ValueError -> "error"; author bug,
+           rejected not clamped, like the interval floor),
+        2. payload JSON + 4 KB cap (non-JSON -> ValueError -> "error"; over-cap ->
+           CapExceeded("timer_payload_size"), mirroring HandlerMemory.set),
+        3. per-fire budget -> CapExceeded("timers"),
+        4. per-handler arming window -> CapExceeded("handler_timers_per_hour"),
+        5. the injected durable scheduler enqueues the re-fire.
+        """
+        delay = validate_timer_delay(delay_seconds)
+        try:
+            encoded = json.dumps(payload)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"timer payload must be JSON-serializable (str/int/float/bool/"
+                f"None/list/dict): {exc}"
+            ) from exc
+        if len(encoded.encode("utf-8")) > TIMER_PAYLOAD_MAX_BYTES:
+            raise CapExceeded(
+                "timer_payload_size",
+                f"timer payload would exceed {TIMER_PAYLOAD_MAX_BYTES} bytes",
+            )
+        self.budget.spend_timer()
+        limiter = self.timer_limiter or self.limiter
+        within = await limiter.hit(
+            handler_timer_arm_key(self.handler_id),
+            HANDLER_TIMERS_PER_HOUR,
+            TIMER_ARMING_WINDOW_SECONDS,
+        )
+        if not within:
+            raise CapExceeded(
+                "handler_timers_per_hour",
+                f"handler hit its {HANDLER_TIMERS_PER_HOUR} timers/hour arming cap",
+            )
+        now = datetime.datetime.now(datetime.timezone.utc)
+        fire_at = now + datetime.timedelta(seconds=delay)
+        refire_context = {
+            "trigger_type": "timer",
+            "payload": payload,
+            "scheduled_at": now.isoformat(),
+        }
+        await self.timer_scheduler(fire_at, refire_context)
+        return True
+
     # -- persistent per-handler memory (survives across fires) --
 
     async def _memory_get(self, key: str, default: Any = None) -> Any:
@@ -623,6 +718,9 @@ async def run_handler_script(
     emitter: DiscordEmitter,
     limiter: WindowedLimiter,
     agent_runner: AgentRunner = _no_agent,
+    handler_id: str = "",
+    timer_scheduler: TimerScheduler = _no_timer,
+    timer_limiter: WindowedLimiter | None = None,
     budget: HandlerBudget | None = None,
     actor: AdminActor | None = None,
     channel_ids: list[str] | None = None,
@@ -655,6 +753,9 @@ async def run_handler_script(
         emitter=emitter,
         limiter=limiter,
         agent_runner=agent_runner,
+        handler_id=handler_id,
+        timer_scheduler=timer_scheduler,
+        timer_limiter=timer_limiter or limiter,
         actor=actor,
         channel_ids=list(channel_ids or []),
         allowed_role_ids=list(allowed_role_ids or []),
