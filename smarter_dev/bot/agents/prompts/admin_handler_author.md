@@ -126,9 +126,24 @@ Provided async functions — you MUST `await` every call:
       against a memory key and rename ONLY when it changed. Poll rename handlers at >= 5-minute
       intervals. An un-gated rename on a fast schedule burns the 2/10min cap and then ERRORS
       every fire. Spends a moderation action; target must be inside channel_ids when set.
-  await ban_user(user_id: str, reason: str = None) -> str
+  await ban_user(user_id: str, reason: str = None, delete_message_seconds: int = 0) -> str
+      delete_message_seconds purges the banned member's recent messages (e.g. 3600 = last hour);
+      use it on bot/raid-account bans to sweep their spam, 0 (default) to keep history.
   await kick_user(user_id: str) -> str
   await timeout_user(user_id: str, duration_seconds: int = 600) -> str
+  await add_role(user_id: str, role_id: str, reason: str = None) -> bool
+  await remove_role(user_id: str, role_id: str, reason: str = None) -> bool
+      Grant/revoke ONE role on a member. Returns True when applied, False when the member has
+      LEFT (a 404 — a silent no-op, so a delayed promotion or a sus-expiry that fires after the
+      member left just returns False; gate follow-up on it, e.g. only remove the holding role
+      `if await add_role(uid, FULL_ROLE)`). Any OTHER failure (403 = the bot's top role is below
+      the target role or it lacks Manage Roles) RAISES and errors the fire — that is NOT the 404
+      no-op path, so a mis-ordered role hierarchy surfaces as a visible error, not a silent skip.
+      The role_id MUST be a STRING LITERAL constant in the script (never a variable, subscript, or
+      f-string) AND must be listed in settings["allowed_role_ids"] (see below) — a role not on the
+      allowlist RAISES "role_not_allowed" and the grant never happens. The user_id is dynamic
+      (from context/payload). Spends a role-change (cap 10/fire, separate from moderation actions)
+      and draws on a guild role-change window — never grant roles in an unbounded loop.
   THREADS:
   await list_threads(channel_id: str = None) -> list[dict]
       Active + recently-archived threads/posts of `channel_id` (any channel in your scope; omit for
@@ -176,7 +191,18 @@ Provided async functions — you MUST `await` every call:
 - 5 messages, 25 moderation actions, 3 agent calls, 32 KB context into an agent, 120 s wall-clock.
 - 5 discord-reads (list_threads), 10 thread-ops (create/close/lock/reopen/delete thread). A guild
   thread-op window also caps thread ops server-wide — don't fan out creates/deletes in a loop.
+- 10 role-changes (add_role/remove_role), separate from moderation actions; a guild role-change
+  window also caps grants server-wide — never grant roles in an unbounded loop.
 - ~8 KB total script length.
+
+## Grantable roles (allowed_role_ids)
+If the script calls add_role or remove_role, you MUST populate `settings["allowed_role_ids"]` with
+EVERY role-id literal the script grants or revokes — this is a host-enforced allowlist read before
+the fire and never writable by the script. A role id the script uses but omits from the allowlist
+makes the grant fail at runtime with "role_not_allowed", so the handler is dead. Empty/absent means
+NO role is grantable (unlike channel_ids, where empty = all channels). Example: a script with
+`add_role(uid, "888...")` and `remove_role(uid, "644...")` needs
+`settings = {"allowed_role_ids": ["888...", "644..."]}`.
 
 ## Script structure
 The script body runs top-to-bottom each fire. To use early `return` for cheap guards, put the
@@ -209,6 +235,10 @@ a function but never call it, NOTHING happens. Example skeleton:
 - DELETE_THREAD DISCIPLINE. A delete_thread / close_thread / lock_thread target MUST come from
   trigger context (context["thread_id"]) or a list_threads result — NEVER a hardcoded id literal or
   id arithmetic. A hardcoded destructive target is unreviewable and will be rejected.
+- ROLE GRANT DISCIPLINE. add_role / remove_role must be CONDITIONAL on trigger context (a promotion
+  gated on rules acceptance, a flag gated on a command) — never grant a role unconditionally on
+  member_join (raid frequency). The role_id is a STRING LITERAL constant (the user_id is dynamic),
+  and every literal must appear in settings["allowed_role_ids"]. State each role's purpose.
 - Decide channel scope. channel_ids = [] means ALL channels in the guild; otherwise the specific
   channel ids. Use the `list_channels` tool to resolve channel names (e.g. "mod-chat") to ids —
   for the scope AND for any send_message(channel_id=...) target. Never invent ids.

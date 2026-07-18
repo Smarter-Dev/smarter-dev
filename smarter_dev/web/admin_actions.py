@@ -33,16 +33,62 @@ class AdminActor(DiscordBotClient):
     user_agent: ClassVar[str] = "SmarterDev-AdminHandlers/1.0"
     error_type: ClassVar[type[DiscordRestError]] = AdminActionError
 
-    async def ban_user(self, user_id: str, reason: str | None = None) -> str:
+    async def ban_user(
+        self,
+        user_id: str,
+        reason: str | None = None,
+        delete_message_seconds: int = 0,
+    ) -> str:
         # Discord expects the audit-log reason URL-encoded; encoding also keeps
         # non-latin-1 reasons (em dashes, emoji) out of raw header bytes.
         headers = (
             {"X-Audit-Log-Reason": quote(reason[:400])} if reason else None
         )
+        # delete_message_seconds purges the banned member's recent messages (the
+        # onboarding auto-ban wants an hour swept); 0 = keep history.
         await self._request(
-            "PUT", f"/guilds/{self.guild_id}/bans/{user_id}", headers=headers
+            "PUT",
+            f"/guilds/{self.guild_id}/bans/{user_id}",
+            headers=headers,
+            json={"delete_message_seconds": int(delete_message_seconds)},
         )
         return f"banned {user_id}"
+
+    async def add_role(
+        self, user_id: str, role_id: str, reason: str | None = None
+    ) -> bool:
+        """Grant a role to a member. A gone member (404) -> False (no-op)."""
+        return await self._mutate_role("PUT", user_id, role_id, reason)
+
+    async def remove_role(
+        self, user_id: str, role_id: str, reason: str | None = None
+    ) -> bool:
+        """Revoke a role from a member. A gone member (404) -> False (no-op)."""
+        return await self._mutate_role("DELETE", user_id, role_id, reason)
+
+    async def _mutate_role(
+        self, method: str, user_id: str, role_id: str, reason: str | None
+    ) -> bool:
+        """PUT/DELETE a member role; 404 (member gone) -> False, else raise.
+
+        The 404 no-op is the required contract: a 2-day promotion or a sus
+        expiry must be a silent no-op when the member already left. Any other
+        status (403 role-hierarchy/perms, 429, 5xx) raises AdminActionError.
+        """
+        headers = (
+            {"X-Audit-Log-Reason": quote(reason[:400])} if reason else None
+        )
+        try:
+            await self._request(
+                method,
+                f"/guilds/{self.guild_id}/members/{user_id}/roles/{role_id}",
+                headers=headers,
+            )
+        except AdminActionError as error:
+            if error.status_code == 404:
+                return False
+            raise
+        return True
 
     async def kick_user(self, user_id: str) -> str:
         await self._request("DELETE", f"/guilds/{self.guild_id}/members/{user_id}")

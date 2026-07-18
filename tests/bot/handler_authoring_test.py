@@ -560,3 +560,71 @@ def test_strictest_verdict_picks_the_rejector():
     assert strictest_verdict([ok, sneaky]).reason == "lgtm"
     # All passing: first verdict wins.
     assert strictest_verdict([ok, _verdict(reason="also fine")]).reason == "fine"
+
+
+# -- role-grant authoring rails (E2) -------------------------------------------
+
+_ROLE_GRANT_SCRIPT = (
+    'if context["trigger_type"] == "member_rules_accepted":\n'
+    '    await add_role(context["member_id"], "888160821673349140", reason="onboard")\n'
+)
+
+
+async def test_pipeline_rejects_role_grant_with_nonliteral_role():
+    """A non-literal role id is caught by lint before the judge ever runs."""
+    judged = []
+
+    async def judge(script, trigger_context):
+        judged.append(script)
+        return _verdict()
+
+    plan = _admin_plan(
+        trigger_type="member_rules_accepted",
+        settings={"allowed_role_ids": ["888160821673349140"]},
+        script='await add_role(context["member_id"], role_id)\n',
+    )
+    result = await run_admin_creation_pipeline(
+        request="give the holding role on rules acceptance",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(plan),
+        judge=judge,
+    )
+    assert not result.ok
+    assert "lint" in result.error and "role id" in result.error
+    assert judged == []  # lint stopped it before the judge
+
+
+async def test_judge_rejects_unconditional_add_role_on_join():
+    """A literal role id passes lint, so the judge is the gate for an
+    unconditional grant on a raid-frequency trigger."""
+    plan = _admin_plan(
+        trigger_type="member_join",
+        settings={"allowed_role_ids": ["888160821673349140"]},
+        script='await add_role(context["member_id"], "888160821673349140")\n',
+    )
+    result = await run_admin_creation_pipeline(
+        request="give everyone the holding role when they join",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(plan),
+        judge=_judge_rejecting("unconditional role grant on member_join"),
+    )
+    assert not result.ok
+    assert "unconditional role grant" in result.error
+
+
+async def test_pipeline_accepts_conditional_literal_role_grant():
+    result = await run_admin_creation_pipeline(
+        request="give the holding role on rules acceptance",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(
+            _admin_plan(
+                trigger_type="member_rules_accepted",
+                settings={"allowed_role_ids": ["888160821673349140"]},
+                script=_ROLE_GRANT_SCRIPT,
+            )
+        ),
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert result.settings == {"allowed_role_ids": ["888160821673349140"]}
+    assert "add_role" in result.script

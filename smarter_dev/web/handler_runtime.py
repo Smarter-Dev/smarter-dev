@@ -32,7 +32,14 @@ as admin ``list_threads``, and charges a per-channel 2-per-600s rename window �
 Discord's hard limit — before the REST call), plus ``close_thread`` /
 ``lock_thread`` / ``reopen_thread`` / ``delete_thread`` -> bool (each spends the
 thread_ops budget + guild thread-op window before the REST call; a gone thread
-yields ``False`` without erroring the fire), plus ``guild_memory_get`` /
+yields ``False`` without erroring the fire), plus ``add_role(user_id, role_id,
+reason=None)`` / ``remove_role(user_id, role_id, reason=None)`` -> bool (the
+role_id must be in the handler's host-owned ``allowed_role_ids`` allowlist —
+otherwise ``CapExceeded("role_not_allowed")`` before any budget/window/REST; then
+spends the role_changes budget + guild role-change window before the REST call; a
+gone member yields ``False`` without erroring the fire), plus ``ban_user(user_id,
+reason=None, delete_message_seconds=0)`` which can purge the banned member's
+recent messages, plus ``guild_memory_get`` /
 ``guild_memory_set`` / ``guild_memory_all`` / ``guild_memory_delete`` — a
 guild-scoped key/value store SHARED by every admin handler in the guild (for
 state that must cross handler rows, e.g. a DM-relay bind target), bounded by the
@@ -67,6 +74,7 @@ from smarter_dev.web.handler_budget import CapExceeded, HandlerBudget
 from smarter_dev.web.handler_caps import (
     CHANNEL_MESSAGES_PER_MIN,
     GLOBAL_AGENT_CALLS_PER_MIN,
+    GUILD_ROLE_CHANGES_PER_MIN,
     GUILD_THREAD_OPS_PER_MIN,
     RENAME_WINDOW_SECONDS,
     RENAMES_PER_WINDOW,
@@ -74,6 +82,7 @@ from smarter_dev.web.handler_caps import (
     channel_message_key,
     channel_rename_key,
     global_agent_key,
+    guild_role_changes_key,
     guild_thread_ops_key,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
@@ -176,6 +185,12 @@ class HandlerExecution:
     # The admin handler's channel scope. Empty means guild-wide; a non-empty
     # scope bounds which channels admin list_threads(channel_id) may read.
     channel_ids: list[str] = field(default_factory=list)
+    # Host-owned allowlist of grantable role ids for add_role/remove_role. This
+    # is config read before the fire, NEVER script-mutable. Fail-closed: a role
+    # not in this list is rejected before any budget/window/REST spend, and an
+    # empty/absent allowlist means NO role is grantable (unlike channel_ids,
+    # where empty = guild-wide — role grants are higher-privilege, so empty=deny).
+    allowed_role_ids: list[str] = field(default_factory=list)
     # Set only for admin handlers; presence enables the moderation functions and
     # lets send_message target any channel.
     actor: AdminActor | None = None
@@ -219,6 +234,8 @@ class HandlerExecution:
                     "ban_user": self._guard(self._ban_user),
                     "kick_user": self._guard(self._kick_user),
                     "timeout_user": self._guard(self._timeout_user),
+                    "add_role": self._guard(self._add_role),
+                    "remove_role": self._guard(self._remove_role),
                     "close_thread": self._guard(self._close_thread),
                     "lock_thread": self._guard(self._lock_thread),
                     "reopen_thread": self._guard(self._reopen_thread),
@@ -423,9 +440,18 @@ class HandlerExecution:
             )
         return await self.emitter.rename_channel(target, str(name))
 
-    async def _ban_user(self, user_id: str, reason: str | None = None) -> str:
+    async def _ban_user(
+        self,
+        user_id: str,
+        reason: str | None = None,
+        delete_message_seconds: int = 0,
+    ) -> str:
+        # Bans stay in the mod pool; delete_message_seconds purges the banned
+        # member's recent messages (onboarding auto-ban sweeps the last hour).
         self.budget.spend_mod_action()
-        return await self.actor.ban_user(str(user_id), reason)
+        return await self.actor.ban_user(
+            str(user_id), reason, int(delete_message_seconds)
+        )
 
     async def _kick_user(self, user_id: str) -> str:
         self.budget.spend_mod_action()
@@ -477,6 +503,56 @@ class HandlerExecution:
             raise CapExceeded(
                 "guild_thread_ops_per_min",
                 f"guild hit its {GUILD_THREAD_OPS_PER_MIN} thread-ops/min cap",
+            )
+
+    # -- admin-only role mutation (only present when self.actor is set) --
+
+    async def _add_role(
+        self, user_id: str, role_id: str, reason: str | None = None
+    ) -> bool:
+        """Grant a role. A gone member (404) is a silent no-op -> False."""
+        return await self._mutate_role("add", str(user_id), str(role_id), reason)
+
+    async def _remove_role(
+        self, user_id: str, role_id: str, reason: str | None = None
+    ) -> bool:
+        """Revoke a role. A gone member (404) is a silent no-op -> False."""
+        return await self._mutate_role("remove", str(user_id), str(role_id), reason)
+
+    async def _mutate_role(
+        self, op: str, user_id: str, role_id: str, reason: str | None
+    ) -> bool:
+        """Enforce the allowlist, then meter, then perform a role grant/revoke.
+
+        Ordering (matching ``_spend_thread_op``, allowlist first): (1) the
+        host-owned ``allowed_role_ids`` allowlist [cheap, fail-closed — a role
+        not on it raises ``CapExceeded("role_not_allowed")`` before ANY spend or
+        REST call], (2) the per-fire role_changes budget, (3) the guild
+        role-change window, (4) the actor REST call. A gone member (404) returns
+        ``False`` from the actor without erroring the fire."""
+        if role_id not in self.allowed_role_ids:
+            raise CapExceeded(
+                "role_not_allowed",
+                f"role {role_id} is not in the handler's allowed_role_ids",
+            )
+        self.budget.spend_role_change()
+        await self._hit_guild_role_changes_window()
+        if op == "add":
+            return await self.actor.add_role(user_id, role_id, reason)
+        return await self.actor.remove_role(user_id, role_id, reason)
+
+    async def _hit_guild_role_changes_window(self) -> None:
+        """Charge the guild role-change window, raising ``CapExceeded`` on breach.
+
+        Shape mirrors ``_hit_guild_thread_ops_window``: a breach fails the fire
+        mid-flight with the cap name so a promotion burst degrades cleanly."""
+        within = await self.limiter.hit(
+            guild_role_changes_key(self.guild_id), GUILD_ROLE_CHANGES_PER_MIN
+        )
+        if not within:
+            raise CapExceeded(
+                "guild_role_changes_per_min",
+                f"guild hit its {GUILD_ROLE_CHANGES_PER_MIN} role-changes/min cap",
             )
 
     async def _add_reaction(self, message_id: str, emoji: str) -> bool:
@@ -550,6 +626,7 @@ async def run_handler_script(
     budget: HandlerBudget | None = None,
     actor: AdminActor | None = None,
     channel_ids: list[str] | None = None,
+    allowed_role_ids: list[str] | None = None,
     memory: dict[str, Any] | None = None,
     guild_memory: dict[str, Any] | None = None,
 ) -> HandlerResult:
@@ -580,6 +657,7 @@ async def run_handler_script(
         agent_runner=agent_runner,
         actor=actor,
         channel_ids=list(channel_ids or []),
+        allowed_role_ids=list(allowed_role_ids or []),
         memory=handler_memory,
         guild_memory=shared_guild_memory,
     )

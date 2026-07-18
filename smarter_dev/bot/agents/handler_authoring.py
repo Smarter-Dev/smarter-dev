@@ -199,7 +199,13 @@ class AdminHandlerPlan(BaseModel):
     channel_ids: list[str] = Field(
         default_factory=list, description="Channel scope; empty = all channels"
     )
-    settings: dict = Field(default_factory=dict, description="Timing for time triggers")
+    settings: dict = Field(
+        default_factory=dict,
+        description="Timing for time triggers; for role-mutating handlers also "
+        "'allowed_role_ids': the host-enforced allowlist of every role-id literal "
+        "the script grants/revokes via add_role/remove_role (empty = no role "
+        "grantable, so a role-mutating script MUST populate it)",
+    )
     description: str = Field(
         default="",
         description="One line: what the handler does AFTER this change",

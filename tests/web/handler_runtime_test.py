@@ -86,8 +86,9 @@ class _FakeActor:
     # Thread ids that model a gone target (404): the mutation returns False.
     gone: set = field(default_factory=set)
 
-    async def ban_user(self, user_id, reason=None):
-        self.calls.append(("ban", user_id, reason)); return f"banned {user_id}"
+    async def ban_user(self, user_id, reason=None, delete_message_seconds=0):
+        self.calls.append(("ban", user_id, reason, delete_message_seconds))
+        return f"banned {user_id}"
 
     async def kick_user(self, user_id):
         self.calls.append(("kick", user_id)); return f"kicked {user_id}"
@@ -110,10 +111,18 @@ class _FakeActor:
     async def delete_thread(self, thread_id):
         self.calls.append(("delete_thread", thread_id)); return thread_id not in self.gone
 
+    async def add_role(self, user_id, role_id, reason=None):
+        self.calls.append(("add_role", user_id, role_id, reason))
+        return user_id not in self.gone
+
+    async def remove_role(self, user_id, role_id, reason=None):
+        self.calls.append(("remove_role", user_id, role_id, reason))
+        return user_id not in self.gone
+
 
 async def _run(
     script, *, budget=None, emitter=None, limiter=None, agent_runner=None,
-    actor=None, channel_ids=None,
+    actor=None, channel_ids=None, allowed_role_ids=None,
 ):
     emitter = emitter or _FakeEmitter()
     limiter = limiter or _StubLimiter()
@@ -124,6 +133,8 @@ async def _run(
         kwargs["actor"] = actor
     if channel_ids is not None:
         kwargs["channel_ids"] = channel_ids
+    if allowed_role_ids is not None:
+        kwargs["allowed_role_ids"] = allowed_role_ids
     result = await run_handler_script(
         script,
         {
@@ -794,3 +805,126 @@ async def test_rename_channel_third_in_window_raises_channel_renames_cap():
     assert result.cap == "channel_renames_per_10min"
     # Two renames land before the third breaches the 2/600s window.
     assert len(emitter.renames) == 2
+
+
+# -- admin role mutation (add_role / remove_role) + ban purge window (E2) --
+
+from smarter_dev.web.handler_caps import guild_role_changes_key  # noqa: E402
+
+
+async def test_role_functions_absent_for_standard_tier():
+    # No actor -> add_role/remove_role not injected -> NameError -> error.
+    result, _, _ = await _run('await add_role("U1", "R1")\n')
+    assert result.outcome == "error"
+    result, _, _ = await _run('await remove_role("U1", "R1")\n')
+    assert result.outcome == "error"
+
+
+async def test_role_functions_present_with_actor():
+    actor = _FakeActor()
+    script = 'ok = await add_role(context["author_id"], "R1")\n'
+    result, _, _ = await _run(
+        script, budget=admin_budget(), actor=actor, allowed_role_ids=["R1"]
+    )
+    assert result.outcome == "ok", result.error
+    assert ("add_role", "U1", "R1", None) in actor.calls
+
+
+async def test_add_role_denied_when_role_not_in_allowlist():
+    """Fail-closed: a role not on the allowlist raises before any spend/REST."""
+    actor = _FakeActor()
+    limiter = _StubLimiter()
+    script = 'await add_role(context["author_id"], "R9")\n'
+    result, _, _ = await _run(
+        script, budget=admin_budget(), actor=actor, limiter=limiter,
+        allowed_role_ids=["R1"],
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "role_not_allowed"
+    assert actor.calls == []          # actor never called
+    assert limiter.calls == []        # window never charged
+    assert result.usage["role_changes"] == 0  # budget never spent
+
+
+async def test_add_role_denied_when_allowlist_empty():
+    actor = _FakeActor()
+    script = 'await add_role(context["author_id"], "R1")\n'
+    result, _, _ = await _run(
+        script, budget=admin_budget(), actor=actor, allowed_role_ids=[],
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "role_not_allowed"
+    assert actor.calls == []
+
+
+async def test_add_role_allowed_role_spends_budget_and_window_and_calls_actor():
+    actor = _FakeActor()
+    limiter = _StubLimiter()
+    script = 'await add_role(context["author_id"], "R1", reason="onboard")\n'
+    result, _, _ = await _run(
+        script, budget=admin_budget(), actor=actor, limiter=limiter,
+        allowed_role_ids=["R1"],
+    )
+    assert result.outcome == "ok", result.error
+    assert ("add_role", "U1", "R1", "onboard") in actor.calls
+    assert result.usage["role_changes"] == 1
+    assert (guild_role_changes_key("G1"), 30, None) in limiter.calls
+
+
+async def test_add_role_guild_window_breach_mid_fire_caps():
+    actor = _FakeActor()
+    limiter = _StubLimiter(allow=False)
+    script = 'await add_role(context["author_id"], "R1")\n'
+    result, _, _ = await _run(
+        script, budget=admin_budget(), actor=actor, limiter=limiter,
+        allowed_role_ids=["R1"],
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "guild_role_changes_per_min"
+    assert actor.calls == []  # window checked before the REST call
+
+
+async def test_add_role_member_gone_returns_false_outcome_ok():
+    actor = _FakeActor(gone={"U1"})
+    script = (
+        'ok = await add_role(context["author_id"], "R1")\n'
+        'await send_message("added" if ok else "member gone", "MODCHAT")\n'
+    )
+    result, emitter, _ = await _run(
+        script, budget=admin_budget(), actor=actor, allowed_role_ids=["R1"],
+    )
+    assert result.outcome == "ok", result.error
+    assert ("MODCHAT", "member gone") in emitter.messages
+
+
+async def test_remove_role_member_gone_returns_false():
+    actor = _FakeActor(gone={"U1"})
+    script = (
+        'ok = await remove_role(context["author_id"], "R1")\n'
+        'await send_message("removed" if ok else "gone", "MODCHAT")\n'
+    )
+    result, emitter, _ = await _run(
+        script, budget=admin_budget(), actor=actor, allowed_role_ids=["R1"],
+    )
+    assert result.outcome == "ok", result.error
+    assert ("MODCHAT", "gone") in emitter.messages
+
+
+async def test_add_role_budget_cap_breach():
+    actor = _FakeActor()
+    script = "for i in range(3):\n    await add_role(context['author_id'], 'R1')\n"
+    result, _, _ = await _run(
+        script, budget=HandlerBudget(max_role_changes=2), actor=actor,
+        allowed_role_ids=["R1"],
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "role_changes"
+    assert result.usage["role_changes"] == 2
+
+
+async def test_ban_user_delete_message_seconds_passthrough():
+    actor = _FakeActor()
+    script = 'await ban_user(context["author_id"], "bot", 3600)\n'
+    result, _, _ = await _run(script, budget=admin_budget(), actor=actor)
+    assert result.outcome == "ok", result.error
+    assert ("ban", "U1", "bot", 3600) in actor.calls

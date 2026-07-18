@@ -93,6 +93,7 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
         channel_id=channel_id,
         guild_id=guild_id,
         channel_ids=channel_ids,
+        allowed_role_ids=list(handler_settings.get("allowed_role_ids") or []),
         emitter=emitter,
         limiter=limiter,
         agent_runner=run_gathering_agent,
@@ -118,6 +119,7 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
                 mod_actions=result.usage.get("mod_actions", 0),
                 discord_reads=result.usage.get("discord_reads", 0),
                 thread_ops=result.usage.get("thread_ops", 0),
+                role_changes=result.usage.get("role_changes", 0),
                 duration_ms=result.duration_ms,
                 finished_at=datetime.now(timezone.utc),
             )

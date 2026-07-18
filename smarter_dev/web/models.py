@@ -4417,10 +4417,14 @@ class HandlerRun(Base):
     agent_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Moderation actions (ban/kick/timeout/delete) — admin handlers only.
     mod_actions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # Metered Discord reads (list_threads) and mutating thread ops
-    # (create/close/lock/reopen/delete thread).
+    # Metered Discord reads (list_threads), mutating thread ops
+    # (create/close/lock/reopen/delete thread), and role grants/revokes
+    # (add_role/remove_role) — the last two admin handlers only.
     discord_reads: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     thread_ops: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    role_changes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
