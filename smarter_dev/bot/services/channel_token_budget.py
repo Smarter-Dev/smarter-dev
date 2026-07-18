@@ -2,7 +2,7 @@
 
 Every channel's chat-token spend is metered into hour and day windows (threads
 count as their own channels). An admin can additionally cap the spend per hour
-and per day via the ``/setmodel`` override — only channels with an override
+and per day via the ``/chat-bot-settings`` override — only channels with an override
 have budgets enforced. Enforcement runs bot-side inside :mod:`chat_engine`, so
 this module talks to the bot's Redis directly rather than round-tripping the
 web API every turn.
@@ -37,15 +37,47 @@ def budget_key(channel_id: str, scope: str, window_index: int) -> str:
     return f"modelbudget:{channel_id}:{scope}:{window_index}"
 
 
+def fallback_flag_key(channel_id: str) -> str:
+    """Redis key for a channel's active free-fallback flag.
+
+    Present (with EXAT = the budget reset epoch) while a member has opted the
+    channel into its fallback model because the primary's budget is spent. Its
+    presence tells the engine to skip budget enforcement and run the fallback.
+    """
+    return f"modelbudget-fallback:{channel_id}"
+
+
+def fallback_ended_key(channel_id: str) -> str:
+    """Redis key for a channel's "notify when the primary returns" marker.
+
+    Set alongside :func:`fallback_flag_key` (EXAT = reset epoch + a day) so the
+    engine can announce the primary model is back on the first turn after the
+    fallback window closes, then clear the marker.
+    """
+    return f"modelbudget-fallback-ended:{channel_id}"
+
+
 def next_window_reset_epoch(now_epoch: float, window_seconds: int) -> int:
     """Epoch second the current wall-aligned ``window_seconds`` window rolls over."""
     return (_window_index(now_epoch, window_seconds) + 1) * window_seconds
 
 
-# Ordered (scope, window length) pairs — the two windows every channel tracks.
+# Ordered (scope, window length) pairs — the two enforced windows every channel
+# tracks. These are the counters ``over_budget_reset_epoch`` checks.
 _WINDOWS: tuple[tuple[str, int], ...] = (
     ("hour", HOUR_WINDOW_SECONDS),
     ("day", DAY_WINDOW_SECONDS),
+)
+
+# Parallel display-only windows for free-fallback spend. A member opting a
+# channel into its fallback model runs turns whose tokens must NOT count toward
+# the primary's cap (otherwise the "free" opt-in would silently push the day
+# window over budget and re-block the primary the moment the fallback closes).
+# These windows are never read by ``over_budget_reset_epoch`` — they only feed
+# ``/bot-usage`` so the display still reflects every token the channel spent.
+_FALLBACK_WINDOWS: tuple[tuple[str, int], ...] = (
+    ("hour-fallback", HOUR_WINDOW_SECONDS),
+    ("day-fallback", DAY_WINDOW_SECONDS),
 )
 
 
@@ -90,19 +122,35 @@ async def current_window_usage(redis: Redis, channel_id: str) -> tuple[int, int]
     """Tokens ``channel_id`` has consumed in the current (hour, day) windows.
 
     Reads the live counters without mutating them — backs the ``/bot-usage``
-    display. Windows with no writes yet read as 0.
+    display. Each figure sums the enforced window and its parallel free-fallback
+    window so the display reflects every token spent, enforced or free. Windows
+    with no writes yet read as 0.
     """
     now_epoch = datetime.now(UTC).timestamp()
-    usage = []
-    for scope, window_seconds in _WINDOWS:
-        key = budget_key(channel_id, scope, _window_index(now_epoch, window_seconds))
-        usage.append(await _consumed(redis, key))
-    hour_used, day_used = usage
+    totals: list[int] = []
+    for enforced_scope, fallback_scope, window_seconds in (
+        ("hour", "hour-fallback", HOUR_WINDOW_SECONDS),
+        ("day", "day-fallback", DAY_WINDOW_SECONDS),
+    ):
+        window_index = _window_index(now_epoch, window_seconds)
+        enforced = await _consumed(
+            redis, budget_key(channel_id, enforced_scope, window_index)
+        )
+        fallback = await _consumed(
+            redis, budget_key(channel_id, fallback_scope, window_index)
+        )
+        totals.append(enforced + fallback)
+    hour_used, day_used = totals
     return hour_used, day_used
 
 
-async def add_usage(redis: Redis, channel_id: str, tokens: int) -> None:
-    """Add ``tokens`` to ``channel_id``'s current hour and day windows.
+async def _add_windowed_usage(
+    redis: Redis,
+    channel_id: str,
+    tokens: int,
+    windows: tuple[tuple[str, int], ...],
+) -> None:
+    """Add ``tokens`` to each of ``windows`` for ``channel_id``.
 
     Each window is incremented with ``INCRBY`` and given a fresh TTL only on the
     first write (``EXPIRE ... NX``) so the window expires exactly one length
@@ -111,9 +159,28 @@ async def add_usage(redis: Redis, channel_id: str, tokens: int) -> None:
     if tokens <= 0:
         return
     now_epoch = datetime.now(UTC).timestamp()
-    for scope, window_seconds in _WINDOWS:
+    for scope, window_seconds in windows:
         key = budget_key(channel_id, scope, _window_index(now_epoch, window_seconds))
         async with redis.pipeline(transaction=True) as pipe:
             pipe.incrby(key, tokens)
             pipe.expire(key, window_seconds, nx=True)
             await pipe.execute()
+
+
+async def add_usage(redis: Redis, channel_id: str, tokens: int) -> None:
+    """Add ``tokens`` to ``channel_id``'s current enforced hour and day windows.
+
+    These are the counters ``over_budget_reset_epoch`` enforces; a non-positive
+    ``tokens`` is a no-op.
+    """
+    await _add_windowed_usage(redis, channel_id, tokens, _WINDOWS)
+
+
+async def add_fallback_usage(redis: Redis, channel_id: str, tokens: int) -> None:
+    """Add a free-fallback turn's ``tokens`` to the display-only windows.
+
+    Metered separately from :func:`add_usage` so free-fallback spend shows in
+    ``/bot-usage`` but never counts toward the enforced budget — the whole point
+    of the opt-in is that its spend is free.
+    """
+    await _add_windowed_usage(redis, channel_id, tokens, _FALLBACK_WINDOWS)

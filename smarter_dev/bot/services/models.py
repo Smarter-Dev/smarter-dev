@@ -611,6 +611,9 @@ class ChannelModelOverride:
     daily_token_budget: int
     hourly_token_budget: int
     reasoning_level: str | None = None
+    auto_respond: bool = False
+    fallback_model_key: str | None = None
+    response_filter: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -624,6 +627,9 @@ class ChannelModelOverride:
             reasoning_level=data.get("reasoning_level"),
             daily_token_budget=data["daily_token_budget"],
             hourly_token_budget=data["hourly_token_budget"],
+            auto_respond=data.get("auto_respond", False),
+            fallback_model_key=data.get("fallback_model_key"),
+            response_filter=data.get("response_filter"),
             created_at=_parse_iso_datetime(data.get("created_at")),
             updated_at=_parse_iso_datetime(data.get("updated_at")),
         )

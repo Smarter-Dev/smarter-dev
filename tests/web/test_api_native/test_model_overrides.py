@@ -33,6 +33,9 @@ def _record(**overrides) -> SimpleNamespace:
         "reasoning_level": None,
         "daily_token_budget": 5000,
         "hourly_token_budget": 500,
+        "auto_respond": False,
+        "fallback_model_key": None,
+        "response_filter": None,
         "created_at": datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
         "updated_at": datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc),
     }
@@ -54,6 +57,9 @@ class TestGetModelOverride:
         assert body["reasoning_level"] is None
         assert body["daily_token_budget"] == 5000
         assert body["hourly_token_budget"] == 500
+        assert body["auto_respond"] is False
+        assert body["fallback_model_key"] is None
+        assert body["response_filter"] is None
         assert body["created_at"] == "2026-01-01T12:00:00+00:00"
         assert body["updated_at"] == "2026-01-02T12:00:00+00:00"
 
@@ -99,6 +105,53 @@ class TestPutModelOverride:
         _, kwargs = model_override_crud_mock.upsert.call_args
         assert kwargs["hourly_token_budget"] == 0
         assert kwargs["reasoning_level"] is None
+        # New per-channel settings default off when omitted (old-style write).
+        assert kwargs["auto_respond"] is False
+        assert kwargs["fallback_model_key"] is None
+        assert kwargs["response_filter"] is None
+
+    def test_new_settings_passed_through(
+        self, model_override_client: TestClient, model_override_crud_mock
+    ):
+        model_override_crud_mock.upsert.return_value = _record(
+            auto_respond=True,
+            fallback_model_key="kimi-k2-6",
+            response_filter="Only coding questions.",
+        )
+
+        response = model_override_client.put(
+            _url(),
+            json={
+                "model_key": "glm-5-2",
+                "auto_respond": True,
+                "fallback_model_key": "kimi-k2-6",
+                "response_filter": "Only coding questions.",
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["auto_respond"] is True
+        assert body["fallback_model_key"] == "kimi-k2-6"
+        assert body["response_filter"] == "Only coding questions."
+        _, kwargs = model_override_crud_mock.upsert.call_args
+        assert kwargs["auto_respond"] is True
+        assert kwargs["fallback_model_key"] == "kimi-k2-6"
+        assert kwargs["response_filter"] == "Only coding questions."
+
+    def test_unknown_fallback_model_key_is_422(self, model_override_client: TestClient):
+        response = model_override_client.put(
+            _url(),
+            json={"model_key": "glm-5-2", "fallback_model_key": "not-a-real-model"},
+        )
+        assert response.status_code == 422
+
+    def test_over_length_response_filter_is_422(self, model_override_client: TestClient):
+        response = model_override_client.put(
+            _url(),
+            json={"model_key": "glm-5-2", "response_filter": "x" * 4001},
+        )
+        assert response.status_code == 422
 
     def test_reasoning_level_passed_through(
         self, model_override_client: TestClient, model_override_crud_mock

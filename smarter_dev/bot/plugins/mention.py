@@ -167,6 +167,46 @@ async def _record_engaged_message(bot: Any, event: hikari.MessageCreateEvent) ->
         )
 
 
+def _model_override_service(bot: Any) -> Any | None:
+    """The bot's ModelOverrideService (set on ``bot.d``), or None if absent.
+
+    Mirrors ``plugins/model_override._get_override_service`` but stays fail-soft:
+    a bot without the service (or a non-dict ``bot.d`` in tests) yields None so
+    the channel behaves as if it has no override.
+    """
+    data = getattr(bot, "d", None)
+    if not isinstance(data, dict):
+        return None
+    service = data.get("model_override_service")
+    if service is None:
+        service = data.get("_services", {}).get("model_override_service")
+    return service
+
+
+async def _channel_auto_responds(bot: Any, event: hikari.MessageCreateEvent) -> bool:
+    """True when the channel's override opts into replying to plain messages.
+
+    Read fail-soft to match the chat runtime's override contract: a missing
+    service or any lookup error degrades to "no auto-respond" (logged at warning)
+    so a bad read never makes the bot answer — or stay silent — unexpectedly.
+    """
+    service = _model_override_service(bot)
+    if service is None:
+        return False
+    try:
+        override = await service.get_override(
+            str(event.guild_id), str(event.channel_id)
+        )
+    except Exception:
+        logger.warning(
+            "Failed to read model override for channel %s — no auto-respond",
+            event.channel_id,
+            exc_info=True,
+        )
+        return False
+    return bool(override and override.auto_respond)
+
+
 def _bot_was_engaged(event: hikari.MessageCreateEvent, bot_user_id: int) -> bool:
     """True if the message @mentions the bot or replies to one of its messages."""
     if event.message.user_mentions_ids and bot_user_id in event.message.user_mentions_ids:
@@ -175,6 +215,66 @@ def _bot_was_engaged(event: hikari.MessageCreateEvent, bot_user_id: int) -> bool
     if ref is not None and ref.author and ref.author.id == bot_user_id:
         return True
     return False
+
+
+async def _activate_engine(registry: Any, event: hikari.MessageCreateEvent) -> None:
+    """Run the shared activation pipeline for a triggering message.
+
+    Both an @mention/reply and an auto-respond channel funnel through here so the
+    two triggers cannot drift: apply the cooldown, rate-limit and per-user
+    message-limit gates, charge the message against its author, then hand it to
+    the channel engine — starting a fresh engagement or force-firing an
+    already-active one. Callers invoke this only after deciding the message
+    should activate (and after any stop phrase was already handled).
+    """
+    if is_channel_on_cooldown(event.channel_id):
+        logger.info(
+            "Channel %s on cooldown — ignoring activation", event.channel_id
+        )
+        return
+    if not rate_limiter.check_token_limit():
+        logger.warning("Rate limited — refusing activation in channel %s", event.channel_id)
+        try:
+            await plugin.bot.rest.create_message(
+                event.channel_id,
+                "I'm at capacity right now — try me again in a few minutes.",
+                reply=event.message,
+            )
+        except Exception:
+            logger.exception("Failed to send rate-limit message")
+        return
+
+    if await _reject_when_over_limit(plugin.bot, event):
+        logger.info(
+            "User %s over the rolling message limit — dropping activation "
+            "in channel %s",
+            event.message.author.id,
+            event.channel_id,
+        )
+        return
+    await _record_engaged_message(plugin.bot, event)
+
+    # Distinguish "engine doesn't exist yet" (first activation in this
+    # engagement) from "engine is already running and the user is
+    # @mentioning again" — the two need different plumbing.
+    existing_active = await registry.has_active(event.channel_id)
+    engine = await registry.ensure_engine(
+        bot=plugin.bot,
+        channel_id=event.channel_id,
+        guild_id=event.guild_id,
+        voice_send=_voice_send,
+    )
+    if not existing_active:
+        # Brand new engagement: kick off the initial activation. The
+        # engine reads the channel history and decides for itself
+        # whether to reply with voice.
+        engine.trigger_initial(event.message)
+    else:
+        # Engine already active — enqueue this @mention/reply and
+        # force-fire so the agent reacts to it right now rather than
+        # waiting on the 5s idle timer.
+        await engine.observe(event)
+        engine.fire_now()
 
 
 @plugin.listener(hikari.MessageCreateEvent)
@@ -195,8 +295,19 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
     engaged = _bot_was_engaged(event, bot_user.id)
     content = event.content or ""
 
-    # Stop heuristic — applies to engagements and any message in an active channel.
-    if engaged or await registry.has_active(event.channel_id):
+    has_active = await registry.has_active(event.channel_id)
+
+    # A channel override can opt into auto-respond, making the bot treat a plain
+    # message exactly like an @mention/reply. Only meaningful when the bot wasn't
+    # engaged and no engine is already running (an active engine's observe()
+    # already sees every message). The override read is TTL-cached and runs only
+    # after the cheap engaged/has_active checks above, keeping the hot path light.
+    should_activate = engaged
+    if not engaged and not has_active:
+        should_activate = await _channel_auto_responds(plugin.bot, event)
+
+    # Stop heuristic — applies to activations and any message in an active channel.
+    if should_activate or has_active:
         if is_stop_request(content):
             engine = await registry.get(event.channel_id)
             had_engine = engine is not None and engine.active
@@ -212,58 +323,11 @@ async def on_message_create(event: hikari.MessageCreateEvent) -> None:
                 logger.exception("Failed to send stop ack")
             return
 
-    if engaged:
-        if is_channel_on_cooldown(event.channel_id):
-            logger.info(
-                "Channel %s on cooldown — ignoring engagement", event.channel_id
-            )
-            return
-        if not rate_limiter.check_token_limit():
-            logger.warning("Rate limited — refusing engagement in channel %s", event.channel_id)
-            try:
-                await plugin.bot.rest.create_message(
-                    event.channel_id,
-                    "I'm at capacity right now — try me again in a few minutes.",
-                    reply=event.message,
-                )
-            except Exception:
-                logger.exception("Failed to send rate-limit message")
-            return
-
-        if await _reject_when_over_limit(plugin.bot, event):
-            logger.info(
-                "User %s over the rolling message limit — dropping engagement "
-                "in channel %s",
-                event.message.author.id,
-                event.channel_id,
-            )
-            return
-        await _record_engaged_message(plugin.bot, event)
-
-        # Distinguish "engine doesn't exist yet" (first activation in this
-        # engagement) from "engine is already running and the user is
-        # @mentioning again" — the two need different plumbing.
-        existing_active = await registry.has_active(event.channel_id)
-        engine = await registry.ensure_engine(
-            bot=plugin.bot,
-            channel_id=event.channel_id,
-            guild_id=event.guild_id,
-            voice_send=_voice_send,
-        )
-        if not existing_active:
-            # Brand new engagement: kick off the initial activation. The
-            # engine reads the channel history and decides for itself
-            # whether to reply with voice.
-            engine.trigger_initial(event.message)
-        else:
-            # Engine already active — enqueue this @mention/reply and
-            # force-fire so the agent reacts to it right now rather than
-            # waiting on the 5s idle timer.
-            await engine.observe(event)
-            engine.fire_now()
+    if should_activate:
+        await _activate_engine(registry, event)
         return
 
-    # Not an engagement — feed to engine if active, otherwise just bump the
+    # Not an activation — feed to engine if active, otherwise just bump the
     # idle-message counter so memory can detect staleness on the next activation.
     engine = await registry.get(event.channel_id)
     if engine is not None and engine.active:
