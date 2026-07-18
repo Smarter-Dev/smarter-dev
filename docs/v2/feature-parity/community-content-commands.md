@@ -15,11 +15,13 @@ This group covers the legacy bot's two read-mostly curated-content command suite
   "# Rules & Conduct" post, and the `!formatting` code-block how-to.
 - **Resources** — config-driven curated learning links with `!resources [topic]`
   (aliases `!r`, `!resource`), an alias table (`py`→`python`, `js`→`javascript`, …),
-  and the static `!project` link command.
+  and the static `!project` link command. **Dropped entirely** (Zech, 2026-07-18): the
+  2020-era catalog is stale, the curation burden outweighs the value, and the chat agent
+  plus challenges/quests cover "where do I learn X" better. See the disposition table.
 
-They are grouped because they share the same shape: no event listeners, no schedules, no
+They were grouped because they share the same shape: no event listeners, no schedules, no
 DB, no HTTP — pure message-in/message-out over a small curated dataset. That is almost
-exactly what a message-trigger handler is, so nearly everything here is **handler-today**.
+exactly what a message-trigger handler is, so everything that survives is **handler-today**.
 The only genuine gaps are three small, shared extensions: an `edit_message` emit for the
 canonical rules post, an `author_role_ids` context field for the staff gate, and default
 mention suppression on the emitter (a blanket safety hardening also wanted by the
@@ -34,13 +36,13 @@ authored as guild-wide admin handlers.
 
 ### Invocation style decision
 
-We keep the bang-command style (`!rule`, `!r`, `!formatting`) rather than re-imagining
+We keep the bang-command style (`!rule`, `!formatting`) rather than re-imagining
 these as slash commands. Handlers match raw message content, so a prefix guard at the top
 of the script is the natural handler idiom, costs nothing, and preserves user muscle
 memory from the legacy server. What we do NOT port verbatim: channel-by-name lookups,
 embeds, and the config/redeploy edit workflow (all replaced below). Prefix guards must be
 word-boundary exact (`content == "!rule"` or `content.startswith("!rule ")`) so `!ruler`
-or `!resourceful` never fire.
+never fires.
 
 ## 2. Feature disposition table
 
@@ -57,15 +59,7 @@ or `!resourceful` never fire.
 | 9 | Mention suppression on rules republish | py-rules | handler-extension | Port as default `allowed_mentions: {"parse": []}` on ALL emitter sends/edits — blanket hardening, not a per-feature flag. |
 | 10 | Dead code: `build_rule_message_embed` (hardcoded admin id) | py-rules | drop | Never called in legacy; inert. Do not port. |
 | 11 | Channel-by-name dependency on `👮rules` | py-rules | handler-today (replaced) | Rules channel id is a literal in the script (resolved at authoring time via the existing `list_channels` tool); message ids persist in handler memory. Name lookup is not ported. |
-| 12 | `!resources` topic index | py-resources-command | handler-today | Sorted `{Display Name}: !r {tag}` listing from the script-literal catalog; one `send_message`. |
-| 13 | `!resources <topic>` lookup with alias resolution | py-resources-command | handler-today | Casefold → alias-map → catalog lookup → markdown sections with `[name](url)` links and quoted tips (see cap. 19 for tip bodies); emitter already suppresses link-preview embeds so link lists don't flood. |
-| 14 | Topic not-found reply | py-resources-command | handler-today | Exact legacy string ``Could not find any resources for `{tag}` `` (post-alias-resolution tag); fail-soft, never errors the fire. |
-| 15 | Resources content-management workflow (production.yaml + redeploy) | py-resources-command | handler-today (superseded) | Conversational re-authoring through the author→lint→judge pipeline strictly beats config-edit-plus-restart; no runtime surface to build. |
-| 16 | `!project` / `!project-ideas` / `!ideas` link command | py-resources-command | drop (Zech's call) | Points at the beginner.py-branded `beginnerpy-com/project-ideas` repo; smarter-dev's challenges/quests plugins supersede it. Trivial to author later if a smarter-dev destination exists. |
-| 17 | Command scope & invocation rules (everyone, all aliases, casefolded, guild-wide) | py-resources-command | handler-today | Guild-wide `AdminHandler` (`channel_ids=[]`) already provides anywhere-invocation; alias and casefold logic live in the script. Windowed caps are an accepted behavior difference. |
-| 18 | No-background-behavior (no listeners/schedules/DB/HTTP) | py-resources-command | drop (nothing to port) | Recorded so the migration doesn't invent link-liveness checks or similar; any such addition is a separate decision. |
-| 19 | Quoted-tip entries carry a message body (`> **name**` + `> {message}`) | py-resources-command | handler-today | Tip entries are `[name, None, message]` triples in the catalog literal; `render_topic` emits both the bold name header and the quoted body line, so the legacy `{message}` dict's content survives the flattening — only its shape changes. |
-| 20 | Complete `lang_aliases` alias set (full production.yaml scope, not the doc's partial list) | py-resources-command | handler-today | The summary doc's alias list is explicitly examples-only ("etc."); the ALIASES literal is seeded by extracting the entire `lang_aliases:` scope from legacy `production.yaml` (31 aliases, incl. `dart`→`flutter`, `kt`/`kts`→`kotlin`, `machinelearning`, `capture the flag`, `ethical-hacking`, `file_analysis`/`malware_analysis`, `ad_blocker`/`ad blocker`) so no prod alias silently stops resolving. |
+| 12–20 | Entire `!resources` command suite (topic index, alias-resolved lookup, not-found reply, content workflow, `!project`, invocation rules, quoted tips, `lang_aliases` set) | py-resources-command | **drop** | Dropped entirely (Zech, 2026-07-18). The catalog is 2020-era and stale, re-curation is a content burden with no owner, and smarter-dev's chat agent + challenges/quests plugins cover the "where do I learn X" need better than a static link list. Nothing here required any handler-system extension, so nothing else is affected; trivially authorable as a handler later if ever wanted. |
 
 ## 3. Handler-system extensions
 
@@ -193,15 +187,15 @@ than from its own memory/`send_message` returns) should fail `actions_appropriat
 - **`send_embed(title, fields, thumbnail)`** — recommend against: markdown headings,
   bold section headers, and masked links carry all the information; the emitter's
   deliberate smallness is worth more than thumbnail parity. Revisit only if multiple
-  future groups independently want it. (Capability 8, 12, 13 render fine as markdown.)
+  future groups independently want it. (Capability 8 renders fine as markdown.)
 - **`delete_after_seconds` on `send_message` / script-schedulable follow-ups** — only
   consumer is the cosmetic 60 s confirmation auto-delete (capability 6). Dropped.
 
 ## 4. Per-feature plans
 
-All three command handlers are **guild-wide admin handlers** (`channel_ids=[]`), created
+Both command handlers are **guild-wide admin handlers** (`channel_ids=[]`), created
 through the existing admin authoring flow (dual-judge pipeline). They coexist under the
-`MAX_ADMIN_HANDLERS_PER_GUILD = 20` cap (this group uses 3). Each script's first lines
+`MAX_ADMIN_HANDLERS_PER_GUILD = 20` cap (this group uses 2). Each script's first lines
 are a cheap prefix guard, since a guild-wide message handler runs on every human message.
 
 ### 4.1 Rules — one handler: `server-rules` (message trigger, guild-wide)
@@ -353,124 +347,13 @@ escapes, which Discord renders as literal backticks — no zero-width-space tric
 could equally be a standard channel handler in the help channels; guild-wide admin is
 chosen for legacy parity (see open question 3).
 
-### 4.3 Resources — one handler: `learning-resources` (message trigger, guild-wide)
+### 4.3 Resources — not ported
 
-Index, lookup, alias resolution, and not-found are all branches of one dataset — one
-handler. **The dataset must be re-curated before authoring**: the legacy 15-topic catalog
-as a script literal plausibly exceeds the 8 KB script cap, several links are years-stale,
-and handler memory (16 KB) can't be pre-seeded except by a script that itself fits in
-8 KB — so "trim to fit the script" is both the storage plan and a needed content pass.
-Target: a catalog that renders each topic in one ≤2 000-char message and keeps the whole
-script under ~7 KB. If Zech wants the full untrimmed catalog, see open question 2.
-
-The content pass covers **both** legacy config scopes, and they get different treatment:
-the `resources:` catalog is where trimming/refreshing happens, but the `lang_aliases:`
-scope must be **extracted in full from legacy `production.yaml`** — the prod-functionality
-doc's alias list is explicitly partial ("Example aliases in prod: … etc."), and any alias
-missing from the script would silently stop resolving after migration. The complete scope
-is 31 aliases (~30 bytes each, so it never competes with links for script budget); the
-literal below reproduces it verbatim. Aliases pointing at topics dropped during
-re-curation get remapped or removed in the same pass — never left dangling at a missing
-catalog key.
-
-```python
-# Complete `lang_aliases:` scope extracted verbatim from legacy
-# production.yaml (31 aliases). Do NOT seed from the prod-functionality
-# doc's example list — it is partial.
-ALIASES = {
-    "py": "python", "python3": "python", "python2": "python",
-    "datascience": "data_science", "ds": "data_science",
-    "data": "data_science", "ai": "data_science", "ml": "data_science",
-    "machinelearning": "data_science", "machine learning": "data_science",
-    "hacking": "pentesting",
-    "ethical-hacking": "cybersecurity", "ethical hacking": "cybersecurity",
-    "capture the flag": "cybersecurity", "ctf": "cybersecurity",
-    "file_analysis": "reverse_engineering",
-    "file analysis": "reverse_engineering",
-    "malware_analysis": "reverse_engineering",
-    "malware analysis": "reverse_engineering",
-    "js": "javascript",
-    "dart": "flutter",
-    "rs": "rust", "rustlang": "rust",
-    "kt": "kotlin", "kts": "kotlin",
-    "c++": "cpp",
-    "adblocker": "privacy", "ad_blocker": "privacy", "ad blocker": "privacy",
-    "encryption": "privacy", "security": "privacy",
-}
-RESOURCES = {
-    "python": {
-        "name": "Python",
-        "sections": [
-            ["Official", [
-                ["Python docs", "https://docs.python.org/3/"],
-                # ...
-            ]],
-            ["Tips", [
-                # None url = quoted tip; third slot is the tip's message body
-                ["Ask in the help channel", None,
-                 "Post your code and the full error message as text."],
-            ]],
-        ],
-    },
-    # ... remaining curated topics
-}
-
-def render_topic(topic):
-    lines = ["## Helpful " + topic["name"] + " Resources"]
-    for section_name, entries in topic["sections"]:
-        lines.append("**" + section_name + "**")
-        for entry in entries:
-            if entry[1]:
-                lines.append("- [" + entry[0] + "](" + entry[1] + ")")
-            else:
-                lines.append("> **" + entry[0] + "**\n> " + entry[2])
-    return "\n".join(lines)
-
-def topic_display_name(tag):
-    return RESOURCES[tag]["name"]
-
-async def run():
-    content = context["message_content"].strip()
-    lowered = content.lower()
-    matched = None
-    for prefix in ("!resources", "!resource", "!r"):  # longest first
-        if lowered == prefix or lowered.startswith(prefix + " "):
-            matched = prefix
-            break
-    if matched is None:
-        return
-    argument = content[len(matched):].strip().casefold()
-    if not argument:
-        lines = [
-            topic_display_name(tag) + ": `!r " + tag + "`"
-            for tag in sorted(RESOURCES, key=topic_display_name)
-        ]
-        await send_message("## Helpful Resources\n" + "\n".join(lines))
-        return
-    tag = ALIASES.get(argument, argument)
-    topic = RESOURCES.get(tag)
-    if topic is None:
-        await send_message("Could not find any resources for `" + tag + "`")
-        return
-    await send_message(render_topic(topic))
-
-await run()
-```
-
-Legacy behaviors preserved: rest-of-line multi-word topics ("machine learning"),
-casefolded matching, the not-found string showing the post-alias-resolution tag, all
-three command aliases, everyone-can-invoke. Legacy behavior improved: the emitter's
-existing `SUPPRESS_EMBEDS` flag means a topic full of links doesn't explode into preview
-cards; content edits are conversational re-authors instead of yaml-plus-redeploy
-(capability 15 — nothing to build). Link entries are `[name, url]` pairs; quoted-tip
-entries are `[name, None, message]` triples, so the legacy `{message}` body text survives
-the flattening and `render_topic` emits the exact legacy shape — a `> **name**` header
-line followed by a `> {message}` body line (capability 19). This replaces the legacy
-string-vs-`{message}` dict duality with positional slots that are cheaper in script bytes
-without dropping any tip content; the `entry[1]` truthiness check discriminates the two
-arities, and `entry[2]` is only reached on the tip branch.
-
-**`!project` is not authored** (capability 16, drop — see §6).
+The entire `!resources` suite (capabilities 12–20) is dropped — see the disposition
+table. No handler is authored, no extension was needed, and nothing else in this plan
+depended on it. If a curated-links command is ever wanted again, it is a plain
+handler-today authoring exercise (catalog literal + prefix guard), with the one caveat
+that the catalog must be curated to fit the 8 KB script cap.
 
 ## 5. Implementation order & TDD notes
 
@@ -508,28 +391,17 @@ scripts through the real authoring pipeline when installing.
   `actions_appropriate`.
 
 **Phase 3 — author the handlers** (content work + golden-script tests; depends on 0–2
-only for `server-rules`; the other two could ship after Phase 0 alone)
+only for `server-rules`; `code-formatting-help` could ship after Phase 0 alone)
 1. `code-formatting-help` — smallest. Tests: each alias fires; `!coder` does not;
    default language `py`; `!format c++` sanitizes to `c`; reply renders literal fences.
-2. `learning-resources` — after the content re-curation pass (which includes extracting
-   the full `lang_aliases:` scope from legacy `production.yaml`, per §4.3). Tests: bare
-   command renders the sorted index; every extracted alias resolves and the alias count
-   is pinned at 31 (a partial extraction fails the test), with every alias target present
-   in the catalog (no dangling aliases after trimming); multi-word and punctuated aliases
-   (`machine learning`, `c++`, `ethical-hacking`); a quoted-tip entry renders both the
-   bold name header and the `> {message}` body line; unknown topic emits the
-   exact not-found string with the resolved tag (`!r ml-ops` → tag `ml-ops`); every
-   rendered topic ≤ 2 000 chars and the script ≤ 8 KB (pin both — these are the caps
-   that silently truncate or fail authoring); prefix guard ignores non-command messages
-   (the overwhelmingly common fire).
-3. `server-rules` — needs Phases 1+2. Tests: exact-label hit; unique-title-substring
+2. `server-rules` — needs Phases 1+2. Tests: exact-label hit; unique-title-substring
    fuzzy hit; ambiguous substring → not-found; bare `!rule` index sorted; non-staff
    `!update-rules` does nothing (critical failure path: empty `author_role_ids`);
    staff + missing reason → usage message; first-run bootstrap posts chunks and persists
    `rules_message_ids`; steady-state republish edits in place and re-sends nothing;
    chunk-count change falls back to re-posting; worst-case emit count ≤ 5; every chunk
    ≤ 1 900 chars.
-- Install order in the live guild: formatting → resources → rules, each via the admin
+- Install order in the live guild: formatting → rules, each via the admin
   authoring flow; for rules, run the one-time `!update-rules initial` bootstrap and
   verify the memory write in the admin handler view.
 
@@ -544,25 +416,22 @@ migrations are needed anywhere in this group.
    permission resolution. Role ids are simple and fail closed but drift if the guild
    restructures roles; permission bits would need bot-side effective-permission
    computation added to dispatch. Plan assumes role ids are acceptable.
-2. **Resources content pass** — the legacy catalog must be re-curated to fit the 8 KB
-   script cap, and many links are stale anyway. Who curates, and is trimming acceptable?
-   (Trimming applies to the `resources:` links only — the `lang_aliases:` set ports in
-   full regardless, see capability 20.)
-   If the full catalog must survive, the fallback is an admin web/API surface for editing
-   handler memory directly (bot-core, small, but a new way to mutate handler state — only
-   build it if trimming is refused).
-3. **Command scope** — guild-wide (legacy parity, this plan) vs restricted to help
-   channels. Guild-wide means every human message fires three cheap script executions
+2. **Command scope** — guild-wide (legacy parity, this plan) vs restricted to help
+   channels. Guild-wide means every human message fires two cheap script executions
    and each handler shares the 120 fires/min admin ceiling — above that message rate,
    command invocations silently decline until the window rolls. If that bothers, author
    them as standard channel handlers in designated channels instead (also drops the
    `server-rules` staff republish's cross-channel need only if the handler lives in the
    rules channel itself).
-4. **Rules text refresh** — the dataset is 2020-era beginner.py content with beginner.py
+3. **Rules text refresh** — the dataset is 2020-era beginner.py content with beginner.py
    branding. Migration mechanics don't care, but the seeded literals need final text
    before `server-rules` is authored.
-5. **`!project` destination** — dropped below; revive only if a smarter-dev-appropriate
-   project-ideas destination exists (then it's a five-line static handler).
+
+### Decided drops
+
+| Capability | Rationale |
+|---|---|
+| **Entire `!resources` command suite (caps 12–20)** | **Dropped by Zech, 2026-07-18.** Stale 2020-era catalog, curation burden with no owner; the chat agent and challenges/quests cover the need. Includes `!project` and the alias table. |
 
 ### Drop recommendations (final call is Zech's)
 
@@ -571,6 +440,4 @@ migrations are needed anywhere in this group.
 | 60 s auto-delete on the `!update-rules` confirmation (cap. 6) | Requires a delayed-execution path (script-schedulable timer or `delete_after_seconds`) whose only consumer is channel-hygiene cosmetics. The confirmation itself ports as a plain message. |
 | Embed presentation + server-icon thumbnail (cap. 8) and the `send_embed` extension | Markdown carries the content; the emitter's smallness is a design asset. Revisit only if several future groups independently want embeds. |
 | Dead code `build_rule_message_embed` (cap. 10) | Never called in legacy; references a hardcoded admin id. Inert. |
-| `!project` / `!project-ideas` / `!ideas` (cap. 16) | Links to the beginner.py-branded repo; smarter-dev's challenges/quests plugins already give members things to build. |
-| No-background-behavior (cap. 18) | Negative capability; recorded so nobody invents link-liveness checking or rule-post monitoring without a separate decision. |
 | Channel-by-name `👮rules` lookup (cap. 11 mechanism) | Replaced by an authoring-time channel id + memory-persisted message ids; the fragile name coupling is not ported. |

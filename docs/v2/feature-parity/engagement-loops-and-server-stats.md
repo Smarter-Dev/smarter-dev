@@ -4,14 +4,14 @@
 - `beginner.codes-bot/docs/features/disboard-bumping.md` (`DisboardBumpReminderExtension`, `DiscordMeBumpReminderExtension`)
 - `beginner.codes-bot/docs/features/server-stat-counter.md` (`MemberCounterExtension`, `OnlineCounterExtension`)
 
-**Target:** the smarter-dev handler system (`smarter_dev/web/handler_*.py`, `smarter_dev/bot/plugins/handler_events.py`, `smarter_dev/bot/agents/handler_authoring.py`), extended where needed. One bot-core piece (gateway presence aggregation).
+**Target:** the smarter-dev handler system (`smarter_dev/web/handler_*.py`, `smarter_dev/bot/plugins/handler_events.py`, `smarter_dev/bot/agents/handler_authoring.py`), extended where needed. No bot-core work — the one candidate (gateway presence aggregation) was dropped along with the online-count features (decision 2026-07-18).
 
 ## 1. Overview
 
 This group covers two legacy features that are structurally the same thing: **schedule-driven engagement/stats loops built on persistent counters**.
 
 - **Disboard bumping** — remind a role 2h after the last confirmed `/bump`, detect Disboard's confirmation messages to credit the invoker, keep the bump channel clean, keep a 7-day bump ledger, and rotate a "Bump King" crown role with an announcement. Plus `!bumpers` / `!bumps` / `!update bump king` text commands and a defunct Discord.me sibling reminder.
-- **Server-stat counters** — rename a channel to show the member count (`📊Members: 1.2k`), and track the all-time max simultaneous-online record, broadcasting new records with a 30-minute cooldown, plus `!online stats` and an admin broadcast-channel setter.
+- **Server-stat counters** — rename a channel to show the member count (`📊Members: 1.2k`). The legacy online-count half (max simultaneous-online record, record broadcasts, `!online stats`, broadcast-channel setter) is **dropped entirely** — see the disposition table.
 
 They are grouped because they share the same implementation pattern in the handler system:
 
@@ -19,7 +19,7 @@ They are grouped because they share the same implementation pattern in the handl
 - a **detector/command pair over the same state**, which is what forces the one genuinely new state primitive in this plan (guild-scoped shared handler memory);
 - **guild-count reads**, **role-ping rails on announcements**, and **rate-limit-aware emits** (channel rename) as shared extensions.
 
-The single capability that cannot live in the handler model is the **online-count source of truth**: counting non-offline members requires the `GUILD_PRESENCES` intent and the gateway's presence cache, which only exists in the bot process. That becomes a tiny bot-core aggregator publishing one number to Redis; everything downstream of it is a handler.
+The one capability that could not live in the handler model was the **online-count source of truth**: counting non-offline members requires the `GUILD_PRESENCES` intent and the gateway's presence cache, which only exists in the bot process. Rather than carry a bot-core presence aggregator (plus a privileged intent) for one display feature, the entire online-count family is **dropped** (Zech, 2026-07-18): no aggregator, no `GUILD_PRESENCES`, no record tracker, no `!online stats`. The member-count rename loop survives — it uses REST `with_counts` and needs no privileged intent.
 
 Everything here lands as **admin handlers**. The Disboard handlers need `delete_message`, cross-channel `send_message`, and role transfer — all admin-tier powers — and the stats handlers need `rename_channel` (admin-tier by design, below). Keeping the whole group at one tier also lets shared-memory namespaces stay an admin-only feature initially, which is the cheapest rail against namespace squatting by member-authored handlers.
 
@@ -48,13 +48,13 @@ Everything here lands as **admin handlers**. The Disboard handlers need `delete_
 | 17 | Member-count formatting rule (`1.2k` / `2.0k`) | server-stat-counter | handler-today | Pure string formatting in the rename handler. The legacy `📊Members:` prefix is kept byte-for-byte — the rendered name doubles as the change-gate key, so the exact string (emoji included) is load-bearing. |
 | 18 | Redundant-rename suppression (change detection) | server-stat-counter | handler-today | `memory_get("last_counter")` compare-and-set; belt-and-braces with the E4 rename cap. |
 | 19 | Ready-time counter re-seed from channel name | server-stat-counter | **drop** | Obsoleted by persistent handler memory; worst case is one redundant rename attempt after a memory wipe, absorbed by the rename cap. |
-| 20 | Live online-count presence aggregation | server-stat-counter | **bot-core** | Requires `GUILD_PRESENCES` and the gateway presence cache; firing a sandboxed handler per `presence_update` is cost-prohibitive. Tiny gateway plugin publishing a per-guild count to Redis. |
-| 21 | Max-online record detection and persistence | server-stat-counter | handler-extension | 60s schedule handler comparing `get_online_member_count()` (E5) against `max_online` in shared memory. Polling trades sub-minute peak fidelity for handler economics (Q9). |
-| 22 | New-record broadcast with 30-minute cooldown | server-stat-counter | handler-today | Same handler as #21: `send_message` to its own bound channel + `last_broadcast` timestamp in memory + `datetime.now()`. Existing channel caps add a second layer. |
-| 23 | `!online stats` command | server-stat-counter | handler-extension | Message-trigger handler in a general channel; needs E5 for the live count and E3 to read the record the schedule handler owns. |
-| 24 | `!set max online channel` admin command | server-stat-counter | **drop** | Superseded by handler channel binding: the broadcast channel *is* the channel the record handler is installed in; moving it is an admin authoring/management operation. A runtime config command would roll a parallel auth/config path. |
-| 25 | Stat persistence across restarts | server-stat-counter | handler-today | `max_online`, `last_broadcast`, `last_counter` map onto the existing memory store. No new tables for the stats themselves. |
-| 26 | Privileged intents prerequisite (presences + members) | server-stat-counter | **bot-core** | `bot/client.py` currently enables `GUILD_MEMBERS` but **not** `GUILD_PRESENCES` (EXISTING-FEATURES.md line 255 claims otherwise — it is wrong). Intent must be added in code and verified in the developer portal. Member count avoids the members intent entirely via REST `with_counts`. |
+| 20 | Live online-count presence aggregation | server-stat-counter | **drop** | Dropped with the whole online-count family (Zech, 2026-07-18). It would have required a bot-core gateway plugin plus the `GUILD_PRESENCES` privileged intent — the only bot-core piece in this group — for a single display feature. |
+| 21 | Max-online record detection and persistence | server-stat-counter | **drop** | Dropped: depends entirely on #20's online-count source. |
+| 22 | New-record broadcast with 30-minute cooldown | server-stat-counter | **drop** | Dropped with #21. |
+| 23 | `!online stats` command | server-stat-counter | **drop** | Dropped with #20/#21 — nothing left to report. |
+| 24 | `!set max online channel` admin command | server-stat-counter | **drop** | Moot after the #20–#23 drop; was already recommended for dropping (handler channel binding supersedes a runtime config command). |
+| 25 | Stat persistence across restarts | server-stat-counter | handler-today | `last_counter` maps onto the existing memory store (`max_online`/`last_broadcast` died with the online-count drop). No new tables for the stats themselves. |
+| 26 | Privileged intents prerequisite (presences + members) | server-stat-counter | **drop** | Moot: `GUILD_PRESENCES` was only needed for #20, which is dropped. Member count avoids the members intent entirely via REST `with_counts`. (EXISTING-FEATURES.md line 255 wrongly claims the presences intent is already enabled — still worth correcting.) |
 
 ## 3. Handler-system extensions
 
@@ -120,7 +120,7 @@ Six extensions, ordered by how many capabilities hang off them. All handler-leve
 
 **Migrations:** one new table.
 
-**Consumed by:** #1, #6, #8, #10, #11, #12, #13b, #21, #23.
+**Consumed by:** #1, #6, #8, #10, #11, #12, #13b.
 
 ### E4. `rename_channel` metered emit + rename cap kind
 
@@ -139,22 +139,21 @@ Six extensions, ordered by how many capabilities hang off them. All handler-leve
 
 **Consumed by:** #16.
 
-### E5. Guild-count read functions + `discord_reads` budget counter
+### E5. Guild-count read function + `discord_reads` budget counter
 
-**What:** two read-only script functions and one new per-fire counter to meter them.
+**What:** one read-only script function and one new per-fire counter to meter it. (A second function, `get_online_member_count()`, was designed here but died with the online-count drop — see #20–#23.)
 
 **Design:**
 
 - `await get_guild_member_count() -> int` — worker-side REST `GET /guilds/{guild_id}?with_counts=true`, returning `approximate_member_count`. Chosen over the gateway cache (avoids intent coupling) and over the synced `GuildMember` table (sync-lagged); "approximate" is fine for a `1.2k`-granularity display.
-- `await get_online_member_count() -> int` — reads the Redis key the bot-core presence aggregator maintains (see §4). The value is stored as `{"count": int, "updated_at": iso}`; if the key is missing or `updated_at` is older than **5 minutes**, the function **raises** (`RuntimeError("online count unavailable/stale")`) rather than returning 0 — a silent 0 can never clobber a record or suppress a broadcast, and the error surfaces through the normal `handler_notify` path. Fail fast, per project convention.
-- **Budget:** new counter on `HandlerBudget`: `max_discord_reads` (default 5, both tiers), `spend_discord_read()`, included in `usage()`. Both functions spend it.
-- Available to both tiers (read-only, cheap), though in this plan only admin handlers use them.
+- **Budget:** new counter on `HandlerBudget`: `max_discord_reads` (default 5, both tiers), `spend_discord_read()`, included in `usage()`.
+- Available to both tiers (read-only, cheap), though in this plan only admin handlers use it.
 
-**Lint/judge:** author prompt documents both, including the staleness-raise behavior ("do not wrap in a bare retry loop; let the fire error"). No judge changes beyond the surface listing.
+**Lint/judge:** author prompt documents the function. No judge changes beyond the surface listing.
 
 **Migrations:** one nullable-default-0 `discord_reads` column on `handler_runs` (alembic) so the audit stays complete.
 
-**Consumed by:** #16, #21, #23.
+**Consumed by:** #16.
 
 ### E6. `add_role` / `remove_role` (consumed from the member-lifecycle group)
 
@@ -173,10 +172,6 @@ The crown transfer (#8) uses the role-mutation extension **designed in the lifec
 **Migrations:** none.
 
 **Consumed by:** #10.
-
-### Bot-core: gateway presence aggregator (not a handler extension)
-
-Covered in §4 under server-stat counters; listed here because E5's `get_online_member_count()` depends on it.
 
 ## 4. Per-feature plans
 
@@ -284,12 +279,7 @@ elif text == "!update bump king" and context["author_is_admin"]:
 
 ### 4.2 Server-stat counters
 
-**Bot-core: presence aggregator** (`smarter_dev/bot/plugins/presence_stats.py`):
-
-- Add `hikari.Intents.GUILD_PRESENCES` in `bot/client.py` (currently **absent** — line ~451 has GUILDS | GUILD_MEMBERS | GUILD_MESSAGES | MESSAGE_CONTENT | GUILD_MESSAGE_REACTIONS) and verify the toggle in the developer portal. Confirm hikari's cache config retains presences.
-- Listener on `PresenceUpdateEvent` (plus a full recount on `StartedEvent`/`GuildAvailableEvent`): count cached presences with status != offline for the guild, write `presence:online:{guild_id}` = `{"count": n, "updated_at": iso}` to Redis. Debounce writes (e.g. at most one per 2s per guild) — presence updates are the highest-volume gateway event.
-- No emits, no handler dispatch. This is exactly the gateway-only-state case the bot-core tier exists for.
-- Optional refinement (Q9): also maintain `presence:online_peak:{guild_id}:{10min-bucket}` rolling maxima so the 60s poller cannot miss sub-minute spikes. Deferred unless Zech wants peak-perfect records.
+The online-count half of this feature (presence aggregator, record tracker, `!online stats`) is dropped — see #20–#23. What remains is one handler.
 
 **Handler 4 — `member-count-display`** (admin schedule handler, `interval_seconds: 600`, `channel_ids=[<stats voice/display channel>]`):
 
@@ -308,35 +298,6 @@ Private per-handler memory suffices here (no reader pair), so no namespace. The 
 
 The `📊Members:` prefix matches the legacy format exactly (#17) — deliberately, because the emoji is load-bearing for the first tick after migration: `last_counter` starts empty, so the first fire always attempts a rename, and keeping the legacy string makes that rename resolve to the name the old bot left on the channel (an idempotent PATCH) instead of a visible format change. Any future prefix change is a display decision that costs one rename out of the 2/10min cap.
 
-**Handler 5 — `online-record-tracker`** (admin schedule handler, `interval_seconds: 60`, installed in the **broadcast channel** — the binding IS the broadcast-channel config, retiring `!set max online channel`; `shared_namespace: "server-stats"`):
-
-```python
-current = await get_online_member_count()          # raises if aggregator stale
-record = await shared_get("max_online", 0)
-if current > record:
-    await shared_set("max_online", current)        # record ALWAYS updates
-    now = datetime.datetime.now(datetime.timezone.utc)
-    last = await shared_get("last_broadcast")
-    if last is None or (now - datetime.datetime.fromisoformat(last)).total_seconds() > 1800:
-        await send_message(f"🎉 New record: {current} members online at once!")
-        await shared_set("last_broadcast", now.isoformat())
-```
-
-Legacy semantics preserved exactly: the record updates unconditionally; only the announcement is cooldown-limited.
-
-**Handler 6 — `online-stats-command`** (admin message handler in a general channel, `shared_namespace: "server-stats"`):
-
-Kept as a lightweight text command (`!online stats` exact match) for parity; folding it into the mention/chat agent instead is Q8.
-
-```python
-if context["message_content"].strip().lower() == "!online stats":
-    current = await get_online_member_count()
-    record = await shared_get("max_online", 0)
-    await send_message(f"🟢 {current} members online now — all-time record: {record}.")
-```
-
-If the aggregator is stale this fire errors and the throttled error notice tells the channel — correct behavior, not a bug.
-
 ## 5. Implementation order & TDD notes
 
 Phases are dependency-ordered; each is TDD (happy paths + critical failure paths) against the existing offline test patterns (fake emitter/limiter/agent-runner into `run_handler_script`, injectable author/judge for pipeline tests).
@@ -354,27 +315,21 @@ Phases are dependency-ordered; each is TDD (happy paths + critical failure paths
    Failure paths: non-admin handler lacks the function; out-of-scope channel id raises; third rename in a window raises with the cap name.
 5. `allowed_mentions` rail on `create_message` + settings pass-through (E2).
    Failure paths: role id NOT in the allowlist does not ping (payload-level assertion); `@everyone` never parseable; default payload now always carries explicit `allowed_mentions` (regression test on existing handlers).
-6. `get_guild_member_count` / `get_online_member_count` (E5).
-   Failure paths: missing Redis key raises; `updated_at` older than 5 min raises; REST error propagates (no silent 0) — these are the tests to write **first**, per the fail-fast rule.
+6. `get_guild_member_count` (E5).
+   Failure paths: REST error propagates (no silent 0) — write these tests **first**, per the fail-fast rule.
 
 **Phase 3 — dispatch changes (E1, E7):**
 7. Bot-message opt-in: own-bot messages never dispatch (the invariant test); bot messages dispatch only to `include_bot_messages` handlers; `bot_message_channels` in the active-channels cache; `embeds` / `interaction_user_id` / `author_is_bot` / `author_is_admin` context fields (admin computed fail-closed on cache miss).
 
-**Phase 4 — bot-core presence aggregator:**
-8. `GUILD_PRESENCES` intent in `bot/client.py` + portal verification (do this early — it needs Zech's portal access).
-9. Aggregator plugin: fake presence events → Redis writes with fresh `updated_at`; debounce; full recount on guild-available.
-
-**Phase 5 — authoring surface + the handlers themselves:**
-10. Author/judge prompt updates (new functions, settings, context fields, the named reject patterns: un-gated rename, un-guarded bot-message trigger, privileged branch without `author_is_admin`). Re-run the authoring evals.
-11. Author the six handlers in the staging guild. Their scripts get direct unit tests via `run_handler_script` with seeded shared memory:
+**Phase 4 — authoring surface + the handlers themselves:**
+8. Author/judge prompt updates (new functions, settings, context fields, the named reject patterns: un-gated rename, un-guarded bot-message trigger, privileged branch without `author_is_admin`). Re-run the authoring evals.
+9. Author the four handlers in the staging guild. Their scripts get direct unit tests via `run_handler_script` with seeded shared memory:
     - detection happy path (embed with "bump done!" → ledger insert, flags reset, previous reminder deleted, previous confirmation deleted, new `confirmation_message_id` stored);
     - confirmation rotation from empty state (no stored `confirmation_message_id` → no delete, id stored);
     - failed-bump path (no matching embed → delete, nothing else);
     - king tie-break (tie → crown moves only on more-recent bump; no-op when top unchanged);
     - reminder loop (fires once per cycle: `reminded` flag; no fire before 2h; cold start with `last_bump_at` absent → reminder fires on the next poll; self-heal from cold memory);
-    - rename suppression (unchanged count → zero emits);
-    - record + cooldown (record updates while broadcast suppressed inside 30 min);
-    - stale-aggregator path (both online handlers error loudly, no memory writes).
+    - rename suppression (unchanged count → zero emits).
 
 Run `semgrep` and `gitleaks` before each phase's commit, per convention.
 
@@ -389,7 +344,13 @@ Run `semgrep` and `gitleaks` before each phase's commit, per convention.
 | #13 Bulk channel purge | Superseded by per-message deletion + targeted deletion of the stored `reminder_message_id` and `confirmation_message_id` (#13b keeps the confirmation rotation, so old "Bump done!" messages do not accumulate); a purge function would be budget-hostile. |
 | #15 Discord.me reminder | The listing service is effectively defunct in 2026. Trivially handler-today if revived (6h schedule + E2). |
 | #19 Ready-time counter re-seed | Persistent `last_counter` memory makes it moot; worst case one redundant rename attempt, absorbed by the rename cap. |
-| #24 `!set max online channel` | The broadcast channel is the record handler's channel binding; a runtime config command would roll a parallel auth/config path (legacy even defined it twice). |
+
+**Decided drops (Zech, 2026-07-18) — no longer open:**
+
+| Capability | Decision |
+|---|---|
+| #20–#23, #26 — the entire online-count family (presence aggregation, max-online record, record broadcast, `!online stats`, `GUILD_PRESENCES` intent) | Dropped. The only bot-core piece in this group plus a privileged intent was not worth one display feature. |
+| #24 `!set max online channel` | Moot after the family drop (was already recommended for dropping: the broadcast channel would have been the handler's channel binding). |
 
 **Open questions:**
 
@@ -399,7 +360,6 @@ Run `semgrep` and `gitleaks` before each phase's commit, per convention.
 4. **Shared-memory tier:** confirm admin-handlers-only namespaces for now, and last-writer-wins concurrency (with per-key UPSERT as the documented upgrade path).
 5. **Embeds out:** announcements/leaderboards were embeds in legacy; this plan ships formatted plain text. Is a `send_embed` extension worth designing across the whole migration (it would serve several groups), or is text fine?
 6. **`!update bump king`:** keep as an `author_is_admin`-gated handler branch (planned), or drop it and rely on asking the admin authoring chat / dashboard to intervene when drift happens?
-7. **Command UX:** keep `!bumpers` / `!bumps` / `!online stats` as text-command handler branches (planned, cheapest parity), or fold the queries into the mention/chat agent for consistency with smarter-dev UX?
+7. **Command UX:** keep `!bumpers` / `!bumps` as text-command handler branches (planned, cheapest parity), or fold the queries into the mention/chat agent for consistency with smarter-dev UX?
 8. **Rename target rail:** planned as `rename_channel(channel_id, name)` restricted to the handler's `channel_ids` scope. Alternative, stricter rail: no `channel_id` parameter at all — always rename the bound channel. Preference?
-9. **Peak fidelity:** 60s polling misses online spikes shorter than the interval. Ship the simple current-count key (planned) or add the aggregator's rolling 10-minute high-water buckets so no peak is lost?
-10. **`GUILD_PRESENCES`:** EXISTING-FEATURES.md claims it is in use, but `bot/client.py` does not enable it — confirm the portal toggle state before Phase 4, and fix the EXISTING-FEATURES.md line while at it.
+9. **EXISTING-FEATURES.md correction:** line 255 claims `GUILD_PRESENCES` is enabled; `bot/client.py` does not enable it. The intent is no longer needed (online-count family dropped), but the doc line should be fixed.
