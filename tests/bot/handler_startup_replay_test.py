@@ -16,8 +16,13 @@ from types import SimpleNamespace
 
 import pytest
 
+import hikari
+
 from smarter_dev.bot.plugins import handler_events
 from smarter_dev.bot.plugins.handler_events import (
+    GUILD_MEMBER_EVENTS_PER_MIN,
+    REPLAY_BATCH_SIZE,
+    _became_rules_accepted,
     _rules_accepted_context,
     find_missed_rules_acceptances,
     member_update_deltas,
@@ -89,6 +94,26 @@ def test_bot_is_excluded():
     assert find_missed_rules_acceptances([make_member(is_bot=True)]) == []
 
 
+def test_undefined_pending_is_excluded_fail_closed():
+    # REST payloads may omit 'pending' (hikari yields UNDEFINED). An unknown
+    # pending state must NOT fail open into a synthesized acceptance.
+    member = make_member(is_pending=hikari.undefined.UNDEFINED)
+    assert find_missed_rules_acceptances([member]) == []
+
+
+def test_selector_agrees_with_live_cache_miss_predicate():
+    # The replay selector and the live cache-miss heuristic must fire for the
+    # same role-less non-pending population, or a replay onboards members the
+    # live system would not (finding: predicates must stay in lockstep).
+    included = make_member(member_id=SNOWFLAKE + 1)
+    excluded_role = make_member(member_id=SNOWFLAKE + 2, role_ids=(GUILD_ID, 5))
+    excluded_pending = make_member(member_id=SNOWFLAKE + 3, is_pending=True)
+    for member in (included, excluded_role, excluded_pending):
+        selected = bool(find_missed_rules_acceptances([member]))
+        live = _became_rules_accepted(None, member)
+        assert selected == live
+
+
 def test_context_carries_reconciliation_flag_and_matches_real_shape():
     member = make_member()
     (context,) = find_missed_rules_acceptances([member])
@@ -130,6 +155,7 @@ async def test_replay_dispatches_each_selected_member_once():
 
     async def fake_dispatch(channel_id, guild_id, trigger_type, context):
         calls.append((channel_id, guild_id, trigger_type, context))
+        return True
 
     count = await replay_missed_rules_acceptances(
         str(GUILD_ID), members, fake_dispatch
@@ -149,6 +175,7 @@ async def test_replay_does_nothing_when_no_missed_members():
 
     async def fake_dispatch(channel_id, guild_id, trigger_type, context):
         calls.append(context)
+        return True
 
     async def fake_sleep(seconds):
         slept.append(seconds)
@@ -172,6 +199,7 @@ async def test_replay_paces_large_backlog_across_windows():
 
     async def fake_dispatch(channel_id, guild_id, trigger_type, context):
         timeline.append(("dispatch", context["member_id"]))
+        return True
 
     async def fake_sleep(seconds):
         timeline.append(("sleep", seconds))
@@ -189,13 +217,59 @@ async def test_replay_paces_large_backlog_across_windows():
     sleeps = [event for event in timeline if event[0] == "sleep"]
     assert len(dispatches) == 150
     assert len(sleeps) == 2  # 60 | wait | 60 | wait | 30
-    # No burst: the first wait lands exactly after one window's worth of fires,
-    # so a real join in the same window still has headroom under the cap.
+    # The first wait lands exactly after one batch's worth of fires; the default
+    # batch is below the cap (see test_default_batch_reserves_window_headroom),
+    # so a concurrent live join is not declined by the replay's backlog.
     assert timeline.index(("sleep", 60)) == 60
     # And the second window is a full batch too (no early/late wait).
     assert timeline[61:121] == [
         ("dispatch", str(SNOWFLAKE + i)) for i in range(60, 120)
     ]
+
+
+def test_default_batch_reserves_window_headroom():
+    # The default replay batch must be strictly below the shared per-guild
+    # member-event cap so a full replay batch never fills the window and declines
+    # a concurrent live member event.
+    assert REPLAY_BATCH_SIZE < GUILD_MEMBER_EVENTS_PER_MIN
+
+
+async def test_declined_fire_is_retried_not_dropped():
+    # A fire the raid gate declines (dispatch returns False) must be retried in a
+    # later window, not silently lost — the exact "drop the member a second time"
+    # failure the spec forbids.
+    members = [make_member(member_id=SNOWFLAKE + i) for i in range(2)]
+    attempts = []
+    declined_once: set[str] = set()
+
+    async def flaky_dispatch(channel_id, guild_id, trigger_type, context):
+        member_id = context["member_id"]
+        attempts.append(member_id)
+        # Decline the first attempt for the second member, accept on retry.
+        if member_id == str(SNOWFLAKE + 1) and member_id not in declined_once:
+            declined_once.add(member_id)
+            return False
+        return True
+
+    slept = []
+
+    async def fake_sleep(seconds):
+        slept.append(seconds)
+
+    delivered = await replay_missed_rules_acceptances(
+        str(GUILD_ID),
+        members,
+        flaky_dispatch,
+        batch_size=2,
+        window_seconds=60,
+        sleep=fake_sleep,
+    )
+
+    assert delivered == 2  # both eventually delivered
+    # The declined member was attempted twice; the other once.
+    assert attempts.count(str(SNOWFLAKE + 1)) == 2
+    assert attempts.count(str(SNOWFLAKE)) == 1
+    assert slept == [60]  # one extra window to carry the retry
 
 
 # ---------------------------------------------------------------------------
@@ -221,13 +295,15 @@ class AsyncMemberIterator:
 
 
 def make_fake_bot(guild_ids, members):
+    # Guilds come from REST (fetch_my_guilds), NOT the gateway guild cache, which
+    # races GUILD_CREATE at StartedEvent and would silently skip guilds.
     rest = SimpleNamespace(
-        fetch_members=lambda guild_id: AsyncMemberIterator(members)
+        fetch_members=lambda guild_id: AsyncMemberIterator(members),
+        fetch_my_guilds=lambda: AsyncMemberIterator(
+            [SimpleNamespace(id=gid) for gid in guild_ids]
+        ),
     )
-    cache = SimpleNamespace(
-        get_guilds_view=lambda: {gid: object() for gid in guild_ids}
-    )
-    return SimpleNamespace(rest=rest, cache=cache)
+    return SimpleNamespace(rest=rest)
 
 
 async def test_startup_replay_routes_synthetic_fires_through_dispatch(monkeypatch):
@@ -237,6 +313,7 @@ async def test_startup_replay_routes_synthetic_fires_through_dispatch(monkeypatc
 
     async def fake_dispatch(channel_id, guild_id, trigger_type, context, *, bot_message=False):
         calls.append((channel_id, guild_id, trigger_type, context))
+        return True
 
     monkeypatch.setattr(handler_events, "_dispatch", fake_dispatch)
 
@@ -264,6 +341,7 @@ async def test_startup_replay_survives_a_guild_fetch_failure(monkeypatch):
 
     async def fake_dispatch(channel_id, guild_id, trigger_type, context, *, bot_message=False):
         calls.append((guild_id, context["member_id"]))
+        return True
 
     monkeypatch.setattr(handler_events, "_dispatch", fake_dispatch)
 
@@ -275,8 +353,12 @@ async def test_startup_replay_survives_a_guild_fetch_failure(monkeypatch):
         return AsyncMemberIterator([good_member])
 
     bot = SimpleNamespace(
-        rest=SimpleNamespace(fetch_members=fetch_members),
-        cache=SimpleNamespace(get_guilds_view=lambda: {1: object(), 99: object()}),
+        rest=SimpleNamespace(
+            fetch_members=fetch_members,
+            fetch_my_guilds=lambda: AsyncMemberIterator(
+                [SimpleNamespace(id=1), SimpleNamespace(id=99)]
+            ),
+        ),
     )
 
     await replay_startup_rules_acceptances(bot)

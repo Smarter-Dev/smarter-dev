@@ -194,7 +194,15 @@ async def _dispatch(
     context: dict,
     *,
     bot_message: bool = False,
-) -> None:
+) -> bool:
+    """Ask the API to enqueue a fire. Returns whether the fire was delivered.
+
+    ``True`` means delivered OR there was no handler to receive it (nothing to
+    retry); ``False`` means the API explicitly declined the fire (e.g. the shared
+    per-guild member-event raid window was exhausted). Live listeners ignore the
+    return; the startup replay uses it to retry a declined fire rather than lose
+    the member a second time.
+    """
     api = _get_api_client()
     # A bot/webhook message uses the opt-in guard (only fires where a handler
     # asked for bot messages); everything else uses the normal per-trigger guard.
@@ -204,9 +212,9 @@ async def _dispatch(
         else await _cache.has(api, channel_id, guild_id, trigger_type)
     )
     if not present:
-        return
+        return True
     try:
-        await api.post(
+        response = await api.post(
             "/handlers/dispatch",
             json_data={
                 "guild_id": guild_id,
@@ -217,6 +225,8 @@ async def _dispatch(
         )
     except Exception:  # noqa: BLE001 — dispatch is best-effort for a toy
         logger.debug("handler dispatch failed", exc_info=True)
+        return True  # a transient error is not a raid-gate decline
+    return bool(response.json().get("dispatched", True))
 
 
 # Channel types that are threads (dispatch keys off their PARENT channel).
@@ -394,12 +404,21 @@ def find_missed_rules_acceptances(members: Any) -> list[dict]:
     result is a member_rules_accepted context identical to the live one apart from
     ``is_reconciliation: True``, so a handler (and the judge) can tell a replayed
     fire from a real delta. No side effects: selection only.
+
+    The role check reuses ``_roles_beyond_everyone`` — the single authority the
+    live cache-miss path (``_became_rules_accepted``) also uses — so the two
+    predicates stay in lockstep. The pending check is deliberately STRICTER than
+    the live path: this selector's first consumer is REST-fetched members, whose
+    ``pending`` field is optional (hikari yields ``UNDEFINED`` when Discord omits
+    it). We require an explicit ``False`` and skip anything else, so an unknown
+    ``pending`` never fails open into a synthesized acceptance for a member who
+    may still be pending.
     """
     contexts: list[dict] = []
     for member in members:
         if member.is_bot:
             continue
-        if member.is_pending:
+        if member.is_pending is not False:
             continue
         if _roles_beyond_everyone(member):
             continue
@@ -409,40 +428,78 @@ def find_missed_rules_acceptances(members: Any) -> list[dict]:
     return contexts
 
 
+# The shared per-guild member-event window (GUILD_MEMBER_EVENTS_PER_MIN) is
+# spent by every live member_join/leave/rules/role fire too, so the replay must
+# NOT consume a whole window — it reserves headroom for concurrent live events
+# and only fires a partial batch per window.
+REPLAY_MEMBER_EVENT_HEADROOM = GUILD_MEMBER_EVENTS_PER_MIN // 2
+REPLAY_BATCH_SIZE = GUILD_MEMBER_EVENTS_PER_MIN - REPLAY_MEMBER_EVENT_HEADROOM
+# Bound on how many extra windows we keep retrying declined fires before giving
+# up and logging, so a permanently saturated window can't loop forever.
+REPLAY_MAX_RETRY_WINDOWS = 5
+
+
 async def replay_missed_rules_acceptances(
     guild_id: str,
     members: Any,
     dispatch: Any,
     *,
-    batch_size: int = GUILD_MEMBER_EVENTS_PER_MIN,
+    batch_size: int = REPLAY_BATCH_SIZE,
     window_seconds: float = WINDOW_SECONDS,
     sleep: Any = asyncio.sleep,
+    max_retry_windows: int = REPLAY_MAX_RETRY_WINDOWS,
 ) -> int:
     """Re-dispatch a synthetic member_rules_accepted for each missed member, paced.
 
     Fires go through the SAME ``dispatch`` path a live delta uses, so the
-    onboarding handler stays the single authority. The per-guild
-    ``GUILD_MEMBER_EVENTS_PER_MIN`` gate would *decline* a burst — and a decline
-    here loses the member a second time — so we pace instead: at most one window's
-    worth of fires, then wait for the window to roll over before the next batch. A
-    post-downtime backlog therefore drains over a few minutes rather than firing
-    at once. ``sleep``/``batch_size``/``window_seconds`` are injected so pacing is
-    testable without real sleeps. Returns the number of fires dispatched.
+    onboarding handler stays the single authority. The per-guild member-event gate
+    is SHARED with every live member fire, so we (a) fire at most ``batch_size``
+    per window — strictly below the cap, leaving headroom so a concurrent live
+    join/leave is never declined by our backlog — and (b) treat a declined fire
+    (``dispatch`` returns falsy) as not-yet-delivered and retry it in a later
+    window rather than dropping the member a second time. A post-downtime backlog
+    therefore drains over a few minutes. ``sleep``/``batch_size``/``window_seconds``
+    are injected so pacing is testable without real sleeps. Returns the number of
+    fires actually delivered.
     """
     contexts = find_missed_rules_acceptances(members)
-    for index, context in enumerate(contexts):
-        if index and index % batch_size == 0:
-            # This window is full; wait for headroom before the next batch so the
-            # raid gate never declines a replay (which would drop the member again).
+    if not contexts:
+        return 0
+
+    pending = list(contexts)
+    delivered = 0
+    full_batches = (len(contexts) + batch_size - 1) // batch_size
+    max_passes = full_batches + max_retry_windows
+    passes = 0
+    while pending and passes < max_passes:
+        if passes:
+            # Wait for the shared window to roll over before spending more of it.
             await sleep(window_seconds)
-        await dispatch("", guild_id, "member_rules_accepted", context)
-    if contexts:
-        logger.info(
-            "Startup replay: synthesized %d member_rules_accepted fires for guild %s",
-            len(contexts),
+        passes += 1
+        batch, pending = pending[:batch_size], pending[batch_size:]
+        declined: list[dict] = []
+        for context in batch:
+            if await dispatch("", guild_id, "member_rules_accepted", context):
+                delivered += 1
+            else:
+                declined.append(context)  # gate declined; retry next window
+        pending = declined + pending
+
+    logger.info(
+        "Startup replay: delivered %d/%d member_rules_accepted fires for guild %s",
+        delivered,
+        len(contexts),
+        guild_id,
+    )
+    if pending:
+        logger.warning(
+            "Startup replay: gave up with %d undelivered member_rules_accepted "
+            "fires for guild %s after %d windows",
+            len(pending),
             guild_id,
+            passes,
         )
-    return len(contexts)
+    return delivered
 
 
 async def _paged_guild_members(bot: Any, guild_id: Any) -> list:
@@ -460,14 +517,15 @@ async def _paged_guild_members(bot: Any, guild_id: Any) -> list:
 async def replay_startup_rules_acceptances(bot: Any) -> None:
     """Run the missed-rules-acceptance replay for every guild the bot is in.
 
-    Each guild paces against its own per-guild window. A REST failure for one
-    guild is logged and skipped so it cannot abort the replay for the rest.
+    Guilds are enumerated authoritatively via REST (``fetch_my_guilds``): the
+    gateway guild cache is populated only as GUILD_CREATE events stream in AFTER
+    each shard's READY, so it races StartedEvent and would silently skip guilds
+    whose GUILD_CREATE has not yet arrived. A fetch failure for one guild's
+    members is logged and skipped so it cannot abort the replay for the rest; a
+    failure enumerating guilds propagates (create_task logs it loudly) rather
+    than silently disabling the whole feature.
     """
-    try:
-        guild_ids = list(bot.cache.get_guilds_view().keys())
-    except Exception:  # noqa: BLE001 — a cold guild view must not crash startup
-        logger.debug("startup replay: guild view unavailable", exc_info=True)
-        return
+    guild_ids = [guild.id async for guild in bot.rest.fetch_my_guilds()]
     for guild_id in guild_ids:
         try:
             members = await _paged_guild_members(bot, guild_id)
