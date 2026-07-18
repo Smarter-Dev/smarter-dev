@@ -34,11 +34,31 @@ from smarter_dev.web.handler_guild_memory import (
     load_guild_memory,
     persist_guild_memory,
 )
+from smarter_dev.web.crud import ModerationActionOperations
 from smarter_dev.web.handler_notify import notify_handler_error
 from smarter_dev.web.handler_schedule import next_fire_at
-from smarter_dev.web.models import AdminHandler, HandlerRun
+from smarter_dev.web.models import AdminHandler, HandlerRun, ModerationAction
 
 logger = logging.getLogger(__name__)
+
+_mod_action_ops = ModerationActionOperations()
+
+
+def _mod_action_row(action: ModerationAction) -> dict:
+    """Map a ModerationAction to the list_mod_actions row (the §3.5/§3.7 shape).
+
+    channel_id/trigger_message_id come straight off the row (either may be None)
+    so a script can build "Jump To Action" links; created_at is ISO-8601."""
+    return {
+        "action_type": action.action_type,
+        "reason": action.reason,
+        "source": action.source,
+        "moderator_username": action.moderator_username,
+        "duration_seconds": action.duration_seconds,
+        "channel_id": action.channel_id,
+        "trigger_message_id": action.trigger_message_id,
+        "created_at": action.created_at.isoformat() if action.created_at else None,
+    }
 
 
 class AdminHandlerFirePayload(BaseModel):
@@ -85,6 +105,12 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
     from smarter_dev.web.handler_runtime import run_handler_script
 
     budget = admin_budget()
+    # Loop rail (§3.5, HARD): a mod_action-triggered handler formats and posts an
+    # audit row into the mod-log — it must NEVER ban/kick/timeout/delete, or a
+    # handler action would write an audit row that re-fires it. Forcing the
+    # mod-action budget to 0 makes that loop structurally impossible.
+    if trigger_type == "mod_action":
+        budget.max_mod_actions = 0
     # The emitter carries the fire's guild so list_threads() can hit the
     # guild-scoped active-threads endpoint; without it the URL is malformed.
     emitter = DiscordEmitter(bot_token=settings.discord_bot_token, guild_id=guild_id)
@@ -115,6 +141,15 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
             job_id=uuid4().hex,
         )
 
+    async def read_mod_actions(target_user_id: str, limit: int) -> list[dict]:
+        # guild_id is bound host-side from THIS fire's guild — a script passes only
+        # the target user and limit, so it can never read another guild's history.
+        async with get_db_session_context() as reader_session:
+            actions = await _mod_action_ops.get_actions_for_user(
+                reader_session, guild_id, str(target_user_id), limit=int(limit)
+            )
+            return [_mod_action_row(action) for action in actions]
+
     result = await run_handler_script(
         script,
         payload.trigger_context,
@@ -125,6 +160,7 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
         emitter=emitter,
         limiter=limiter,
         agent_runner=run_gathering_agent,
+        mod_action_reader=read_mod_actions,
         handler_id=str(handler_id),
         timer_scheduler=schedule_timer,
         timer_limiter=timer_limiter,
@@ -153,6 +189,7 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
                 thread_ops=result.usage.get("thread_ops", 0),
                 role_changes=result.usage.get("role_changes", 0),
                 timers_scheduled=result.usage.get("timers_scheduled", 0),
+                lookups=result.usage.get("lookups", 0),
                 duration_ms=result.duration_ms,
                 finished_at=datetime.now(timezone.utc),
             )

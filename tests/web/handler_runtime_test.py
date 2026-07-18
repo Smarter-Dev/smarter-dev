@@ -133,17 +133,41 @@ class _FakeActor:
         self.calls.append(("remove_role", user_id, role_id, reason))
         return user_id not in self.gone
 
+    # webhook_result: what delete_webhook returns (True killed / False 404).
+    webhook_result: bool = True
+
+    async def delete_webhook(self, webhook_url):
+        self.calls.append(("delete_webhook", webhook_url))
+        return self.webhook_result
+
+    # member_info / search_result: canned mod-audit REST reads.
+    member_info: dict = field(default_factory=lambda: {"user_id": "U1", "in_guild": True})
+    search_result: dict = field(
+        default_factory=lambda: {"members": [], "overflow_count": 0}
+    )
+
+    async def get_member_info(self, user_id):
+        self.calls.append(("get_member_info", user_id))
+        return dict(self.member_info)
+
+    async def search_guild_members(self, query, limit=10):
+        self.calls.append(("search_guild_members", query, limit))
+        return dict(self.search_result)
+
 
 async def _run(
     script, *, budget=None, emitter=None, limiter=None, agent_runner=None,
     actor=None, channel_ids=None, allowed_role_ids=None,
     timer_scheduler=None, timer_limiter=None, dm_user_limiter=None, handler_id=None,
+    mod_action_reader=None,
 ):
     emitter = emitter or _FakeEmitter()
     limiter = limiter or _StubLimiter()
     kwargs = {}
     if dm_user_limiter is not None:
         kwargs["dm_user_limiter"] = dm_user_limiter
+    if mod_action_reader is not None:
+        kwargs["mod_action_reader"] = mod_action_reader
     if agent_runner is not None:
         kwargs["agent_runner"] = agent_runner
     if actor is not None:
@@ -1235,3 +1259,103 @@ async def test_send_dm_returns_false_does_not_raise():
     assert result.cap is None
     assert emitter.dm_sends == [("U9", "hi")]
     assert emitter.messages == []  # the delivered branch did not run
+
+
+# -- mod-audit surface: delete_webhook + reads (admin only) --------------------
+
+
+async def test_delete_webhook_spends_mod_action_and_present_only_for_admin():
+    actor = _FakeActor()
+    script = "r = await delete_webhook('https://discord.com/api/webhooks/1/tok')\n"
+    result, _, _ = await _run(
+        script, budget=admin_budget(), actor=actor
+    )
+    assert result.outcome == "ok"
+    assert ("delete_webhook", "https://discord.com/api/webhooks/1/tok") in actor.calls
+    assert result.usage["mod_actions"] == 1
+
+    # A standard (no-actor) handler has no delete_webhook function at all.
+    standard = await _run(
+        "await delete_webhook('https://discord.com/api/webhooks/1/tok')\n"
+    )
+    assert standard[0].outcome == "error"
+    assert "delete_webhook" in (standard[0].error or "")
+
+
+async def test_read_functions_admin_only_and_spend_lookup():
+    actor = _FakeActor()
+
+    async def reader(user_id, limit):
+        return []
+
+    script = (
+        "a = await list_mod_actions('U1', 5)\n"
+        "b = await get_member_info('U1')\n"
+        "c = await search_guild_members('ali', 3)\n"
+    )
+    result, _, _ = await _run(
+        script, budget=admin_budget(), actor=actor, mod_action_reader=reader
+    )
+    assert result.outcome == "ok"
+    # One lookup spent per read call.
+    assert result.usage["lookups"] == 3
+    assert ("get_member_info", "U1") in actor.calls
+    assert ("search_guild_members", "ali", 3) in actor.calls
+
+    # None of the three reads exist for a standard (no-actor) handler.
+    for fn in ("list_mod_actions('U1')", "get_member_info('U1')",
+               "search_guild_members('x')"):
+        res = await _run(f"await {fn}\n")
+        assert res[0].outcome == "error"
+
+
+async def test_read_lookup_cap_breach_raises_cap_exceeded():
+    actor = _FakeActor()
+
+    async def reader(user_id, limit):
+        return []
+
+    # Only ONE lookup allowed; the second read must breach.
+    script = (
+        "await get_member_info('U1')\n"
+        "await get_member_info('U2')\n"
+    )
+    result, _, _ = await _run(
+        script,
+        budget=HandlerBudget(max_lookups=1, max_messages=5),
+        actor=actor,
+        mod_action_reader=reader,
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "lookups"
+
+
+async def test_list_mod_actions_passes_through_channel_and_trigger_message_ids():
+    actor = _FakeActor()
+    captured = {}
+    rows = [
+        {"action_type": "ban", "channel_id": "C9", "trigger_message_id": "M9",
+         "created_at": "2026-01-02T00:00:00+00:00"},
+        {"action_type": "warn", "channel_id": None, "trigger_message_id": None,
+         "created_at": "2026-01-01T00:00:00+00:00"},
+    ]
+
+    async def reader(user_id, limit):
+        captured["args"] = (user_id, limit)
+        return rows
+
+    script = (
+        "actions = await list_mod_actions('U7', 25)\n"
+        "await send_message(str(len(actions)))\n"
+        "await send_message(str(actions[1]['channel_id']))\n"
+    )
+    result, emitter, _ = await _run(
+        script, budget=admin_budget(), actor=actor, mod_action_reader=reader
+    )
+    assert result.outcome == "ok"
+    # guild id is bound host-side by the reader; the script controls user + limit.
+    assert captured["args"] == ("U7", 25)
+    # Rows carrying None channel/message ids are passed through unchanged.
+    assert emitter.messages[0][1] == "2"
+    assert emitter.messages[1][1] == "None"
+    assert result.usage["lookups"] == 1

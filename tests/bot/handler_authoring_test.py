@@ -310,6 +310,15 @@ def test_describe_trigger_message_edit():
     assert "old_content" in line
 
 
+def test_describe_trigger_mod_action():
+    line = describe_trigger("mod_action", {})
+    # Not the generic fallback.
+    assert line != "Trigger: mod_action."
+    assert "moderation action" in line
+    # Documents the loop rail (0 mod-action budget).
+    assert "0 moderation-action budget" in line
+
+
 def test_describe_trigger_cadence_phrasing():
     assert "EVERY user message" in describe_trigger("message", {})
     assert "EVERY user reaction" in describe_trigger("reaction", {})

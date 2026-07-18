@@ -3488,7 +3488,7 @@ class ModerationAction(Base):
         nullable=False,
         default="ai",
         server_default="ai",
-        doc="Action source: ai, manual, audit_log",
+        doc="Action source: ai, manual, audit_log, handler",
     )
     channel_id: Mapped[Optional[str]] = mapped_column(
         String,
@@ -4326,11 +4326,27 @@ ADMIN_ONLY_TRIGGER_TYPES = (
     # See docs/v2/feature-parity/automated-and-command-moderation.md §3.3.
     "message_edit",
 )
-# The admin tier's full trigger vocabulary: the standard four plus the five above.
-ADMIN_HANDLER_TRIGGER_TYPES = HANDLER_TRIGGER_TYPES + ADMIN_ONLY_TRIGGER_TYPES
-# Admin event (gateway-dispatched) triggers: standard events plus the five new
-# ones, used by the admin active-channels query. Time triggers stay excluded.
-ADMIN_HANDLER_EVENT_TRIGGERS = HANDLER_EVENT_TRIGGERS + ADMIN_ONLY_TRIGGER_TYPES
+# Admin-tier SYNTHETIC triggers: fired by the bot explicitly (not from a gateway
+# event) after a domain write. mod_action rides the /handlers/dispatch endpoint
+# like a member event (guild-scoped, no home channel) but has no hikari listener —
+# a bot-side helper POSTs it after each ModerationAction commit. Kept OUT of
+# ADMIN_ONLY_TRIGGER_TYPES (which feeds the per-guild member-events raid gate) so
+# a mass-ban wave is bounded by the per-handler ADMIN_FIRES_PER_MIN window, not
+# the raid window. See docs/v2/feature-parity/automated-and-command-moderation.md
+# §3.5.
+ADMIN_SYNTHETIC_TRIGGER_TYPES = ("mod_action",)
+# The admin tier's full trigger vocabulary: the standard four plus the gateway and
+# synthetic admin-only triggers. Used to validate what an admin handler may author.
+ADMIN_HANDLER_TRIGGER_TYPES = (
+    HANDLER_TRIGGER_TYPES + ADMIN_ONLY_TRIGGER_TYPES + ADMIN_SYNTHETIC_TRIGGER_TYPES
+)
+# Admin event (dispatch-guarded) triggers: standard events plus the gateway and
+# synthetic admin-only triggers, used by the admin active-channels query so the
+# bot's dispatch guard knows a guild has (e.g.) mod_action handlers. Time triggers
+# stay excluded (they self-schedule, never routed through the dispatch guard).
+ADMIN_HANDLER_EVENT_TRIGGERS = (
+    HANDLER_EVENT_TRIGGERS + ADMIN_ONLY_TRIGGER_TYPES + ADMIN_SYNTHETIC_TRIGGER_TYPES
+)
 
 
 class ChannelHandler(Base):
@@ -4438,6 +4454,11 @@ class HandlerRun(Base):
     timers_scheduled: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    # Metered mod-audit reads (list_mod_actions / get_member_info /
+    # search_guild_members) — admin handlers only, distinct from discord_reads.
+    lookups: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
@@ -4459,7 +4480,7 @@ class AdminHandler(Base):
             "trigger_type IN ('message', 'reaction', 'schedule', 'timer', "
             "'member_join', 'member_leave', 'member_rules_accepted', "
             "'member_role_change', 'thread_create', 'dm_message', "
-            "'message_edit')",
+            "'message_edit', 'mod_action')",
             name="ck_admin_handlers_trigger_type",
         ),
         Index("ix_admin_handlers_guild_id", "guild_id"),

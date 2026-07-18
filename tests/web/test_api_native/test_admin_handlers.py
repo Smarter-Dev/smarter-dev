@@ -305,3 +305,19 @@ def test_create_admin_accepts_new_event_triggers(client, trigger):
     assert resp.status_code == 201
     assert resp.json()["trigger_type"] == trigger
     assert len(client.submitted) == 0  # type: ignore[attr-defined]
+
+
+def test_create_mod_action_handler_allowed(client):
+    """The synthetic mod_action trigger is an authorable admin trigger; it is an
+    event-style trigger so no first fire is scheduled on create."""
+    resp = client.post(
+        "/api/admin/handlers",
+        json=_body(
+            trigger_type="mod_action",
+            name="mod-log-formatter",
+            script="await send_message('logged', 'MODLOG')\n",
+        ),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["trigger_type"] == "mod_action"
+    assert len(client.submitted) == 0  # type: ignore[attr-defined]

@@ -130,6 +130,20 @@ Leave channel_ids EMPTY for the member_* triggers (a member event has no channel
               plus context["is_thread"]/context["thread_id"]/context["thread_name"] when the edit is
               in a thread. Use this to catch edit-based evasion (e.g. posting clean, then editing in
               an @everyone ping or a link): delete_message(context["message_id"]) + a warning.
+  "mod_action": fires ONCE per moderation action recorded in this guild — a /warn, /timeout, the AI
+              triage, or the audit-log backfill of a manual ban/kick/unban/timeout. GUILD-scoped with
+              NO home channel (like member_*): send_message(content) with no channel_id FAILS, so post
+              to a mod-log channel constant and leave channel_ids EMPTY. context["action_type"]
+              (warn | kick | ban | unban | timeout | purge), context["target_user_id"],
+              context["target_username"], context["moderator_user_id"]/context["moderator_username"]
+              (None for AI/handler actions), context["reason"], context["duration_seconds"] (timeouts),
+              context["source"] (ai | manual | audit_log | handler), context["channel_id"] and
+              context["trigger_message_id"] (either may be None — when both are set, build a jump link
+              https://discord.com/channels/{context["guild_id"]}/{channel_id}/{trigger_message_id}),
+              context["created_at"] (ISO). A mod_action handler runs with a ZERO moderation-action
+              budget — it FORMATS and posts the audit row into the mod-log; it can NEVER itself
+              ban/kick/timeout/delete (calling one breaches immediately). This is how you own mod-log
+              formatting for manual, AI, and auto-mod actions with one handler.
 
 Provided async functions — you MUST `await` every call:
   await send_message(content: str, channel_id: str = None, ping_role_id: str = None) -> str
@@ -146,6 +160,14 @@ Provided async functions — you MUST `await` every call:
       cheap. Use it to double-check evidence before acting.
   MODERATION (admin only):
   await delete_message(message_id: str, channel_id: str = None) -> str
+  await delete_webhook(webhook_url: str) -> bool
+      Destroy a leaked Discord webhook (the codes-server webhook-scam response). Pass the FULL
+      webhook URL exactly as it appeared in the triggering message — it is validated host-side and
+      MUST match https://discord.com/api/webhooks/<id>/<token> (canary/ptb/discordapp variants ok);
+      ANY other URL RAISES (the sandbox can never DELETE an arbitrary host). Returns True when killed,
+      False when it was already gone (404) — branch on it. ONLY call it on URLs extracted from the
+      triggering message, never a constructed or guessed one. Spends a moderation action (cap 25/fire,
+      so a message leaking several webhooks is covered).
   await edit_message(message_id: str, content: str, channel_id: str = None) -> str
       Edit a message the BOT ITSELF posted (returns its id). ONLY the bot's own messages can
       be edited — editing anyone else's is a REST 403 that ERRORS the fire. Store the ids of
@@ -197,6 +219,32 @@ Provided async functions — you MUST `await` every call:
       minutes, so do NOT gate on exact values). Callable from ANY trigger INCLUDING schedule/timer
       (no channel or gateway needed) — this is how a stat-counter schedule handler renders its name.
       Costs a discord-read (shared 5/fire pool with list_threads) — call it ONCE per fire.
+  MOD-AUDIT READS (admin only; each spends a LOOKUP — 10/fire pool, separate from discord-reads):
+      These back mod-channel lookup commands (!lookup / !whois / !history) and the rejoin alert. Put
+      them BEHIND A CHEAP GUARD — a command-prefix match on the message, or a member_join fire —
+      NEVER run them on every message (a guild-wide message handler that does burns the lookup pool
+      and rate limits). Read them ONCE and iterate; never loop a read per candidate.
+  await list_mod_actions(user_id: str, limit: int = 10) -> list[dict]
+      This guild's recent mod actions for a member, NEWEST FIRST. Each: {"action_type", "reason",
+      "source", "moderator_username", "duration_seconds", "channel_id", "trigger_message_id",
+      "created_at"}. channel_id/trigger_message_id may be None (actions with no triggering message);
+      when BOTH are set, build a "Jump To Action" link
+      https://discord.com/channels/{context["guild_id"]}/{channel_id}/{trigger_message_id}. The guild
+      is bound host-side — you pass only the user id and limit. The emitter caps a message at 2000
+      chars, so render newest-first until near the cap and append "…and N older actions".
+  await get_member_info(user_id: str) -> dict
+      {"user_id", "username", "nickname", "joined_at", "account_created_at", "is_pending",
+      "role_ids", "role_names", "in_guild"}. Works on DEPARTED users: a non-member returns
+      in_guild=False with empty guild fields (joined_at=None, role_ids=[], role_names=[]) — render
+      "NO LONGER A MEMBER". is_pending=False means they accepted the rules.
+  await search_guild_members(query: str, limit: int = 10) -> dict
+      {"members": [{"user_id", "username", "nickname", "joined_at", "top_role_name"}, ...],
+      "overflow_count": N}. Discord matches a username/nick PREFIX (NOT a substring — a documented
+      divergence from the legacy search; say so in output). top_role_name is the member's most senior
+      role ("@everyone" when they have none). overflow_count is matches beyond `limit`: EXACT when
+      under Discord's 100 window, a FLOOR once it fills — render "N+ more", never an exact total. One
+      lookup covers the whole call (search + role resolution). All-digit queries: also try
+      get_member_info(query) for a direct id hit.
   await create_thread(name: str, message_id: str = None) -> str   # returns the new thread id
       message_id set: spins a thread off that message; omitted: a public thread on the home channel.
   await create_post(title: str, content: str, tag_names: list = None) -> str   # forum post thread id
@@ -256,8 +304,11 @@ Provided async functions — you MUST `await` every call:
 
 ## Per-fire limits (admin tier)
 - 5 messages, 25 moderation actions, 3 agent calls, 32 KB context into an agent, 120 s wall-clock.
-- 5 discord-reads (list_threads), 10 thread-ops (create/close/lock/reopen/delete thread). A guild
-  thread-op window also caps thread ops server-wide — don't fan out creates/deletes in a loop.
+- 5 discord-reads (list_threads / get_guild_member_count), 10 thread-ops (create/close/lock/reopen/
+  delete thread). A guild thread-op window also caps thread ops server-wide — don't fan out
+  creates/deletes in a loop.
+- 10 lookups (list_mod_actions / get_member_info / search_guild_members), separate from discord-reads.
+  A mod_action-triggered handler runs with 0 moderation actions (it can only format + post).
 - 10 role-changes (add_role/remove_role), separate from moderation actions; a guild role-change
   window also caps grants server-wide — never grant roles in an unbounded loop.
 - 5 timers armed per fire (schedule_timer), plus a 30/hour per-handler arming window.
@@ -307,9 +358,11 @@ a function but never call it, NOTHING happens. Example skeleton:
   "member_leave"; "when a member accepts the rules / passes the gate" → "member_rules_accepted";
   "when someone gets/loses a role (or boosts)" → "member_role_change"; "when a thread or forum post
   is created" → "thread_create"; "when someone DMs the bot / a DM relay" → "dm_message"; "when a
-  message is edited / catch edited-in pings / edit-based evasion" → "message_edit". Leave
-  channel_ids EMPTY for the four member_* triggers AND for dm_message (a DM has no channel);
-  message_edit IS channel-keyed (scope it by channel_ids like a message handler, empty = all).
+  message is edited / catch edited-in pings / edit-based evasion" → "message_edit"; "post every
+  moderation action to a mod-log / format the audit log" → "mod_action". Leave channel_ids EMPTY for
+  the four member_* triggers, for dm_message (a DM has no channel), AND for mod_action (guild-wide,
+  no home channel); message_edit IS channel-keyed (scope it by channel_ids like a message handler,
+  empty = all).
 - MEMBER EVENTS HAVE NO HOME CHANNEL. On a member_* trigger, send_message(content) with no
   channel_id FAILS — every send must name a channel constant (resolve names via list_channels).
 - RAID FREQUENCY. member_join and member_leave fire on EVERY join/leave and burst during raids and

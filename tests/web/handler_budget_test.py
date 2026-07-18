@@ -8,11 +8,13 @@ import pytest
 
 from smarter_dev.web.handler_budget import (
     ADMIN_MAX_DISCORD_READS,
+    ADMIN_MAX_LOOKUPS,
     ADMIN_MAX_ROLE_CHANGES,
     ADMIN_MAX_THREAD_OPS,
     ADMIN_MAX_TIMERS,
     CapExceeded,
     DEFAULT_MAX_DISCORD_READS,
+    DEFAULT_MAX_LOOKUPS,
     DEFAULT_MAX_ROLE_CHANGES,
     DEFAULT_MAX_THREAD_OPS,
     DEFAULT_MAX_TIMERS,
@@ -94,6 +96,7 @@ def test_usage_snapshot():
         "thread_ops": 0,
         "role_changes": 0,
         "timers_scheduled": 0,
+        "lookups": 0,
     }
 
 
@@ -244,4 +247,38 @@ def test_timer_checks_deadline_first():
     budget.started_at = time.monotonic() - 1.0
     with pytest.raises(CapExceeded) as exc:
         budget.spend_timer()
+    assert exc.value.cap == "wall_clock"
+
+
+def test_spend_lookup_raises_cap_exceeded_at_limit():
+    budget = HandlerBudget(max_lookups=ADMIN_MAX_LOOKUPS)
+    for _ in range(ADMIN_MAX_LOOKUPS):
+        budget.spend_lookup()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_lookup()
+    assert exc.value.cap == "lookups"
+    assert budget.lookups == ADMIN_MAX_LOOKUPS
+
+
+def test_usage_includes_lookups():
+    budget = HandlerBudget()
+    assert budget.usage()["lookups"] == 0
+    budget = HandlerBudget(max_lookups=2)
+    budget.spend_lookup()
+    assert budget.usage()["lookups"] == 1
+
+
+def test_admin_budget_grants_lookups_default_denies():
+    assert ADMIN_MAX_LOOKUPS == 10
+    assert DEFAULT_MAX_LOOKUPS == 0
+    assert admin_budget().max_lookups == ADMIN_MAX_LOOKUPS
+    assert HandlerBudget().max_lookups == 0
+
+
+def test_lookup_checks_deadline_first():
+    budget = HandlerBudget(max_lookups=ADMIN_MAX_LOOKUPS)
+    budget.wall_clock_seconds = 0.0
+    budget.started_at = time.monotonic() - 1.0
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_lookup()
     assert exc.value.cap == "wall_clock"

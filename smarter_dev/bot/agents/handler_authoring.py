@@ -195,7 +195,7 @@ class AdminHandlerPlan(BaseModel):
         default="message",
         description="message | reaction | schedule | timer | member_join | "
         "member_leave | member_rules_accepted | member_role_change | thread_create | "
-        "dm_message | message_edit",
+        "dm_message | message_edit | mod_action",
     )
     channel_ids: list[str] = Field(
         default_factory=list, description="Channel scope; empty = all channels"
@@ -426,6 +426,14 @@ def describe_trigger(trigger_type: str, settings: dict) -> str:
             "common evasion vector (posting clean, then editing in an @everyone "
             "ping or a link). Scan message_content (the text NOW); old_content is "
             "best-effort ('' when the original wasn't cached)."
+        )
+    if trigger_type == "mod_action":
+        return (
+            "Fires once per moderation action recorded in this guild (from a slash "
+            "command, the AI triage, or the audit-log backfill) — low frequency, "
+            "one fire per action. Runs with a 0 moderation-action budget: it can "
+            "format and post the audit row but can NEVER itself ban/kick/timeout/"
+            "delete. Use it to own the mod-log channel's formatting."
         )
     return f"Trigger: {trigger_type}."
 
