@@ -648,6 +648,131 @@ async def test_timer_trigger_row_does_not_reschedule(monkeypatch):
     assert submits == []
 
 
+async def test_schedule_row_scheduled_fire_reschedules(monkeypatch):
+    # A genuine scheduled fire of a "schedule" row enqueues the next occurrence.
+    record = SimpleNamespace(
+        enabled=True, script="pass", channel_id="C1", guild_id="G1",
+        trigger_type="schedule", settings={"interval_seconds": 300}, memory={},
+    )
+    submits, limiter_kwargs = [], []
+
+    async def fake_run(script, context, **kwargs):
+        return _ok_result()
+
+    _patch_std_job(
+        monkeypatch, record, fake_run=fake_run, submits=submits,
+        limiter_kwargs=limiter_kwargs,
+    )
+    await handlers_jobs.run_handler_fire(
+        HandlerFirePayload(
+            handler_id=str(uuid4()), trigger_context={"trigger_type": "schedule"}
+        )
+    )
+    assert len(submits) == 1
+    payload, _, _ = submits[0]
+    assert payload.trigger_context == {"trigger_type": "schedule"}
+
+
+async def test_schedule_row_timer_refire_does_not_reschedule(monkeypatch):
+    # A "schedule" row that self-arms a schedule_timer re-fires with a "timer"
+    # context; that re-fire must NOT re-enter _reschedule (which would fork a
+    # duplicate perpetual chain and clobber scheduled_job_id). The mocked run
+    # arms nothing, so ANY submit here would be a spurious reschedule.
+    record = SimpleNamespace(
+        enabled=True, script="pass", channel_id="C1", guild_id="G1",
+        trigger_type="schedule", settings={"interval_seconds": 300}, memory={},
+    )
+    submits, limiter_kwargs = [], []
+
+    async def fake_run(script, context, **kwargs):
+        return _ok_result()
+
+    _patch_std_job(
+        monkeypatch, record, fake_run=fake_run, submits=submits,
+        limiter_kwargs=limiter_kwargs,
+    )
+    await handlers_jobs.run_handler_fire(
+        HandlerFirePayload(
+            handler_id=str(uuid4()),
+            trigger_context={"trigger_type": "timer", "payload": {}},
+        )
+    )
+    assert submits == []
+
+
+def _patch_admin_reschedule_job(monkeypatch, record, submits):
+    async def fake_run(script, context, **kwargs):
+        return _ok_result()
+
+    async def fake_agent(*a, **k):
+        return ""
+
+    async def fake_notify(**kwargs):
+        return None
+
+    async def fake_submit(payload, scheduled_for=None, job_id=None):
+        submits.append((payload, scheduled_for, job_id))
+
+    async def fake_load_guild_memory(session, guild_id):
+        return {}
+
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+    monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
+    monkeypatch.setattr(admin_handlers_jobs, "notify_handler_error", fake_notify)
+    monkeypatch.setattr(admin_handlers_jobs, "worker_submit", fake_submit)
+    monkeypatch.setattr(
+        admin_handlers_jobs, "load_guild_memory", fake_load_guild_memory
+    )
+    monkeypatch.setattr(
+        admin_handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+    monkeypatch.setattr(
+        admin_handlers_jobs, "get_db_session_context", lambda: _FakeSessionCtx(record)
+    )
+    monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: object())
+    monkeypatch.setattr(
+        admin_handlers_jobs, "WindowedLimiter", lambda **kwargs: object()
+    )
+
+
+async def test_admin_schedule_row_scheduled_fire_reschedules(monkeypatch):
+    record = SimpleNamespace(
+        enabled=True, script="pass", guild_id="G1", trigger_type="schedule",
+        channel_ids=["C1"], settings={"interval_seconds": 300}, memory={},
+    )
+    submits: list = []
+    _patch_admin_reschedule_job(monkeypatch, record, submits)
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(
+            admin_handler_id=str(uuid4()), channel_id="C1",
+            trigger_context={"trigger_type": "schedule"},
+        )
+    )
+    assert len(submits) == 1
+    payload, _, _ = submits[0]
+    assert payload.trigger_context == {"trigger_type": "schedule"}
+
+
+async def test_admin_schedule_row_timer_refire_does_not_reschedule(monkeypatch):
+    # Same fork guard on the admin fire job: a timer re-fire of a schedule admin
+    # handler must not enqueue a second next-occurrence chain.
+    record = SimpleNamespace(
+        enabled=True, script="pass", guild_id="G1", trigger_type="schedule",
+        channel_ids=["C1"], settings={"interval_seconds": 300}, memory={},
+    )
+    submits: list = []
+    _patch_admin_reschedule_job(monkeypatch, record, submits)
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(
+            admin_handler_id=str(uuid4()), channel_id="C1",
+            trigger_context={"trigger_type": "timer", "payload": {}},
+        )
+    )
+    assert submits == []
+
+
 async def test_refire_of_deleted_handler_returns_missing_and_emits_nothing(monkeypatch):
     ran = {}
 

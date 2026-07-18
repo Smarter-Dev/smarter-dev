@@ -72,6 +72,21 @@ def test_whole_store_size_cap_raises_guild_memory_size():
     assert mem.dirty is False
 
 
+def test_key_longer_than_column_raises_before_persist():
+    # The key column is VARCHAR(64); an over-long key must fail loud at set()
+    # time (a soft CapExceeded the script can catch), not blow up the audit
+    # commit later with a Postgres value-too-long error.
+    mem = GuildMemory({"keep": 1})
+    with pytest.raises(CapExceeded) as exc:
+        mem.set("x" * 65, 1)
+    assert exc.value.cap == "guild_memory_key_size"
+    assert mem.dirty is False  # rejected write doesn't dirty the store
+    assert mem.get("x" * 65) is None
+    # A key exactly at the limit is accepted.
+    mem.set("x" * 64, 2)
+    assert mem.get("x" * 64) == 2
+
+
 def test_writes_and_deletes_track_touched_keys_only():
     mem = GuildMemory({"seed": 1})
     mem.set("a", 10)
@@ -116,6 +131,17 @@ async def test_load_is_scoped_to_the_guild(db_session):
     await db_session.commit()
     assert await load_guild_memory(db_session, "G1") == {"a": 1}
     assert await load_guild_memory(db_session, "G2") == {"a": 2}
+
+
+async def test_persist_first_writes_a_key_that_already_exists_upserts(db_session):
+    # A concurrent fire may have inserted the key after this fire loaded its
+    # (empty) snapshot, so this fire treats the key as new. The persist must
+    # upsert last-write-wins via ON CONFLICT, never raise a UNIQUE IntegrityError.
+    await persist_guild_memory(db_session, "G1", {"k": "first"}, [])
+    await db_session.commit()
+    await persist_guild_memory(db_session, "G1", {"k": "second"}, [])
+    await db_session.commit()
+    assert await load_guild_memory(db_session, "G1") == {"k": "second"}
 
 
 # -- runtime integration -------------------------------------------------------

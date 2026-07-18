@@ -129,7 +129,11 @@ Leave channel_ids EMPTY for the member_* triggers (a member event has no channel
               guard — skip the action when true), context["channel_parent_id"] (category id or null),
               plus context["is_thread"]/context["thread_id"]/context["thread_name"] when the edit is
               in a thread. Use this to catch edit-based evasion (e.g. posting clean, then editing in
-              an @everyone ping or a link): delete_message(context["message_id"]) + a warning.
+              an @everyone ping or a link): delete + a warning. The edited message lives in the
+              channel it was typed in — for a thread edit that is context["thread_id"], NOT the
+              parent this handler fires on, so you MUST pass the channel explicitly:
+              delete_message(context["message_id"], context["thread_id"] if context["is_thread"] else None).
+              Omitting the channel deletes against the parent and 404s on every thread edit.
   "mod_action": fires ONCE per moderation action recorded in this guild — a /warn, /timeout, the AI
               triage, or the audit-log backfill of a manual ban/kick/unban/timeout. GUILD-scoped with
               NO home channel (like member_*): send_message(content) with no channel_id FAILS, so post
@@ -278,9 +282,10 @@ Provided async functions — you MUST `await` every call:
       handler rows (e.g. a DM-relay bind target the mirror handler writes and the relay handler
       reads). Use per-handler memory_* for state private to this one handler; use guild memory ONLY
       when another handler needs to see it. Same discipline as memory: JSON-serializable values,
-      SHARED 16-KB cap across the whole store (a breach ERRORS the fire), and NEVER key it per
-      user/message/day without pruning. Keys persist per-key, so two handlers writing DIFFERENT
-      keys never conflict; same-key writes are last-write-wins (no hard transactional ordering).
+      SHARED 16-KB cap across the whole store (a breach ERRORS the fire), keys are at most 64
+      characters (a longer key ERRORS the fire), and NEVER key it per user/message/day without
+      pruning. Keys persist per-key, so two handlers writing DIFFERENT keys never conflict;
+      same-key writes are last-write-wins (no hard transactional ordering).
   PERSISTED SELF-DEFER (durable one-shot re-fire of THIS handler; survives restarts):
   await schedule_timer(delay_seconds: int, payload: dict) -> True
       Arm a single re-fire of this handler at now + delay_seconds. The re-fire arrives with

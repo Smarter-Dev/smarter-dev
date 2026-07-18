@@ -153,7 +153,14 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
             error=result.error,
         )
 
-    if trigger_type == "schedule":
+    # Re-arm the recurring chain only on a genuine scheduled fire. A schedule
+    # handler that self-arms a schedule_timer re-fires with trigger_type "timer"
+    # in its context; that re-fire must NOT re-enter _reschedule or it forks a
+    # duplicate perpetual chain and clobbers scheduled_job_id (orphaning the
+    # original chain's job so disable/update can no longer cancel it).
+    if trigger_type == "schedule" and (
+        payload.trigger_context.get("trigger_type") != "timer"
+    ):
         await _reschedule(handler_id, handler_settings)
 
     return {"status": result.outcome, "cap": result.cap}

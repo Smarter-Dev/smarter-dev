@@ -9,6 +9,7 @@ from smarter_dev.web.models import (
     ADMIN_HANDLER_EVENT_TRIGGERS,
     ADMIN_HANDLER_TRIGGER_TYPES,
     ADMIN_ONLY_TRIGGER_TYPES,
+    ADMIN_SYNTHETIC_TRIGGER_TYPES,
     HANDLER_EVENT_TRIGGERS,
     HANDLER_TRIGGER_TYPES,
     AdminHandler,
@@ -87,16 +88,24 @@ def test_dm_message_is_admin_only_not_standard():
 
 
 def test_admin_trigger_tuple_is_the_union_of_standard_and_new():
-    assert ADMIN_HANDLER_TRIGGER_TYPES == HANDLER_TRIGGER_TYPES + ADMIN_ONLY_TRIGGER_TYPES
-    # Every standard trigger and every new admin-only trigger is admissible.
-    for trigger in HANDLER_TRIGGER_TYPES + ADMIN_ONLY_TRIGGER_TYPES:
+    assert ADMIN_HANDLER_TRIGGER_TYPES == (
+        HANDLER_TRIGGER_TYPES + ADMIN_ONLY_TRIGGER_TYPES + ADMIN_SYNTHETIC_TRIGGER_TYPES
+    )
+    # Every standard trigger, every new admin-only trigger, and the synthetic
+    # mod_action trigger is admissible.
+    for trigger in (
+        HANDLER_TRIGGER_TYPES + ADMIN_ONLY_TRIGGER_TYPES + ADMIN_SYNTHETIC_TRIGGER_TYPES
+    ):
         assert trigger in ADMIN_HANDLER_TRIGGER_TYPES
 
 
 def test_admin_event_triggers_extend_the_gateway_subset():
-    # Gateway-dispatched (event) triggers: message/reaction plus the five new
-    # ones; the time triggers (schedule/timer) stay out.
-    assert ADMIN_HANDLER_EVENT_TRIGGERS == HANDLER_EVENT_TRIGGERS + ADMIN_ONLY_TRIGGER_TYPES
+    # Gateway-dispatched (event) triggers: message/reaction plus the new admin
+    # ones and the synthetic mod_action; the time triggers (schedule/timer) stay
+    # out.
+    assert ADMIN_HANDLER_EVENT_TRIGGERS == (
+        HANDLER_EVENT_TRIGGERS + ADMIN_ONLY_TRIGGER_TYPES + ADMIN_SYNTHETIC_TRIGGER_TYPES
+    )
     assert "schedule" not in ADMIN_HANDLER_EVENT_TRIGGERS
     assert "timer" not in ADMIN_HANDLER_EVENT_TRIGGERS
 

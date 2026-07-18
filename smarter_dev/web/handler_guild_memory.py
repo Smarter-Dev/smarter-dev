@@ -33,9 +33,16 @@ from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
 from smarter_dev.web.handler_budget import CapExceeded
 from smarter_dev.web.handler_memory import MAX_MEMORY_BYTES
 from smarter_dev.web.models import GuildHandlerMemory
+
+# The GuildHandlerMemory.key column is VARCHAR(64); reject an over-long key at
+# set() time so it never reaches the audit commit as a value-too-long error.
+MAX_KEY_LENGTH = 64
 
 
 class GuildMemory:
@@ -65,6 +72,11 @@ class GuildMemory:
     def set(self, key: str, value) -> bool:
         """Store ``value`` under ``key``. Fails loud on non-JSON or over-cap."""
         key = str(key)
+        if len(key) > MAX_KEY_LENGTH:
+            raise CapExceeded(
+                "guild_memory_key_size",
+                f"guild memory key must be at most {MAX_KEY_LENGTH} characters",
+            )
         candidate = dict(self._data)
         candidate[key] = value
         try:
@@ -141,20 +153,19 @@ async def persist_guild_memory(
                 GuildHandlerMemory.key == str(key),
             )
         )
+    if not writes:
+        return
+    # INSERT ... ON CONFLICT (guild_id, key) DO UPDATE: a select-then-insert
+    # race between two concurrent fires first-writing the same new key would let
+    # the loser's commit raise IntegrityError on uq_guild_handler_memory_guild_key.
+    # A real upsert makes it last-write-wins as the model documents.
+    insert = pg_insert if session.bind.dialect.name == "postgresql" else sqlite_insert
     for key, value in writes.items():
-        key = str(key)
-        existing = await session.scalar(
-            select(GuildHandlerMemory).where(
-                GuildHandlerMemory.guild_id == guild_id,
-                GuildHandlerMemory.key == key,
-            )
+        statement = insert(GuildHandlerMemory).values(
+            guild_id=guild_id, key=str(key), value=value, updated_at=now
         )
-        if existing is None:
-            session.add(
-                GuildHandlerMemory(
-                    guild_id=guild_id, key=key, value=value, updated_at=now
-                )
-            )
-        else:
-            existing.value = value
-            existing.updated_at = now
+        statement = statement.on_conflict_do_update(
+            index_elements=["guild_id", "key"],
+            set_={"value": value, "updated_at": now},
+        )
+        await session.execute(statement)

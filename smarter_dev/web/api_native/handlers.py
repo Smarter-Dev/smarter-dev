@@ -413,6 +413,11 @@ class HandlerController(Controller):
         # recording this message, so scripts get platform truth instead of
         # tracking users in their size-capped memory.
         trigger_context = dict(data.trigger_context)
+        # Every gateway-dispatched fire carries its guild id in context so a
+        # script can build cross-channel jump links (mod-log formatters, !history)
+        # — the runtime binds guild_id host-side but doesn't expose it to the
+        # sandbox, and the prompts document context["guild_id"].
+        trigger_context["guild_id"] = data.guild_id
         # A bot/webhook-authored message (author_is_bot, set bot-side after the
         # own-bot anti-loop guard) fires ONLY handlers that opted in via
         # settings["include_bot_messages"]; a plain message handler in the same
@@ -420,7 +425,11 @@ class HandlerController(Controller):
         # message handler unchanged.
         author_is_bot = bool(trigger_context.get("author_is_bot"))
         author_id = trigger_context.get("author_id")
-        if data.trigger_type == "message" and author_id:
+        # Activity is human-only: a bot/webhook is not a guild member, so an
+        # opted-in bot message neither records a MemberActivity row nor derives
+        # human-shaped activity facts for it (the bot-side batcher skips them for
+        # the same reason).
+        if data.trigger_type == "message" and author_id and not author_is_bot:
             now = datetime.now(timezone.utc)
             row = await get_activity(db_session, data.guild_id, str(author_id))
             trigger_context.update(activity_facts(row, now))

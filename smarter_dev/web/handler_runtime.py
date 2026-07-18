@@ -519,7 +519,11 @@ class HandlerExecution:
         channel_id/trigger_message_id straight off the ModerationAction row (either
         may be None) so a script can build "Jump To Action" links."""
         self.budget.spend_lookup()
-        return await self.mod_action_reader(str(user_id), int(limit))
+        # Host-clamp the script-supplied limit to [0, 50] before it reaches the
+        # SQL LIMIT: a huge value would load every row for the user into the
+        # sandbox in one call, and a negative value errors Postgres.
+        clamped_limit = min(max(int(limit), 0), 50)
+        return await self.mod_action_reader(str(user_id), clamped_limit)
 
     async def _get_member_info(self, user_id: str) -> dict:
         """Profile a member (or a departed user, in_guild=False); spends a lookup."""
