@@ -4307,8 +4307,11 @@ HANDLER_TRIGGER_TYPES = ("message", "reaction", "schedule", "timer")
 # Event (gateway-dispatched) triggers for the standard tier; time triggers coexist.
 HANDLER_EVENT_TRIGGERS = ("message", "reaction")
 
-# Admin-tier-only gateway triggers: guild-shaped member lifecycle events plus
-# thread creation (see docs/v2/feature-parity/threads-and-member-events.md §6).
+# Admin-tier-only gateway triggers: guild-shaped member lifecycle events, thread
+# creation (see docs/v2/feature-parity/threads-and-member-events.md §6), and the
+# inbound-DM trigger (docs/v2/feature-parity/staff-communication-channels.md E1 —
+# a member-authored channel handler must never see other users' DMs, so the
+# standard tier's ck_channel_handlers_trigger_type is deliberately NOT extended).
 # Standard create paths reject these; only the admin tier admits them.
 ADMIN_ONLY_TRIGGER_TYPES = (
     "member_join",
@@ -4316,6 +4319,7 @@ ADMIN_ONLY_TRIGGER_TYPES = (
     "member_rules_accepted",
     "member_role_change",
     "thread_create",
+    "dm_message",
 )
 # The admin tier's full trigger vocabulary: the standard four plus the five above.
 ADMIN_HANDLER_TRIGGER_TYPES = HANDLER_TRIGGER_TYPES + ADMIN_ONLY_TRIGGER_TYPES
@@ -4449,7 +4453,7 @@ class AdminHandler(Base):
         CheckConstraint(
             "trigger_type IN ('message', 'reaction', 'schedule', 'timer', "
             "'member_join', 'member_leave', 'member_rules_accepted', "
-            "'member_role_change', 'thread_create')",
+            "'member_role_change', 'thread_create', 'dm_message')",
             name="ck_admin_handlers_trigger_type",
         ),
         Index("ix_admin_handlers_guild_id", "guild_id"),

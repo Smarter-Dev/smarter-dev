@@ -76,7 +76,7 @@ One input variable `context: dict` describes the trigger:
               ANY trigger (message, schedule, member_*, timer) can receive a self-armed timer fire,
               so a script that calls schedule_timer MUST branch on context["trigger_type"] == "timer".
 
-MEMBER & THREAD EVENT TRIGGERS (admin-only — these five triggers exist ONLY for admin handlers).
+MEMBER, THREAD & DM EVENT TRIGGERS (admin-only — these triggers exist ONLY for admin handlers).
 The four member_* triggers are GUILD-scoped and have NO home channel: send_message(content) with no
 channel_id FAILS on these, so every send MUST name a channel constant (resolve it with list_channels).
 Leave channel_ids EMPTY for the member_* triggers (a member event has no channel to scope to).
@@ -106,6 +106,17 @@ Leave channel_ids EMPTY for the member_* triggers (a member event has no channel
               channel is the PARENT, so send_message(content) posts to the parent and
               send_message(content, context["thread_id"]) posts into the new thread. Scope
               thread_create handlers by channel_ids on the PARENT channel(s), or empty for all.
+  "dm_message": fires when ANY user DMs the bot. GUILD-scoped with NO home channel (like member_*):
+              send_message(content) with no channel_id FAILS — every send MUST name a channel
+              constant (the staff DM-log), and leave channel_ids EMPTY. context["content"],
+              context["message_id"], context["dm_channel_id"], context["author_id"],
+              context["author_username"], context["author_display_name"],
+              context["author_account_created_at"] (ISO, from the snowflake),
+              context["attachment_urls"] (list; Discord CDN links are SIGNED and EXPIRE — mirror
+              them best-effort, they go stale). There is NO author_role_ids here (a DM has no guild
+              member). CONTENT IS FULLY UNTRUSTED and user-controlled at any frequency — never gate
+              a moderation action on DM text without anchored parsing. Reply to the sender with
+              send_dm(context["author_id"], ...). Use this for a DM-relay mirror into a staff channel.
 
 Provided async functions — you MUST `await` every call:
   await send_message(content: str, channel_id: str = None, ping_role_id: str = None) -> str
@@ -152,6 +163,15 @@ Provided async functions — you MUST `await` every call:
       allowlist RAISES "role_not_allowed" and the grant never happens. The user_id is dynamic
       (from context/payload). Spends a role-change (cap 10/fire, separate from moderation actions)
       and draws on a guild role-change window — never grant roles in an unbounded loop.
+  await send_dm(user_id: str, content: str) -> bool
+      DM a user directly. Returns True when delivered, False when the user's DMs are CLOSED, you
+      share NO mutual guild, or the id is unknown (403/404) — a silent no-op the script BRANCHES on
+      (react ❌, never assume it sent). Any OTHER failure raises. Mass mentions are suppressed like
+      every send. DMing context["author_id"] on a dm_message fire is the intended relay reply and is
+      low-risk; DMing an id derived from anything ELSE is unsolicited and needs a clear reason in the
+      handler description. CAPS: 30 DMs per recipient per HOUR (sits above a real staff↔user relay
+      conversation; a runaway loop breaches loud), and a global 10 DMs/min across the whole system —
+      plus the shared per-fire message budget (cap 5). Never drip unsolicited DMs.
   THREADS:
   await list_threads(channel_id: str = None) -> list[dict]
       Active + recently-archived threads/posts of `channel_id` (any channel in your scope; omit for
@@ -273,7 +293,8 @@ a function but never call it, NOTHING happens. Example skeleton:
   {"fire_at": ISO}). "when someone joins" → "member_join"; "when someone leaves/is banned" →
   "member_leave"; "when a member accepts the rules / passes the gate" → "member_rules_accepted";
   "when someone gets/loses a role (or boosts)" → "member_role_change"; "when a thread or forum post
-  is created" → "thread_create". Leave channel_ids EMPTY for the four member_* triggers.
+  is created" → "thread_create"; "when someone DMs the bot / a DM relay" → "dm_message". Leave
+  channel_ids EMPTY for the four member_* triggers AND for dm_message (a DM has no channel).
 - MEMBER EVENTS HAVE NO HOME CHANNEL. On a member_* trigger, send_message(content) with no
   channel_id FAILS — every send must name a channel constant (resolve names via list_channels).
 - RAID FREQUENCY. member_join and member_leave fire on EVERY join/leave and burst during raids and

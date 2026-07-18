@@ -454,6 +454,7 @@ def create_bot(settings: Settings | None = None) -> lightbulb.BotApp:
         | hikari.Intents.GUILD_MESSAGES  # For activity tracking
         | hikari.Intents.MESSAGE_CONTENT  # For message content
         | hikari.Intents.GUILD_MESSAGE_REACTIONS  # For message reactions
+        | hikari.Intents.DM_MESSAGES  # For the dm_message handler trigger (DM relay)
     )
 
     # Create bot instance using Lightbulb BotApp (v2 syntax)

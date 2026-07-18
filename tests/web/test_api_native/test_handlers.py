@@ -724,3 +724,136 @@ def test_create_standard_rejects_admin_only_triggers(client, trigger):
     resp = client.post("/api/handlers", json=_event_body(trigger_type=trigger))
     assert resp.status_code == 422
     assert resp.json() == {"detail": "unknown trigger_type"}
+
+
+# ---------------------------------------------------------------------------
+# dm_message dispatch — guild-scoped, no home channel, per-author window (E1)
+# ---------------------------------------------------------------------------
+
+
+class _DmAuthorLimiter:
+    """Counts per key; only the per-(handler, author) DM window is enforced.
+
+    A shared instance across dispatch calls lets a spammer exhaust their own
+    window while every other key (fire caps, other authors) stays open.
+    """
+
+    def __init__(self, redis=None):
+        self.counts: dict = {}
+
+    async def hit(self, key, limit):
+        self.counts[key] = self.counts.get(key, 0) + 1
+        if "dmtrig" in key:
+            return self.counts[key] <= limit
+        return True
+
+
+async def test_dispatch_dm_message_enqueues_admin_handler_channel_bypass(
+    client, db_session
+):
+    from smarter_dev.web.models import AdminHandler
+
+    # Scope names a channel, but a DM has no channel: the scope check is bypassed
+    # and the handler matches by guild + trigger, fired with channel_id="".
+    db_session.add(AdminHandler(
+        guild_id="G1", name="dm-mirror", trigger_type="dm_message", settings={},
+        channel_ids=["SOMECHAN"], description="mirror DMs",
+        script="await send_message('x', 'LOG')\n", created_by_admin="A1",
+    ))
+    # A dm_message handler in a DIFFERENT guild must not fire.
+    db_session.add(AdminHandler(
+        guild_id="G2", name="other", trigger_type="dm_message", settings={},
+        channel_ids=[], description="other guild", script="pass\n",
+        created_by_admin="A2",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "",
+            "trigger_type": "dm_message",
+            "trigger_context": {"trigger_type": "dm_message", "author_id": "U9"},
+        },
+    )
+    body = resp.json()
+    assert body["dispatched"] is True
+    assert len(body["handler_ids"]) == 1
+    # The fire carries no home channel — so its error notice can never leak into
+    # the user's DM (see admin_handlers_jobs / notify_handler_error).
+    payload, _ = client.submitted[0]  # type: ignore[attr-defined]
+    assert payload.channel_id == ""
+
+
+async def test_dispatch_dm_message_skips_standard_tier(client, db_session):
+    from smarter_dev.web.models import ChannelHandler
+
+    # A standard message handler in the DM channel must never fire on a DM: the
+    # standard query is skipped entirely for the admin-only dm_message trigger.
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="DM1", name="std", trigger_type="message",
+        settings={}, description="std", script="await send_message('x')\n",
+        created_by="U1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "DM1",
+            "trigger_type": "dm_message",
+            "trigger_context": {"trigger_type": "dm_message", "author_id": "U9"},
+        },
+    )
+    assert resp.json()["dispatched"] is False
+    assert len(client.submitted) == 0  # type: ignore[attr-defined]
+
+
+async def test_dispatch_dm_per_author_window_declines_spammer(
+    client, db_session, monkeypatch
+):
+    from smarter_dev.web.models import AdminHandler
+
+    shared = _DmAuthorLimiter()
+    monkeypatch.setattr(handlers_module, "WindowedLimiter", lambda redis: shared)
+    db_session.add(AdminHandler(
+        guild_id="G1", name="dm-mirror", trigger_type="dm_message", settings={},
+        channel_ids=[], description="mirror", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    def _dm(author_id: str):
+        return client.post(
+            "/api/handlers/dispatch",
+            json={
+                "guild_id": "G1",
+                "channel_id": "",
+                "trigger_type": "dm_message",
+                "trigger_context": {"trigger_type": "dm_message", "author_id": author_id},
+            },
+        ).json()["dispatched"]
+
+    # DM_FIRES_PER_AUTHOR_PER_MIN = 4: the same author's first four fire, the
+    # fifth is declined — they burn their OWN window, not the handler's budget.
+    results = [_dm("SPAMMER") for _ in range(5)]
+    assert results == [True, True, True, True, False]
+    # A DIFFERENT author still fires — the window is per-(handler, author).
+    assert _dm("OTHER") is True
+
+
+async def test_active_channels_surfaces_dm_message_as_guild_trigger(client, db_session):
+    from smarter_dev.web.models import AdminHandler
+
+    db_session.add(AdminHandler(
+        guild_id="G1", name="dm-mirror", trigger_type="dm_message", settings={},
+        channel_ids=[], description="mirror", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    body = client.get("/api/handlers/active-channels").json()
+    # A DM has no channel, so it surfaces as a (guild_id, trigger) guild-trigger,
+    # never a channel entry.
+    assert ["G1", "dm_message"] in body["guild_triggers"]
+    assert all(trigger != "dm_message" for _, trigger in body["channels"])

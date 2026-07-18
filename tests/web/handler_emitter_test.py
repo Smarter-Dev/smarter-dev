@@ -516,3 +516,82 @@ async def test_get_guild_member_count_raises_on_rest_error():
     requests: list[httpx.Request] = []
     with pytest.raises(DiscordEmitError):
         await _emitter(requests, status_code=403, body="no perms").get_guild_member_count()
+
+
+# ---------------------------------------------------------------------------
+# send_dm — open (or reuse) the DM channel, then post (E2)
+# ---------------------------------------------------------------------------
+
+
+def _dm_handler(requests: list[httpx.Request], *, post_status: int = 200):
+    """Route the two send_dm calls: open the DM channel, then post the message."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/users/@me/channels"):
+            return httpx.Response(200, text='{"id": "DM1"}')
+        return httpx.Response(post_status, text='{"id": "M7"}')
+
+    return handle
+
+
+async def test_send_dm_opens_channel_then_posts():
+    requests: list[httpx.Request] = []
+    message_id = await _routed_emitter(_dm_handler(requests)).send_dm("U9", "hey")
+    assert message_id == "M7"
+    # First the DM-channel open, then the post into the resolved channel.
+    open_req, post_req = requests
+    assert open_req.method == "POST"
+    assert open_req.url.path.endswith("/users/@me/channels")
+    assert json.loads(open_req.content) == {"recipient_id": "U9"}
+    assert post_req.method == "POST"
+    assert post_req.url.path.endswith("/channels/DM1/messages")
+    payload = json.loads(post_req.content)
+    assert payload["content"] == "hey"
+    # Same embed-suppression + mention rail as create_message.
+    assert payload["flags"] == 1 << 2
+    assert payload["allowed_mentions"] == {"parse": ["users"]}
+
+
+async def test_send_dm_truncates_to_discord_limit():
+    requests: list[httpx.Request] = []
+    await _routed_emitter(_dm_handler(requests)).send_dm("U9", "x" * 3000)
+    post_req = requests[1]
+    assert len(json.loads(post_req.content)["content"]) == 2000
+
+
+async def test_send_dm_caches_dm_channel_per_fire():
+    requests: list[httpx.Request] = []
+    emitter = _routed_emitter(_dm_handler(requests))
+    await emitter.send_dm("U9", "first")
+    await emitter.send_dm("U9", "second")
+    # Two sends to the same user open the channel ONCE (cache), then post twice.
+    opens = [r for r in requests if r.url.path.endswith("/users/@me/channels")]
+    posts = [r for r in requests if r.url.path.endswith("/channels/DM1/messages")]
+    assert len(opens) == 1
+    assert len(posts) == 2
+
+
+async def test_send_dm_returns_false_on_403_dms_closed():
+    requests: list[httpx.Request] = []
+    result = await _routed_emitter(
+        _dm_handler(requests, post_status=403)
+    ).send_dm("U9", "hi")
+    assert result is False
+
+
+async def test_send_dm_returns_false_on_404_unknown_user():
+    def handle(request: httpx.Request) -> httpx.Response:
+        # The DM-channel open itself 404s an unknown user id.
+        return httpx.Response(404, text="unknown user")
+
+    result = await _routed_emitter(handle).send_dm("U9", "hi")
+    assert result is False
+
+
+async def test_send_dm_raises_on_5xx():
+    requests: list[httpx.Request] = []
+    with pytest.raises(DiscordEmitError):
+        await _routed_emitter(
+            _dm_handler(requests, post_status=500)
+        ).send_dm("U9", "hi")

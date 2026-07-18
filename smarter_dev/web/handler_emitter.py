@@ -14,7 +14,7 @@ reaction, rename a channel. Request plumbing lives in
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 from urllib.parse import quote
 
@@ -88,6 +88,10 @@ class DiscordEmitter(DiscordBotClient):
     # reactions keep constructing with ``bot_token`` alone; ``list_threads``
     # requires the runtime to pass the real guild id.
     guild_id: str = ""
+    # Per-fire cache of user_id -> opened DM channel id, so repeated relay
+    # replies to one user (send_dm) open the channel once. One emitter is built
+    # per fire in admin_handlers_jobs, so this is naturally fire-scoped.
+    _dm_channel_cache: dict[str, str] = field(default_factory=dict)
 
     user_agent: ClassVar[str] = "SmarterDev-Handlers/1.0"
     error_type: ClassVar[type[DiscordRestError]] = DiscordEmitError
@@ -111,6 +115,46 @@ class DiscordEmitter(DiscordBotClient):
             "POST", f"/channels/{channel_id}/messages", json=payload
         )
         return str(response.json().get("id", ""))
+
+    async def send_dm(self, user_id: str, content: str) -> str | bool:
+        """DM a user; return the new message id, or ``False`` on a closed door.
+
+        Resolves (opening if needed) the user's DM channel via
+        ``POST /users/@me/channels`` — cached per fire so repeated relay replies
+        to one user pay a single channel-open — then posts with the same
+        truncation, embed suppression, and mention rail as ``create_message``.
+
+        Returns ``False`` on 403 (DMs closed / no mutual guild) or 404 (unknown
+        user): these are *expected* outcomes the relay script branches to ❌ on,
+        not infrastructure failures. Everything else raises (fail fast).
+        """
+        try:
+            channel_id = await self._resolve_dm_channel(user_id)
+            payload = {
+                "content": content[:_MESSAGE_MAX],
+                "flags": _SUPPRESS_EMBEDS,
+                "allowed_mentions": _allowed_mentions(),
+            }
+            response = await self._request(
+                "POST", f"/channels/{channel_id}/messages", json=payload
+            )
+        except DiscordEmitError as error:
+            if error.status_code in (403, 404):
+                return False
+            raise
+        return str(response.json().get("id", ""))
+
+    async def _resolve_dm_channel(self, user_id: str) -> str:
+        """The user's DM channel id, opening + caching it once per fire."""
+        cached = self._dm_channel_cache.get(user_id)
+        if cached is not None:
+            return cached
+        response = await self._request(
+            "POST", "/users/@me/channels", json={"recipient_id": user_id}
+        )
+        channel_id = str(response.json().get("id", ""))
+        self._dm_channel_cache[user_id] = channel_id
+        return channel_id
 
     async def edit_message(
         self, channel_id: str, message_id: str, content: str

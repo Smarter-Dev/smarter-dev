@@ -399,3 +399,145 @@ async def test_dispatch_message_bot_message_skipped_when_get_me_none(monkeypatch
     bot.get_me = lambda: None
     await dispatch_message(bot, event)
     assert capture.calls == []
+
+
+# ---------------------------------------------------------------------------
+# dm_message — context, mutual-guild routing, and the DM listener (E1)
+# ---------------------------------------------------------------------------
+
+from smarter_dev.bot.plugins.handler_events import (
+    dispatch_dm_message,
+    dm_message_context,
+    route_dm_guilds,
+)
+
+_DM_SNOWFLAKE = 733364234141827073
+
+
+def _dm_message(content="hi there", attachments=()):
+    author = SimpleNamespace(
+        id=_DM_SNOWFLAKE, username="alice", display_name="Alice"
+    )
+    message = SimpleNamespace(
+        id=987654321,
+        channel_id=555000,
+        content=content,
+        author=author,
+        attachments=[SimpleNamespace(url=u) for u in attachments],
+    )
+    return message, author
+
+
+def test_dm_message_context_shape():
+    message, author = _dm_message(
+        content="need help", attachments=("https://cdn/a.png", "https://cdn/b.pdf")
+    )
+    ctx = dm_message_context(message, author)
+    assert ctx["trigger_type"] == "dm_message"
+    assert ctx["content"] == "need help"
+    assert ctx["message_id"] == "987654321"
+    assert ctx["dm_channel_id"] == "555000"
+    assert ctx["author_id"] == str(_DM_SNOWFLAKE)
+    assert ctx["author_username"] == "alice"
+    assert ctx["author_display_name"] == "Alice"
+    assert ctx["author_account_created_at"] == _snowflake_created_at(_DM_SNOWFLAKE)
+    assert ctx["attachment_urls"] == ["https://cdn/a.png", "https://cdn/b.pdf"]
+    # A DM has no guild member, so there are NO role fields.
+    assert "author_role_ids" not in ctx
+
+
+def test_dm_message_context_empty_content_and_no_attachments():
+    message, author = _dm_message(content="", attachments=())
+    ctx = dm_message_context(message, author)
+    assert ctx["content"] == ""
+    assert ctx["attachment_urls"] == []
+
+
+def test_route_dm_guilds_single_mutual_guild():
+    assert route_dm_guilds(["G1"], {"G1"}) == ["G1"]
+
+
+def test_route_dm_guilds_multiple_intersect_only_handler_guilds():
+    # Author is in G1, G2, G3 but only G1 and G3 have a dm_message handler.
+    assert route_dm_guilds(["G1", "G2", "G3"], {"G1", "G3"}) == ["G1", "G3"]
+
+
+def test_route_dm_guilds_none_when_no_mutual_handler_guild():
+    # A guild the user isn't in never sees their DM; no handler guild -> empty.
+    assert route_dm_guilds(["G9"], {"G1"}) == []
+    assert route_dm_guilds([], {"G1"}) == []
+
+
+class _DmCache:
+    """Stand-in ActiveChannelsCache exposing only guilds_with_trigger."""
+
+    def __init__(self, guilds):
+        self._guilds = set(guilds)
+
+    async def guilds_with_trigger(self, api, trigger_type):
+        return self._guilds if trigger_type == "dm_message" else set()
+
+
+class _DmBotCache:
+    def __init__(self, guild_ids, member_guild_ids):
+        self._guild_ids = guild_ids
+        self._member_guild_ids = set(member_guild_ids)
+
+    def get_guilds_view(self):
+        return {gid: object() for gid in self._guild_ids}
+
+    def get_member(self, guild_id, user_id):
+        return object() if guild_id in self._member_guild_ids else None
+
+
+async def test_dm_listener_ignores_bot_author(monkeypatch):
+    capture = _DispatchCapture()
+    monkeypatch.setattr(handler_events, "_dispatch", capture)
+    monkeypatch.setattr(handler_events, "_cache", _DmCache({"G1"}))
+    monkeypatch.setattr(handler_events, "_get_api_client", lambda: object())
+    message, _ = _dm_message()
+    bot = SimpleNamespace(cache=_DmBotCache([1], [1]))
+    event = SimpleNamespace(is_human=False, message=message)
+    await dispatch_dm_message(bot, event)
+    assert capture.calls == []  # a bot-authored DM never relays (no loop)
+
+
+async def test_dm_listener_dispatches_per_mutual_guild(monkeypatch):
+    capture = _DispatchCapture()
+    monkeypatch.setattr(handler_events, "_dispatch", capture)
+    # Both mutual guilds have a dm_message handler; a third guild (no membership)
+    # must not see the DM.
+    monkeypatch.setattr(handler_events, "_cache", _DmCache({"1", "2", "3"}))
+    monkeypatch.setattr(handler_events, "_get_api_client", lambda: object())
+    message, _ = _dm_message()
+    bot = SimpleNamespace(cache=_DmBotCache([1, 2, 3], [1, 2]))
+    event = SimpleNamespace(is_human=True, message=message)
+    await dispatch_dm_message(bot, event)
+    # One dispatch per routed mutual guild (G1, G2); the un-joined G3 is dropped.
+    assert len(capture.calls) == 2
+    # Every dispatch has NO home channel and the dm_message trigger.
+    for call in capture.calls:
+        assert call["channel_id"] == ""
+        assert call["trigger_type"] == "dm_message"
+
+
+async def test_dm_listener_no_dispatch_when_no_mutual_handler_guild(monkeypatch):
+    capture = _DispatchCapture()
+    monkeypatch.setattr(handler_events, "_dispatch", capture)
+    # The author's only mutual guild has no dm_message handler -> dropped.
+    monkeypatch.setattr(handler_events, "_cache", _DmCache(set()))
+    monkeypatch.setattr(handler_events, "_get_api_client", lambda: object())
+    message, _ = _dm_message()
+    bot = SimpleNamespace(cache=_DmBotCache([1], [1]))
+    event = SimpleNamespace(is_human=True, message=message)
+    await dispatch_dm_message(bot, event)
+    assert capture.calls == []
+
+
+async def test_cache_guilds_with_trigger_filters_by_trigger():
+    api = _FakeAPI(
+        channels=[], guild_triggers=[["G1", "dm_message"], ["G2", "member_join"]]
+    )
+    cache = ActiveChannelsCache(ttl_seconds=999)
+    assert await cache.guilds_with_trigger(api, "dm_message") == {"G1"}
+    assert await cache.guilds_with_trigger(api, "member_join") == {"G2"}

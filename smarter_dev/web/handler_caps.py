@@ -62,6 +62,21 @@ MAX_ADMIN_HANDLERS_PER_GUILD = 20
 HANDLER_TIMERS_PER_HOUR = 30
 TIMER_ARMING_WINDOW_SECONDS = 3600
 
+# DM-relay rails (staff-communication-channels.md E1/E2). Three distinct windows:
+# - dm_trigger_author_key: a per-(handler, author) minute gate at DISPATCH, so a
+#   user spamming DMs burns their OWN window rather than the handler's global fire
+#   budget. Deliberately NOT under GUILD_MEMBER_EVENTS_PER_MIN — a DM is not a
+#   raid-shaped guild event.
+# - dm_user_key: a per-recipient HOUR window on send_dm, sized to sit comfortably
+#   above a real staff<->user relay conversation (§6.3) so an ongoing back-and-forth
+#   never errors the fire; a runaway loop still breaches loud.
+# - global_dm_key: the actual unsolicited-drip abuse rail — a tight global per-minute
+#   ceiling across every send_dm in the system, on the shared 60s limiter.
+DM_FIRES_PER_AUTHOR_PER_MIN = 4
+DMS_PER_USER_PER_HOUR = 30
+GLOBAL_DMS_PER_MIN = 10
+DM_USER_WINDOW_SECONDS = 3600
+
 # When a handler fire errors we post a notice in the channel — but a broken
 # handler errors on every fire, so throttle the notice hard: at most one per
 # handler per window. The window is long enough not to nag, short enough that the
@@ -104,6 +119,18 @@ def handler_timer_arm_key(handler_id: str) -> str:
 
 def channel_rename_key(channel_id: str) -> str:
     return f"hcap:rename:{channel_id}"
+
+
+def dm_trigger_author_key(handler_id: str, author_id: str) -> str:
+    return f"hcap:dmtrig:{handler_id}:{author_id}"
+
+
+def dm_user_key(user_id: str) -> str:
+    return f"hcap:dmuser:{user_id}"
+
+
+def global_dm_key() -> str:
+    return "hcap:dm:global"
 
 
 def fires_per_min_for_trigger(trigger_type: str) -> int:

@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from smarter_dev.web.handler_caps import (
+    DM_FIRES_PER_AUTHOR_PER_MIN,
+    DM_USER_WINDOW_SECONDS,
+    DMS_PER_USER_PER_HOUR,
+    GLOBAL_DMS_PER_MIN,
     GUILD_MEMBER_EVENTS_PER_MIN,
     GUILD_ROLE_CHANGES_PER_MIN,
     GUILD_THREAD_OPS_PER_MIN,
@@ -12,7 +16,10 @@ from smarter_dev.web.handler_caps import (
     TIMER_ARMING_WINDOW_SECONDS,
     WindowedLimiter,
     channel_rename_key,
+    dm_trigger_author_key,
+    dm_user_key,
     fires_per_min_for_trigger,
+    global_dm_key,
     guild_member_events_key,
     guild_role_changes_key,
     guild_thread_ops_key,
@@ -164,3 +171,39 @@ def test_handler_timer_arm_key_shape():
 def test_timer_arming_window_constants():
     assert HANDLER_TIMERS_PER_HOUR == 30
     assert TIMER_ARMING_WINDOW_SECONDS == 3600
+
+
+def test_dm_cap_keys_and_constants():
+    # Per-(handler, author) trigger window, per-recipient hour window, global min.
+    assert dm_trigger_author_key("H1", "U9") == "hcap:dmtrig:H1:U9"
+    assert dm_user_key("U9") == "hcap:dmuser:U9"
+    assert global_dm_key() == "hcap:dm:global"
+    assert DM_FIRES_PER_AUTHOR_PER_MIN == 4
+    assert DMS_PER_USER_PER_HOUR == 30
+    assert GLOBAL_DMS_PER_MIN == 10
+    # The per-user window is an HOUR — comfortably above a real relay conversation.
+    assert DM_USER_WINDOW_SECONDS == 3600
+
+
+async def test_dm_trigger_author_window_declines_past_limit():
+    limiter = WindowedLimiter(redis=_FakeRedis())
+    key = dm_trigger_author_key("H1", "U9")
+    allowed = [
+        await limiter.hit(key, DM_FIRES_PER_AUTHOR_PER_MIN)
+        for _ in range(DM_FIRES_PER_AUTHOR_PER_MIN + 1)
+    ]
+    assert allowed[:DM_FIRES_PER_AUTHOR_PER_MIN] == [True] * DM_FIRES_PER_AUTHOR_PER_MIN
+    assert allowed[DM_FIRES_PER_AUTHOR_PER_MIN] is False
+
+
+async def test_dm_user_hour_window_declines_past_limit_on_hour_limiter():
+    fake = _FakeRedis()
+    limiter = WindowedLimiter(redis=fake, window_seconds=DM_USER_WINDOW_SECONDS)
+    key = dm_user_key("U9")
+    allowed = [
+        await limiter.hit(key, DMS_PER_USER_PER_HOUR) for _ in range(DMS_PER_USER_PER_HOUR + 1)
+    ]
+    assert allowed[:DMS_PER_USER_PER_HOUR] == [True] * DMS_PER_USER_PER_HOUR
+    assert allowed[DMS_PER_USER_PER_HOUR] is False
+    # The window's expiry is the hour, not the 60s default.
+    assert fake.expiries == {key: DM_USER_WINDOW_SECONDS}

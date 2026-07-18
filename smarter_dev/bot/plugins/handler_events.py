@@ -144,6 +144,16 @@ class ActiveChannelsCache:
             or (str(guild_id), str(trigger_type)) in self._guild_triggers
         )
 
+    async def guilds_with_trigger(self, api: Any, trigger_type: str) -> set[str]:
+        """Guild ids with an enabled guild-wide handler for ``trigger_type``.
+
+        Backs DM routing: a DM carries no guild, so it fans out only to mutual
+        guilds that actually have a ``dm_message`` handler. A refresh failure
+        yields an empty set (fail closed — no dispatch, never a crash)."""
+        if not await self._ensure_fresh(api):
+            return set()
+        return {g for g, t in self._guild_triggers if t == str(trigger_type)}
+
     async def has_bot_message(
         self, api: Any, channel_id: str, guild_id: str
     ) -> bool:
@@ -779,6 +789,100 @@ async def dispatch_thread_create(bot: Any, event: Any) -> None:
 @plugin.listener(hikari.GuildThreadCreateEvent)
 async def on_thread_create(event: hikari.GuildThreadCreateEvent) -> None:
     await dispatch_thread_create(plugin.bot, event)
+
+
+# ---------------------------------------------------------------------------
+# dm_message context + mutual-guild routing (staff-communication-channels.md E1)
+# ---------------------------------------------------------------------------
+
+
+def dm_message_context(message: Any, author: Any) -> dict:
+    """dm_message trigger context (pure — no cache/REST).
+
+    A DM has no guild and no guild member, so the context carries only the DM
+    channel and the author's user-level fields (NO role ids — there is no guild
+    member object at the DM event; context-rails' author_role_ids do not apply
+    here). Attachment URLs are best-effort: Discord CDN links are signed and
+    expire, so a mirror handler treats them as transient.
+    """
+    return {
+        "trigger_type": "dm_message",
+        "content": message.content or "",
+        "message_id": str(message.id),
+        "dm_channel_id": str(message.channel_id),
+        "author_id": str(author.id),
+        "author_username": author.username,
+        "author_display_name": (
+            getattr(author, "display_name", None) or author.username
+        ),
+        "author_account_created_at": _snowflake_created_at(int(author.id)),
+        "attachment_urls": [a.url for a in message.attachments],
+    }
+
+
+def route_dm_guilds(
+    mutual_guild_ids: list[str], guilds_with_dm_handlers: set[str]
+) -> list[str]:
+    """Which guilds a DM fans out to: mutual guilds that have a dm_message handler.
+
+    A DM carries no guild, so it routes to every guild the author shares with the
+    bot AND that has an enabled dm_message admin handler (the plan's mutual-guild
+    rule — correct for the single-guild reality, degrades safely to N). Order
+    follows ``mutual_guild_ids``, deduplicated. An empty result (no mutual guild
+    resolved, or none has a handler) means no dispatch — fail closed.
+    """
+    seen: set[str] = set()
+    routed: list[str] = []
+    for guild_id in mutual_guild_ids:
+        gid = str(guild_id)
+        if gid in guilds_with_dm_handlers and gid not in seen:
+            seen.add(gid)
+            routed.append(gid)
+    return routed
+
+
+def _mutual_guild_ids(bot: Any, author_id: Any) -> list[str]:
+    """Guild ids the author shares with the bot, from the gateway member cache.
+
+    A cold or incomplete member cache yields fewer/no guilds, so a legitimate DM
+    may be dropped (no mutual guild resolved) — acceptable for the single-guild
+    reality. Fails closed: any cache error returns an empty list, never crashes.
+    """
+    try:
+        guild_ids = list(bot.cache.get_guilds_view().keys())
+    except Exception:  # noqa: BLE001 — a cache miss must never crash dispatch
+        return []
+    mutual: list[str] = []
+    for guild_id in guild_ids:
+        try:
+            if bot.cache.get_member(guild_id, author_id) is not None:
+                mutual.append(str(guild_id))
+        except Exception:  # noqa: BLE001 — one uncached guild must not drop the rest
+            continue
+    return mutual
+
+
+async def dispatch_dm_message(bot: Any, event: Any) -> None:
+    # Only human DMs relay — is_human (from the MessageCreateEvent base) is False
+    # for the bot's own DMs and any other bot, structurally preventing a relay
+    # loop and mirroring on_message's own-bot guard.
+    if not event.is_human:
+        return
+    message = event.message
+    author = message.author
+    context = dm_message_context(message, author)
+    mutual_guild_ids = _mutual_guild_ids(bot, author.id)
+    handler_guilds = await _cache.guilds_with_trigger(_get_api_client(), "dm_message")
+    # One dispatch per routed guild, each with NO home channel (channel_id="")
+    # so a broken dm handler's error notice is skipped, never posted into the
+    # user's DM (see admin_handlers_jobs / notify_handler_error).
+    for guild_id in route_dm_guilds(mutual_guild_ids, handler_guilds):
+        await _dispatch("", guild_id, "dm_message", context)
+
+
+@plugin.listener(hikari.DMMessageCreateEvent)
+async def on_dm_message(event: hikari.DMMessageCreateEvent) -> None:
+    await dispatch_dm_message(plugin.bot, event)
 
 
 @plugin.listener(hikari.GuildReactionAddEvent)
