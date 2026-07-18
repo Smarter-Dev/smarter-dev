@@ -159,6 +159,19 @@ def _to_response(record: ChannelHandler) -> HandlerResponse:
     )
 
 
+def _reject_bot_optin_on_non_message(settings: dict, trigger_type: str) -> None:
+    """422 when ``include_bot_messages`` is set on a non-message-trigger handler.
+
+    The opt-in changes which bot/webhook messages fire the handler, so it only
+    means anything on a ``message`` trigger — allowing it elsewhere would be a
+    silent no-op the author might rely on. Enforced host-side at create/update.
+    """
+    if settings.get("include_bot_messages") and trigger_type != "message":
+        raise plain_error(
+            422, "include_bot_messages is only valid on message-trigger handlers"
+        )
+
+
 def _normalized_name(raw: str) -> str:
     """Validate and normalize a handler name; 422 on blank/oversized."""
     name = raw.strip()
@@ -220,6 +233,7 @@ class HandlerController(Controller):
     ) -> HandlerResponse:
         if data.trigger_type not in HANDLER_TRIGGER_TYPES:
             raise plain_error(422, "unknown trigger_type")
+        _reject_bot_optin_on_non_message(data.settings, data.trigger_type)
         name = _normalized_name(data.name)
 
         if await _name_taken(db_session, data.channel_id, name):
@@ -275,6 +289,8 @@ class HandlerController(Controller):
         record = await db_session.get(ChannelHandler, parsed_handler_id)
         if record is None:
             raise plain_error(404, "handler not found")
+        # trigger_type is immutable on edit, so validate against the stored one.
+        _reject_bot_optin_on_non_message(data.settings, record.trigger_type)
 
         if data.name is not None:
             name = _normalized_name(data.name)
@@ -367,6 +383,12 @@ class HandlerController(Controller):
         # recording this message, so scripts get platform truth instead of
         # tracking users in their size-capped memory.
         trigger_context = dict(data.trigger_context)
+        # A bot/webhook-authored message (author_is_bot, set bot-side after the
+        # own-bot anti-loop guard) fires ONLY handlers that opted in via
+        # settings["include_bot_messages"]; a plain message handler in the same
+        # channel must not react to bot traffic. Human messages fire every
+        # message handler unchanged.
+        author_is_bot = bool(trigger_context.get("author_is_bot"))
         author_id = trigger_context.get("author_id")
         if data.trigger_type == "message" and author_id:
             now = datetime.now(timezone.utc)
@@ -390,6 +412,10 @@ class HandlerController(Controller):
                 )
             ).scalars().all()
             for standard in standard_rows:
+                if author_is_bot and not (standard.settings or {}).get(
+                    "include_bot_messages"
+                ):
+                    continue
                 if not await limiter.hit(
                     handler_fire_key(str(standard.id)),
                     fires_per_min_for_trigger(standard.trigger_type),
@@ -417,6 +443,10 @@ class HandlerController(Controller):
             )
         ).scalars().all()
         for admin_handler in admin_rows:
+            if author_is_bot and not (admin_handler.settings or {}).get(
+                "include_bot_messages"
+            ):
+                continue
             if not is_member_event:
                 scope = admin_handler.channel_ids or []
                 if scope and data.channel_id not in scope:
@@ -447,6 +477,11 @@ class HandlerController(Controller):
         handlers scoped to specific channels. ``guild_triggers``: [guild_id,
         trigger] for admin handlers scoped to ALL channels (so every channel in
         that guild fires).
+
+        ``bot_message_channels`` / ``bot_message_guild_triggers``: the channel
+        ids (and guild ids for guild-wide admin handlers) that have a
+        message-trigger handler with ``include_bot_messages`` — so the bot only
+        POSTs a bot/webhook message to /dispatch when some handler there opted in.
         """
         rows = (
             await db_session.execute(
@@ -483,7 +518,48 @@ class HandlerController(Controller):
             else:
                 guild_triggers.append([guild_id, trigger])
 
-        return {"channels": channels, "guild_triggers": guild_triggers}
+        # Bot-message opt-in sets: message-trigger handlers with
+        # include_bot_messages. Standard + channel-scoped admin -> channel ids;
+        # guild-wide admin -> guild ids. Only the message trigger can opt in.
+        bot_message_channels: list[str] = []
+        bot_message_guild_triggers: list[str] = []
+        std_bot_rows = (
+            await db_session.execute(
+                select(ChannelHandler.channel_id, ChannelHandler.settings).where(
+                    ChannelHandler.enabled.is_(True),
+                    ChannelHandler.trigger_type == "message",
+                )
+            )
+        ).all()
+        for channel_id, settings in std_bot_rows:
+            if (settings or {}).get("include_bot_messages"):
+                bot_message_channels.append(channel_id)
+        admin_bot_rows = (
+            await db_session.execute(
+                select(
+                    AdminHandler.guild_id,
+                    AdminHandler.channel_ids,
+                    AdminHandler.settings,
+                ).where(
+                    AdminHandler.enabled.is_(True),
+                    AdminHandler.trigger_type == "message",
+                )
+            )
+        ).all()
+        for guild_id, channel_ids, settings in admin_bot_rows:
+            if not (settings or {}).get("include_bot_messages"):
+                continue
+            if channel_ids:
+                bot_message_channels.extend(channel_ids)
+            else:
+                bot_message_guild_triggers.append(guild_id)
+
+        return {
+            "channels": channels,
+            "guild_triggers": guild_triggers,
+            "bot_message_channels": bot_message_channels,
+            "bot_message_guild_triggers": bot_message_guild_triggers,
+        }
 
     @get("/{handler_id:str}", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
     async def get_handler(

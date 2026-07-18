@@ -31,6 +31,8 @@ class _FakeEmitter:
     # list_threads guild-scope rail.
     guild_by_channel: dict = field(default_factory=dict)
     guild_calls: list = field(default_factory=list)
+    # Value get_guild_member_count returns (overridable per test).
+    member_count: int = 1234
 
     async def create_message(
         self, channel_id: str, content: str, ping_role_id: str | None = None
@@ -52,6 +54,9 @@ class _FakeEmitter:
 
     async def list_threads(self, channel_id: str, limit: int = 50) -> list:
         return self.threads_by_channel.get(channel_id, [])
+
+    async def get_guild_member_count(self) -> int:
+        return self.member_count
 
     async def get_channel_guild_id(self, channel_id: str):
         self.guild_calls.append(channel_id)
@@ -432,6 +437,35 @@ async def test_list_threads_gone_channel_returns_empty_without_error():
 
 async def test_list_threads_discord_read_cap_breaches():
     script = "for i in range(3):\n    await list_threads()\n"
+    result, _, _ = await _run(script, budget=HandlerBudget(max_discord_reads=2))
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "discord_reads"
+
+
+async def test_get_guild_member_count_available_to_standard_handler():
+    # A read-only, cheap guild-count read is present for BOTH tiers (no actor).
+    emitter = _FakeEmitter(member_count=1234)
+    script = (
+        "n = await get_guild_member_count()\n"
+        'await send_message(f"{n}")\n'
+    )
+    result, emitter, _ = await _run(script, emitter=emitter)
+    assert result.outcome == "ok", result.error
+    assert emitter.messages[0][1] == "1234"
+
+
+async def test_get_guild_member_count_spends_discord_read():
+    emitter = _FakeEmitter(member_count=42)
+    result, _, _ = await _run(
+        "await get_guild_member_count()\n", emitter=emitter
+    )
+    assert result.outcome == "ok", result.error
+    assert result.usage["discord_reads"] == 1
+
+
+async def test_get_guild_member_count_breach_raises_discord_reads():
+    # Shares the discord_reads pool with list_threads; exhausting it fails the fire.
+    script = "for i in range(3):\n    await get_guild_member_count()\n"
     result, _, _ = await _run(script, budget=HandlerBudget(max_discord_reads=2))
     assert result.outcome == "cap_exceeded"
     assert result.cap == "discord_reads"

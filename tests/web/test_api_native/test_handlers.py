@@ -381,6 +381,125 @@ def test_active_channels(client):
     assert ["C1", "reaction"] in channels
 
 
+def test_create_handler_rejects_include_bot_messages_on_non_message(client):
+    # include_bot_messages only means anything on a message trigger.
+    rejected = client.post(
+        "/api/handlers",
+        json=_event_body(
+            name="rx", trigger_type="reaction",
+            settings={"include_bot_messages": True},
+        ),
+    )
+    assert rejected.status_code == 422
+    # ... but a message-trigger handler accepts it.
+    accepted = client.post(
+        "/api/handlers",
+        json=_event_body(name="botwatch", settings={"include_bot_messages": True}),
+    )
+    assert accepted.status_code == 201
+
+
+async def test_dispatch_bot_message_fires_only_optin_handlers(client, db_session):
+    from smarter_dev.web.models import AdminHandler, ChannelHandler
+
+    # A plain message handler + an opted-in one, both in C1. A bot-authored
+    # message (author_is_bot) must fire ONLY the opted-in handler.
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="plain", trigger_type="message",
+        settings={}, description="plain", script="await send_message('x')\n",
+        created_by="U1",
+    ))
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="botwatch", trigger_type="message",
+        settings={"include_bot_messages": True}, description="opt-in",
+        script="await send_message('y')\n", created_by="U1",
+    ))
+    db_session.add(AdminHandler(
+        guild_id="G1", name="disboard", trigger_type="message",
+        settings={"include_bot_messages": True}, channel_ids=["C1"],
+        description="tracker", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {"author_is_bot": True, "author_id": "BOT9"},
+        },
+    )
+    body = resp.json()
+    assert body["dispatched"] is True
+    # The opted-in standard handler + the opted-in admin handler; NOT the plain one.
+    assert len(body["handler_ids"]) == 2
+    assert len(client.submitted) == 2  # type: ignore[attr-defined]
+
+
+async def test_dispatch_human_message_fires_all_message_handlers(client, db_session):
+    from smarter_dev.web.models import ChannelHandler
+
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="plain", trigger_type="message",
+        settings={}, description="plain", script="await send_message('x')\n",
+        created_by="U1",
+    ))
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="botwatch", trigger_type="message",
+        settings={"include_bot_messages": True}, description="opt-in",
+        script="await send_message('y')\n", created_by="U1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {"author_id": "U7"},  # author_is_bot absent = human
+        },
+    )
+    # Both fire on a human message — the opt-in never suppresses human traffic.
+    assert len(resp.json()["handler_ids"]) == 2
+
+
+async def test_active_channels_includes_bot_message_channels(client, db_session):
+    from smarter_dev.web.models import AdminHandler, ChannelHandler
+
+    # standard opt-in -> channel entry
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="botwatch", trigger_type="message",
+        settings={"include_bot_messages": True}, description="d",
+        script="pass\n", created_by="U1",
+    ))
+    # a plain message handler must NOT appear in the bot-message set
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C2", name="plain", trigger_type="message",
+        settings={}, description="d", script="pass\n", created_by="U1",
+    ))
+    # admin scoped opt-in -> channel entry
+    db_session.add(AdminHandler(
+        guild_id="G1", name="scoped", trigger_type="message",
+        settings={"include_bot_messages": True}, channel_ids=["C3"],
+        description="d", script="pass\n", created_by_admin="A1",
+    ))
+    # admin guild-wide opt-in -> guild entry
+    db_session.add(AdminHandler(
+        guild_id="G1", name="wide", trigger_type="message",
+        settings={"include_bot_messages": True}, channel_ids=[],
+        description="d", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    body = client.get("/api/handlers/active-channels").json()
+    assert "C1" in body["bot_message_channels"]
+    assert "C3" in body["bot_message_channels"]
+    assert "C2" not in body["bot_message_channels"]
+    assert "G1" in body["bot_message_guild_triggers"]
+
+
 # --- admin-only member/thread triggers (threads-and-member-events.md §3) -------
 
 

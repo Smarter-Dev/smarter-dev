@@ -484,3 +484,35 @@ async def test_get_thread_parent_id_raises_on_non_404_error():
         await _emitter(requests, status_code=403, body="nope").get_thread_parent_id(
             "T1"
         )
+
+
+# -- get_guild_member_count -------------------------------------------------
+
+
+async def test_get_guild_member_count_returns_approximate_count():
+    requests: list[httpx.Request] = []
+    emitter = DiscordEmitter(
+        bot_token="t",
+        guild_id="G1",
+        transport=httpx.MockTransport(
+            lambda request: (
+                requests.append(request),
+                httpx.Response(200, text='{"approximate_member_count": 1234}'),
+            )[1]
+        ),
+    )
+    count = await emitter.get_guild_member_count()
+    assert count == 1234
+    assert isinstance(count, int)
+    request = requests[0]
+    assert request.method == "GET"
+    assert request.url.path.endswith("/guilds/G1")
+    # with_counts is what makes approximate_member_count present in the payload.
+    assert request.url.params.get("with_counts") == "true"
+
+
+async def test_get_guild_member_count_raises_on_rest_error():
+    # A non-200 propagates (no silent 0) so a stat handler errors loudly.
+    requests: list[httpx.Request] = []
+    with pytest.raises(DiscordEmitError):
+        await _emitter(requests, status_code=403, body="no perms").get_guild_member_count()

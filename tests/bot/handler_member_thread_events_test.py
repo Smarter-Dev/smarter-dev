@@ -34,6 +34,8 @@ from smarter_dev.bot.plugins.handler_events import (
 
 # A real 2015+ Discord snowflake so account_created_at resolves sanely.
 SNOWFLAKE = 733364234141827073
+# The smarter-dev bot's own user id (get_me), distinct from message authors.
+BOT_USER_ID = 999000111222333444
 
 
 def make_member(
@@ -382,7 +384,9 @@ def test_guild_member_counts_none_guild():
 def captured(monkeypatch):
     calls = []
 
-    async def fake_dispatch(channel_id, guild_id, trigger_type, context):
+    async def fake_dispatch(
+        channel_id, guild_id, trigger_type, context, *, bot_message=False
+    ):
         calls.append((channel_id, guild_id, trigger_type, context))
 
     monkeypatch.setattr(handler_events, "_dispatch", fake_dispatch)
@@ -572,7 +576,12 @@ def make_message_event(*, channel_id, thread_channel=None):
     threads = {}
     if thread_channel is not None:
         threads[int(channel_id)] = thread_channel
-    bot = SimpleNamespace(cache=FakeCache(threads=threads))
+    # get_me() backs the own-bot anti-loop guard; a distinct id from the author
+    # so a normal message is never mistaken for the bot's own.
+    bot = SimpleNamespace(
+        cache=FakeCache(threads=threads),
+        get_me=lambda: SimpleNamespace(id=BOT_USER_ID),
+    )
     event = SimpleNamespace(
         is_human=True,
         guild_id=42,
@@ -613,8 +622,10 @@ async def test_non_thread_message_single_dispatch(captured):
     assert "thread_id" not in ctx
 
 
-async def test_message_from_bot_is_ignored(captured):
+async def test_message_from_own_bot_is_ignored(captured):
+    # The bot's OWN message never dispatches (structural anti-loop invariant),
+    # regardless of is_human.
     bot, event = make_message_event(channel_id=555)
-    event.is_human = False
+    event.message.author.id = BOT_USER_ID  # authored by the bot itself
     await dispatch_message(bot, event)
     assert captured == []
