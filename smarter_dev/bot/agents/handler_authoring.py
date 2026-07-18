@@ -61,7 +61,8 @@ class JudgeVerdict(BaseModel):
     )
     memory_bounded: bool = Field(
         description="No unbounded memory keying (per-user/per-message/per-day without pruning); "
-        "state stays far below the 16KB cap on a busy channel"
+        "state stays far below the 16KB cap on a busy channel. Guild-shared memory "
+        "(guild_memory_*) is bounded the same way — one 16KB store cap for the whole guild"
     )
     guards_effective: bool = Field(
         description="Cheap guards before expensive work, and the guards actually filter — "

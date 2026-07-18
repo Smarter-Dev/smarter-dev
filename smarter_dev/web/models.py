@@ -4474,6 +4474,41 @@ class AdminHandler(Base):
     scheduled_job_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
 
 
+class GuildHandlerMemory(Base):
+    """One key/value row of a guild's shared admin-handler memory.
+
+    Guild-scoped shared state (see
+    :class:`~smarter_dev.web.handler_guild_memory.GuildMemory`): unlike the
+    private per-handler ``memory`` blob, every admin handler in the guild reads
+    and writes this same store, so a fact can cross handler rows (e.g. the
+    DM-relay auto-bind target shared by the mirror and relay handlers). Rows are
+    PER KEY (not one blob) so two handler fires writing different keys on the
+    concurrent ``agents`` queue never clobber each other; a same-key write is
+    last-write-wins via the ``UNIQUE(guild_id, key)`` upsert.
+    """
+
+    __tablename__ = "guild_handler_memory"
+    __table_args__ = (
+        UniqueConstraint(
+            "guild_id", "key", name="uq_guild_handler_memory_guild_key"
+        ),
+        Index("ix_guild_handler_memory_guild_id", "guild_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    value: Mapped[dict] = mapped_column(JSON, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+
+
 class MemberActivity(Base):
     """Per-(guild, member) message activity: first and most recent message times.
 

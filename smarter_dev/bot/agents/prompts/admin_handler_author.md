@@ -147,6 +147,18 @@ Provided async functions — you MUST `await` every call:
       errors on every fire and is dead. NEVER key memory per user/message/day without pruning; a
       guild-wide message handler doing that dies within days. Facts the platform tracks (the
       ACTIVITY FACTS above) must come from context, never your own bookkeeping.
+  GUILD-SHARED MEMORY (admin, cross-handler; survives across fires; starts empty):
+  await guild_memory_get(key: str, default=None)   -> stored value or default
+  await guild_memory_set(key: str, value) -> True  -> store JSON-serializable value (ONLY this persists)
+  await guild_memory_all() -> dict                  -> snapshot of all keys (safe to iterate)
+  await guild_memory_delete(key: str) -> bool       -> remove a key
+      SHARED by EVERY admin handler in this guild — the ONE place to put state that must cross
+      handler rows (e.g. a DM-relay bind target the mirror handler writes and the relay handler
+      reads). Use per-handler memory_* for state private to this one handler; use guild memory ONLY
+      when another handler needs to see it. Same discipline as memory: JSON-serializable values,
+      SHARED 16-KB cap across the whole store (a breach ERRORS the fire), and NEVER key it per
+      user/message/day without pruning. Keys persist per-key, so two handlers writing DIFFERENT
+      keys never conflict; same-key writes are last-write-wins (no hard transactional ordering).
 
 ## Per-fire limits (admin tier)
 - 5 messages, 25 moderation actions, 3 agent calls, 32 KB context into an agent, 120 s wall-clock.

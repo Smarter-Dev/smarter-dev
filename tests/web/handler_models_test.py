@@ -13,6 +13,7 @@ from smarter_dev.web.models import (
     HANDLER_TRIGGER_TYPES,
     AdminHandler,
     ChannelHandler,
+    GuildHandlerMemory,
 )
 
 
@@ -141,5 +142,18 @@ async def test_admin_handler_name_is_unique_per_guild(db_session):
     db_session.add(_admin("G2", "scam-banner"))  # other guild — fine
     await db_session.commit()
     db_session.add(_admin("G1", "scam-banner"))
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+
+
+async def test_guild_handler_memory_unique_guild_key_upsert(db_session):
+    # Two different keys for the same guild coexist; a duplicate (guild, key)
+    # is rejected so the store's per-key upsert has a real conflict target.
+    db_session.add(GuildHandlerMemory(guild_id="G1", key="a", value={"v": 1}))
+    db_session.add(GuildHandlerMemory(guild_id="G1", key="b", value=2))
+    db_session.add(GuildHandlerMemory(guild_id="G2", key="a", value=3))  # other guild
+    await db_session.commit()
+
+    db_session.add(GuildHandlerMemory(guild_id="G1", key="a", value={"v": 9}))
     with pytest.raises(IntegrityError):
         await db_session.commit()

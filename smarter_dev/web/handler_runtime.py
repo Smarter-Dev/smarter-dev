@@ -26,7 +26,11 @@ Script-facing surface (Monty external functions):
 Admin handlers (``actor`` set) additionally get ``close_thread`` /
 ``lock_thread`` / ``reopen_thread`` / ``delete_thread`` -> bool (each spends the
 thread_ops budget + guild thread-op window before the REST call; a gone thread
-yields ``False`` without erroring the fire).
+yields ``False`` without erroring the fire), plus ``guild_memory_get`` /
+``guild_memory_set`` / ``guild_memory_all`` / ``guild_memory_delete`` — a
+guild-scoped key/value store SHARED by every admin handler in the guild (for
+state that must cross handler rows, e.g. a DM-relay bind target), bounded by the
+same 16KB cap as per-handler ``memory_*`` and DB-only (spends nothing).
 
 Script-facing data (Monty input): ``context`` — a plain dict describing the
 trigger (its keys depend on ``context["trigger_type"]``).
@@ -64,6 +68,7 @@ from smarter_dev.web.handler_caps import (
     guild_thread_ops_key,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
+from smarter_dev.web.handler_guild_memory import GuildMemory
 from smarter_dev.web.handler_memory import HandlerMemory
 from smarter_dev.web.admin_actions import AdminActor
 
@@ -140,6 +145,13 @@ class HandlerResult:
     # The caller persists ``memory`` back to the handler row only when ``memory_changed``.
     memory: dict[str, Any] = field(default_factory=dict)
     memory_changed: bool = False
+    # Guild-shared memory changes this fire made, for the caller to persist per
+    # key (only when ``guild_memory_changed``). Writes are upserted, deletes are
+    # removed — untouched keys are never rewritten, keeping concurrent
+    # different-key fires from clobbering each other.
+    guild_memory_writes: dict[str, Any] = field(default_factory=dict)
+    guild_memory_deletes: list[str] = field(default_factory=list)
+    guild_memory_changed: bool = False
 
 
 @dataclass
@@ -161,6 +173,9 @@ class HandlerExecution:
     # Per-handler persistent key/value store, loaded before the fire. The host
     # owns it; the script reads/writes via the memory_* external functions.
     memory: HandlerMemory = field(default_factory=HandlerMemory)
+    # Guild-shared key/value store (admin handlers only), loaded before the fire.
+    # Read/written via the guild_memory_* functions; persisted per changed key.
+    guild_memory: GuildMemory = field(default_factory=GuildMemory)
     # The cap that stopped this fire, captured here because Monty rewraps the
     # exception that crosses out of an external function (losing its type), so
     # we record the real CapExceeded on the host side before re-raising.
@@ -197,6 +212,10 @@ class HandlerExecution:
                     "lock_thread": self._guard(self._lock_thread),
                     "reopen_thread": self._guard(self._reopen_thread),
                     "delete_thread": self._guard(self._delete_thread),
+                    "guild_memory_get": self._guard(self._guild_memory_get),
+                    "guild_memory_set": self._guard(self._guild_memory_set),
+                    "guild_memory_all": self._guard(self._guild_memory_all),
+                    "guild_memory_delete": self._guard(self._guild_memory_delete),
                 }
             )
         return funcs
@@ -449,6 +468,20 @@ class HandlerExecution:
     async def _memory_delete(self, key: str) -> bool:
         return self.memory.delete(str(key))
 
+    # -- guild-shared memory (admin only; shared across the guild's handlers) --
+
+    async def _guild_memory_get(self, key: str, default: Any = None) -> Any:
+        return self.guild_memory.get(str(key), default)
+
+    async def _guild_memory_set(self, key: str, value: Any) -> bool:
+        return self.guild_memory.set(str(key), value)
+
+    async def _guild_memory_all(self) -> dict[str, Any]:
+        return self.guild_memory.all()
+
+    async def _guild_memory_delete(self, key: str) -> bool:
+        return self.guild_memory.delete(str(key))
+
 
 async def run_handler_script(
     script: str,
@@ -463,6 +496,7 @@ async def run_handler_script(
     actor: AdminActor | None = None,
     channel_ids: list[str] | None = None,
     memory: dict[str, Any] | None = None,
+    guild_memory: dict[str, Any] | None = None,
 ) -> HandlerResult:
     """Compile and run ``script`` in Monty with every rail enforced.
 
@@ -474,10 +508,14 @@ async def run_handler_script(
     send_message target any channel). ``memory`` seeds the handler's persistent
     store; the result carries it back (with ``memory_changed``) for the caller to
     persist regardless of outcome — a counter bumped before a later failure is
-    not lost, matching the "emitted effects stay" rule.
+    not lost, matching the "emitted effects stay" rule. ``guild_memory`` seeds the
+    guild-shared store (admin handlers only); the result carries back the changed
+    keys the same way (``guild_memory_writes`` / ``guild_memory_deletes`` /
+    ``guild_memory_changed``).
     """
     budget = budget or HandlerBudget()
     handler_memory = HandlerMemory(memory or {})
+    shared_guild_memory = GuildMemory(guild_memory or {})
     execution = HandlerExecution(
         channel_id=channel_id,
         guild_id=guild_id,
@@ -488,6 +526,7 @@ async def run_handler_script(
         actor=actor,
         channel_ids=list(channel_ids or []),
         memory=handler_memory,
+        guild_memory=shared_guild_memory,
     )
     started = time.monotonic()
 
@@ -500,6 +539,9 @@ async def run_handler_script(
             cap=cap,
             memory=handler_memory.snapshot(),
             memory_changed=handler_memory.dirty,
+            guild_memory_writes=shared_guild_memory.writes(),
+            guild_memory_deletes=shared_guild_memory.deletes(),
+            guild_memory_changed=shared_guild_memory.dirty,
         )
 
     try:
