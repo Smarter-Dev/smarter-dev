@@ -4,9 +4,9 @@ Admin-gated (ADMINISTRATOR). Opens a model string-select for the current
 channel; picking a model swaps the ephemeral message for one settings panel
 (reasoning level for reasoning-capable models, a fallback model, and an
 auto-respond toggle), and a "Budgets & filter…" button opens a modal for the
-daily/hourly token budgets and an optional response filter. Modal submit
-persists everything (model + reasoning + budgets + auto-respond + fallback +
-filter) in one call via
+daily/hourly token budgets and an optional response filter. A separate Save
+button persists panel changes immediately while retaining the stored budgets
+and filter; modal submit persists everything in one call via
 :class:`~smarter_dev.bot.services.model_override_service.ModelOverrideService`.
 Picking the "server default" sentinel clears the override instead.
 
@@ -14,9 +14,9 @@ The interaction handlers here are dispatched from
 :mod:`smarter_dev.bot.plugins.events` by ``custom_id``: the model select
 (``handle_model_override_select``), the panel re-render handlers
 (``handle_model_override_reasoning_select`` / ``_fallback_select`` /
-``_auto_toggle``), the modal opener (``handle_model_override_continue``) and the
-modal submit (``handle_model_override_modal_submit``). The chat runtime consumes
-the stored settings via
+``_auto_toggle``), the quick-save handler (``handle_model_override_save``), the
+modal opener (``handle_model_override_continue``), and the modal submit
+(``handle_model_override_modal_submit``). The chat runtime consumes the stored settings via
 :func:`~smarter_dev.bot.agents.chat_agent.get_chat_agent`.
 """
 
@@ -30,11 +30,6 @@ from typing import Any
 import hikari
 import lightbulb
 
-from smarter_dev.shared.model_catalog import CatalogModel
-from smarter_dev.shared.model_catalog import get_model
-from smarter_dev.shared.model_catalog import is_valid_model_key
-from smarter_dev.shared.model_catalog import parse_reasoning_level
-from smarter_dev.shared.model_catalog import resolve_reasoning_level
 from smarter_dev.bot.plugins.admin_gate import deny_if_not_admin
 from smarter_dev.bot.plugins.admin_gate import is_admin
 from smarter_dev.bot.services.channel_token_budget import fallback_ended_key
@@ -45,22 +40,25 @@ from smarter_dev.bot.services.model_override_service import ModelOverrideService
 from smarter_dev.bot.services.models import ChannelModelOverride
 from smarter_dev.bot.views.model_override_views import AUTO_TOGGLE_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import CONTINUE_CUSTOM_ID_PREFIX
-from smarter_dev.bot.views.model_override_views import (
-    FALLBACK_SELECT_CUSTOM_ID_PREFIX,
-)
+from smarter_dev.bot.views.model_override_views import FALLBACK_SELECT_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import MODAL_CUSTOM_ID_PREFIX
-from smarter_dev.bot.views.model_override_views import PanelState
-from smarter_dev.bot.views.model_override_views import (
-    REASONING_SELECT_CUSTOM_ID_PREFIX,
-)
+from smarter_dev.bot.views.model_override_views import MODEL_NEXT_CUSTOM_ID_PREFIX
+from smarter_dev.bot.views.model_override_views import REASONING_SELECT_CUSTOM_ID_PREFIX
+from smarter_dev.bot.views.model_override_views import SAVE_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import SENTINEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_MODEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_NO_FALLBACK
+from smarter_dev.bot.views.model_override_views import PanelState
 from smarter_dev.bot.views.model_override_views import create_model_select_message
 from smarter_dev.bot.views.model_override_views import create_settings_modal
 from smarter_dev.bot.views.model_override_views import create_settings_panel
 from smarter_dev.bot.views.model_override_views import parse_budget
 from smarter_dev.bot.views.model_override_views import parse_panel_state
+from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.shared.model_catalog import is_valid_model_key
+from smarter_dev.shared.model_catalog import parse_reasoning_level
+from smarter_dev.shared.model_catalog import resolve_reasoning_level
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +179,7 @@ async def _render_panel(
         hikari.ResponseType.MESSAGE_UPDATE,
         content=(
             f"Configuring **{model.label}** for this channel. Adjust the settings "
-            "below, then open **Budgets & filter…** to finish."
+            "below, then choose **Save** or open **Budgets & filter…**."
         ),
         components=create_settings_panel(
             model,
@@ -232,9 +230,34 @@ async def handle_model_override_select(
     if await _deny_interaction_if_not_admin(event):
         return
 
+    selected = interaction.values[0] if interaction.values else None
+    await _advance_from_model_selection(event, interaction, selected)
+
+
+async def handle_model_override_next(
+    event: hikari.InteractionCreateEvent,
+) -> None:
+    """Advance with the model already selected when the command was opened."""
+    interaction = event.interaction
+    if not isinstance(interaction, hikari.ComponentInteraction):
+        return
+    if await _deny_interaction_if_not_admin(event):
+        return
+
+    prefix, separator, selected = interaction.custom_id.partition(":")
+    if not separator or prefix != MODEL_NEXT_CUSTOM_ID_PREFIX:
+        selected = None
+    await _advance_from_model_selection(event, interaction, selected)
+
+
+async def _advance_from_model_selection(
+    event: hikari.InteractionCreateEvent,
+    interaction: hikari.ComponentInteraction,
+    selected: str | None,
+) -> None:
+    """Clear the override or render the panel for a selected model."""
     guild_id = str(interaction.guild_id)
     channel_id = str(interaction.channel_id)
-    selected = interaction.values[0] if interaction.values else None
 
     if selected == SENTINEL_DEFAULT:
         service = _get_override_service(event.app)
@@ -292,9 +315,7 @@ async def handle_model_override_reasoning_select(
     if await _deny_interaction_if_not_admin(event):
         return
 
-    state = parse_panel_state(
-        interaction.custom_id, REASONING_SELECT_CUSTOM_ID_PREFIX
-    )
+    state = parse_panel_state(interaction.custom_id, REASONING_SELECT_CUSTOM_ID_PREFIX)
     if state is None:
         logger.error("Invalid reasoning select custom_id: %s", interaction.custom_id)
         await interaction.create_initial_response(
@@ -328,9 +349,7 @@ async def handle_model_override_fallback_select(
     if await _deny_interaction_if_not_admin(event):
         return
 
-    state = parse_panel_state(
-        interaction.custom_id, FALLBACK_SELECT_CUSTOM_ID_PREFIX
-    )
+    state = parse_panel_state(interaction.custom_id, FALLBACK_SELECT_CUSTOM_ID_PREFIX)
     if state is None:
         logger.error("Invalid fallback select custom_id: %s", interaction.custom_id)
         await interaction.create_initial_response(
@@ -417,6 +436,76 @@ async def handle_model_override_continue(
     )
 
 
+async def handle_model_override_save(
+    event: hikari.InteractionCreateEvent,
+) -> None:
+    """Save panel settings without opening the budgets/filter modal.
+
+    Existing budgets and response filter are retained; a new override starts
+    with unlimited budgets and no filter.
+    """
+    interaction = event.interaction
+    if not isinstance(interaction, hikari.ComponentInteraction):
+        return
+    if await _deny_interaction_if_not_admin(event):
+        return
+
+    state = parse_panel_state(interaction.custom_id, SAVE_CUSTOM_ID_PREFIX)
+    model = get_model(state.model_key) if state is not None else None
+    if state is None or model is None:
+        logger.error("Invalid save custom_id: %s", interaction.custom_id)
+        await interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_UPDATE,
+            content="❌ Invalid request. Please run `/chat-bot-settings` again.",
+            components=[],
+        )
+        return
+
+    service = _get_override_service(event.app)
+    guild_id = str(interaction.guild_id)
+    channel_id = str(interaction.channel_id)
+    try:
+        current = await service.get_override(guild_id, channel_id)
+        daily_budget = current.daily_token_budget if current is not None else 0
+        hourly_budget = current.hourly_token_budget if current is not None else 0
+        response_filter = current.response_filter if current is not None else None
+        await service.set_override(
+            guild_id,
+            channel_id,
+            state.model_key,
+            daily_budget,
+            hourly_budget,
+            reasoning_level=state.reasoning_level,
+            auto_respond=state.auto_respond,
+            fallback_model_key=state.fallback_model_key,
+            response_filter=response_filter,
+        )
+    except APIError as exc:
+        logger.error(
+            "Failed to save model override for channel %s: %s", channel_id, exc
+        )
+        await interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_UPDATE,
+            content="❌ Couldn't save the override — please try again shortly.",
+            components=[],
+        )
+        return
+
+    await interaction.create_initial_response(
+        hikari.ResponseType.MESSAGE_UPDATE,
+        content=(
+            f"✅ This channel now uses **{model.label}**.\n"
+            f"• Reasoning: {_render_reasoning(model, state.reasoning_level)}\n"
+            f"• Auto-respond: {'on' if state.auto_respond else 'off'}\n"
+            f"• Fallback model: {_render_fallback(state.fallback_model_key)}\n"
+            f"• Response filter: {'set' if response_filter else 'none'}\n"
+            f"• Daily budget: {_render_budget(daily_budget)}\n"
+            f"• Hourly budget: {_render_budget(hourly_budget)}"
+        ),
+        components=[],
+    )
+
+
 async def handle_model_override_modal_submit(
     event: hikari.InteractionCreateEvent,
 ) -> None:
@@ -429,7 +518,9 @@ async def handle_model_override_modal_submit(
 
     state = parse_panel_state(interaction.custom_id, MODAL_CUSTOM_ID_PREFIX)
     if state is None:
-        logger.error("Invalid model override modal custom_id: %s", interaction.custom_id)
+        logger.error(
+            "Invalid model override modal custom_id: %s", interaction.custom_id
+        )
         await interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
             content="❌ Invalid request. Please run `/chat-bot-settings` again.",
@@ -478,7 +569,11 @@ async def handle_model_override_modal_submit(
         # Without this, the failure surfaces as Discord's generic
         # "This interaction failed" (the events.py fallback responder is
         # broken) and the admin gets no explanation.
-        logger.error("Failed to save model override for channel %s: %s", interaction.channel_id, exc)
+        logger.error(
+            "Failed to save model override for channel %s: %s",
+            interaction.channel_id,
+            exc,
+        )
         await interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
             content="❌ Couldn't save the override — please try again shortly.",
@@ -534,7 +629,9 @@ async def handle_model_budget_fallback(
 
     parts = interaction.custom_id.split(":")
     if len(parts) != 2:
-        logger.error("Invalid model-budget-fallback custom_id: %s", interaction.custom_id)
+        logger.error(
+            "Invalid model-budget-fallback custom_id: %s", interaction.custom_id
+        )
         return
     try:
         reset_epoch = int(parts[1])
@@ -595,7 +692,9 @@ async def handle_model_budget_fallback(
 
     fallback_model = get_model(override.fallback_model_key)
     label = (
-        fallback_model.label if fallback_model is not None else override.fallback_model_key
+        fallback_model.label
+        if fallback_model is not None
+        else override.fallback_model_key
     )
     await interaction.create_initial_response(
         hikari.ResponseType.MESSAGE_UPDATE,

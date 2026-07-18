@@ -15,8 +15,6 @@ from unittest.mock import patch
 import hikari
 import pytest
 
-from smarter_dev.shared.model_catalog import MODEL_CATALOG
-from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.bot.plugins import model_override
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.models import ChannelModelOverride
@@ -25,19 +23,24 @@ from smarter_dev.bot.views.model_override_views import CONTINUE_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import FALLBACK_SELECT_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import MAX_TOKEN_BUDGET
 from smarter_dev.bot.views.model_override_views import MODAL_CUSTOM_ID_PREFIX
-from smarter_dev.bot.views.model_override_views import PanelState
+from smarter_dev.bot.views.model_override_views import MODEL_NEXT_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import REASONING_SELECT_CUSTOM_ID_PREFIX
+from smarter_dev.bot.views.model_override_views import SAVE_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import SENTINEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_MODEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_NO_FALLBACK
+from smarter_dev.bot.views.model_override_views import PanelState
 from smarter_dev.bot.views.model_override_views import build_fallback_options
 from smarter_dev.bot.views.model_override_views import build_model_options
 from smarter_dev.bot.views.model_override_views import build_reasoning_options
+from smarter_dev.bot.views.model_override_views import create_model_select_message
 from smarter_dev.bot.views.model_override_views import create_settings_modal
 from smarter_dev.bot.views.model_override_views import create_settings_panel
 from smarter_dev.bot.views.model_override_views import encode_panel_state
 from smarter_dev.bot.views.model_override_views import parse_budget
 from smarter_dev.bot.views.model_override_views import parse_panel_state
+from smarter_dev.shared.model_catalog import MODEL_CATALOG
+from smarter_dev.shared.model_catalog import get_model
 
 ADMIN = hikari.Permissions.ADMINISTRATOR
 NONE = hikari.Permissions.NONE
@@ -108,6 +111,21 @@ def test_build_model_options_defaults_to_sentinel_without_override():
     assert defaults == [SENTINEL_DEFAULT]
 
 
+def test_model_select_message_has_next_button_for_current_model():
+    rows = create_model_select_message(_override(model_key=REASONING_KEY))
+    assert len(rows) == 2
+    next_button = rows[1].components[0]
+    assert next_button.label == "Next"
+    assert next_button.custom_id == f"{MODEL_NEXT_CUSTOM_ID_PREFIX}:{REASONING_KEY}"
+
+
+def test_model_select_message_next_uses_default_sentinel_without_override():
+    rows = create_model_select_message(None)
+    assert rows[1].components[0].custom_id == (
+        f"{MODEL_NEXT_CUSTOM_ID_PREFIX}:{SENTINEL_DEFAULT}"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Pure helpers — budget parsing
 # --------------------------------------------------------------------------- #
@@ -166,7 +184,9 @@ def test_build_reasoning_options_marks_stored_level_default():
 
 
 def test_build_fallback_options_excludes_primary_and_offers_sentinel():
-    options = build_fallback_options(primary_key=REASONING_KEY, current_fallback_key=None)
+    options = build_fallback_options(
+        primary_key=REASONING_KEY, current_fallback_key=None
+    )
     values = [opt.value for opt in options]
 
     assert values[0] == SENTINEL_NO_FALLBACK
@@ -205,7 +225,10 @@ def test_encode_panel_state_full():
 
 
 def test_encode_panel_state_empties():
-    assert encode_panel_state(NO_REASONING_KEY, None, False, None) == f"{NO_REASONING_KEY}::0:"
+    assert (
+        encode_panel_state(NO_REASONING_KEY, None, False, None)
+        == f"{NO_REASONING_KEY}::0:"
+    )
 
 
 def test_parse_panel_state_roundtrip():
@@ -236,7 +259,12 @@ def test_parse_panel_state_wrong_prefix_returns_none():
 
 
 def test_parse_panel_state_wrong_field_count_returns_none():
-    assert parse_panel_state(f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:only:two", AUTO_TOGGLE_CUSTOM_ID_PREFIX) is None
+    assert (
+        parse_panel_state(
+            f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:only:two", AUTO_TOGGLE_CUSTOM_ID_PREFIX
+        )
+        is None
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -250,7 +278,10 @@ def test_create_settings_panel_reasoning_model_has_reasoning_row():
     # reasoning select + fallback select + button row
     assert len(rows) == 3
     prefixes = [row.components[0].custom_id.split(":")[0] for row in rows[:2]]
-    assert prefixes == [REASONING_SELECT_CUSTOM_ID_PREFIX, FALLBACK_SELECT_CUSTOM_ID_PREFIX]
+    assert prefixes == [
+        REASONING_SELECT_CUSTOM_ID_PREFIX,
+        FALLBACK_SELECT_CUSTOM_ID_PREFIX,
+    ]
 
 
 def test_create_settings_panel_no_reasoning_model_omits_reasoning_row():
@@ -258,16 +289,21 @@ def test_create_settings_panel_no_reasoning_model_omits_reasoning_row():
     rows = create_settings_panel(model, None, False, None)
     # No reasoning knob -> fallback select + button row only.
     assert len(rows) == 2
-    assert rows[0].components[0].custom_id.split(":")[0] == FALLBACK_SELECT_CUSTOM_ID_PREFIX
+    assert (
+        rows[0].components[0].custom_id.split(":")[0]
+        == FALLBACK_SELECT_CUSTOM_ID_PREFIX
+    )
 
 
-def test_create_settings_panel_buttons_carry_auto_and_continue():
+def test_create_settings_panel_buttons_carry_auto_continue_and_save():
     model = get_model(NO_REASONING_KEY)
     rows = create_settings_panel(model, None, False, None)
     buttons = rows[-1].components
     button_prefixes = [button.custom_id.split(":")[0] for button in buttons]
     assert AUTO_TOGGLE_CUSTOM_ID_PREFIX in button_prefixes
     assert CONTINUE_CUSTOM_ID_PREFIX in button_prefixes
+    assert SAVE_CUSTOM_ID_PREFIX in button_prefixes
+    assert len(buttons) == 3
 
 
 def test_create_settings_panel_auto_button_reflects_off_state():
@@ -528,6 +564,21 @@ async def test_select_panel_prefills_from_current_override():
     assert rows[0].components[0].custom_id.endswith(state)
 
 
+async def test_next_advances_with_preselected_current_model():
+    service = AsyncMock()
+    service.get_override.return_value = _override(model_key=REASONING_KEY)
+    event = _component_event(
+        [], service, custom_id=f"{MODEL_NEXT_CUSTOM_ID_PREFIX}:{REASONING_KEY}"
+    )
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.handle_model_override_next(event)
+
+    args, kwargs = event.interaction.create_initial_response.call_args
+    assert args[0] == hikari.ResponseType.MESSAGE_UPDATE
+    assert kwargs["components"]
+    service.clear_override.assert_not_called()
+
+
 async def test_select_denies_non_admin():
     service = AsyncMock()
     event = _component_event([NO_REASONING_KEY], service)
@@ -669,6 +720,58 @@ async def test_continue_opens_modal_carrying_state():
     event.interaction.create_modal_response.assert_awaited_once()
     args, _ = event.interaction.create_modal_response.call_args
     assert args[1] == f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}"
+
+
+async def test_save_persists_panel_state_without_modal_and_keeps_advanced_fields():
+    service = AsyncMock()
+    service.get_override.return_value = _override(
+        daily=1500, hourly=200, response_filter="Only programming questions"
+    )
+    event = _component_event(
+        [],
+        service,
+        custom_id=f"{SAVE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}",
+    )
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.handle_model_override_save(event)
+
+    service.set_override.assert_awaited_once_with(
+        "G",
+        "C",
+        REASONING_KEY,
+        1500,
+        200,
+        reasoning_level="high",
+        auto_respond=True,
+        fallback_model_key=FALLBACK_KEY,
+        response_filter="Only programming questions",
+    )
+    event.interaction.create_modal_response.assert_not_called()
+    args, kwargs = event.interaction.create_initial_response.call_args
+    assert args[0] == hikari.ResponseType.MESSAGE_UPDATE
+    assert kwargs["components"] == []
+
+
+async def test_save_new_override_uses_unlimited_budgets_and_no_filter():
+    service = AsyncMock()
+    service.get_override.return_value = None
+    event = _component_event(
+        [], service, custom_id=f"{SAVE_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0:"
+    )
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.handle_model_override_save(event)
+
+    service.set_override.assert_awaited_once_with(
+        "G",
+        "C",
+        NO_REASONING_KEY,
+        0,
+        0,
+        reasoning_level=None,
+        auto_respond=False,
+        fallback_model_key=None,
+        response_filter=None,
+    )
 
 
 # --------------------------------------------------------------------------- #
