@@ -6,8 +6,9 @@ is the *only* way a handler reaches a channel; the sandboxed script can call it
 solely through the metered external functions in
 :mod:`smarter_dev.web.handler_runtime`.
 
-Kept deliberately small: send a message, add a reaction. Request plumbing
-lives in :mod:`smarter_dev.web.discord_rest`, shared with ``AdminActor``.
+Kept deliberately small: send a message, edit a bot-authored message, add a
+reaction, rename a channel. Request plumbing lives in
+:mod:`smarter_dev.web.discord_rest`, shared with ``AdminActor``.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ from smarter_dev.web.discord_rest import DiscordBotClient, DiscordRestError
 logger = logging.getLogger(__name__)
 
 _MESSAGE_MAX = 2000
+# Discord's hard channel-name length limit; a longer rename is rejected by REST.
+_CHANNEL_NAME_MAX = 100
 # Discord message flag: suppress auto-generated link-preview embeds. Handler
 # output is often a list of links (e.g. a news digest); without this each URL
 # explodes into a large preview card, flooding the channel.
@@ -108,6 +111,40 @@ class DiscordEmitter(DiscordBotClient):
             "POST", f"/channels/{channel_id}/messages", json=payload
         )
         return str(response.json().get("id", ""))
+
+    async def edit_message(
+        self, channel_id: str, message_id: str, content: str
+    ) -> str:
+        """Edit a bot-authored message in place; return the message id.
+
+        Discord REST only permits editing the bot's OWN messages, so
+        bot-authored-only is enforced by the API (403 otherwise) — no ownership
+        bookkeeping needed on our side. The same embed- and mention-suppression
+        rails as ``create_message`` apply, so a maintained post can't start
+        pinging when its content is re-rendered.
+        """
+        payload = {
+            "content": content[:_MESSAGE_MAX],
+            "flags": _SUPPRESS_EMBEDS,
+            "allowed_mentions": _allowed_mentions(),
+        }
+        response = await self._request(
+            "PATCH", f"/channels/{channel_id}/messages/{message_id}", json=payload
+        )
+        return str(response.json().get("id", ""))
+
+    async def rename_channel(self, channel_id: str, name: str) -> bool:
+        """Rename a channel; return True. Raises on any failure.
+
+        ``PATCH /channels/{id}`` with ``{"name": name[:100]}`` (Discord's channel
+        name limit). Discord hard-limits renames to 2 per 10 min per channel and
+        missing MANAGE_CHANNELS surfaces as a REST error — both error the fire
+        loudly rather than silently no-op.
+        """
+        await self._request(
+            "PATCH", f"/channels/{channel_id}", json={"name": name[:_CHANNEL_NAME_MAX]}
+        )
+        return True
 
     async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
         """React to a message. ``emoji`` is ``name:id`` for custom, else unicode."""

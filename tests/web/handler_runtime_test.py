@@ -15,6 +15,10 @@ class _FakeEmitter:
     # ping_role_id) so the runtime's admin-only ping pass-through is observable.
     message_calls: list[tuple[str, str, str | None]] = field(default_factory=list)
     reactions: list[tuple[str, str, str]] = field(default_factory=list)
+    # (channel, message_id, content) for each edit_message; renames record
+    # (channel, name). status/behaviour is happy-path unless a test overrides.
+    edits: list[tuple[str, str, str]] = field(default_factory=list)
+    renames: list[tuple[str, str]] = field(default_factory=list)
     # channel_id -> list[dict] returned by list_threads (missing key -> [], the
     # emitter's gone-channel (404) shape).
     threads_by_channel: dict = field(default_factory=dict)
@@ -37,6 +41,14 @@ class _FakeEmitter:
 
     async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
         self.reactions.append((channel_id, message_id, emoji))
+
+    async def edit_message(self, channel_id: str, message_id: str, content: str) -> str:
+        self.edits.append((channel_id, message_id, content))
+        return message_id
+
+    async def rename_channel(self, channel_id: str, name: str) -> bool:
+        self.renames.append((channel_id, name))
+        return True
 
     async def list_threads(self, channel_id: str, limit: int = 50) -> list:
         return self.threads_by_channel.get(channel_id, [])
@@ -63,8 +75,8 @@ class _StubLimiter:
     allow: bool = True
     calls: list = field(default_factory=list)
 
-    async def hit(self, key: str, limit: int) -> bool:
-        self.calls.append((key, limit))
+    async def hit(self, key: str, limit: int, window_seconds: int | None = None) -> bool:
+        self.calls.append((key, limit, window_seconds))
         return self.allow
 
 
@@ -421,10 +433,10 @@ async def test_create_thread_spends_message_and_channel_window():
     assert emitter.created_threads == [("C1", "help", None)]
     assert emitter.messages[0][1] == "thread1"  # returned id flows to the script
     assert result.usage["messages_sent"] == 2  # create + the send_message
-    assert (channel_message_key("C1"), CHANNEL_MESSAGES_PER_MIN) in limiter.calls
+    assert (channel_message_key("C1"), CHANNEL_MESSAGES_PER_MIN, None) in limiter.calls
     # §5.3: a create is a mutating thread op and draws the guild thread-op window
     # too — but it spends the message budget, not the thread_ops counter.
-    assert (guild_thread_ops_key("G1"), GUILD_THREAD_OPS_PER_MIN) in limiter.calls
+    assert (guild_thread_ops_key("G1"), GUILD_THREAD_OPS_PER_MIN, None) in limiter.calls
     assert result.usage["thread_ops"] == 0
 
 
@@ -465,8 +477,8 @@ async def test_create_post_spends_message_and_window():
     assert result.outcome == "ok", result.error
     assert emitter.created_posts == [("C1", "Title", "body", ["news"])]
     assert emitter.messages[0][1] == "post1"
-    assert (channel_message_key("C1"), CHANNEL_MESSAGES_PER_MIN) in limiter.calls
-    assert (guild_thread_ops_key("G1"), GUILD_THREAD_OPS_PER_MIN) in limiter.calls
+    assert (channel_message_key("C1"), CHANNEL_MESSAGES_PER_MIN, None) in limiter.calls
+    assert (guild_thread_ops_key("G1"), GUILD_THREAD_OPS_PER_MIN, None) in limiter.calls
 
 
 # -- send_message thread-of-home relaxation (standard tier) --------------------
@@ -580,7 +592,7 @@ async def test_admin_close_thread_spends_thread_op_and_guild_window():
     assert result.outcome == "ok", result.error
     assert ("close", "T1") in actor.calls
     assert result.usage["thread_ops"] == 1
-    assert (guild_thread_ops_key("G1"), GUILD_THREAD_OPS_PER_MIN) in limiter.calls
+    assert (guild_thread_ops_key("G1"), GUILD_THREAD_OPS_PER_MIN, None) in limiter.calls
 
 
 async def test_admin_lock_reopen_thread_metered():
@@ -633,3 +645,152 @@ async def test_standard_handler_has_no_thread_op_functions():
     # No actor -> close_thread is undefined in the sandbox -> NameError -> error.
     result, _, _ = await _run('await close_thread("T1")\n')
     assert result.outcome == "error"
+
+
+# -- admin edit_message (actor set) --------------------------------------------
+
+from smarter_dev.web.handler_caps import (
+    RENAME_WINDOW_SECONDS,
+    RENAMES_PER_WINDOW,
+    channel_rename_key,
+)
+
+
+@dataclass
+class _CountingLimiter:
+    """Real fixed-window behaviour: denies once a key's count exceeds its limit."""
+
+    counts: dict = field(default_factory=dict)
+    calls: list = field(default_factory=list)
+
+    async def hit(self, key: str, limit: int, window_seconds: int | None = None) -> bool:
+        self.calls.append((key, limit, window_seconds))
+        self.counts[key] = self.counts.get(key, 0) + 1
+        return self.counts[key] <= limit
+
+
+async def test_edit_message_absent_without_actor():
+    # No actor -> edit_message is undefined in the sandbox -> NameError -> error.
+    result, _, _ = await _run('await edit_message("M1", "new")\n')
+    assert result.outcome == "error"
+
+
+async def test_edit_message_admin_edits_bot_message_default_channel():
+    actor = _FakeActor()
+    result, emitter, _ = await _run(
+        'await edit_message("M9", "updated rules")\n',
+        budget=admin_budget(),
+        actor=actor,
+    )
+    assert result.outcome == "ok", result.error
+    assert emitter.edits == [("C1", "M9", "updated rules")]
+    assert result.usage["messages_sent"] == 1
+
+
+async def test_edit_message_targets_explicit_channel():
+    actor = _FakeActor()
+    result, emitter, _ = await _run(
+        'await edit_message("M9", "text", "C2")\n',
+        budget=admin_budget(),
+        actor=actor,
+    )
+    assert result.outcome == "ok", result.error
+    assert emitter.edits == [("C2", "M9", "text")]
+
+
+async def test_edit_message_spends_message_budget_and_breaches_at_sixth():
+    actor = _FakeActor()
+    script = "for i in range(6):\n    await edit_message('M9', str(i))\n"
+    result, emitter, _ = await _run(script, budget=admin_budget(), actor=actor)
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "messages"
+    # Admin cap is 5: five edits went out before the sixth breached.
+    assert len(emitter.edits) == 5
+
+
+async def test_edit_message_does_not_hit_channel_message_window():
+    actor = _FakeActor()
+    limiter = _StubLimiter()
+    result, emitter, limiter = await _run(
+        'await edit_message("M9", "a")\nawait edit_message("M9", "b")\n',
+        budget=admin_budget(),
+        actor=actor,
+        limiter=limiter,
+    )
+    assert result.outcome == "ok", result.error
+    # An edit is not channel volume: the per-channel message window is untouched.
+    assert not any(
+        key == channel_message_key("C1") for key, _, _ in limiter.calls
+    )
+
+
+# -- admin rename_channel (actor set) ------------------------------------------
+
+
+async def test_rename_channel_absent_without_actor():
+    # No actor -> rename_channel is undefined -> NameError -> error.
+    result, _, _ = await _run('await rename_channel("C1", "x")\n')
+    assert result.outcome == "error"
+
+
+async def test_rename_channel_admin_spends_mod_action_and_renames():
+    actor = _FakeActor()
+    limiter = _CountingLimiter()
+    # In-scope via channel_ids so the scope check resolves without a guild fetch.
+    result, emitter, limiter = await _run(
+        'await rename_channel("C1", "📊Members: 1.2k")\n',
+        budget=admin_budget(),
+        actor=actor,
+        limiter=limiter,
+        channel_ids=["C1"],
+    )
+    assert result.outcome == "ok", result.error
+    assert emitter.renames == [("C1", "📊Members: 1.2k")]
+    assert result.usage["mod_actions"] == 1
+    assert (
+        channel_rename_key("C1"),
+        RENAMES_PER_WINDOW,
+        RENAME_WINDOW_SECONDS,
+    ) in limiter.calls
+
+
+async def test_rename_channel_out_of_scope_raises():
+    actor = _FakeActor()
+    result, emitter, _ = await _run(
+        'await rename_channel("OTHER", "x")\n',
+        budget=admin_budget(),
+        actor=actor,
+        channel_ids=["C1", "C2"],
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "out_of_scope_channel"
+    assert emitter.renames == []  # denied before the REST call
+    assert result.usage["mod_actions"] == 0
+
+
+async def test_rename_channel_guild_wide_verifies_guild_ownership():
+    # Empty scope + foreign-guild channel: the guild-scope rail denies it.
+    emitter = _FakeEmitter(guild_by_channel={"OTHER": "OTHER_GUILD"})
+    result, emitter, _ = await _run(
+        'await rename_channel("OTHER", "x")\n',
+        budget=admin_budget(),
+        actor=_FakeActor(),
+        emitter=emitter,
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "out_of_scope_channel"
+    assert emitter.renames == []
+
+
+async def test_rename_channel_third_in_window_raises_channel_renames_cap():
+    actor = _FakeActor()
+    limiter = _CountingLimiter()
+    script = "for i in range(3):\n    await rename_channel('C1', str(i))\n"
+    result, emitter, _ = await _run(
+        script, budget=admin_budget(), actor=actor, limiter=limiter,
+        channel_ids=["C1"],
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "channel_renames_per_10min"
+    # Two renames land before the third breaches the 2/600s window.
+    assert len(emitter.renames) == 2
