@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from smarter_dev.web.handler_caps import (
     GUILD_MEMBER_EVENTS_PER_MIN,
+    GUILD_ROLE_CHANGES_PER_MIN,
     GUILD_THREAD_OPS_PER_MIN,
     RENAME_WINDOW_SECONDS,
     RENAMES_PER_WINDOW,
@@ -11,6 +12,7 @@ from smarter_dev.web.handler_caps import (
     channel_rename_key,
     fires_per_min_for_trigger,
     guild_member_events_key,
+    guild_role_changes_key,
     guild_thread_ops_key,
     HANDLER_FIRES_PER_MIN_MESSAGE,
     HANDLER_FIRES_PER_MIN_REACTION,
@@ -110,6 +112,22 @@ def test_guild_member_events_window():
 def test_guild_thread_ops_window():
     assert GUILD_THREAD_OPS_PER_MIN == 30
     assert guild_thread_ops_key("G1") == "hcap:threadop:G1"
+
+
+def test_guild_role_changes_key_format():
+    assert GUILD_ROLE_CHANGES_PER_MIN == 30
+    assert guild_role_changes_key("G1") == "hcap:rolechg:G1"
+
+
+async def test_role_changes_window_declines_over_limit():
+    limiter = WindowedLimiter(redis=_FakeRedis())
+    key = guild_role_changes_key("G1")
+    allowed = [
+        await limiter.hit(key, GUILD_ROLE_CHANGES_PER_MIN)
+        for _ in range(GUILD_ROLE_CHANGES_PER_MIN + 1)
+    ]
+    assert allowed[:GUILD_ROLE_CHANGES_PER_MIN] == [True] * GUILD_ROLE_CHANGES_PER_MIN
+    assert allowed[GUILD_ROLE_CHANGES_PER_MIN] is False
 
 
 async def test_limiter_window_seconds_override_uses_custom_ttl():

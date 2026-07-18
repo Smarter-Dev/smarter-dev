@@ -53,6 +53,19 @@ _HEXISH = re.compile(r"^[0-9a-fA-F]+$")
 # quote), so dynamic references are left for the judge.
 _DELETE_THREAD_LITERAL = re.compile(r"\bdelete_thread\s*\(\s*['\"]")
 
+# add_role/remove_role(user_id, ROLE_ID): the SECOND argument (the grant target)
+# must be a plain string literal so the role a handler can grant is reviewable —
+# the inverse of the delete_thread rule (which rejects a LITERAL first arg). The
+# user_id (first arg) is expected to be dynamic (context/payload), so only the
+# role id is constrained. The first arg is matched non-greedily up to the comma,
+# then the second arg must open with a bare quote — a variable, subscript, or
+# f-string role id (the `f` precedes the quote) fails the match and is rejected.
+# Pragmatic/regex-based like the rest of this module: fragile for deeply nested
+# first args (a call with its own comma), which the judge still backstops.
+_ROLE_ID_LITERAL = re.compile(
+    r"\b(?:add_role|remove_role)\s*\(\s*[^,()]+,\s*(?P<second>['\"]?)"
+)
+
 
 def _string_literals(script: str) -> list[str]:
     out: list[str] = []
@@ -78,6 +91,16 @@ def check_static(script: str) -> str | None:
     # variable, subscript, or f-string reference passes through to the judge.
     if _DELETE_THREAD_LITERAL.search(script):
         return "script calls delete_thread() with a hardcoded thread id literal"
+
+    # A role grant's target must be a reviewable string-literal role id (the
+    # allowlist is stated against literals). A variable/subscript/f-string role
+    # id is rejected here; the runtime allowlist still gates whatever passes.
+    for match in _ROLE_ID_LITERAL.finditer(script):
+        if not match.group("second"):
+            return (
+                "script calls add_role/remove_role with a non-literal role id "
+                "(the role id must be a string literal)"
+            )
 
     for literal in _string_literals(script):
         compact = literal.strip()

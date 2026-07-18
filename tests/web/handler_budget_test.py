@@ -8,9 +8,11 @@ import pytest
 
 from smarter_dev.web.handler_budget import (
     ADMIN_MAX_DISCORD_READS,
+    ADMIN_MAX_ROLE_CHANGES,
     ADMIN_MAX_THREAD_OPS,
     CapExceeded,
     DEFAULT_MAX_DISCORD_READS,
+    DEFAULT_MAX_ROLE_CHANGES,
     DEFAULT_MAX_THREAD_OPS,
     HandlerBudget,
     admin_budget,
@@ -88,6 +90,7 @@ def test_usage_snapshot():
         "mod_actions": 0,
         "discord_reads": 0,
         "thread_ops": 0,
+        "role_changes": 0,
     }
 
 
@@ -150,4 +153,50 @@ def test_thread_op_checks_deadline_first():
     budget.started_at = time.monotonic() - 1.0
     with pytest.raises(CapExceeded) as exc:
         budget.spend_thread_op()
+    assert exc.value.cap == "wall_clock"
+
+
+def test_spend_role_change_increments_and_caps():
+    budget = HandlerBudget(max_role_changes=2)
+    budget.spend_role_change()
+    budget.spend_role_change()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_role_change()
+    assert exc.value.cap == "role_changes"
+    assert budget.role_changes == 2
+
+
+def test_default_budget_role_changes_cap_is_zero_raises_immediately():
+    # Standard tier has no AdminActor, so a role change can never be spent.
+    assert DEFAULT_MAX_ROLE_CHANGES == 0
+    budget = HandlerBudget()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_role_change()
+    assert exc.value.cap == "role_changes"
+    assert budget.role_changes == 0
+
+
+def test_admin_budget_sets_role_changes_cap():
+    assert ADMIN_MAX_ROLE_CHANGES == 10
+    budget = admin_budget()
+    assert budget.max_role_changes == ADMIN_MAX_ROLE_CHANGES
+    for _ in range(ADMIN_MAX_ROLE_CHANGES):
+        budget.spend_role_change()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_role_change()
+    assert exc.value.cap == "role_changes"
+
+
+def test_usage_includes_role_changes():
+    budget = admin_budget()
+    budget.spend_role_change()
+    assert budget.usage()["role_changes"] == 1
+
+
+def test_role_change_checks_deadline_first():
+    budget = admin_budget()
+    budget.wall_clock_seconds = 0.0
+    budget.started_at = time.monotonic() - 1.0
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_role_change()
     assert exc.value.cap == "wall_clock"

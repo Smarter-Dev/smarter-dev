@@ -30,6 +30,7 @@ _USAGE = {
     "mod_actions": 0,
     "discord_reads": 0,
     "thread_ops": 0,
+    "role_changes": 0,
 }
 
 
@@ -177,7 +178,9 @@ def _result_with_guild_memory(writes=None, deletes=None, outcome="ok"):
     )
 
 
-async def _seed_admin_handler(engine, guild_id: str = "G1") -> str:
+async def _seed_admin_handler(
+    engine, guild_id: str = "G1", settings: dict | None = None
+) -> str:
     handler_id = str(uuid4())
     async with async_sessionmaker(engine, expire_on_commit=False)() as s:
         s.add(
@@ -186,7 +189,7 @@ async def _seed_admin_handler(engine, guild_id: str = "G1") -> str:
                 guild_id=guild_id,
                 name=f"h-{handler_id[:8]}",
                 trigger_type="message",
-                settings={},
+                settings=settings or {},
                 channel_ids=["C1"],
                 description="d",
                 script="pass\n",
@@ -201,6 +204,7 @@ def _patch_admin_job(monkeypatch, engine, fake_result, captured=None):
     async def fake_run(script, context, **kwargs):
         if captured is not None:
             captured["guild_memory"] = kwargs.get("guild_memory")
+            captured["allowed_role_ids"] = kwargs.get("allowed_role_ids")
         return fake_result
 
     async def fake_agent(*args, **kwargs):
@@ -358,3 +362,94 @@ async def test_concurrent_different_key_writes_and_same_key_last_write_wins(
     await _fire(_result_with_guild_memory(writes={"a": 10}))
     await _fire(_result_with_guild_memory(writes={"a": 20}))
     assert await _load(test_engine, "G1") == {"a": 20, "b": 2}
+
+
+# -- role_changes recording + allowed_role_ids passthrough (E2) ----------------
+
+from sqlalchemy import select
+
+from smarter_dev.web.models import HandlerRun
+
+
+async def _load_runs(engine, handler_id: str) -> list[HandlerRun]:
+    async with async_sessionmaker(engine, expire_on_commit=False)() as s:
+        rows = await s.scalars(
+            select(HandlerRun).where(HandlerRun.handler_id == UUID(handler_id))
+        )
+        return list(rows)
+
+
+async def test_admin_fire_records_role_changes(monkeypatch, test_engine):
+    handler_id = await _seed_admin_handler(test_engine, "G1")
+    usage = dict(_USAGE, role_changes=3)
+    result = HandlerResult(outcome="ok", usage=usage, duration_ms=1)
+    _patch_admin_job(monkeypatch, test_engine, result)
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+    runs = await _load_runs(test_engine, handler_id)
+    assert len(runs) == 1
+    assert runs[0].role_changes == 3
+
+
+async def test_admin_fire_passes_allowed_role_ids_from_settings(
+    monkeypatch, test_engine
+):
+    handler_id = await _seed_admin_handler(
+        test_engine, "G1", settings={"allowed_role_ids": ["R1", "R2"]}
+    )
+    captured = {}
+    _patch_admin_job(
+        monkeypatch, test_engine, _result_with_guild_memory(), captured
+    )
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+    assert captured["allowed_role_ids"] == ["R1", "R2"]
+
+
+async def test_standard_fire_records_zero_role_changes(monkeypatch, test_engine):
+    handler_id = str(uuid4())
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as s:
+        s.add(
+            ChannelHandler(
+                id=UUID(handler_id),
+                guild_id="G1",
+                channel_id="C1",
+                name="std-rc",
+                trigger_type="message",
+                settings={},
+                description="d",
+                script="pass\n",
+                created_by="U1",
+            )
+        )
+        await s.commit()
+
+    async def fake_run(script, context, **kwargs):
+        return HandlerResult(outcome="ok", usage=dict(_USAGE), duration_ms=1)
+
+    async def fake_agent(*args, **kwargs):
+        return ""
+
+    async def fake_notify(**kwargs):
+        return None
+
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+    monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
+    monkeypatch.setattr(handlers_jobs, "notify_handler_error", fake_notify)
+    monkeypatch.setattr(
+        handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+    monkeypatch.setattr(
+        handlers_jobs, "get_db_session_context", _RealSessionCtx(test_engine)
+    )
+    monkeypatch.setattr(handlers_jobs, "get_redis_client", lambda: object())
+    monkeypatch.setattr(handlers_jobs, "WindowedLimiter", lambda **kwargs: object())
+
+    await handlers_jobs.run_handler_fire(HandlerFirePayload(handler_id=handler_id))
+    runs = await _load_runs(test_engine, handler_id)
+    assert len(runs) == 1
+    assert runs[0].role_changes == 0

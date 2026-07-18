@@ -89,3 +89,28 @@ def test_allows_delete_thread_over_list_threads_result():
         "        await delete_thread(t['thread_id'])\n"
     )
     assert check_static(script) is None
+
+
+def test_add_role_with_literal_role_id_ok():
+    ok = 'await add_role(context["member_id"], "888160821673349140")\n'
+    assert check_static(ok) is None
+
+
+def test_remove_role_with_literal_role_id_ok():
+    ok = "await remove_role(context['payload']['user_id'], '644325811301777426')\n"
+    assert check_static(ok) is None
+
+
+def test_add_role_with_variable_role_id_rejected():
+    reason = check_static('await add_role(context["member_id"], role_id)\n')
+    assert reason and "role id" in reason
+
+
+def test_remove_role_with_fstring_role_id_rejected():
+    reason = check_static('await remove_role(context["member_id"], f"{role}")\n')
+    assert reason and "role id" in reason
+
+
+def test_add_role_with_subscript_role_id_rejected():
+    reason = check_static('await add_role(context["member_id"], roles["holding"])\n')
+    assert reason and "role id" in reason

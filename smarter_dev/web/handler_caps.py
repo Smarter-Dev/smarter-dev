@@ -38,6 +38,10 @@ GUILD_MEMBER_EVENTS_PER_MIN = 60
 # Guild-wide gate on mutating thread ops (create/close/lock/reopen/delete),
 # enforced in the runtime wrapper before the REST call.
 GUILD_THREAD_OPS_PER_MIN = 30
+# Guild-wide gate on role grants/revokes (add_role/remove_role), enforced in the
+# runtime wrapper before the REST call so a promotion burst degrades to a
+# declined fire rather than a REST flood.
+GUILD_ROLE_CHANGES_PER_MIN = 30
 
 # Per-channel rename ceiling. Discord itself hard-limits channel renames to
 # 2 per 10 minutes per channel, so this window is pinned to that limit rather
@@ -80,6 +84,10 @@ def guild_member_events_key(guild_id: str) -> str:
 
 def guild_thread_ops_key(guild_id: str) -> str:
     return f"hcap:threadop:{guild_id}"
+
+
+def guild_role_changes_key(guild_id: str) -> str:
+    return f"hcap:rolechg:{guild_id}"
 
 
 def channel_rename_key(channel_id: str) -> str:

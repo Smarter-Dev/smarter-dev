@@ -32,6 +32,10 @@ DEFAULT_MAX_MOD_ACTIONS = 0
 # thread ops are zero for them, exactly like mod actions.
 DEFAULT_MAX_DISCORD_READS = 2
 DEFAULT_MAX_THREAD_OPS = 0
+# Role grants/revokes. Standard handlers have no AdminActor, so zero (belt and
+# suspenders — the functions aren't even injected for them). Kept OUT of the mod
+# pool so a promotion burst can't starve a ban and vice versa.
+DEFAULT_MAX_ROLE_CHANGES = 0
 
 # Admin handlers are admin-created and trusted: looser per-fire caps, and a
 # moderation-action budget (bans/kicks/timeouts/deletes), e.g. cleaning up a
@@ -41,6 +45,8 @@ ADMIN_MAX_AGENT_CALLS = 3
 ADMIN_MAX_MOD_ACTIONS = 25
 ADMIN_MAX_DISCORD_READS = 5
 ADMIN_MAX_THREAD_OPS = 10
+# Role changes: a promotion is 2 ops/fire, a multi-target sus a handful.
+ADMIN_MAX_ROLE_CHANGES = 10
 ADMIN_WALL_CLOCK_SECONDS = 120.0
 
 
@@ -74,6 +80,7 @@ class HandlerBudget:
     max_mod_actions: int = DEFAULT_MAX_MOD_ACTIONS
     max_discord_reads: int = DEFAULT_MAX_DISCORD_READS
     max_thread_ops: int = DEFAULT_MAX_THREAD_OPS
+    max_role_changes: int = DEFAULT_MAX_ROLE_CHANGES
 
     messages_sent: int = 0
     web_searches: int = 0
@@ -82,6 +89,7 @@ class HandlerBudget:
     mod_actions: int = 0
     discord_reads: int = 0
     thread_ops: int = 0
+    role_changes: int = 0
 
     started_at: float = field(default_factory=time.monotonic)
 
@@ -168,6 +176,20 @@ class HandlerBudget:
             )
         self.thread_ops += 1
 
+    def spend_role_change(self) -> None:
+        """Account for one role grant/revoke (add_role/remove_role).
+
+        Separate from mod_actions: role changes are routine lifecycle plumbing
+        and must not draw from the same pool as bans.
+        """
+        self.check_deadline()
+        if self.role_changes >= self.max_role_changes:
+            raise CapExceeded(
+                "role_changes",
+                f"handler hit its {self.max_role_changes}-role-change cap",
+            )
+        self.role_changes += 1
+
     def enforce_agent_context(self, argument: str) -> None:
         """Reject an agent argument larger than the context-bytes cap.
 
@@ -193,6 +215,7 @@ class HandlerBudget:
             "mod_actions": self.mod_actions,
             "discord_reads": self.discord_reads,
             "thread_ops": self.thread_ops,
+            "role_changes": self.role_changes,
         }
 
 
@@ -204,5 +227,6 @@ def admin_budget() -> "HandlerBudget":
         max_mod_actions=ADMIN_MAX_MOD_ACTIONS,
         max_discord_reads=ADMIN_MAX_DISCORD_READS,
         max_thread_ops=ADMIN_MAX_THREAD_OPS,
+        max_role_changes=ADMIN_MAX_ROLE_CHANGES,
         wall_clock_seconds=ADMIN_WALL_CLOCK_SECONDS,
     )

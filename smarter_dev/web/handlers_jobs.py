@@ -104,6 +104,7 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
                 agent_calls=result.usage["agent_calls"],
                 discord_reads=result.usage.get("discord_reads", 0),
                 thread_ops=result.usage.get("thread_ops", 0),
+                role_changes=result.usage.get("role_changes", 0),
                 duration_ms=result.duration_ms,
                 finished_at=datetime.now(timezone.utc),
             )

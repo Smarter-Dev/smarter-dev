@@ -199,3 +199,80 @@ async def test_thread_verification_cached_across_ops():
     await actor.close_thread("T1")
     await actor.lock_thread("T1")
     assert [r.method for r in requests] == ["GET", "PATCH", "PATCH"]
+
+
+# -- role mutation (add_role / remove_role) + ban purge window (E2) --
+
+
+def _role_actor(
+    requests: list[httpx.Request], status_code: int = 204
+) -> AdminActor:
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(status_code)
+
+    return AdminActor(
+        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+    )
+
+
+async def test_add_role_puts_role_and_returns_true():
+    requests: list[httpx.Request] = []
+    result = await _role_actor(requests).add_role("U1", "R1", reason="onboard")
+    assert result is True
+    request = requests[0]
+    assert request.method == "PUT"
+    assert request.url.path.endswith("/guilds/G1/members/U1/roles/R1")
+    assert request.headers["X-Audit-Log-Reason"] == "onboard"
+
+
+async def test_remove_role_deletes_role_and_returns_true():
+    requests: list[httpx.Request] = []
+    result = await _role_actor(requests).remove_role("U1", "R1")
+    assert result is True
+    request = requests[0]
+    assert request.method == "DELETE"
+    assert request.url.path.endswith("/guilds/G1/members/U1/roles/R1")
+    assert "X-Audit-Log-Reason" not in request.headers
+
+
+async def test_add_role_unknown_member_404_returns_false():
+    """A member who left before the grant: silent no-op, no raise."""
+    result = await _role_actor([], status_code=404).add_role("U1", "R1")
+    assert result is False
+
+
+async def test_remove_role_unknown_member_404_returns_false():
+    result = await _role_actor([], status_code=404).remove_role("U1", "R1")
+    assert result is False
+
+
+async def test_add_role_forbidden_403_raises_admin_action_error():
+    for status in (403, 500):
+        with pytest.raises(AdminActionError):
+            await _role_actor([], status_code=status).add_role("U1", "R1")
+        with pytest.raises(AdminActionError):
+            await _role_actor([], status_code=status).remove_role("U1", "R1")
+
+
+async def test_add_role_encodes_audit_reason():
+    requests: list[httpx.Request] = []
+    await _role_actor(requests).add_role("U1", "R1", reason="sus — telegram")
+    assert requests[0].headers["X-Audit-Log-Reason"] == "sus%20%E2%80%94%20telegram"
+
+
+async def test_ban_user_sends_delete_message_seconds_body():
+    requests: list[httpx.Request] = []
+    await _role_actor(requests).ban_user(
+        "U1", reason="bot heuristic", delete_message_seconds=3600
+    )
+    request = requests[0]
+    assert request.method == "PUT"
+    assert request.url.path.endswith("/guilds/G1/bans/U1")
+    assert json.loads(request.content) == {"delete_message_seconds": 3600}
+
+
+async def test_ban_user_defaults_delete_message_seconds_zero():
+    requests: list[httpx.Request] = []
+    await _role_actor(requests).ban_user("U1")
+    assert json.loads(requests[0].content) == {"delete_message_seconds": 0}

@@ -125,6 +125,24 @@ async def test_handler_run_has_discord_reads_and_thread_ops(db_session):
     assert run.thread_ops == 2
 
 
+async def test_handler_run_role_changes_defaults_zero(db_session):
+    from smarter_dev.web.models import HandlerRun
+    from uuid import uuid4
+
+    run = HandlerRun(handler_id=uuid4(), trigger_context={}, outcome="ok")
+    db_session.add(run)
+    await db_session.commit()
+    await db_session.refresh(run)
+    assert run.role_changes == 0
+
+    graded = HandlerRun(
+        handler_id=uuid4(), trigger_context={}, outcome="ok", role_changes=4
+    )
+    db_session.add(graded)
+    await db_session.commit()
+    assert graded.role_changes == 4
+
+
 async def test_admin_handler_name_is_unique_per_guild(db_session):
     def _admin(guild_id: str, name: str) -> AdminHandler:
         return AdminHandler(
