@@ -214,7 +214,9 @@ class HandlerExecution:
 
         return wrapper
 
-    async def _send_message(self, content: str, channel_id: str | None = None) -> str:
+    async def _send_message(
+        self, content: str, channel_id: str | None = None, ping_role_id: str | None = None
+    ) -> str:
         target = str(channel_id) if channel_id else self.channel_id
         # Standard handlers may only post to their own channel or a thread OF
         # that channel; admin handlers (actor set) may post anywhere in the guild
@@ -236,7 +238,11 @@ class HandlerExecution:
                 "channel_messages_per_min",
                 f"channel hit its {CHANNEL_MESSAGES_PER_MIN} messages/min cap",
             )
-        return await self.emitter.create_message(target, str(content))
+        # ping_role_id is a mod-escalation rail: forwarded ONLY for admin handlers
+        # (actor set). A standard handler's ping_role_id is silently dropped so
+        # the emitter's mention-suppressing default stands (fail-safe).
+        role_ping = str(ping_role_id) if (ping_role_id and self.actor is not None) else None
+        return await self.emitter.create_message(target, str(content), role_ping)
 
     async def _is_home_channel_thread(self, channel_id: str) -> bool:
         """Whether ``channel_id`` is a thread whose parent is the home channel.

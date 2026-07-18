@@ -454,6 +454,98 @@ def thread_create_context(
     }
 
 
+# Guild-level permissions that mark a message author as "staff" for the
+# message-trigger context's cheap staff-exemption guard (§3.1). ADMINISTRATOR
+# implies every permission, so it counts even without explicit MANAGE_MESSAGES.
+_STAFF_MESSAGE_PERMISSIONS = (
+    hikari.Permissions.MANAGE_MESSAGES | hikari.Permissions.ADMINISTRATOR
+)
+
+
+def author_has_manage_messages(member: Any) -> bool:
+    """Guild-level MANAGE_MESSAGES/ADMINISTRATOR for a message author.
+
+    Fail CLOSED: an uncached (``None``) author or an unresolvable permission set
+    reads as NON-staff, so the author is scanned rather than exempted — a
+    staff-exemption gate must never fail open. Guild-level only (no per-channel
+    overwrites), matching the invite-filter plan's "express staff as roles".
+    """
+    if member is None:
+        return False
+    try:
+        permissions = lightbulb.utils.permissions_for(member)
+    except Exception:  # noqa: BLE001 — an unresolved author is scanned, not exempt
+        return False
+    return bool(permissions & _STAFF_MESSAGE_PERMISSIONS)
+
+
+def _category_id_of(channel: Any) -> str | None:
+    """Category (parent) id of a guild channel, or None when absent/uncached."""
+    if channel is None:
+        return None
+    parent_id = getattr(channel, "parent_id", None)
+    return str(parent_id) if parent_id is not None else None
+
+
+def resolve_channel_parent_id(bot: Any, channel_id: Any) -> str | None:
+    """Category id of the surface a message was posted in, or None (§3.1).
+
+    A top-level channel reports its own parent_id (the category). A thread
+    message reports the thread's parent text channel's parent_id — the
+    grandparent category — so an invite/private-category check reads the same in
+    a thread as in the channel it hangs off. None on any cache miss (fail closed;
+    a handler must treat None as "unknown category").
+    """
+    thread_channel = _get_thread_channel(bot, channel_id)
+    if thread_channel is not None:
+        return _category_id_of(_get_guild_channel(bot, thread_channel.parent_id))
+    return _category_id_of(_get_guild_channel(bot, channel_id))
+
+
+def message_context(
+    msg: Any,
+    *,
+    author_role_ids: list[str],
+    author_has_manage_messages: bool,
+    mentioned_user_ids: list[str],
+    mentioned_role_ids: list[str],
+    mentions_everyone: bool,
+    channel_parent_id: str | None,
+    author_joined_at: str | None,
+    attachments: list[dict],
+    thread_fields: dict,
+) -> dict:
+    """message trigger context (pure — no cache/REST).
+
+    The impure inputs (author roles, guild-level manage-messages, the mention id
+    lists off the gateway payload, the category id) are resolved by the caller
+    and passed in; this only assembles the dict. The enrichment fields are inert
+    for every dispatch — cheap staff-exemption / anti-mention-injection guards
+    the auto-mod handlers and the future message_edit trigger reuse.
+    """
+    return {
+        "trigger_type": "message",
+        "message_content": msg.content or "",
+        "message_id": str(msg.id),
+        "author_id": str(msg.author.id),
+        "author_name": msg.author.username,
+        # For admin handlers that gate on new accounts / recent joiners.
+        "author_account_created_at": _snowflake_created_at(int(msg.author.id)),
+        "author_joined_at": author_joined_at,
+        # §3.1 enrichment — staff-exemption + anti-mention-injection guards.
+        "author_role_ids": author_role_ids,
+        "author_has_manage_messages": author_has_manage_messages,
+        "mentioned_user_ids": mentioned_user_ids,
+        "mentioned_role_ids": mentioned_role_ids,
+        "mentions_everyone": mentions_everyone,
+        "channel_parent_id": channel_parent_id,
+        # Files posted with the message — scripts can read these via the
+        # gathering agent's web_read tool (it handles image/pdf/audio urls).
+        "attachments": attachments,
+        **thread_fields,
+    }
+
+
 def message_thread_fields(thread_channel: Any) -> dict:
     """Extra message-context fields naming the enclosing thread (or is_thread=False)."""
     if thread_channel is None:
@@ -530,20 +622,21 @@ async def dispatch_message(bot: Any, event: Any) -> None:
         for a in msg.attachments
     ]
     thread_channel = _get_thread_channel(bot, event.channel_id)
-    context = {
-        "trigger_type": "message",
-        "message_content": msg.content or "",
-        "message_id": str(msg.id),
-        "author_id": str(msg.author.id),
-        "author_name": msg.author.username,
-        # For admin handlers that gate on new accounts / recent joiners.
-        "author_account_created_at": _snowflake_created_at(int(msg.author.id)),
-        "author_joined_at": joined_at,
-        # Files posted with the message — scripts can read these via the
-        # gathering agent's web_read tool (it handles image/pdf/audio urls).
-        "attachments": attachments,
-        **message_thread_fields(thread_channel),
-    }
+    author_role_ids = (
+        _roles_beyond_everyone(event.member) if event.member is not None else []
+    )
+    context = message_context(
+        msg,
+        author_role_ids=author_role_ids,
+        author_has_manage_messages=author_has_manage_messages(event.member),
+        mentioned_user_ids=[str(x) for x in msg.user_mentions_ids],
+        mentioned_role_ids=[str(x) for x in msg.role_mention_ids],
+        mentions_everyone=bool(msg.mentions_everyone),
+        channel_parent_id=resolve_channel_parent_id(bot, event.channel_id),
+        author_joined_at=joined_at,
+        attachments=attachments,
+        thread_fields=message_thread_fields(thread_channel),
+    )
     # A message inside a thread dispatches to the thread's PARENT channel (a
     # single fire whose home channel is the parent, §4); a non-thread message
     # dispatches to its own channel. Either way it's exactly one dispatch.

@@ -45,6 +45,16 @@ One input variable `context: dict` describes the trigger:
               user id — always present), context["author_joined_at"] (ISO 8601 or null),
               context["attachments"] — a list of files posted with the message, each
               {"url", "content_type", "filename"} (empty list if none).
+              AUTHOR & MENTION GUARDS (cheap, always present — use FIRST to exempt staff and
+              catch mass pings before any expensive check or action):
+              context["author_role_ids"] (role ids held, @everyone excluded; [] when the member
+              isn't cached), context["author_has_manage_messages"] (true when the author has
+              guild-level Manage Messages or Administrator — a staff-exemption signal; false when
+              unknown, so a false reading means SCAN, never exempt),
+              context["mentioned_user_ids"] / context["mentioned_role_ids"] (id lists this message
+              pinged), context["mentions_everyone"] (true on @everyone/@here — the mass-ping catch),
+              context["channel_parent_id"] (the category id of the channel, or the thread's parent
+              channel, or null when uncached — for private-category exemptions).
               ACTIVITY FACTS (platform-tracked — use these instead of keeping your own per-user
               records in memory): context["author_is_first_message"] (true on the author's first
               tracked message in this guild), context["author_days_since_last_message"] (whole
@@ -90,8 +100,11 @@ Leave channel_ids EMPTY for the member_* triggers (a member event has no channel
               thread_create handlers by channel_ids on the PARENT channel(s), or empty for all.
 
 Provided async functions — you MUST `await` every call:
-  await send_message(content: str, channel_id: str = None) -> str
+  await send_message(content: str, channel_id: str = None, ping_role_id: str = None) -> str
       Post to the current channel, or to `channel_id` (any channel — e.g. mod-chat). Returns id.
+      Mass mentions are suppressed by default: content that names @everyone/@here or a role does
+      NOT ping. ping_role_id is for MOD ESCALATION ONLY — pass a role id to ping exactly that one
+      role (e.g. alert @mods on a raid); use it sparingly, never for routine notices.
   await add_reaction(message_id: str, emoji: str) -> bool
   await spawn_agent(prompt: str, has_tools: bool = False) -> str
       Gathering agent; PLAINTEXT only. has_tools=True can web-search AND read ANY url — web pages,

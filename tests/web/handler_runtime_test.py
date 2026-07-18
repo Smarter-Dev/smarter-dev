@@ -11,6 +11,9 @@ from smarter_dev.web.handler_runtime import run_handler_script
 @dataclass
 class _FakeEmitter:
     messages: list[tuple[str, str]] = field(default_factory=list)
+    # Full create_message calls including the mention-rail arg (channel, content,
+    # ping_role_id) so the runtime's admin-only ping pass-through is observable.
+    message_calls: list[tuple[str, str, str | None]] = field(default_factory=list)
     reactions: list[tuple[str, str, str]] = field(default_factory=list)
     # channel_id -> list[dict] returned by list_threads (missing key -> [], the
     # emitter's gone-channel (404) shape).
@@ -25,8 +28,11 @@ class _FakeEmitter:
     guild_by_channel: dict = field(default_factory=dict)
     guild_calls: list = field(default_factory=list)
 
-    async def create_message(self, channel_id: str, content: str) -> str:
+    async def create_message(
+        self, channel_id: str, content: str, ping_role_id: str | None = None
+    ) -> str:
         self.messages.append((channel_id, content))
+        self.message_calls.append((channel_id, content, ping_role_id))
         return f"msg{len(self.messages)}"
 
     async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
@@ -267,6 +273,24 @@ async def test_admin_handler_moderation_metered():
     assert "delete" in kinds and "ban" in kinds
     assert result.usage["mod_actions"] == 2
     assert ("MODCHAT", "banned a scammer") in emitter.messages  # admin cross-channel ok
+
+
+async def test_admin_send_message_forwards_ping_role_id():
+    # An admin (actor set) escalation send may ping exactly one role.
+    actor = _FakeActor()
+    script = 'await send_message("mods needed", ping_role_id="R7")\n'
+    result, emitter, _ = await _run(script, budget=admin_budget(), actor=actor)
+    assert result.outcome == "ok", result.error
+    assert emitter.message_calls == [("C1", "mods needed", "R7")]
+
+
+async def test_standard_send_message_drops_ping_role_id():
+    # A standard handler (no actor) never pings a role even if the script asks;
+    # the emitter's suppressing default stands (fail-safe, arg silently dropped).
+    script = 'await send_message("mods needed", ping_role_id="R7")\n'
+    result, emitter, _ = await _run(script)
+    assert result.outcome == "ok", result.error
+    assert emitter.message_calls == [("C1", "mods needed", None)]
 
 
 async def test_admin_mod_action_cap():

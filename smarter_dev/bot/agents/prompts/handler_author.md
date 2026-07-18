@@ -49,6 +49,18 @@ One input variable is provided:
                 context["author_id"], context["author_name"],
                 context["attachments"] — files posted with the message, each
                 {"url", "content_type", "filename"} (empty list if none)
+                AUTHOR & MENTION GUARDS (cheap, always present — use to skip staff
+                or catch mass pings before doing expensive work):
+                context["author_role_ids"] — role ids the author holds (@everyone
+                excluded; [] when the member isn't cached);
+                context["author_has_manage_messages"] — true when the author has
+                guild-level Manage Messages or Administrator (a staff signal; false
+                when unknown, so treat false as "not staff");
+                context["mentioned_user_ids"] / context["mentioned_role_ids"] — id
+                lists this message pinged; context["mentions_everyone"] — true when
+                it used @everyone/@here;
+                context["channel_parent_id"] — the category id of the channel (or
+                the thread's parent channel), or null when uncached.
                 THREADS: context["is_thread"] is true when the message was typed
                 inside a thread of this channel (with context["thread_id"] and
                 context["thread_name"]); false otherwise. The handler still runs

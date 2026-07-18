@@ -44,6 +44,26 @@ async def test_create_message_posts_content_and_returns_id():
     assert payload["content"] == "hello"
     # Link-preview embeds are suppressed so URL-heavy output doesn't flood.
     assert payload["flags"] == 1 << 2
+    # By default no handler send may ping @everyone/@here or a role.
+    assert payload["allowed_mentions"] == {"parse": ["users"]}
+
+
+async def test_create_message_suppresses_role_and_everyone_mentions_by_default():
+    requests: list[httpx.Request] = []
+    await _emitter(requests, body='{"id": "M9"}').create_message("C1", "@everyone")
+    payload = json.loads(requests[0].content)
+    # Roles / @everyone / @here are stripped; only user mentions parse.
+    assert payload["allowed_mentions"] == {"parse": ["users"]}
+    assert payload["flags"] == 1 << 2
+
+
+async def test_create_message_with_ping_role_id_allows_that_role():
+    requests: list[httpx.Request] = []
+    await _emitter(requests, body='{"id": "M9"}').create_message(
+        "C1", "mods!", ping_role_id="R1"
+    )
+    payload = json.loads(requests[0].content)
+    assert payload["allowed_mentions"] == {"parse": ["users"], "roles": ["R1"]}
 
 
 async def test_create_message_truncates_to_discord_limit():
@@ -318,7 +338,10 @@ async def test_create_post_resolves_tag_names_to_ids():
     assert post_request.url.path.endswith("/channels/C1/threads")
     payload = json.loads(post_request.content)
     assert payload["name"] == "How do I?"
-    assert payload["message"] == {"content": "help me"}
+    assert payload["message"] == {
+        "content": "help me",
+        "allowed_mentions": {"parse": ["users"]},
+    }
     assert payload["applied_tags"] == ["TAG2"]
 
 
@@ -332,6 +355,8 @@ async def test_create_post_without_tags_sends_no_applied_tags():
     assert len(requests) == 1
     payload = json.loads(requests[0].content)
     assert "applied_tags" not in payload
+    # A forum post's body can ping, so its starter message is suppressed too.
+    assert payload["message"]["allowed_mentions"] == {"parse": ["users"]}
 
 
 async def test_create_post_unknown_tag_raises_value_error_listing_valid():

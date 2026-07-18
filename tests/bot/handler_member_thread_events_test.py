@@ -562,6 +562,9 @@ def make_message_event(*, channel_id, thread_channel=None):
         content="hello",
         author=author,
         attachments=[],
+        user_mentions_ids=[],
+        role_mention_ids=[],
+        mentions_everyone=False,
     )
     # A thread message's channel id resolves through cache.get_thread(), NOT
     # get_guild_channel() — so register the thread under threads (as production

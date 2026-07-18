@@ -27,6 +27,20 @@ _MESSAGE_MAX = 2000
 # explodes into a large preview card, flooding the channel.
 _SUPPRESS_EMBEDS = 1 << 2
 
+
+def _allowed_mentions(ping_role_id: str | None = None) -> dict:
+    """Mention rail applied to every content-posting emit.
+
+    Discord's default parses EVERYTHING, so an un-suppressed send that echoes
+    user content could ping ``@everyone``/``@here`` or any role. Parsing only
+    ``users`` keeps a moderation handler able to ping the offending user by id
+    while stripping mass pings. An explicit ``ping_role_id`` (admin escalation
+    only) re-adds exactly that one role.
+    """
+    if ping_role_id is not None:
+        return {"parse": ["users"], "roles": [str(ping_role_id)]}
+    return {"parse": ["users"]}
+
 # Merged active + recently-archived thread list is capped so a script can't
 # fan a single read into an unbounded page of threads.
 _THREAD_LIST_MAX = 50
@@ -75,13 +89,21 @@ class DiscordEmitter(DiscordBotClient):
     user_agent: ClassVar[str] = "SmarterDev-Handlers/1.0"
     error_type: ClassVar[type[DiscordRestError]] = DiscordEmitError
 
-    async def create_message(self, channel_id: str, content: str) -> str:
+    async def create_message(
+        self, channel_id: str, content: str, ping_role_id: str | None = None
+    ) -> str:
         """Post a message to a channel; return the new message id.
 
         Link-preview embeds are suppressed so a handler that posts URLs doesn't
-        flood the channel with large preview cards.
+        flood the channel with large preview cards. Mass mentions are suppressed
+        by default (only user mentions parse); ``ping_role_id`` re-allows exactly
+        one role, for admin mod-escalation sends.
         """
-        payload = {"content": content[:_MESSAGE_MAX], "flags": _SUPPRESS_EMBEDS}
+        payload = {
+            "content": content[:_MESSAGE_MAX],
+            "flags": _SUPPRESS_EMBEDS,
+            "allowed_mentions": _allowed_mentions(ping_role_id),
+        }
         response = await self._request(
             "POST", f"/channels/{channel_id}/messages", json=payload
         )
@@ -170,7 +192,10 @@ class DiscordEmitter(DiscordBotClient):
         ``tag_names`` are resolved against the forum's ``available_tags``; an
         unknown name raises ``ValueError`` listing the valid names (fail fast).
         """
-        payload: dict = {"name": title, "message": {"content": content}}
+        payload: dict = {
+            "name": title,
+            "message": {"content": content, "allowed_mentions": _allowed_mentions()},
+        }
         if tag_names:
             channel = await self._request("GET", f"/channels/{channel_id}")
             id_by_name = {
