@@ -547,6 +547,45 @@ async def log_member_update(
                     await dispatch_mod_action(action)
         except Exception:
             logger.exception(f"Failed to record timeout action for guild {event.guild_id}")
+    elif old_timeout != new_timeout and new_timeout is None and old_timeout is not None:
+        # Timeout was cleared early by a moderator — record the untimeout.
+        # A natural expiry has no matching audit-log entry, so nothing is recorded.
+        try:
+            async with get_db_session_context() as session:
+                moderator_id = None
+                moderator_name = None
+                reason = None
+                try:
+                    async for entry in bot.rest.fetch_audit_log(
+                        event.guild_id, event_type=hikari.AuditLogEventType.MEMBER_UPDATE
+                    ).limit(1):
+                        if str(entry.target_id) == str(member.id):
+                            if entry.user_id and entry.user_id == bot.get_me().id:
+                                break  # Bot did it, already recorded
+                            moderator_id = str(entry.user_id) if entry.user_id else None
+                            actor = await bot.rest.fetch_user(entry.user_id) if entry.user_id else None
+                            moderator_name = actor.username if actor else None
+                            reason = entry.reason
+                        break
+                except Exception:
+                    logger.debug(f"Could not fetch audit log for untimeout in guild {event.guild_id}")
+
+                if moderator_id:
+                    action = await mod_action_ops.create_action(
+                        session,
+                        guild_id=str(event.guild_id),
+                        target_user_id=str(member.id),
+                        target_username=member.username,
+                        moderator_user_id=moderator_id,
+                        moderator_username=moderator_name,
+                        action_type="untimeout",
+                        reason=reason,
+                        source="audit_log",
+                    )
+                    await session.commit()
+                    await dispatch_mod_action(action)
+        except Exception:
+            logger.exception(f"Failed to record untimeout action for guild {event.guild_id}")
 
     # Check for username change
     if old_member.username != member.username:
