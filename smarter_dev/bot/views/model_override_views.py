@@ -384,9 +384,8 @@ def create_settings_modal(
                 label="Response filter (optional)",
                 style=hikari.TextInputStyle.PARAGRAPH,
                 placeholder=(
-                    "When set, the bot only answers messages matching these "
-                    'instructions — e.g. "Only respond to questions about '
-                    'programming".'
+                    "Only answer matching messages, e.g. "
+                    '"Only respond to programming questions."'
                 ),
                 value=filter_prefill,
                 required=False,
