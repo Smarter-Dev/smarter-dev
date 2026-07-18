@@ -5487,7 +5487,7 @@ class ModerationActionOperations:
 # Channel model override operations
 # ============================================================================
 #
-# One row per channel (unique ``channel_id``): the admin ``/setmodel`` command's
+# One row per channel (unique ``channel_id``): the admin ``/chat-bot-settings`` command's
 # PUT is an upsert so reopening the modal edits the existing row. These are
 # plain functions (not an Operations class) taking an ``AsyncSession``; the
 # caller owns the transaction and commits.
@@ -5514,6 +5514,9 @@ async def upsert_channel_model_override(
     daily_token_budget: int,
     hourly_token_budget: int,
     reasoning_level: str | None = None,
+    auto_respond: bool = False,
+    fallback_model_key: str | None = None,
+    response_filter: str | None = None,
 ) -> ChannelModelOverride:
     """Insert or update the single override row for ``channel_id``.
 
@@ -5529,6 +5532,9 @@ async def upsert_channel_model_override(
             reasoning_level=reasoning_level,
             daily_token_budget=daily_token_budget,
             hourly_token_budget=hourly_token_budget,
+            auto_respond=auto_respond,
+            fallback_model_key=fallback_model_key,
+            response_filter=response_filter,
         )
         session.add(record)
     else:
@@ -5537,6 +5543,9 @@ async def upsert_channel_model_override(
         record.reasoning_level = reasoning_level
         record.daily_token_budget = daily_token_budget
         record.hourly_token_budget = hourly_token_budget
+        record.auto_respond = auto_respond
+        record.fallback_model_key = fallback_model_key
+        record.response_filter = response_filter
     await session.flush()
     # Load server-generated timestamps (created_at/updated_at) now, so callers can
     # serialize the row without triggering a lazy load outside the async context.

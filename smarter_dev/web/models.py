@@ -4541,3 +4541,13 @@ class ChannelModelOverride(Base):
     hourly_token_budget: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
+    # When true the chat bot activates on ANY channel message, not just @mentions.
+    auto_respond: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # A stable catalog ``key`` to fall back to when the primary model is
+    # unavailable, or NULL to use no fallback.
+    fallback_model_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Free-text instructions describing which messages deserve a response, or NULL
+    # to respond without a content filter.
+    response_filter: Mapped[str | None] = mapped_column(Text, nullable=True)

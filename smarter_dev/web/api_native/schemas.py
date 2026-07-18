@@ -761,10 +761,32 @@ class ChannelModelOverrideWrite(BaseAPIModel):
     hourly_token_budget: int = Field(
         0, ge=0, le=2_147_483_647, description="Hourly token cap (0 = unlimited)"
     )
+    auto_respond: bool = Field(
+        False,
+        description="When true the bot replies to any message, not just @mentions",
+    )
+    fallback_model_key: str | None = Field(
+        None,
+        description="Catalog key used when the primary model is unavailable; null for none",
+    )
+    response_filter: str | None = Field(
+        None,
+        max_length=4000,
+        description="Free-text instructions for which messages deserve a response",
+    )
 
     @field_validator("model_key")
     @classmethod
     def _model_key_in_catalog(cls, value: str) -> str:
+        if not is_valid_model_key(value):
+            raise ValueError(f"unknown model key: {value!r}")
+        return value
+
+    @field_validator("fallback_model_key")
+    @classmethod
+    def _fallback_model_key_in_catalog(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         if not is_valid_model_key(value):
             raise ValueError(f"unknown model key: {value!r}")
         return value
@@ -792,6 +814,15 @@ class ChannelModelOverrideRead(BaseAPIModel):
     )
     daily_token_budget: int = Field(description="Daily token cap (0 = unlimited)")
     hourly_token_budget: int = Field(description="Hourly token cap (0 = unlimited)")
+    auto_respond: bool = Field(
+        description="When true the bot replies to any message, not just @mentions"
+    )
+    fallback_model_key: str | None = Field(
+        None, description="Fallback catalog key, or null for none"
+    )
+    response_filter: str | None = Field(
+        None, description="Instructions for which messages deserve a response, or null"
+    )
     created_at: datetime = Field(description="Override creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")
 
