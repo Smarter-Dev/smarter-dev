@@ -352,6 +352,16 @@ def test_create_settings_modal_has_budget_and_filter_inputs():
     assert response_filter_input.max_length == 4000
 
 
+def test_create_settings_modal_text_inputs_fit_discord_limits():
+    modal = create_settings_modal(_panel_state(), None)
+
+    for text_input in _row_components(modal.components):
+        assert len(text_input.custom_id) <= 100
+        assert len(text_input.label) <= 45
+        if text_input.placeholder is not hikari.UNDEFINED:
+            assert len(text_input.placeholder) <= 100
+
+
 def test_create_settings_modal_omits_prefill_without_override():
     modal = create_settings_modal(_panel_state(), None)
     values = [component.value for component in _row_components(modal.components)]
