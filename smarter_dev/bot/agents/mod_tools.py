@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 import hikari
 import lightbulb
 
+from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.bot.plugins.timeout import parse_duration
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import ModerationActionOperations
@@ -201,7 +202,10 @@ def create_moderation_tools(
                 ai_context_summary=ai_context_summary,
             )
             await session.commit()
-            return action
+        # Fire the mod_action trigger so a mod-log handler formats the AI action
+        # (best-effort; never breaks the triage tool).
+        await dispatch_mod_action(action)
+        return action
 
     # ── Action tools ─────────────────────────────────────────────────
 

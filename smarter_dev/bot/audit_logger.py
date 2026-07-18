@@ -15,6 +15,7 @@ from datetime import datetime
 
 import hikari
 
+from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import AuditLogConfigOperations, ModerationActionOperations
 
@@ -230,7 +231,7 @@ async def log_member_leave(
                         actor = await bot.rest.fetch_user(entry.user_id) if entry.user_id else None
                         moderator_name = actor.username if actor else None
 
-                        await mod_action_ops.create_action(
+                        action = await mod_action_ops.create_action(
                             session,
                             guild_id=str(event.guild_id),
                             target_user_id=str(user.id),
@@ -241,6 +242,8 @@ async def log_member_leave(
                             reason=entry.reason,
                             source="audit_log",
                         )
+                        await session.commit()
+                        await dispatch_mod_action(action)
                     break
             except Exception:
                 logger.debug(f"Could not fetch audit log for kick in guild {event.guild_id}")
@@ -299,7 +302,7 @@ async def log_member_ban(
                 logger.debug(f"Could not fetch audit log for ban in guild {event.guild_id}")
 
             if moderator_id:  # Only record if we found external moderator
-                await mod_action_ops.create_action(
+                action = await mod_action_ops.create_action(
                     session,
                     guild_id=str(event.guild_id),
                     target_user_id=str(user.id),
@@ -310,6 +313,8 @@ async def log_member_ban(
                     reason=reason,
                     source="audit_log",
                 )
+                await session.commit()
+                await dispatch_mod_action(action)
     except Exception:
         logger.exception(f"Failed to record ban action for guild {event.guild_id}")
 
@@ -363,7 +368,7 @@ async def log_member_unban(
                 logger.debug(f"Could not fetch audit log for unban in guild {event.guild_id}")
 
             if moderator_id:
-                await mod_action_ops.create_action(
+                action = await mod_action_ops.create_action(
                     session,
                     guild_id=str(event.guild_id),
                     target_user_id=str(user.id),
@@ -374,6 +379,8 @@ async def log_member_unban(
                     reason=reason,
                     source="audit_log",
                 )
+                await session.commit()
+                await dispatch_mod_action(action)
     except Exception:
         logger.exception(f"Failed to record unban action for guild {event.guild_id}")
 
@@ -524,7 +531,7 @@ async def log_member_update(
                         if duration_seconds < 0:
                             duration_seconds = None
 
-                    await mod_action_ops.create_action(
+                    action = await mod_action_ops.create_action(
                         session,
                         guild_id=str(event.guild_id),
                         target_user_id=str(member.id),
@@ -536,6 +543,8 @@ async def log_member_update(
                         duration_seconds=duration_seconds,
                         source="audit_log",
                     )
+                    await session.commit()
+                    await dispatch_mod_action(action)
         except Exception:
             logger.exception(f"Failed to record timeout action for guild {event.guild_id}")
 

@@ -180,7 +180,11 @@ def _result_with_guild_memory(writes=None, deletes=None, outcome="ok"):
 
 
 async def _seed_admin_handler(
-    engine, guild_id: str = "G1", settings: dict | None = None
+    engine,
+    guild_id: str = "G1",
+    settings: dict | None = None,
+    trigger_type: str = "message",
+    script: str = "pass\n",
 ) -> str:
     handler_id = str(uuid4())
     async with async_sessionmaker(engine, expire_on_commit=False)() as s:
@@ -189,11 +193,11 @@ async def _seed_admin_handler(
                 id=UUID(handler_id),
                 guild_id=guild_id,
                 name=f"h-{handler_id[:8]}",
-                trigger_type="message",
+                trigger_type=trigger_type,
                 settings=settings or {},
                 channel_ids=["C1"],
                 description="d",
-                script="pass\n",
+                script=script,
                 created_by_admin="A1",
             )
         )
@@ -809,3 +813,131 @@ async def test_dm_message_admin_fire_skips_error_notice(monkeypatch):
     # notify_handler_error was called with the EMPTY channel (which short-circuits
     # to a no-op), never with the DM channel id.
     assert notify_channel_ids == [""]
+
+
+# -- mod_action reader injection + lookups audit + loop rail --------------------
+
+from datetime import datetime, timezone
+
+from smarter_dev.web.models import HandlerRun, ModerationAction
+
+
+async def _handler_run_for(engine, handler_id: str) -> HandlerRun:
+    from sqlalchemy import select
+
+    async with async_sessionmaker(engine, expire_on_commit=False)() as s:
+        rows = (
+            await s.execute(
+                select(HandlerRun).where(HandlerRun.handler_id == UUID(handler_id))
+            )
+        ).scalars().all()
+    assert len(rows) == 1
+    return rows[0]
+
+
+async def test_admin_fire_wires_mod_action_reader_and_records_lookups(
+    monkeypatch, test_engine
+):
+    handler_id = await _seed_admin_handler(test_engine, "G1")
+    # A committed action the injected reader must surface for this guild+user.
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as s:
+        s.add(
+            ModerationAction(
+                guild_id="G1",
+                target_user_id="U1",
+                target_username="bob",
+                action_type="ban",
+                source="manual",
+                channel_id="C9",
+                trigger_message_id="M9",
+                created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            )
+        )
+        await s.commit()
+
+    captured = {}
+
+    async def fake_run(script, context, **kwargs):
+        captured["reader"] = kwargs.get("mod_action_reader")
+        usage = dict(_USAGE)
+        usage["lookups"] = 2
+        return HandlerResult(outcome="ok", usage=usage, duration_ms=1)
+
+    _patch_admin_job(monkeypatch, test_engine, _ok_result())
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+
+    # The reader is DB-backed and binds the fire's guild host-side.
+    rows = await captured["reader"]("U1", 10)
+    assert len(rows) == 1
+    assert rows[0]["action_type"] == "ban"
+    assert rows[0]["channel_id"] == "C9"
+    assert rows[0]["trigger_message_id"] == "M9"
+    # A different guild's action is never visible through this fire's reader.
+    assert await captured["reader"]("U9", 10) == []
+
+    # usage['lookups'] lands on the durable run record.
+    run = await _handler_run_for(test_engine, handler_id)
+    assert run.lookups == 2
+
+
+class _NullActor:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def timeout_user(self, *args, **kwargs):
+        raise AssertionError("timeout_user must never reach the actor (budget=0)")
+
+
+async def test_mod_action_fire_forces_zero_mod_action_budget(monkeypatch, test_engine):
+    # A mod_action-triggered handler whose script tries to timeout a user must
+    # breach CapExceeded('mod_actions') immediately — the loop rail forces its
+    # mod-action budget to 0 (§3.5).
+    handler_id = await _seed_admin_handler(
+        test_engine,
+        "G1",
+        trigger_type="mod_action",
+        script="await timeout_user('U1')\n",
+    )
+
+    async def fake_agent(*args, **kwargs):
+        return ""
+
+    async def fake_notify(**kwargs):
+        return None
+
+    import smarter_dev.web.admin_actions as admin_actions
+
+    monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
+    monkeypatch.setattr(admin_handlers_jobs, "notify_handler_error", fake_notify)
+    monkeypatch.setattr(admin_actions, "AdminActor", _NullActor)
+    monkeypatch.setattr(
+        admin_handlers_jobs, "DiscordEmitter", lambda **kwargs: object()
+    )
+    monkeypatch.setattr(
+        admin_handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+    monkeypatch.setattr(
+        admin_handlers_jobs, "get_db_session_context", _RealSessionCtx(test_engine)
+    )
+    monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: object())
+    monkeypatch.setattr(
+        admin_handlers_jobs, "WindowedLimiter", lambda **kwargs: object()
+    )
+
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(
+            admin_handler_id=handler_id,
+            channel_id="C1",
+            trigger_context={"trigger_type": "mod_action", "action_type": "ban"},
+        )
+    )
+
+    run = await _handler_run_for(test_engine, handler_id)
+    assert run.outcome == "cap_exceeded"
+    assert run.cap == "mod_actions"

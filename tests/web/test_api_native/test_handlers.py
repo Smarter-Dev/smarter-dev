@@ -990,3 +990,86 @@ async def test_active_channels_surfaces_dm_message_as_guild_trigger(client, db_s
     # never a channel entry.
     assert ["G1", "dm_message"] in body["guild_triggers"]
     assert all(trigger != "dm_message" for _, trigger in body["channels"])
+
+
+async def test_dispatch_mod_action_enqueues_guild_wide_handlers_ignoring_scope(
+    client, db_session
+):
+    from smarter_dev.web.models import AdminHandler
+
+    # Scope names a specific channel, but a mod_action fire has no home channel:
+    # the scope check is bypassed and the handler matches by guild + trigger.
+    db_session.add(AdminHandler(
+        guild_id="G1", name="mod-log", trigger_type="mod_action", settings={},
+        channel_ids=["SOMECHAN"], description="format audit rows",
+        script="await send_message('logged', 'MODLOG')\n", created_by_admin="A1",
+    ))
+    # A handler in a DIFFERENT guild must not fire.
+    db_session.add(AdminHandler(
+        guild_id="G2", name="other", trigger_type="mod_action", settings={},
+        channel_ids=[], description="other guild", script="pass\n",
+        created_by_admin="A2",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "",
+            "trigger_type": "mod_action",
+            "trigger_context": {"trigger_type": "mod_action", "action_type": "ban"},
+        },
+    )
+    body = resp.json()
+    assert body["dispatched"] is True
+    assert len(body["handler_ids"]) == 1
+    payload, _ = client.submitted[0]  # type: ignore[attr-defined]
+    assert payload.channel_id == ""
+
+
+async def test_dispatch_mod_action_not_under_member_raid_gate(
+    client, db_session, monkeypatch
+):
+    from smarter_dev.web.models import AdminHandler
+
+    # Simulate an exhausted member-events raid window; a mod_action fire must NOT
+    # be keyed on it (mod actions are not a raid vector), so it still enqueues.
+    monkeypatch.setattr(
+        handlers_module, "WindowedLimiter", lambda redis: _KeyAwareLimiter()
+    )
+    db_session.add(AdminHandler(
+        guild_id="G1", name="mod-log", trigger_type="mod_action", settings={},
+        channel_ids=[], description="format", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "",
+            "trigger_type": "mod_action",
+            "trigger_context": {"trigger_type": "mod_action"},
+        },
+    )
+    assert resp.json()["dispatched"] is True
+    # The raid window key was never even consulted for a mod_action fire.
+    assert not any("memberevt" in key for key, _ in _KeyAwareLimiter().hits)
+
+
+async def test_active_channels_lists_mod_action_as_guild_trigger(client, db_session):
+    from smarter_dev.web.models import AdminHandler
+
+    db_session.add(AdminHandler(
+        guild_id="G1", name="mod-log", trigger_type="mod_action", settings={},
+        channel_ids=["SOMECHAN"], description="format", script="pass\n",
+        created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    body = client.get("/api/handlers/active-channels").json()
+    # A mod_action fire is guild-wide (no home channel), so it surfaces as a
+    # (guild_id, trigger) guild-trigger even though the handler is scoped.
+    assert ["G1", "mod_action"] in body["guild_triggers"]
+    assert all(trigger != "mod_action" for _, trigger in body["channels"])

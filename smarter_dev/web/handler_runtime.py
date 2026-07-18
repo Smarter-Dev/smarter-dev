@@ -60,7 +60,16 @@ erroring the fire, so a relay script branches to ❌), plus ``guild_memory_get``
 ``guild_memory_set`` / ``guild_memory_all`` / ``guild_memory_delete`` — a
 guild-scoped key/value store SHARED by every admin handler in the guild (for
 state that must cross handler rows, e.g. a DM-relay bind target), bounded by the
-same 16KB cap as per-handler ``memory_*`` and DB-only (spends nothing).
+same 16KB cap as per-handler ``memory_*`` and DB-only (spends nothing), plus
+``delete_webhook(webhook_url)`` -> bool (DELETE a leaked Discord webhook URL —
+the actor rejects any non-Discord URL host-side before the REST call; spends a
+mod_action; False on 404), plus the mod-audit reads ``list_mod_actions(user_id,
+limit=10)`` -> list[dict] (this guild's recent actions for a member, newest
+first, via an injected DB reader), ``get_member_info(user_id)`` -> dict (member
+profile; a departed user comes back with ``in_guild=False``), and
+``search_guild_members(query, limit=10)`` -> dict (prefix name/nick search with a
+per-row top role and an overflow count) — each of the three spends the lookups
+budget.
 
 Script-facing data (Monty input): ``context`` — a plain dict describing the
 trigger (its keys depend on ``context["trigger_type"]``).
@@ -141,6 +150,12 @@ AgentRunner = Callable[[str, bool, HandlerBudget], Awaitable[str]]
 # submit machinery — the same discipline as AgentRunner.
 TimerScheduler = Callable[[datetime.datetime, dict[str, Any]], Awaitable[None]]
 
+# An async function (target_user_id, limit) -> list of mod-action rows for the
+# fire's guild, newest first. Injected by the admin fire job, which owns the DB
+# session context and binds the guild id host-side (so a script can never read
+# another guild's mod history) — the same injection discipline as AgentRunner.
+ModActionReader = Callable[[str, int], Awaitable[list[dict[str, Any]]]]
+
 
 async def _no_agent(prompt: str, has_tools: bool, budget: HandlerBudget) -> str:
     raise RuntimeError("no agent runner configured for this handler execution")
@@ -148,6 +163,10 @@ async def _no_agent(prompt: str, has_tools: bool, budget: HandlerBudget) -> str:
 
 async def _no_timer(fire_at: datetime.datetime, refire_context: dict[str, Any]) -> None:
     raise RuntimeError("no timer scheduler configured for this handler execution")
+
+
+async def _no_mod_action_reader(user_id: str, limit: int) -> list[dict[str, Any]]:
+    raise RuntimeError("no mod-action reader configured for this handler execution")
 
 
 def _clock_os(
@@ -223,6 +242,10 @@ class HandlerExecution:
     emitter: DiscordEmitter
     limiter: WindowedLimiter
     agent_runner: AgentRunner = _no_agent
+    # DB-backed reader for list_mod_actions, injected by the admin fire job (which
+    # binds the fire's guild id host-side). Admin handlers only; standard fires
+    # never construct list_mod_actions so this stays the raising default.
+    mod_action_reader: ModActionReader = _no_mod_action_reader
     # This handler's id — needed only for the per-handler timer-arming window key.
     # Optional (default "") so existing callers that never arm a timer are unaffected.
     handler_id: str = ""
@@ -291,6 +314,7 @@ class HandlerExecution:
             funcs.update(
                 {
                     "delete_message": self._guard(self._delete_message),
+                    "delete_webhook": self._guard(self._delete_webhook),
                     "edit_message": self._guard(self._edit_message),
                     "rename_channel": self._guard(self._rename_channel),
                     "ban_user": self._guard(self._ban_user),
@@ -299,6 +323,11 @@ class HandlerExecution:
                     "add_role": self._guard(self._add_role),
                     "remove_role": self._guard(self._remove_role),
                     "send_dm": self._guard(self._send_dm),
+                    # Mod-audit reads (each spends a lookup): the mod-channel
+                    # lookup/history/whois commands and the rejoin alert.
+                    "list_mod_actions": self._guard(self._list_mod_actions),
+                    "get_member_info": self._guard(self._get_member_info),
+                    "search_guild_members": self._guard(self._search_guild_members),
                     "close_thread": self._guard(self._close_thread),
                     "lock_thread": self._guard(self._lock_thread),
                     "reopen_thread": self._guard(self._reopen_thread),
@@ -468,6 +497,40 @@ class HandlerExecution:
         self.budget.spend_mod_action()
         target = str(channel_id) if channel_id else self.channel_id
         return await self.actor.delete_message(target, str(message_id))
+
+    async def _delete_webhook(self, webhook_url: str) -> bool:
+        """DELETE a leaked webhook URL; return whether one was killed.
+
+        Destructive, so it spends the mod_actions budget (the 25/fire admin cap
+        covers a message with several leaked webhooks). The actor validates the
+        URL host-side — a non-Discord URL raises before any REST call — and
+        returns False on 404 (already dead), which the script branches on.
+        """
+        self.budget.spend_mod_action()
+        return bool(await self.actor.delete_webhook(str(webhook_url)))
+
+    # -- admin-only mod-audit reads (each spends a lookup) --
+
+    async def _list_mod_actions(self, user_id: str, limit: int = 10) -> list[dict]:
+        """Recent mod actions for a member in THIS guild, newest first.
+
+        Backed by the injected DB reader, which binds the fire's guild id
+        host-side (a script can never read another guild's history). Rows carry
+        channel_id/trigger_message_id straight off the ModerationAction row (either
+        may be None) so a script can build "Jump To Action" links."""
+        self.budget.spend_lookup()
+        return await self.mod_action_reader(str(user_id), int(limit))
+
+    async def _get_member_info(self, user_id: str) -> dict:
+        """Profile a member (or a departed user, in_guild=False); spends a lookup."""
+        self.budget.spend_lookup()
+        return await self.actor.get_member_info(str(user_id))
+
+    async def _search_guild_members(self, query: str, limit: int = 10) -> dict:
+        """Prefix-search guild members with per-row top role; spends ONE lookup
+        covering the members/search + roles fetch pair."""
+        self.budget.spend_lookup()
+        return await self.actor.search_guild_members(str(query), int(limit))
 
     async def _edit_message(
         self, message_id: str, content: str, channel_id: str | None = None
@@ -780,6 +843,7 @@ async def run_handler_script(
     emitter: DiscordEmitter,
     limiter: WindowedLimiter,
     agent_runner: AgentRunner = _no_agent,
+    mod_action_reader: ModActionReader = _no_mod_action_reader,
     handler_id: str = "",
     timer_scheduler: TimerScheduler = _no_timer,
     timer_limiter: WindowedLimiter | None = None,
@@ -816,6 +880,7 @@ async def run_handler_script(
         emitter=emitter,
         limiter=limiter,
         agent_runner=agent_runner,
+        mod_action_reader=mod_action_reader,
         handler_id=handler_id,
         timer_scheduler=timer_scheduler,
         timer_limiter=timer_limiter or limiter,

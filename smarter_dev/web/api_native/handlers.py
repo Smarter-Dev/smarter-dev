@@ -79,6 +79,7 @@ from smarter_dev.web.member_activity import (
 from smarter_dev.web.models import (
     ADMIN_HANDLER_EVENT_TRIGGERS,
     ADMIN_ONLY_TRIGGER_TYPES,
+    ADMIN_SYNTHETIC_TRIGGER_TYPES,
     HANDLER_EVENT_TRIGGERS,
     HANDLER_TRIGGER_TYPES,
     AdminHandler,
@@ -107,9 +108,14 @@ MEMBER_EVENT_TRIGGERS = tuple(
 
 # Admin triggers dispatched with NO home channel (``channel_id=""``), so the
 # admin scope check is bypassed and the handler surfaces as a (guild_id, trigger)
-# guild-trigger in active-channels: the member_* events plus dm_message (a DM has
-# no guild channel to scope against).
-GUILD_SCOPED_ADMIN_TRIGGERS = MEMBER_EVENT_TRIGGERS + ("dm_message",)
+# guild-trigger in active-channels: the member_* events, dm_message (a DM has no
+# guild channel to scope against), and the synthetic mod_action trigger (fired
+# guild-wide after a ModerationAction commit; NOT under the member-events raid
+# gate — MEMBER_EVENT_TRIGGERS excludes it — so a mass-ban wave is bounded only by
+# the per-handler ADMIN_FIRES_PER_MIN window).
+GUILD_SCOPED_ADMIN_TRIGGERS = (
+    MEMBER_EVENT_TRIGGERS + ("dm_message",) + ADMIN_SYNTHETIC_TRIGGER_TYPES
+)
 
 # Permission granted to the bot's Skrift service key (see roles.py `bot-service`
 # role and the phase-01 key-mint runbook).
@@ -385,7 +391,13 @@ class HandlerController(Controller):
 
         is_member_event = data.trigger_type in MEMBER_EVENT_TRIGGERS
         is_guild_scoped = data.trigger_type in GUILD_SCOPED_ADMIN_TRIGGERS
-        is_admin_only = data.trigger_type in ADMIN_ONLY_TRIGGER_TYPES
+        # mod_action is admin-only (synthetic), never in the standard vocabulary,
+        # so the standard-tier query is skipped for it exactly like the member
+        # events — no ChannelHandler can carry it.
+        is_admin_only = (
+            data.trigger_type in ADMIN_ONLY_TRIGGER_TYPES
+            or data.trigger_type in ADMIN_SYNTHETIC_TRIGGER_TYPES
+        )
 
         # Member lifecycle events are gated by a per-guild raid window BEFORE any
         # fire is enqueued, so a raid + ban wave degrades to declined dispatches

@@ -7,6 +7,7 @@ import logging
 import hikari
 import lightbulb
 
+from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import ModerationActionOperations
 
@@ -116,10 +117,11 @@ async def warn_user(ctx: lightbulb.Context) -> None:
     except (hikari.ForbiddenError, hikari.NotFoundError):
         logger.info(f"Could not DM user {target_user.username} about warning")
 
-    # Record the warning in the moderation actions table
+    # Record the warning in the moderation actions table, then fire the
+    # mod_action trigger so a mod-log handler can format it (best-effort).
     try:
         async with get_db_session_context() as session:
-            await mod_action_ops.create_action(
+            action = await mod_action_ops.create_action(
                 session,
                 guild_id=str(guild.id),
                 target_user_id=str(target_user.id),
@@ -131,6 +133,8 @@ async def warn_user(ctx: lightbulb.Context) -> None:
                 source="manual",
                 channel_id=str(ctx.channel_id),
             )
+            await session.commit()
+        await dispatch_mod_action(action)
     except Exception:
         logger.exception("Failed to record warn action to moderation log")
 
