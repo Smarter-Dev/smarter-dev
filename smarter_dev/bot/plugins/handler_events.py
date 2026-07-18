@@ -26,6 +26,7 @@ import hikari
 import lightbulb
 
 from smarter_dev.shared.config import get_settings
+from smarter_dev.web.handler_caps import GUILD_MEMBER_EVENTS_PER_MIN, WINDOW_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -378,6 +379,108 @@ def member_update_deltas(old_member: Any, new_member: Any) -> list[tuple[str, di
     return deltas
 
 
+# ---------------------------------------------------------------------------
+# E6 — startup rules-acceptance replay (bot-core, trigger synthesis only)
+# ---------------------------------------------------------------------------
+
+
+def find_missed_rules_acceptances(members: Any) -> list[dict]:
+    """Members whose pending -> accepted transition the bot may have missed.
+
+    Pure selector over a member snapshot (gateway cache or REST page). A member
+    who is NOT pending, holds no role beyond @everyone, and is not a bot has
+    accepted the rules yet shows no sign of onboarding — exactly the population
+    the legacy ready-sweep repaired for events lost while the bot was down. Each
+    result is a member_rules_accepted context identical to the live one apart from
+    ``is_reconciliation: True``, so a handler (and the judge) can tell a replayed
+    fire from a real delta. No side effects: selection only.
+    """
+    contexts: list[dict] = []
+    for member in members:
+        if member.is_bot:
+            continue
+        if member.is_pending:
+            continue
+        if _roles_beyond_everyone(member):
+            continue
+        contexts.append(
+            {**_rules_accepted_context(member), "is_reconciliation": True}
+        )
+    return contexts
+
+
+async def replay_missed_rules_acceptances(
+    guild_id: str,
+    members: Any,
+    dispatch: Any,
+    *,
+    batch_size: int = GUILD_MEMBER_EVENTS_PER_MIN,
+    window_seconds: float = WINDOW_SECONDS,
+    sleep: Any = asyncio.sleep,
+) -> int:
+    """Re-dispatch a synthetic member_rules_accepted for each missed member, paced.
+
+    Fires go through the SAME ``dispatch`` path a live delta uses, so the
+    onboarding handler stays the single authority. The per-guild
+    ``GUILD_MEMBER_EVENTS_PER_MIN`` gate would *decline* a burst — and a decline
+    here loses the member a second time — so we pace instead: at most one window's
+    worth of fires, then wait for the window to roll over before the next batch. A
+    post-downtime backlog therefore drains over a few minutes rather than firing
+    at once. ``sleep``/``batch_size``/``window_seconds`` are injected so pacing is
+    testable without real sleeps. Returns the number of fires dispatched.
+    """
+    contexts = find_missed_rules_acceptances(members)
+    for index, context in enumerate(contexts):
+        if index and index % batch_size == 0:
+            # This window is full; wait for headroom before the next batch so the
+            # raid gate never declines a replay (which would drop the member again).
+            await sleep(window_seconds)
+        await dispatch("", guild_id, "member_rules_accepted", context)
+    if contexts:
+        logger.info(
+            "Startup replay: synthesized %d member_rules_accepted fires for guild %s",
+            len(contexts),
+            guild_id,
+        )
+    return len(contexts)
+
+
+async def _paged_guild_members(bot: Any, guild_id: Any) -> list:
+    """All members of a guild via REST paging (authoritative, chunk-independent).
+
+    Gateway member chunking is requested at connect (``bot.start`` runs with the
+    default ``chunk_members=True`` and the GUILD_MEMBERS intent), but chunks
+    arrive asynchronously and are not guaranteed complete at StartedEvent, so the
+    member cache cannot be relied on at replay time. REST paging returns the full
+    membership regardless of chunk state.
+    """
+    return [member async for member in bot.rest.fetch_members(guild_id)]
+
+
+async def replay_startup_rules_acceptances(bot: Any) -> None:
+    """Run the missed-rules-acceptance replay for every guild the bot is in.
+
+    Each guild paces against its own per-guild window. A REST failure for one
+    guild is logged and skipped so it cannot abort the replay for the rest.
+    """
+    try:
+        guild_ids = list(bot.cache.get_guilds_view().keys())
+    except Exception:  # noqa: BLE001 — a cold guild view must not crash startup
+        logger.debug("startup replay: guild view unavailable", exc_info=True)
+        return
+    for guild_id in guild_ids:
+        try:
+            members = await _paged_guild_members(bot, guild_id)
+        except Exception:  # noqa: BLE001 — one guild's fetch must not drop the rest
+            logger.warning(
+                "startup replay: member fetch failed for guild %s",
+                guild_id,
+                exc_info=True,
+            )
+            continue
+        await replay_missed_rules_acceptances(str(guild_id), members, _dispatch)
+
+
 def resolve_role_names(guild: Any, role_ids: list[str]) -> list[str]:
     """Resolve role ids to names via the guild cache; empty when guild uncached.
 
@@ -656,6 +759,13 @@ def _get_starter_message_content(bot: Any, message_id: Any) -> str:
 @plugin.listener(hikari.StartedEvent)
 async def start_activity_flush(_: hikari.StartedEvent) -> None:
     asyncio.create_task(_activity.run(_get_api_client()))
+
+
+@plugin.listener(hikari.StartedEvent)
+async def start_rules_acceptance_replay(_: hikari.StartedEvent) -> None:
+    # Pace inside a background task: the replay sleeps between rate-limit windows
+    # while a backlog drains, and must not block other StartedEvent listeners.
+    asyncio.create_task(replay_startup_rules_acceptances(plugin.bot))
 
 
 async def dispatch_message(bot: Any, event: Any) -> None:
