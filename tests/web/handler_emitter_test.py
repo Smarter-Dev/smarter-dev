@@ -93,6 +93,83 @@ async def test_error_status_raises_emit_error():
         )
 
 
+# -- edit_message -----------------------------------------------------------
+
+
+async def test_edit_message_patches_content_and_returns_id():
+    requests: list[httpx.Request] = []
+    message_id = await _emitter(requests, body='{"id": "M9"}').edit_message(
+        "C1", "M9", "updated rules"
+    )
+    assert message_id == "M9"
+    request = requests[0]
+    assert request.method == "PATCH"
+    assert request.url.path.endswith("/channels/C1/messages/M9")
+    assert json.loads(request.content)["content"] == "updated rules"
+
+
+async def test_edit_message_truncates_to_discord_limit():
+    requests: list[httpx.Request] = []
+    await _emitter(requests, body='{"id": "M9"}').edit_message("C1", "M9", "x" * 3000)
+    assert len(json.loads(requests[0].content)["content"]) == 2000
+
+
+async def test_edit_message_payload_suppresses_embeds_and_mentions():
+    requests: list[httpx.Request] = []
+    await _emitter(requests, body='{"id": "M9"}').edit_message("C1", "M9", "@everyone")
+    payload = json.loads(requests[0].content)
+    # Link-preview embeds suppressed; mass/role pings stripped (only users parse).
+    assert payload["flags"] == 1 << 2
+    assert payload["allowed_mentions"] == {"parse": ["users"]}
+
+
+async def test_edit_message_raises_on_403_not_bot_authored():
+    # Editing a message the bot didn't author is a REST 403 — no silent fallback.
+    requests: list[httpx.Request] = []
+    with pytest.raises(DiscordEmitError):
+        await _emitter(requests, status_code=403, body="not yours").edit_message(
+            "C1", "M9", "nope"
+        )
+
+
+async def test_edit_message_raises_on_404_message_deleted():
+    requests: list[httpx.Request] = []
+    with pytest.raises(DiscordEmitError):
+        await _emitter(requests, status_code=404, body="gone").edit_message(
+            "C1", "M9", "nope"
+        )
+
+
+# -- rename_channel ---------------------------------------------------------
+
+
+async def test_rename_channel_patches_name_and_returns():
+    requests: list[httpx.Request] = []
+    result = await _emitter(requests, body='{"id": "C1"}').rename_channel(
+        "C1", "📊Members: 1.2k"
+    )
+    assert result is True
+    request = requests[0]
+    assert request.method == "PATCH"
+    assert request.url.path.endswith("/channels/C1")
+    assert json.loads(request.content) == {"name": "📊Members: 1.2k"}
+
+
+async def test_rename_channel_truncates_name_to_hundred():
+    requests: list[httpx.Request] = []
+    await _emitter(requests, body='{"id": "C1"}').rename_channel("C1", "y" * 150)
+    assert len(json.loads(requests[0].content)["name"]) == 100
+
+
+async def test_rename_channel_raises_on_error():
+    # Missing MANAGE_CHANNELS (403) or any non-2xx errors the fire loudly.
+    requests: list[httpx.Request] = []
+    with pytest.raises(DiscordEmitError):
+        await _emitter(requests, status_code=403, body="no perms").rename_channel(
+            "C1", "x"
+        )
+
+
 # -- list_threads -----------------------------------------------------------
 
 _ACTIVE_THREADS_BODY = json.dumps(

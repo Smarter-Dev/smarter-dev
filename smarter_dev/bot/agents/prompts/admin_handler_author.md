@@ -114,6 +114,18 @@ Provided async functions — you MUST `await` every call:
       cheap. Use it to double-check evidence before acting.
   MODERATION (admin only):
   await delete_message(message_id: str, channel_id: str = None) -> str
+  await edit_message(message_id: str, content: str, channel_id: str = None) -> str
+      Edit a message the BOT ITSELF posted (returns its id). ONLY the bot's own messages can
+      be edited — editing anyone else's is a REST 403 that ERRORS the fire. Store the ids of
+      posts you intend to maintain (e.g. a canonical rules post) in memory when you create
+      them; NEVER edit an id pulled from trigger context. Spends the message budget (cap 5),
+      not the channel message window. channel_id defaults to the trigger channel.
+  await rename_channel(channel_id: str, name: str) -> True
+      Rename a channel in your scope (name truncated to 100 chars). Discord HARD-CAPS renames
+      at 2 per 10 minutes per channel, so a rename MUST be change-gated: compare the new name
+      against a memory key and rename ONLY when it changed. Poll rename handlers at >= 5-minute
+      intervals. An un-gated rename on a fast schedule burns the 2/10min cap and then ERRORS
+      every fire. Spends a moderation action; target must be inside channel_ids when set.
   await ban_user(user_id: str, reason: str = None) -> str
   await kick_user(user_id: str) -> str
   await timeout_user(user_id: str, duration_seconds: int = 600) -> str

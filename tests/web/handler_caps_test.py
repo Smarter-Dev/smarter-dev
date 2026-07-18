@@ -5,7 +5,10 @@ from __future__ import annotations
 from smarter_dev.web.handler_caps import (
     GUILD_MEMBER_EVENTS_PER_MIN,
     GUILD_THREAD_OPS_PER_MIN,
+    RENAME_WINDOW_SECONDS,
+    RENAMES_PER_WINDOW,
     WindowedLimiter,
+    channel_rename_key,
     fires_per_min_for_trigger,
     guild_member_events_key,
     guild_thread_ops_key,
@@ -107,3 +110,27 @@ def test_guild_member_events_window():
 def test_guild_thread_ops_window():
     assert GUILD_THREAD_OPS_PER_MIN == 30
     assert guild_thread_ops_key("G1") == "hcap:threadop:G1"
+
+
+async def test_limiter_window_seconds_override_uses_custom_ttl():
+    fake = _FakeRedis()
+    limiter = WindowedLimiter(redis=fake, window_seconds=60)
+    await limiter.hit("rk", limit=2, window_seconds=600)
+    # The override fixes a 600s expiry, not the instance's 60s default.
+    assert fake.expiries == {"rk": 600}
+
+
+async def test_limiter_default_window_unchanged_by_override_param():
+    fake = _FakeRedis()
+    limiter = WindowedLimiter(redis=fake, window_seconds=60)
+    await limiter.hit("k", limit=2)
+    assert fake.expiries == {"k": 60}
+
+
+def test_channel_rename_key_shape():
+    assert channel_rename_key("C1") == "hcap:rename:C1"
+
+
+def test_rename_window_constants_are_two_per_600():
+    assert RENAMES_PER_WINDOW == 2
+    assert RENAME_WINDOW_SECONDS == 600

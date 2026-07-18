@@ -23,7 +23,13 @@ Script-facing surface (Monty external functions):
   ``memory_all()`` / ``memory_delete(key)`` -> persistent per-handler key/value
   store that survives across fires.
 
-Admin handlers (``actor`` set) additionally get ``close_thread`` /
+Admin handlers (``actor`` set) additionally get ``edit_message(message_id,
+content, channel_id=None)`` -> message id (edits a bot-authored message in place,
+spending the message budget like ``add_reaction`` but not the channel window; a
+non-bot message is a REST 403 that errors the fire) and ``rename_channel(
+channel_id, name)`` -> bool (spends a mod_action, checks the same channel scope
+as admin ``list_threads``, and charges a per-channel 2-per-600s rename window —
+Discord's hard limit — before the REST call), plus ``close_thread`` /
 ``lock_thread`` / ``reopen_thread`` / ``delete_thread`` -> bool (each spends the
 thread_ops budget + guild thread-op window before the REST call; a gone thread
 yields ``False`` without erroring the fire), plus ``guild_memory_get`` /
@@ -62,8 +68,11 @@ from smarter_dev.web.handler_caps import (
     CHANNEL_MESSAGES_PER_MIN,
     GLOBAL_AGENT_CALLS_PER_MIN,
     GUILD_THREAD_OPS_PER_MIN,
+    RENAME_WINDOW_SECONDS,
+    RENAMES_PER_WINDOW,
     WindowedLimiter,
     channel_message_key,
+    channel_rename_key,
     global_agent_key,
     guild_thread_ops_key,
 )
@@ -205,6 +214,8 @@ class HandlerExecution:
             funcs.update(
                 {
                     "delete_message": self._guard(self._delete_message),
+                    "edit_message": self._guard(self._edit_message),
+                    "rename_channel": self._guard(self._rename_channel),
                     "ban_user": self._guard(self._ban_user),
                     "kick_user": self._guard(self._kick_user),
                     "timeout_user": self._guard(self._timeout_user),
@@ -367,6 +378,50 @@ class HandlerExecution:
         self.budget.spend_mod_action()
         target = str(channel_id) if channel_id else self.channel_id
         return await self.actor.delete_message(target, str(message_id))
+
+    async def _edit_message(
+        self, message_id: str, content: str, channel_id: str | None = None
+    ) -> str:
+        """Edit a bot-authored message in place; return its id.
+
+        An edit is an emit: it spends the per-fire message budget (admin cap 5)
+        but NOT the per-channel message window — like ``add_reaction``, it changes
+        an existing message rather than adding channel volume. ``channel_id``
+        defaults to the trigger channel, symmetric with ``delete_message``.
+        Editing a message the bot doesn't own is a REST 403 that errors the fire
+        loudly (bot-authored-only is enforced by Discord, not our bookkeeping).
+        """
+        self.budget.spend_message()
+        target = str(channel_id) if channel_id else self.channel_id
+        return await self.emitter.edit_message(target, str(message_id), str(content))
+
+    async def _rename_channel(self, channel_id: str, name: str) -> bool:
+        """Rename a channel in the handler's scope; return True.
+
+        A rename is a guild mutation, so it spends the mod_actions budget; the
+        target must be in the handler's ``channel_ids`` scope (empty scope =
+        guild-wide, verified to belong to this fire's guild) exactly like admin
+        ``list_threads``. Discord hard-limits renames to 2/10min per channel, so
+        the runtime charges a per-channel 600s window before the REST call and
+        raises ``CapExceeded("channel_renames_per_10min")`` on breach.
+        """
+        target = str(channel_id)
+        if not await self._admin_channel_in_scope(target):
+            raise CapExceeded(
+                "out_of_scope_channel",
+                "rename_channel target is outside the handler's channel scope / guild",
+            )
+        self.budget.spend_mod_action()
+        within = await self.limiter.hit(
+            channel_rename_key(target), RENAMES_PER_WINDOW, RENAME_WINDOW_SECONDS
+        )
+        if not within:
+            raise CapExceeded(
+                "channel_renames_per_10min",
+                f"channel hit its {RENAMES_PER_WINDOW} renames/"
+                f"{RENAME_WINDOW_SECONDS}s cap",
+            )
+        return await self.emitter.rename_channel(target, str(name))
 
     async def _ban_user(self, user_id: str, reason: str | None = None) -> str:
         self.budget.spend_mod_action()
