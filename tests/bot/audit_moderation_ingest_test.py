@@ -27,25 +27,41 @@ async def _async_noop(*args, **kwargs) -> None:
     return None
 
 
-class _AsyncEntryIterator:
+class _AuditLogPage:
+    """Stand-in for ``hikari.AuditLog``: an iterable page of entries.
+
+    Real ``RESTClient.fetch_audit_log()`` yields ``AuditLog`` pages (each a
+    ``Sequence[AuditLogEntry]``), newest first — NOT bare entries — so the fake
+    must yield pages too or it masks the page-vs-entry access bug.
+    """
+
     def __init__(self, entries: list) -> None:
         self._entries = list(entries)
 
-    def __aiter__(self) -> "_AsyncEntryIterator":
+    def __iter__(self):
+        return iter(self._entries)
+
+
+class _AsyncPageIterator:
+    def __init__(self, entries: list) -> None:
+        # Discord returns no page at all when there are no entries of the type.
+        self._pages = [_AuditLogPage(entries)] if entries else []
+
+    def __aiter__(self) -> "_AsyncPageIterator":
         return self
 
     async def __anext__(self):
-        if not self._entries:
+        if not self._pages:
             raise StopAsyncIteration
-        return self._entries.pop(0)
+        return self._pages.pop(0)
 
 
 class _AuditLogQuery:
     def __init__(self, entries: list) -> None:
         self._entries = entries
 
-    def limit(self, n: int) -> _AsyncEntryIterator:
-        return _AsyncEntryIterator(self._entries[:n])
+    def limit(self, n: int) -> _AsyncPageIterator:
+        return _AsyncPageIterator(self._entries[:n])
 
 
 class _FakeRest:
@@ -76,11 +92,19 @@ class _FakeBot:
         return SimpleNamespace(id=BOT_ID)
 
 
-def _audit_entry(target_id, user_id, reason="native reason", created_at=None):
+TIMEOUT_CHANGE_KEY = hikari.AuditLogChangeKey.COMMUNICATION_DISABLED_UNTIL
+
+
+def _change(key, new_value=None, old_value=None):
+    return SimpleNamespace(key=key, new_value=new_value, old_value=old_value)
+
+
+def _audit_entry(target_id, user_id, reason="native reason", created_at=None, changes=None):
     return SimpleNamespace(
         target_id=target_id,
         user_id=user_id,
         reason=reason,
+        changes=changes or [],
         id=SimpleNamespace(created_at=created_at or datetime.now(UTC)),
     )
 
@@ -203,7 +227,10 @@ async def test_timeout_add_recorded_with_duration(recorder):
     rest = _FakeRest(
         entries_by_type={
             hikari.AuditLogEventType.MEMBER_UPDATE: [
-                _audit_entry(TARGET_ID, MOD_ID, reason="cooldown"),
+                _audit_entry(
+                    TARGET_ID, MOD_ID, reason="cooldown",
+                    changes=[_change(TIMEOUT_CHANGE_KEY, new_value=new_timeout)],
+                ),
             ],
         },
         users={MOD_ID: _user(MOD_ID, "modcarol")},
@@ -230,7 +257,10 @@ async def test_timeout_removal_recorded_as_untimeout(recorder):
     rest = _FakeRest(
         entries_by_type={
             hikari.AuditLogEventType.MEMBER_UPDATE: [
-                _audit_entry(TARGET_ID, MOD_ID, reason="pardoned"),
+                _audit_entry(
+                    TARGET_ID, MOD_ID, reason="pardoned",
+                    changes=[_change(TIMEOUT_CHANGE_KEY, new_value=None)],
+                ),
             ],
         },
         users={MOD_ID: _user(MOD_ID, "modcarol")},
@@ -258,7 +288,10 @@ async def test_bot_performed_untimeout_skipped(recorder):
     rest = _FakeRest(
         entries_by_type={
             hikari.AuditLogEventType.MEMBER_UPDATE: [
-                _audit_entry(TARGET_ID, BOT_ID, reason="handled by tool"),
+                _audit_entry(
+                    TARGET_ID, BOT_ID, reason="handled by tool",
+                    changes=[_change(TIMEOUT_CHANGE_KEY, new_value=None)],
+                ),
             ],
         },
         users={},
@@ -270,6 +303,94 @@ async def test_bot_performed_untimeout_skipped(recorder):
     )
 
     await audit_logger.log_member_update(_FakeBot(rest), event)
+
+    assert recorder.created == []
+    assert recorder.dispatched == []
+
+
+async def test_untimeout_ignores_stale_timeout_set_entry(recorder):
+    # The timeout expired naturally: the null transition surfaces on a later
+    # member update while the newest MEMBER_UPDATE entry is the 30-min-old
+    # timeout-SET entry. Recency must reject it — no false untimeout.
+    old_timeout = datetime.now(UTC) + timedelta(hours=1)
+    stale = datetime.now(UTC) - timedelta(minutes=30)
+    rest = _FakeRest(
+        entries_by_type={
+            hikari.AuditLogEventType.MEMBER_UPDATE: [
+                _audit_entry(
+                    TARGET_ID, MOD_ID, reason="original timeout reason",
+                    created_at=stale,
+                    changes=[_change(TIMEOUT_CHANGE_KEY, new_value=old_timeout)],
+                ),
+            ],
+        },
+        users={MOD_ID: _user(MOD_ID, "modcarol")},
+    )
+    event = SimpleNamespace(
+        guild_id=GUILD_ID,
+        member=_member(TARGET_ID, "baduser", None),
+        old_member=_member(TARGET_ID, "baduser", old_timeout),
+    )
+
+    await audit_logger.log_member_update(_FakeBot(rest), event)
+
+    assert recorder.created == []
+    assert recorder.dispatched == []
+
+
+async def test_untimeout_ignores_unrelated_member_update(recorder):
+    # A fresh but unrelated MEMBER_UPDATE (e.g. a nickname change) must not be
+    # attributed as an untimeout: it carries no communication_disabled_until change.
+    old_timeout = datetime.now(UTC) + timedelta(hours=1)
+    rest = _FakeRest(
+        entries_by_type={
+            hikari.AuditLogEventType.MEMBER_UPDATE: [
+                _audit_entry(
+                    TARGET_ID, MOD_ID, reason="fix name",
+                    changes=[_change(hikari.AuditLogChangeKey.NICK, new_value="newnick")],
+                ),
+            ],
+        },
+        users={MOD_ID: _user(MOD_ID, "modcarol")},
+    )
+    event = SimpleNamespace(
+        guild_id=GUILD_ID,
+        member=_member(TARGET_ID, "baduser", None),
+        old_member=_member(TARGET_ID, "baduser", old_timeout),
+    )
+
+    await audit_logger.log_member_update(_FakeBot(rest), event)
+
+    assert recorder.created == []
+    assert recorder.dispatched == []
+
+
+async def test_voluntary_leave_without_kick_entry_records_nothing(recorder):
+    # No MEMBER_KICK audit entry at all → a plain voluntary leave → no row.
+    rest = _FakeRest(entries_by_type={}, users={})
+    event = SimpleNamespace(guild_id=GUILD_ID, user=_user(TARGET_ID, "leaver"))
+
+    await audit_logger.log_member_leave(_FakeBot(rest), event)
+
+    assert recorder.created == []
+    assert recorder.dispatched == []
+
+
+async def test_voluntary_leave_with_stale_kick_entry_records_nothing(recorder):
+    # A recent-but-not-this-leave kick of the same user (older than the 10s
+    # window) must not be attributed to a later voluntary leave.
+    stale = datetime.now(UTC) - timedelta(minutes=5)
+    rest = _FakeRest(
+        entries_by_type={
+            hikari.AuditLogEventType.MEMBER_KICK: [
+                _audit_entry(TARGET_ID, MOD_ID, reason="old kick", created_at=stale),
+            ],
+        },
+        users={MOD_ID: _user(MOD_ID, "modcarol")},
+    )
+    event = SimpleNamespace(guild_id=GUILD_ID, user=_user(TARGET_ID, "leaver"))
+
+    await audit_logger.log_member_leave(_FakeBot(rest), event)
 
     assert recorder.created == []
     assert recorder.dispatched == []

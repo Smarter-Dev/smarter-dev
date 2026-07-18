@@ -1176,6 +1176,11 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         bot.load_extensions("smarter_dev.bot.plugins.warn")
         logger.info("✓ Loaded warn plugin")
 
+        # Load purge command plugin
+        logger.info("Loading purge plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.purge")
+        logger.info("✓ Loaded purge plugin")
+
         # Load agentic handler plugins (member handlers + admin routines)
         logger.info("Loading handler events plugin...")
         bot.load_extensions("smarter_dev.bot.plugins.handler_events")
