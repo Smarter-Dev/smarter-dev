@@ -4523,7 +4523,9 @@ class AdminHandler(Base):
     )
     guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
-    trigger_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    # 32, not 20: the longest admin trigger, "member_rules_accepted", is 21
+    # chars — a varchar(20) truncation-errored every insert of that handler.
+    trigger_type: Mapped[str] = mapped_column(String(32), nullable=False)
     settings: Mapped[dict] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
     )
