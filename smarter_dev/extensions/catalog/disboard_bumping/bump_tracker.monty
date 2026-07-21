@@ -1,0 +1,118 @@
+# Disboard bump tracker. Fires on messages in the bump channel INCLUDING bot
+# messages (include_bot_messages), hard-guarded on Disboard's user id. On a
+# confirmed "Bump done" embed it credits the /bump invoker, prunes a 7-day
+# ledger, rotates the Bump King crown role, deletes the previous reminder and the
+# previous confirmation (so exactly one confirmation stays visible), and arms a
+# one-shot 2-hour reminder. Any other message in the channel is deleted to keep
+# it clean. The armed timer re-fires THIS handler with trigger_type == "timer" to
+# post the reminder. Config values are baked in as literal constants at install.
+import datetime
+
+BUMP_CHANNEL = {{cfg.bump_channel_id}}
+REMINDER_PING_ROLE = {{cfg.reminder_ping_role_id}}
+DISBOARD_ID = "302050872383242240"
+REMINDER_DELAY_SECONDS = 7200
+LEDGER_WINDOW_SECONDS = 604800
+LEDGER_MAX_ENTRIES = 200
+
+
+def top_bumper(bumps):
+    # bumps is newest-first, so a user's first appearance is their most recent
+    # bump. Winner = most bumps in the window; ties are broken by the more recent
+    # bump (a challenger takes a tied crown by having bumped more recently).
+    counts = {}
+    most_recent = {}
+    for entry in bumps:
+        user_id = entry[0]
+        bumped_at = entry[1]
+        counts[user_id] = counts.get(user_id, 0) + 1
+        if user_id not in most_recent:
+            most_recent[user_id] = bumped_at
+    best = None
+    for user_id in counts:
+        if best is None:
+            best = user_id
+        elif counts[user_id] > counts[best]:
+            best = user_id
+        elif counts[user_id] == counts[best] and most_recent[user_id] > most_recent[best]:
+            best = user_id
+    return best
+
+
+async def send_reminder():
+    text = "It's been 2 hours since the last bump — run /bump to keep us at the top of Disboard!"
+    if REMINDER_PING_ROLE:
+        return await send_message(text, BUMP_CHANNEL, REMINDER_PING_ROLE)
+    return await send_message(text, BUMP_CHANNEL)
+
+
+async def run():
+    # Timer re-fire: post the 2-hour reminder, but only if this is still the
+    # latest bump (a newer bump arms a fresh timer that supersedes this one) and
+    # we have not already reminded for it. MANDATORY schedule_timer branch.
+    if context.get("trigger_type") == "timer":
+        payload = context.get("payload") or {}
+        armed_for = payload.get("bump_at")
+        last_bump_at = await guild_memory_get("disboard_last_bump_at")
+        already_reminded = await guild_memory_get("disboard_reminded", False)
+        if last_bump_at is not None and last_bump_at == armed_for and not already_reminded:
+            reminder_id = await send_reminder()
+            if reminder_id:
+                await guild_memory_set("disboard_reminder_message_id", reminder_id)
+            await guild_memory_set("disboard_reminded", True)
+        return
+
+    # Bot-message guard: only Disboard is ever acted on. The smarter-dev bot's
+    # own messages never dispatch, so the standing reminder is spared here.
+    if context["author_id"] != DISBOARD_ID:
+        await delete_message(context["message_id"], BUMP_CHANNEL)
+        return
+
+    # A real confirmation is a "Bump done" embed whose invoker Discord reports.
+    bump_confirmed = False
+    for embed in (context.get("embeds") or []):
+        description = embed.get("description") or ""
+        if "bump done" in description.lower():
+            bump_confirmed = True
+    bumper_id = context.get("interaction_user_id")
+    if not bump_confirmed or not bumper_id:
+        # A cooldown / error notice from Disboard — remove it, credit nothing.
+        await delete_message(context["message_id"], BUMP_CHANNEL)
+        return
+
+    now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+    stored = await guild_memory_get("disboard_bumps", [])
+    bumps = [entry for entry in stored if now - entry[1] < LEDGER_WINDOW_SECONDS]
+    bumps.insert(0, [bumper_id, now])
+    bumps = bumps[:LEDGER_MAX_ENTRIES]
+    await guild_memory_set("disboard_bumps", bumps)
+    await guild_memory_set("disboard_last_bump_at", now)
+    await guild_memory_set("disboard_reminded", False)
+
+    # Remove the previous reminder (its cue is spent) and the previous
+    # confirmation, then remember this confirmation so exactly one stays visible.
+    previous_reminder = await guild_memory_get("disboard_reminder_message_id")
+    if previous_reminder:
+        await delete_message(previous_reminder, BUMP_CHANNEL)
+        await guild_memory_set("disboard_reminder_message_id", None)
+    previous_confirmation = await guild_memory_get("disboard_confirmation_message_id")
+    if previous_confirmation:
+        await delete_message(previous_confirmation, BUMP_CHANNEL)
+    await guild_memory_set("disboard_confirmation_message_id", context["message_id"])
+
+    # Rotate the crown when the top bumper changes: revoke from the stored
+    # previous king only (never enumerate role members), grant to the new king.
+    previous_king = await guild_memory_get("disboard_king_id")
+    new_king = top_bumper(bumps)
+    if new_king and new_king != previous_king:
+        if previous_king:
+            await remove_role(previous_king, {{cfg.bump_king_role_id}})
+        await add_role(new_king, {{cfg.bump_king_role_id}})
+        await guild_memory_set("disboard_king_id", new_king)
+        await send_message(f"👑 <@{new_king}> is the new Bump King!", BUMP_CHANNEL)
+
+    # Arm the one-shot reminder for 2 hours after this bump.
+    await schedule_timer(REMINDER_DELAY_SECONDS, {"bump_at": now})
+
+
+await run()

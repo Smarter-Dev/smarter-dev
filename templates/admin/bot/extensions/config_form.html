@@ -1,0 +1,75 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{% if mode == "install" %}Install{% else %}Configure{% endif %} {{ manifest.title }} - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>{% if mode == "install" %}Install{% else %}Configure{% endif %} {{ manifest.title }}</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}/extensions">&larr; Extensions</a></p>
+        </hgroup>
+
+        {% if errors %}
+        <div class="sk-flash sk-flash-error">
+            <strong>Please correct the following errors:</strong>
+            <ul style="margin:0.5rem 0 0 1rem;">
+                {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">{{ manifest.title }} <span class="sk-text-muted">v{{ manifest.version }}</span></div>
+            <div class="sk-panel-body">
+                <p class="sk-text-muted">{{ manifest.summary }}</p>
+
+                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/{% if mode == 'install' %}install{% else %}configure{% endif %}">
+                    {% for field in manifest.config %}
+                    {% set value = values.get(field.name) %}
+                    <label for="cfg_{{ field.name }}">{{ field.label }}{% if field.required %} <span class="sk-text-muted">*</span>{% endif %}</label>
+
+                    {% if field.type == "channel_id" %}
+                        {% if channels %}
+                        <select id="cfg_{{ field.name }}" name="{{ field.name }}"{% if field.required %} required{% endif %}>
+                            <option value="">Select a channel</option>
+                            {% for channel in channels %}
+                            <option value="{{ channel.id }}" {% if value|string == channel.id %}selected{% endif %}>{{ channel.name }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
+                        <input type="text" id="cfg_{{ field.name }}" name="{{ field.name }}" pattern="[0-9]{15,20}" value="{{ value }}"{% if field.required %} required{% endif %} placeholder="Channel ID (15-20 digits)">
+                        {% endif %}
+                    {% elif field.type == "role_id" %}
+                        {% if roles %}
+                        <select id="cfg_{{ field.name }}" name="{{ field.name }}"{% if field.required %} required{% endif %}>
+                            <option value="">Select a role</option>
+                            {% for role in roles %}
+                            <option value="{{ role.id }}" {% if value|string == role.id %}selected{% endif %}>{{ role.name }}</option>
+                            {% endfor %}
+                        </select>
+                        {% else %}
+                        <input type="text" id="cfg_{{ field.name }}" name="{{ field.name }}" pattern="[0-9]{15,20}" value="{{ value }}"{% if field.required %} required{% endif %} placeholder="Role ID (15-20 digits)">
+                        {% endif %}
+                    {% elif field.type == "int" %}
+                        <input type="number" id="cfg_{{ field.name }}" name="{{ field.name }}" value="{{ value }}"{% if field.required %} required{% endif %}>
+                    {% elif field.type == "bool" %}
+                        <div><input type="checkbox" id="cfg_{{ field.name }}" name="{{ field.name }}" value="true" {% if value %}checked{% endif %}> <span class="sk-text-muted">{{ field.label }}</span></div>
+                    {% else %}
+                        <input type="text" id="cfg_{{ field.name }}" name="{{ field.name }}" value="{{ value }}"{% if field.required %} required{% endif %}>
+                    {% endif %}
+
+                    {% if field.help %}<small class="sk-text-muted">{{ field.help }}</small>{% endif %}
+                    {% endfor %}
+
+                    <div style="margin-top:1rem;">
+                        <button type="submit" class="sk-btn">{% if mode == "install" %}Install Extension{% else %}Save &amp; Apply{% endif %}</button>
+                        <a href="/admin/bot/guilds/{{ guild.id }}/extensions" class="sk-btn-outline">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

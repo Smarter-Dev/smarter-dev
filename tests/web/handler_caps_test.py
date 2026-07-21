@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 from smarter_dev.web.handler_caps import (
+    DM_FIRES_PER_AUTHOR_PER_MIN,
+    DM_USER_WINDOW_SECONDS,
+    DMS_PER_USER_PER_HOUR,
+    GLOBAL_DMS_PER_MIN,
     GUILD_MEMBER_EVENTS_PER_MIN,
+    GUILD_ROLE_CHANGES_PER_MIN,
     GUILD_THREAD_OPS_PER_MIN,
+    HANDLER_TIMERS_PER_HOUR,
+    RENAME_WINDOW_SECONDS,
+    RENAMES_PER_WINDOW,
+    TIMER_ARMING_WINDOW_SECONDS,
     WindowedLimiter,
+    channel_rename_key,
+    dm_trigger_author_key,
+    dm_user_key,
     fires_per_min_for_trigger,
+    global_dm_key,
     guild_member_events_key,
+    guild_role_changes_key,
     guild_thread_ops_key,
+    handler_timer_arm_key,
     HANDLER_FIRES_PER_MIN_MESSAGE,
     HANDLER_FIRES_PER_MIN_REACTION,
 )
@@ -107,3 +122,88 @@ def test_guild_member_events_window():
 def test_guild_thread_ops_window():
     assert GUILD_THREAD_OPS_PER_MIN == 30
     assert guild_thread_ops_key("G1") == "hcap:threadop:G1"
+
+
+def test_guild_role_changes_key_format():
+    assert GUILD_ROLE_CHANGES_PER_MIN == 30
+    assert guild_role_changes_key("G1") == "hcap:rolechg:G1"
+
+
+async def test_role_changes_window_declines_over_limit():
+    limiter = WindowedLimiter(redis=_FakeRedis())
+    key = guild_role_changes_key("G1")
+    allowed = [
+        await limiter.hit(key, GUILD_ROLE_CHANGES_PER_MIN)
+        for _ in range(GUILD_ROLE_CHANGES_PER_MIN + 1)
+    ]
+    assert allowed[:GUILD_ROLE_CHANGES_PER_MIN] == [True] * GUILD_ROLE_CHANGES_PER_MIN
+    assert allowed[GUILD_ROLE_CHANGES_PER_MIN] is False
+
+
+async def test_limiter_window_seconds_override_uses_custom_ttl():
+    fake = _FakeRedis()
+    limiter = WindowedLimiter(redis=fake, window_seconds=60)
+    await limiter.hit("rk", limit=2, window_seconds=600)
+    # The override fixes a 600s expiry, not the instance's 60s default.
+    assert fake.expiries == {"rk": 600}
+
+
+async def test_limiter_default_window_unchanged_by_override_param():
+    fake = _FakeRedis()
+    limiter = WindowedLimiter(redis=fake, window_seconds=60)
+    await limiter.hit("k", limit=2)
+    assert fake.expiries == {"k": 60}
+
+
+def test_channel_rename_key_shape():
+    assert channel_rename_key("C1") == "hcap:rename:C1"
+
+
+def test_rename_window_constants_are_two_per_600():
+    assert RENAMES_PER_WINDOW == 2
+    assert RENAME_WINDOW_SECONDS == 600
+
+
+def test_handler_timer_arm_key_shape():
+    assert handler_timer_arm_key("H1") == "hcap:timersched:H1"
+
+
+def test_timer_arming_window_constants():
+    assert HANDLER_TIMERS_PER_HOUR == 30
+    assert TIMER_ARMING_WINDOW_SECONDS == 3600
+
+
+def test_dm_cap_keys_and_constants():
+    # Per-(handler, author) trigger window, per-recipient hour window, global min.
+    assert dm_trigger_author_key("H1", "U9") == "hcap:dmtrig:H1:U9"
+    assert dm_user_key("U9") == "hcap:dmuser:U9"
+    assert global_dm_key() == "hcap:dm:global"
+    assert DM_FIRES_PER_AUTHOR_PER_MIN == 4
+    assert DMS_PER_USER_PER_HOUR == 30
+    assert GLOBAL_DMS_PER_MIN == 10
+    # The per-user window is an HOUR — comfortably above a real relay conversation.
+    assert DM_USER_WINDOW_SECONDS == 3600
+
+
+async def test_dm_trigger_author_window_declines_past_limit():
+    limiter = WindowedLimiter(redis=_FakeRedis())
+    key = dm_trigger_author_key("H1", "U9")
+    allowed = [
+        await limiter.hit(key, DM_FIRES_PER_AUTHOR_PER_MIN)
+        for _ in range(DM_FIRES_PER_AUTHOR_PER_MIN + 1)
+    ]
+    assert allowed[:DM_FIRES_PER_AUTHOR_PER_MIN] == [True] * DM_FIRES_PER_AUTHOR_PER_MIN
+    assert allowed[DM_FIRES_PER_AUTHOR_PER_MIN] is False
+
+
+async def test_dm_user_hour_window_declines_past_limit_on_hour_limiter():
+    fake = _FakeRedis()
+    limiter = WindowedLimiter(redis=fake, window_seconds=DM_USER_WINDOW_SECONDS)
+    key = dm_user_key("U9")
+    allowed = [
+        await limiter.hit(key, DMS_PER_USER_PER_HOUR) for _ in range(DMS_PER_USER_PER_HOUR + 1)
+    ]
+    assert allowed[:DMS_PER_USER_PER_HOUR] == [True] * DMS_PER_USER_PER_HOUR
+    assert allowed[DMS_PER_USER_PER_HOUR] is False
+    # The window's expiry is the hour, not the 60s default.
+    assert fake.expiries == {key: DM_USER_WINDOW_SECONDS}

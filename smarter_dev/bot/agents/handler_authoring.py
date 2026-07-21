@@ -61,7 +61,8 @@ class JudgeVerdict(BaseModel):
     )
     memory_bounded: bool = Field(
         description="No unbounded memory keying (per-user/per-message/per-day without pruning); "
-        "state stays far below the 16KB cap on a busy channel"
+        "state stays far below the 16KB cap on a busy channel. Guild-shared memory "
+        "(guild_memory_*) is bounded the same way — one 16KB store cap for the whole guild"
     )
     guards_effective: bool = Field(
         description="Cheap guards before expensive work, and the guards actually filter — "
@@ -193,12 +194,19 @@ class AdminHandlerPlan(BaseModel):
     trigger_type: str = Field(
         default="message",
         description="message | reaction | schedule | timer | member_join | "
-        "member_leave | member_rules_accepted | member_role_change | thread_create",
+        "member_leave | member_rules_accepted | member_role_change | thread_create | "
+        "dm_message | message_edit | mod_action",
     )
     channel_ids: list[str] = Field(
         default_factory=list, description="Channel scope; empty = all channels"
     )
-    settings: dict = Field(default_factory=dict, description="Timing for time triggers")
+    settings: dict = Field(
+        default_factory=dict,
+        description="Timing for time triggers; for role-mutating handlers also "
+        "'allowed_role_ids': the host-enforced allowlist of every role-id literal "
+        "the script grants/revokes via add_role/remove_role (empty = no role "
+        "grantable, so a role-mutating script MUST populate it)",
+    )
     description: str = Field(
         default="",
         description="One line: what the handler does AFTER this change",
@@ -374,11 +382,22 @@ def describe_trigger(trigger_type: str, settings: dict) -> str:
             return f"Recurring forever: fires once daily at {settings['daily_time']} UTC."
         return "Recurring forever on a schedule."
     if trigger_type == "timer":
+        # A handler on ANY trigger can also arm its own one-shot re-fire with
+        # schedule_timer; the re-fire arrives as a timer context, so branch on
+        # context["trigger_type"] == "timer" to handle it.
+        rearm = (
+            " The script may re-arm itself with schedule_timer(delay_seconds, "
+            "payload), which re-fires this handler with a timer context."
+        )
         if "delay_seconds" in settings:
-            return f"One-shot: fires a single time, {_humanize_seconds(int(settings['delay_seconds']))} after creation."
+            return (
+                f"One-shot: fires a single time, "
+                f"{_humanize_seconds(int(settings['delay_seconds']))} after creation."
+                + rearm
+            )
         if "fire_at" in settings:
-            return f"One-shot: fires a single time at {settings['fire_at']}."
-        return "One-shot: fires a single time."
+            return f"One-shot: fires a single time at {settings['fire_at']}." + rearm
+        return "One-shot: fires a single time." + rearm
     if trigger_type == "member_join":
         return (
             "Fires on EVERY member join — bursts hard during raids. A handler that "
@@ -396,6 +415,26 @@ def describe_trigger(trigger_type: str, settings: dict) -> str:
         return "Fires only when a member's roles actually change — low frequency."
     if trigger_type == "thread_create":
         return "Fires on EVERY new thread/post in the channel."
+    if trigger_type == "dm_message":
+        return (
+            "Fires on EVERY DM any user sends the bot — frequency is "
+            "user-controlled, so treat content as fully untrusted."
+        )
+    if trigger_type == "message_edit":
+        return (
+            "Fires on EVERY message edit in scope — high frequency; edits are a "
+            "common evasion vector (posting clean, then editing in an @everyone "
+            "ping or a link). Scan message_content (the text NOW); old_content is "
+            "best-effort ('' when the original wasn't cached)."
+        )
+    if trigger_type == "mod_action":
+        return (
+            "Fires once per moderation action recorded in this guild (from a slash "
+            "command, the AI triage, or the audit-log backfill) — low frequency, "
+            "one fire per action. Runs with a 0 moderation-action budget: it can "
+            "format and post the audit row but can NEVER itself ban/kick/timeout/"
+            "delete. Use it to own the mod-log channel's formatting."
+        )
     return f"Trigger: {trigger_type}."
 
 

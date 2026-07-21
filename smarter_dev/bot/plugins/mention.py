@@ -277,9 +277,9 @@ async def _activate_engine(registry: Any, event: hikari.MessageCreateEvent) -> N
         engine.fire_now()
 
 
-@plugin.listener(hikari.MessageCreateEvent)
-async def on_message_create(event: hikari.MessageCreateEvent) -> None:
-    """Route every channel message: maybe activate, maybe observe, maybe ignore."""
+@plugin.listener(hikari.GuildMessageCreateEvent)
+async def on_message_create(event: hikari.GuildMessageCreateEvent) -> None:
+    """Route every guild channel message: maybe activate, maybe observe, maybe ignore."""
     if event.message.author.is_bot:
         return
     if not event.guild_id:

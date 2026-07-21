@@ -1,0 +1,39 @@
+# Daily downtime-recovery sweep for onboarding. Reads the newcomer (holding)
+# role's members and promotes anyone whose join is older than the configured
+# delay: grant the full role, then remove the newcomer role gated on the grant
+# succeeding. The happy path is handled by the timed onboarding handler; this
+# only catches members whose promotion timer was lost or never armed. Config
+# values are baked in as literal constants at install time — see the manifest.
+import datetime
+
+NEWCOMER_ROLE_ID = {{cfg.newcomer_role_id}}
+DELAY_HOURS = {{cfg.promotion_delay_hours}}
+
+# get_role_members is hard-capped at 200 matches host-side (a rail, not a paging
+# contract — holding-role populations are small). Each promotion spends up to two
+# role-changes (add + remove) and the admin role-change budget is 10 per fire, so
+# we bound the batch to 5 promotions and let the next day's run pick up any
+# remaining stuck members. The sweep is idempotent, so nothing is lost by pacing.
+MAX_PROMOTIONS_PER_FIRE = 5
+
+now = datetime.datetime.now(datetime.timezone.utc)
+delay_seconds = DELAY_HOURS * 3600
+promotions = 0
+
+for member in await get_role_members(NEWCOMER_ROLE_ID):
+    if promotions >= MAX_PROMOTIONS_PER_FIRE:
+        break
+    # A pending member has not accepted the rules — never promote them past the gate.
+    if member["pending"]:
+        continue
+    joined_at = member["joined_at"]
+    if not joined_at:
+        continue
+    joined = datetime.datetime.fromisoformat(joined_at)
+    if (now - joined).total_seconds() < delay_seconds:
+        continue
+    # Count the attempt BEFORE the grant so a run of members who have since left
+    # (add_role returns False, one role-change each) can never exceed the budget.
+    promotions = promotions + 1
+    if await add_role(member["member_id"], {{cfg.full_member_role_id}}, reason="onboarding: reconcile promotion"):
+        await remove_role(member["member_id"], {{cfg.newcomer_role_id}}, reason="onboarding: reconcile promotion")
