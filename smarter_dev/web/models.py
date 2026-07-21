@@ -4008,6 +4008,15 @@ class ChatAgentTurn(Base):
     chat_reasoning_level: Mapped[str | None] = mapped_column(
         String(16), nullable=True, default=None
     )
+    # Prompt-cache split for the chat model call. A SUBSET of chat_tokens_input
+    # (provider-reporting convention). NULL on historical rows written before
+    # the split was captured — the split for those is unknowable.
+    chat_cache_read_tokens: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None
+    )
+    chat_cache_write_tokens: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None
+    )
     chat_cost_usd: Mapped[Decimal] = mapped_column(
         Numeric(10, 6), nullable=False, default=Decimal("0")
     )
@@ -4073,6 +4082,15 @@ class ChatAgentCompactionEvent(Base):
     # runs at a fixed level), or NULL when it has no reasoning knob configured.
     summarizer_reasoning_level: Mapped[str | None] = mapped_column(
         String(16), nullable=True, default=None
+    )
+    # Prompt-cache split for the summarizer call. A SUBSET of
+    # summarizer_tokens_input (provider-reporting convention). NULL on
+    # historical rows written before the split was captured.
+    summarizer_cache_read_tokens: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None
+    )
+    summarizer_cache_write_tokens: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None
     )
     summarizer_cost_usd: Mapped[Decimal] = mapped_column(
         Numeric(10, 6), nullable=False, default=Decimal("0")

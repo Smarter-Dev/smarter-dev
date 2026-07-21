@@ -221,6 +221,109 @@ class TestCreateTurn:
         assert len(turns) == 1
         assert turns[0].chat_reasoning_level is None
 
+    async def test_chat_cache_tokens_flow_to_row_and_discount_cost(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        response = await client.post(
+            "/api/chat-conversations/turns",
+            json={
+                "engagement_id": str(engagement.id),
+                "request_id": "req-cache",
+                "turn_kind": "initial",
+                "output_kind": "send_response",
+                "triggering_messages": [],
+                "agent_output": {"topic": "t"},
+                "chat_tokens_input": 1000,
+                "chat_tokens_output": 500,
+                "chat_model_name": "kimi-k2.6",
+                "chat_cache_read_tokens": 400,
+                "chat_cache_write_tokens": 0,
+            },
+        )
+        assert response.status_code == 201
+        body = response.json()
+        # 600 uncached input @0.76 + 500 out @3.20 + 400 cached @0.19, per Mtok.
+        assert body["chat_cost_usd"] == "0.002132"
+
+        turns = (await session.execute(select(ChatAgentTurn))).scalars().all()
+        assert len(turns) == 1
+        assert turns[0].chat_cache_read_tokens == 400
+        assert turns[0].chat_cache_write_tokens == 0
+
+    async def test_chat_cache_tokens_absent_uses_full_input_rate(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        response = await client.post(
+            "/api/chat-conversations/turns",
+            json={
+                "engagement_id": str(engagement.id),
+                "request_id": "req-nocache",
+                "turn_kind": "initial",
+                "output_kind": "send_response",
+                "triggering_messages": [],
+                "agent_output": {"topic": "t"},
+                "chat_tokens_input": 1000,
+                "chat_tokens_output": 500,
+                "chat_model_name": "kimi-k2.6",
+            },
+        )
+        assert response.status_code == 201
+        body = response.json()
+        # No cache split → full 1000 input @0.76 + 500 out @3.20.
+        assert body["chat_cost_usd"] == "0.00236"
+
+        turns = (await session.execute(select(ChatAgentTurn))).scalars().all()
+        assert len(turns) == 1
+        assert turns[0].chat_cache_read_tokens is None
+        assert turns[0].chat_cache_write_tokens is None
+
+    async def test_summarizer_cache_tokens_flow_to_row_and_discount_cost(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        response = await client.post(
+            "/api/chat-conversations/turns",
+            json={
+                "engagement_id": str(engagement.id),
+                "request_id": "req-summ-cache",
+                "turn_kind": "followup",
+                "output_kind": "no_response",
+                "triggering_messages": [],
+                "agent_output": {},
+                "compaction_events": [
+                    {
+                        "event_kind": "conversation",
+                        "tool_name": None,
+                        "original_content": "aaaa",
+                        "summary": "a",
+                        "original_chars": 4,
+                        "summary_chars": 1,
+                        "summarizer_tokens_input": 2000,
+                        "summarizer_tokens_output": 100,
+                        "summarizer_model_name": "kimi-k2.6",
+                        "summarizer_cache_read_tokens": 1500,
+                        "summarizer_cache_write_tokens": 0,
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 201
+        body = response.json()
+        # 500 uncached @0.76 + 100 out @3.20 + 1500 cached @0.19, per Mtok.
+        assert body["summarizer_cost_usd_total"] == "0.000985"
+
+        events = (
+            await session.execute(select(ChatAgentCompactionEvent))
+        ).scalars().all()
+        assert len(events) == 1
+        assert events[0].summarizer_cache_read_tokens == 1500
+        assert events[0].summarizer_cache_write_tokens == 0
+
     async def test_persists_compaction_events(self, client: AsyncClient, session):
         engagement = await _seed_engagement(session)
 

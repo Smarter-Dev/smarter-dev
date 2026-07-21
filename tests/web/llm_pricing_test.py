@@ -47,8 +47,34 @@ class TestDigitalOceanPricing:
     def test_digitalocean_prefixed_name_also_resolves(self):
         assert calc_cost(1_000_000, 0, "digitalocean:kimi-k2.6") == Decimal("0.76")
 
-    def test_cache_read_tokens_use_prompt_caching_rate(self):
-        # kimi-k2.6 prompt caching: $0.19 per 1M tokens
+    def test_cached_reads_bill_at_caching_rate_not_input_rate(self):
+        # Providers report cache tokens as a SUBSET of input_tokens. 1M input
+        # of which 600k were cached reads on kimi-k2.6:
+        # 400k @ $0.76 + 600k @ $0.19 per Mtok.
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=600_000,
+            cache_write_tokens=0,
+            model_name="kimi-k2.6",
+        )
+        assert cost == Decimal("0.418")
+
+    def test_cache_tokens_without_caching_rate_bill_as_input(self):
+        # gemma-4 has no prompt-caching tier on DO; the cached portion bills
+        # at the plain input rate, so the split changes nothing.
+        cost = calc_session_cost(
+            input_tokens=2_000_000,
+            output_tokens=0,
+            cache_read_tokens=1_000_000,
+            cache_write_tokens=1_000_000,
+            model_name="gemma-4-31B-it",
+        )
+        assert cost == Decimal("0.36")
+
+    def test_cache_tokens_exceeding_input_clamp_uncached_to_zero(self):
+        # Defensive: a provider reporting cache reads without folding them
+        # into input_tokens must not produce a negative uncached share.
         cost = calc_session_cost(
             input_tokens=0,
             output_tokens=0,
@@ -58,17 +84,14 @@ class TestDigitalOceanPricing:
         )
         assert cost == Decimal("0.19")
 
-    def test_cache_tokens_without_caching_rate_bill_as_input(self):
-        # gemma-4 has no prompt-caching tier on DO; cached reads/writes are
-        # billed at the plain input rate.
-        cost = calc_session_cost(
-            input_tokens=0,
-            output_tokens=0,
-            cache_read_tokens=1_000_000,
-            cache_write_tokens=1_000_000,
-            model_name="gemma-4-31B-it",
+    def test_calc_cost_accepts_cache_token_split(self):
+        cost = calc_cost(
+            1_000_000,
+            0,
+            "kimi-k2.6",
+            cache_read_tokens=600_000,
         )
-        assert cost == Decimal("0.36")
+        assert cost == Decimal("0.418")
 
 
 class TestUnknownModelFallback:
