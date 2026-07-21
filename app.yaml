@@ -113,6 +113,7 @@ controllers:
   - smarter_dev.web.bot_admin.repeating_messages:RepeatingMessagesAdminController
   - smarter_dev.web.bot_admin.guild_configs:GuildConfigsAdminController
   - smarter_dev.web.bot_admin.help_conversations:HelpConversationsAdminController
+  - smarter_dev.web.bot_admin.extensions:ExtensionsAdminController
   - smarter_dev.web.handlers_admin:HandlersAdminController
   - smarter_dev.web.quests_admin:QuestsAdminController
   - smarter_dev.web.chat_conversations_admin:ChatConversationsAdminController

@@ -1,0 +1,95 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Extensions - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Extensions</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <p class="sk-text-muted">
+            First-party, code-reviewed handler bundles. Installing an extension
+            materialises its admin handlers for this guild with your config baked in.
+        </p>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Catalog ({{ extensions|length }})</div>
+            <div class="sk-panel-body">
+                {% if extensions %}
+                <div style="display:flex; flex-direction:column; gap:1rem;">
+                    {% for ext in extensions %}
+                    {% set manifest = ext.manifest %}
+                    {% set install = installs_by_slug.get(manifest.slug) %}
+                    <div class="sk-panel" style="margin:0;">
+                        <div class="sk-panel-body">
+                            <div style="display:flex; justify-content:space-between; align-items:baseline; gap:1rem; flex-wrap:wrap;">
+                                <div>
+                                    <strong style="font-size:1.05rem;">{{ manifest.title }}</strong>
+                                    <span class="sk-pill sk-pill-draft">v{{ manifest.version }}</span>
+                                    {% if install %}
+                                        {% if install.enabled %}
+                                        <span class="sk-pill sk-pill-published">Enabled</span>
+                                        {% else %}
+                                        <span class="sk-pill sk-pill-draft">Disabled</span>
+                                        {% endif %}
+                                        {% if manifest.version > install.installed_version %}
+                                        <span class="sk-pill sk-pill-draft">Update available (v{{ install.installed_version }} &rarr; v{{ manifest.version }})</span>
+                                        {% endif %}
+                                    {% endif %}
+                                </div>
+                                <code class="sk-text-muted">{{ manifest.slug }}</code>
+                            </div>
+                            <p class="sk-text-muted" style="margin:0.5rem 0;">{{ manifest.summary }}</p>
+                            <p class="sk-text-muted" style="font-size:0.85rem; margin:0.25rem 0;">
+                                {{ manifest.handlers|length }} handler(s):
+                                {% for handler in manifest.handlers %}<code>{{ handler.trigger_type }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+                            </p>
+
+                            <div style="margin-top:0.75rem; white-space:nowrap;">
+                                {% if not install %}
+                                <a href="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/install" class="sk-btn">Install</a>
+                                {% else %}
+                                <a href="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/configure" class="sk-btn-outline sk-btn-small">Configure</a>
+                                {% if manifest.version > install.installed_version %}
+                                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/update" style="display:inline;">
+                                    <button type="submit" class="sk-btn sk-btn-small">Update</button>
+                                </form>
+                                {% endif %}
+                                {% if install.enabled %}
+                                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/disable" style="display:inline;">
+                                    <button type="submit" class="sk-btn-outline sk-btn-small">Disable</button>
+                                </form>
+                                {% else %}
+                                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/enable" style="display:inline;">
+                                    <button type="submit" class="sk-btn-outline sk-btn-small">Enable</button>
+                                </form>
+                                {% endif %}
+                                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/uninstall" style="display:inline;" onsubmit="return confirm('Uninstall this extension? Its handlers will be removed from this guild.')">
+                                    <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Uninstall</button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="sk-no-items">No extensions are available in the catalog.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
