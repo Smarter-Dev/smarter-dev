@@ -25,6 +25,7 @@ from smarter_dev.bot.agents.chat_models import Message
 from smarter_dev.bot.agents.chat_models import MessageScore
 from smarter_dev.bot.agents.chat_models import ResponseBody
 from smarter_dev.bot.agents.chat_models import TurnDecision
+from smarter_dev.bot.agents.chat_tools import GeneratedImage
 from smarter_dev.bot.agents.response_fitting import FitResult
 from smarter_dev.bot.services.chat_engine import ChannelEngine
 
@@ -243,4 +244,69 @@ async def test_reply_at_threshold_is_not_rewritten(fake_memory, fake_redis):
         await engine._run_once(first_activation=True)
 
     fit_mock.assert_not_called()
+    assert len(engine.bot.rest.create_message.await_args_list) == 2
+
+
+@pytest.mark.asyncio
+async def test_split_reply_puts_attachments_on_the_last_message(fake_redis):
+    """Images ride on the second message of a split reply so an attachment
+    never visually interrupts the text."""
+    engine = _make_engine(fake_redis)
+    image = GeneratedImage(
+        data=b"PNGDATA", mime_type="image/png", filename="diagram.png"
+    )
+
+    ok = await engine._send_text(
+        "A" * 1200 + "\n" + "B" * 1290, reply_to=101, images=[image]
+    )
+
+    assert ok is True
+    calls = engine.bot.rest.create_message.await_args_list
+    assert len(calls) == 2
+    first, second = (call.kwargs for call in calls)
+    assert first["content"] == "A" * 1200
+    assert first["reply"] == 101
+    assert "attachments" not in first
+    assert second["content"] == "B" * 1290
+    assert "reply" not in second
+    assert len(second["attachments"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_single_message_reply_keeps_attachments_on_it(fake_redis):
+    engine = _make_engine(fake_redis)
+    image = GeneratedImage(
+        data=b"PNGDATA", mime_type="image/png", filename="diagram.png"
+    )
+
+    ok = await engine._send_text("short reply", reply_to=None, images=[image])
+
+    assert ok is True
+    engine.bot.rest.create_message.assert_awaited_once()
+    kwargs = engine.bot.rest.create_message.await_args.kwargs
+    assert kwargs["content"] == "short reply"
+    assert len(kwargs["attachments"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_failed_lead_message_fails_the_send(fake_redis):
+    engine = _make_engine(fake_redis)
+    engine.bot.rest.create_message = AsyncMock(side_effect=RuntimeError("down"))
+
+    ok = await engine._send_text("A" * 1200 + "\n" + "B" * 1290, reply_to=None)
+
+    assert ok is False
+    engine.bot.rest.create_message.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_failed_continuation_still_counts_as_sent(fake_redis):
+    engine = _make_engine(fake_redis)
+    engine.bot.rest.create_message = AsyncMock(
+        side_effect=[None, RuntimeError("down")]
+    )
+
+    ok = await engine._send_text("A" * 1200 + "\n" + "B" * 1290, reply_to=None)
+
+    assert ok is True
     assert len(engine.bot.rest.create_message.await_args_list) == 2
