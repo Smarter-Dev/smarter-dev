@@ -69,6 +69,7 @@ from smarter_dev.bot.services.chat_conversation_persistence import start_engagem
 from smarter_dev.bot.services.chat_memory import get_chat_memory
 from smarter_dev.bot.services.user_message_limit import DIRECTED_SCORE_THRESHOLD
 from smarter_dev.bot.services.user_message_limit import record_directed_messages
+from smarter_dev.bot.utils.messages import fetch_channel_info
 from smarter_dev.bot.utils.stop_detection import is_stop_request
 from smarter_dev.bot.utils.stop_detection import set_channel_cooldown
 from smarter_dev.bot.views.model_override_views import (
@@ -1140,6 +1141,24 @@ class ChannelEngine:
         fetched.reverse()
         return [self._to_gate_message(message) for message in fetched]
 
+    async def _fetch_gate_channel_name(self) -> str | None:
+        """The channel's name for the response gate — a forum post's title.
+
+        Best-effort: any lookup failure degrades to None (debug log) so the
+        gate judges without the name rather than erroring the turn.
+        """
+        try:
+            info = await fetch_channel_info(self.bot, self.channel_id)
+        except Exception:
+            logger.debug(
+                "could not fetch channel name for response-filter gate in "
+                "channel %s",
+                self.channel_id,
+                exc_info=True,
+            )
+            return None
+        return info.get("channel_name") or None
+
     async def _gate_allows(
         self, response_filter: str, candidates: list[Any]
     ) -> set[str]:
@@ -1148,7 +1167,8 @@ class ChannelEngine:
         Wraps the (already fail-open) message gate so an unexpected error still
         runs the turn unfiltered — a wasted reply is far cheaper than a channel
         that goes mute. ``candidates`` are hikari messages; grounding is up to
-        five channel messages immediately preceding them.
+        five channel messages immediately preceding them plus the channel name
+        (a forum post's title), so short follow-ups are judged in context.
         """
         candidate_messages = [
             self._to_gate_message(message)
@@ -1158,9 +1178,13 @@ class ChannelEngine:
         if not candidate_messages:
             return set()
         grounding = await self._fetch_gate_grounding(candidates)
+        channel_name = await self._fetch_gate_channel_name()
         try:
             allowed = await filter_messages(
-                response_filter, candidate_messages, grounding
+                response_filter,
+                candidate_messages,
+                grounding,
+                channel_name=channel_name,
             )
         except Exception:
             logger.warning(

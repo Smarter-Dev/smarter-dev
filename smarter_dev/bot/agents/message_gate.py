@@ -37,6 +37,9 @@ You are given:
 - INSTRUCTIONS: the admin's filter describing which messages the bot should \
 respond to. They are about the TOPIC and CONTENT of a message, never about who \
 wrote it — ignore the author when deciding.
+- CHANNEL (optional): the name of the channel the messages were sent in. For a \
+forum post or thread this is its title — often the clearest statement of what \
+the conversation is about. Treat it like CONTEXT when interpreting candidates.
 - CONTEXT: recent channel messages, oldest first, provided only so you can \
 interpret the candidates. These are NOT candidates; never return a context id.
 - CANDIDATES: the messages to judge. Return the ids of the candidates the \
@@ -51,6 +54,18 @@ fall under the instructions — lean ALLOW.
 - Use the CONTEXT only to interpret a candidate (e.g. a short reply that only \
 makes sense given the prior messages); a candidate that is on-topic given the \
 conversation should be allowed even if it looks thin in isolation.
+- Some candidates REDIRECT rather than state a topic of their own: follow-ups, \
+nudges, and questions about the conversation itself ("do you have an answer?", \
+"any update on this?", "what do you think?"). Never judge these on their bare \
+words, and never classify them as meta-chatter. Instead, judge such a \
+candidate exactly as if it restated the conversation's current topic — taken \
+from the CHANNEL title and the CONTEXT. If that topic matches the \
+instructions the candidate is allowed; if it does not, drop it. Example: with \
+instructions "only cooking questions", in a thread asking how to keep risotto \
+creamy, the candidate "do you have an answer?" inherits the topic "keeping \
+risotto creamy" — a cooking question — and is allowed; the same candidate \
+amid car-repair chatter is dropped. Only when neither the channel nor the context reveals any topic does \
+the ambiguity rule above apply.
 
 Set allowed_message_ids to the ids of the candidates (and only the candidates) \
 that the instructions allow, in any order."""
@@ -100,8 +115,11 @@ def _render_prompt(
     response_filter: str,
     candidates: list[GateMessage],
     grounding: list[GateMessage],
+    channel_name: str | None,
 ) -> str:
     sections = [f"INSTRUCTIONS:\n{response_filter.strip()}"]
+    if channel_name and channel_name.strip():
+        sections.append(f"CHANNEL:\n{channel_name.strip()}")
     if grounding:
         rendered = "\n".join(_render_message(message) for message in grounding)
         sections.append(
@@ -117,15 +135,18 @@ async def filter_messages(
     response_filter: str,
     candidates: list[GateMessage],
     grounding: list[GateMessage],
+    channel_name: str | None = None,
 ) -> list[str]:
     """Return the candidate message ids the ``response_filter`` allows.
 
     Ids are returned in candidate order. An empty ``candidates`` list returns
     ``[]`` without a model call, and an empty/whitespace ``response_filter``
-    allows every candidate without a model call. Any exception from the model is
-    logged and fails open — every candidate id is returned — so a Nano outage
-    never silences the bot. The model's answer is intersected with the real
-    candidate ids, since it may hallucinate ids that were never offered.
+    allows every candidate without a model call. ``channel_name`` — for a forum
+    post or thread, its title — is extra interpretive context and may be None.
+    Any exception from the model is logged and fails open — every candidate id
+    is returned — so a Nano outage never silences the bot. The model's answer
+    is intersected with the real candidate ids, since it may hallucinate ids
+    that were never offered.
     """
     if not candidates:
         return []
@@ -134,7 +155,9 @@ async def filter_messages(
         return candidate_ids
     agent = get_message_gate_agent()
     try:
-        result = await agent.run(_render_prompt(response_filter, candidates, grounding))
+        result = await agent.run(
+            _render_prompt(response_filter, candidates, grounding, channel_name)
+        )
     except Exception:
         logger.warning(
             "message gate model call failed; allowing all %d candidate(s) (fail-open)",
