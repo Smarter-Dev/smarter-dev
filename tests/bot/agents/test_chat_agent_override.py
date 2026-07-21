@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 import smarter_dev.bot.agents.chat_agent as chat_agent
+from smarter_dev.bot.agents.chat_agent import _model_identity_prompt
 from smarter_dev.bot.agents.chat_agent import get_chat_agent
 from smarter_dev.bot.agents.chat_agent import resolved_reasoning_level
 
@@ -67,6 +68,56 @@ def test_none_resolves_to_env_default_and_is_singleton_equivalent(monkeypatch):
     explicit_default = get_chat_agent(chat_agent.DEFAULT_MODEL)
     assert default_first is default_second
     assert default_first is explicit_default
+
+
+def test_model_identity_prompt_names_model_and_resolved_reasoning():
+    identity = _model_identity_prompt("gpt-5.4", "high")
+    assert "GPT-5.4" in identity
+    assert "`gpt-5.4`" in identity
+    assert "**high**" in identity
+
+
+def test_model_identity_prompt_reports_the_clamped_level():
+    # Gemini's thinking_level tops out at "high" — the identity must reflect
+    # what actually runs, not the raw stored choice.
+    identity = _model_identity_prompt("gemini-3.1-flash-lite", "max")
+    assert "**high**" in identity
+    assert "max" not in identity
+
+
+def test_model_identity_prompt_omits_reasoning_without_knob():
+    identity = _model_identity_prompt("kimi-k2.6", "high")
+    assert "Kimi K2.6" in identity
+    assert "at reasoning level" not in identity
+
+
+def test_model_identity_prompt_handles_adhoc_model_id():
+    identity = _model_identity_prompt("some-unlisted-model", None)
+    assert "`some-unlisted-model`" in identity
+    assert "at reasoning level" not in identity
+
+
+def test_model_identity_prompt_is_share_on_request_only():
+    identity = _model_identity_prompt("gpt-5.4", None)
+    assert "when someone asks" in identity
+    assert "never volunteer" in identity
+
+
+def test_agent_system_prompt_carries_its_model_identity():
+    _reset_cache()
+    agent = get_chat_agent("gpt-5.4", "high")
+    prompt = "".join(agent._system_prompts)
+    assert "## Your model" in prompt
+    assert "`gpt-5.4`" in prompt
+    assert "**high**" in prompt
+
+
+def test_default_agent_system_prompt_names_the_default_model(monkeypatch):
+    _reset_cache()
+    monkeypatch.delenv(chat_agent.MODEL_ENV_VAR, raising=False)
+    agent = get_chat_agent()
+    prompt = "".join(agent._system_prompts)
+    assert f"`{chat_agent.DEFAULT_MODEL}`" in prompt
 
 
 def test_resolved_reasoning_level_returns_supported_choice():
