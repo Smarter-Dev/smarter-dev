@@ -54,6 +54,14 @@ One input variable is provided:
                 are never delivered.
                 context["attachments"] — files posted with the message, each
                 {"url", "content_type", "filename"} (empty list if none)
+                context["embeds"] — the message's embeds, JSON-safe, each
+                {"title", "description", "fields": [{"name", "value"}]} with
+                strings truncated to 1024 chars and absent parts null (empty
+                list if none) — how a bot-message handler reads a Disboard-style
+                confirmation: embeds[0]["description"];
+                context["interaction_user_id"] — id of the user whose slash
+                command produced this message when it is a bot's command
+                response, else null (how a bump handler credits who ran /bump);
                 AUTHOR & MENTION GUARDS (cheap, always present — use to skip staff
                 or catch mass pings before doing expensive work):
                 context["author_role_ids"] — role ids the author holds (@everyone
@@ -95,10 +103,15 @@ These async functions are provided — you MUST `await` every call:
       Post a message to the channel. Returns the new message's id (use it if you
       then want to react to your own message). You may pass channel_id ONLY to
       post into a THREAD of this channel (e.g. context["thread_id"], or a
-      thread id from list_threads) — any other channel is rejected. Omit
-      channel_id to post to the channel itself.
-  await add_reaction(message_id: str, emoji: str) -> bool
-      Add a reaction to a message. Custom emoji: pass "name:id". Unicode: pass the character.
+      thread id from list_threads) — any other channel is rejected. When the
+      thread you targeted is GONE or inaccessible (403/404) it returns False, a
+      silent no-op — branch on it, never assume it sent. Omit channel_id to post
+      to the channel itself (that path raises on failure instead).
+  await add_reaction(message_id: str, emoji: str, channel_id: str = None) -> bool
+      Add a reaction to a message. Custom emoji: pass "name:id". Unicode: pass the
+      character. channel_id defaults to this channel — to react to a message
+      INSIDE a thread of this channel, pass the thread id explicitly (like
+      send_message) or the reaction 404s against the channel itself.
   await list_threads() -> list[dict]
       Active + recently-archived threads/posts of THIS channel (hard cap 50), each
       {"thread_id", "name", "created_at", "archived", "locked", "owner_id",
