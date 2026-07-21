@@ -55,6 +55,50 @@ _patch_provider(
     ),
 )
 
+# Gemini 3.5 Flash Lite — not yet in genai-prices
+# NOTE: must come before gemini-3.5-flash so the more specific match wins
+_patch_provider(
+    "google",
+    types.ModelInfo(
+        id="gemini-3.5-flash-lite",
+        match=types.ClauseStartsWith(starts_with="gemini-3.5-flash-lite"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("0.30"),
+            output_mtok=Decimal("2.50"),
+            cache_read_mtok=Decimal("0.03"),
+        ),
+    ),
+)
+
+# Gemini 3.5 Flash — not yet in genai-prices. Retired as a selectable model
+# (replaced by 3.6 Flash) but historical turns still price against it.
+_patch_provider(
+    "google",
+    types.ModelInfo(
+        id="gemini-3.5-flash",
+        match=types.ClauseStartsWith(starts_with="gemini-3.5-flash"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("1.50"),
+            output_mtok=Decimal("9.00"),
+            cache_read_mtok=Decimal("0.15"),
+        ),
+    ),
+)
+
+# Gemini 3.6 Flash — not yet in genai-prices
+_patch_provider(
+    "google",
+    types.ModelInfo(
+        id="gemini-3.6-flash",
+        match=types.ClauseStartsWith(starts_with="gemini-3.6-flash"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("1.50"),
+            output_mtok=Decimal("7.50"),
+            cache_read_mtok=Decimal("0.15"),
+        ),
+    ),
+)
+
 # GPT-5.4 Nano — not yet in genai-prices
 _patch_provider(
     "openai",

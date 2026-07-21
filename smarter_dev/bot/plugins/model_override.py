@@ -29,12 +29,16 @@ from typing import Any
 
 import hikari
 import lightbulb
+from redis.exceptions import RedisError
 
 from smarter_dev.bot.plugins.admin_gate import deny_if_not_admin
 from smarter_dev.bot.plugins.admin_gate import is_admin
 from smarter_dev.bot.services.channel_token_budget import fallback_ended_key
 from smarter_dev.bot.services.channel_token_budget import fallback_flag_key
 from smarter_dev.bot.services.chat_engine_registry import get_chat_engine_registry
+from smarter_dev.bot.services.default_model_override import DefaultModelOverride
+from smarter_dev.bot.services.default_model_override import parse_end_date_utc
+from smarter_dev.bot.services.default_model_override import set_default_model_override
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.model_override_service import ModelOverrideService
 from smarter_dev.bot.services.models import ChannelModelOverride
@@ -54,6 +58,8 @@ from smarter_dev.bot.views.model_override_views import create_settings_modal
 from smarter_dev.bot.views.model_override_views import create_settings_panel
 from smarter_dev.bot.views.model_override_views import parse_budget
 from smarter_dev.bot.views.model_override_views import parse_panel_state
+from smarter_dev.shared.model_catalog import ALL_REASONING_LEVELS
+from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_catalog import is_valid_model_key
@@ -215,6 +221,97 @@ async def chat_bot_settings(ctx: lightbulb.Context) -> None:
     await ctx.respond(
         "Select a model for this channel. Pick **Server default** to remove any override.",
         components=create_model_select_message(current),
+        flags=hikari.MessageFlag.EPHEMERAL,
+    )
+
+
+@plugin.command
+@lightbulb.option(
+    "end_date",
+    "UTC end — YYYY-MM-DD (lasts through that day) or YYYY-MM-DD HH:MM",
+    type=hikari.OptionType.STRING,
+    required=True,
+)
+@lightbulb.option(
+    "reasoning",
+    "Reasoning level (clamped to what the model supports)",
+    type=hikari.OptionType.STRING,
+    choices=[
+        hikari.CommandChoice(name=level.label, value=level.value)
+        for level in ALL_REASONING_LEVELS
+    ],
+    required=True,
+)
+@lightbulb.option(
+    "model",
+    "Model to run as the temporary default",
+    type=hikari.OptionType.STRING,
+    choices=[
+        hikari.CommandChoice(name=catalog_model.label, value=catalog_model.key)
+        for catalog_model in MODEL_CATALOG
+    ],
+    required=True,
+)
+@lightbulb.command(
+    "chat-default-model-override",
+    "Temporarily switch the default chat model until a UTC end date (admin only)",
+)
+@lightbulb.implements(lightbulb.SlashCommand)
+async def chat_default_model_override(ctx: lightbulb.Context) -> None:
+    """Store a self-expiring bot-wide default-model override in Redis.
+
+    Applies to every channel *without* its own ``/chat-bot-settings`` override;
+    the chat engine reads it per turn, and the Redis ``EXAT`` reverts the
+    default automatically at the end date.
+    """
+    if await deny_if_not_admin(ctx, ADMIN_DENIAL_MESSAGE):
+        return
+
+    model = get_model(ctx.options.model)
+    if model is None:
+        await ctx.respond(
+            "❌ That model is no longer available.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
+        return
+
+    try:
+        expires_at = parse_end_date_utc(ctx.options.end_date, datetime.now(UTC))
+    except ValueError as exc:
+        await ctx.respond(f"❌ {exc}", flags=hikari.MessageFlag.EPHEMERAL)
+        return
+
+    redis = _budget_redis(ctx.bot)
+    if redis is None:
+        await ctx.respond(
+            "❌ Couldn't reach the override store — please try again shortly.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
+        return
+
+    expires_at_epoch = int(expires_at.timestamp())
+    try:
+        await set_default_model_override(
+            redis,
+            DefaultModelOverride(
+                model_key=model.key,
+                reasoning_level=ctx.options.reasoning,
+                expires_at_epoch=expires_at_epoch,
+            ),
+        )
+    except RedisError:
+        logger.exception("Failed to store the temporary default-model override")
+        await ctx.respond(
+            "❌ Couldn't save the override — please try again shortly.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
+        return
+
+    await ctx.respond(
+        f"✅ Default chat model is temporarily **{model.label}** until "
+        f"<t:{expires_at_epoch}:f> (<t:{expires_at_epoch}:R>).\n"
+        f"• Reasoning: {_render_reasoning(model, ctx.options.reasoning)}\n"
+        "• Channels with their own `/chat-bot-settings` override are unaffected.",
         flags=hikari.MessageFlag.EPHEMERAL,
     )
 

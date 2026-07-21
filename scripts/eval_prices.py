@@ -17,9 +17,17 @@ from genai_prices import data_snapshot, types
 # provider_id -> { api_id: (display_name, input_mtok, output_mtok, cache_read_mtok) }
 CUSTOM_PRICES: dict[str, dict[str, tuple[str, str, str, str | None]]] = {
     "google": {
+        # Gemini 3.5 Flash Lite — launched 2026-07-21. $0.30 in / $2.50 out / $0.03 cached.
+        # Must precede gemini-3.5-flash: that id's "gemini-3.5-flash-" prefix
+        # matcher would otherwise swallow the lite id.
+        # https://ai.google.dev/gemini-api/docs/pricing
+        "gemini-3.5-flash-lite": ("Gemini 3.5 Flash Lite", "0.3", "2.5", "0.03"),
         # Gemini 3.5 Flash — launched 2026-05-19. $1.50 in / $9.00 out / $0.15 cached.
         # https://devtk.ai/en/models/gemini-3-5-flash/ , https://pricepertoken.com/pricing-page/model/google-gemini-3.5-flash
         "gemini-3.5-flash": ("Gemini 3.5 Flash", "1.5", "9", "0.15"),
+        # Gemini 3.6 Flash — launched 2026-07-21. $1.50 in / $7.50 out / $0.15 cached.
+        # https://ai.google.dev/gemini-api/docs/pricing
+        "gemini-3.6-flash": ("Gemini 3.6 Flash", "1.5", "7.5", "0.15"),
         # Gemini 3.1 Flash Lite — GA 2026-05-07. $0.25 in / $1.50 out.
         # https://devtk.ai/en/models/gemini-3-1-flash-lite/
         "gemini-3.1-flash-lite": ("Gemini 3.1 Flash Lite", "0.25", "1.5", None),

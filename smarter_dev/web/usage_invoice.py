@@ -49,6 +49,8 @@ _PROVIDER_BY_FLAT_MODEL_ID: dict[str, str] = {
     catalog_model.model_id: catalog_model.provider.value
     for catalog_model in MODEL_CATALOG
 }
+# Wire ids of retired catalog models — historical usage rows still carry them.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3.5-flash", "google")
 
 # Provider key -> human display label.
 PROVIDER_LABELS: dict[str, str] = {
