@@ -16,7 +16,15 @@ from skrift.admin.helpers import get_admin_context
 from skrift.admin.navigation import ADMIN_NAV_TAG
 from skrift.auth.guards import Permission, auth_guard
 
+from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.web.models import ResearchSession, ScanServiceUsage
+from smarter_dev.web.usage_invoice import (
+    ChannelUsageLine,
+    InvoiceLine,
+    available_months,
+    channel_breakdown,
+    monthly_invoice,
+)
 
 # Bucket expressions keyed by granularity name.
 # Each returns a string label suitable for Chart.js x-axis.
@@ -48,6 +56,122 @@ def _build_filters(
     return filters
 
 
+_SOURCE_LABELS = {
+    "chat": "Chat",
+    "voice": "Voice",
+    "compaction": "Compaction",
+    "scan": "Scan research",
+    "scan_service": "Scan services",
+}
+
+_VALID_TABS = {"runs", "users", "service", "invoice", "channels"}
+
+
+def _reasoning_display(reasoning_level: str | None) -> str:
+    if reasoning_level is None:
+        return "—"
+    try:
+        return ReasoningLevel(reasoning_level).label
+    except ValueError:
+        return reasoning_level
+
+
+def _zero_token_totals() -> dict:
+    return {
+        "cost": Decimal("0"),
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+    }
+
+
+def build_invoice_tree(lines: list[InvoiceLine]) -> tuple[list[dict], dict]:
+    """Group flat invoice lines into provider → model → reasoning rows.
+
+    Returns (providers, grand_totals) where each provider carries its own
+    subtotals and a cost-descending list of models, each model carrying its
+    subtotals and cost-descending reasoning/source rows.
+    """
+    providers_by_key: dict[str, dict] = {}
+    grand_totals = _zero_token_totals()
+
+    for line in lines:
+        provider = providers_by_key.setdefault(line.provider_key, {
+            "key": line.provider_key,
+            "label": line.provider_label,
+            **_zero_token_totals(),
+            "models": {},
+        })
+        model = provider["models"].setdefault(line.model_name, {
+            "name": line.model_name,
+            **_zero_token_totals(),
+            "rows": [],
+        })
+        model["rows"].append({
+            "reasoning": _reasoning_display(line.reasoning_level),
+            "source": _SOURCE_LABELS.get(line.source, line.source),
+            "input_tokens": line.input_tokens,
+            "output_tokens": line.output_tokens,
+            "cache_read_tokens": line.cache_read_tokens,
+            "cache_write_tokens": line.cache_write_tokens,
+            "cost": line.cost_usd,
+        })
+        for bucket in (model, provider, grand_totals):
+            bucket["cost"] += line.cost_usd
+            bucket["input_tokens"] += line.input_tokens
+            bucket["output_tokens"] += line.output_tokens
+            bucket["cache_read_tokens"] += line.cache_read_tokens
+            bucket["cache_write_tokens"] += line.cache_write_tokens
+
+    providers = sorted(
+        providers_by_key.values(), key=lambda p: p["cost"], reverse=True
+    )
+    for provider in providers:
+        provider["models"] = sorted(
+            provider["models"].values(), key=lambda m: m["cost"], reverse=True
+        )
+        for model in provider["models"]:
+            model["rows"].sort(key=lambda r: r["cost"], reverse=True)
+    return providers, grand_totals
+
+
+def build_channel_tree(lines: list[ChannelUsageLine]) -> list[dict]:
+    """Group flat channel usage lines into per-channel groups with subtotals."""
+    channels_by_key: dict[tuple, dict] = {}
+
+    for line in lines:
+        channel = channels_by_key.setdefault((line.guild_id, line.channel_id), {
+            "guild_id": line.guild_id,
+            "channel_id": line.channel_id,
+            "display_name": None,
+            "cost": Decimal("0"),
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "rows": [],
+        })
+        if line.channel_name and not channel["display_name"]:
+            channel["display_name"] = f"#{line.channel_name}"
+        channel["rows"].append({
+            "provider_label": line.provider_label,
+            "model_name": line.model_name,
+            "reasoning": _reasoning_display(line.reasoning_level),
+            "source": _SOURCE_LABELS.get(line.source, line.source),
+            "input_tokens": line.input_tokens,
+            "output_tokens": line.output_tokens,
+            "cost": line.cost_usd,
+        })
+        channel["cost"] += line.cost_usd
+        channel["input_tokens"] += line.input_tokens
+        channel["output_tokens"] += line.output_tokens
+
+    for channel in channels_by_key.values():
+        if not channel["display_name"]:
+            channel["display_name"] = channel["channel_id"] or "unknown channel"
+        channel["rows"].sort(key=lambda r: r["cost"], reverse=True)
+    return sorted(channels_by_key.values(), key=lambda c: c["cost"], reverse=True)
+
+
 class _DecimalEncoder(json.JSONEncoder):
     def default(self, o: object) -> object:
         if isinstance(o, Decimal):
@@ -74,6 +198,8 @@ class UsageAdminController(Controller):
         days: Optional[int] = 30,
         pipeline_mode: Optional[str] = None,
         granularity: Optional[str] = "day",
+        month: str | None = None,
+        tab: str | None = None,
     ) -> TemplateResponse:
         """Usage dashboard with individual runs, per-user aggregation, and cost chart."""
         ctx = await get_admin_context(request, db_session)
@@ -81,6 +207,21 @@ class UsageAdminController(Controller):
 
         if granularity not in _BUCKET_EXPR:
             granularity = "day"
+        active_tab = tab if tab in _VALID_TABS else "runs"
+
+        # ------------------------------------------------------------------
+        # Monthly invoice + per-channel breakdown
+        # ------------------------------------------------------------------
+        months = await available_months(db_session)
+        selected_month = month if month in months else (months[0] if months else None)
+        if selected_month:
+            invoice_lines = await monthly_invoice(db_session, selected_month)
+            channel_lines = await channel_breakdown(db_session, selected_month)
+        else:
+            invoice_lines = []
+            channel_lines = []
+        invoice_providers, invoice_totals = build_invoice_tree(invoice_lines)
+        channels = build_channel_tree(channel_lines)
 
         # ------------------------------------------------------------------
         # Tab 1: Individual runs (most recent 200)
@@ -221,6 +362,12 @@ class UsageAdminController(Controller):
                 "svc_agg_rows": svc_agg_rows,
                 "svc_total_cost": svc_total_cost,
                 "svc_total_invocations": svc_total_invocations,
+                "active_tab": active_tab,
+                "months": months,
+                "selected_month": selected_month,
+                "invoice_providers": invoice_providers,
+                "invoice_totals": invoice_totals,
+                "channels": channels,
                 **ctx,
             },
         )

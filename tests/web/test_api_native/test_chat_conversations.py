@@ -178,6 +178,7 @@ class TestCreateTurn:
                 "agent_output": {"topic": "greetings", "notes": "friendly"},
                 "chat_tokens_input": 100,
                 "chat_tokens_output": 50,
+                "chat_reasoning_level": "high",
             },
         )
         assert response.status_code == 201
@@ -190,12 +191,35 @@ class TestCreateTurn:
 
         turns = (await session.execute(select(ChatAgentTurn))).scalars().all()
         assert len(turns) == 1
+        assert turns[0].chat_reasoning_level == "high"
 
         await session.refresh(engagement)
         assert engagement.total_chat_tokens_input == 100
         assert engagement.total_chat_tokens_output == 50
         assert engagement.last_topic == "greetings"
         assert engagement.last_notes == "friendly"
+
+    async def test_reasoning_level_defaults_to_null_when_absent(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        response = await client.post(
+            "/api/chat-conversations/turns",
+            json={
+                "engagement_id": str(engagement.id),
+                "request_id": "req-noreason",
+                "turn_kind": "initial",
+                "output_kind": "no_response",
+                "triggering_messages": [],
+                "agent_output": {},
+            },
+        )
+        assert response.status_code == 201
+
+        turns = (await session.execute(select(ChatAgentTurn))).scalars().all()
+        assert len(turns) == 1
+        assert turns[0].chat_reasoning_level is None
 
     async def test_persists_compaction_events(self, client: AsyncClient, session):
         engagement = await _seed_engagement(session)
@@ -217,6 +241,7 @@ class TestCreateTurn:
                         "summary": "a",
                         "original_chars": 4,
                         "summary_chars": 1,
+                        "summarizer_reasoning_level": "low",
                     }
                 ],
             },
@@ -228,6 +253,7 @@ class TestCreateTurn:
         ).scalars().all()
         assert len(events) == 1
         assert events[0].chars_saved == 3
+        assert events[0].summarizer_reasoning_level == "low"
 
     async def test_captures_blog_topic_candidates(self, client: AsyncClient, session):
         engagement = await _seed_engagement(session)

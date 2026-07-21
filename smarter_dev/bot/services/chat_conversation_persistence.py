@@ -119,6 +119,7 @@ async def persist_turn(
     chat_tokens_input: int,
     chat_tokens_output: int,
     chat_model_name: str | None,
+    chat_reasoning_level: str | None = None,
     voice_tokens_input: int = 0,
     voice_tokens_output: int = 0,
     voice_model_name: str | None = None,
@@ -150,6 +151,7 @@ async def persist_turn(
             "summarizer_tokens_input": ev.summarizer_tokens_input,
             "summarizer_tokens_output": ev.summarizer_tokens_output,
             "summarizer_model_name": ev.summarizer_model_name,
+            "summarizer_reasoning_level": ev.summarizer_reasoning_level,
         }
         for ev in (compaction_events or [])
     ]
@@ -166,6 +168,7 @@ async def persist_turn(
         "chat_tokens_input": chat_tokens_input,
         "chat_tokens_output": chat_tokens_output,
         "chat_model_name": chat_model_name,
+        "chat_reasoning_level": chat_reasoning_level,
         "voice_tokens_input": voice_tokens_input,
         "voice_tokens_output": voice_tokens_output,
         "voice_model_name": voice_model_name,
