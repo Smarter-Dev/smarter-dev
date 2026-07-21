@@ -17,8 +17,10 @@ response filter go in a modal:
    (chosen model, reasoning level, auto flag, fallback key) rides in every component's
    ``custom_id`` — see :func:`encode_panel_state` / :func:`parse_panel_state` —
    so each select/toggle re-renders the panel with the updated state and no
-   server-side session. Picking the server-default sentinel clears the override
-   without a panel.
+   server-side session. Picking the server-default sentinel opens the same
+   panel minus the reasoning select (model_key persists as NULL — budgets and
+   behaviour still apply); the panel's "Reset all" button deletes the whole
+   override.
 3. The "Budgets & filter…" button opens the settings modal
    (``create_settings_modal``) whose ``custom_id`` carries the full panel state;
    its text inputs collect the daily/hourly budgets and the response filter.
@@ -38,8 +40,9 @@ from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import models_by_family
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 
-# Model-select value that means "remove any override and fall back to the server
-# default model". Kept distinct from every catalog key.
+# Model-select value that means "pin no model — keep the server default" (stored
+# as a NULL model_key; budgets/auto-respond/filter still apply). Kept distinct
+# from every catalog key.
 SENTINEL_DEFAULT = "__default__"
 
 # Reasoning-select value that means "use the model's own default level" (stored
@@ -61,6 +64,9 @@ AUTO_TOGGLE_CUSTOM_ID_PREFIX = "cbs_auto"
 CONTINUE_CUSTOM_ID_PREFIX = "cbs_continue"
 SAVE_CUSTOM_ID_PREFIX = "cbs_save"
 MODAL_CUSTOM_ID_PREFIX = "cbs_modal"
+# The panel's "Reset all" button deletes the whole override row (model, budgets,
+# behaviour). Carries no state, so it's a bare custom_id rather than a prefix.
+RESET_CUSTOM_ID = "cbs_reset"
 
 # Prefix for the button the chat engine attaches to a budget-exhausted notice,
 # offering the channel's configured fallback model. Its only state is the budget
@@ -146,9 +152,9 @@ def build_model_options(
     """
     options: list[hikari.impl.SelectOptionBuilder] = [
         hikari.impl.SelectOptionBuilder(
-            label="Server default (remove override)",
+            label="Server default",
             value=SENTINEL_DEFAULT,
-            description="Use the server's default model for this channel",
+            description="Keep the default model — budgets and behaviour still apply",
             is_default=current_key is None,
         )
     ]
@@ -259,25 +265,32 @@ def build_fallback_options(
 
 
 def create_settings_panel(
-    model: CatalogModel,
+    model: CatalogModel | None,
     reasoning_level: str | None,
     auto_respond: bool,
     fallback_model_key: str | None,
 ) -> list[hikari.impl.MessageActionRowBuilder]:
     """Build the ephemeral settings panel for a chosen ``model``.
 
-    Holds (in order) an optional reasoning select (reasoning-capable models
-    only), a fallback-model select, and a button row with an auto-respond toggle
-    plus "Budgets & filter…" and "Save" buttons. The current panel state is
-    encoded into every component's ``custom_id`` so each interaction can
-    re-render the panel without server-side session state.
+    ``model`` of ``None`` means the server-default sentinel was chosen: the
+    panel then omits the reasoning select (the underlying default model can
+    change, so a pinned level would silently stop matching) but still offers
+    everything else. Otherwise holds (in order) an optional reasoning select
+    (reasoning-capable models only), a fallback-model select, and a button row
+    with an auto-respond toggle plus "Budgets & filter…", "Save", and
+    "Reset all" buttons. The current panel state is encoded into every
+    component's ``custom_id`` so each interaction can re-render the panel
+    without server-side session state.
     """
     state = encode_panel_state(
-        model.key, reasoning_level, auto_respond, fallback_model_key
+        model.key if model is not None else SENTINEL_DEFAULT,
+        reasoning_level,
+        auto_respond,
+        fallback_model_key,
     )
     rows: list[hikari.impl.MessageActionRowBuilder] = []
 
-    if model.supports_reasoning:
+    if model is not None and model.supports_reasoning:
         reasoning_row = hikari.impl.MessageActionRowBuilder()
         reasoning_menu = reasoning_row.add_text_menu(
             f"{REASONING_SELECT_CUSTOM_ID_PREFIX}:{state}",
@@ -301,7 +314,9 @@ def create_settings_panel(
         min_values=1,
         max_values=1,
     )
-    for option in build_fallback_options(model.key, fallback_model_key):
+    for option in build_fallback_options(
+        model.key if model is not None else SENTINEL_DEFAULT, fallback_model_key
+    ):
         fallback_menu.add_option(
             option.label,
             option.value,
@@ -325,6 +340,11 @@ def create_settings_panel(
         hikari.ButtonStyle.SUCCESS,
         f"{SAVE_CUSTOM_ID_PREFIX}:{state}",
         label="Save",
+    )
+    button_row.add_interactive_button(
+        hikari.ButtonStyle.DANGER,
+        RESET_CUSTOM_ID,
+        label="Reset all",
     )
     rows.append(button_row)
 
@@ -395,9 +415,8 @@ def create_settings_modal(
                 label="Response filter (optional)",
                 style=hikari.TextInputStyle.PARAGRAPH,
                 placeholder=(
-                    "When set, the bot only answers messages matching these "
-                    'instructions — e.g. "Only respond to questions about '
-                    'programming".'
+                    "Only answer matching messages, e.g. "
+                    '"Only respond to programming questions."'
                 ),
                 value=filter_prefill,
                 required=False,

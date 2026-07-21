@@ -226,7 +226,13 @@ class ChatConversationController(Controller):
         """Persist one agent turn + its compaction events. Bumps engagement totals."""
         # Cost calculations — best-effort, returns 0 on unknown models.
         chat_cost = (
-            calc_cost(data.chat_tokens_input, data.chat_tokens_output, data.chat_model_name)
+            calc_cost(
+                data.chat_tokens_input,
+                data.chat_tokens_output,
+                data.chat_model_name,
+                cache_read_tokens=data.chat_cache_read_tokens or 0,
+                cache_write_tokens=data.chat_cache_write_tokens or 0,
+            )
             if data.chat_model_name
             else Decimal("0")
         )
@@ -251,6 +257,9 @@ class ChatConversationController(Controller):
             chat_tokens_input=data.chat_tokens_input,
             chat_tokens_output=data.chat_tokens_output,
             chat_model_name=data.chat_model_name,
+            chat_reasoning_level=data.chat_reasoning_level,
+            chat_cache_read_tokens=data.chat_cache_read_tokens,
+            chat_cache_write_tokens=data.chat_cache_write_tokens,
             chat_cost_usd=chat_cost,
             voice_tokens_input=data.voice_tokens_input,
             voice_tokens_output=data.voice_tokens_output,
@@ -268,6 +277,8 @@ class ChatConversationController(Controller):
                     ev.summarizer_tokens_input,
                     ev.summarizer_tokens_output,
                     ev.summarizer_model_name,
+                    cache_read_tokens=ev.summarizer_cache_read_tokens or 0,
+                    cache_write_tokens=ev.summarizer_cache_write_tokens or 0,
                 )
                 if ev.summarizer_model_name
                 else Decimal("0")
@@ -288,6 +299,9 @@ class ChatConversationController(Controller):
                     summarizer_tokens_input=ev.summarizer_tokens_input,
                     summarizer_tokens_output=ev.summarizer_tokens_output,
                     summarizer_model_name=ev.summarizer_model_name,
+                    summarizer_reasoning_level=ev.summarizer_reasoning_level,
+                    summarizer_cache_read_tokens=ev.summarizer_cache_read_tokens,
+                    summarizer_cache_write_tokens=ev.summarizer_cache_write_tokens,
                     summarizer_cost_usd=ev_cost,
                 )
             )

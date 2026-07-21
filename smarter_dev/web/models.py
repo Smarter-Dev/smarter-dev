@@ -4003,6 +4003,20 @@ class ChatAgentTurn(Base):
     chat_tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     chat_tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     chat_model_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    # ReasoningLevel wire value (e.g. "high") in effect for the chat model call,
+    # or NULL when the model has no reasoning knob / an ad-hoc model was used.
+    chat_reasoning_level: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, default=None
+    )
+    # Prompt-cache split for the chat model call. A SUBSET of chat_tokens_input
+    # (provider-reporting convention). NULL on historical rows written before
+    # the split was captured — the split for those is unknowable.
+    chat_cache_read_tokens: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None
+    )
+    chat_cache_write_tokens: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None
+    )
     chat_cost_usd: Mapped[Decimal] = mapped_column(
         Numeric(10, 6), nullable=False, default=Decimal("0")
     )
@@ -4064,6 +4078,20 @@ class ChatAgentCompactionEvent(Base):
     summarizer_tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     summarizer_tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     summarizer_model_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    # ReasoningLevel wire value in effect for the summarizer call (the summarizer
+    # runs at a fixed level), or NULL when it has no reasoning knob configured.
+    summarizer_reasoning_level: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, default=None
+    )
+    # Prompt-cache split for the summarizer call. A SUBSET of
+    # summarizer_tokens_input (provider-reporting convention). NULL on
+    # historical rows written before the split was captured.
+    summarizer_cache_read_tokens: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None
+    )
+    summarizer_cache_write_tokens: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None
+    )
     summarizer_cost_usd: Mapped[Decimal] = mapped_column(
         Numeric(10, 6), nullable=False, default=Decimal("0")
     )
@@ -4666,7 +4694,9 @@ class ChannelModelOverride(Base):
     )
     guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
     channel_id: Mapped[str] = mapped_column(String(20), nullable=False)
-    model_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    # A stable catalog ``key``, or NULL to keep the server default model while
+    # the budgets/auto-respond/filter below still apply.
+    model_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # A ReasoningLevel value (e.g. "high"), or NULL to use the model's default.
     # Resolved/clamped against the selected model at request time, so a level the
     # model no longer supports never needs a migration here.

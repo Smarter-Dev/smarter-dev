@@ -6,6 +6,7 @@ select + button + modal-submit interaction handlers (single settings-panel flow)
 
 from __future__ import annotations
 
+import json
 from datetime import UTC
 from datetime import datetime
 from unittest.mock import AsyncMock
@@ -25,6 +26,7 @@ from smarter_dev.bot.views.model_override_views import MAX_TOKEN_BUDGET
 from smarter_dev.bot.views.model_override_views import MODAL_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import MODEL_NEXT_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import REASONING_SELECT_CUSTOM_ID_PREFIX
+from smarter_dev.bot.views.model_override_views import RESET_CUSTOM_ID
 from smarter_dev.bot.views.model_override_views import SAVE_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import SENTINEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_MODEL_DEFAULT
@@ -295,7 +297,7 @@ def test_create_settings_panel_no_reasoning_model_omits_reasoning_row():
     )
 
 
-def test_create_settings_panel_buttons_carry_auto_continue_and_save():
+def test_create_settings_panel_buttons_carry_auto_continue_save_and_reset():
     model = get_model(NO_REASONING_KEY)
     rows = create_settings_panel(model, None, False, None)
     buttons = rows[-1].components
@@ -303,7 +305,31 @@ def test_create_settings_panel_buttons_carry_auto_continue_and_save():
     assert AUTO_TOGGLE_CUSTOM_ID_PREFIX in button_prefixes
     assert CONTINUE_CUSTOM_ID_PREFIX in button_prefixes
     assert SAVE_CUSTOM_ID_PREFIX in button_prefixes
-    assert len(buttons) == 3
+    assert RESET_CUSTOM_ID in button_prefixes
+    assert len(buttons) == 4
+
+
+def test_create_settings_panel_server_default_omits_reasoning_row():
+    rows = create_settings_panel(None, None, False, None)
+    custom_ids = [component.custom_id for component in _row_components(rows)]
+    assert not any(
+        custom_id.startswith(REASONING_SELECT_CUSTOM_ID_PREFIX)
+        for custom_id in custom_ids
+    )
+    state = encode_panel_state(SENTINEL_DEFAULT, None, False, None)
+    assert f"{SAVE_CUSTOM_ID_PREFIX}:{state}" in custom_ids
+    assert RESET_CUSTOM_ID in custom_ids
+
+
+def test_create_settings_panel_server_default_offers_every_fallback():
+    rows = create_settings_panel(None, None, False, None)
+    fallback_menu = next(
+        component
+        for component in _row_components(rows)
+        if component.custom_id.startswith(FALLBACK_SELECT_CUSTOM_ID_PREFIX)
+    )
+    # The sentinel matches no catalog key, so no model is excluded as "primary".
+    assert len(fallback_menu.options) == 1 + len(MODEL_CATALOG)
 
 
 def test_create_settings_panel_auto_button_reflects_off_state():
@@ -335,6 +361,9 @@ def test_create_settings_panel_custom_ids_carry_state_and_stay_short():
     rows = create_settings_panel(model, "high", True, FALLBACK_KEY)
     state = encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY)
     for component in _row_components(rows):
+        # The reset button is stateless — it deletes the row outright.
+        if component.custom_id == RESET_CUSTOM_ID:
+            continue
         assert component.custom_id.endswith(state)
         assert len(component.custom_id) < 100
 
@@ -386,6 +415,16 @@ def test_create_settings_modal_has_budget_and_filter_inputs():
     assert response_filter_input.style == hikari.TextInputStyle.PARAGRAPH
     assert response_filter_input.is_required is False
     assert response_filter_input.max_length == 4000
+
+
+def test_create_settings_modal_text_inputs_fit_discord_limits():
+    modal = create_settings_modal(_panel_state(), None)
+
+    for text_input in _row_components(modal.components):
+        assert len(text_input.custom_id) <= 100
+        assert len(text_input.label) <= 45
+        if text_input.placeholder is not hikari.UNDEFINED:
+            assert len(text_input.placeholder) <= 100
 
 
 def test_create_settings_modal_omits_prefill_without_override():
@@ -455,6 +494,110 @@ async def test_chat_bot_settings_shows_select_for_admin():
 
 
 # --------------------------------------------------------------------------- #
+# /chat-default-model-override command
+# --------------------------------------------------------------------------- #
+
+
+def _default_override_ctx(
+    redis,
+    model: str = "gemini-3-6-flash",
+    reasoning: str = "high",
+    end_date: str = "2030-01-01",
+):
+    ctx = Mock()
+    ctx.member = Mock(spec=hikari.InteractionMember)
+    ctx.guild_id = "G"
+    ctx.channel_id = "C"
+    ctx.respond = AsyncMock()
+    ctx.bot = Mock()
+    ctx.bot.d = {"chat_memory_redis": redis} if redis is not None else {}
+    ctx.options = Mock()
+    ctx.options.model = model
+    ctx.options.reasoning = reasoning
+    ctx.options.end_date = end_date
+    return ctx
+
+
+async def test_chat_default_model_override_denies_non_admin():
+    redis = Mock()
+    redis.set = AsyncMock()
+    ctx = _default_override_ctx(redis)
+    with patch(PERMS_TARGET, return_value=NONE):
+        await model_override.chat_default_model_override(ctx)
+
+    redis.set.assert_not_called()
+    ctx.respond.assert_called_once()
+    _, kwargs = ctx.respond.call_args
+    assert kwargs.get("flags") == hikari.MessageFlag.EPHEMERAL
+
+
+async def test_chat_default_model_override_stores_self_expiring_override():
+    redis = Mock()
+    redis.set = AsyncMock()
+    ctx = _default_override_ctx(redis, end_date="2030-01-01")
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.chat_default_model_override(ctx)
+
+    # A bare end date lasts through that whole UTC day.
+    expected_epoch = int(datetime(2030, 1, 2, tzinfo=UTC).timestamp())
+    redis.set.assert_awaited_once()
+    args, kwargs = redis.set.await_args
+    assert kwargs["exat"] == expected_epoch
+    assert json.loads(args[1]) == {
+        "model_key": "gemini-3-6-flash",
+        "reasoning_level": "high",
+        "expires_at_epoch": expected_epoch,
+    }
+    message = ctx.respond.call_args.args[0]
+    assert "Gemini 3.6 Flash" in message
+    assert f"<t:{expected_epoch}:f>" in message
+
+
+async def test_chat_default_model_override_accepts_utc_minute_end():
+    redis = Mock()
+    redis.set = AsyncMock()
+    ctx = _default_override_ctx(redis, end_date="2030-01-01 18:30")
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.chat_default_model_override(ctx)
+
+    expected_epoch = int(datetime(2030, 1, 1, 18, 30, tzinfo=UTC).timestamp())
+    assert redis.set.await_args.kwargs["exat"] == expected_epoch
+
+
+async def test_chat_default_model_override_rejects_bad_end_date():
+    redis = Mock()
+    redis.set = AsyncMock()
+    ctx = _default_override_ctx(redis, end_date="whenever")
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.chat_default_model_override(ctx)
+
+    redis.set.assert_not_called()
+    message = ctx.respond.call_args.args[0]
+    assert "YYYY-MM-DD" in message
+
+
+async def test_chat_default_model_override_rejects_past_end_date():
+    redis = Mock()
+    redis.set = AsyncMock()
+    ctx = _default_override_ctx(redis, end_date="2020-01-01")
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.chat_default_model_override(ctx)
+
+    redis.set.assert_not_called()
+    message = ctx.respond.call_args.args[0]
+    assert "not in the future" in message
+
+
+async def test_chat_default_model_override_without_redis_reports_error():
+    ctx = _default_override_ctx(None)
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.chat_default_model_override(ctx)
+
+    message = ctx.respond.call_args.args[0]
+    assert "Couldn't reach the override store" in message
+
+
+# --------------------------------------------------------------------------- #
 # Model select handler
 # --------------------------------------------------------------------------- #
 
@@ -479,29 +622,100 @@ def _component_event(
     return event
 
 
-async def test_select_sentinel_clears_override():
+async def test_select_sentinel_renders_default_panel_without_reasoning():
+    """Picking "Server default" opens the settings panel (budgets, auto-respond
+    etc. stay configurable) instead of clearing the override, and the panel
+    omits the reasoning select — the underlying default model can change."""
     service = AsyncMock()
+    service.get_override.return_value = None
     event = _component_event([SENTINEL_DEFAULT], service)
     with patch(PERMS_TARGET, return_value=ADMIN):
         await model_override.handle_model_override_select(event)
+
+    service.clear_override.assert_not_called()
+    event.interaction.create_initial_response.assert_awaited_once()
+    args, kwargs = event.interaction.create_initial_response.call_args
+    assert args[0] == hikari.ResponseType.MESSAGE_UPDATE
+    custom_ids = [c.custom_id for c in _row_components(kwargs["components"])]
+    assert not any(c.startswith(REASONING_SELECT_CUSTOM_ID_PREFIX) for c in custom_ids)
+    assert any(c.startswith(FALLBACK_SELECT_CUSTOM_ID_PREFIX) for c in custom_ids)
+    assert RESET_CUSTOM_ID in custom_ids
+
+
+async def test_select_sentinel_drops_stored_reasoning_from_panel_state():
+    """A stored override's reasoning level must not ride into the default
+    panel's state — the server default carries no pinned level."""
+    service = AsyncMock()
+    service.get_override.return_value = _override(
+        model_key=REASONING_KEY, reasoning_level="high", auto_respond=True
+    )
+    event = _component_event([SENTINEL_DEFAULT], service)
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.handle_model_override_select(event)
+
+    _, kwargs = event.interaction.create_initial_response.call_args
+    state = encode_panel_state(SENTINEL_DEFAULT, None, True, None)
+    save_ids = [
+        c.custom_id
+        for c in _row_components(kwargs["components"])
+        if c.custom_id.startswith(SAVE_CUSTOM_ID_PREFIX)
+    ]
+    assert save_ids == [f"{SAVE_CUSTOM_ID_PREFIX}:{state}"]
+
+
+async def test_save_sentinel_persists_null_model_key():
+    """Saving the server-default panel stores model_key=None so budgets and
+    behaviour apply while the channel keeps the default model."""
+    service = AsyncMock()
+    service.get_override.return_value = _override(daily=500, hourly=100)
+    state = encode_panel_state(SENTINEL_DEFAULT, None, True, None)
+    event = _component_event(
+        [], service, custom_id=f"{SAVE_CUSTOM_ID_PREFIX}:{state}"
+    )
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.handle_model_override_save(event)
+
+    service.set_override.assert_awaited_once()
+    args, kwargs = service.set_override.await_args
+    assert args[2] is None  # model_key
+    assert kwargs["auto_respond"] is True
+    _, response_kwargs = event.interaction.create_initial_response.call_args
+    assert "server default model" in response_kwargs["content"]
+
+
+async def test_reset_button_clears_override():
+    service = AsyncMock()
+    event = _component_event([], service, custom_id=RESET_CUSTOM_ID)
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.handle_model_override_reset(event)
 
     service.clear_override.assert_awaited_once_with("G", "C")
-    event.interaction.create_initial_response.assert_awaited_once()
-    event.interaction.create_modal_response.assert_not_called()
+    _, kwargs = event.interaction.create_initial_response.call_args
+    assert "Reset this channel's chat-bot settings" in kwargs["content"]
+    assert kwargs["components"] == []
 
 
-async def test_select_sentinel_clear_failure_reports_to_admin():
-    """An API failure clearing the override must answer the interaction with a
-    friendly error, not escape to the (broken) generic modal error responder."""
+async def test_reset_button_denies_non_admin():
+    service = AsyncMock()
+    event = _component_event([], service, custom_id=RESET_CUSTOM_ID)
+    with patch(PERMS_TARGET, return_value=NONE):
+        await model_override.handle_model_override_reset(event)
+
+    service.clear_override.assert_not_called()
+
+
+async def test_reset_failure_reports_to_admin():
+    """An API failure resetting must answer the interaction with a friendly
+    error, not escape to the (broken) generic error responder."""
     service = AsyncMock()
     service.clear_override.side_effect = APIError("boom", status_code=500)
-    event = _component_event([SENTINEL_DEFAULT], service)
+    event = _component_event([], service, custom_id=RESET_CUSTOM_ID)
     with patch(PERMS_TARGET, return_value=ADMIN):
-        await model_override.handle_model_override_select(event)
+        await model_override.handle_model_override_reset(event)
 
     event.interaction.create_initial_response.assert_awaited_once()
     _, kwargs = event.interaction.create_initial_response.call_args
-    assert "Couldn't remove the override" in kwargs["content"]
+    assert "Couldn't reset the settings" in kwargs["content"]
 
 
 async def test_select_no_reasoning_model_renders_panel():
@@ -663,6 +877,8 @@ async def test_auto_toggle_flips_state_off_to_on():
     assert args[0] == hikari.ResponseType.MESSAGE_UPDATE
     state = encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY)
     for component in _row_components(kwargs["components"]):
+        if component.custom_id == RESET_CUSTOM_ID:
+            continue
         assert component.custom_id.endswith(state)
 
 
