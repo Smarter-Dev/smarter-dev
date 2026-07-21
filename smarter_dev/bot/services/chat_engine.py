@@ -60,6 +60,7 @@ from smarter_dev.bot.agents.chat_tools import GeneratedImage
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.bot.services.channel_token_budget import add_fallback_usage
 from smarter_dev.bot.services.channel_token_budget import add_usage
+from smarter_dev.bot.services.default_model_override import read_default_model_override
 from smarter_dev.bot.services.channel_token_budget import fallback_ended_key
 from smarter_dev.bot.services.channel_token_budget import fallback_flag_key
 from smarter_dev.bot.services.exceptions import APIError
@@ -581,6 +582,14 @@ class ChannelEngine:
                     if override is not None and override_model_id is not None
                     else None
                 )
+            # A temporary bot-wide default-model override (set via the admin
+            # ``/chat-default-model-override`` command, self-expiring in Redis)
+            # substitutes for the configured default — so it applies only when
+            # no channel override chose this turn's model.
+            if override_model_id is None and budget_redis is not None:
+                override_model_id, override_reasoning = (
+                    await self._resolve_temporary_default(budget_redis)
+                )
             # The model this turn actually runs on: the override's wire id when
             # one applied, otherwise the configured default. Persisted with the
             # turn so the dashboard prices tokens against the right model.
@@ -1057,6 +1066,29 @@ class ChannelEngine:
             )
             return None
         return catalog_model.model_id
+
+    async def _resolve_temporary_default(
+        self, redis: Any
+    ) -> tuple[str | None, str | None]:
+        """(wire model id, reasoning level) from the temporary bot-wide default
+        override, or ``(None, None)`` when none is active.
+
+        A stored ``model_key`` the catalog no longer knows degrades to the
+        configured default with a warning, mirroring
+        :meth:`_resolve_override_model_id`.
+        """
+        temporary_default = await read_default_model_override(redis)
+        if temporary_default is None:
+            return None, None
+        catalog_model = get_model(temporary_default.model_key)
+        if catalog_model is None:
+            logger.warning(
+                "Temporary default override names unknown model_key %r — "
+                "using the configured default model",
+                temporary_default.model_key,
+            )
+            return None, None
+        return catalog_model.model_id, temporary_default.reasoning_level
 
     def _fallback_flag_key(self) -> str:
         """Redis key for this channel's active free-fallback flag."""

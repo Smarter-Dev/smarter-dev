@@ -6,6 +6,7 @@ select + button + modal-submit interaction handlers (single settings-panel flow)
 
 from __future__ import annotations
 
+import json
 from datetime import UTC
 from datetime import datetime
 from unittest.mock import AsyncMock
@@ -462,6 +463,110 @@ async def test_chat_bot_settings_shows_select_for_admin():
     _, kwargs = ctx.respond.call_args
     assert kwargs["components"]  # a select action row was attached
     assert kwargs["flags"] == hikari.MessageFlag.EPHEMERAL
+
+
+# --------------------------------------------------------------------------- #
+# /chat-default-model-override command
+# --------------------------------------------------------------------------- #
+
+
+def _default_override_ctx(
+    redis,
+    model: str = "gemini-3-6-flash",
+    reasoning: str = "high",
+    end_date: str = "2030-01-01",
+):
+    ctx = Mock()
+    ctx.member = Mock(spec=hikari.InteractionMember)
+    ctx.guild_id = "G"
+    ctx.channel_id = "C"
+    ctx.respond = AsyncMock()
+    ctx.bot = Mock()
+    ctx.bot.d = {"chat_memory_redis": redis} if redis is not None else {}
+    ctx.options = Mock()
+    ctx.options.model = model
+    ctx.options.reasoning = reasoning
+    ctx.options.end_date = end_date
+    return ctx
+
+
+async def test_chat_default_model_override_denies_non_admin():
+    redis = Mock()
+    redis.set = AsyncMock()
+    ctx = _default_override_ctx(redis)
+    with patch(PERMS_TARGET, return_value=NONE):
+        await model_override.chat_default_model_override(ctx)
+
+    redis.set.assert_not_called()
+    ctx.respond.assert_called_once()
+    _, kwargs = ctx.respond.call_args
+    assert kwargs.get("flags") == hikari.MessageFlag.EPHEMERAL
+
+
+async def test_chat_default_model_override_stores_self_expiring_override():
+    redis = Mock()
+    redis.set = AsyncMock()
+    ctx = _default_override_ctx(redis, end_date="2030-01-01")
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.chat_default_model_override(ctx)
+
+    # A bare end date lasts through that whole UTC day.
+    expected_epoch = int(datetime(2030, 1, 2, tzinfo=UTC).timestamp())
+    redis.set.assert_awaited_once()
+    args, kwargs = redis.set.await_args
+    assert kwargs["exat"] == expected_epoch
+    assert json.loads(args[1]) == {
+        "model_key": "gemini-3-6-flash",
+        "reasoning_level": "high",
+        "expires_at_epoch": expected_epoch,
+    }
+    message = ctx.respond.call_args.args[0]
+    assert "Gemini 3.6 Flash" in message
+    assert f"<t:{expected_epoch}:f>" in message
+
+
+async def test_chat_default_model_override_accepts_utc_minute_end():
+    redis = Mock()
+    redis.set = AsyncMock()
+    ctx = _default_override_ctx(redis, end_date="2030-01-01 18:30")
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.chat_default_model_override(ctx)
+
+    expected_epoch = int(datetime(2030, 1, 1, 18, 30, tzinfo=UTC).timestamp())
+    assert redis.set.await_args.kwargs["exat"] == expected_epoch
+
+
+async def test_chat_default_model_override_rejects_bad_end_date():
+    redis = Mock()
+    redis.set = AsyncMock()
+    ctx = _default_override_ctx(redis, end_date="whenever")
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.chat_default_model_override(ctx)
+
+    redis.set.assert_not_called()
+    message = ctx.respond.call_args.args[0]
+    assert "YYYY-MM-DD" in message
+
+
+async def test_chat_default_model_override_rejects_past_end_date():
+    redis = Mock()
+    redis.set = AsyncMock()
+    ctx = _default_override_ctx(redis, end_date="2020-01-01")
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.chat_default_model_override(ctx)
+
+    redis.set.assert_not_called()
+    message = ctx.respond.call_args.args[0]
+    assert "not in the future" in message
+
+
+async def test_chat_default_model_override_without_redis_reports_error():
+    ctx = _default_override_ctx(None)
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.chat_default_model_override(ctx)
+
+    message = ctx.respond.call_args.args[0]
+    assert "Couldn't reach the override store" in message
 
 
 # --------------------------------------------------------------------------- #
