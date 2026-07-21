@@ -686,7 +686,7 @@ class ChannelEngine:
             tokens = _extract_tokens(result.usage())
             # A reply too long to send in two messages gets rewritten before
             # dispatch: the agent shortens its own draft (context-aware),
-            # falling back to a Flash Lite summary, then truncation. The
+            # falling back to a Luna summary, then truncation. The
             # shorten re-run spends chat-model tokens, so they're folded into
             # this turn's metering and persisted totals.
             fit_extra_input = 0
