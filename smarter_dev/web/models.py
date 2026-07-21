@@ -4557,7 +4557,9 @@ class ChannelModelOverride(Base):
     )
     guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
     channel_id: Mapped[str] = mapped_column(String(20), nullable=False)
-    model_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    # A stable catalog ``key``, or NULL to keep the server default model while
+    # the budgets/auto-respond/filter below still apply.
+    model_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # A ReasoningLevel value (e.g. "high"), or NULL to use the model's default.
     # Resolved/clamped against the selected model at request time, so a level the
     # model no longer supports never needs a migration here.

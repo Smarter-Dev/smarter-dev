@@ -607,7 +607,7 @@ class ChannelModelOverride:
 
     guild_id: str
     channel_id: str
-    model_key: str
+    model_key: str | None
     daily_token_budget: int
     hourly_token_budget: int
     reasoning_level: str | None = None
@@ -623,7 +623,7 @@ class ChannelModelOverride:
         return cls(
             guild_id=data["guild_id"],
             channel_id=data["channel_id"],
-            model_key=data["model_key"],
+            model_key=data.get("model_key"),
             reasoning_level=data.get("reasoning_level"),
             daily_token_budget=data["daily_token_budget"],
             hourly_token_budget=data["hourly_token_budget"],

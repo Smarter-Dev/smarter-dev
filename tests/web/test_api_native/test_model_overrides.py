@@ -110,6 +110,33 @@ class TestPutModelOverride:
         assert kwargs["fallback_model_key"] is None
         assert kwargs["response_filter"] is None
 
+    def test_upsert_accepts_null_model_key_for_server_default(
+        self, model_override_client: TestClient, model_override_crud_mock, session_mock
+    ):
+        """model_key null = keep the server default model; budgets and
+        behaviour flags still persist."""
+        model_override_crud_mock.upsert.return_value = _record(
+            model_key=None, daily_token_budget=1000, auto_respond=True
+        )
+
+        response = model_override_client.put(
+            _url(),
+            json={
+                "model_key": None,
+                "daily_token_budget": 1000,
+                "auto_respond": True,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["model_key"] is None
+        assert body["daily_token_budget"] == 1000
+        assert body["auto_respond"] is True
+        _, kwargs = model_override_crud_mock.upsert.call_args
+        assert kwargs["model_key"] is None
+        session_mock.commit.assert_awaited_once()
+
     def test_new_settings_passed_through(
         self, model_override_client: TestClient, model_override_crud_mock
     ):

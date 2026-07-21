@@ -756,7 +756,11 @@ class ChannelModelOverrideWrite(BaseAPIModel):
     rejected with 422.
     """
 
-    model_key: str = Field(description="Stable catalog key for the model")
+    model_key: str | None = Field(
+        None,
+        description="Stable catalog key for the model; null keeps the server "
+        "default model while budgets/auto-respond/filter still apply",
+    )
     reasoning_level: str | None = Field(
         None,
         description="ReasoningLevel value (e.g. 'high'); null uses the model default",
@@ -783,7 +787,9 @@ class ChannelModelOverrideWrite(BaseAPIModel):
 
     @field_validator("model_key")
     @classmethod
-    def _model_key_in_catalog(cls, value: str) -> str:
+    def _model_key_in_catalog(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         if not is_valid_model_key(value):
             raise ValueError(f"unknown model key: {value!r}")
         return value
@@ -814,7 +820,10 @@ class ChannelModelOverrideRead(BaseAPIModel):
 
     guild_id: str = Field(description="Discord guild ID")
     channel_id: str = Field(description="Discord channel ID")
-    model_key: str = Field(description="Stable catalog key for the model")
+    model_key: str | None = Field(
+        None,
+        description="Stable catalog key for the model, or null for the server default",
+    )
     reasoning_level: str | None = Field(
         None, description="Selected reasoning level, or null for the model default"
     )

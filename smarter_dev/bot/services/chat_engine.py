@@ -640,7 +640,11 @@ class ChannelEngine:
             set_last_model_call(self._last_model_call_at)
             image_quota = await self._fetch_image_quota()
             user_prompt, message_history = build_agent_call(
-                agent_input, history, image_quota=image_quota
+                agent_input,
+                history,
+                image_quota=image_quota,
+                model_name=resolved_model_name,
+                reasoning_level=resolved_reasoning_wire,
             )
             try:
                 result = await agent.run(
@@ -1051,10 +1055,12 @@ class ChannelEngine:
     def _resolve_override_model_id(self, override: Any | None) -> str | None:
         """Wire model id for ``override``, or None to use the default agent.
 
-        A stored ``model_key`` the catalog no longer knows (stale) falls back to
-        the default model with a warning rather than crashing the turn.
+        A ``model_key`` of ``None`` means the override pins no model (budgets/
+        behaviour only — the channel keeps the server default). A stored
+        ``model_key`` the catalog no longer knows (stale) falls back to the
+        default model with a warning rather than crashing the turn.
         """
-        if override is None:
+        if override is None or override.model_key is None:
             return None
         catalog_model = get_model(override.model_key)
         if catalog_model is None:
@@ -1267,8 +1273,16 @@ class ChannelEngine:
             return
         if not cleared:
             return
-        model = get_model(override.model_key)
-        label = model.label if model is not None else override.model_key
+        model = (
+            get_model(override.model_key)
+            if override.model_key is not None
+            else None
+        )
+        label = (
+            model.label
+            if model is not None
+            else override.model_key or "the default model"
+        )
         await self._post_notice(
             f"Budget reset — **{label}** is answering again.",
             reply_to=None,
