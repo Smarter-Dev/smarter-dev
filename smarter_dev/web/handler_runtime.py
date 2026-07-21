@@ -9,7 +9,10 @@ true in practice.
 
 Script-facing surface (Monty external functions):
 - ``send_message(content)`` -> message id (may also target a thread of the
-  handler's home channel; admin handlers may target any channel in the guild)
+  handler's home channel; admin handlers may target any channel in the guild).
+  An EXPLICIT target (any channel_id argument) that is deleted / inaccessible
+  returns ``False`` on 403/404 so a relay script can branch to ❌, mirroring
+  ``send_dm``; the default home-channel send still raises on a vanished channel.
 - ``add_reaction(message_id, emoji)`` -> True
 - ``post_voice(text)`` -> True
 - ``spawn_agent(prompt, has_tools=False)`` -> plaintext str
@@ -69,7 +72,10 @@ first, via an injected DB reader), ``get_member_info(user_id)`` -> dict (member
 profile; a departed user comes back with ``in_guild=False``), and
 ``search_guild_members(query, limit=10)`` -> dict (prefix name/nick search with a
 per-row top role and an overflow count) — each of the three spends the lookups
-budget.
+budget, plus ``get_role_members(role_id)`` -> list[dict] (every member currently
+holding a role, paged worker-side and hard-capped at 200; backs the daily
+onboarding-reconcile sweep — spends the discord_reads budget like
+``get_guild_member_count``).
 
 Script-facing data (Monty input): ``context`` — a plain dict describing the
 trigger (its keys depend on ``context["trigger_type"]``).
@@ -328,6 +334,7 @@ class HandlerExecution:
                     "list_mod_actions": self._guard(self._list_mod_actions),
                     "get_member_info": self._guard(self._get_member_info),
                     "search_guild_members": self._guard(self._search_guild_members),
+                    "get_role_members": self._guard(self._get_role_members),
                     "close_thread": self._guard(self._close_thread),
                     "lock_thread": self._guard(self._lock_thread),
                     "reopen_thread": self._guard(self._reopen_thread),
@@ -355,7 +362,10 @@ class HandlerExecution:
 
     async def _send_message(
         self, content: str, channel_id: str | None = None, ping_role_id: str | None = None
-    ) -> str:
+    ) -> str | bool:
+        # An explicitly-chosen target (any truthy channel_id) is a cross-channel /
+        # thread send; the default (no channel_id) is the handler's home channel.
+        explicit_target = bool(channel_id)
         target = str(channel_id) if channel_id else self.channel_id
         # Standard handlers may only post to their own channel or a thread OF
         # that channel; admin handlers (actor set) may post anywhere in the guild
@@ -381,6 +391,15 @@ class HandlerExecution:
         # (actor set). A standard handler's ping_role_id is silently dropped so
         # the emitter's mention-suppressing default stands (fail-safe).
         role_ping = str(ping_role_id) if (ping_role_id and self.actor is not None) else None
+        # An explicit target (e.g. a DM-relay forum post) may have been deleted /
+        # gone inaccessible: the emitter returns False on 403/404 so the script can
+        # branch to ❌, mirroring send_dm. Budget/window are already spent — the
+        # False path is an expected outcome, not a cap breach. A home-channel send
+        # keeps the raise-on-4xx contract (a vanished home channel is infra failure).
+        if explicit_target:
+            return await self.emitter.create_message(
+                target, str(content), role_ping, tolerate_missing_target=True
+            )
         return await self.emitter.create_message(target, str(content), role_ping)
 
     async def _is_home_channel_thread(self, channel_id: str) -> bool:
@@ -535,6 +554,18 @@ class HandlerExecution:
         covering the members/search + roles fetch pair."""
         self.budget.spend_lookup()
         return await self.actor.search_guild_members(str(query), int(limit))
+
+    async def _get_role_members(self, role_id: str) -> list[dict]:
+        """Members currently holding ``role_id`` in the guild; spends one discord
+        read.
+
+        Admin-tier only (E5): the daily onboarding-reconcile sweep pages the
+        role's holders to re-check for stuck/overdue members. The read is paged
+        and hard-capped at 200 matches by the emitter. Metered on the shared
+        discord_reads pool like ``get_guild_member_count`` — one spend covers the
+        whole paged read; a REST error propagates and errors the fire."""
+        self.budget.spend_discord_read()
+        return await self.emitter.get_role_members(str(role_id))
 
     async def _edit_message(
         self, message_id: str, content: str, channel_id: str | None = None
@@ -726,12 +757,29 @@ class HandlerExecution:
             )
         return bool(await self.emitter.send_dm(str(user_id), str(content)))
 
-    async def _add_reaction(self, message_id: str, emoji: str) -> bool:
+    async def _add_reaction(
+        self, message_id: str, emoji: str, channel_id: str | None = None
+    ) -> bool:
         # Reactions are emits too — metered against the per-fire emit cap, but
         # not against the per-channel *message* window (they are not messages).
+        # An explicit channel_id targets a message living outside the fire's
+        # home channel (e.g. a staff reply inside a relay forum post); the tier
+        # rule matches _send_message: standard handlers may only target their
+        # own channel or a thread of it, admin handlers anywhere in the guild.
+        target = str(channel_id) if channel_id else self.channel_id
+        if self.actor is None and target != self.channel_id:
+            if not await self._is_home_channel_thread(target):
+                raise CapExceeded(
+                    "cross_channel_send",
+                    "standard handlers can only react in their own channel "
+                    "or a thread of it",
+                )
         self.budget.spend_message()
-        await self.emitter.add_reaction(self.channel_id, str(message_id), str(emoji))
-        return True
+        # ``is not False`` so legacy emitter fakes returning None still read as
+        # delivered; only an explicit False (403/404 tolerance) reports failure.
+        return await self.emitter.add_reaction(
+            target, str(message_id), str(emoji)
+        ) is not False
 
     async def _post_voice(self, text: str) -> bool:
         self.budget.spend_message()

@@ -33,12 +33,30 @@ class _FakeEmitter:
     guild_calls: list = field(default_factory=list)
     # Value get_guild_member_count returns (overridable per test).
     member_count: int = 1234
+    # role_id -> list[dict] returned by get_role_members (missing key -> []).
+    role_members: dict = field(default_factory=dict)
+    role_member_calls: list = field(default_factory=list)
+    # Channel ids that model a deleted / inaccessible explicit target: an
+    # explicit-target send (tolerate_missing_target=True) to one returns False,
+    # the emitter's 403/404 shape. (channel, content, ping, tolerate) is recorded
+    # for every attempt so the runtime's tolerance pass-through is observable.
+    missing_targets: set = field(default_factory=set)
+    tolerated_calls: list = field(default_factory=list)
 
     async def create_message(
-        self, channel_id: str, content: str, ping_role_id: str | None = None
-    ) -> str:
-        self.messages.append((channel_id, content))
+        self,
+        channel_id: str,
+        content: str,
+        ping_role_id: str | None = None,
+        tolerate_missing_target: bool = False,
+    ):
         self.message_calls.append((channel_id, content, ping_role_id))
+        self.tolerated_calls.append(
+            (channel_id, content, ping_role_id, tolerate_missing_target)
+        )
+        if tolerate_missing_target and channel_id in self.missing_targets:
+            return False
+        self.messages.append((channel_id, content))
         return f"msg{len(self.messages)}"
 
     async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
@@ -57,6 +75,10 @@ class _FakeEmitter:
 
     async def get_guild_member_count(self) -> int:
         return self.member_count
+
+    async def get_role_members(self, role_id: str) -> list:
+        self.role_member_calls.append(role_id)
+        return list(self.role_members.get(role_id, []))
 
     async def get_channel_guild_id(self, channel_id: str):
         self.guild_calls.append(channel_id)
@@ -324,6 +346,41 @@ async def test_standard_handler_cannot_send_to_other_channel():
     assert result.outcome == "cap_exceeded"
     assert result.cap == "cross_channel_send"
     assert emitter.messages == []
+
+
+async def test_add_reaction_explicit_target_reaches_thread():
+    # Admin tier: reacting to a staff reply INSIDE a relay forum post targets
+    # the post thread, not the fire's home channel (the forum parent).
+    result, emitter, _ = await _run(
+        'await add_reaction("M9", "📤", "T42")\n',
+        actor=_FakeActor(),
+        budget=admin_budget(),
+    )
+    assert result.outcome == "ok"
+    assert emitter.reactions == [("T42", "M9", "📤")]
+
+
+async def test_add_reaction_defaults_to_home_channel():
+    result, emitter, _ = await _run('await add_reaction("M9", "🎉")\n')
+    assert result.outcome == "ok"
+    assert emitter.reactions == [("C1", "M9", "🎉")]
+
+
+async def test_standard_handler_can_react_into_home_thread():
+    emitter = _FakeEmitter()
+    emitter.parent_by_thread["T7"] = "C1"
+    result, emitter, _ = await _run(
+        'await add_reaction("M9", "🎉", "T7")\n', emitter=emitter
+    )
+    assert result.outcome == "ok"
+    assert emitter.reactions == [("T7", "M9", "🎉")]
+
+
+async def test_standard_handler_cannot_react_cross_channel():
+    result, emitter, _ = await _run('await add_reaction("M9", "🎉", "OTHER")\n')
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "cross_channel_send"
+    assert emitter.reactions == []
 
 
 async def test_admin_handler_moderation_metered():
@@ -732,6 +789,80 @@ async def test_standard_handler_has_no_thread_op_functions():
     # No actor -> close_thread is undefined in the sandbox -> NameError -> error.
     result, _, _ = await _run('await close_thread("T1")\n')
     assert result.outcome == "error"
+
+
+# -- send_message explicit-target failure semantics (relay-support c) ----------
+
+
+async def test_admin_send_message_explicit_target_gone_returns_false():
+    # An explicit cross-channel/thread target (e.g. a deleted DM-relay forum post)
+    # that 403/404s returns False so the script branches to ❌, exactly like
+    # send_dm — the fire ends ok, NOT an error.
+    actor = _FakeActor()
+    emitter = _FakeEmitter(missing_targets={"POST1"})
+    script = (
+        'ok = await send_message("relayed reply", "POST1")\n'
+        'await send_message("noop" if ok is False else "sent")\n'
+    )
+    result, emitter, _ = await _run(
+        script, budget=admin_budget(), actor=actor, emitter=emitter
+    )
+    assert result.outcome == "ok", result.error
+    # The explicit-target attempt requested tolerance; the follow-up home send did not.
+    assert ("POST1", "relayed reply", None, True) in emitter.tolerated_calls
+    assert ("C1", "noop", None, False) in emitter.tolerated_calls
+    # The gone target sent nothing; only the home-channel "noop" landed.
+    assert emitter.messages == [("C1", "noop")]
+
+
+async def test_admin_send_message_explicit_target_spends_budget_on_false_path():
+    # Budget/window are spent BEFORE the attempt, so a gone target still consumes
+    # one message unit and hits the destination window (consistent with send_dm).
+    actor = _FakeActor()
+    emitter = _FakeEmitter(missing_targets={"POST1"})
+    limiter = _StubLimiter()
+    result, _, limiter = await _run(
+        'await send_message("x", "POST1")\n',
+        budget=admin_budget(), actor=actor, emitter=emitter, limiter=limiter,
+    )
+    assert result.outcome == "ok", result.error
+    assert result.usage["messages_sent"] == 1
+    assert (channel_message_key("POST1"), CHANNEL_MESSAGES_PER_MIN, None) in limiter.calls
+
+
+async def test_home_channel_send_does_not_tolerate_missing_target():
+    # The default (no channel_id) home send never requests tolerance: a vanished
+    # home channel stays an infrastructure failure that raises, not a False branch.
+    emitter = _FakeEmitter()
+    result, emitter, _ = await _run('await send_message("hi")\n', emitter=emitter)
+    assert result.outcome == "ok", result.error
+    assert emitter.tolerated_calls == [("C1", "hi", None, False)]
+
+
+# -- archived relay post: unarchive-before-send round trip (relay-support d) ----
+
+
+async def test_relay_reopen_then_send_into_archived_post_is_metered():
+    # Discord auto-archives an idle forum post; relaying a human reply back into it
+    # reopens (unarchives) it first, then posts. reopen_thread spends a thread_op +
+    # the guild thread-op window; the post spends a message + the destination
+    # channel window — all metered, no unmetered Discord I/O.
+    actor = _FakeActor()
+    emitter = _FakeEmitter()
+    script = (
+        'await reopen_thread("POST1")\n'
+        'await send_message("relayed reply", "POST1")\n'
+    )
+    result, emitter, limiter = await _run(
+        script, budget=admin_budget(), actor=actor, emitter=emitter
+    )
+    assert result.outcome == "ok", result.error
+    assert ("reopen", "POST1") in actor.calls
+    assert result.usage["thread_ops"] == 1
+    assert result.usage["messages_sent"] == 1
+    assert (guild_thread_ops_key("G1"), GUILD_THREAD_OPS_PER_MIN, None) in limiter.calls
+    assert (channel_message_key("POST1"), CHANNEL_MESSAGES_PER_MIN, None) in limiter.calls
+    assert emitter.messages == [("POST1", "relayed reply")]
 
 
 # -- admin edit_message (actor set) --------------------------------------------
@@ -1380,3 +1511,64 @@ async def test_list_mod_actions_clamps_limit_host_side():
         )
         assert result.outcome == "ok"
         assert captured["limit"] == expected
+
+
+# -- get_role_members (E5, admin-tier metered read) -------------------------
+
+
+async def test_get_role_members_not_available_to_standard_handler():
+    # No actor -> get_role_members is not injected -> NameError -> error.
+    script = 'await get_role_members("R1")\n'
+    result, _, _ = await _run(script)
+    assert result.outcome == "error"
+    assert "get_role_members" in result.error
+
+
+async def test_get_role_members_returns_shape_and_spends_discord_read():
+    holders = [
+        {"member_id": "100", "username": "alice", "pending": False},
+        {"member_id": "200", "username": "bob", "pending": True},
+    ]
+    emitter = _FakeEmitter(role_members={"R1": holders})
+    script = (
+        'members = await get_role_members("R1")\n'
+        'await send_message(f"{len(members)}:{members[0]['"'"'member_id'"'"']}")\n'
+    )
+    result, emitter, _ = await _run(
+        script, budget=admin_budget(), actor=_FakeActor(), emitter=emitter
+    )
+    assert result.outcome == "ok", result.error
+    assert emitter.role_member_calls == ["R1"]
+    assert ("C1", "2:100") in emitter.messages
+    assert result.usage["discord_reads"] == 1
+
+
+async def test_get_role_members_shares_discord_reads_pool_exhaustion():
+    # Same pool as list_threads / get_guild_member_count: exhausting it fails
+    # the fire with the discord_reads cap (critical: budget-exhausted path).
+    emitter = _FakeEmitter(role_members={"R1": []})
+    script = "for i in range(3):\n    await get_role_members('R1')\n"
+    result, _, _ = await _run(
+        script,
+        budget=HandlerBudget(max_discord_reads=2, max_messages=5),
+        actor=_FakeActor(),
+        emitter=emitter,
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "discord_reads"
+    assert result.usage["discord_reads"] == 2  # spent up to the cap, then denied
+
+
+async def test_get_role_members_denied_when_budget_zero():
+    # A zero discord_reads budget denies the very first call before the read.
+    emitter = _FakeEmitter(role_members={"R1": [{"member_id": "1"}]})
+    result, emitter, _ = await _run(
+        'await get_role_members("R1")\n',
+        budget=HandlerBudget(max_discord_reads=0),
+        actor=_FakeActor(),
+        emitter=emitter,
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "discord_reads"
+    assert result.usage["discord_reads"] == 0
+    assert emitter.role_member_calls == []  # denied before the emitter is reached

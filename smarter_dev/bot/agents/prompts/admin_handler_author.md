@@ -48,6 +48,13 @@ One input variable `context: dict` describes the trigger:
               see include_bot_messages below — the bot's OWN messages are never delivered),
               context["attachments"] — a list of files posted with the message, each
               {"url", "content_type", "filename"} (empty list if none).
+              context["embeds"] — the message's embeds, JSON-safe, each {"title", "description",
+              "fields": [{"name", "value"}]} with every string truncated to 1024 chars and absent
+              parts null (empty list if none) — how a bot-message handler reads a Disboard-style
+              confirmation: embeds[0]["description"].
+              context["interaction_user_id"] — the id of the user whose slash command produced this
+              message when it is a bot's application-command response, else null — how a bump
+              handler credits the member who ran /bump.
               AUTHOR & MENTION GUARDS (cheap, always present — use FIRST to exempt staff and
               catch mass pings before any expensive check or action):
               context["author_role_ids"] (role ids held, @everyone excluded; [] when the member
@@ -112,8 +119,9 @@ Leave channel_ids EMPTY for the member_* triggers (a member event has no channel
               context["message_id"], context["dm_channel_id"], context["author_id"],
               context["author_username"], context["author_display_name"],
               context["author_account_created_at"] (ISO, from the snowflake),
-              context["attachment_urls"] (list; Discord CDN links are SIGNED and EXPIRE — mirror
-              them best-effort, they go stale). There is NO author_role_ids here (a DM has no guild
+              context["attachment_urls"] (list of {"url", "filename"} dicts, empty when none;
+              Discord CDN links are SIGNED and EXPIRE — mirror them best-effort, they go stale).
+              There is NO author_role_ids here (a DM has no guild
               member). CONTENT IS FULLY UNTRUSTED and user-controlled at any frequency — never gate
               a moderation action on DM text without anchored parsing. Reply to the sender with
               send_dm(context["author_id"], ...). Use this for a DM-relay mirror into a staff channel.
@@ -151,11 +159,21 @@ Leave channel_ids EMPTY for the member_* triggers (a member event has no channel
 
 Provided async functions — you MUST `await` every call:
   await send_message(content: str, channel_id: str = None, ping_role_id: str = None) -> str
-      Post to the current channel, or to `channel_id` (any channel — e.g. mod-chat). Returns id.
+      Post to the current channel, or to `channel_id` (any channel — e.g. mod-chat). Returns id —
+      EXCEPT when channel_id was passed EXPLICITLY and that target is gone or inaccessible
+      (403/404): then it returns False, a silent no-op the script BRANCHES on (a stale/deleted
+      channel or thread is an expected outcome — react ❌, never assume it sent). Omitting
+      channel_id (home-channel send) still RAISES on any failure — the handler's own channel
+      vanishing is an infrastructure error, not a branch. Sending into an ARCHIVED thread/post is
+      NOT a 403/404 and errors the fire — await reopen_thread(thread_id) first (a harmless no-op
+      when the thread is already active).
       Mass mentions are suppressed by default: content that names @everyone/@here or a role does
       NOT ping. ping_role_id is for MOD ESCALATION ONLY — pass a role id to ping exactly that one
       role (e.g. alert @mods on a raid); use it sparingly, never for routine notices.
-  await add_reaction(message_id: str, emoji: str) -> bool
+  await add_reaction(message_id: str, emoji: str, channel_id: str = None) -> bool
+      React to a message. channel_id defaults to the fire's home channel — for a message living
+      INSIDE a thread/forum post (e.g. reacting 📤 to a relayed staff reply), pass the thread id
+      explicitly or the reaction 404s against the parent. Spends the message budget.
   await spawn_agent(prompt: str, has_tools: bool = False) -> str
       Gathering agent; PLAINTEXT only. has_tools=True can web-search AND read ANY url — web pages,
       PDFs, images, and audio. To inspect an attached screenshot (e.g. a fake crypto-trade image),
@@ -223,6 +241,13 @@ Provided async functions — you MUST `await` every call:
       minutes, so do NOT gate on exact values). Callable from ANY trigger INCLUDING schedule/timer
       (no channel or gateway needed) — this is how a stat-counter schedule handler renders its name.
       Costs a discord-read (shared 5/fire pool with list_threads) — call it ONCE per fire.
+  await get_role_members(role_id: str) -> list[dict]
+      Every member currently holding the role, each {"member_id", "display_name", "username",
+      "joined_at", "account_created_at", "has_custom_avatar", "pending"} (pending=true means they
+      have NOT accepted the rules). HARD-CAPPED at 200 matches — a rail against runaway reads, not
+      a paging contract; use it on small holding roles (a sus role, an onboarding role), never to
+      enumerate the whole guild. Backs a scheduled reconcile sweep. Costs ONE discord-read for the
+      whole scan (shared 5/fire pool) — call it once per fire and iterate, NEVER per-member.
   MOD-AUDIT READS (admin only; each spends a LOOKUP — 10/fire pool, separate from discord-reads):
       These back mod-channel lookup commands (!lookup / !whois / !history) and the rejoin alert. Put
       them BEHIND A CHEAP GUARD — a command-prefix match on the message, or a member_join fire —
@@ -309,7 +334,7 @@ Provided async functions — you MUST `await` every call:
 
 ## Per-fire limits (admin tier)
 - 5 messages, 25 moderation actions, 3 agent calls, 32 KB context into an agent, 120 s wall-clock.
-- 5 discord-reads (list_threads / get_guild_member_count), 10 thread-ops (create/close/lock/reopen/
+- 5 discord-reads (list_threads / get_guild_member_count / get_role_members), 10 thread-ops (create/close/lock/reopen/
   delete thread). A guild thread-op window also caps thread ops server-wide — don't fan out
   creates/deletes in a loop.
 - 10 lookups (list_mod_actions / get_member_info / search_guild_members), separate from discord-reads.

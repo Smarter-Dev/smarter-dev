@@ -717,6 +717,60 @@ def resolve_channel_parent_id(bot: Any, channel_id: Any) -> str | None:
     return _category_id_of(_get_guild_channel(bot, channel_id))
 
 
+_EMBED_TEXT_LIMIT = 1024
+
+
+def _truncate_embed_text(text: str | None) -> str | None:
+    """Cap one embed string so a fat embed can't bloat the fire context."""
+    if text is None:
+        return None
+    return text[:_EMBED_TEXT_LIMIT]
+
+
+def serialize_message_embeds(embeds: Any) -> list[dict]:
+    """Minimal JSON-safe view of a message's embeds (§3 E1).
+
+    Keeps only the plain-string parts an authored handler can match on —
+    title, description, and each field's name/value — every string truncated
+    to 1KB so a large embed stays out of the fire context. Disboard bump
+    detection reads ``embeds[0]["description"]`` for the "Bump done!" marker.
+    Absent strings stay ``None`` (JSON null); an empty list when the message
+    carries no embeds.
+    """
+    return [
+        {
+            "title": _truncate_embed_text(getattr(embed, "title", None)),
+            "description": _truncate_embed_text(getattr(embed, "description", None)),
+            "fields": [
+                {
+                    "name": _truncate_embed_text(getattr(embed_field, "name", None)),
+                    "value": _truncate_embed_text(getattr(embed_field, "value", None)),
+                }
+                for embed_field in (getattr(embed, "fields", None) or [])
+            ],
+        }
+        for embed in (embeds or [])
+    ]
+
+
+def message_interaction_user_id(msg: Any) -> str | None:
+    """Snowflake (str) of the slash-command invoker, or None (§3 E1).
+
+    Disboard's ``/bump`` confirmation is an application-command response whose
+    ``interaction.user`` is the member who ran ``/bump`` — the person credited
+    with the bump. hikari 2.1.1 exposes this as ``Message.interaction`` (a
+    ``MessageInteraction`` carrying a ``user``). None for any ordinary message
+    not produced by a slash command.
+    """
+    interaction = getattr(msg, "interaction", None)
+    if interaction is None:
+        return None
+    user = getattr(interaction, "user", None)
+    if user is None:
+        return None
+    return str(user.id)
+
+
 def message_context(
     msg: Any,
     *,
@@ -729,6 +783,8 @@ def message_context(
     channel_parent_id: str | None,
     author_joined_at: str | None,
     attachments: list[dict],
+    embeds: list[dict],
+    interaction_user_id: str | None,
     thread_fields: dict,
 ) -> dict:
     """message trigger context (pure — no cache/REST).
@@ -761,6 +817,13 @@ def message_context(
         # Files posted with the message — scripts can read these via the
         # gathering agent's web_read tool (it handles image/pdf/audio urls).
         "attachments": attachments,
+        # §3 E1 — Disboard bump authoring. `embeds` is a minimal JSON-safe view
+        # (title/description/field name-value pairs); bump detection keys off
+        # embeds[0]["description"] == "Bump done!". `interaction_user_id` is the
+        # slash-command invoker credited with the bump. Both are inert for
+        # ordinary human posts (empty list / None).
+        "embeds": embeds,
+        "interaction_user_id": interaction_user_id,
         **thread_fields,
     }
 
@@ -872,6 +935,8 @@ async def dispatch_message(bot: Any, event: Any) -> None:
         channel_parent_id=resolve_channel_parent_id(bot, event.channel_id),
         author_joined_at=joined_at,
         attachments=attachments,
+        embeds=serialize_message_embeds(msg.embeds),
+        interaction_user_id=message_interaction_user_id(msg),
         thread_fields=message_thread_fields(thread_channel),
     )
     # A message inside a thread dispatches to the thread's PARENT channel (a
@@ -1065,7 +1130,10 @@ def dm_message_context(message: Any, author: Any) -> dict:
     A DM has no guild and no guild member, so the context carries only the DM
     channel and the author's user-level fields (NO role ids — there is no guild
     member object at the DM event; context-rails' author_role_ids do not apply
-    here). Attachment URLs are best-effort: Discord CDN links are signed and
+    here). ``attachment_urls`` is a list of ``{"url", "filename"}`` dicts so a
+    relay handler can re-post the DM's files into the forum post with their
+    original names; the same shape (minus content_type) the guild-message
+    ``attachments`` field carries. Best-effort: Discord CDN links are signed and
     expire, so a mirror handler treats them as transient.
     """
     return {
@@ -1079,7 +1147,10 @@ def dm_message_context(message: Any, author: Any) -> dict:
             getattr(author, "display_name", None) or author.username
         ),
         "author_account_created_at": _snowflake_created_at(int(author.id)),
-        "attachment_urls": [a.url for a in message.attachments],
+        "attachment_urls": [
+            {"url": attachment.url, "filename": getattr(attachment, "filename", None) or ""}
+            for attachment in message.attachments
+        ],
     }
 
 

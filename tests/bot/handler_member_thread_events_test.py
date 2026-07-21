@@ -559,16 +559,20 @@ async def test_thread_create_forum_post_empty_starter_when_uncached(captured):
 # ---------------------------------------------------------------------------
 
 
-def make_message_event(*, channel_id, thread_channel=None):
-    author = SimpleNamespace(id=SNOWFLAKE, username="alice")
+def make_message_event(
+    *, channel_id, thread_channel=None, author_id=SNOWFLAKE, attachments=(), forum=None
+):
+    author = SimpleNamespace(id=author_id, username="alice")
     message = SimpleNamespace(
         id=1234,
         content="hello",
         author=author,
-        attachments=[],
+        attachments=list(attachments),
         user_mentions_ids=[],
         role_mention_ids=[],
         mentions_everyone=False,
+        embeds=[],
+        interaction=None,
     )
     # A thread message's channel id resolves through cache.get_thread(), NOT
     # get_guild_channel() — so register the thread under threads (as production
@@ -576,10 +580,15 @@ def make_message_event(*, channel_id, thread_channel=None):
     threads = {}
     if thread_channel is not None:
         threads[int(channel_id)] = thread_channel
+    # The forum/parent channel resolves through get_guild_channel() (as production
+    # does), so category resolution for a forum post reads the right cache view.
+    channels = {}
+    if forum is not None:
+        channels[int(forum.id)] = forum
     # get_me() backs the own-bot anti-loop guard; a distinct id from the author
     # so a normal message is never mistaken for the bot's own.
     bot = SimpleNamespace(
-        cache=FakeCache(threads=threads),
+        cache=FakeCache(threads=threads, channels=channels),
         get_me=lambda: SimpleNamespace(id=BOT_USER_ID),
     )
     event = SimpleNamespace(
@@ -627,5 +636,70 @@ async def test_message_from_own_bot_is_ignored(captured):
     # regardless of is_human.
     bot, event = make_message_event(channel_id=555)
     event.message.author.id = BOT_USER_ID  # authored by the bot itself
+    await dispatch_message(bot, event)
+    assert captured == []
+
+
+# ---------------------------------------------------------------------------
+# DM<->forum relay support (relay-support b, e, f)
+# ---------------------------------------------------------------------------
+
+
+def _forum_post_thread(*, post_id=999, forum_id=555):
+    """A forum post: a public thread whose parent is a GUILD_FORUM channel."""
+    return SimpleNamespace(
+        id=post_id,
+        name="DM: Alice",
+        parent_id=forum_id,
+        type=hikari.ChannelType.GUILD_PUBLIC_THREAD,
+    )
+
+
+async def test_message_in_forum_post_dispatches_to_forum_channel_as_thread(captured):
+    # relay-support (b): a human staff reply inside a member's forum post fires the
+    # parent-scoped admin message handler — dispatch keys off the FORUM channel and
+    # the context flags is_thread=True with the post id, so the relay handler can
+    # map the post back to the member and DM them.
+    forum = make_forum_channel(555)
+    post = _forum_post_thread(post_id=999, forum_id=555)
+    bot, event = make_message_event(channel_id=999, thread_channel=post, forum=forum)
+    await dispatch_message(bot, event)
+    assert len(captured) == 1
+    channel_id, _, trigger, ctx = captured[0]
+    assert channel_id == "555"  # the forum channel (thread parent), not the post id
+    assert trigger == "message"
+    assert ctx["is_thread"] is True
+    assert ctx["thread_id"] == "999"
+
+
+async def test_message_in_forum_post_carries_attachments_with_filenames(captured):
+    # relay-support (e), guild direction: the guild/thread message context includes
+    # each attachment's url AND filename so the relay handler can forward staff's
+    # files back to the member's DM.
+    forum = make_forum_channel(555)
+    post = _forum_post_thread(post_id=999, forum_id=555)
+    attachment = SimpleNamespace(
+        url="https://cdn/reply.png", media_type="image/png", filename="reply.png"
+    )
+    bot, event = make_message_event(
+        channel_id=999, thread_channel=post, forum=forum, attachments=[attachment]
+    )
+    await dispatch_message(bot, event)
+    _, _, _, ctx = captured[0]
+    assert ctx["attachments"] == [
+        {"url": "https://cdn/reply.png", "content_type": "image/png", "filename": "reply.png"}
+    ]
+
+
+async def test_relayed_bot_message_into_forum_post_does_not_dispatch(captured):
+    # relay-support (f): the anti-loop round trip. When the bot posts the relayed DM
+    # INTO the member's forum post, that message is authored by the bot itself, so
+    # the own-bot guard drops it before any dispatch — the relay can never loop
+    # (bot post -> message fire -> relay -> bot post -> ...).
+    forum = make_forum_channel(555)
+    post = _forum_post_thread(post_id=999, forum_id=555)
+    bot, event = make_message_event(
+        channel_id=999, thread_channel=post, forum=forum, author_id=BOT_USER_ID
+    )
     await dispatch_message(bot, event)
     assert captured == []

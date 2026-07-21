@@ -129,7 +129,7 @@ Seven extensions, ordered by how many capabilities consume them. All new emit fu
       "author_username": str,
       "author_display_name": str,
       "author_account_created_at": str,   # ISO, from snowflake (same helper as message trigger)
-      "attachment_urls": list,            # best-effort: Discord CDN URLs are signed and expire
+      "attachment_urls": list,            # [{"url", "filename"}] dicts — best-effort: Discord CDN URLs are signed and expire
   }
   ```
 - **Routing (the multi-guild decision):** DMs carry no guild id. Proposed rule: the bot's `hikari.DMMessageCreateEvent` listener computes the author's **mutual guilds** from the gateway member cache and dispatches to each mutual guild that has an enabled `dm_message` admin handler. In practice that is one guild today; the rule degrades safely if the bot ever joins more (a guild the user isn't in never sees their DMs). The dispatch payload uses `channel_id = dm_channel_id` for the run record; the worker passes the routed `guild_id` so admin cross-channel sends work.
@@ -208,8 +208,8 @@ lines = [
     "**New DM from @" + context["author_username"] + " (" + author_id + ")**",
     context["content"] if context["content"] else "*(no text)*",
 ]
-for url in context["attachment_urls"]:
-    lines.append("attachment: " + url)
+for attachment in context["attachment_urls"]:
+    lines.append("attachment: " + attachment["url"])
 lines.append("reply in <#RELAY_CHANNEL_ID> with `!!!<message>`, or retarget there first with `!bind <@" + author_id + ">`")   # !bind only works in the relay channel (see Handler B narrowing note)
 send_message("\n".join(lines), "STAFF_DM_LOG_CHANNEL_ID")   # baked in at authoring
 
