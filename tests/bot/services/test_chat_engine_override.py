@@ -8,6 +8,7 @@ skips a turn for budget, and when it meters usage.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -119,6 +120,8 @@ def fake_redis():
     # Fallback flag/marker reads default to "absent" so normal budget flow runs.
     r.exists = AsyncMock(return_value=0)
     r.delete = AsyncMock(return_value=0)
+    # The temporary default-model override read defaults to "none active".
+    r.get = AsyncMock(return_value=None)
     # The engine also records per-user message-limit charges through a
     # pipeline on this same Redis — make that path awaitable and inert.
     pipe = MagicMock()
@@ -308,6 +311,161 @@ async def test_no_override_uses_default_and_skips_enforcement_but_meters(
     get_agent_mock.assert_called_once_with(None, None)
     over_budget_mock.assert_not_called()
     add_usage_mock.assert_awaited_once_with(fake_redis, "42", 150)
+
+
+@pytest.mark.asyncio
+async def test_override_without_pinned_model_uses_default_but_enforces_budget(
+    fake_memory, fake_redis
+):
+    """A budgets-only override (model_key None = server default) runs the
+    default agent while its token budgets are still enforced."""
+    agent_mock = MagicMock()
+    agent_mock.run = AsyncMock(return_value=_result(_send()))
+    engine, _ = _make_engine(_override(None, hourly=100), fake_redis)
+
+    get_agent = patch(
+        "smarter_dev.bot.services.chat_engine.get_chat_agent",
+        return_value=agent_mock,
+    )
+    with get_agent as get_agent_mock, _patches(
+        agent_mock=agent_mock, fake_memory=fake_memory
+    )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=None),
+    ) as over_budget_mock, patch(
+        "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
+    ):
+        await engine._run_once(first_activation=True)
+
+    get_agent_mock.assert_called_once_with(None, None)
+    over_budget_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_turn_prompt_carries_model_identity(fake_memory, fake_redis):
+    """The user prompt handed to the agent names the resolved model and
+    reasoning level in its ``<your-model>`` metadata tag."""
+    agent_mock = MagicMock()
+    agent_mock.run = AsyncMock(return_value=_result(_send()))
+    engine, _ = _make_engine(
+        _override("gpt-5-4", reasoning_level="high"), fake_redis
+    )
+
+    with patch(
+        "smarter_dev.bot.services.chat_engine.get_chat_agent",
+        return_value=agent_mock,
+    ), _patches(agent_mock=agent_mock, fake_memory=fake_memory)[1], _patches(
+        agent_mock=agent_mock, fake_memory=fake_memory
+    )[2], patch(
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=None),
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
+    ):
+        await engine._run_once(first_activation=True)
+
+    user_prompt = agent_mock.run.await_args.kwargs["user_prompt"]
+    assert '<your-model id="gpt-5.4"' in user_prompt
+    assert 'reasoning-level="high"' in user_prompt
+
+
+def _temporary_default_payload(
+    model_key: str = "gemini-3-6-flash", reasoning_level: str | None = "high"
+) -> str:
+    return json.dumps(
+        {
+            "model_key": model_key,
+            "reasoning_level": reasoning_level,
+            "expires_at_epoch": 1_800_000_000,
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_temporary_default_applies_without_channel_override(
+    fake_memory, fake_redis
+):
+    """With no channel override, an active temporary default-model override
+    picks the turn's model + reasoning and is the persisted model name."""
+    agent_mock = MagicMock()
+    agent_mock.run = AsyncMock(return_value=_result(_send()))
+    fake_redis.get = AsyncMock(return_value=_temporary_default_payload())
+    engine, _ = _make_engine(None, fake_redis)
+
+    persist_turn = AsyncMock()
+    get_agent = patch(
+        "smarter_dev.bot.services.chat_engine.get_chat_agent",
+        return_value=agent_mock,
+    )
+    with get_agent as get_agent_mock, _patches(
+        agent_mock=agent_mock, fake_memory=fake_memory
+    )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
+        "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.start_engagement",
+        new=AsyncMock(return_value="engagement-1"),
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.persist_turn", new=persist_turn
+    ):
+        await engine._run_once(first_activation=True)
+
+    get_agent_mock.assert_called_once_with("gemini-3.6-flash", "high")
+    assert persist_turn.await_args.kwargs["chat_model_name"] == "gemini-3.6-flash"
+
+
+@pytest.mark.asyncio
+async def test_channel_override_wins_over_temporary_default(
+    fake_memory, fake_redis
+):
+    """A channel's own override stays authoritative while a temporary
+    bot-wide default override is active."""
+    agent_mock = MagicMock()
+    agent_mock.run = AsyncMock(return_value=_result(_send()))
+    fake_redis.get = AsyncMock(return_value=_temporary_default_payload())
+    engine, _ = _make_engine(_override("gpt-5-4"), fake_redis)
+
+    get_agent = patch(
+        "smarter_dev.bot.services.chat_engine.get_chat_agent",
+        return_value=agent_mock,
+    )
+    with get_agent as get_agent_mock, _patches(
+        agent_mock=agent_mock, fake_memory=fake_memory
+    )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=None),
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
+    ):
+        await engine._run_once(first_activation=True)
+
+    get_agent_mock.assert_called_once_with("gpt-5.4", None)
+
+
+@pytest.mark.asyncio
+async def test_temporary_default_with_stale_key_uses_configured_default(
+    fake_memory, fake_redis
+):
+    """A temporary default naming a retired catalog key degrades to the
+    configured default model instead of breaking the turn."""
+    agent_mock = MagicMock()
+    agent_mock.run = AsyncMock(return_value=_result(_send()))
+    fake_redis.get = AsyncMock(
+        return_value=_temporary_default_payload(model_key="gemini-3-5-flash")
+    )
+    engine, _ = _make_engine(None, fake_redis)
+
+    get_agent = patch(
+        "smarter_dev.bot.services.chat_engine.get_chat_agent",
+        return_value=agent_mock,
+    )
+    with get_agent as get_agent_mock, _patches(
+        agent_mock=agent_mock, fake_memory=fake_memory
+    )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
+        "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
+    ):
+        await engine._run_once(first_activation=True)
+
+    get_agent_mock.assert_called_once_with(None, None)
 
 
 @pytest.mark.asyncio
@@ -587,6 +745,50 @@ async def test_response_filter_gate_error_runs_turn_unfiltered(
 
     assert consumed is True
     agent_mock.run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_gate_receives_channel_name(fake_redis):
+    """The gate must see the channel/thread name — for a forum post it is the
+    title, often the only statement of what the conversation is about."""
+    engine, _ = _make_engine(
+        _override("gpt-5-4", response_filter="only python questions"), fake_redis
+    )
+    gate = AsyncMock(return_value=[])
+
+    with patch(
+        "smarter_dev.bot.services.chat_engine.filter_messages", new=gate
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.fetch_channel_info",
+        new=AsyncMock(return_value={"channel_name": "How Does Logits Work?"}),
+    ), patch.object(
+        engine, "_fetch_gate_grounding", new=AsyncMock(return_value=[])
+    ):
+        await engine._gate_allows("only python questions", [_fake_message(700)])
+
+    assert gate.await_args.kwargs["channel_name"] == "How Does Logits Work?"
+
+
+@pytest.mark.asyncio
+async def test_gate_channel_name_lookup_failure_degrades_to_none(fake_redis):
+    """A channel-info failure must not break the gate — it judges without the
+    name rather than erroring the turn."""
+    engine, _ = _make_engine(
+        _override("gpt-5-4", response_filter="only python questions"), fake_redis
+    )
+    gate = AsyncMock(return_value=[])
+
+    with patch(
+        "smarter_dev.bot.services.chat_engine.filter_messages", new=gate
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.fetch_channel_info",
+        new=AsyncMock(side_effect=RuntimeError("discord hiccup")),
+    ), patch.object(
+        engine, "_fetch_gate_grounding", new=AsyncMock(return_value=[])
+    ):
+        await engine._gate_allows("only python questions", [_fake_message(700)])
+
+    assert gate.await_args.kwargs["channel_name"] is None
 
 
 # --------------------------------------------------------------------------- #

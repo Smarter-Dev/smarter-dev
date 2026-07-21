@@ -44,6 +44,7 @@ from redis.exceptions import RedisError
 from smarter_dev.bot.agents.chat_agent import DEFAULT_MODEL as CHAT_DEFAULT_MODEL
 from smarter_dev.bot.agents.chat_agent import MODEL_ENV_VAR as CHAT_MODEL_ENV_VAR
 from smarter_dev.bot.agents.chat_agent import get_chat_agent
+from smarter_dev.bot.agents.chat_agent import resolved_reasoning_level
 from smarter_dev.bot.agents.chat_compaction import drain_collection
 from smarter_dev.bot.agents.chat_compaction import set_last_model_call
 from smarter_dev.bot.agents.chat_compaction import start_collection
@@ -54,11 +55,15 @@ from smarter_dev.bot.agents.message_gate import GateMessage
 from smarter_dev.bot.agents.message_gate import filter_messages
 from smarter_dev.bot.agents.chat_models import ResponseBody
 from smarter_dev.bot.agents.chat_models import TurnDecision
+from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
+from smarter_dev.bot.agents.response_fitting import fit_overlong_response
+from smarter_dev.bot.agents.response_fitting import split_for_discord
 from smarter_dev.bot.agents.chat_tools import ChatDeps
 from smarter_dev.bot.agents.chat_tools import GeneratedImage
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.bot.services.channel_token_budget import add_fallback_usage
 from smarter_dev.bot.services.channel_token_budget import add_usage
+from smarter_dev.bot.services.default_model_override import read_default_model_override
 from smarter_dev.bot.services.channel_token_budget import fallback_ended_key
 from smarter_dev.bot.services.channel_token_budget import fallback_flag_key
 from smarter_dev.bot.services.exceptions import APIError
@@ -69,6 +74,7 @@ from smarter_dev.bot.services.chat_conversation_persistence import start_engagem
 from smarter_dev.bot.services.chat_memory import get_chat_memory
 from smarter_dev.bot.services.user_message_limit import DIRECTED_SCORE_THRESHOLD
 from smarter_dev.bot.services.user_message_limit import record_directed_messages
+from smarter_dev.bot.utils.messages import fetch_channel_info
 from smarter_dev.bot.utils.stop_detection import is_stop_request
 from smarter_dev.bot.utils.stop_detection import set_channel_cooldown
 from smarter_dev.bot.views.model_override_views import (
@@ -579,11 +585,27 @@ class ChannelEngine:
                     if override is not None and override_model_id is not None
                     else None
                 )
+            # A temporary bot-wide default-model override (set via the admin
+            # ``/chat-default-model-override`` command, self-expiring in Redis)
+            # substitutes for the configured default — so it applies only when
+            # no channel override chose this turn's model.
+            if override_model_id is None and budget_redis is not None:
+                override_model_id, override_reasoning = (
+                    await self._resolve_temporary_default(budget_redis)
+                )
             # The model this turn actually runs on: the override's wire id when
             # one applied, otherwise the configured default. Persisted with the
             # turn so the dashboard prices tokens against the right model.
             resolved_model_name = override_model_id or os.environ.get(
                 CHAT_MODEL_ENV_VAR, CHAT_DEFAULT_MODEL
+            )
+            # The reasoning level actually applied this turn: the override's
+            # choice clamped onto what the resolved model supports (or the
+            # model default when unset). Persisted with the turn so the
+            # dashboard can attribute reasoning spend. Matches the model +
+            # reasoning pair handed to ``get_chat_agent`` below.
+            resolved_reasoning_wire = resolved_reasoning_level(
+                override_model_id, override_reasoning
             )
 
             # Start engagement persistence on the very first turn — gives us
@@ -621,7 +643,11 @@ class ChannelEngine:
             set_last_model_call(self._last_model_call_at)
             image_quota = await self._fetch_image_quota()
             user_prompt, message_history = build_agent_call(
-                agent_input, history, image_quota=image_quota
+                agent_input,
+                history,
+                image_quota=image_quota,
+                model_name=resolved_model_name,
+                reasoning_level=resolved_reasoning_wire,
             )
             try:
                 result = await agent.run(
@@ -658,6 +684,41 @@ class ChannelEngine:
 
             output = result.output
             tokens = _extract_tokens(result.usage())
+            # A reply too long to send in two messages gets rewritten before
+            # dispatch: the agent shortens its own draft (context-aware),
+            # falling back to a Luna summary, then truncation. The
+            # shorten re-run spends chat-model tokens, so they're folded into
+            # this turn's metering and persisted totals.
+            fit_extra_input = 0
+            fit_extra_output = 0
+            if (
+                output.response is not None
+                and output.response.message
+                and len(output.response.message) > SUMMARIZE_THRESHOLD
+            ):
+                fit = await fit_overlong_response(
+                    output.response.message,
+                    agent=agent,
+                    deps=deps,
+                    message_history=list(result.all_messages()),
+                )
+                logger.info(
+                    "[%s] Overlong reply (%d chars) fitted via %s to %d chars",
+                    request_id,
+                    len(output.response.message),
+                    fit.method,
+                    len(fit.text),
+                )
+                output = output.model_copy(
+                    update={
+                        "response": output.response.model_copy(
+                            update={"message": fit.text}
+                        )
+                    }
+                )
+                fit_extra_input = fit.extra_input_tokens
+                fit_extra_output = fit.extra_output_tokens
+                tokens += fit_extra_input + fit_extra_output
             # Meter this turn's chat tokens against the channel's usage windows.
             # Every channel is metered (so ``/bot-usage`` always has numbers);
             # the budgets that *enforce* only exist on override channels.
@@ -704,8 +765,20 @@ class ChannelEngine:
                     else [m.model_dump(mode="json") for m in agent_input.new_messages]
                 )
                 chat_usage = result.usage()
-                chat_in = int(getattr(chat_usage, "input_tokens", 0) or 0)
-                chat_out = int(getattr(chat_usage, "output_tokens", 0) or 0)
+                chat_in = (
+                    int(getattr(chat_usage, "input_tokens", 0) or 0)
+                    + fit_extra_input
+                )
+                chat_out = (
+                    int(getattr(chat_usage, "output_tokens", 0) or 0)
+                    + fit_extra_output
+                )
+                chat_cache_read = int(
+                    getattr(chat_usage, "cache_read_tokens", 0) or 0
+                )
+                chat_cache_write = int(
+                    getattr(chat_usage, "cache_write_tokens", 0) or 0
+                )
 
                 voice = dispatch.voice
                 duration_ms = int(
@@ -729,6 +802,9 @@ class ChannelEngine:
                         chat_tokens_input=chat_in,
                         chat_tokens_output=chat_out,
                         chat_model_name=resolved_model_name,
+                        chat_reasoning_level=resolved_reasoning_wire,
+                        chat_cache_read_tokens=chat_cache_read,
+                        chat_cache_write_tokens=chat_cache_write,
                         voice_tokens_input=(
                             voice.tokens_input if voice else 0
                         ),
@@ -888,15 +964,40 @@ class ChannelEngine:
         reply_to: int | None,
         images: list[GeneratedImage] | None = None,
     ) -> bool:
-        content = message.strip()[:2000]
-        base_kwargs: dict[str, Any] = {"content": content}
-        if reply_to is not None:
-            base_kwargs["reply"] = reply_to
+        # A reply over Discord's 2000-char cap goes out as two messages, split
+        # at the last newline before the 1500-char mark (see split_for_discord).
+        # The reply anchor rides on the first message; any images ride on the
+        # LAST message so an attachment never visually interrupts the text.
+        parts = split_for_discord(message) or [""]
         attachments = (
             [hikari.Bytes(img.data, img.filename, img.mime_type) for img in images]
             if images
             else []
         )
+        last_index = len(parts) - 1
+        for index, part in enumerate(parts):
+            sent = await self._send_message_part(
+                part,
+                reply_to=reply_to if index == 0 else None,
+                attachments=attachments if index == last_index else [],
+            )
+            if not sent:
+                # A failed lead means the reply didn't land. A failed
+                # continuation is logged only — the lead already delivered
+                # the reply's opening.
+                return index > 0
+        return True
+
+    async def _send_message_part(
+        self,
+        content: str,
+        reply_to: int | None,
+        attachments: list[hikari.Bytes],
+    ) -> bool:
+        """Send one message of a (possibly split) reply."""
+        base_kwargs: dict[str, Any] = {"content": content}
+        if reply_to is not None:
+            base_kwargs["reply"] = reply_to
         try:
             kwargs = dict(base_kwargs)
             if attachments:
@@ -1023,10 +1124,12 @@ class ChannelEngine:
     def _resolve_override_model_id(self, override: Any | None) -> str | None:
         """Wire model id for ``override``, or None to use the default agent.
 
-        A stored ``model_key`` the catalog no longer knows (stale) falls back to
-        the default model with a warning rather than crashing the turn.
+        A ``model_key`` of ``None`` means the override pins no model (budgets/
+        behaviour only — the channel keeps the server default). A stored
+        ``model_key`` the catalog no longer knows (stale) falls back to the
+        default model with a warning rather than crashing the turn.
         """
-        if override is None:
+        if override is None or override.model_key is None:
             return None
         catalog_model = get_model(override.model_key)
         if catalog_model is None:
@@ -1038,6 +1141,29 @@ class ChannelEngine:
             )
             return None
         return catalog_model.model_id
+
+    async def _resolve_temporary_default(
+        self, redis: Any
+    ) -> tuple[str | None, str | None]:
+        """(wire model id, reasoning level) from the temporary bot-wide default
+        override, or ``(None, None)`` when none is active.
+
+        A stored ``model_key`` the catalog no longer knows degrades to the
+        configured default with a warning, mirroring
+        :meth:`_resolve_override_model_id`.
+        """
+        temporary_default = await read_default_model_override(redis)
+        if temporary_default is None:
+            return None, None
+        catalog_model = get_model(temporary_default.model_key)
+        if catalog_model is None:
+            logger.warning(
+                "Temporary default override names unknown model_key %r — "
+                "using the configured default model",
+                temporary_default.model_key,
+            )
+            return None, None
+        return catalog_model.model_id, temporary_default.reasoning_level
 
     def _fallback_flag_key(self) -> str:
         """Redis key for this channel's active free-fallback flag."""
@@ -1140,6 +1266,24 @@ class ChannelEngine:
         fetched.reverse()
         return [self._to_gate_message(message) for message in fetched]
 
+    async def _fetch_gate_channel_name(self) -> str | None:
+        """The channel's name for the response gate — a forum post's title.
+
+        Best-effort: any lookup failure degrades to None (debug log) so the
+        gate judges without the name rather than erroring the turn.
+        """
+        try:
+            info = await fetch_channel_info(self.bot, self.channel_id)
+        except Exception:
+            logger.debug(
+                "could not fetch channel name for response-filter gate in "
+                "channel %s",
+                self.channel_id,
+                exc_info=True,
+            )
+            return None
+        return info.get("channel_name") or None
+
     async def _gate_allows(
         self, response_filter: str, candidates: list[Any]
     ) -> set[str]:
@@ -1148,7 +1292,8 @@ class ChannelEngine:
         Wraps the (already fail-open) message gate so an unexpected error still
         runs the turn unfiltered — a wasted reply is far cheaper than a channel
         that goes mute. ``candidates`` are hikari messages; grounding is up to
-        five channel messages immediately preceding them.
+        five channel messages immediately preceding them plus the channel name
+        (a forum post's title), so short follow-ups are judged in context.
         """
         candidate_messages = [
             self._to_gate_message(message)
@@ -1158,9 +1303,13 @@ class ChannelEngine:
         if not candidate_messages:
             return set()
         grounding = await self._fetch_gate_grounding(candidates)
+        channel_name = await self._fetch_gate_channel_name()
         try:
             allowed = await filter_messages(
-                response_filter, candidate_messages, grounding
+                response_filter,
+                candidate_messages,
+                grounding,
+                channel_name=channel_name,
             )
         except Exception:
             logger.warning(
@@ -1193,8 +1342,16 @@ class ChannelEngine:
             return
         if not cleared:
             return
-        model = get_model(override.model_key)
-        label = model.label if model is not None else override.model_key
+        model = (
+            get_model(override.model_key)
+            if override.model_key is not None
+            else None
+        )
+        label = (
+            model.label
+            if model is not None
+            else override.model_key or "the default model"
+        )
         await self._post_notice(
             f"Budget reset — **{label}** is answering again.",
             reply_to=None,

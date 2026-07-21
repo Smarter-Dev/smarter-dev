@@ -23,6 +23,12 @@ from smarter_dev.bot.agents.chat_models import (
     Message,
 )
 from smarter_dev.bot.agents.url_registry import register_escaped_url
+from smarter_dev.shared.model_catalog import MODEL_CATALOG
+
+# Wire model id -> human label, for the per-turn ``<your-model>`` metadata tag.
+_MODEL_LABEL_BY_ID: dict[str, str] = {
+    catalog_model.model_id: catalog_model.label for catalog_model in MODEL_CATALOG
+}
 
 
 def _attr(value: str | bool | None) -> str | None:
@@ -150,6 +156,8 @@ def render_metadata_xml(
     topic: str | None,
     notes: str | None,
     image_quota: dict | None = None,
+    model_name: str | None = None,
+    reasoning_level: str | None = None,
 ) -> str:
     """Render the per-turn metadata block (me / channel / now / topic / notes)."""
     return _render_metadata(
@@ -159,6 +167,8 @@ def render_metadata_xml(
         topic=topic,
         notes=notes,
         image_quota=image_quota,
+        model_name=model_name,
+        reasoning_level=reasoning_level,
     )
 
 
@@ -166,6 +176,8 @@ def build_agent_call(
     agent_input: InitialAgentInput | FollowupAgentInput,
     prior_history: list[ModelMessage],
     image_quota: dict | None = None,
+    model_name: str | None = None,
+    reasoning_level: str | None = None,
 ) -> tuple[str, list[ModelMessage]]:
     """Convert a turn input into (user_prompt, message_history) for ``agent.run``.
 
@@ -201,6 +213,8 @@ def build_agent_call(
                 topic=agent_input.topic,
                 notes=agent_input.notes,
                 image_quota=image_quota,
+                model_name=model_name,
+                reasoning_level=reasoning_level,
             ),
             history,
         )
@@ -224,6 +238,8 @@ def build_agent_call(
         topic=agent_input.topic,
         notes=agent_input.notes,
         image_quota=image_quota,
+        model_name=model_name,
+        reasoning_level=reasoning_level,
     )
     latest_xml = render_message_xml(latest, me=me, authors=authors)
     user_prompt = f"{metadata}\n\n{latest_xml}"
@@ -238,6 +254,8 @@ def _render_metadata(
     topic: str | None,
     notes: str | None,
     image_quota: dict | None = None,
+    model_name: str | None = None,
+    reasoning_level: str | None = None,
 ) -> str:
     chunks: list[str] = []
     chunks.append(_empty_tag("me", {"user-id": me.user_id, "username": me.username}))
@@ -252,6 +270,21 @@ def _render_metadata(
         )
     )
     chunks.append(_empty_tag("now", {"utc": _format_utc(now_utc)}))
+    if model_name:
+        # Which model (and effective reasoning level) is answering this turn.
+        # Rendered per turn — not in the system prompt — because pydantic-ai
+        # only applies the system prompt when history is empty, and the model
+        # can change mid-engagement (override edits, the temporary default).
+        chunks.append(
+            _empty_tag(
+                "your-model",
+                {
+                    "id": model_name,
+                    "name": _MODEL_LABEL_BY_ID.get(model_name),
+                    "reasoning-level": reasoning_level,
+                },
+            )
+        )
     if image_quota is not None:
         # How many technical images can still be generated this hour, and when
         # the window resets — so the agent knows up front whether it can draw.

@@ -50,7 +50,7 @@ from smarter_dev.bot.agents.chat_tools import ChatDeps  # noqa: E402
 MODELS = {
     "Gemini 3.1 Flash Lite": ("google", "gemini-3.1-flash-lite"),
     "Gemini 3 Flash": ("google", "gemini-3-flash-preview"),
-    "Gemini 3.5 Flash": ("google", "gemini-3.5-flash"),
+    "GPT 5.6 Luna": ("openai", "gpt-5.6-luna"),
     "GPT 5.4 Nano": ("openai", "gpt-5.4-nano"),
     "GPT 5.4 Mini": ("openai", "gpt-5.4-mini"),
 }

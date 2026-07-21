@@ -8,7 +8,9 @@ daily/hourly token budgets and an optional response filter. A separate Save
 button persists panel changes immediately while retaining the stored budgets
 and filter; modal submit persists everything in one call via
 :class:`~smarter_dev.bot.services.model_override_service.ModelOverrideService`.
-Picking the "server default" sentinel clears the override instead.
+Picking the "server default" sentinel opens the same panel minus the reasoning
+select and persists a NULL ``model_key`` (budgets/behaviour still apply); the
+panel's "Reset all" button deletes the whole override.
 
 The interaction handlers here are dispatched from
 :mod:`smarter_dev.bot.plugins.events` by ``custom_id``: the model select
@@ -29,12 +31,16 @@ from typing import Any
 
 import hikari
 import lightbulb
+from redis.exceptions import RedisError
 
 from smarter_dev.bot.plugins.admin_gate import deny_if_not_admin
 from smarter_dev.bot.plugins.admin_gate import is_admin
 from smarter_dev.bot.services.channel_token_budget import fallback_ended_key
 from smarter_dev.bot.services.channel_token_budget import fallback_flag_key
 from smarter_dev.bot.services.chat_engine_registry import get_chat_engine_registry
+from smarter_dev.bot.services.default_model_override import DefaultModelOverride
+from smarter_dev.bot.services.default_model_override import parse_end_date_utc
+from smarter_dev.bot.services.default_model_override import set_default_model_override
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.model_override_service import ModelOverrideService
 from smarter_dev.bot.services.models import ChannelModelOverride
@@ -54,6 +60,8 @@ from smarter_dev.bot.views.model_override_views import create_settings_modal
 from smarter_dev.bot.views.model_override_views import create_settings_panel
 from smarter_dev.bot.views.model_override_views import parse_budget
 from smarter_dev.bot.views.model_override_views import parse_panel_state
+from smarter_dev.shared.model_catalog import ALL_REASONING_LEVELS
+from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_catalog import is_valid_model_key
@@ -137,6 +145,35 @@ def _render_fallback(fallback_model_key: str | None) -> str:
     return fallback.label if fallback is not None else fallback_model_key
 
 
+def _confirmation_message(
+    model: CatalogModel | None,
+    state: PanelState,
+    response_filter: str | None,
+    daily_budget: int,
+    hourly_budget: int,
+) -> str:
+    """Render the saved-settings confirmation (``model`` None = server default)."""
+    model_line = (
+        f"✅ This channel now uses **{model.label}**."
+        if model is not None
+        else "✅ This channel keeps the **server default model**."
+    )
+    reasoning = (
+        _render_reasoning(model, state.reasoning_level)
+        if model is not None
+        else "model default"
+    )
+    return (
+        f"{model_line}\n"
+        f"• Reasoning: {reasoning}\n"
+        f"• Auto-respond: {'on' if state.auto_respond else 'off'}\n"
+        f"• Fallback model: {_render_fallback(state.fallback_model_key)}\n"
+        f"• Response filter: {'set' if response_filter else 'none'}\n"
+        f"• Daily budget: {_render_budget(daily_budget)}\n"
+        f"• Hourly budget: {_render_budget(hourly_budget)}"
+    )
+
+
 def _read_modal_text_values(
     interaction: hikari.ModalInteraction,
 ) -> dict[str, str]:
@@ -163,23 +200,46 @@ async def _load_current_override(
         return None
 
 
+def _stored_model_key(state: PanelState) -> str | None:
+    """The ``model_key`` to persist for ``state`` — ``None`` for the sentinel."""
+    return None if state.model_key == SENTINEL_DEFAULT else state.model_key
+
+
+def _panel_model(state: PanelState) -> tuple[CatalogModel | None, bool]:
+    """Resolve the panel's model: ``(model, is_valid)``.
+
+    The server-default sentinel resolves to ``(None, True)``; an unknown
+    catalog key to ``(None, False)`` so callers can reject stale state.
+    """
+    if state.model_key == SENTINEL_DEFAULT:
+        return None, True
+    model = get_model(state.model_key)
+    return model, model is not None
+
+
 async def _render_panel(
     interaction: hikari.ComponentInteraction, state: PanelState
 ) -> None:
     """Re-render the settings panel for ``state`` as a message update."""
-    model = get_model(state.model_key)
-    if model is None:
+    model, is_valid = _panel_model(state)
+    if not is_valid:
         await interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_UPDATE,
             content="❌ That model is no longer available. Please run `/chat-bot-settings` again.",
             components=[],
         )
         return
+    configuring = (
+        f"**{model.label}**"
+        if model is not None
+        else "the **server default model**"
+    )
     await interaction.create_initial_response(
         hikari.ResponseType.MESSAGE_UPDATE,
         content=(
-            f"Configuring **{model.label}** for this channel. Adjust the settings "
-            "below, then choose **Save** or open **Budgets & filter…**."
+            f"Configuring {configuring} for this channel. Adjust the settings "
+            "below, then choose **Save** or open **Budgets & filter…**. "
+            "**Reset all** removes every stored setting."
         ),
         components=create_settings_panel(
             model,
@@ -213,8 +273,100 @@ async def chat_bot_settings(ctx: lightbulb.Context) -> None:
         logger.warning("Could not load current model override for prefill: %s", exc)
 
     await ctx.respond(
-        "Select a model for this channel. Pick **Server default** to remove any override.",
+        "Select a model for this channel — **Server default** keeps the default "
+        "model while still letting you set budgets and behaviour.",
         components=create_model_select_message(current),
+        flags=hikari.MessageFlag.EPHEMERAL,
+    )
+
+
+@plugin.command
+@lightbulb.option(
+    "end_date",
+    "UTC end — YYYY-MM-DD (lasts through that day) or YYYY-MM-DD HH:MM",
+    type=hikari.OptionType.STRING,
+    required=True,
+)
+@lightbulb.option(
+    "reasoning",
+    "Reasoning level (clamped to what the model supports)",
+    type=hikari.OptionType.STRING,
+    choices=[
+        hikari.CommandChoice(name=level.label, value=level.value)
+        for level in ALL_REASONING_LEVELS
+    ],
+    required=True,
+)
+@lightbulb.option(
+    "model",
+    "Model to run as the temporary default",
+    type=hikari.OptionType.STRING,
+    choices=[
+        hikari.CommandChoice(name=catalog_model.label, value=catalog_model.key)
+        for catalog_model in MODEL_CATALOG
+    ],
+    required=True,
+)
+@lightbulb.command(
+    "chat-default-model-override",
+    "Temporarily switch the default chat model until a UTC end date (admin only)",
+)
+@lightbulb.implements(lightbulb.SlashCommand)
+async def chat_default_model_override(ctx: lightbulb.Context) -> None:
+    """Store a self-expiring bot-wide default-model override in Redis.
+
+    Applies to every channel *without* its own ``/chat-bot-settings`` override;
+    the chat engine reads it per turn, and the Redis ``EXAT`` reverts the
+    default automatically at the end date.
+    """
+    if await deny_if_not_admin(ctx, ADMIN_DENIAL_MESSAGE):
+        return
+
+    model = get_model(ctx.options.model)
+    if model is None:
+        await ctx.respond(
+            "❌ That model is no longer available.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
+        return
+
+    try:
+        expires_at = parse_end_date_utc(ctx.options.end_date, datetime.now(UTC))
+    except ValueError as exc:
+        await ctx.respond(f"❌ {exc}", flags=hikari.MessageFlag.EPHEMERAL)
+        return
+
+    redis = _budget_redis(ctx.bot)
+    if redis is None:
+        await ctx.respond(
+            "❌ Couldn't reach the override store — please try again shortly.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
+        return
+
+    expires_at_epoch = int(expires_at.timestamp())
+    try:
+        await set_default_model_override(
+            redis,
+            DefaultModelOverride(
+                model_key=model.key,
+                reasoning_level=ctx.options.reasoning,
+                expires_at_epoch=expires_at_epoch,
+            ),
+        )
+    except RedisError:
+        logger.exception("Failed to store the temporary default-model override")
+        await ctx.respond(
+            "❌ Couldn't save the override — please try again shortly.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
+        return
+
+    await ctx.respond(
+        f"✅ Default chat model is temporarily **{model.label}** until "
+        f"<t:{expires_at_epoch}:f> (<t:{expires_at_epoch}:R>).\n"
+        f"• Reasoning: {_render_reasoning(model, ctx.options.reasoning)}\n"
+        "• Channels with their own `/chat-bot-settings` override are unaffected.",
         flags=hikari.MessageFlag.EPHEMERAL,
     )
 
@@ -255,32 +407,19 @@ async def _advance_from_model_selection(
     interaction: hikari.ComponentInteraction,
     selected: str | None,
 ) -> None:
-    """Clear the override or render the panel for a selected model."""
+    """Render the settings panel for a selected model (or the server default).
+
+    Picking the server-default sentinel no longer clears the override — it
+    opens the same panel (minus the reasoning select) so budgets, auto-respond,
+    fallback, and the response filter stay configurable for a default-model
+    channel. The panel's "Reset all" button is what deletes the override now.
+    """
     guild_id = str(interaction.guild_id)
     channel_id = str(interaction.channel_id)
 
-    if selected == SENTINEL_DEFAULT:
-        service = _get_override_service(event.app)
-        try:
-            await service.clear_override(guild_id, channel_id)
-        except APIError as exc:
-            logger.error(
-                "Failed to clear model override for channel %s: %s", channel_id, exc
-            )
-            await interaction.create_initial_response(
-                hikari.ResponseType.MESSAGE_UPDATE,
-                content="❌ Couldn't remove the override — please try again shortly.",
-                components=[],
-            )
-            return
-        await interaction.create_initial_response(
-            hikari.ResponseType.MESSAGE_UPDATE,
-            content="✅ Removed this channel's model override — using the server default.",
-            components=[],
-        )
-        return
-
-    if not selected or not is_valid_model_key(selected):
+    if not selected or (
+        selected != SENTINEL_DEFAULT and not is_valid_model_key(selected)
+    ):
         await interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_UPDATE,
             content="❌ That model is no longer available. Please run `/chat-bot-settings` again.",
@@ -295,9 +434,16 @@ async def _advance_from_model_selection(
     fallback_key = current.fallback_model_key if current is not None else None
     if fallback_key == selected:
         fallback_key = None
+    # The server default carries no pinned reasoning level: the underlying
+    # default model can change, so a stored level would silently stop matching.
+    reasoning_level = (
+        current.reasoning_level
+        if current is not None and selected != SENTINEL_DEFAULT
+        else None
+    )
     state = PanelState(
         model_key=selected,
-        reasoning_level=current.reasoning_level if current is not None else None,
+        reasoning_level=reasoning_level,
         auto_respond=current.auto_respond if current is not None else False,
         fallback_model_key=fallback_key,
     )
@@ -415,7 +561,7 @@ async def handle_model_override_continue(
         return
 
     state = parse_panel_state(interaction.custom_id, CONTINUE_CUSTOM_ID_PREFIX)
-    if state is None or get_model(state.model_key) is None:
+    if state is None or not _panel_model(state)[1]:
         logger.error("Invalid continue custom_id: %s", interaction.custom_id)
         await interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_UPDATE,
@@ -451,8 +597,8 @@ async def handle_model_override_save(
         return
 
     state = parse_panel_state(interaction.custom_id, SAVE_CUSTOM_ID_PREFIX)
-    model = get_model(state.model_key) if state is not None else None
-    if state is None or model is None:
+    model, is_valid = _panel_model(state) if state is not None else (None, False)
+    if state is None or not is_valid:
         logger.error("Invalid save custom_id: %s", interaction.custom_id)
         await interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_UPDATE,
@@ -472,7 +618,7 @@ async def handle_model_override_save(
         await service.set_override(
             guild_id,
             channel_id,
-            state.model_key,
+            _stored_model_key(state),
             daily_budget,
             hourly_budget,
             reasoning_level=state.reasoning_level,
@@ -493,14 +639,45 @@ async def handle_model_override_save(
 
     await interaction.create_initial_response(
         hikari.ResponseType.MESSAGE_UPDATE,
+        content=_confirmation_message(
+            model, state, response_filter, daily_budget, hourly_budget
+        ),
+        components=[],
+    )
+
+
+async def handle_model_override_reset(
+    event: hikari.InteractionCreateEvent,
+) -> None:
+    """Handle the panel's "Reset all" button: delete the whole override row so
+    the channel returns to server defaults (model, budgets, and behaviour)."""
+    interaction = event.interaction
+    if not isinstance(interaction, hikari.ComponentInteraction):
+        return
+    if await _deny_interaction_if_not_admin(event):
+        return
+
+    service = _get_override_service(event.app)
+    guild_id = str(interaction.guild_id)
+    channel_id = str(interaction.channel_id)
+    try:
+        await service.clear_override(guild_id, channel_id)
+    except APIError as exc:
+        logger.error(
+            "Failed to reset chat-bot settings for channel %s: %s", channel_id, exc
+        )
+        await interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_UPDATE,
+            content="❌ Couldn't reset the settings — please try again shortly.",
+            components=[],
+        )
+        return
+
+    await interaction.create_initial_response(
+        hikari.ResponseType.MESSAGE_UPDATE,
         content=(
-            f"✅ This channel now uses **{model.label}**.\n"
-            f"• Reasoning: {_render_reasoning(model, state.reasoning_level)}\n"
-            f"• Auto-respond: {'on' if state.auto_respond else 'off'}\n"
-            f"• Fallback model: {_render_fallback(state.fallback_model_key)}\n"
-            f"• Response filter: {'set' if response_filter else 'none'}\n"
-            f"• Daily budget: {_render_budget(daily_budget)}\n"
-            f"• Hourly budget: {_render_budget(hourly_budget)}"
+            "✅ Reset this channel's chat-bot settings — model, budgets, and "
+            "behaviour are back to the server defaults."
         ),
         components=[],
     )
@@ -528,8 +705,8 @@ async def handle_model_override_modal_submit(
         )
         return
 
-    model = get_model(state.model_key)
-    if model is None:
+    model, is_valid = _panel_model(state)
+    if not is_valid:
         await interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
             content="❌ That model is no longer available. Please run `/chat-bot-settings` again.",
@@ -557,7 +734,7 @@ async def handle_model_override_modal_submit(
         await service.set_override(
             str(interaction.guild_id),
             str(interaction.channel_id),
-            state.model_key,
+            _stored_model_key(state),
             daily_budget,
             hourly_budget,
             reasoning_level=state.reasoning_level,
@@ -583,14 +760,8 @@ async def handle_model_override_modal_submit(
 
     await interaction.create_initial_response(
         hikari.ResponseType.MESSAGE_CREATE,
-        content=(
-            f"✅ This channel now uses **{model.label}**.\n"
-            f"• Reasoning: {_render_reasoning(model, state.reasoning_level)}\n"
-            f"• Auto-respond: {'on' if state.auto_respond else 'off'}\n"
-            f"• Fallback model: {_render_fallback(state.fallback_model_key)}\n"
-            f"• Response filter: {'set' if response_filter else 'none'}\n"
-            f"• Daily budget: {_render_budget(daily_budget)}\n"
-            f"• Hourly budget: {_render_budget(hourly_budget)}"
+        content=_confirmation_message(
+            model, state, response_filter, daily_budget, hourly_budget
         ),
         flags=hikari.MessageFlag.EPHEMERAL,
     )
