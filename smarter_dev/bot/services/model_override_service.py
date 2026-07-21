@@ -82,7 +82,7 @@ class ModelOverrideService(BaseService):
         self,
         guild_id: str,
         channel_id: str,
-        model_key: str,
+        model_key: str | None,
         daily_token_budget: int,
         hourly_token_budget: int,
         reasoning_level: str | None = None,
@@ -92,8 +92,10 @@ class ModelOverrideService(BaseService):
     ) -> ChannelModelOverride:
         """Upsert the channel's override and return the stored value.
 
-        ``reasoning_level`` of ``None`` means "use the model's default level".
-        ``auto_respond`` makes the bot reply to any message, not just @mentions;
+        ``model_key`` of ``None`` keeps the server default model while the
+        budgets and behaviour settings still apply. ``reasoning_level`` of
+        ``None`` means "use the model's default level". ``auto_respond`` makes
+        the bot reply to any message, not just @mentions;
         ``fallback_model_key`` and ``response_filter`` default to "unset".
         """
         response = await self._api_client.put(
