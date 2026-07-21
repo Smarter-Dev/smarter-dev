@@ -55,6 +55,9 @@ from smarter_dev.bot.agents.message_gate import GateMessage
 from smarter_dev.bot.agents.message_gate import filter_messages
 from smarter_dev.bot.agents.chat_models import ResponseBody
 from smarter_dev.bot.agents.chat_models import TurnDecision
+from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
+from smarter_dev.bot.agents.response_fitting import fit_overlong_response
+from smarter_dev.bot.agents.response_fitting import split_for_discord
 from smarter_dev.bot.agents.chat_tools import ChatDeps
 from smarter_dev.bot.agents.chat_tools import GeneratedImage
 from smarter_dev.shared.model_catalog import get_model
@@ -681,6 +684,41 @@ class ChannelEngine:
 
             output = result.output
             tokens = _extract_tokens(result.usage())
+            # A reply too long to send in two messages gets rewritten before
+            # dispatch: the agent shortens its own draft (context-aware),
+            # falling back to a Flash Lite summary, then truncation. The
+            # shorten re-run spends chat-model tokens, so they're folded into
+            # this turn's metering and persisted totals.
+            fit_extra_input = 0
+            fit_extra_output = 0
+            if (
+                output.response is not None
+                and output.response.message
+                and len(output.response.message) > SUMMARIZE_THRESHOLD
+            ):
+                fit = await fit_overlong_response(
+                    output.response.message,
+                    agent=agent,
+                    deps=deps,
+                    message_history=list(result.all_messages()),
+                )
+                logger.info(
+                    "[%s] Overlong reply (%d chars) fitted via %s to %d chars",
+                    request_id,
+                    len(output.response.message),
+                    fit.method,
+                    len(fit.text),
+                )
+                output = output.model_copy(
+                    update={
+                        "response": output.response.model_copy(
+                            update={"message": fit.text}
+                        )
+                    }
+                )
+                fit_extra_input = fit.extra_input_tokens
+                fit_extra_output = fit.extra_output_tokens
+                tokens += fit_extra_input + fit_extra_output
             # Meter this turn's chat tokens against the channel's usage windows.
             # Every channel is metered (so ``/bot-usage`` always has numbers);
             # the budgets that *enforce* only exist on override channels.
@@ -727,8 +765,14 @@ class ChannelEngine:
                     else [m.model_dump(mode="json") for m in agent_input.new_messages]
                 )
                 chat_usage = result.usage()
-                chat_in = int(getattr(chat_usage, "input_tokens", 0) or 0)
-                chat_out = int(getattr(chat_usage, "output_tokens", 0) or 0)
+                chat_in = (
+                    int(getattr(chat_usage, "input_tokens", 0) or 0)
+                    + fit_extra_input
+                )
+                chat_out = (
+                    int(getattr(chat_usage, "output_tokens", 0) or 0)
+                    + fit_extra_output
+                )
                 chat_cache_read = int(
                     getattr(chat_usage, "cache_read_tokens", 0) or 0
                 )
@@ -920,7 +964,13 @@ class ChannelEngine:
         reply_to: int | None,
         images: list[GeneratedImage] | None = None,
     ) -> bool:
-        content = message.strip()[:2000]
+        # A reply over Discord's 2000-char cap goes out as two messages, split
+        # at the last newline before the 1500-char mark (see split_for_discord).
+        # The reply anchor and any images ride on the first message; the
+        # continuation follows as a plain message.
+        parts = split_for_discord(message)
+        content = parts[0] if parts else ""
+        continuations = parts[1:]
         base_kwargs: dict[str, Any] = {"content": content}
         if reply_to is not None:
             base_kwargs["reply"] = reply_to
@@ -934,6 +984,7 @@ class ChannelEngine:
             if attachments:
                 kwargs["attachments"] = attachments
             await self.bot.rest.create_message(self.channel_id, **kwargs)
+            await self._send_continuations(continuations)
             return True
         except Exception as err:
             if not attachments:
@@ -958,6 +1009,7 @@ class ChannelEngine:
                 text_only["content"] = (content + _ATTACH_PERM_NOTE)[:2000]
             try:
                 await self.bot.rest.create_message(self.channel_id, **text_only)
+                await self._send_continuations(continuations)
                 return True
             except Exception:
                 logger.exception(
@@ -966,6 +1018,22 @@ class ChannelEngine:
                     self.channel_id,
                 )
                 return False
+
+    async def _send_continuations(self, parts: list[str]) -> None:
+        """Send a split reply's follow-up message(s), best-effort.
+
+        The lead message already delivered the reply's opening, so a failed
+        continuation is logged rather than failing the whole send.
+        """
+        for part in parts:
+            try:
+                await self.bot.rest.create_message(self.channel_id, content=part)
+            except Exception:
+                logger.exception(
+                    "Failed to send reply continuation in channel %s",
+                    self.channel_id,
+                )
+                return
 
     async def _post_images(
         self, images: list[GeneratedImage], reply_to: int | None
