@@ -20,6 +20,13 @@ from datetime import datetime, timedelta, timezone
 MIN_INTERVAL_SECONDS = 60
 MIN_INTERVAL_WITH_AGENT_SECONDS = 300
 
+# Bounds on a script-armed one-shot timer (schedule_timer). The floor matches the
+# recurring interval floor; the ceiling caps how far out an orphaned timer can
+# linger before it drains to a no-op (a deleted handler's refire returns
+# "missing"). Out-of-bounds is an author bug — rejected, not clamped.
+MIN_TIMER_DELAY_SECONDS = 60
+MAX_TIMER_DELAY_SECONDS = 30 * 86400
+
 
 class ScheduleError(ValueError):
     """Raised when time-trigger settings are malformed or below the floor."""
@@ -43,6 +50,25 @@ def validate_interval(settings: dict, *, uses_agent: bool) -> None:
             f"interval_seconds must be at least {floor}"
             + (" because this handler spawns an agent" if uses_agent else "")
         )
+
+
+def validate_timer_delay(delay_seconds: int) -> int:
+    """Return ``delay_seconds`` as an int if within timer bounds, else raise.
+
+    Pure: no clock, no side effects. A delay below the floor or above the ceiling
+    is an author bug — rejected loudly (never silently clamped), exactly like the
+    recurring interval floor.
+    """
+    delay = int(delay_seconds)
+    if delay < MIN_TIMER_DELAY_SECONDS:
+        raise ScheduleError(
+            f"timer delay_seconds must be at least {MIN_TIMER_DELAY_SECONDS}"
+        )
+    if delay > MAX_TIMER_DELAY_SECONDS:
+        raise ScheduleError(
+            f"timer delay_seconds must be at most {MAX_TIMER_DELAY_SECONDS}"
+        )
+    return delay
 
 
 def _daily_next(daily_time: str, now: datetime) -> datetime:

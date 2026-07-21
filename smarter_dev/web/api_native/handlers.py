@@ -56,9 +56,11 @@ from smarter_dev.web.api_native.errors import (
 )
 from smarter_dev.web.handler_caps import (
     ADMIN_FIRES_PER_MIN,
+    DM_FIRES_PER_AUTHOR_PER_MIN,
     GUILD_MEMBER_EVENTS_PER_MIN,
     MAX_HANDLERS_PER_CHANNEL,
     WindowedLimiter,
+    dm_trigger_author_key,
     fires_per_min_for_trigger,
     guild_member_events_key,
     handler_fire_key,
@@ -77,6 +79,7 @@ from smarter_dev.web.member_activity import (
 from smarter_dev.web.models import (
     ADMIN_HANDLER_EVENT_TRIGGERS,
     ADMIN_ONLY_TRIGGER_TYPES,
+    ADMIN_SYNTHETIC_TRIGGER_TYPES,
     HANDLER_EVENT_TRIGGERS,
     HANDLER_TRIGGER_TYPES,
     AdminHandler,
@@ -85,13 +88,33 @@ from smarter_dev.web.models import (
 
 logger = logging.getLogger(__name__)
 
+# Admin-only triggers that are NOT guild-shaped member lifecycle events, so the
+# per-guild raid window must not gate them: thread_create and message_edit
+# (both dispatched with a real home channel — the thread's parent / the edited
+# message's channel) and dm_message (its own per-author window). Excluded from
+# MEMBER_EVENT_TRIGGERS.
+_NON_MEMBER_ADMIN_TRIGGERS = ("thread_create", "dm_message", "message_edit")
+
 # The guild-shaped member lifecycle triggers: dispatched with ``channel_id=""``
 # (a member event has no channel), matched admin-only by guild + trigger, and
-# gated by the per-guild ``GUILD_MEMBER_EVENTS_PER_MIN`` raid window. This is
-# ``ADMIN_ONLY_TRIGGER_TYPES`` minus ``thread_create`` — the odd one out, which
-# keys off a parent channel and is scope-matched like a normal channel trigger.
+# gated by the per-guild ``GUILD_MEMBER_EVENTS_PER_MIN`` raid window. dm_message is
+# deliberately NOT here — it is guild-scoped in dispatch but has its OWN
+# per-(handler, author) window (see GUILD_SCOPED_ADMIN_TRIGGERS), not the raid gate.
 MEMBER_EVENT_TRIGGERS = tuple(
-    trigger for trigger in ADMIN_ONLY_TRIGGER_TYPES if trigger != "thread_create"
+    trigger
+    for trigger in ADMIN_ONLY_TRIGGER_TYPES
+    if trigger not in _NON_MEMBER_ADMIN_TRIGGERS
+)
+
+# Admin triggers dispatched with NO home channel (``channel_id=""``), so the
+# admin scope check is bypassed and the handler surfaces as a (guild_id, trigger)
+# guild-trigger in active-channels: the member_* events, dm_message (a DM has no
+# guild channel to scope against), and the synthetic mod_action trigger (fired
+# guild-wide after a ModerationAction commit; NOT under the member-events raid
+# gate — MEMBER_EVENT_TRIGGERS excludes it — so a mass-ban wave is bounded only by
+# the per-handler ADMIN_FIRES_PER_MIN window).
+GUILD_SCOPED_ADMIN_TRIGGERS = (
+    MEMBER_EVENT_TRIGGERS + ("dm_message",) + ADMIN_SYNTHETIC_TRIGGER_TYPES
 )
 
 # Permission granted to the bot's Skrift service key (see roles.py `bot-service`
@@ -159,6 +182,19 @@ def _to_response(record: ChannelHandler) -> HandlerResponse:
     )
 
 
+def _reject_bot_optin_on_non_message(settings: dict, trigger_type: str) -> None:
+    """422 when ``include_bot_messages`` is set on a non-message-trigger handler.
+
+    The opt-in changes which bot/webhook messages fire the handler, so it only
+    means anything on a ``message`` trigger — allowing it elsewhere would be a
+    silent no-op the author might rely on. Enforced host-side at create/update.
+    """
+    if settings.get("include_bot_messages") and trigger_type != "message":
+        raise plain_error(
+            422, "include_bot_messages is only valid on message-trigger handlers"
+        )
+
+
 def _normalized_name(raw: str) -> str:
     """Validate and normalize a handler name; 422 on blank/oversized."""
     name = raw.strip()
@@ -220,6 +256,7 @@ class HandlerController(Controller):
     ) -> HandlerResponse:
         if data.trigger_type not in HANDLER_TRIGGER_TYPES:
             raise plain_error(422, "unknown trigger_type")
+        _reject_bot_optin_on_non_message(data.settings, data.trigger_type)
         name = _normalized_name(data.name)
 
         if await _name_taken(db_session, data.channel_id, name):
@@ -275,6 +312,8 @@ class HandlerController(Controller):
         record = await db_session.get(ChannelHandler, parsed_handler_id)
         if record is None:
             raise plain_error(404, "handler not found")
+        # trigger_type is immutable on edit, so validate against the stored one.
+        _reject_bot_optin_on_non_message(data.settings, record.trigger_type)
 
         if data.name is not None:
             name = _normalized_name(data.name)
@@ -351,7 +390,14 @@ class HandlerController(Controller):
         dispatched: list[str] = []
 
         is_member_event = data.trigger_type in MEMBER_EVENT_TRIGGERS
-        is_admin_only = data.trigger_type in ADMIN_ONLY_TRIGGER_TYPES
+        is_guild_scoped = data.trigger_type in GUILD_SCOPED_ADMIN_TRIGGERS
+        # mod_action is admin-only (synthetic), never in the standard vocabulary,
+        # so the standard-tier query is skipped for it exactly like the member
+        # events — no ChannelHandler can carry it.
+        is_admin_only = (
+            data.trigger_type in ADMIN_ONLY_TRIGGER_TYPES
+            or data.trigger_type in ADMIN_SYNTHETIC_TRIGGER_TYPES
+        )
 
         # Member lifecycle events are gated by a per-guild raid window BEFORE any
         # fire is enqueued, so a raid + ban wave degrades to declined dispatches
@@ -367,8 +413,23 @@ class HandlerController(Controller):
         # recording this message, so scripts get platform truth instead of
         # tracking users in their size-capped memory.
         trigger_context = dict(data.trigger_context)
+        # Every gateway-dispatched fire carries its guild id in context so a
+        # script can build cross-channel jump links (mod-log formatters, !history)
+        # — the runtime binds guild_id host-side but doesn't expose it to the
+        # sandbox, and the prompts document context["guild_id"].
+        trigger_context["guild_id"] = data.guild_id
+        # A bot/webhook-authored message (author_is_bot, set bot-side after the
+        # own-bot anti-loop guard) fires ONLY handlers that opted in via
+        # settings["include_bot_messages"]; a plain message handler in the same
+        # channel must not react to bot traffic. Human messages fire every
+        # message handler unchanged.
+        author_is_bot = bool(trigger_context.get("author_is_bot"))
         author_id = trigger_context.get("author_id")
-        if data.trigger_type == "message" and author_id:
+        # Activity is human-only: a bot/webhook is not a guild member, so an
+        # opted-in bot message neither records a MemberActivity row nor derives
+        # human-shaped activity facts for it (the bot-side batcher skips them for
+        # the same reason).
+        if data.trigger_type == "message" and author_id and not author_is_bot:
             now = datetime.now(timezone.utc)
             row = await get_activity(db_session, data.guild_id, str(author_id))
             trigger_context.update(activity_facts(row, now))
@@ -390,6 +451,10 @@ class HandlerController(Controller):
                 )
             ).scalars().all()
             for standard in standard_rows:
+                if author_is_bot and not (standard.settings or {}).get(
+                    "include_bot_messages"
+                ):
+                    continue
                 if not await limiter.hit(
                     handler_fire_key(str(standard.id)),
                     fires_per_min_for_trigger(standard.trigger_type),
@@ -417,9 +482,23 @@ class HandlerController(Controller):
             )
         ).scalars().all()
         for admin_handler in admin_rows:
-            if not is_member_event:
+            if author_is_bot and not (admin_handler.settings or {}).get(
+                "include_bot_messages"
+            ):
+                continue
+            if not is_guild_scoped:
                 scope = admin_handler.channel_ids or []
                 if scope and data.channel_id not in scope:
+                    continue
+            # dm_message: a per-(handler, author) minute window so a user spamming
+            # DMs burns their OWN window (a declined dispatch) rather than the
+            # handler's global fire budget. Enforced before the fire cap below,
+            # which still applies on top. A DM always carries author_id.
+            if data.trigger_type == "dm_message" and author_id:
+                if not await limiter.hit(
+                    dm_trigger_author_key(str(admin_handler.id), str(author_id)),
+                    DM_FIRES_PER_AUTHOR_PER_MIN,
+                ):
                     continue
             if not await limiter.hit(
                 handler_fire_key(str(admin_handler.id)), ADMIN_FIRES_PER_MIN
@@ -447,6 +526,11 @@ class HandlerController(Controller):
         handlers scoped to specific channels. ``guild_triggers``: [guild_id,
         trigger] for admin handlers scoped to ALL channels (so every channel in
         that guild fires).
+
+        ``bot_message_channels`` / ``bot_message_guild_triggers``: the channel
+        ids (and guild ids for guild-wide admin handlers) that have a
+        message-trigger handler with ``include_bot_messages`` — so the bot only
+        POSTs a bot/webhook message to /dispatch when some handler there opted in.
         """
         rows = (
             await db_session.execute(
@@ -472,18 +556,61 @@ class HandlerController(Controller):
         ).all()
         guild_triggers: list[list[str]] = []
         for guild_id, trigger, channel_ids in admin_rows:
-            # member_* handlers always surface as (guild_id, trigger) — their
-            # dispatch guard is per-guild regardless of channel_ids. Everything
-            # else (message/reaction/thread_create) follows the scoped/guild-wide
-            # split: listed channels become channel entries, empty scope = guild.
-            if trigger in MEMBER_EVENT_TRIGGERS:
+            # Guild-scoped admin triggers (member_* and dm_message) always surface
+            # as (guild_id, trigger) — their dispatch guard is per-guild regardless
+            # of channel_ids (a member event / DM has no channel to scope against).
+            # Everything else (message/reaction/thread_create/message_edit)
+            # follows the scoped/guild-wide split: listed channels become channel
+            # entries, empty scope = guild.
+            if trigger in GUILD_SCOPED_ADMIN_TRIGGERS:
                 guild_triggers.append([guild_id, trigger])
             elif channel_ids:
                 channels.extend([channel_id, trigger] for channel_id in channel_ids)
             else:
                 guild_triggers.append([guild_id, trigger])
 
-        return {"channels": channels, "guild_triggers": guild_triggers}
+        # Bot-message opt-in sets: message-trigger handlers with
+        # include_bot_messages. Standard + channel-scoped admin -> channel ids;
+        # guild-wide admin -> guild ids. Only the message trigger can opt in.
+        bot_message_channels: list[str] = []
+        bot_message_guild_triggers: list[str] = []
+        std_bot_rows = (
+            await db_session.execute(
+                select(ChannelHandler.channel_id, ChannelHandler.settings).where(
+                    ChannelHandler.enabled.is_(True),
+                    ChannelHandler.trigger_type == "message",
+                )
+            )
+        ).all()
+        for channel_id, settings in std_bot_rows:
+            if (settings or {}).get("include_bot_messages"):
+                bot_message_channels.append(channel_id)
+        admin_bot_rows = (
+            await db_session.execute(
+                select(
+                    AdminHandler.guild_id,
+                    AdminHandler.channel_ids,
+                    AdminHandler.settings,
+                ).where(
+                    AdminHandler.enabled.is_(True),
+                    AdminHandler.trigger_type == "message",
+                )
+            )
+        ).all()
+        for guild_id, channel_ids, settings in admin_bot_rows:
+            if not (settings or {}).get("include_bot_messages"):
+                continue
+            if channel_ids:
+                bot_message_channels.extend(channel_ids)
+            else:
+                bot_message_guild_triggers.append(guild_id)
+
+        return {
+            "channels": channels,
+            "guild_triggers": guild_triggers,
+            "bot_message_channels": bot_message_channels,
+            "bot_message_guild_triggers": bot_message_guild_triggers,
+        }
 
     @get("/{handler_id:str}", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
     async def get_handler(

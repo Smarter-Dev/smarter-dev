@@ -295,6 +295,30 @@ async def test_judge_receives_trigger_cadence():
     assert "every 5 minutes" in seen["ctx"]
 
 
+def test_describe_trigger_dm_message():
+    line = describe_trigger("dm_message", {})
+    assert "EVERY DM" in line
+    assert "user-controlled" in line
+    assert "untrusted" in line
+
+
+def test_describe_trigger_message_edit():
+    line = describe_trigger("message_edit", {})
+    assert "EVERY message edit" in line
+    assert "high frequency" in line
+    assert "evasion" in line
+    assert "old_content" in line
+
+
+def test_describe_trigger_mod_action():
+    line = describe_trigger("mod_action", {})
+    # Not the generic fallback.
+    assert line != "Trigger: mod_action."
+    assert "moderation action" in line
+    # Documents the loop rail (0 mod-action budget).
+    assert "0 moderation-action budget" in line
+
+
 def test_describe_trigger_cadence_phrasing():
     assert "EVERY user message" in describe_trigger("message", {})
     assert "EVERY user reaction" in describe_trigger("reaction", {})
@@ -303,6 +327,15 @@ def test_describe_trigger_cadence_phrasing():
     )
     assert "daily at 08:00" in describe_trigger("schedule", {"daily_time": "08:00"})
     assert "One-shot" in describe_trigger("timer", {"delay_seconds": 120})
+
+
+def test_describe_trigger_timer_mentions_self_rearm():
+    # The timer cadence line must surface schedule_timer self re-arm and the
+    # timer-context branch, since ANY trigger can receive a self-armed re-fire.
+    for settings in ({"delay_seconds": 120}, {"fire_at": "2026-06-27T08:00:00+00:00"}, {}):
+        copy = describe_trigger("timer", settings)
+        assert "schedule_timer" in copy
+        assert "timer context" in copy
 
 
 def test_describe_trigger_member_and_thread_cadence():
@@ -489,6 +522,35 @@ async def test_admin_pipeline_accepts_member_trigger():
     assert "EVERY member join" in seen["ctx"]
 
 
+async def test_admin_pipeline_accepts_message_edit_trigger():
+    # message_edit is in the admin vocabulary; a create plan on it is accepted
+    # and its edit-frequency cadence reaches the judge.
+    seen = {}
+
+    async def judge(script, trigger_context):
+        seen["ctx"] = trigger_context
+        return _verdict(reason="ok")
+
+    result = await run_admin_creation_pipeline(
+        request="delete edits that add @everyone",
+        existing_handlers=[],
+        author=_admin_author_returning(
+            _admin_plan(
+                trigger_type="message_edit",
+                name="edit-ping-catch",
+                script=(
+                    'if "@everyone" in context["message_content"]:\n'
+                    '    await delete_message(context["message_id"])\n'
+                ),
+            )
+        ),
+        judge=judge,
+    )
+    assert result.ok
+    assert result.trigger_type == "message_edit"
+    assert "EVERY message edit" in seen["ctx"]
+
+
 async def test_standard_pipeline_rejects_admin_only_trigger():
     # Even if the standard author mistakenly emits an admin-only trigger, the
     # standard pipeline rejects it — the vocabulary stays the four base types.
@@ -560,3 +622,124 @@ def test_strictest_verdict_picks_the_rejector():
     assert strictest_verdict([ok, sneaky]).reason == "lgtm"
     # All passing: first verdict wins.
     assert strictest_verdict([ok, _verdict(reason="also fine")]).reason == "fine"
+
+
+# -- role-grant authoring rails (E2) -------------------------------------------
+
+_ROLE_GRANT_SCRIPT = (
+    'if context["trigger_type"] == "member_rules_accepted":\n'
+    '    await add_role(context["member_id"], "888160821673349140", reason="onboard")\n'
+)
+
+
+async def test_pipeline_rejects_role_grant_with_nonliteral_role():
+    """A non-literal role id is caught by lint before the judge ever runs."""
+    judged = []
+
+    async def judge(script, trigger_context):
+        judged.append(script)
+        return _verdict()
+
+    plan = _admin_plan(
+        trigger_type="member_rules_accepted",
+        settings={"allowed_role_ids": ["888160821673349140"]},
+        script='await add_role(context["member_id"], role_id)\n',
+    )
+    result = await run_admin_creation_pipeline(
+        request="give the holding role on rules acceptance",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(plan),
+        judge=judge,
+    )
+    assert not result.ok
+    assert "lint" in result.error and "role id" in result.error
+    assert judged == []  # lint stopped it before the judge
+
+
+async def test_judge_rejects_unconditional_add_role_on_join():
+    """A literal role id passes lint, so the judge is the gate for an
+    unconditional grant on a raid-frequency trigger."""
+    plan = _admin_plan(
+        trigger_type="member_join",
+        settings={"allowed_role_ids": ["888160821673349140"]},
+        script='await add_role(context["member_id"], "888160821673349140")\n',
+    )
+    result = await run_admin_creation_pipeline(
+        request="give everyone the holding role when they join",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(plan),
+        judge=_judge_rejecting("unconditional role grant on member_join"),
+    )
+    assert not result.ok
+    assert "unconditional role grant" in result.error
+
+
+# -- schedule_timer authoring rails (E3) ---------------------------------------
+
+_TIMER_NO_BRANCH_SCRIPT = (
+    'await add_role(context["member_id"], "888160821673349140", reason="sus")\n'
+    'await schedule_timer(86400, {"user_id": context["member_id"]})\n'
+)
+
+_TIMER_WITH_BRANCH_SCRIPT = (
+    'if context["trigger_type"] == "timer":\n'
+    '    await remove_role(context["payload"]["user_id"], "888160821673349140")\n'
+    'else:\n'
+    '    await add_role(context["member_id"], "888160821673349140", reason="sus")\n'
+    '    await schedule_timer(86400, {"user_id": context["member_id"]})\n'
+)
+
+
+async def test_judge_rejects_schedule_timer_without_timer_branch():
+    # A script that arms a timer but never handles the timer re-fire is a
+    # guaranteed error on every re-fire; the judge (guards_effective) rejects it.
+    plan = _admin_plan(
+        trigger_type="message",
+        settings={"allowed_role_ids": ["888160821673349140"]},
+        script=_TIMER_NO_BRANCH_SCRIPT,
+    )
+    result = await run_admin_creation_pipeline(
+        request="sus a member and remove the role a day later",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(plan),
+        judge=_judge_rejecting(
+            "arms schedule_timer but never handles the timer re-fire branch"
+        ),
+    )
+    assert not result.ok
+    assert "timer re-fire branch" in result.error
+
+
+async def test_pipeline_accepts_schedule_timer_with_timer_branch():
+    result = await run_admin_creation_pipeline(
+        request="sus a member and remove the role a day later",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(
+            _admin_plan(
+                trigger_type="message",
+                settings={"allowed_role_ids": ["888160821673349140"]},
+                script=_TIMER_WITH_BRANCH_SCRIPT,
+            )
+        ),
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert "schedule_timer" in result.script
+
+
+async def test_pipeline_accepts_conditional_literal_role_grant():
+    result = await run_admin_creation_pipeline(
+        request="give the holding role on rules acceptance",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(
+            _admin_plan(
+                trigger_type="member_rules_accepted",
+                settings={"allowed_role_ids": ["888160821673349140"]},
+                script=_ROLE_GRANT_SCRIPT,
+            )
+        ),
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert result.settings == {"allowed_role_ids": ["888160821673349140"]}
+    assert "add_role" in result.script

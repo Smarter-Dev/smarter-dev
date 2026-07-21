@@ -8,10 +8,16 @@ import pytest
 
 from smarter_dev.web.handler_budget import (
     ADMIN_MAX_DISCORD_READS,
+    ADMIN_MAX_LOOKUPS,
+    ADMIN_MAX_ROLE_CHANGES,
     ADMIN_MAX_THREAD_OPS,
+    ADMIN_MAX_TIMERS,
     CapExceeded,
     DEFAULT_MAX_DISCORD_READS,
+    DEFAULT_MAX_LOOKUPS,
+    DEFAULT_MAX_ROLE_CHANGES,
     DEFAULT_MAX_THREAD_OPS,
+    DEFAULT_MAX_TIMERS,
     HandlerBudget,
     admin_budget,
 )
@@ -88,6 +94,9 @@ def test_usage_snapshot():
         "mod_actions": 0,
         "discord_reads": 0,
         "thread_ops": 0,
+        "role_changes": 0,
+        "timers_scheduled": 0,
+        "lookups": 0,
     }
 
 
@@ -150,4 +159,126 @@ def test_thread_op_checks_deadline_first():
     budget.started_at = time.monotonic() - 1.0
     with pytest.raises(CapExceeded) as exc:
         budget.spend_thread_op()
+    assert exc.value.cap == "wall_clock"
+
+
+def test_spend_role_change_increments_and_caps():
+    budget = HandlerBudget(max_role_changes=2)
+    budget.spend_role_change()
+    budget.spend_role_change()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_role_change()
+    assert exc.value.cap == "role_changes"
+    assert budget.role_changes == 2
+
+
+def test_default_budget_role_changes_cap_is_zero_raises_immediately():
+    # Standard tier has no AdminActor, so a role change can never be spent.
+    assert DEFAULT_MAX_ROLE_CHANGES == 0
+    budget = HandlerBudget()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_role_change()
+    assert exc.value.cap == "role_changes"
+    assert budget.role_changes == 0
+
+
+def test_admin_budget_sets_role_changes_cap():
+    assert ADMIN_MAX_ROLE_CHANGES == 10
+    budget = admin_budget()
+    assert budget.max_role_changes == ADMIN_MAX_ROLE_CHANGES
+    for _ in range(ADMIN_MAX_ROLE_CHANGES):
+        budget.spend_role_change()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_role_change()
+    assert exc.value.cap == "role_changes"
+
+
+def test_usage_includes_role_changes():
+    budget = admin_budget()
+    budget.spend_role_change()
+    assert budget.usage()["role_changes"] == 1
+
+
+def test_role_change_checks_deadline_first():
+    budget = admin_budget()
+    budget.wall_clock_seconds = 0.0
+    budget.started_at = time.monotonic() - 1.0
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_role_change()
+    assert exc.value.cap == "wall_clock"
+
+
+# -- timer arming budget (schedule_timer, E3) ----------------------------------
+
+
+def test_spend_timer_default_cap():
+    # Both tiers can arm timers; the default per-fire ceiling is 2.
+    assert DEFAULT_MAX_TIMERS == 2
+    budget = HandlerBudget()
+    budget.spend_timer()
+    budget.spend_timer()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_timer()
+    assert exc.value.cap == "timers"
+    assert budget.timers_scheduled == 2
+
+
+def test_admin_budget_allows_five_timers():
+    assert ADMIN_MAX_TIMERS == 5
+    budget = admin_budget()
+    assert budget.max_timers == ADMIN_MAX_TIMERS
+    for _ in range(ADMIN_MAX_TIMERS):
+        budget.spend_timer()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_timer()
+    assert exc.value.cap == "timers"
+
+
+def test_usage_includes_timers_scheduled():
+    budget = HandlerBudget()
+    assert budget.usage()["timers_scheduled"] == 0
+    budget.spend_timer()
+    assert budget.usage()["timers_scheduled"] == 1
+
+
+def test_timer_checks_deadline_first():
+    budget = HandlerBudget()
+    budget.wall_clock_seconds = 0.0
+    budget.started_at = time.monotonic() - 1.0
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_timer()
+    assert exc.value.cap == "wall_clock"
+
+
+def test_spend_lookup_raises_cap_exceeded_at_limit():
+    budget = HandlerBudget(max_lookups=ADMIN_MAX_LOOKUPS)
+    for _ in range(ADMIN_MAX_LOOKUPS):
+        budget.spend_lookup()
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_lookup()
+    assert exc.value.cap == "lookups"
+    assert budget.lookups == ADMIN_MAX_LOOKUPS
+
+
+def test_usage_includes_lookups():
+    budget = HandlerBudget()
+    assert budget.usage()["lookups"] == 0
+    budget = HandlerBudget(max_lookups=2)
+    budget.spend_lookup()
+    assert budget.usage()["lookups"] == 1
+
+
+def test_admin_budget_grants_lookups_default_denies():
+    assert ADMIN_MAX_LOOKUPS == 10
+    assert DEFAULT_MAX_LOOKUPS == 0
+    assert admin_budget().max_lookups == ADMIN_MAX_LOOKUPS
+    assert HandlerBudget().max_lookups == 0
+
+
+def test_lookup_checks_deadline_first():
+    budget = HandlerBudget(max_lookups=ADMIN_MAX_LOOKUPS)
+    budget.wall_clock_seconds = 0.0
+    budget.started_at = time.monotonic() - 1.0
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_lookup()
     assert exc.value.cap == "wall_clock"

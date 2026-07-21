@@ -1,0 +1,84 @@
+# Mirrors an inbound member DM into that member's persistent relay forum post.
+# This handler is scoped to the forum channel, so the forum channel is its HOME
+# channel: create_post() opens the post there, and (on the member's first DM) its
+# opening content IS the first relayed message. Thereafter the same post is
+# reused. The member -> post map lives in one guild-shared memory key so the
+# forum-relay handler can resolve which member a staff reply in a post belongs to.
+NOTIFY_ON_FIRST_DM = {{cfg.notify_on_first_dm}}
+
+# One guild-memory key holds the whole member -> post-thread-id map. It is pruned
+# to the most-recent MAX_TRACKED_MEMBERS so the single stored value stays well
+# inside the guild-memory size rail. A pruned member simply gets a fresh post on
+# their next DM — an accepted tradeoff (nothing is lost on the member's side).
+POSTS_KEY = "dm_forum_posts"
+MAX_TRACKED_MEMBERS = 100
+
+
+def remember_post(posts, member_id, post_id):
+    # Pure: return a new map with member_id -> post_id moved to the most-recent
+    # end, dropping the oldest entries beyond MAX_TRACKED_MEMBERS (a JSON dict
+    # preserves insertion order, so first-inserted == oldest).
+    reordered = {}
+    for existing_member, existing_post in posts.items():
+        if existing_member != member_id:
+            reordered[existing_member] = existing_post
+    reordered[member_id] = post_id
+    overflow = len(reordered) - MAX_TRACKED_MEMBERS
+    if overflow <= 0:
+        return reordered
+    pruned = {}
+    index = 0
+    for keep_member, keep_post in reordered.items():
+        if index >= overflow:
+            pruned[keep_member] = keep_post
+        index = index + 1
+    return pruned
+
+
+async def run():
+    member_id = context["author_id"]
+    title = "DM: " + context["author_display_name"] + " (" + member_id + ")"
+
+    lines = [context["content"] if context["content"] else "*(no text)*"]
+    for attachment in context["attachment_urls"]:
+        lines.append("attachment: " + attachment["url"])
+    # Discord caps a message at 2000 chars and create_post does NOT truncate
+    # host-side (send_message does) — a Nitro member's 4000-char DM would 400
+    # the post creation and error the fire, so cap the body here.
+    body = "\n".join(lines)[:2000]
+
+    posts = await guild_memory_get(POSTS_KEY, {})
+    post_id = posts.get(member_id)
+
+    if post_id is None:
+        # First DM from this member: open the post on the home (forum) channel;
+        # its opening content IS the first relayed message.
+        post_id = await create_post(title, body)
+        await guild_memory_set(POSTS_KEY, remember_post(posts, member_id, post_id))
+    else:
+        # Existing post: reopen first (harmless no-op when the post is active) so
+        # a Discord-auto-archived post accepts the send. A deleted post makes the
+        # explicit-target send return False — mint a fresh post and relay again.
+        await reopen_thread(post_id)
+        delivered = await send_message(body, post_id)
+        if delivered is False:
+            post_id = await create_post(title, body)
+            await guild_memory_set(
+                POSTS_KEY, remember_post(posts, member_id, post_id)
+            )
+
+    if NOTIFY_ON_FIRST_DM:
+        warned = await memory_get("warned_ids", [])
+        if member_id not in warned:
+            notified = await send_dm(
+                member_id,
+                "Heads up: DMs to this bot are relayed to the staff team, who "
+                "may reply here.",
+            )
+            if notified:
+                warned.append(member_id)
+                # Bounded: per-handler memory caps raise (never evict) — prune.
+                await memory_set("warned_ids", warned[-500:])
+
+
+await run()

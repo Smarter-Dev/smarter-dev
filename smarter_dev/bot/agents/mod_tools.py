@@ -21,7 +21,12 @@ from datetime import datetime, timedelta, timezone
 import hikari
 import lightbulb
 
+from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.bot.plugins.timeout import parse_duration
+from smarter_dev.bot.purge_core import (
+    delete_selected_messages,
+    select_purgeable_messages,
+)
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import ModerationActionOperations
 from smarter_dev.web.models import ModerationAction
@@ -201,7 +206,10 @@ def create_moderation_tools(
                 ai_context_summary=ai_context_summary,
             )
             await session.commit()
-            return action
+        # Fire the mod_action trigger so a mod-log handler formats the AI action
+        # (best-effort; never breaks the triage tool).
+        await dispatch_mod_action(action)
+        return action
 
     # ── Action tools ─────────────────────────────────────────────────
 
@@ -309,33 +317,18 @@ def create_moderation_tools(
             member = await bot.rest.fetch_member(int(guild_id), int(user_id))
             username = member.display_name or member.username
 
-            # Fetch recent messages and filter to target user
-            now = datetime.now(timezone.utc)
-            fourteen_days_ago = now - timedelta(days=14)
-            message_ids: list[int] = []
-
-            async for message in bot.rest.fetch_messages(int(channel_id)).limit(count * 3):
-                if str(message.author.id) != user_id:
-                    continue
-                # Discord bulk delete requires messages < 14 days old
-                msg_created = snowflake_to_datetime(message.id)
-                if msg_created < fourteen_days_ago:
-                    continue
-                message_ids.append(message.id)
-                if len(message_ids) >= count:
-                    break
-
-            if not message_ids:
+            # Shared paging/bulk-delete core (14-day rule + single-vs-bulk delete)
+            # so /purge and this tool never diverge on which messages they delete.
+            selection = await select_purgeable_messages(
+                bot.rest.fetch_messages(int(channel_id)).limit(count * 3),
+                count=count,
+                user_id=user_id,
+            )
+            if not selection.message_ids:
                 return {"success": True, "result": f"No recent messages found from user {username} to delete."}
 
-            # Delete messages
-            if len(message_ids) == 1:
-                await bot.rest.delete_message(int(channel_id), message_ids[0])
-            else:
-                # bulk delete handles 2-100 messages
-                await bot.rest.delete_messages(int(channel_id), message_ids)
-
-            deleted_count = len(message_ids)
+            await delete_selected_messages(bot.rest, int(channel_id), selection.message_ids)
+            deleted_count = len(selection.message_ids)
 
             await _record_action(
                 target_user_id=user_id,

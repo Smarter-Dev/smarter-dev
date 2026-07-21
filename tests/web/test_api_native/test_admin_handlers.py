@@ -102,6 +102,49 @@ def _body(**over):
     return body
 
 
+def test_create_admin_handler_rejects_include_bot_messages_on_non_message(client):
+    # The Disboard-confirmation opt-in only means anything on a message trigger.
+    rejected = client.post(
+        "/api/admin/handlers",
+        json=_body(
+            name="stat-counter",
+            trigger_type="schedule",
+            settings={"include_bot_messages": True, "interval_seconds": 600},
+            script="pass\n",
+        ),
+    )
+    assert rejected.status_code == 422
+    # A message-trigger admin handler accepts it (this is the Disboard tracker).
+    accepted = client.post(
+        "/api/admin/handlers",
+        json=_body(
+            name="disboard-tracker",
+            trigger_type="message",
+            settings={"include_bot_messages": True},
+        ),
+    )
+    assert accepted.status_code == 201
+
+
+def test_update_admin_handler_rejects_include_bot_messages_on_non_message(client):
+    created = client.post(
+        "/api/admin/handlers",
+        json=_body(name="stat-counter", trigger_type="schedule",
+                   settings={"interval_seconds": 600}, script="pass\n"),
+    )
+    handler_id = created.json()["handler_id"]
+    resp = client.put(
+        f"/api/admin/handlers/{handler_id}",
+        json={
+            "description": "d",
+            "script": "pass\n",
+            "settings": {"include_bot_messages": True, "interval_seconds": 600},
+            "channel_ids": [],
+        },
+    )
+    assert resp.status_code == 422
+
+
 def test_create_list_delete_admin_handler(client):
     created = client.post("/api/admin/handlers", json=_body())
     assert created.status_code == 201
@@ -261,4 +304,20 @@ def test_create_admin_accepts_new_event_triggers(client, trigger):
     )
     assert resp.status_code == 201
     assert resp.json()["trigger_type"] == trigger
+    assert len(client.submitted) == 0  # type: ignore[attr-defined]
+
+
+def test_create_mod_action_handler_allowed(client):
+    """The synthetic mod_action trigger is an authorable admin trigger; it is an
+    event-style trigger so no first fire is scheduled on create."""
+    resp = client.post(
+        "/api/admin/handlers",
+        json=_body(
+            trigger_type="mod_action",
+            name="mod-log-formatter",
+            script="await send_message('logged', 'MODLOG')\n",
+        ),
+    )
+    assert resp.status_code == 201
+    assert resp.json()["trigger_type"] == "mod_action"
     assert len(client.submitted) == 0  # type: ignore[attr-defined]

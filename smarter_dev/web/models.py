@@ -3488,7 +3488,7 @@ class ModerationAction(Base):
         nullable=False,
         default="ai",
         server_default="ai",
-        doc="Action source: ai, manual, audit_log",
+        doc="Action source: ai, manual, audit_log, handler",
     )
     channel_id: Mapped[Optional[str]] = mapped_column(
         String,
@@ -4335,8 +4335,11 @@ HANDLER_TRIGGER_TYPES = ("message", "reaction", "schedule", "timer")
 # Event (gateway-dispatched) triggers for the standard tier; time triggers coexist.
 HANDLER_EVENT_TRIGGERS = ("message", "reaction")
 
-# Admin-tier-only gateway triggers: guild-shaped member lifecycle events plus
-# thread creation (see docs/v2/feature-parity/threads-and-member-events.md §6).
+# Admin-tier-only gateway triggers: guild-shaped member lifecycle events, thread
+# creation (see docs/v2/feature-parity/threads-and-member-events.md §6), and the
+# inbound-DM trigger (docs/v2/feature-parity/staff-communication-channels.md E1 —
+# a member-authored channel handler must never see other users' DMs, so the
+# standard tier's ck_channel_handlers_trigger_type is deliberately NOT extended).
 # Standard create paths reject these; only the admin tier admits them.
 ADMIN_ONLY_TRIGGER_TYPES = (
     "member_join",
@@ -4344,12 +4347,34 @@ ADMIN_ONLY_TRIGGER_TYPES = (
     "member_rules_accepted",
     "member_role_change",
     "thread_create",
+    "dm_message",
+    # Human message edits (hikari.GuildMessageUpdateEvent). Channel-keyed like
+    # thread_create — edits are a common @everyone/evasion vector, so an admin
+    # auto-mod handler must see the new (and best-effort cached old) content.
+    # See docs/v2/feature-parity/automated-and-command-moderation.md §3.3.
+    "message_edit",
 )
-# The admin tier's full trigger vocabulary: the standard four plus the five above.
-ADMIN_HANDLER_TRIGGER_TYPES = HANDLER_TRIGGER_TYPES + ADMIN_ONLY_TRIGGER_TYPES
-# Admin event (gateway-dispatched) triggers: standard events plus the five new
-# ones, used by the admin active-channels query. Time triggers stay excluded.
-ADMIN_HANDLER_EVENT_TRIGGERS = HANDLER_EVENT_TRIGGERS + ADMIN_ONLY_TRIGGER_TYPES
+# Admin-tier SYNTHETIC triggers: fired by the bot explicitly (not from a gateway
+# event) after a domain write. mod_action rides the /handlers/dispatch endpoint
+# like a member event (guild-scoped, no home channel) but has no hikari listener —
+# a bot-side helper POSTs it after each ModerationAction commit. Kept OUT of
+# ADMIN_ONLY_TRIGGER_TYPES (which feeds the per-guild member-events raid gate) so
+# a mass-ban wave is bounded by the per-handler ADMIN_FIRES_PER_MIN window, not
+# the raid window. See docs/v2/feature-parity/automated-and-command-moderation.md
+# §3.5.
+ADMIN_SYNTHETIC_TRIGGER_TYPES = ("mod_action",)
+# The admin tier's full trigger vocabulary: the standard four plus the gateway and
+# synthetic admin-only triggers. Used to validate what an admin handler may author.
+ADMIN_HANDLER_TRIGGER_TYPES = (
+    HANDLER_TRIGGER_TYPES + ADMIN_ONLY_TRIGGER_TYPES + ADMIN_SYNTHETIC_TRIGGER_TYPES
+)
+# Admin event (dispatch-guarded) triggers: standard events plus the gateway and
+# synthetic admin-only triggers, used by the admin active-channels query so the
+# bot's dispatch guard knows a guild has (e.g.) mod_action handlers. Time triggers
+# stay excluded (they self-schedule, never routed through the dispatch guard).
+ADMIN_HANDLER_EVENT_TRIGGERS = (
+    HANDLER_EVENT_TRIGGERS + ADMIN_ONLY_TRIGGER_TYPES + ADMIN_SYNTHETIC_TRIGGER_TYPES
+)
 
 
 class ChannelHandler(Base):
@@ -4445,10 +4470,23 @@ class HandlerRun(Base):
     agent_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # Moderation actions (ban/kick/timeout/delete) — admin handlers only.
     mod_actions: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # Metered Discord reads (list_threads) and mutating thread ops
-    # (create/close/lock/reopen/delete thread).
+    # Metered Discord reads (list_threads), mutating thread ops
+    # (create/close/lock/reopen/delete thread), and role grants/revokes
+    # (add_role/remove_role) — the last two admin handlers only.
     discord_reads: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     thread_ops: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    role_changes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    # One-shot timers armed via schedule_timer this fire (both tiers).
+    timers_scheduled: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    # Metered mod-audit reads (list_mod_actions / get_member_info /
+    # search_guild_members) — admin handlers only, distinct from discord_reads.
+    lookups: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
@@ -4469,11 +4507,15 @@ class AdminHandler(Base):
         CheckConstraint(
             "trigger_type IN ('message', 'reaction', 'schedule', 'timer', "
             "'member_join', 'member_leave', 'member_rules_accepted', "
-            "'member_role_change', 'thread_create')",
+            "'member_role_change', 'thread_create', 'dm_message', "
+            "'message_edit', 'mod_action')",
             name="ck_admin_handlers_trigger_type",
         ),
         Index("ix_admin_handlers_guild_id", "guild_id"),
         Index("uq_admin_handlers_guild_name", "guild_id", "name", unique=True),
+        Index(
+            "ix_admin_handlers_extension_install_id", "extension_install_id"
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -4500,6 +4542,101 @@ class AdminHandler(Base):
         JSON, nullable=False, default=dict, server_default="{}"
     )
     scheduled_job_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Set when this row was materialised by an extension install; NULL for
+    # hand-authored handlers. No FK by house style (cf. handler_runs.handler_id,
+    # guild_handler_memory) — the install service owns integrity, and only ever
+    # mutates/deletes rows whose extension_install_id matches its own install.
+    extension_install_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+    # The manifest HandlerTemplate.key this row materialises. Update and
+    # config-edit reconcile rows by (extension_install_id, key) so a re-render
+    # preserves the row id and its per-handler ``memory``.
+    extension_handler_key: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+
+
+class ExtensionInstall(Base):
+    """One guild's installation of a catalog extension.
+
+    Records which extension (``extension_slug``), at which catalog
+    ``installed_version``, with which admin-supplied ``config``, and owns the
+    materialised ``admin_handlers`` rows via
+    ``AdminHandler.extension_install_id`` — uninstall deletes exactly those
+    rows. One install per (guild, extension), enforced by
+    ``uq_extension_installs_guild_slug``. ``installed_version`` is compared
+    against the in-repo manifest's version to surface "update available".
+    """
+
+    __tablename__ = "extension_installs"
+    __table_args__ = (
+        UniqueConstraint(
+            "guild_id", "extension_slug", name="uq_extension_installs_guild_slug"
+        ),
+        Index("ix_extension_installs_guild_id", "guild_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    extension_slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    installed_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The cleaned config the current rows were rendered from; re-rendered on
+    # config-edit and update.
+    config: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    # Skrift admin identity (username/email) who performed the install.
+    installed_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+
+
+class GuildHandlerMemory(Base):
+    """One key/value row of a guild's shared admin-handler memory.
+
+    Guild-scoped shared state (see
+    :class:`~smarter_dev.web.handler_guild_memory.GuildMemory`): unlike the
+    private per-handler ``memory`` blob, every admin handler in the guild reads
+    and writes this same store, so a fact can cross handler rows (e.g. the
+    DM-relay auto-bind target shared by the mirror and relay handlers). Rows are
+    PER KEY (not one blob) so two handler fires writing different keys on the
+    concurrent ``agents`` queue never clobber each other; a same-key write is
+    last-write-wins via the ``UNIQUE(guild_id, key)`` upsert.
+    """
+
+    __tablename__ = "guild_handler_memory"
+    __table_args__ = (
+        UniqueConstraint(
+            "guild_id", "key", name="uq_guild_handler_memory_guild_key"
+        ),
+        Index("ix_guild_handler_memory_guild_id", "guild_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    value: Mapped[dict] = mapped_column(JSON, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
 
 
 class MemberActivity(Base):

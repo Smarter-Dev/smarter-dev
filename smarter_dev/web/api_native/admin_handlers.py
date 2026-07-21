@@ -114,6 +114,19 @@ def _to_response(record: AdminHandler) -> AdminHandlerResponse:
     )
 
 
+def _reject_bot_optin_on_non_message(settings: dict, trigger_type: str) -> None:
+    """422 when ``include_bot_messages`` is set on a non-message admin handler.
+
+    The opt-in only means anything on a ``message`` trigger (it changes which
+    bot/webhook messages fire the handler); admin handlers are the primary
+    Disboard-confirmation consumer, so enforce the same rail as the member tier.
+    """
+    if settings.get("include_bot_messages") and trigger_type != "message":
+        raise plain_error(
+            422, "include_bot_messages is only valid on message-trigger handlers"
+        )
+
+
 def _normalized_name(raw: str) -> str:
     name = raw.strip()
     if not name:
@@ -172,6 +185,7 @@ class AdminHandlerController(Controller):
     ) -> AdminHandlerResponse:
         if data.trigger_type not in ADMIN_HANDLER_TRIGGER_TYPES:
             raise plain_error(422, "unknown trigger_type")
+        _reject_bot_optin_on_non_message(data.settings, data.trigger_type)
         name = _normalized_name(data.name)
 
         if await _name_taken(db_session, data.guild_id, name):
@@ -227,6 +241,8 @@ class AdminHandlerController(Controller):
         record = await db_session.get(AdminHandler, parsed_handler_id)
         if record is None:
             raise plain_error(404, "admin handler not found")
+        # trigger_type is immutable on edit, so validate against the stored one.
+        _reject_bot_optin_on_non_message(data.settings, record.trigger_type)
 
         if data.name is not None:
             name = _normalized_name(data.name)

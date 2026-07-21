@@ -26,6 +26,7 @@ import hikari
 import lightbulb
 
 from smarter_dev.shared.config import get_settings
+from smarter_dev.web.handler_caps import GUILD_MEMBER_EVENTS_PER_MIN, WINDOW_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -91,13 +92,18 @@ class ActiveChannelsCache:
     """Short-TTL cache of which (channel, trigger) and (guild, trigger) fire.
 
     ``_pairs`` covers standard + channel-scoped admin handlers; ``_guild_triggers``
-    covers admin handlers scoped to all channels in a guild.
+    covers admin handlers scoped to all channels in a guild. The two
+    ``_bot_message_*`` sets are the bot-message opt-in guard: which channels /
+    guilds have a message handler with ``include_bot_messages``, so a bot/webhook
+    message only ever POSTs /dispatch where some handler asked for it.
     """
 
     def __init__(self, ttl_seconds: float = 30.0) -> None:
         self._ttl = ttl_seconds
         self._pairs: set[tuple[str, str]] = set()
         self._guild_triggers: set[tuple[str, str]] = set()
+        self._bot_message_channels: set[str] = set()
+        self._bot_message_guilds: set[str] = set()
         self._expires_at: float = 0.0
 
     def invalidate(self) -> None:
@@ -111,20 +117,57 @@ class ActiveChannelsCache:
             self._guild_triggers = {
                 (str(g), str(t)) for g, t in data.get("guild_triggers", [])
             }
+            self._bot_message_channels = {
+                str(c) for c in data.get("bot_message_channels", [])
+            }
+            self._bot_message_guilds = {
+                str(g) for g in data.get("bot_message_guild_triggers", [])
+            }
             self._expires_at = time.monotonic() + self._ttl
 
-    async def has(
-        self, api: Any, channel_id: str, guild_id: str, trigger_type: str
-    ) -> bool:
+    async def _ensure_fresh(self, api: Any) -> bool:
+        """Refresh the cache when stale; False when the refresh failed."""
         if time.monotonic() >= self._expires_at:
             try:
                 await self._refresh(api)
             except Exception:  # noqa: BLE001 — never let dispatch crash on a cache miss
                 logger.debug("active-channels refresh failed", exc_info=True)
                 return False
+        return True
+
+    async def has(
+        self, api: Any, channel_id: str, guild_id: str, trigger_type: str
+    ) -> bool:
+        if not await self._ensure_fresh(api):
+            return False
         return (
             (str(channel_id), str(trigger_type)) in self._pairs
             or (str(guild_id), str(trigger_type)) in self._guild_triggers
+        )
+
+    async def guilds_with_trigger(self, api: Any, trigger_type: str) -> set[str]:
+        """Guild ids with an enabled guild-wide handler for ``trigger_type``.
+
+        Backs DM routing: a DM carries no guild, so it fans out only to mutual
+        guilds that actually have a ``dm_message`` handler. A refresh failure
+        yields an empty set (fail closed — no dispatch, never a crash)."""
+        if not await self._ensure_fresh(api):
+            return set()
+        return {g for g, t in self._guild_triggers if t == str(trigger_type)}
+
+    async def has_bot_message(
+        self, api: Any, channel_id: str, guild_id: str
+    ) -> bool:
+        """Whether a bot/webhook message here fires some opted-in handler.
+
+        True only when the channel (or the whole guild, for a guild-wide admin
+        handler) has a message handler with ``include_bot_messages``. A refresh
+        failure returns False — the same fail-safe as ``has``."""
+        if not await self._ensure_fresh(api):
+            return False
+        return (
+            str(channel_id) in self._bot_message_channels
+            or str(guild_id) in self._bot_message_guilds
         )
 
 
@@ -145,13 +188,33 @@ def _get_api_client() -> Any:
 
 
 async def _dispatch(
-    channel_id: str, guild_id: str, trigger_type: str, context: dict
-) -> None:
+    channel_id: str,
+    guild_id: str,
+    trigger_type: str,
+    context: dict,
+    *,
+    bot_message: bool = False,
+) -> bool:
+    """Ask the API to enqueue a fire. Returns whether the fire was delivered.
+
+    ``True`` means delivered OR there was no handler to receive it (nothing to
+    retry); ``False`` means the API explicitly declined the fire (e.g. the shared
+    per-guild member-event raid window was exhausted). Live listeners ignore the
+    return; the startup replay uses it to retry a declined fire rather than lose
+    the member a second time.
+    """
     api = _get_api_client()
-    if not await _cache.has(api, channel_id, guild_id, trigger_type):
-        return
+    # A bot/webhook message uses the opt-in guard (only fires where a handler
+    # asked for bot messages); everything else uses the normal per-trigger guard.
+    present = (
+        await _cache.has_bot_message(api, channel_id, guild_id)
+        if bot_message
+        else await _cache.has(api, channel_id, guild_id, trigger_type)
+    )
+    if not present:
+        return True
     try:
-        await api.post(
+        response = await api.post(
             "/handlers/dispatch",
             json_data={
                 "guild_id": guild_id,
@@ -162,6 +225,8 @@ async def _dispatch(
         )
     except Exception:  # noqa: BLE001 — dispatch is best-effort for a toy
         logger.debug("handler dispatch failed", exc_info=True)
+        return True  # a transient error is not a raid-gate decline
+    return bool(response.json().get("dispatched", True))
 
 
 # Channel types that are threads (dispatch keys off their PARENT channel).
@@ -324,6 +389,156 @@ def member_update_deltas(old_member: Any, new_member: Any) -> list[tuple[str, di
     return deltas
 
 
+# ---------------------------------------------------------------------------
+# E6 — startup rules-acceptance replay (bot-core, trigger synthesis only)
+# ---------------------------------------------------------------------------
+
+
+def find_missed_rules_acceptances(members: Any) -> list[dict]:
+    """Members whose pending -> accepted transition the bot may have missed.
+
+    Pure selector over a member snapshot (gateway cache or REST page). A member
+    who is NOT pending, holds no role beyond @everyone, and is not a bot has
+    accepted the rules yet shows no sign of onboarding — exactly the population
+    the legacy ready-sweep repaired for events lost while the bot was down. Each
+    result is a member_rules_accepted context identical to the live one apart from
+    ``is_reconciliation: True``, so a handler (and the judge) can tell a replayed
+    fire from a real delta. No side effects: selection only.
+
+    The role check reuses ``_roles_beyond_everyone`` — the single authority the
+    live cache-miss path (``_became_rules_accepted``) also uses — so the two
+    predicates stay in lockstep. The pending check is deliberately STRICTER than
+    the live path: this selector's first consumer is REST-fetched members, whose
+    ``pending`` field is optional (hikari yields ``UNDEFINED`` when Discord omits
+    it). We require an explicit ``False`` and skip anything else, so an unknown
+    ``pending`` never fails open into a synthesized acceptance for a member who
+    may still be pending.
+    """
+    contexts: list[dict] = []
+    for member in members:
+        if member.is_bot:
+            continue
+        if member.is_pending is not False:
+            continue
+        if _roles_beyond_everyone(member):
+            continue
+        contexts.append(
+            {**_rules_accepted_context(member), "is_reconciliation": True}
+        )
+    return contexts
+
+
+# The shared per-guild member-event window (GUILD_MEMBER_EVENTS_PER_MIN) is
+# spent by every live member_join/leave/rules/role fire too, so the replay must
+# NOT consume a whole window — it reserves headroom for concurrent live events
+# and only fires a partial batch per window.
+REPLAY_MEMBER_EVENT_HEADROOM = GUILD_MEMBER_EVENTS_PER_MIN // 2
+REPLAY_BATCH_SIZE = GUILD_MEMBER_EVENTS_PER_MIN - REPLAY_MEMBER_EVENT_HEADROOM
+# Bound on how many extra windows we keep retrying declined fires before giving
+# up and logging, so a permanently saturated window can't loop forever.
+REPLAY_MAX_RETRY_WINDOWS = 5
+
+
+async def replay_missed_rules_acceptances(
+    guild_id: str,
+    members: Any,
+    dispatch: Any,
+    *,
+    batch_size: int = REPLAY_BATCH_SIZE,
+    window_seconds: float = WINDOW_SECONDS,
+    sleep: Any = asyncio.sleep,
+    max_retry_windows: int = REPLAY_MAX_RETRY_WINDOWS,
+) -> int:
+    """Re-dispatch a synthetic member_rules_accepted for each missed member, paced.
+
+    Fires go through the SAME ``dispatch`` path a live delta uses, so the
+    onboarding handler stays the single authority. The per-guild member-event gate
+    is SHARED with every live member fire, so we (a) fire at most ``batch_size``
+    per window — strictly below the cap, leaving headroom so a concurrent live
+    join/leave is never declined by our backlog — and (b) treat a declined fire
+    (``dispatch`` returns falsy) as not-yet-delivered and retry it in a later
+    window rather than dropping the member a second time. A post-downtime backlog
+    therefore drains over a few minutes. ``sleep``/``batch_size``/``window_seconds``
+    are injected so pacing is testable without real sleeps. Returns the number of
+    fires actually delivered.
+    """
+    contexts = find_missed_rules_acceptances(members)
+    if not contexts:
+        return 0
+
+    pending = list(contexts)
+    delivered = 0
+    full_batches = (len(contexts) + batch_size - 1) // batch_size
+    max_passes = full_batches + max_retry_windows
+    passes = 0
+    while pending and passes < max_passes:
+        if passes:
+            # Wait for the shared window to roll over before spending more of it.
+            await sleep(window_seconds)
+        passes += 1
+        batch, pending = pending[:batch_size], pending[batch_size:]
+        declined: list[dict] = []
+        for context in batch:
+            if await dispatch("", guild_id, "member_rules_accepted", context):
+                delivered += 1
+            else:
+                declined.append(context)  # gate declined; retry next window
+        pending = declined + pending
+
+    logger.info(
+        "Startup replay: delivered %d/%d member_rules_accepted fires for guild %s",
+        delivered,
+        len(contexts),
+        guild_id,
+    )
+    if pending:
+        logger.warning(
+            "Startup replay: gave up with %d undelivered member_rules_accepted "
+            "fires for guild %s after %d windows",
+            len(pending),
+            guild_id,
+            passes,
+        )
+    return delivered
+
+
+async def _paged_guild_members(bot: Any, guild_id: Any) -> list:
+    """All members of a guild via REST paging (authoritative, chunk-independent).
+
+    Gateway member chunking is requested at connect (``bot.start`` runs with the
+    default ``chunk_members=True`` and the GUILD_MEMBERS intent), but chunks
+    arrive asynchronously and are not guaranteed complete at StartedEvent, so the
+    member cache cannot be relied on at replay time. REST paging returns the full
+    membership regardless of chunk state.
+    """
+    return [member async for member in bot.rest.fetch_members(guild_id)]
+
+
+async def replay_startup_rules_acceptances(bot: Any) -> None:
+    """Run the missed-rules-acceptance replay for every guild the bot is in.
+
+    Guilds are enumerated authoritatively via REST (``fetch_my_guilds``): the
+    gateway guild cache is populated only as GUILD_CREATE events stream in AFTER
+    each shard's READY, so it races StartedEvent and would silently skip guilds
+    whose GUILD_CREATE has not yet arrived. A fetch failure for one guild's
+    members is logged and skipped so it cannot abort the replay for the rest; a
+    failure enumerating guilds propagates (create_task logs it loudly) rather
+    than silently disabling the whole feature.
+    """
+    guild_ids = [guild.id async for guild in bot.rest.fetch_my_guilds()]
+    for guild_id in guild_ids:
+        try:
+            members = await _paged_guild_members(bot, guild_id)
+        except Exception:  # noqa: BLE001 — one guild's fetch must not drop the rest
+            logger.warning(
+                "startup replay: member fetch failed for guild %s",
+                guild_id,
+                exc_info=True,
+            )
+            continue
+        await replay_missed_rules_acceptances(str(guild_id), members, _dispatch)
+
+
 def resolve_role_names(guild: Any, role_ids: list[str]) -> list[str]:
     """Resolve role ids to names via the guild cache; empty when guild uncached.
 
@@ -454,6 +669,165 @@ def thread_create_context(
     }
 
 
+# Guild-level permissions that mark a message author as "staff" for the
+# message-trigger context's cheap staff-exemption guard (§3.1). ADMINISTRATOR
+# implies every permission, so it counts even without explicit MANAGE_MESSAGES.
+_STAFF_MESSAGE_PERMISSIONS = (
+    hikari.Permissions.MANAGE_MESSAGES | hikari.Permissions.ADMINISTRATOR
+)
+
+
+def author_has_manage_messages(member: Any) -> bool:
+    """Guild-level MANAGE_MESSAGES/ADMINISTRATOR for a message author.
+
+    Fail CLOSED: an uncached (``None``) author or an unresolvable permission set
+    reads as NON-staff, so the author is scanned rather than exempted — a
+    staff-exemption gate must never fail open. Guild-level only (no per-channel
+    overwrites), matching the invite-filter plan's "express staff as roles".
+    """
+    if member is None:
+        return False
+    try:
+        permissions = lightbulb.utils.permissions_for(member)
+    except Exception:  # noqa: BLE001 — an unresolved author is scanned, not exempt
+        return False
+    return bool(permissions & _STAFF_MESSAGE_PERMISSIONS)
+
+
+def _category_id_of(channel: Any) -> str | None:
+    """Category (parent) id of a guild channel, or None when absent/uncached."""
+    if channel is None:
+        return None
+    parent_id = getattr(channel, "parent_id", None)
+    return str(parent_id) if parent_id is not None else None
+
+
+def resolve_channel_parent_id(bot: Any, channel_id: Any) -> str | None:
+    """Category id of the surface a message was posted in, or None (§3.1).
+
+    A top-level channel reports its own parent_id (the category). A thread
+    message reports the thread's parent text channel's parent_id — the
+    grandparent category — so an invite/private-category check reads the same in
+    a thread as in the channel it hangs off. None on any cache miss (fail closed;
+    a handler must treat None as "unknown category").
+    """
+    thread_channel = _get_thread_channel(bot, channel_id)
+    if thread_channel is not None:
+        return _category_id_of(_get_guild_channel(bot, thread_channel.parent_id))
+    return _category_id_of(_get_guild_channel(bot, channel_id))
+
+
+_EMBED_TEXT_LIMIT = 1024
+
+
+def _truncate_embed_text(text: str | None) -> str | None:
+    """Cap one embed string so a fat embed can't bloat the fire context."""
+    if text is None:
+        return None
+    return text[:_EMBED_TEXT_LIMIT]
+
+
+def serialize_message_embeds(embeds: Any) -> list[dict]:
+    """Minimal JSON-safe view of a message's embeds (§3 E1).
+
+    Keeps only the plain-string parts an authored handler can match on —
+    title, description, and each field's name/value — every string truncated
+    to 1KB so a large embed stays out of the fire context. Disboard bump
+    detection reads ``embeds[0]["description"]`` for the "Bump done!" marker.
+    Absent strings stay ``None`` (JSON null); an empty list when the message
+    carries no embeds.
+    """
+    return [
+        {
+            "title": _truncate_embed_text(getattr(embed, "title", None)),
+            "description": _truncate_embed_text(getattr(embed, "description", None)),
+            "fields": [
+                {
+                    "name": _truncate_embed_text(getattr(embed_field, "name", None)),
+                    "value": _truncate_embed_text(getattr(embed_field, "value", None)),
+                }
+                for embed_field in (getattr(embed, "fields", None) or [])
+            ],
+        }
+        for embed in (embeds or [])
+    ]
+
+
+def message_interaction_user_id(msg: Any) -> str | None:
+    """Snowflake (str) of the slash-command invoker, or None (§3 E1).
+
+    Disboard's ``/bump`` confirmation is an application-command response whose
+    ``interaction.user`` is the member who ran ``/bump`` — the person credited
+    with the bump. hikari 2.1.1 exposes this as ``Message.interaction`` (a
+    ``MessageInteraction`` carrying a ``user``). None for any ordinary message
+    not produced by a slash command.
+    """
+    interaction = getattr(msg, "interaction", None)
+    if interaction is None:
+        return None
+    user = getattr(interaction, "user", None)
+    if user is None:
+        return None
+    return str(user.id)
+
+
+def message_context(
+    msg: Any,
+    *,
+    author_is_bot: bool,
+    author_role_ids: list[str],
+    author_has_manage_messages: bool,
+    mentioned_user_ids: list[str],
+    mentioned_role_ids: list[str],
+    mentions_everyone: bool,
+    channel_parent_id: str | None,
+    author_joined_at: str | None,
+    attachments: list[dict],
+    embeds: list[dict],
+    interaction_user_id: str | None,
+    thread_fields: dict,
+) -> dict:
+    """message trigger context (pure — no cache/REST).
+
+    The impure inputs (author roles, guild-level manage-messages, the mention id
+    lists off the gateway payload, the category id) are resolved by the caller
+    and passed in; this only assembles the dict. The enrichment fields are inert
+    for every dispatch — cheap staff-exemption / anti-mention-injection guards
+    the auto-mod handlers and the future message_edit trigger reuse.
+    """
+    return {
+        "trigger_type": "message",
+        "message_content": msg.content or "",
+        "message_id": str(msg.id),
+        "author_id": str(msg.author.id),
+        "author_name": msg.author.username,
+        # True for any non-human author (bot/webhook) that survived the own-bot
+        # anti-loop guard; the /dispatch filter keys off it. False for humans.
+        "author_is_bot": author_is_bot,
+        # For admin handlers that gate on new accounts / recent joiners.
+        "author_account_created_at": _snowflake_created_at(int(msg.author.id)),
+        "author_joined_at": author_joined_at,
+        # §3.1 enrichment — staff-exemption + anti-mention-injection guards.
+        "author_role_ids": author_role_ids,
+        "author_has_manage_messages": author_has_manage_messages,
+        "mentioned_user_ids": mentioned_user_ids,
+        "mentioned_role_ids": mentioned_role_ids,
+        "mentions_everyone": mentions_everyone,
+        "channel_parent_id": channel_parent_id,
+        # Files posted with the message — scripts can read these via the
+        # gathering agent's web_read tool (it handles image/pdf/audio urls).
+        "attachments": attachments,
+        # §3 E1 — Disboard bump authoring. `embeds` is a minimal JSON-safe view
+        # (title/description/field name-value pairs); bump detection keys off
+        # embeds[0]["description"] == "Bump done!". `interaction_user_id` is the
+        # slash-command invoker credited with the bump. Both are inert for
+        # ordinary human posts (empty list / None).
+        "embeds": embeds,
+        "interaction_user_id": interaction_user_id,
+        **thread_fields,
+    }
+
+
 def message_thread_fields(thread_channel: Any) -> dict:
     """Extra message-context fields naming the enclosing thread (or is_thread=False)."""
     if thread_channel is None:
@@ -508,16 +882,33 @@ async def start_activity_flush(_: hikari.StartedEvent) -> None:
     asyncio.create_task(_activity.run(_get_api_client()))
 
 
+@plugin.listener(hikari.StartedEvent)
+async def start_rules_acceptance_replay(_: hikari.StartedEvent) -> None:
+    # Pace inside a background task: the replay sleeps between rate-limit windows
+    # while a backlog drains, and must not block other StartedEvent listeners.
+    asyncio.create_task(replay_startup_rules_acceptances(plugin.bot))
+
+
 async def dispatch_message(bot: Any, event: Any) -> None:
-    # Only user actions fire triggers.
-    if not event.is_human:
-        return
-    _activity.record(
-        str(event.guild_id),
-        str(event.message.author.id),
-        datetime.now(timezone.utc),
-    )
     msg = event.message
+    me = bot.get_me()
+    # Structural anti-loop invariant: the smarter-dev bot's OWN messages never
+    # fire a handler (post -> fire -> post -> ...), dropped before any opt-in.
+    if me is not None and msg.author.id == me.id:
+        return
+    # A non-human (bot/webhook) message fires only opted-in handlers. When
+    # get_me() is None (pre-READY) the own-bot invariant can't be verified, so a
+    # bot message is dropped — fail closed. Human messages fire unchanged.
+    is_bot_message = not event.is_human
+    if is_bot_message and me is None:
+        return
+    if not is_bot_message:
+        # Activity facts stay human-only — a bot/webhook is not a guild member.
+        _activity.record(
+            str(event.guild_id),
+            str(event.message.author.id),
+            datetime.now(timezone.utc),
+        )
     joined_at = None
     if event.member is not None and event.member.joined_at is not None:
         joined_at = event.member.joined_at.isoformat()
@@ -530,20 +921,24 @@ async def dispatch_message(bot: Any, event: Any) -> None:
         for a in msg.attachments
     ]
     thread_channel = _get_thread_channel(bot, event.channel_id)
-    context = {
-        "trigger_type": "message",
-        "message_content": msg.content or "",
-        "message_id": str(msg.id),
-        "author_id": str(msg.author.id),
-        "author_name": msg.author.username,
-        # For admin handlers that gate on new accounts / recent joiners.
-        "author_account_created_at": _snowflake_created_at(int(msg.author.id)),
-        "author_joined_at": joined_at,
-        # Files posted with the message — scripts can read these via the
-        # gathering agent's web_read tool (it handles image/pdf/audio urls).
-        "attachments": attachments,
-        **message_thread_fields(thread_channel),
-    }
+    author_role_ids = (
+        _roles_beyond_everyone(event.member) if event.member is not None else []
+    )
+    context = message_context(
+        msg,
+        author_is_bot=is_bot_message,
+        author_role_ids=author_role_ids,
+        author_has_manage_messages=author_has_manage_messages(event.member),
+        mentioned_user_ids=[str(x) for x in msg.user_mentions_ids],
+        mentioned_role_ids=[str(x) for x in msg.role_mention_ids],
+        mentions_everyone=bool(msg.mentions_everyone),
+        channel_parent_id=resolve_channel_parent_id(bot, event.channel_id),
+        author_joined_at=joined_at,
+        attachments=attachments,
+        embeds=serialize_message_embeds(msg.embeds),
+        interaction_user_id=message_interaction_user_id(msg),
+        thread_fields=message_thread_fields(thread_channel),
+    )
     # A message inside a thread dispatches to the thread's PARENT channel (a
     # single fire whose home channel is the parent, §4); a non-thread message
     # dispatches to its own channel. Either way it's exactly one dispatch.
@@ -552,7 +947,13 @@ async def dispatch_message(bot: Any, event: Any) -> None:
         if thread_channel is not None
         else str(event.channel_id)
     )
-    await _dispatch(dispatch_channel_id, str(event.guild_id), "message", context)
+    await _dispatch(
+        dispatch_channel_id,
+        str(event.guild_id),
+        "message",
+        context,
+        bot_message=is_bot_message,
+    )
 
 
 @plugin.listener(hikari.GuildMessageCreateEvent)
@@ -621,6 +1022,201 @@ async def dispatch_thread_create(bot: Any, event: Any) -> None:
 @plugin.listener(hikari.GuildThreadCreateEvent)
 async def on_thread_create(event: hikari.GuildThreadCreateEvent) -> None:
     await dispatch_thread_create(plugin.bot, event)
+
+
+# ---------------------------------------------------------------------------
+# message_edit trigger (admin-tier auto-mod; automated-and-command-moderation §3.3)
+# ---------------------------------------------------------------------------
+
+
+def message_edit_context(
+    msg: Any,
+    *,
+    old_content: str,
+    author_role_ids: list[str],
+    author_has_manage_messages: bool,
+    channel_parent_id: str | None,
+    author_joined_at: str | None,
+    thread_fields: dict,
+) -> dict:
+    """message_edit trigger context (pure — no cache/REST).
+
+    Carries the message's content NOW (``message_content`` — legacy auto-mod
+    only scans the new text) plus the best-effort cached ``old_content`` and the
+    same author permission/category enrichment as the message trigger, so a
+    handler can apply the same staff-exemption and @everyone guards to an edit
+    that it applies to a fresh message.
+    """
+    return {
+        "trigger_type": "message_edit",
+        "message_id": str(msg.id),
+        "message_content": msg.content or "",
+        "old_content": old_content,
+        "author_id": str(msg.author.id),
+        "author_name": msg.author.username,
+        "author_account_created_at": _snowflake_created_at(int(msg.author.id)),
+        "author_joined_at": author_joined_at,
+        "author_role_ids": author_role_ids,
+        "author_has_manage_messages": author_has_manage_messages,
+        "channel_parent_id": channel_parent_id,
+        **thread_fields,
+    }
+
+
+async def dispatch_message_edit(bot: Any, event: Any) -> None:
+    # Bot/webhook edits never fire — reuses the message trigger's is_human guard,
+    # preserving the no-loop invariant. For an embed/link-unfurl update Discord
+    # reports is_human as UNDEFINED (author unknown); that is falsy, so it is
+    # dropped here too.
+    if not event.is_human:
+        return
+    msg = event.message
+    new_content = msg.content
+    # Suppress no-op edits: Discord re-emits GuildMessageUpdateEvent for
+    # link/embed unfurls (content UNDEFINED) and pin/embed-only updates, both
+    # with UNCHANGED text — firing on those would turn a rare trigger into a
+    # per-message one. Skip when there is no new content, or when the cached old
+    # content matches the new content. On a cache miss we cannot compare, so we
+    # fire with old_content="" (fail toward scanning — the auto-mod stance).
+    if not new_content:
+        return
+    old_message = event.old_message
+    if old_message is not None and old_message.content == new_content:
+        return
+    old_content = old_message.content or "" if old_message is not None else ""
+    # event.member is UNDEFINED (not None) for the author-unknown unfurl case; the
+    # is_human guard above already dropped those, so a truthy member is a real one.
+    member = event.member or None
+    joined_at = None
+    if member is not None and member.joined_at is not None:
+        joined_at = member.joined_at.isoformat()
+    author_role_ids = _roles_beyond_everyone(member) if member is not None else []
+    thread_channel = _get_thread_channel(bot, event.channel_id)
+    context = message_edit_context(
+        msg,
+        old_content=old_content,
+        author_role_ids=author_role_ids,
+        author_has_manage_messages=author_has_manage_messages(member),
+        channel_parent_id=resolve_channel_parent_id(bot, event.channel_id),
+        author_joined_at=joined_at,
+        thread_fields=message_thread_fields(thread_channel),
+    )
+    # An edit inside a thread dispatches to the thread's PARENT channel — a single
+    # fire whose home channel is the parent, so channel-scoped admin handlers
+    # catch edits exactly as they catch messages (§4, mirrors dispatch_message).
+    dispatch_channel_id = (
+        str(thread_channel.parent_id)
+        if thread_channel is not None
+        else str(event.channel_id)
+    )
+    await _dispatch(
+        dispatch_channel_id, str(event.guild_id), "message_edit", context
+    )
+
+
+@plugin.listener(hikari.GuildMessageUpdateEvent)
+async def on_message_edit(event: hikari.GuildMessageUpdateEvent) -> None:
+    await dispatch_message_edit(plugin.bot, event)
+
+
+# ---------------------------------------------------------------------------
+# dm_message context + mutual-guild routing (staff-communication-channels.md E1)
+# ---------------------------------------------------------------------------
+
+
+def dm_message_context(message: Any, author: Any) -> dict:
+    """dm_message trigger context (pure — no cache/REST).
+
+    A DM has no guild and no guild member, so the context carries only the DM
+    channel and the author's user-level fields (NO role ids — there is no guild
+    member object at the DM event; context-rails' author_role_ids do not apply
+    here). ``attachment_urls`` is a list of ``{"url", "filename"}`` dicts so a
+    relay handler can re-post the DM's files into the forum post with their
+    original names; the same shape (minus content_type) the guild-message
+    ``attachments`` field carries. Best-effort: Discord CDN links are signed and
+    expire, so a mirror handler treats them as transient.
+    """
+    return {
+        "trigger_type": "dm_message",
+        "content": message.content or "",
+        "message_id": str(message.id),
+        "dm_channel_id": str(message.channel_id),
+        "author_id": str(author.id),
+        "author_username": author.username,
+        "author_display_name": (
+            getattr(author, "display_name", None) or author.username
+        ),
+        "author_account_created_at": _snowflake_created_at(int(author.id)),
+        "attachment_urls": [
+            {"url": attachment.url, "filename": getattr(attachment, "filename", None) or ""}
+            for attachment in message.attachments
+        ],
+    }
+
+
+def route_dm_guilds(
+    mutual_guild_ids: list[str], guilds_with_dm_handlers: set[str]
+) -> list[str]:
+    """Which guilds a DM fans out to: mutual guilds that have a dm_message handler.
+
+    A DM carries no guild, so it routes to every guild the author shares with the
+    bot AND that has an enabled dm_message admin handler (the plan's mutual-guild
+    rule — correct for the single-guild reality, degrades safely to N). Order
+    follows ``mutual_guild_ids``, deduplicated. An empty result (no mutual guild
+    resolved, or none has a handler) means no dispatch — fail closed.
+    """
+    seen: set[str] = set()
+    routed: list[str] = []
+    for guild_id in mutual_guild_ids:
+        gid = str(guild_id)
+        if gid in guilds_with_dm_handlers and gid not in seen:
+            seen.add(gid)
+            routed.append(gid)
+    return routed
+
+
+def _mutual_guild_ids(bot: Any, author_id: Any) -> list[str]:
+    """Guild ids the author shares with the bot, from the gateway member cache.
+
+    A cold or incomplete member cache yields fewer/no guilds, so a legitimate DM
+    may be dropped (no mutual guild resolved) — acceptable for the single-guild
+    reality. Fails closed: any cache error returns an empty list, never crashes.
+    """
+    try:
+        guild_ids = list(bot.cache.get_guilds_view().keys())
+    except Exception:  # noqa: BLE001 — a cache miss must never crash dispatch
+        return []
+    mutual: list[str] = []
+    for guild_id in guild_ids:
+        try:
+            if bot.cache.get_member(guild_id, author_id) is not None:
+                mutual.append(str(guild_id))
+        except Exception:  # noqa: BLE001 — one uncached guild must not drop the rest
+            continue
+    return mutual
+
+
+async def dispatch_dm_message(bot: Any, event: Any) -> None:
+    # Only human DMs relay — is_human (from the MessageCreateEvent base) is False
+    # for the bot's own DMs and any other bot, structurally preventing a relay
+    # loop and mirroring on_message's own-bot guard.
+    if not event.is_human:
+        return
+    message = event.message
+    author = message.author
+    context = dm_message_context(message, author)
+    mutual_guild_ids = _mutual_guild_ids(bot, author.id)
+    handler_guilds = await _cache.guilds_with_trigger(_get_api_client(), "dm_message")
+    # One dispatch per routed guild, each with NO home channel (channel_id="")
+    # so a broken dm handler's error notice is skipped, never posted into the
+    # user's DM (see admin_handlers_jobs / notify_handler_error).
+    for guild_id in route_dm_guilds(mutual_guild_ids, handler_guilds):
+        await _dispatch("", guild_id, "dm_message", context)
+
+
+@plugin.listener(hikari.DMMessageCreateEvent)
+async def on_dm_message(event: hikari.DMMessageCreateEvent) -> None:
+    await dispatch_dm_message(plugin.bot, event)
 
 
 @plugin.listener(hikari.GuildReactionAddEvent)

@@ -68,3 +68,4 @@ scripts/.capability_results.json
 
 # Any environment-specific secrets file (prod.env, staging.env, …)
 *.env
+reports/image_prompt_review/

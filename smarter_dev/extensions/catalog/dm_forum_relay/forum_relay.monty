@@ -1,0 +1,59 @@
+# Reverse relay: any human message typed inside a per-member DM-relay forum post
+# is delivered to that member over DM. NO staff-role gate and NO command prefix —
+# every human message in a relay post is relayed (the bot's own mirror posts and
+# other bot messages never reach this handler by default). The member is resolved
+# from the shared member -> post map the dm-mirror handler maintains.
+# DELIVERY SIGNAL: a 📤 reaction on the staff reply itself (add_reaction with the
+# post thread as the explicit target — the fire's home channel is the forum
+# PARENT, so the target must be passed). Failures react ❌ and post a short
+# explanation; the bot's own messages never re-fire this handler (own-bot guard).
+POSTS_KEY = "dm_forum_posts"
+
+
+async def run():
+    # Only a message inside a forum post (a thread) can be relayed; a message on
+    # the forum channel itself has no member to reach.
+    if not context["is_thread"]:
+        return
+    post_id = context["thread_id"]
+
+    posts = await guild_memory_get(POSTS_KEY, {})
+    member_id = None
+    for mapped_member, mapped_post in posts.items():
+        if mapped_post == post_id:
+            member_id = mapped_member
+            break
+
+    if member_id is None:
+        # A post with no mapped member (pruned, or a non-relay thread): the reply
+        # has nowhere to go — flag it in the post and stop.
+        await add_reaction(context["message_id"], "❌", post_id)
+        await send_message(
+            "❌ No member is mapped to this post (pruned or not a relay post) — "
+            "the reply was NOT delivered.",
+            post_id,
+        )
+        return
+
+    lines = []
+    if context["message_content"]:
+        lines.append(context["message_content"])
+    for attachment in context["attachments"]:
+        lines.append("attachment: " + attachment["url"])
+    if not lines:
+        lines = ["*(no text)*"]
+    body = "\n".join(lines)
+
+    delivered = await send_dm(member_id, body)
+    if delivered:
+        await add_reaction(context["message_id"], "📤", post_id)
+    else:
+        await add_reaction(context["message_id"], "❌", post_id)
+        await send_message(
+            "❌ Could not DM this member (DMs closed or they left) — the reply "
+            "was NOT delivered.",
+            post_id,
+        )
+
+
+await run()

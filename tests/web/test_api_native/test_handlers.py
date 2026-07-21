@@ -381,6 +381,156 @@ def test_active_channels(client):
     assert ["C1", "reaction"] in channels
 
 
+def test_create_handler_rejects_include_bot_messages_on_non_message(client):
+    # include_bot_messages only means anything on a message trigger.
+    rejected = client.post(
+        "/api/handlers",
+        json=_event_body(
+            name="rx", trigger_type="reaction",
+            settings={"include_bot_messages": True},
+        ),
+    )
+    assert rejected.status_code == 422
+    # ... but a message-trigger handler accepts it.
+    accepted = client.post(
+        "/api/handlers",
+        json=_event_body(name="botwatch", settings={"include_bot_messages": True}),
+    )
+    assert accepted.status_code == 201
+
+
+async def test_dispatch_bot_message_fires_only_optin_handlers(client, db_session):
+    from smarter_dev.web.models import AdminHandler, ChannelHandler
+
+    # A plain message handler + an opted-in one, both in C1. A bot-authored
+    # message (author_is_bot) must fire ONLY the opted-in handler.
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="plain", trigger_type="message",
+        settings={}, description="plain", script="await send_message('x')\n",
+        created_by="U1",
+    ))
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="botwatch", trigger_type="message",
+        settings={"include_bot_messages": True}, description="opt-in",
+        script="await send_message('y')\n", created_by="U1",
+    ))
+    db_session.add(AdminHandler(
+        guild_id="G1", name="disboard", trigger_type="message",
+        settings={"include_bot_messages": True}, channel_ids=["C1"],
+        description="tracker", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {"author_is_bot": True, "author_id": "BOT9"},
+        },
+    )
+    body = resp.json()
+    assert body["dispatched"] is True
+    # The opted-in standard handler + the opted-in admin handler; NOT the plain one.
+    assert len(body["handler_ids"]) == 2
+    assert len(client.submitted) == 2  # type: ignore[attr-defined]
+
+
+async def test_dispatch_bot_message_records_no_member_activity(client, db_session):
+    from sqlalchemy import select
+
+    from smarter_dev.web.models import ChannelHandler, MemberActivity
+
+    # Activity recording is human-only: an opted-in handler firing on a
+    # bot-authored message must NOT upsert a MemberActivity row for the bot's id
+    # (nor hand the handler human-shaped activity facts).
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="botwatch", trigger_type="message",
+        settings={"include_bot_messages": True}, description="opt-in",
+        script="await send_message('y')\n", created_by="U1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {"author_is_bot": True, "author_id": "BOT9"},
+        },
+    )
+    assert resp.json()["dispatched"] is True
+    rows = (await db_session.execute(
+        select(MemberActivity).where(MemberActivity.user_id == "BOT9")
+    )).scalars().all()
+    assert rows == []
+
+
+async def test_dispatch_human_message_fires_all_message_handlers(client, db_session):
+    from smarter_dev.web.models import ChannelHandler
+
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="plain", trigger_type="message",
+        settings={}, description="plain", script="await send_message('x')\n",
+        created_by="U1",
+    ))
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="botwatch", trigger_type="message",
+        settings={"include_bot_messages": True}, description="opt-in",
+        script="await send_message('y')\n", created_by="U1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {"author_id": "U7"},  # author_is_bot absent = human
+        },
+    )
+    # Both fire on a human message — the opt-in never suppresses human traffic.
+    assert len(resp.json()["handler_ids"]) == 2
+
+
+async def test_active_channels_includes_bot_message_channels(client, db_session):
+    from smarter_dev.web.models import AdminHandler, ChannelHandler
+
+    # standard opt-in -> channel entry
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="botwatch", trigger_type="message",
+        settings={"include_bot_messages": True}, description="d",
+        script="pass\n", created_by="U1",
+    ))
+    # a plain message handler must NOT appear in the bot-message set
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C2", name="plain", trigger_type="message",
+        settings={}, description="d", script="pass\n", created_by="U1",
+    ))
+    # admin scoped opt-in -> channel entry
+    db_session.add(AdminHandler(
+        guild_id="G1", name="scoped", trigger_type="message",
+        settings={"include_bot_messages": True}, channel_ids=["C3"],
+        description="d", script="pass\n", created_by_admin="A1",
+    ))
+    # admin guild-wide opt-in -> guild entry
+    db_session.add(AdminHandler(
+        guild_id="G1", name="wide", trigger_type="message",
+        settings={"include_bot_messages": True}, channel_ids=[],
+        description="d", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    body = client.get("/api/handlers/active-channels").json()
+    assert "C1" in body["bot_message_channels"]
+    assert "C3" in body["bot_message_channels"]
+    assert "C2" not in body["bot_message_channels"]
+    assert "G1" in body["bot_message_guild_triggers"]
+
+
 # --- admin-only member/thread triggers (threads-and-member-events.md §3) -------
 
 
@@ -599,9 +749,396 @@ async def test_active_channels_thread_create_follows_channel_split(client, db_se
         "member_rules_accepted",
         "member_role_change",
         "thread_create",
+        "message_edit",
     ],
 )
 def test_create_standard_rejects_admin_only_triggers(client, trigger):
     resp = client.post("/api/handlers", json=_event_body(trigger_type=trigger))
     assert resp.status_code == 422
     assert resp.json() == {"detail": "unknown trigger_type"}
+
+
+# ---------------------------------------------------------------------------
+# message_edit dispatch — channel-keyed admin trigger, not raid-gated (§3.3)
+# ---------------------------------------------------------------------------
+
+
+async def test_dispatch_message_edit_fires_admin_handler_in_scope(client, db_session):
+    from smarter_dev.web.models import AdminHandler, ChannelHandler
+
+    db_session.add(AdminHandler(
+        guild_id="G1", name="edit-catch", trigger_type="message_edit", settings={},
+        channel_ids=["EDITCHAN"], description="catch edits", script="pass\n",
+        created_by_admin="A1",
+    ))
+    # A standard message handler in the same channel must NOT fire on an edit —
+    # message_edit is admin-only, so the standard query is skipped entirely.
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="EDITCHAN", name="std", trigger_type="message",
+        settings={}, description="std", script="pass\n", created_by="U1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "EDITCHAN",
+            "trigger_type": "message_edit",
+            "trigger_context": {"trigger_type": "message_edit", "message_id": "M1"},
+        },
+    )
+    body = resp.json()
+    assert body["dispatched"] is True
+    assert len(body["handler_ids"]) == 1
+    payload, _ = client.submitted[0]  # type: ignore[attr-defined]
+    assert payload.channel_id == "EDITCHAN"
+
+
+async def test_dispatch_message_edit_empty_scope_matches_any_channel(
+    client, db_session
+):
+    from smarter_dev.web.models import AdminHandler
+
+    db_session.add(AdminHandler(
+        guild_id="G1", name="all-edits", trigger_type="message_edit", settings={},
+        channel_ids=[], description="all", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "ANYCHAN",
+            "trigger_type": "message_edit",
+            "trigger_context": {"trigger_type": "message_edit"},
+        },
+    )
+    assert resp.json()["dispatched"] is True
+
+
+async def test_dispatch_message_edit_respects_channel_scope(client, db_session):
+    from smarter_dev.web.models import AdminHandler
+
+    # Scoped to a DIFFERENT channel → must not fire for an edit elsewhere.
+    db_session.add(AdminHandler(
+        guild_id="G1", name="other-edits", trigger_type="message_edit", settings={},
+        channel_ids=["OTHER"], description="other", script="pass\n",
+        created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "EDITCHAN",
+            "trigger_type": "message_edit",
+            "trigger_context": {"trigger_type": "message_edit"},
+        },
+    )
+    assert resp.json()["dispatched"] is False
+    assert len(client.submitted) == 0  # type: ignore[attr-defined]
+
+
+async def test_dispatch_message_edit_not_gated_by_member_window(
+    client, db_session, monkeypatch
+):
+    from smarter_dev.web.models import AdminHandler
+
+    # Even with the member-events raid window exhausted, message_edit is
+    # unaffected — it is a channel-keyed trigger, not a member lifecycle event.
+    monkeypatch.setattr(
+        handlers_module, "WindowedLimiter", lambda redis: _KeyAwareLimiter()
+    )
+    db_session.add(AdminHandler(
+        guild_id="G1", name="all-edits", trigger_type="message_edit", settings={},
+        channel_ids=[], description="all", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "ANYCHAN",
+            "trigger_type": "message_edit",
+            "trigger_context": {"trigger_type": "message_edit"},
+        },
+    )
+    assert resp.json()["dispatched"] is True
+
+
+async def test_active_channels_message_edit_follows_channel_split(client, db_session):
+    from smarter_dev.web.models import AdminHandler
+
+    db_session.add(AdminHandler(
+        guild_id="G1", name="scoped-edit", trigger_type="message_edit", settings={},
+        channel_ids=["EDITCHAN"], description="s", script="pass\n",
+        created_by_admin="A1",
+    ))
+    db_session.add(AdminHandler(
+        guild_id="G1", name="wide-edit", trigger_type="message_edit", settings={},
+        channel_ids=[], description="w", script="pass\n", created_by_admin="A2",
+    ))
+    await db_session.commit()
+
+    body = client.get("/api/handlers/active-channels").json()
+    # Guild-wide message_edit surfaces as a guild trigger; scoped one as a channel.
+    assert ["EDITCHAN", "message_edit"] in body["channels"]
+    assert ["G1", "message_edit"] in body["guild_triggers"]
+
+
+# ---------------------------------------------------------------------------
+# dm_message dispatch — guild-scoped, no home channel, per-author window (E1)
+# ---------------------------------------------------------------------------
+
+
+class _DmAuthorLimiter:
+    """Counts per key; only the per-(handler, author) DM window is enforced.
+
+    A shared instance across dispatch calls lets a spammer exhaust their own
+    window while every other key (fire caps, other authors) stays open.
+    """
+
+    def __init__(self, redis=None):
+        self.counts: dict = {}
+
+    async def hit(self, key, limit):
+        self.counts[key] = self.counts.get(key, 0) + 1
+        if "dmtrig" in key:
+            return self.counts[key] <= limit
+        return True
+
+
+async def test_dispatch_dm_message_enqueues_admin_handler_channel_bypass(
+    client, db_session
+):
+    from smarter_dev.web.models import AdminHandler
+
+    # Scope names a channel, but a DM has no channel: the scope check is bypassed
+    # and the handler matches by guild + trigger, fired with channel_id="".
+    db_session.add(AdminHandler(
+        guild_id="G1", name="dm-mirror", trigger_type="dm_message", settings={},
+        channel_ids=["SOMECHAN"], description="mirror DMs",
+        script="await send_message('x', 'LOG')\n", created_by_admin="A1",
+    ))
+    # A dm_message handler in a DIFFERENT guild must not fire.
+    db_session.add(AdminHandler(
+        guild_id="G2", name="other", trigger_type="dm_message", settings={},
+        channel_ids=[], description="other guild", script="pass\n",
+        created_by_admin="A2",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "",
+            "trigger_type": "dm_message",
+            "trigger_context": {"trigger_type": "dm_message", "author_id": "U9"},
+        },
+    )
+    body = resp.json()
+    assert body["dispatched"] is True
+    assert len(body["handler_ids"]) == 1
+    # The fire carries no home channel — so its error notice can never leak into
+    # the user's DM (see admin_handlers_jobs / notify_handler_error).
+    payload, _ = client.submitted[0]  # type: ignore[attr-defined]
+    assert payload.channel_id == ""
+
+
+async def test_dispatch_dm_message_skips_standard_tier(client, db_session):
+    from smarter_dev.web.models import ChannelHandler
+
+    # A standard message handler in the DM channel must never fire on a DM: the
+    # standard query is skipped entirely for the admin-only dm_message trigger.
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="DM1", name="std", trigger_type="message",
+        settings={}, description="std", script="await send_message('x')\n",
+        created_by="U1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "DM1",
+            "trigger_type": "dm_message",
+            "trigger_context": {"trigger_type": "dm_message", "author_id": "U9"},
+        },
+    )
+    assert resp.json()["dispatched"] is False
+    assert len(client.submitted) == 0  # type: ignore[attr-defined]
+
+
+async def test_dispatch_dm_per_author_window_declines_spammer(
+    client, db_session, monkeypatch
+):
+    from smarter_dev.web.models import AdminHandler
+
+    shared = _DmAuthorLimiter()
+    monkeypatch.setattr(handlers_module, "WindowedLimiter", lambda redis: shared)
+    db_session.add(AdminHandler(
+        guild_id="G1", name="dm-mirror", trigger_type="dm_message", settings={},
+        channel_ids=[], description="mirror", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    def _dm(author_id: str):
+        return client.post(
+            "/api/handlers/dispatch",
+            json={
+                "guild_id": "G1",
+                "channel_id": "",
+                "trigger_type": "dm_message",
+                "trigger_context": {"trigger_type": "dm_message", "author_id": author_id},
+            },
+        ).json()["dispatched"]
+
+    # DM_FIRES_PER_AUTHOR_PER_MIN = 4: the same author's first four fire, the
+    # fifth is declined — they burn their OWN window, not the handler's budget.
+    results = [_dm("SPAMMER") for _ in range(5)]
+    assert results == [True, True, True, True, False]
+    # A DIFFERENT author still fires — the window is per-(handler, author).
+    assert _dm("OTHER") is True
+
+
+async def test_active_channels_surfaces_dm_message_as_guild_trigger(client, db_session):
+    from smarter_dev.web.models import AdminHandler
+
+    db_session.add(AdminHandler(
+        guild_id="G1", name="dm-mirror", trigger_type="dm_message", settings={},
+        channel_ids=[], description="mirror", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    body = client.get("/api/handlers/active-channels").json()
+    # A DM has no channel, so it surfaces as a (guild_id, trigger) guild-trigger,
+    # never a channel entry.
+    assert ["G1", "dm_message"] in body["guild_triggers"]
+    assert all(trigger != "dm_message" for _, trigger in body["channels"])
+
+
+async def test_dispatch_mod_action_enqueues_guild_wide_handlers_ignoring_scope(
+    client, db_session
+):
+    from smarter_dev.web.models import AdminHandler
+
+    # Scope names a specific channel, but a mod_action fire has no home channel:
+    # the scope check is bypassed and the handler matches by guild + trigger.
+    db_session.add(AdminHandler(
+        guild_id="G1", name="mod-log", trigger_type="mod_action", settings={},
+        channel_ids=["SOMECHAN"], description="format audit rows",
+        script="await send_message('logged', 'MODLOG')\n", created_by_admin="A1",
+    ))
+    # A handler in a DIFFERENT guild must not fire.
+    db_session.add(AdminHandler(
+        guild_id="G2", name="other", trigger_type="mod_action", settings={},
+        channel_ids=[], description="other guild", script="pass\n",
+        created_by_admin="A2",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "",
+            "trigger_type": "mod_action",
+            "trigger_context": {"trigger_type": "mod_action", "action_type": "ban"},
+        },
+    )
+    body = resp.json()
+    assert body["dispatched"] is True
+    assert len(body["handler_ids"]) == 1
+    payload, _ = client.submitted[0]  # type: ignore[attr-defined]
+    assert payload.channel_id == ""
+    # The fire's context carries the guild id so a mod-log formatter can build a
+    # "Jump To Action" link (the prompt documents context["guild_id"]).
+    assert payload.trigger_context["guild_id"] == "G1"
+
+
+async def test_dispatch_injects_guild_id_into_message_context(client, db_session):
+    from smarter_dev.web.models import ChannelHandler
+
+    # Every gateway-dispatched fire gets context["guild_id"] host-side, so a
+    # !history-style handler can build jump links to a member's mod actions.
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="hist", trigger_type="message",
+        settings={}, description="d", script="await send_message('x')\n",
+        created_by="U1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {"author_id": "U7"},
+        },
+    )
+    assert resp.json()["dispatched"] is True
+    payload, _ = client.submitted[0]  # type: ignore[attr-defined]
+    assert payload.trigger_context["guild_id"] == "G1"
+
+
+async def test_dispatch_mod_action_not_under_member_raid_gate(
+    client, db_session, monkeypatch
+):
+    from smarter_dev.web.models import AdminHandler
+
+    # Simulate an exhausted member-events raid window; a mod_action fire must NOT
+    # be keyed on it (mod actions are not a raid vector), so it still enqueues.
+    # Capture the actual limiter instance the endpoint uses so its recorded hits
+    # can be inspected (a fresh _KeyAwareLimiter().hits would always be empty).
+    limiters: list[_KeyAwareLimiter] = []
+
+    def make_limiter(redis):
+        limiter = _KeyAwareLimiter()
+        limiters.append(limiter)
+        return limiter
+
+    monkeypatch.setattr(handlers_module, "WindowedLimiter", make_limiter)
+    db_session.add(AdminHandler(
+        guild_id="G1", name="mod-log", trigger_type="mod_action", settings={},
+        channel_ids=[], description="format", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "",
+            "trigger_type": "mod_action",
+            "trigger_context": {"trigger_type": "mod_action"},
+        },
+    )
+    assert resp.json()["dispatched"] is True
+    # The raid window key was never even consulted for a mod_action fire.
+    assert limiters, "the endpoint constructed no limiter"
+    all_hits = [key for limiter in limiters for key, _ in limiter.hits]
+    assert not any("memberevt" in key for key in all_hits)
+
+
+async def test_active_channels_lists_mod_action_as_guild_trigger(client, db_session):
+    from smarter_dev.web.models import AdminHandler
+
+    db_session.add(AdminHandler(
+        guild_id="G1", name="mod-log", trigger_type="mod_action", settings={},
+        channel_ids=["SOMECHAN"], description="format", script="pass\n",
+        created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    body = client.get("/api/handlers/active-channels").json()
+    # A mod_action fire is guild-wide (no home channel), so it surfaces as a
+    # (guild_id, trigger) guild-trigger even though the handler is scoped.
+    assert ["G1", "mod_action"] in body["guild_triggers"]
+    assert all(trigger != "mod_action" for _, trigger in body["channels"])

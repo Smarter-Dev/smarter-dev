@@ -6,14 +6,16 @@ is the *only* way a handler reaches a channel; the sandboxed script can call it
 solely through the metered external functions in
 :mod:`smarter_dev.web.handler_runtime`.
 
-Kept deliberately small: send a message, add a reaction. Request plumbing
-lives in :mod:`smarter_dev.web.discord_rest`, shared with ``AdminActor``.
+Kept deliberately small: send a message, edit a bot-authored message, add a
+reaction, rename a channel. Request plumbing lives in
+:mod:`smarter_dev.web.discord_rest`, shared with ``AdminActor``.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import ClassVar
 from urllib.parse import quote
 
@@ -22,10 +24,26 @@ from smarter_dev.web.discord_rest import DiscordBotClient, DiscordRestError
 logger = logging.getLogger(__name__)
 
 _MESSAGE_MAX = 2000
+# Discord's hard channel-name length limit; a longer rename is rejected by REST.
+_CHANNEL_NAME_MAX = 100
 # Discord message flag: suppress auto-generated link-preview embeds. Handler
 # output is often a list of links (e.g. a news digest); without this each URL
 # explodes into a large preview card, flooding the channel.
 _SUPPRESS_EMBEDS = 1 << 2
+
+
+def _allowed_mentions(ping_role_id: str | None = None) -> dict:
+    """Mention rail applied to every content-posting emit.
+
+    Discord's default parses EVERYTHING, so an un-suppressed send that echoes
+    user content could ping ``@everyone``/``@here`` or any role. Parsing only
+    ``users`` keeps a moderation handler able to ping the offending user by id
+    while stripping mass pings. An explicit ``ping_role_id`` (admin escalation
+    only) re-adds exactly that one role.
+    """
+    if ping_role_id is not None:
+        return {"parse": ["users"], "roles": [str(ping_role_id)]}
+    return {"parse": ["users"]}
 
 # Merged active + recently-archived thread list is capped so a script can't
 # fan a single read into an unbounded page of threads.
@@ -36,6 +54,48 @@ _THREAD_CHANNEL_TYPES = (10, 11, 12)
 # Discord channel ``type`` for a standalone public thread created via
 # POST /channels/{id}/threads (no starter message).
 _PUBLIC_THREAD_TYPE = 11
+
+# Discord's ``GET /guilds/{id}/members`` returns at most 1000 rows per page,
+# paged by an ``after`` snowflake cursor. The role filter has no server-side
+# support, so get_role_members pages the full membership and filters host-side.
+_MEMBER_PAGE_LIMIT = 1000
+# Hard cap on get_role_members matches (spec E5). Holding-role populations are
+# small, so this is a rail against a runaway read, not a real constraint.
+_ROLE_MEMBERS_MAX = 200
+# A Discord snowflake encodes its creation time in the high bits (ms since the
+# Discord epoch), so a member's account-creation time needs no extra REST call.
+_DISCORD_EPOCH_MS = 1420070400000
+
+
+def _snowflake_created_at(snowflake_id: str) -> str | None:
+    """ISO-8601 UTC account-creation time from a Discord snowflake, None if bad."""
+    try:
+        ms = (int(snowflake_id) >> 22) + _DISCORD_EPOCH_MS
+    except (TypeError, ValueError):
+        return None
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
+
+
+def _role_member_summary(member: dict) -> dict:
+    """Flatten a raw Discord guild-member object into the get_role_members shape.
+
+    ``display_name`` mirrors the gateway contexts' precedence (guild nick, then
+    the account's global display name, then the raw username). ``has_custom_avatar``
+    is true when the member set either a per-guild or account avatar.
+    """
+    user = member.get("user") or {}
+    user_id = str(user.get("id", ""))
+    return {
+        "member_id": user_id,
+        "display_name": (
+            member.get("nick") or user.get("global_name") or user.get("username")
+        ),
+        "username": user.get("username"),
+        "joined_at": member.get("joined_at"),
+        "account_created_at": _snowflake_created_at(user_id),
+        "has_custom_avatar": bool(user.get("avatar") or member.get("avatar")),
+        "pending": bool(member.get("pending", False)),
+    }
 
 
 class DiscordEmitError(DiscordRestError):
@@ -71,30 +131,145 @@ class DiscordEmitter(DiscordBotClient):
     # reactions keep constructing with ``bot_token`` alone; ``list_threads``
     # requires the runtime to pass the real guild id.
     guild_id: str = ""
+    # Per-fire cache of user_id -> opened DM channel id, so repeated relay
+    # replies to one user (send_dm) open the channel once. One emitter is built
+    # per fire in admin_handlers_jobs, so this is naturally fire-scoped.
+    _dm_channel_cache: dict[str, str] = field(default_factory=dict)
 
     user_agent: ClassVar[str] = "SmarterDev-Handlers/1.0"
     error_type: ClassVar[type[DiscordRestError]] = DiscordEmitError
 
-    async def create_message(self, channel_id: str, content: str) -> str:
+    async def create_message(
+        self,
+        channel_id: str,
+        content: str,
+        ping_role_id: str | None = None,
+        tolerate_missing_target: bool = False,
+    ) -> str | bool:
         """Post a message to a channel; return the new message id.
 
         Link-preview embeds are suppressed so a handler that posts URLs doesn't
-        flood the channel with large preview cards.
+        flood the channel with large preview cards. Mass mentions are suppressed
+        by default (only user mentions parse); ``ping_role_id`` re-allows exactly
+        one role, for admin mod-escalation sends.
+
+        ``tolerate_missing_target`` is set by the runtime ONLY for an explicit
+        cross-channel/thread target (a channel the script chose, e.g. a DM-relay
+        forum post): a 403 (lost access) or 404 (deleted channel/thread) then
+        returns ``False`` — an *expected* outcome the relay script branches to ❌
+        on — instead of raising, mirroring ``send_dm``. It defaults False so a
+        home-channel send (the handler's own vanished channel is an
+        infrastructure failure) still raises. Any other status always raises.
         """
-        payload = {"content": content[:_MESSAGE_MAX], "flags": _SUPPRESS_EMBEDS}
+        payload = {
+            "content": content[:_MESSAGE_MAX],
+            "flags": _SUPPRESS_EMBEDS,
+            "allowed_mentions": _allowed_mentions(ping_role_id),
+        }
+        try:
+            response = await self._request(
+                "POST", f"/channels/{channel_id}/messages", json=payload
+            )
+        except DiscordEmitError as error:
+            if tolerate_missing_target and error.status_code in (403, 404):
+                return False
+            raise
+        return str(response.json().get("id", ""))
+
+    async def send_dm(self, user_id: str, content: str) -> str | bool:
+        """DM a user; return the new message id, or ``False`` on a closed door.
+
+        Resolves (opening if needed) the user's DM channel via
+        ``POST /users/@me/channels`` — cached per fire so repeated relay replies
+        to one user pay a single channel-open — then posts with the same
+        truncation, embed suppression, and mention rail as ``create_message``.
+
+        Returns ``False`` on 403 (DMs closed / no mutual guild) or 404 (unknown
+        user): these are *expected* outcomes the relay script branches to ❌ on,
+        not infrastructure failures. Everything else raises (fail fast).
+        """
+        try:
+            channel_id = await self._resolve_dm_channel(user_id)
+            payload = {
+                "content": content[:_MESSAGE_MAX],
+                "flags": _SUPPRESS_EMBEDS,
+                "allowed_mentions": _allowed_mentions(),
+            }
+            response = await self._request(
+                "POST", f"/channels/{channel_id}/messages", json=payload
+            )
+        except DiscordEmitError as error:
+            if error.status_code in (403, 404):
+                return False
+            raise
+        return str(response.json().get("id", ""))
+
+    async def _resolve_dm_channel(self, user_id: str) -> str:
+        """The user's DM channel id, opening + caching it once per fire."""
+        cached = self._dm_channel_cache.get(user_id)
+        if cached is not None:
+            return cached
         response = await self._request(
-            "POST", f"/channels/{channel_id}/messages", json=payload
+            "POST", "/users/@me/channels", json={"recipient_id": user_id}
+        )
+        channel_id = str(response.json().get("id", ""))
+        self._dm_channel_cache[user_id] = channel_id
+        return channel_id
+
+    async def edit_message(
+        self, channel_id: str, message_id: str, content: str
+    ) -> str:
+        """Edit a bot-authored message in place; return the message id.
+
+        Discord REST only permits editing the bot's OWN messages, so
+        bot-authored-only is enforced by the API (403 otherwise) — no ownership
+        bookkeeping needed on our side. The same embed- and mention-suppression
+        rails as ``create_message`` apply, so a maintained post can't start
+        pinging when its content is re-rendered.
+        """
+        payload = {
+            "content": content[:_MESSAGE_MAX],
+            "flags": _SUPPRESS_EMBEDS,
+            "allowed_mentions": _allowed_mentions(),
+        }
+        response = await self._request(
+            "PATCH", f"/channels/{channel_id}/messages/{message_id}", json=payload
         )
         return str(response.json().get("id", ""))
 
-    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> None:
-        """React to a message. ``emoji`` is ``name:id`` for custom, else unicode."""
+    async def rename_channel(self, channel_id: str, name: str) -> bool:
+        """Rename a channel; return True. Raises on any failure.
+
+        ``PATCH /channels/{id}`` with ``{"name": name[:100]}`` (Discord's channel
+        name limit). Discord hard-limits renames to 2 per 10 min per channel and
+        missing MANAGE_CHANNELS surfaces as a REST error — both error the fire
+        loudly rather than silently no-op.
+        """
+        await self._request(
+            "PATCH", f"/channels/{channel_id}", json={"name": name[:_CHANNEL_NAME_MAX]}
+        )
+        return True
+
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """React to a message. ``emoji`` is ``name:id`` for custom, else unicode.
+
+        Returns ``False`` on 403/404 (message or channel gone, or reactions
+        blocked) — a reaction is a best-effort signal, and its target vanishing
+        mid-fire is an expected outcome, not an infrastructure failure (same
+        contract as ``send_dm``). Everything else raises (fail fast).
+        """
         cleaned = emoji.strip().lstrip("<").rstrip(">")
         encoded = quote(cleaned, safe="")
-        await self._request(
-            "PUT",
-            f"/channels/{channel_id}/messages/{message_id}/reactions/{encoded}/@me",
-        )
+        try:
+            await self._request(
+                "PUT",
+                f"/channels/{channel_id}/messages/{message_id}/reactions/{encoded}/@me",
+            )
+        except DiscordEmitError as error:
+            if error.status_code in (403, 404):
+                return False
+            raise
+        return True
 
     async def list_threads(self, channel_id: str, limit: int = 50) -> list[dict]:
         """Active + recently-archived threads/posts of ``channel_id``.
@@ -170,7 +345,10 @@ class DiscordEmitter(DiscordBotClient):
         ``tag_names`` are resolved against the forum's ``available_tags``; an
         unknown name raises ``ValueError`` listing the valid names (fail fast).
         """
-        payload: dict = {"name": title, "message": {"content": content}}
+        payload: dict = {
+            "name": title,
+            "message": {"content": content, "allowed_mentions": _allowed_mentions()},
+        }
         if tag_names:
             channel = await self._request("GET", f"/channels/{channel_id}")
             id_by_name = {
@@ -188,6 +366,54 @@ class DiscordEmitter(DiscordBotClient):
             "POST", f"/channels/{channel_id}/threads", json=payload
         )
         return str(response.json().get("id", ""))
+
+    async def get_guild_member_count(self) -> int:
+        """Approximate total member count of this fire's guild.
+
+        ``GET /guilds/{guild_id}?with_counts=true`` -> ``approximate_member_count``
+        (Discord's lazily-updated figure, fine for a coarse ``1.2k`` display). No
+        gateway intent or member cache needed. A REST error propagates and errors
+        the fire — never a silent 0.
+        """
+        response = await self._request(
+            "GET", f"/guilds/{self.guild_id}", params={"with_counts": "true"}
+        )
+        return int(response.json()["approximate_member_count"])
+
+    async def get_role_members(self, role_id: str) -> list[dict]:
+        """Members currently holding ``role_id`` in this fire's guild.
+
+        Discord's member-list endpoint has no server-side role filter, so this
+        pages ``GET /guilds/{gid}/members`` (1000/page, ``after`` cursor on the
+        last user id) and filters by role host-side, stopping at the first
+        ``_ROLE_MEMBERS_MAX`` matches (spec E5 hard cap) or when a page comes
+        back empty (the membership is exhausted). Each match is flattened to the
+        ``_role_member_summary`` shape. A REST error propagates and errors the
+        fire (never a silent partial list).
+        """
+        role = str(role_id)
+        matches: list[dict] = []
+        after = "0"
+        while len(matches) < _ROLE_MEMBERS_MAX:
+            response = await self._request(
+                "GET",
+                f"/guilds/{self.guild_id}/members",
+                params={"limit": _MEMBER_PAGE_LIMIT, "after": after},
+            )
+            page = response.json()
+            if not page:
+                break
+            for member in page:
+                if role in [str(rid) for rid in member.get("roles", [])]:
+                    matches.append(_role_member_summary(member))
+                    if len(matches) >= _ROLE_MEMBERS_MAX:
+                        break
+            last_id = str((page[-1].get("user") or {}).get("id", ""))
+            # Guard against a non-advancing cursor so a malformed page can't loop.
+            if not last_id or last_id == after:
+                break
+            after = last_id
+        return matches
 
     async def get_channel_guild_id(self, channel_id: str) -> str | None:
         """Guild id that owns ``channel_id``, or ``None`` when gone/not a guild

@@ -47,8 +47,33 @@ One input variable is provided:
   context: dict — describes the trigger. Keys depend on context["trigger_type"]:
     "message":  context["message_content"], context["message_id"],
                 context["author_id"], context["author_name"],
+                context["author_is_bot"] — true when a bot or webhook (not a
+                human) authored the message; false for humans. Only present-and-
+                true when the handler opted into bot messages (see
+                include_bot_messages below); the smarter-dev bot's OWN messages
+                are never delivered.
                 context["attachments"] — files posted with the message, each
                 {"url", "content_type", "filename"} (empty list if none)
+                context["embeds"] — the message's embeds, JSON-safe, each
+                {"title", "description", "fields": [{"name", "value"}]} with
+                strings truncated to 1024 chars and absent parts null (empty
+                list if none) — how a bot-message handler reads a Disboard-style
+                confirmation: embeds[0]["description"];
+                context["interaction_user_id"] — id of the user whose slash
+                command produced this message when it is a bot's command
+                response, else null (how a bump handler credits who ran /bump);
+                AUTHOR & MENTION GUARDS (cheap, always present — use to skip staff
+                or catch mass pings before doing expensive work):
+                context["author_role_ids"] — role ids the author holds (@everyone
+                excluded; [] when the member isn't cached);
+                context["author_has_manage_messages"] — true when the author has
+                guild-level Manage Messages or Administrator (a staff signal; false
+                when unknown, so treat false as "not staff");
+                context["mentioned_user_ids"] / context["mentioned_role_ids"] — id
+                lists this message pinged; context["mentions_everyone"] — true when
+                it used @everyone/@here;
+                context["channel_parent_id"] — the category id of the channel (or
+                the thread's parent channel), or null when uncached.
                 THREADS: context["is_thread"] is true when the message was typed
                 inside a thread of this channel (with context["thread_id"] and
                 context["thread_name"]); false otherwise. The handler still runs
@@ -63,7 +88,14 @@ One input variable is provided:
                 context["author_last_message_at"] — ISO timestamp or null.
     "reaction": context["reaction_emoji"], context["reaction_message_id"],
                 context["reaction_user_id"]
-    "schedule" / "timer": no extra keys.
+    "schedule": no extra keys.
+    "timer":    the trigger's own one-shot fire has no extra keys, BUT a fire the
+                script armed itself with schedule_timer arrives with
+                context["trigger_type"] == "timer", context["payload"] (the dict
+                you passed) and context["scheduled_at"] (ISO time it was armed).
+                ANY handler — message, schedule, timer — can receive a timer fire
+                this way, so if your script calls schedule_timer you MUST branch on
+                context["trigger_type"] == "timer" to handle the re-fire (see below).
 
 These async functions are provided — you MUST `await` every call:
 
@@ -71,15 +103,35 @@ These async functions are provided — you MUST `await` every call:
       Post a message to the channel. Returns the new message's id (use it if you
       then want to react to your own message). You may pass channel_id ONLY to
       post into a THREAD of this channel (e.g. context["thread_id"], or a
-      thread id from list_threads) — any other channel is rejected. Omit
-      channel_id to post to the channel itself.
-  await add_reaction(message_id: str, emoji: str) -> bool
-      Add a reaction to a message. Custom emoji: pass "name:id". Unicode: pass the character.
+      thread id from list_threads) — any other channel is rejected. When the
+      thread you targeted is GONE or inaccessible (403/404) it returns False, a
+      silent no-op — branch on it, never assume it sent. Omit channel_id to post
+      to the channel itself (that path raises on failure instead).
+  await add_reaction(message_id: str, emoji: str, channel_id: str = None) -> bool
+      Add a reaction to a message. Custom emoji: pass "name:id". Unicode: pass the
+      character. channel_id defaults to this channel — to react to a message
+      INSIDE a thread of this channel, pass the thread id explicitly (like
+      send_message) or the reaction 404s against the channel itself.
   await list_threads() -> list[dict]
       Active + recently-archived threads/posts of THIS channel (hard cap 50), each
       {"thread_id", "name", "created_at", "archived", "locked", "owner_id",
       "message_count", "applied_tag_names"}. Use it to find a thread to post into
       or to detect duplicates before creating one.
+  await get_guild_member_count() -> int
+      The guild's approximate total member count (Discord's lazily-updated
+      figure; fine for a coarse display like "1.2k", may trail reality by minutes
+      — do NOT gate on exact values). Costs a discord-read (shared 2/fire pool
+      with list_threads) — call it once per fire, never in a loop. Works from a
+      schedule fire too (no channel/context needed).
+
+MESSAGE-HANDLER SETTING — settings["include_bot_messages"] (message trigger ONLY):
+set it to true so this handler ALSO fires on bot/webhook messages (context
+["author_is_bot"] == true). Default (absent/false) is human-only. The bot's own
+messages never fire any handler. A handler that opts in MUST guard on a SPECIFIC
+author_id (e.g. `if context["author_id"] != "302050872383242240": return`) —
+reacting to arbitrary bot messages risks a two-bot reply loop the own-bot guard
+cannot prevent. Setting include_bot_messages on any non-message trigger is
+rejected at save time.
   await create_thread(name: str, message_id: str = None) -> str   # returns the new thread id
       Start a thread on this channel — off message_id if given, else a standalone
       public thread. Counts as a message emit (see the caps).
@@ -107,6 +159,26 @@ These functions give the handler PERSISTENT MEMORY that survives across firings 
 Memory is private to this one handler and starts empty ({}). Use it for things that must remember
 across fires: counters ("messages seen today"), cooldown timestamps, a running total. Mutating the
 dict from memory_all() does NOT save — you must call memory_set to persist.
+
+This function lets the handler DEFER work to a future one-shot fire of ITSELF (also `await` it):
+
+  await schedule_timer(delay_seconds: int, payload: dict) -> True
+      Durably arm a single re-fire of THIS handler at now + delay_seconds. The re-fire SURVIVES
+      restarts, and arrives with context["trigger_type"] == "timer", context["payload"] == the dict
+      you passed, and context["scheduled_at"]. Use it for "do X in N seconds/hours/days" without
+      keeping a timestamp in memory and polling — e.g. send a follow-up an hour later.
+      RAILS: delay_seconds must be in [60, 2592000] (60s .. 30 days) or the fire ERRORS; payload must
+      be JSON-serializable and ≤ 4 KB; at most 2 timers per fire (and 30/hour across fires).
+      MANDATORY: if you call schedule_timer, your script MUST handle the re-fire branch, e.g.
+
+        if context["trigger_type"] == "timer":
+            uid = context["payload"]["user_id"]
+            await send_message(f"<@{uid}> your hour is up")
+            return
+        # ... normal (message/schedule) path arms the timer:
+        await schedule_timer(3600, {"user_id": context["author_id"]})
+
+      Without that branch the re-fire has nothing to do and just ERRORS every time.
 
 MEMORY IS HARD-CAPPED AT 16 KB — exceeding it makes the fire ERROR, and once full the handler
 errors on every fire and is effectively dead. Therefore:

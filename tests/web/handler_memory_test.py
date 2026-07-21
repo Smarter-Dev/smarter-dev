@@ -72,7 +72,9 @@ def test_size_cap_raises_capexceeded():
 class _FakeEmitter:
     messages: list = field(default_factory=list)
 
-    async def create_message(self, channel_id: str, content: str) -> str:
+    async def create_message(
+        self, channel_id: str, content: str, ping_role_id: str | None = None
+    ) -> str:
         self.messages.append((channel_id, content))
         return f"msg{len(self.messages)}"
 

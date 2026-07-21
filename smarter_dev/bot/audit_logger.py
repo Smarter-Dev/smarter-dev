@@ -15,6 +15,7 @@ from datetime import datetime
 
 import hikari
 
+from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import AuditLogConfigOperations, ModerationActionOperations
 
@@ -152,6 +153,75 @@ async def should_log_event(guild_id: int, event_type: str) -> bool:
         return False
 
 
+def _entry_matches_change(entry: hikari.AuditLogEntry, change_key) -> bool:
+    """Whether an audit-log entry carries the given change key.
+
+    ``None`` means "no change-key requirement". Used to distinguish a genuine
+    timeout add/clear (COMMUNICATION_DISABLED_UNTIL) from the many other things a
+    MEMBER_UPDATE entry can represent (nickname, deaf, mute changes).
+    """
+    if change_key is None:
+        return True
+    changes = getattr(entry, "changes", None) or []
+    return any(getattr(change, "key", None) == change_key for change in changes)
+
+
+async def _lookup_audit_moderator(
+    bot: hikari.GatewayBot,
+    guild_id: int,
+    event_type: hikari.AuditLogEventType,
+    target_id: int,
+    *,
+    change_key=None,
+    max_age_seconds: float | None = None,
+) -> tuple[str | None, str | None, str | None]:
+    """Find the moderator behind a native action from the guild audit log.
+
+    ``fetch_audit_log`` yields ``AuditLog`` *pages* (each a sequence of
+    ``AuditLogEntry``), newest first, so we iterate the entries of the single
+    fetched page and pick the newest one that targets ``target_id`` and, when
+    required, carries ``change_key``. Returns ``(moderator_id, moderator_name,
+    reason)`` or ``(None, None, None)`` when there is no attributable entry —
+    the entry is missing, older than ``max_age_seconds``, lacks ``change_key``,
+    or was performed by the bot itself (already recorded by the mod tools). A
+    REST failure is swallowed so a moderation event is never lost to a hiccup.
+    """
+    me = bot.get_me()
+    bot_id = me.id if me is not None else None
+    try:
+        async for page in bot.rest.fetch_audit_log(
+            guild_id, event_type=event_type
+        ).limit(1):
+            for entry in page:
+                if str(entry.target_id) != str(target_id):
+                    continue
+                if not _entry_matches_change(entry, change_key):
+                    continue
+                if max_age_seconds is not None:
+                    created_at = getattr(entry.id, "created_at", None)
+                    entry_time = created_at.timestamp() if created_at else 0
+                    if abs(time.time() - entry_time) > max_age_seconds:
+                        return None, None, None
+                if entry.user_id and bot_id is not None and entry.user_id == bot_id:
+                    return None, None, None
+                moderator_id = str(entry.user_id) if entry.user_id else None
+                actor = (
+                    await bot.rest.fetch_user(entry.user_id)
+                    if entry.user_id
+                    else None
+                )
+                moderator_name = actor.username if actor else None
+                return moderator_id, moderator_name, entry.reason
+    except Exception:
+        logger.debug(
+            "Could not fetch audit log for %s in guild %s",
+            event_type,
+            guild_id,
+            exc_info=True,
+        )
+    return None, None, None
+
+
 # Event-specific embed builders
 
 async def log_member_join(
@@ -210,40 +280,33 @@ async def log_member_leave(
 
     await send_audit_log(bot, event.guild_id, embed)
 
-    # Check audit log for kick (member leave could be voluntary or a kick)
+    # Check audit log for kick (member leave could be voluntary or a kick). A
+    # voluntary leave has no recent matching MEMBER_KICK entry, so nothing is
+    # recorded; the 10s recency window keeps a stale kick of another member from
+    # being mis-attributed to this leave.
     try:
         async with get_db_session_context() as session:
-            try:
-                async for entry in bot.rest.fetch_audit_log(
-                    event.guild_id, event_type=hikari.AuditLogEventType.MEMBER_KICK
-                ).limit(1):
-                    if str(entry.target_id) == str(user.id):
-                        # Check if this kick happened recently (within 5 seconds)
-                        entry_time = entry.id.created_at.timestamp() if hasattr(entry.id, 'created_at') else 0
-                        if abs(time.time() - entry_time) > 10:
-                            break  # Too old, not related
-
-                        if entry.user_id and entry.user_id == bot.get_me().id:
-                            break  # Bot did it, already recorded
-
-                        moderator_id = str(entry.user_id) if entry.user_id else None
-                        actor = await bot.rest.fetch_user(entry.user_id) if entry.user_id else None
-                        moderator_name = actor.username if actor else None
-
-                        await mod_action_ops.create_action(
-                            session,
-                            guild_id=str(event.guild_id),
-                            target_user_id=str(user.id),
-                            target_username=user.username,
-                            moderator_user_id=moderator_id,
-                            moderator_username=moderator_name,
-                            action_type="kick",
-                            reason=entry.reason,
-                            source="audit_log",
-                        )
-                    break
-            except Exception:
-                logger.debug(f"Could not fetch audit log for kick in guild {event.guild_id}")
+            moderator_id, moderator_name, reason = await _lookup_audit_moderator(
+                bot,
+                event.guild_id,
+                hikari.AuditLogEventType.MEMBER_KICK,
+                user.id,
+                max_age_seconds=10,
+            )
+            if moderator_id:
+                action = await mod_action_ops.create_action(
+                    session,
+                    guild_id=str(event.guild_id),
+                    target_user_id=str(user.id),
+                    target_username=user.username,
+                    moderator_user_id=moderator_id,
+                    moderator_username=moderator_name,
+                    action_type="kick",
+                    reason=reason,
+                    source="audit_log",
+                )
+                await session.commit()
+                await dispatch_mod_action(action)
     except Exception:
         logger.exception(f"Failed to record kick action for guild {event.guild_id}")
 
@@ -278,28 +341,14 @@ async def log_member_ban(
     # Record ban in moderation actions (from audit log / external source)
     try:
         async with get_db_session_context() as session:
-            # Try to get the moderator from Discord audit log
-            moderator_id = None
-            moderator_name = None
-            reason = None
-            try:
-                async for entry in bot.rest.fetch_audit_log(
-                    event.guild_id, event_type=hikari.AuditLogEventType.MEMBER_BAN_ADD
-                ).limit(1):
-                    if str(entry.target_id) == str(user.id):
-                        # Skip if the bot performed this action (already recorded by mod_tools)
-                        if entry.user_id and entry.user_id == bot.get_me().id:
-                            break
-                        moderator_id = str(entry.user_id) if entry.user_id else None
-                        actor = await bot.rest.fetch_user(entry.user_id) if entry.user_id else None
-                        moderator_name = actor.username if actor else None
-                        reason = entry.reason
-                    break
-            except Exception:
-                logger.debug(f"Could not fetch audit log for ban in guild {event.guild_id}")
-
+            moderator_id, moderator_name, reason = await _lookup_audit_moderator(
+                bot,
+                event.guild_id,
+                hikari.AuditLogEventType.MEMBER_BAN_ADD,
+                user.id,
+            )
             if moderator_id:  # Only record if we found external moderator
-                await mod_action_ops.create_action(
+                action = await mod_action_ops.create_action(
                     session,
                     guild_id=str(event.guild_id),
                     target_user_id=str(user.id),
@@ -310,6 +359,8 @@ async def log_member_ban(
                     reason=reason,
                     source="audit_log",
                 )
+                await session.commit()
+                await dispatch_mod_action(action)
     except Exception:
         logger.exception(f"Failed to record ban action for guild {event.guild_id}")
 
@@ -344,26 +395,14 @@ async def log_member_unban(
     # Record unban in moderation actions
     try:
         async with get_db_session_context() as session:
-            moderator_id = None
-            moderator_name = None
-            reason = None
-            try:
-                async for entry in bot.rest.fetch_audit_log(
-                    event.guild_id, event_type=hikari.AuditLogEventType.MEMBER_BAN_REMOVE
-                ).limit(1):
-                    if str(entry.target_id) == str(user.id):
-                        if entry.user_id and entry.user_id == bot.get_me().id:
-                            break
-                        moderator_id = str(entry.user_id) if entry.user_id else None
-                        actor = await bot.rest.fetch_user(entry.user_id) if entry.user_id else None
-                        moderator_name = actor.username if actor else None
-                        reason = entry.reason
-                    break
-            except Exception:
-                logger.debug(f"Could not fetch audit log for unban in guild {event.guild_id}")
-
+            moderator_id, moderator_name, reason = await _lookup_audit_moderator(
+                bot,
+                event.guild_id,
+                hikari.AuditLogEventType.MEMBER_BAN_REMOVE,
+                user.id,
+            )
             if moderator_id:
-                await mod_action_ops.create_action(
+                action = await mod_action_ops.create_action(
                     session,
                     guild_id=str(event.guild_id),
                     target_user_id=str(user.id),
@@ -374,6 +413,8 @@ async def log_member_unban(
                     reason=reason,
                     source="audit_log",
                 )
+                await session.commit()
+                await dispatch_mod_action(action)
     except Exception:
         logger.exception(f"Failed to record unban action for guild {event.guild_id}")
 
@@ -495,26 +536,20 @@ async def log_member_update(
     old_timeout = getattr(old_member, "communication_disabled_until", None)
     new_timeout = getattr(member, "communication_disabled_until", None)
     if old_timeout != new_timeout and new_timeout is not None:
-        # User was timed out — record it
+        # User was timed out — record it. Require the audit entry to actually be
+        # a communication_disabled_until change (MEMBER_UPDATE also covers
+        # nickname/deaf/mute) and to be recent, so an unrelated member update is
+        # never mis-attributed as a timeout.
         try:
             async with get_db_session_context() as session:
-                moderator_id = None
-                moderator_name = None
-                reason = None
-                try:
-                    async for entry in bot.rest.fetch_audit_log(
-                        event.guild_id, event_type=hikari.AuditLogEventType.MEMBER_UPDATE
-                    ).limit(1):
-                        if str(entry.target_id) == str(member.id):
-                            if entry.user_id and entry.user_id == bot.get_me().id:
-                                break  # Bot did it, already recorded
-                            moderator_id = str(entry.user_id) if entry.user_id else None
-                            actor = await bot.rest.fetch_user(entry.user_id) if entry.user_id else None
-                            moderator_name = actor.username if actor else None
-                            reason = entry.reason
-                        break
-                except Exception:
-                    logger.debug(f"Could not fetch audit log for timeout in guild {event.guild_id}")
+                moderator_id, moderator_name, reason = await _lookup_audit_moderator(
+                    bot,
+                    event.guild_id,
+                    hikari.AuditLogEventType.MEMBER_UPDATE,
+                    member.id,
+                    change_key=hikari.AuditLogChangeKey.COMMUNICATION_DISABLED_UNTIL,
+                    max_age_seconds=10,
+                )
 
                 if moderator_id:
                     # Calculate duration
@@ -524,7 +559,7 @@ async def log_member_update(
                         if duration_seconds < 0:
                             duration_seconds = None
 
-                    await mod_action_ops.create_action(
+                    action = await mod_action_ops.create_action(
                         session,
                         guild_id=str(event.guild_id),
                         target_user_id=str(member.id),
@@ -536,8 +571,42 @@ async def log_member_update(
                         duration_seconds=duration_seconds,
                         source="audit_log",
                     )
+                    await session.commit()
+                    await dispatch_mod_action(action)
         except Exception:
             logger.exception(f"Failed to record timeout action for guild {event.guild_id}")
+    elif old_timeout != new_timeout and new_timeout is None and old_timeout is not None:
+        # Timeout was cleared early by a moderator — record the untimeout. Require
+        # a recent communication_disabled_until change so a natural expiry (whose
+        # null transition can surface on a later, unrelated member update) or any
+        # other MEMBER_UPDATE entry is never mis-attributed as a moderator untimeout.
+        try:
+            async with get_db_session_context() as session:
+                moderator_id, moderator_name, reason = await _lookup_audit_moderator(
+                    bot,
+                    event.guild_id,
+                    hikari.AuditLogEventType.MEMBER_UPDATE,
+                    member.id,
+                    change_key=hikari.AuditLogChangeKey.COMMUNICATION_DISABLED_UNTIL,
+                    max_age_seconds=10,
+                )
+
+                if moderator_id:
+                    action = await mod_action_ops.create_action(
+                        session,
+                        guild_id=str(event.guild_id),
+                        target_user_id=str(member.id),
+                        target_username=member.username,
+                        moderator_user_id=moderator_id,
+                        moderator_username=moderator_name,
+                        action_type="untimeout",
+                        reason=reason,
+                        source="audit_log",
+                    )
+                    await session.commit()
+                    await dispatch_mod_action(action)
+        except Exception:
+            logger.exception(f"Failed to record untimeout action for guild {event.guild_id}")
 
     # Check for username change
     if old_member.username != member.username:

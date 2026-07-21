@@ -25,7 +25,11 @@ from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.handler_budget import HandlerBudget
-from smarter_dev.web.handler_caps import ERROR_NOTICE_WINDOW_SECONDS, WindowedLimiter
+from smarter_dev.web.handler_caps import (
+    ERROR_NOTICE_WINDOW_SECONDS,
+    TIMER_ARMING_WINDOW_SECONDS,
+    WindowedLimiter,
+)
 from smarter_dev.web.handler_emitter import DiscordEmitter
 from smarter_dev.web.handler_notify import notify_handler_error
 from smarter_dev.web.handler_schedule import next_fire_at
@@ -77,6 +81,22 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
     emitter = DiscordEmitter(bot_token=settings.discord_bot_token, guild_id=guild_id)
     redis = get_redis_client()
     limiter = WindowedLimiter(redis=redis)
+    # schedule_timer arms a durable one-shot re-fire of THIS handler. The closure
+    # owns the payload class + handler_id, keeping the runtime import-clean; the
+    # timer limiter is a separate 3600s window (self.limiter is fixed at 60s).
+    timer_limiter = WindowedLimiter(
+        redis=redis, window_seconds=TIMER_ARMING_WINDOW_SECONDS
+    )
+
+    async def schedule_timer(fire_at: datetime, refire_context: dict) -> None:
+        await worker_submit(
+            HandlerFirePayload(
+                handler_id=str(handler_id),
+                trigger_context=refire_context,
+            ),
+            scheduled_for=fire_at,
+            job_id=uuid4().hex,
+        )
 
     result = await run_handler_script(
         script,
@@ -86,6 +106,9 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
         emitter=emitter,
         limiter=limiter,
         agent_runner=run_gathering_agent,
+        handler_id=str(handler_id),
+        timer_scheduler=schedule_timer,
+        timer_limiter=timer_limiter,
         budget=budget,
         memory=memory,
     )
@@ -104,6 +127,8 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
                 agent_calls=result.usage["agent_calls"],
                 discord_reads=result.usage.get("discord_reads", 0),
                 thread_ops=result.usage.get("thread_ops", 0),
+                role_changes=result.usage.get("role_changes", 0),
+                timers_scheduled=result.usage.get("timers_scheduled", 0),
                 duration_ms=result.duration_ms,
                 finished_at=datetime.now(timezone.utc),
             )
@@ -128,7 +153,14 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
             error=result.error,
         )
 
-    if trigger_type == "schedule":
+    # Re-arm the recurring chain only on a genuine scheduled fire. A schedule
+    # handler that self-arms a schedule_timer re-fires with trigger_type "timer"
+    # in its context; that re-fire must NOT re-enter _reschedule or it forks a
+    # duplicate perpetual chain and clobbers scheduled_job_id (orphaning the
+    # original chain's job so disable/update can no longer cancel it).
+    if trigger_type == "schedule" and (
+        payload.trigger_context.get("trigger_type") != "timer"
+    ):
         await _reschedule(handler_id, handler_settings)
 
     return {"status": result.outcome, "cap": result.cap}
