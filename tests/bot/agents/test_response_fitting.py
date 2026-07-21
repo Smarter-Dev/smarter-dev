@@ -10,6 +10,7 @@ import pytest
 
 import smarter_dev.bot.agents.response_fitting as response_fitting
 from smarter_dev.bot.agents.response_fitting import DISCORD_MESSAGE_LIMIT
+from smarter_dev.bot.agents.response_fitting import LENGTH_SUMMARIZER_MODEL_KEY
 from smarter_dev.bot.agents.response_fitting import SPLIT_TARGET
 from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.agents.response_fitting import _shorten_with_agent
@@ -19,6 +20,10 @@ from smarter_dev.bot.agents.response_fitting import split_for_discord
 # --------------------------------------------------------------------------- #
 # split_for_discord
 # --------------------------------------------------------------------------- #
+
+
+def test_length_summarizer_uses_luna():
+    assert LENGTH_SUMMARIZER_MODEL_KEY == "gpt-5-6-luna"
 
 
 def test_split_short_text_passes_through():
@@ -141,7 +146,7 @@ async def test_fit_uses_agent_rewrite_when_it_fits(monkeypatch):
         AsyncMock(return_value=("rewritten", 11, 7)),
     )
     summarize = AsyncMock()
-    monkeypatch.setattr(response_fitting, "_summarize_with_flash_lite", summarize)
+    monkeypatch.setattr(response_fitting, "_summarize_with_luna", summarize)
 
     fit = await fit_overlong_response(LONG, agent=None, deps=None, message_history=[])
 
@@ -159,7 +164,7 @@ async def test_fit_falls_back_to_summarizer_when_rewrite_still_long(monkeypatch)
         AsyncMock(return_value=("y" * (SUMMARIZE_THRESHOLD + 1), 11, 7)),
     )
     summarize = AsyncMock(return_value="a tidy summary")
-    monkeypatch.setattr(response_fitting, "_summarize_with_flash_lite", summarize)
+    monkeypatch.setattr(response_fitting, "_summarize_with_luna", summarize)
 
     fit = await fit_overlong_response(LONG, agent=None, deps=None, message_history=[])
 
@@ -176,7 +181,7 @@ async def test_fit_truncates_when_everything_fails(monkeypatch):
         response_fitting, "_shorten_with_agent", AsyncMock(return_value=(None, 0, 0))
     )
     monkeypatch.setattr(
-        response_fitting, "_summarize_with_flash_lite", AsyncMock(return_value=None)
+        response_fitting, "_summarize_with_luna", AsyncMock(return_value=None)
     )
 
     fit = await fit_overlong_response(LONG, agent=None, deps=None, message_history=[])

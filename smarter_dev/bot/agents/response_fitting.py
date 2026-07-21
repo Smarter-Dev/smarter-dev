@@ -10,14 +10,14 @@ Three tiers, cheapest first:
 3. ``len > 3000`` — :func:`fit_overlong_response` first asks the chat agent
    itself to rewrite the reply shorter (it has the full conversation context);
    if the rewrite is still over 3000 characters (or the run fails), a cheap
-   Gemini 3.5 Flash Lite summarizer condenses the original; if even that
-   overruns, the text is hard-truncated as a last resort. The result then
-   flows through tier 1/2 for sending.
+   GPT-5.6 Luna summarizer condenses the original; if even that overruns, the
+   text is hard-truncated as a last resort. The result then flows through tier
+   1/2 for sending.
 
 The shorten re-run uses the turn's own agent + history, so its tokens are the
 chat model's and are folded into the turn's metering/pricing by the engine.
-The Flash Lite summarizer runs its own model; like chat compaction, its
-(small) spend is logged but not metered against the channel budget.
+The Luna summarizer runs its own model; like chat compaction, its spend is
+logged but not metered against the channel budget.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ SPLIT_TARGET = 1500
 SUMMARIZE_THRESHOLD = 3000
 
 # Catalog key of the model that summarizes as the second resort.
-LENGTH_SUMMARIZER_MODEL_KEY = "gemini-3-5-flash-lite"
+LENGTH_SUMMARIZER_MODEL_KEY = "gpt-5-6-luna"
 
 _SHORTEN_PROMPT_TEMPLATE = (
     "<length-notice>Your drafted reply could not be sent: it is {length} "
@@ -112,7 +112,7 @@ _length_summarizer: Agent | None = None
 
 
 def get_length_summarizer() -> Agent:
-    """The cached Flash Lite summarizer agent (plain-text output)."""
+    """The cached Luna summarizer agent (plain-text output)."""
     global _length_summarizer
     if _length_summarizer is None:
         catalog_model = get_model(LENGTH_SUMMARIZER_MODEL_KEY)
@@ -154,8 +154,8 @@ async def _shorten_with_agent(
     return text or None, input_tokens, output_tokens
 
 
-async def _summarize_with_flash_lite(message: str) -> str | None:
-    """Condense ``message`` with the Flash Lite summarizer (fail-soft)."""
+async def _summarize_with_luna(message: str) -> str | None:
+    """Condense ``message`` with the Luna summarizer (fail-soft)."""
     try:
         result = await get_length_summarizer().run(user_prompt=message)
     except Exception:
@@ -192,7 +192,7 @@ async def fit_overlong_response(
     if shortened is not None and len(shortened) <= SUMMARIZE_THRESHOLD:
         return FitResult(shortened, input_tokens, output_tokens, "shortened")
 
-    summary = await _summarize_with_flash_lite(message)
+    summary = await _summarize_with_luna(message)
     if summary is not None and len(summary) <= SUMMARIZE_THRESHOLD:
         return FitResult(summary, input_tokens, output_tokens, "summarized")
 
