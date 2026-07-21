@@ -6,6 +6,7 @@ import pytest
 
 import smarter_dev.bot.agents.chat_agent as chat_agent
 from smarter_dev.bot.agents.chat_agent import get_chat_agent
+from smarter_dev.bot.agents.chat_agent import resolved_reasoning_level
 
 
 @pytest.fixture(autouse=True)
@@ -66,3 +67,34 @@ def test_none_resolves_to_env_default_and_is_singleton_equivalent(monkeypatch):
     explicit_default = get_chat_agent(chat_agent.DEFAULT_MODEL)
     assert default_first is default_second
     assert default_first is explicit_default
+
+
+def test_resolved_reasoning_level_returns_supported_choice():
+    # gpt-5.4 supports "high" — an explicit supported pick passes through.
+    assert resolved_reasoning_level("gpt-5.4", "high") == "high"
+
+
+def test_resolved_reasoning_level_clamps_unsupported_choice():
+    # Gemini's thinking_level tops out at "high"; "max" clamps down to it.
+    assert resolved_reasoning_level("gemini-3.1-flash-lite", "max") == "high"
+
+
+def test_resolved_reasoning_level_falls_back_to_model_default():
+    # No explicit choice -> the catalog model's default_reasoning (MEDIUM here).
+    assert resolved_reasoning_level("gpt-5.4", None) == "medium"
+
+
+def test_resolved_reasoning_level_none_for_model_without_knob():
+    # Kimi K2.6 has no reasoning ladder -> always None.
+    assert resolved_reasoning_level("kimi-k2.6", "high") is None
+
+
+def test_resolved_reasoning_level_none_for_adhoc_model():
+    # A non-catalog ad-hoc model id maps to no ReasoningLevel.
+    assert resolved_reasoning_level("some-unlisted-model", "high") is None
+
+
+def test_resolved_reasoning_level_default_model_when_id_omitted(monkeypatch):
+    # None model id resolves to the env/default (a catalog Gemini, default MEDIUM).
+    monkeypatch.delenv(chat_agent.MODEL_ENV_VAR, raising=False)
+    assert resolved_reasoning_level(None, None) == "medium"
