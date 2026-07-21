@@ -1,0 +1,27 @@
+# Announce when the server's human member count crosses a new milestone step.
+# member_join is guild-scoped and fires on EVERY join (it bursts during raids),
+# so the common path stays silent: a high-water mark in memory gates the send so
+# each MILESTONE_STEP boundary announces exactly once, no matter how many joins
+# land between boundaries. Config values are baked in as literal constants at
+# install time — see the extension manifest.
+ANNOUNCE_CHANNEL_ID = {{cfg.announce_channel_id}}
+MILESTONE_STEP = {{cfg.milestone_step}}
+
+count = context["guild_human_member_count"]
+high = await memory_get("highest", 0)
+
+if count is not None and MILESTONE_STEP > 0:
+    if count > high:
+        await memory_set("highest", count)
+        # Memory-gate: only a freshly-crossed step boundary announces, so the
+        # 249 joins between one milestone and the next stay silent.
+        if count // MILESTONE_STEP > high // MILESTONE_STEP:
+            milestone = (count // MILESTONE_STEP) * MILESTONE_STEP
+            await send_message(
+                "🎉 We just passed " + str(milestone) + " members! Welcome aboard! 🎉",
+                ANNOUNCE_CHANNEL_ID,
+            )
+    elif count < high - MILESTONE_STEP:
+        # Re-baseline downward after a purge/raid ban wave so a later recovery
+        # re-announces the milestone instead of staying stuck at the old peak.
+        await memory_set("highest", count)

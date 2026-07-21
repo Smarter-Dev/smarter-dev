@@ -1,0 +1,20 @@
+# Thank a member the moment they start boosting the server. member_role_change
+# fires only when a member's role set actually changes, and the bot computes the
+# boost delta, so is_boost_role_added is true exactly once per
+# not-boosting -> boosting transition — the re-fire guard lives in dispatch and
+# is never re-implemented here. member_role_change is guild-scoped with no home
+# channel, so the send names the announce-channel constant. Both legacy stats are
+# preserved: total boosts AND the number of boosting members (distinct figures,
+# since one member can boost multiple times). Config values are baked in as
+# literal constants at install time — see the extension manifest.
+ANNOUNCE_CHANNEL_ID = {{cfg.announce_channel_id}}
+
+if context["is_boost_role_added"]:
+    boosts = context["premium_subscription_count"]
+    boosters = context["boosting_member_count"]
+    message_text = (
+        "💖 **" + context["member_display_name"] + " Has Boosted The Server!!!**\n"
+        + "That makes " + str(boosts) + " boosts from " + str(boosters)
+        + " boosting members — thank you! 🚀"
+    )
+    await send_message(message_text, ANNOUNCE_CHANNEL_ID)
