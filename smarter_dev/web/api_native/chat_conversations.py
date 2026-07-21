@@ -251,6 +251,7 @@ class ChatConversationController(Controller):
             chat_tokens_input=data.chat_tokens_input,
             chat_tokens_output=data.chat_tokens_output,
             chat_model_name=data.chat_model_name,
+            chat_reasoning_level=data.chat_reasoning_level,
             chat_cost_usd=chat_cost,
             voice_tokens_input=data.voice_tokens_input,
             voice_tokens_output=data.voice_tokens_output,
@@ -288,6 +289,7 @@ class ChatConversationController(Controller):
                     summarizer_tokens_input=ev.summarizer_tokens_input,
                     summarizer_tokens_output=ev.summarizer_tokens_output,
                     summarizer_model_name=ev.summarizer_model_name,
+                    summarizer_reasoning_level=ev.summarizer_reasoning_level,
                     summarizer_cost_usd=ev_cost,
                 )
             )

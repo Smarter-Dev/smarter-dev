@@ -33,6 +33,13 @@
 .usage-td-query { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-td-model { font-size: .85em; }
 .usage-status-error { color: #da3633; }
+.usage-month-form { display: flex; gap: .75rem; align-items: center; margin: 1rem 0; }
+.usage-td-num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.usage-invoice-summary { margin: 1rem 0; opacity: .8; }
+.usage-invoice-panel { margin-bottom: 1.5rem; }
+.usage-invoice-panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.usage-invoice-subtotal { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.usage-invoice-model-row td { font-weight: 600; background: rgba(255,255,255,.04); }
 </style>
 
 <hgroup>
@@ -93,13 +100,15 @@
 {# ── Tabs ────────────────────────────────────────────────────────── #}
 <div class="usage-tabs-wrap">
     <div class="usage-tab-bar">
-        <button class="usage-tab active" data-tab="runs">Individual Runs</button>
-        <button class="usage-tab" data-tab="users">By User</button>
-        <button class="usage-tab" data-tab="service">Service Costs</button>
+        <button class="usage-tab {% if active_tab == 'runs' %}active{% endif %}" data-tab="runs">Individual Runs</button>
+        <button class="usage-tab {% if active_tab == 'users' %}active{% endif %}" data-tab="users">By User</button>
+        <button class="usage-tab {% if active_tab == 'service' %}active{% endif %}" data-tab="service">Service Costs</button>
+        <button class="usage-tab {% if active_tab == 'invoice' %}active{% endif %}" data-tab="invoice">Invoice</button>
+        <button class="usage-tab {% if active_tab == 'channels' %}active{% endif %}" data-tab="channels">By Channel</button>
     </div>
 
     {# ── Tab: Individual Runs ────────────────────────────────────── #}
-    <div id="tab-runs" class="usage-tab-content">
+    <div id="tab-runs" class="usage-tab-content {% if active_tab != 'runs' %}hidden{% endif %}">
         {% if runs %}
         <table class="sk-admin-table">
             <thead>
@@ -153,7 +162,7 @@
     </div>
 
     {# ── Tab: By User ────────────────────────────────────────────── #}
-    <div id="tab-users" class="usage-tab-content hidden">
+    <div id="tab-users" class="usage-tab-content {% if active_tab != 'users' %}hidden{% endif %}">
         {% if agg_rows %}
         <table class="sk-admin-table">
             <thead>
@@ -195,7 +204,7 @@
     </div>
 
     {# ── Tab: Service Costs ──────────────────────────────────────── #}
-    <div id="tab-service" class="usage-tab-content hidden">
+    <div id="tab-service" class="usage-tab-content {% if active_tab != 'service' %}hidden{% endif %}">
         <p style="margin: 1rem 0; opacity: .7;">
             Internal service costs (profiler, etc.) &mdash;
             {{ "{:,}".format(svc_total_invocations) }} invocation{{ 's' if svc_total_invocations != 1 else '' }},
@@ -266,6 +275,143 @@
         </div>
         {% else %}
         <p class="sk-no-items">No service usage recorded yet.</p>
+        {% endif %}
+    </div>
+
+    {# ── Tab: Invoice ────────────────────────────────────────────── #}
+    <div id="tab-invoice" class="usage-tab-content {% if active_tab != 'invoice' %}hidden{% endif %}">
+        <form method="get" action="/admin/usage" class="usage-month-form">
+            <input type="hidden" name="tab" value="invoice">
+            <label for="month-invoice"><strong>Billing month</strong></label>
+            <select name="month" id="month-invoice">
+                {% for m in months %}
+                <option value="{{ m }}" {% if m == selected_month %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="sk-btn-outline sk-btn-small">Apply</button>
+        </form>
+
+        {% if invoice_providers %}
+        <p class="usage-invoice-summary">
+            {{ selected_month }} &middot;
+            {{ "{:,}".format(invoice_totals.input_tokens) }} input &middot;
+            {{ "{:,}".format(invoice_totals.output_tokens) }} output &middot;
+            {{ "{:,}".format(invoice_totals.cache_read_tokens) }} cache read &middot;
+            {{ "{:,}".format(invoice_totals.cache_write_tokens) }} cache write tokens &middot;
+            <strong>${{ "{:.4f}".format(invoice_totals.cost) }} total</strong>
+        </p>
+
+        {% for provider in invoice_providers %}
+        <div class="sk-panel usage-invoice-panel">
+            <div class="sk-panel-head usage-invoice-panel-head">
+                <strong>{{ provider.label }}</strong>
+                <span class="usage-invoice-subtotal">${{ "{:.4f}".format(provider.cost) }}</span>
+            </div>
+            <div class="sk-panel-body" style="padding: 0;">
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Model</th>
+                            <th>Reasoning</th>
+                            <th>Source</th>
+                            <th class="usage-td-num">Input</th>
+                            <th class="usage-td-num">Output</th>
+                            <th class="usage-td-num">Cache Read</th>
+                            <th class="usage-td-num">Cache Write</th>
+                            <th class="usage-td-num">Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for model in provider.models %}
+                        <tr class="usage-invoice-model-row">
+                            <td class="usage-td-model" title="{{ model.name }}">{{ model.name }}</td>
+                            <td></td>
+                            <td></td>
+                            <td class="usage-td-num">{{ "{:,}".format(model.input_tokens) }}</td>
+                            <td class="usage-td-num">{{ "{:,}".format(model.output_tokens) }}</td>
+                            <td class="usage-td-num">{{ "{:,}".format(model.cache_read_tokens) }}</td>
+                            <td class="usage-td-num">{{ "{:,}".format(model.cache_write_tokens) }}</td>
+                            <td class="usage-td-num">${{ "{:.4f}".format(model.cost) }}</td>
+                        </tr>
+                        {% for row in model.rows %}
+                        <tr>
+                            <td></td>
+                            <td>{{ row.reasoning }}</td>
+                            <td><span class="sk-pill">{{ row.source }}</span></td>
+                            <td class="usage-td-num">{{ "{:,}".format(row.input_tokens) }}</td>
+                            <td class="usage-td-num">{{ "{:,}".format(row.output_tokens) }}</td>
+                            <td class="usage-td-num">{{ "{:,}".format(row.cache_read_tokens) }}</td>
+                            <td class="usage-td-num">{{ "{:,}".format(row.cache_write_tokens) }}</td>
+                            <td class="usage-td-num">${{ "{:.4f}".format(row.cost) }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="sk-no-items">No LLM usage recorded for {{ selected_month or 'this month' }}.</p>
+        {% endif %}
+    </div>
+
+    {# ── Tab: By Channel ─────────────────────────────────────────── #}
+    <div id="tab-channels" class="usage-tab-content {% if active_tab != 'channels' %}hidden{% endif %}">
+        <form method="get" action="/admin/usage" class="usage-month-form">
+            <input type="hidden" name="tab" value="channels">
+            <label for="month-channels"><strong>Billing month</strong></label>
+            <select name="month" id="month-channels">
+                {% for m in months %}
+                <option value="{{ m }}" {% if m == selected_month %}selected{% endif %}>{{ m }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="sk-btn-outline sk-btn-small">Apply</button>
+        </form>
+
+        {% if channels %}
+        {% for channel in channels %}
+        <div class="sk-panel usage-invoice-panel">
+            <div class="sk-panel-head usage-invoice-panel-head">
+                <strong>{{ channel.display_name }}</strong>
+                <span class="usage-invoice-subtotal">
+                    {{ "{:,}".format(channel.input_tokens) }} in &middot;
+                    {{ "{:,}".format(channel.output_tokens) }} out &middot;
+                    ${{ "{:.4f}".format(channel.cost) }}
+                </span>
+            </div>
+            <div class="sk-panel-body" style="padding: 0;">
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Provider</th>
+                            <th>Model</th>
+                            <th>Reasoning</th>
+                            <th>Source</th>
+                            <th class="usage-td-num">Input</th>
+                            <th class="usage-td-num">Output</th>
+                            <th class="usage-td-num">Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in channel.rows %}
+                        <tr>
+                            <td>{{ row.provider_label }}</td>
+                            <td class="usage-td-model" title="{{ row.model_name }}">{{ row.model_name }}</td>
+                            <td>{{ row.reasoning }}</td>
+                            <td><span class="sk-pill">{{ row.source }}</span></td>
+                            <td class="usage-td-num">{{ "{:,}".format(row.input_tokens) }}</td>
+                            <td class="usage-td-num">{{ "{:,}".format(row.output_tokens) }}</td>
+                            <td class="usage-td-num">${{ "{:.4f}".format(row.cost) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="sk-no-items">No channel usage recorded for {{ selected_month or 'this month' }}.</p>
         {% endif %}
     </div>
 </div>

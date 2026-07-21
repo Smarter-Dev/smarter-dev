@@ -44,6 +44,7 @@ from redis.exceptions import RedisError
 from smarter_dev.bot.agents.chat_agent import DEFAULT_MODEL as CHAT_DEFAULT_MODEL
 from smarter_dev.bot.agents.chat_agent import MODEL_ENV_VAR as CHAT_MODEL_ENV_VAR
 from smarter_dev.bot.agents.chat_agent import get_chat_agent
+from smarter_dev.bot.agents.chat_agent import resolved_reasoning_level
 from smarter_dev.bot.agents.chat_compaction import drain_collection
 from smarter_dev.bot.agents.chat_compaction import set_last_model_call
 from smarter_dev.bot.agents.chat_compaction import start_collection
@@ -585,6 +586,14 @@ class ChannelEngine:
             resolved_model_name = override_model_id or os.environ.get(
                 CHAT_MODEL_ENV_VAR, CHAT_DEFAULT_MODEL
             )
+            # The reasoning level actually applied this turn: the override's
+            # choice clamped onto what the resolved model supports (or the
+            # model default when unset). Persisted with the turn so the
+            # dashboard can attribute reasoning spend. Matches the model +
+            # reasoning pair handed to ``get_chat_agent`` below.
+            resolved_reasoning_wire = resolved_reasoning_level(
+                override_model_id, override_reasoning
+            )
 
             # Start engagement persistence on the very first turn — gives us
             # an engagement_id we attach to every persisted turn that follows.
@@ -729,6 +738,7 @@ class ChannelEngine:
                         chat_tokens_input=chat_in,
                         chat_tokens_output=chat_out,
                         chat_model_name=resolved_model_name,
+                        chat_reasoning_level=resolved_reasoning_wire,
                         voice_tokens_input=(
                             voice.tokens_input if voice else 0
                         ),
