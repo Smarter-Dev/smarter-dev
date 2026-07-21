@@ -19,7 +19,7 @@ from sqlalchemy.dialects.postgresql import UUID
 
 
 revision: str = "c3d5e7f9a1b2"
-down_revision: Union[str, None] = "f1a2b3c4d5e6"
+down_revision: Union[str, None] = "f4a7d1c9e3b6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
