@@ -5510,7 +5510,7 @@ async def upsert_channel_model_override(
     session: AsyncSession,
     guild_id: str,
     channel_id: str,
-    model_key: str,
+    model_key: str | None,
     daily_token_budget: int,
     hourly_token_budget: int,
     reasoning_level: str | None = None,
@@ -5521,7 +5521,9 @@ async def upsert_channel_model_override(
     """Insert or update the single override row for ``channel_id``.
 
     Loads (or creates) the row internally so no caller-owned object is mutated.
-    ``reasoning_level`` of ``None`` means "use the model's default level".
+    ``model_key`` of ``None`` keeps the server default model (budgets and
+    behaviour flags still apply); ``reasoning_level`` of ``None`` means "use
+    the model's default level".
     """
     record = await get_channel_model_override(session, guild_id, channel_id)
     if record is None:

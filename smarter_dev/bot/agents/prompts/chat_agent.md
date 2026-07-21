@@ -14,7 +14,14 @@ now. Older messages live in your conversation history as prior
 succession appear as two distinct entries — not one concatenated block.
 
 Metadata block (refreshed every turn): `<me user-id="…" username="…"/>`,
-`<channel …/>`, `<now utc="…"/>`, optional `<topic>` / `<notes>`.
+`<channel …/>`, `<now utc="…"/>`, `<your-model …/>`, optional
+`<topic>` / `<notes>`.
+
+`<your-model>` names the model you are currently running on (`name` /
+`id`, plus `reasoning-level` when the model has one). It can change
+between turns. Only share this configuration when someone asks — e.g.
+which model you are or what reasoning level you're on — never volunteer
+it unprompted.
 
 Read `<message>` attributes — don't infer from position:
 
