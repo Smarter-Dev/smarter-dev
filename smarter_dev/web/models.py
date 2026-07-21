@@ -4485,6 +4485,9 @@ class AdminHandler(Base):
         ),
         Index("ix_admin_handlers_guild_id", "guild_id"),
         Index("uq_admin_handlers_guild_name", "guild_id", "name", unique=True),
+        Index(
+            "ix_admin_handlers_extension_install_id", "extension_install_id"
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -4511,6 +4514,66 @@ class AdminHandler(Base):
         JSON, nullable=False, default=dict, server_default="{}"
     )
     scheduled_job_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Set when this row was materialised by an extension install; NULL for
+    # hand-authored handlers. No FK by house style (cf. handler_runs.handler_id,
+    # guild_handler_memory) — the install service owns integrity, and only ever
+    # mutates/deletes rows whose extension_install_id matches its own install.
+    extension_install_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+    # The manifest HandlerTemplate.key this row materialises. Update and
+    # config-edit reconcile rows by (extension_install_id, key) so a re-render
+    # preserves the row id and its per-handler ``memory``.
+    extension_handler_key: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+
+
+class ExtensionInstall(Base):
+    """One guild's installation of a catalog extension.
+
+    Records which extension (``extension_slug``), at which catalog
+    ``installed_version``, with which admin-supplied ``config``, and owns the
+    materialised ``admin_handlers`` rows via
+    ``AdminHandler.extension_install_id`` — uninstall deletes exactly those
+    rows. One install per (guild, extension), enforced by
+    ``uq_extension_installs_guild_slug``. ``installed_version`` is compared
+    against the in-repo manifest's version to surface "update available".
+    """
+
+    __tablename__ = "extension_installs"
+    __table_args__ = (
+        UniqueConstraint(
+            "guild_id", "extension_slug", name="uq_extension_installs_guild_slug"
+        ),
+        Index("ix_extension_installs_guild_id", "guild_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    extension_slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    installed_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The cleaned config the current rows were rendered from; re-rendered on
+    # config-edit and update.
+    config: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    # Skrift admin identity (username/email) who performed the install.
+    installed_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
 
 
 class GuildHandlerMemory(Base):

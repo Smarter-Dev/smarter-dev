@@ -54,6 +54,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "chat_agent_engagements",
     "chat_agent_turns",
     "daily_quests",
+    "extension_installs",
     "feature_flags",
     "forum_agent_responses",
     "forum_agents",
