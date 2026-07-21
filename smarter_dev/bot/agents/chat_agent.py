@@ -38,6 +38,7 @@ from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import parse_reasoning_level
+from smarter_dev.shared.model_catalog import resolve_reasoning_level
 from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
 
@@ -124,6 +125,28 @@ def _model_settings_for(
     return GoogleModelSettings(
         google_thinking_config={"thinking_level": "MEDIUM"},
     )
+
+
+def resolved_reasoning_level(
+    model_id: str | None = None, reasoning_level: str | None = None
+) -> str | None:
+    """Return the ReasoningLevel wire value actually applied for a chat run.
+
+    Mirrors the reasoning resolution in :func:`_model_settings_for`: a catalog
+    model clamps the requested ``reasoning_level`` onto what it supports (or its
+    ``default_reasoning`` when unset), and a model with no reasoning knob yields
+    ``None``. A non-catalog ad-hoc ``CHAT_AGENT_MODEL`` id also yields ``None``
+    (no channel level maps onto it — its provider default is applied implicitly).
+    Used to persist the level in effect alongside the turn.
+    """
+    resolved_id = model_id or _model_id()
+    catalog_model = _catalog_model_for_id(resolved_id)
+    if catalog_model is None:
+        return None
+    effective = resolve_reasoning_level(
+        catalog_model, parse_reasoning_level(reasoning_level)
+    )
+    return effective.value if effective is not None else None
 
 
 # One agent per resolved (model id, reasoning level). A per-channel override

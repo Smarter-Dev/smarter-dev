@@ -65,6 +65,8 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.providers.google import GoogleProvider
 
+from smarter_dev.shared.model_catalog import ReasoningLevel
+
 logger = logging.getLogger(__name__)
 
 # Quality floor: this many characters of the most recent turns are never
@@ -94,6 +96,9 @@ COMPACTED_PREFIX = "[compacted history]"
 
 DEFAULT_COMPACT_MODEL = "gemini-3.1-flash-lite"
 COMPACT_MODEL_ENV_VAR = "CHAT_AGENT_COMPACT_MODEL"
+# The summarizer runs at a fixed reasoning level (Gemini thinking_level LOW);
+# persisted with each compaction event so the dashboard can attribute its spend.
+SUMMARIZER_REASONING_LEVEL = ReasoningLevel.LOW
 # Mirrors chat_agent.MODEL_ENV_VAR — chat_agent imports this module, so
 # importing back would be circular.
 CHAT_MODEL_ENV_VAR = "CHAT_AGENT_MODEL"
@@ -173,6 +178,7 @@ class CompactionEvent:
     summarizer_tokens_input: int
     summarizer_tokens_output: int
     summarizer_model_name: str
+    summarizer_reasoning_level: str | None
 
 
 _collected: ContextVar[list[CompactionEvent] | None] = ContextVar(
@@ -252,7 +258,9 @@ def get_summarizer_agent() -> Agent[None, str]:
             output_type=str,
             system_prompt=_SUMMARIZER_PROMPT.format(max_chars=MAX_SUMMARY_CHARS),
             model_settings=GoogleModelSettings(
-                google_thinking_config={"thinking_level": "LOW"},
+                google_thinking_config={
+                    "thinking_level": SUMMARIZER_REASONING_LEVEL.value.upper(),
+                },
             ),
         )
     return _summarizer_agent
@@ -455,6 +463,7 @@ async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
             summarizer_tokens_input=summary.tokens_input,
             summarizer_tokens_output=summary.tokens_output,
             summarizer_model_name=summary.model_name,
+            summarizer_reasoning_level=SUMMARIZER_REASONING_LEVEL.value,
         )
     )
 

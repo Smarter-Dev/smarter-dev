@@ -4003,6 +4003,11 @@ class ChatAgentTurn(Base):
     chat_tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     chat_tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     chat_model_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    # ReasoningLevel wire value (e.g. "high") in effect for the chat model call,
+    # or NULL when the model has no reasoning knob / an ad-hoc model was used.
+    chat_reasoning_level: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, default=None
+    )
     chat_cost_usd: Mapped[Decimal] = mapped_column(
         Numeric(10, 6), nullable=False, default=Decimal("0")
     )
@@ -4064,6 +4069,11 @@ class ChatAgentCompactionEvent(Base):
     summarizer_tokens_input: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     summarizer_tokens_output: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     summarizer_model_name: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    # ReasoningLevel wire value in effect for the summarizer call (the summarizer
+    # runs at a fixed level), or NULL when it has no reasoning knob configured.
+    summarizer_reasoning_level: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, default=None
+    )
     summarizer_cost_usd: Mapped[Decimal] = mapped_column(
         Numeric(10, 6), nullable=False, default=Decimal("0")
     )

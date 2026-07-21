@@ -125,6 +125,7 @@ async def test_persist_turn_serialises_compaction_events_and_delta():
         summarizer_tokens_input=42,
         summarizer_tokens_output=7,
         summarizer_model_name="stub-model",
+        summarizer_reasoning_level="low",
     )
     await ccp.persist_turn(
         bot=bot,
@@ -139,6 +140,7 @@ async def test_persist_turn_serialises_compaction_events_and_delta():
         chat_tokens_input=500,
         chat_tokens_output=100,
         chat_model_name="gemini-3.1-flash-lite-preview",
+        chat_reasoning_level="high",
         voice_tokens_input=80,
         voice_tokens_output=20,
         voice_model_name="gemini-2.5-flash-preview-tts",
@@ -154,6 +156,7 @@ async def test_persist_turn_serialises_compaction_events_and_delta():
     assert body["turn_kind"] == "followup"
     assert body["output_kind"] == "send_response"
     assert body["chat_tokens_input"] == 500
+    assert body["chat_reasoning_level"] == "high"
     assert body["voice_tokens_input"] == 80
     assert body["voice_sent_ok"] is True
     assert body["model_messages_delta"] == []
@@ -162,6 +165,31 @@ async def test_persist_turn_serialises_compaction_events_and_delta():
     assert posted_event["event_kind"] == "user_prompt"
     assert posted_event["original_chars"] == 12000
     assert posted_event["summarizer_tokens_input"] == 42
+    assert posted_event["summarizer_reasoning_level"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_persist_turn_defaults_reasoning_level_to_none():
+    post = AsyncMock(return_value=SimpleNamespace(status_code=201))
+    bot = _bot_with_api_client(post)
+    await ccp.persist_turn(
+        bot=bot,
+        engagement_id=uuid4(),
+        request_id="abcd1234",
+        turn_kind="initial",
+        output_kind="no_response",
+        triggering_messages=[],
+        agent_output={"kind": "no_response", "topic": "x"},
+        new_model_messages=[],
+        duration_ms=10,
+        chat_tokens_input=0,
+        chat_tokens_output=0,
+        chat_model_name=None,
+    )
+    post.assert_awaited_once()
+    _, kwargs = post.call_args
+    # Field is always present so an unset value round-trips as an explicit None.
+    assert kwargs["json_data"]["chat_reasoning_level"] is None
 
 
 @pytest.mark.asyncio

@@ -685,6 +685,7 @@ class ChatAgentCompactionEventCreate(BaseAPIModel):
     summarizer_tokens_input: int = 0
     summarizer_tokens_output: int = 0
     summarizer_model_name: Optional[str] = None
+    summarizer_reasoning_level: Optional[str] = None
 
 
 class ChatAgentTurnCreate(BaseAPIModel):
@@ -699,6 +700,7 @@ class ChatAgentTurnCreate(BaseAPIModel):
     chat_tokens_input: int = 0
     chat_tokens_output: int = 0
     chat_model_name: Optional[str] = None
+    chat_reasoning_level: Optional[str] = None
     voice_tokens_input: int = 0
     voice_tokens_output: int = 0
     voice_model_name: Optional[str] = None
