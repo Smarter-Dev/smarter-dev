@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 import mimetypes
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 from typing import Any
 
 import hikari
@@ -132,10 +133,13 @@ async def _post_status(ctx: RunContext[ChatDeps], text: str) -> None:
 
 
 async def web_search(ctx: RunContext[ChatDeps], query: str) -> list[dict[str, str]]:
-    """Search the web via Brave Search and return up to 5 result snippets.
+    """Discover web sources via Brave Search and return up to 5 result snippets.
 
-    Use this when the user asks about current events, specific products,
-    niche technical topics, or anything that needs sources to back it up.
+    This is the first stage of web research. Snippets are enough for quick,
+    low-stakes answers and broad summaries. For accurate or deep answers,
+    precise technical guidance, nuanced comparisons, quotations, verification,
+    or source-specific claims, choose the best result URLs and call ``web_read``
+    before replying.
     """
     logger.info("web_search: %r (channel=%s)", query, ctx.deps.channel_id)
     await _post_status(ctx, f'Searching the web: "{query}"')
@@ -153,12 +157,14 @@ async def web_search(ctx: RunContext[ChatDeps], query: str) -> list[dict[str, st
 async def web_read(
     ctx: RunContext[ChatDeps], url: str, instruction: str
 ) -> dict[str, str]:
-    """Fetch a URL and return an instruction-guided summary of its content.
+    """Read a URL and return an instruction-guided summary of its content.
 
-    Handles web pages, PDFs, YouTube links, and image/audio files (e.g.
-    ``<attachment>`` URLs). A fast model condenses the content per
-    ``instruction`` — you get the summary back, never the raw file — so say
-    what to look for, what to ignore, quote-vs-paraphrase, and how much
+    This is the evidence stage after ``web_search`` when an answer must be
+    accurate, deep, precise, nuanced, verified, or grounded in a source. It
+    also handles direct URLs and ``<attachment>`` URLs for web pages, PDFs,
+    YouTube links, and image/audio files. A fast model condenses the content
+    per ``instruction`` — you get the summary back, never the raw file — so
+    say what to look for, what to ignore, quote-vs-paraphrase, and how much
     detail (keep it small; ~5 paragraphs max). If the page lacks what you
     asked for, the summary says so instead of guessing. Returns ``url``,
     ``title``, and ``summary`` (or ``error`` on fetch failure).
