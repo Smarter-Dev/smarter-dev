@@ -251,6 +251,88 @@ async def test_multi_source_aggregation_with_mixed_reasoning(db_session):
     assert costs == sorted(costs, reverse=True)
 
 
+async def test_chat_and_compaction_cache_tokens_sum_with_null_coalesce(db_session):
+    engagement = _engagement()
+    # Two chat turns share (model, reasoning): one carries cache tokens, the
+    # other leaves the cache columns NULL (historical / not-captured row).
+    # coalesce must treat NULL as zero so the line still sums cleanly.
+    turn_cached = _turn(
+        engagement,
+        started_at=_at(2),
+        chat_model_name="kimi-k2.6",
+        chat_reasoning_level="high",
+        chat_tokens_input=1000,
+        chat_tokens_output=500,
+        chat_cache_read_tokens=400,
+        chat_cache_write_tokens=60,
+        chat_cost_usd=Decimal("0.010000"),
+    )
+    turn_null_cache = _turn(
+        engagement,
+        started_at=_at(3),
+        chat_model_name="kimi-k2.6",
+        chat_reasoning_level="high",
+        chat_tokens_input=200,
+        chat_tokens_output=100,
+        chat_cache_read_tokens=None,
+        chat_cache_write_tokens=None,
+        chat_cost_usd=Decimal("0.002000"),
+    )
+    compaction_cached = ChatAgentCompactionEvent(
+        turn=turn_cached,
+        event_kind="assistant_text",
+        original_content="x",
+        summary="y",
+        original_chars=1,
+        summary_chars=1,
+        chars_saved=0,
+        summarizer_model_name="gemini-3.1-flash-lite",
+        summarizer_reasoning_level="low",
+        summarizer_tokens_input=2000,
+        summarizer_tokens_output=100,
+        summarizer_cache_read_tokens=1500,
+        summarizer_cache_write_tokens=25,
+        summarizer_cost_usd=Decimal("0.001000"),
+    )
+    compaction_null_cache = ChatAgentCompactionEvent(
+        turn=turn_null_cache,
+        event_kind="assistant_text",
+        original_content="x",
+        summary="y",
+        original_chars=1,
+        summary_chars=1,
+        chars_saved=0,
+        summarizer_model_name="gemini-3.1-flash-lite",
+        summarizer_reasoning_level="low",
+        summarizer_tokens_input=300,
+        summarizer_tokens_output=20,
+        summarizer_cache_read_tokens=None,
+        summarizer_cache_write_tokens=None,
+        summarizer_cost_usd=Decimal("0.000500"),
+    )
+    db_session.add_all(
+        [
+            engagement,
+            turn_cached,
+            turn_null_cache,
+            compaction_cached,
+            compaction_null_cache,
+        ]
+    )
+    await db_session.commit()
+
+    lines = await monthly_invoice(db_session, "2026-07")
+    by_key = {(l.source, l.model_name, l.reasoning_level): l for l in lines}
+
+    chat = by_key[("chat", "kimi-k2.6", "high")]
+    assert chat.cache_read_tokens == 400  # 400 + NULL(->0)
+    assert chat.cache_write_tokens == 60  # 60 + NULL(->0)
+
+    compaction = by_key[("compaction", "gemini-3.1-flash-lite", "low")]
+    assert compaction.cache_read_tokens == 1500  # 1500 + NULL(->0)
+    assert compaction.cache_write_tokens == 25  # 25 + NULL(->0)
+
+
 async def test_month_filter_excludes_out_of_range_rows(db_session):
     engagement = _engagement()
     inside = _turn(

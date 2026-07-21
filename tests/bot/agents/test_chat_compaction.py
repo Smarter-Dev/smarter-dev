@@ -29,6 +29,7 @@ from smarter_dev.bot.agents.chat_compaction import (
     KEEP_RECENT_CHARS,
     CompactionEvent,
     _should_fold,
+    _summarise_conversation,
     compact_history,
     drain_collection,
     set_last_model_call,
@@ -46,6 +47,8 @@ def _stub_result():
         tokens_input=10,
         tokens_output=5,
         model_name="stub-model",
+        cache_read_tokens=4,
+        cache_write_tokens=0,
     )
 
 
@@ -332,6 +335,8 @@ async def test_events_recorded_when_collector_active(patched_summarise):
     assert ev.summary == STUB_SUMMARY_TEXT
     assert ev.original_chars > 0
     assert ev.summarizer_model_name == "stub-model"
+    assert ev.summarizer_cache_read_tokens == 4
+    assert ev.summarizer_cache_write_tokens == 0
 
 
 @pytest.mark.asyncio
@@ -339,6 +344,50 @@ async def test_events_dropped_without_collector(patched_summarise):
     drain_collection()  # ensure no active bucket
     await compact_history(_long_history(5) + _current_turn())
     assert drain_collection() == []
+
+
+@pytest.mark.asyncio
+async def test_summarise_reads_cache_tokens_from_usage():
+    """The summariser folds the usage object's cache split onto the result."""
+    from types import SimpleNamespace
+
+    usage = SimpleNamespace(
+        input_tokens=200,
+        output_tokens=20,
+        cache_read_tokens=150,
+        cache_write_tokens=5,
+    )
+    run_result = SimpleNamespace(
+        output="a concise summary", usage=lambda: usage
+    )
+    stub_agent = SimpleNamespace(run=AsyncMock(return_value=run_result))
+    with patch(
+        "smarter_dev.bot.agents.chat_compaction.get_summarizer_agent",
+        return_value=stub_agent,
+    ):
+        result = await _summarise_conversation("some transcript")
+    assert result is not None
+    assert result.tokens_input == 200
+    assert result.cache_read_tokens == 150
+    assert result.cache_write_tokens == 5
+
+
+@pytest.mark.asyncio
+async def test_summarise_defaults_cache_tokens_when_usage_lacks_them():
+    """A usage object without cache attrs yields a zero cache split."""
+    from types import SimpleNamespace
+
+    usage = SimpleNamespace(input_tokens=200, output_tokens=20)
+    run_result = SimpleNamespace(output="summary", usage=lambda: usage)
+    stub_agent = SimpleNamespace(run=AsyncMock(return_value=run_result))
+    with patch(
+        "smarter_dev.bot.agents.chat_compaction.get_summarizer_agent",
+        return_value=stub_agent,
+    ):
+        result = await _summarise_conversation("some transcript")
+    assert result is not None
+    assert result.cache_read_tokens == 0
+    assert result.cache_write_tokens == 0
 
 
 @pytest.mark.asyncio

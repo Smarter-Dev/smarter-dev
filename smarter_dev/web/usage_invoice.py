@@ -273,6 +273,8 @@ async def monthly_invoice(db_session: AsyncSession, month: str) -> list[InvoiceL
             ChatAgentTurn.chat_reasoning_level,
             _tokens(ChatAgentTurn.chat_tokens_input).label("input_tokens"),
             _tokens(ChatAgentTurn.chat_tokens_output).label("output_tokens"),
+            _tokens(ChatAgentTurn.chat_cache_read_tokens).label("cache_read_tokens"),
+            _tokens(ChatAgentTurn.chat_cache_write_tokens).label("cache_write_tokens"),
             _cost(ChatAgentTurn.chat_cost_usd).label("cost_usd"),
         )
         .where(ChatAgentTurn.started_at >= start)
@@ -287,8 +289,8 @@ async def monthly_invoice(db_session: AsyncSession, month: str) -> list[InvoiceL
                 source="chat",
                 input_tokens=row.input_tokens,
                 output_tokens=row.output_tokens,
-                cache_read_tokens=0,
-                cache_write_tokens=0,
+                cache_read_tokens=row.cache_read_tokens,
+                cache_write_tokens=row.cache_write_tokens,
                 cost_usd=row.cost_usd,
             )
         )
@@ -329,6 +331,8 @@ async def monthly_invoice(db_session: AsyncSession, month: str) -> list[InvoiceL
             ChatAgentCompactionEvent.summarizer_reasoning_level,
             _tokens(ChatAgentCompactionEvent.summarizer_tokens_input).label("input_tokens"),
             _tokens(ChatAgentCompactionEvent.summarizer_tokens_output).label("output_tokens"),
+            _tokens(ChatAgentCompactionEvent.summarizer_cache_read_tokens).label("cache_read_tokens"),
+            _tokens(ChatAgentCompactionEvent.summarizer_cache_write_tokens).label("cache_write_tokens"),
             _cost(ChatAgentCompactionEvent.summarizer_cost_usd).label("cost_usd"),
         )
         .where(ChatAgentCompactionEvent.created_at >= start)
@@ -346,8 +350,8 @@ async def monthly_invoice(db_session: AsyncSession, month: str) -> list[InvoiceL
                 source="compaction",
                 input_tokens=row.input_tokens,
                 output_tokens=row.output_tokens,
-                cache_read_tokens=0,
-                cache_write_tokens=0,
+                cache_read_tokens=row.cache_read_tokens,
+                cache_write_tokens=row.cache_write_tokens,
                 cost_usd=row.cost_usd,
             )
         )

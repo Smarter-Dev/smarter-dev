@@ -716,6 +716,12 @@ class ChannelEngine:
                 chat_usage = result.usage()
                 chat_in = int(getattr(chat_usage, "input_tokens", 0) or 0)
                 chat_out = int(getattr(chat_usage, "output_tokens", 0) or 0)
+                chat_cache_read = int(
+                    getattr(chat_usage, "cache_read_tokens", 0) or 0
+                )
+                chat_cache_write = int(
+                    getattr(chat_usage, "cache_write_tokens", 0) or 0
+                )
 
                 voice = dispatch.voice
                 duration_ms = int(
@@ -740,6 +746,8 @@ class ChannelEngine:
                         chat_tokens_output=chat_out,
                         chat_model_name=resolved_model_name,
                         chat_reasoning_level=resolved_reasoning_wire,
+                        chat_cache_read_tokens=chat_cache_read,
+                        chat_cache_write_tokens=chat_cache_write,
                         voice_tokens_input=(
                             voice.tokens_input if voice else 0
                         ),

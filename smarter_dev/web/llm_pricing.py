@@ -163,16 +163,23 @@ def _digitalocean_cost(
 ) -> Decimal:
     """Direct cost computation for a DO-served model.
 
-    DO bills cached reads at the model's prompt-caching rate when it has one
-    (otherwise as plain input) and has no separate cache-write tier, so
-    writes bill as plain input.
+    Cache tokens follow the provider-reporting convention (same one
+    genai-prices assumes): they are a SUBSET of ``input_tokens``. The
+    uncached share bills at the input rate, cached reads at the model's
+    prompt-caching rate when it has one (otherwise plain input), and cache
+    writes at plain input (DO has no separate write tier). The uncached
+    share is clamped at zero in case a provider reports cache tokens
+    without folding them into ``input_tokens``.
     """
     input_rate = price.input_mtok
     cache_read_rate = (
         price.cache_read_mtok if price.cache_read_mtok is not None else input_rate
     )
+    uncached_input_tokens = max(
+        input_tokens - cache_read_tokens - cache_write_tokens, 0
+    )
     return (
-        Decimal(input_tokens) * input_rate
+        Decimal(uncached_input_tokens) * input_rate
         + Decimal(output_tokens) * price.output_mtok
         + Decimal(cache_read_tokens) * cache_read_rate
         + Decimal(cache_write_tokens) * input_rate
@@ -240,21 +247,25 @@ def calc_cost(
     input_tokens: int,
     output_tokens: int,
     model_name: str,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
 ) -> Decimal:
-    """Cheaper-to-call cost helper for ad-hoc input/output token totals.
+    """Cheaper-to-call cost helper for per-turn token totals.
 
-    Same provider/model resolution as ``calc_session_cost`` but without
-    cache-token bookkeeping. Used by per-turn cost computations on the
-    chat agent (chat, compaction, voice buckets each call this once).
-    An unknown model returns Decimal("0") so the turn write still lands,
-    but logs loudly — a $0 model means this module needs a price entry.
+    Same provider/model resolution as ``calc_session_cost``. Cache tokens
+    follow the provider-reporting convention: a subset of ``input_tokens``,
+    billed at the cache rates instead of the full input rate. Used by
+    per-turn cost computations on the chat agent (chat, compaction, voice
+    buckets each call this once). An unknown model returns Decimal("0") so
+    the turn write still lands, but logs loudly — a $0 model means this
+    module needs a price entry.
     """
     try:
         return calc_session_cost(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cache_read_tokens=0,
-            cache_write_tokens=0,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
             model_name=model_name,
         )
     except LookupError:
