@@ -202,3 +202,24 @@ async def test_guild_handler_memory_unique_guild_key_upsert(db_session):
     db_session.add(GuildHandlerMemory(guild_id="G1", key="a", value={"v": 9}))
     with pytest.raises(IntegrityError):
         await db_session.commit()
+
+
+def test_trigger_type_columns_fit_their_vocabulary():
+    # The test DB is SQLite, which ignores VARCHAR(n) limits, so a too-narrow
+    # trigger_type column only surfaces in Postgres (prod): "member_rules_accepted"
+    # (21 chars) truncation-errored every insert against a varchar(20) column.
+    # This backend-independent invariant guards the column width directly.
+    admin_len = AdminHandler.__table__.c.trigger_type.type.length
+    longest_admin = max(len(t) for t in ADMIN_HANDLER_TRIGGER_TYPES)
+    assert admin_len >= longest_admin, (
+        f"admin_handlers.trigger_type varchar({admin_len}) cannot hold "
+        f"{longest_admin}-char triggers like "
+        f"{max(ADMIN_HANDLER_TRIGGER_TYPES, key=len)!r}"
+    )
+
+    channel_len = ChannelHandler.__table__.c.trigger_type.type.length
+    longest_channel = max(len(t) for t in HANDLER_TRIGGER_TYPES)
+    assert channel_len >= longest_channel, (
+        f"channel_handlers.trigger_type varchar({channel_len}) cannot hold "
+        f"{longest_channel}-char triggers"
+    )
