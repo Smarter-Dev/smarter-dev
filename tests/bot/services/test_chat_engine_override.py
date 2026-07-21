@@ -313,6 +313,62 @@ async def test_no_override_uses_default_and_skips_enforcement_but_meters(
     add_usage_mock.assert_awaited_once_with(fake_redis, "42", 150)
 
 
+@pytest.mark.asyncio
+async def test_override_without_pinned_model_uses_default_but_enforces_budget(
+    fake_memory, fake_redis
+):
+    """A budgets-only override (model_key None = server default) runs the
+    default agent while its token budgets are still enforced."""
+    agent_mock = MagicMock()
+    agent_mock.run = AsyncMock(return_value=_result(_send()))
+    engine, _ = _make_engine(_override(None, hourly=100), fake_redis)
+
+    get_agent = patch(
+        "smarter_dev.bot.services.chat_engine.get_chat_agent",
+        return_value=agent_mock,
+    )
+    with get_agent as get_agent_mock, _patches(
+        agent_mock=agent_mock, fake_memory=fake_memory
+    )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=None),
+    ) as over_budget_mock, patch(
+        "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
+    ):
+        await engine._run_once(first_activation=True)
+
+    get_agent_mock.assert_called_once_with(None, None)
+    over_budget_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_turn_prompt_carries_model_identity(fake_memory, fake_redis):
+    """The user prompt handed to the agent names the resolved model and
+    reasoning level in its ``<your-model>`` metadata tag."""
+    agent_mock = MagicMock()
+    agent_mock.run = AsyncMock(return_value=_result(_send()))
+    engine, _ = _make_engine(
+        _override("gpt-5-4", reasoning_level="high"), fake_redis
+    )
+
+    with patch(
+        "smarter_dev.bot.services.chat_engine.get_chat_agent",
+        return_value=agent_mock,
+    ), _patches(agent_mock=agent_mock, fake_memory=fake_memory)[1], _patches(
+        agent_mock=agent_mock, fake_memory=fake_memory
+    )[2], patch(
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=None),
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
+    ):
+        await engine._run_once(first_activation=True)
+
+    user_prompt = agent_mock.run.await_args.kwargs["user_prompt"]
+    assert '<your-model id="gpt-5.4"' in user_prompt
+    assert 'reasoning-level="high"' in user_prompt
+
+
 def _temporary_default_payload(
     model_key: str = "gemini-3-6-flash", reasoning_level: str | None = "high"
 ) -> str:
