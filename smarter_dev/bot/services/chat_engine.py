@@ -966,25 +966,43 @@ class ChannelEngine:
     ) -> bool:
         # A reply over Discord's 2000-char cap goes out as two messages, split
         # at the last newline before the 1500-char mark (see split_for_discord).
-        # The reply anchor and any images ride on the first message; the
-        # continuation follows as a plain message.
-        parts = split_for_discord(message)
-        content = parts[0] if parts else ""
-        continuations = parts[1:]
-        base_kwargs: dict[str, Any] = {"content": content}
-        if reply_to is not None:
-            base_kwargs["reply"] = reply_to
+        # The reply anchor rides on the first message; any images ride on the
+        # LAST message so an attachment never visually interrupts the text.
+        parts = split_for_discord(message) or [""]
         attachments = (
             [hikari.Bytes(img.data, img.filename, img.mime_type) for img in images]
             if images
             else []
         )
+        last_index = len(parts) - 1
+        for index, part in enumerate(parts):
+            sent = await self._send_message_part(
+                part,
+                reply_to=reply_to if index == 0 else None,
+                attachments=attachments if index == last_index else [],
+            )
+            if not sent:
+                # A failed lead means the reply didn't land. A failed
+                # continuation is logged only — the lead already delivered
+                # the reply's opening.
+                return index > 0
+        return True
+
+    async def _send_message_part(
+        self,
+        content: str,
+        reply_to: int | None,
+        attachments: list[hikari.Bytes],
+    ) -> bool:
+        """Send one message of a (possibly split) reply."""
+        base_kwargs: dict[str, Any] = {"content": content}
+        if reply_to is not None:
+            base_kwargs["reply"] = reply_to
         try:
             kwargs = dict(base_kwargs)
             if attachments:
                 kwargs["attachments"] = attachments
             await self.bot.rest.create_message(self.channel_id, **kwargs)
-            await self._send_continuations(continuations)
             return True
         except Exception as err:
             if not attachments:
@@ -1009,7 +1027,6 @@ class ChannelEngine:
                 text_only["content"] = (content + _ATTACH_PERM_NOTE)[:2000]
             try:
                 await self.bot.rest.create_message(self.channel_id, **text_only)
-                await self._send_continuations(continuations)
                 return True
             except Exception:
                 logger.exception(
@@ -1018,22 +1035,6 @@ class ChannelEngine:
                     self.channel_id,
                 )
                 return False
-
-    async def _send_continuations(self, parts: list[str]) -> None:
-        """Send a split reply's follow-up message(s), best-effort.
-
-        The lead message already delivered the reply's opening, so a failed
-        continuation is logged rather than failing the whole send.
-        """
-        for part in parts:
-            try:
-                await self.bot.rest.create_message(self.channel_id, content=part)
-            except Exception:
-                logger.exception(
-                    "Failed to send reply continuation in channel %s",
-                    self.channel_id,
-                )
-                return
 
     async def _post_images(
         self, images: list[GeneratedImage], reply_to: int | None
