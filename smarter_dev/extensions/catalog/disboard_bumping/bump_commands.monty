@@ -1,0 +1,53 @@
+# Bump command surface. !bumpers shows the 7-day bump leaderboard; !bumps lists
+# the most recent bumps. Both read the shared ledger the tracker maintains
+# (guild_memory). Installed OUTSIDE the bump channel — the tracker deletes human
+# messages there, so these commands live in a general/bot-commands channel.
+import datetime
+
+LEDGER_WINDOW_SECONDS = 604800
+
+
+async def run():
+    text = context["message_content"].strip().lower()
+    if text != "!bumpers" and text != "!bumps":
+        return
+    now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+    ledger = await guild_memory_get("disboard_bumps", [])
+    recent = [entry for entry in ledger if now - entry[1] < LEDGER_WINDOW_SECONDS]
+    if not recent:
+        await send_message("No bumps recorded in the last 7 days.")
+        return
+
+    if text == "!bumpers":
+        counts = {}
+        for entry in recent:
+            counts[entry[0]] = counts.get(entry[0], 0) + 1
+        # Rank by count descending with a comparison-free selection pass (Monty's
+        # sorted() can't order composite entries), ties keeping insertion order.
+        remaining = []
+        for user_id in counts:
+            remaining.append(user_id)
+        ranked = []
+        while remaining:
+            best_index = 0
+            for index in range(len(remaining)):
+                if counts[remaining[index]] > counts[remaining[best_index]]:
+                    best_index = index
+            ranked.append(remaining[best_index])
+            remaining = remaining[:best_index] + remaining[best_index + 1:]
+        medals = ["🥇", "🥈", "🥉"]
+        lines = ["**Top bumpers — last 7 days**"]
+        position = 0
+        for user_id in ranked[:10]:
+            marker = medals[position] if position < 3 else "✨"
+            lines.append(f"{marker} <@{user_id}> — {counts[user_id]} bumps")
+            position = position + 1
+        await send_message("\n".join(lines))
+    else:
+        lines = ["**Recent bumps**"]
+        for entry in recent[:10]:
+            lines.append(f"<@{entry[0]}> — <t:{entry[1]}:R>")
+        await send_message("\n".join(lines))
+
+
+await run()

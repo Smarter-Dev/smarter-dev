@@ -1,0 +1,43 @@
+# Posts a once-a-year celebration in the configured announcement channel on the
+# server's founding anniversary. Fires daily (01:00 UTC) and self-filters to the
+# founding month/day. Idempotent per calendar year: a memory gate on the year it
+# last announced makes a repeat fire on the anniversary day a harmless no-op.
+# Config values are baked in as literal constants at install time — see the
+# extension manifest.
+import datetime
+
+ANNOUNCE_CHANNEL_ID = {{cfg.announce_channel_id}}
+FOUNDING_MONTH = {{cfg.founding_month}}
+FOUNDING_DAY = {{cfg.founding_day}}
+FOUNDING_YEAR = {{cfg.founding_year}}
+CELEBRATION_GIF_URL = {{cfg.celebration_gif_url}}
+
+
+def ordinal(n):
+    if 10 <= (n % 100) <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return str(n) + suffix
+
+
+async def run():
+    today = datetime.date.today()
+    if today.month != FOUNDING_MONTH or today.day != FOUNDING_DAY:
+        return
+    # Idempotence: announce at most once per calendar year, even if the daily
+    # schedule fires more than once on the anniversary (worker retry, restart).
+    last_year = await memory_get("last_announced_year")
+    if last_year == today.year:
+        return
+    await memory_set("last_announced_year", today.year)
+    if CELEBRATION_GIF_URL:
+        await send_message(CELEBRATION_GIF_URL, ANNOUNCE_CHANNEL_ID)
+    age = today.year - FOUNDING_YEAR
+    await send_message(
+        "🎂 Happy " + ordinal(age) + " birthday to the server!! 🎉",
+        ANNOUNCE_CHANNEL_ID,
+    )
+
+
+await run()

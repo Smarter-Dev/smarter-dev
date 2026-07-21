@@ -1,0 +1,34 @@
+# Schedule handler: reads the guild member count and renames the stats channel
+# to show it, but ONLY when the rendered name changed since the last fire.
+# Discord HARD-CAPS channel renames at 2 per 10 minutes, so an un-gated rename on
+# a schedule burns the cap and then errors every fire — hence the memory compare.
+#
+# THREE placeholder mechanisms are in play here and none of them can be confused:
+#   * The cfg-markers on the two constants below are INSTALL-TIME templates. The
+#     extension installer substituted them with the admin's config (a quoted
+#     snowflake, a JSON string literal) before this script ran; that marker
+#     syntax is a distinct double-brace, cfg-prefixed form and is gone by runtime.
+#   * "{count}" and "{icon}" inside NAME_FORMAT are RUNTIME tokens — plain
+#     single-brace text this script replaces on every fire (the .replace chain
+#     below). {count} becomes the formatted member count; {icon} becomes the
+#     legacy counter glyph. They are ordinary text to the install renderer.
+# The glyph is a RAW literal here on purpose: an astral-plane emoji cannot survive
+# the config -> json.dumps -> sandbox string-literal path (it decodes to U+FFFD),
+# so the fixed legacy glyph lives in the script and the admin positions it with
+# the {icon} token instead of typing the emoji into the config form.
+COUNTER_ICON = "📊"
+STATS_CHANNEL_ID = {{cfg.stats_channel_id}}
+NAME_FORMAT = {{cfg.name_format}}
+
+# get_guild_member_count is Discord's approximate with_counts figure (coarse,
+# may trail reality by minutes — fine for a "1.2k"-granularity display).
+count = await get_guild_member_count()
+# Legacy formatting rule: 1234 -> "1.2k", 950 -> "950".
+display = f"{count / 1000:.1f}k" if count >= 1000 else str(count)
+name = NAME_FORMAT.replace("{icon}", COUNTER_ICON).replace("{count}", display)
+
+# Change-gate: last_counter starts empty, so the first fire always renames (an
+# idempotent PATCH when the channel already carries this exact name).
+if await memory_get("last_counter") != name:
+    await rename_channel(STATS_CHANNEL_ID, name)
+    await memory_set("last_counter", name)
