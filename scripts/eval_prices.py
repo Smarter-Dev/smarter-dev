@@ -1,8 +1,8 @@
 """Inject prices for models newer than the bundled genai-prices snapshot.
 
 The pip snapshot (and its remote refresh) lags new releases, so models like
-Gemini 3.5 Flash / 3.1 Flash Lite and GPT 5.4 nano/mini aren't priceable out
-of the box. We register them as a custom snapshot so calc_price() resolves.
+Gemini 3.1 Flash Lite and GPT 5.4 nano/mini or GPT 5.6 Luna aren't priceable
+out of the box. We register them as a custom snapshot so calc_price() resolves.
 
 Prices are list price per 1M tokens, sourced from each provider's published
 pricing. Update the table if list prices change.
@@ -39,6 +39,8 @@ CUSTOM_PRICES: dict[str, dict[str, tuple[str, str, str, str | None]]] = {
         "gpt-5.4-nano": ("GPT 5.4 Nano", "0.2", "1.25", "0.02"),
         # GPT-5.4 Mini — $0.75 in / $4.50 out / $0.075 cached.
         "gpt-5.4-mini": ("GPT 5.4 Mini", "0.75", "4.5", "0.075"),
+        # GPT-5.6 Luna — preview pricing, July 2026. $1.00 in / $6.00 out.
+        "gpt-5.6-luna": ("GPT 5.6 Luna", "1", "6", None),
     },
 }
 
@@ -90,7 +92,7 @@ if __name__ == "__main__":
     print("added:", install())
     pd = calc_price(
         Usage(input_tokens=1_000_000, output_tokens=1_000_000),
-        model_ref="gemini-3.5-flash",
-        provider_id="google",
+        model_ref="gpt-5.6-luna",
+        provider_id="openai",
     )
-    print(f"gemini-3.5-flash 1M/1M -> ${pd.total_price} (matched {pd.model.id})")
+    print(f"gpt-5.6-luna 1M/1M -> ${pd.total_price} (matched {pd.model.id})")
