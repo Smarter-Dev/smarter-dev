@@ -96,6 +96,72 @@ async def test_blank_filter_allows_all_without_model():
 
 
 @pytest.mark.asyncio
+async def test_system_prompt_covers_redirecting_candidates():
+    """A candidate like "do you have an answer?" names no topic itself; the
+    system prompt must direct the model to resolve what such a message points
+    at from the context and judge that subject, not the bare words."""
+    captured: dict[str, object] = {}
+
+    def _echo(messages, info: AgentInfo):
+        captured["system"] = messages[0].parts[0].content
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="final_result", args={"allowed_message_ids": []})]
+        )
+
+    agent = message_gate.get_message_gate_agent()
+    with agent.override(model=FunctionModel(_echo)):
+        await filter_messages("only coding questions", _candidates(), [])
+
+    system_prompt = captured["system"]
+    assert "REDIRECT" in system_prompt
+    assert "do you have an answer?" in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_channel_name_is_rendered_as_context():
+    """In a forum post or thread the channel name is its title — often the
+    clearest statement of the conversation's topic — so it must reach the
+    model, and the system prompt must explain what it is."""
+    captured: dict[str, object] = {}
+
+    def _echo(messages, info: AgentInfo):
+        captured["system"] = messages[0].parts[0].content
+        captured["prompt"] = messages[-1].parts[-1].content
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="final_result", args={"allowed_message_ids": []})]
+        )
+
+    agent = message_gate.get_message_gate_agent()
+    with agent.override(model=FunctionModel(_echo)):
+        await filter_messages(
+            "only coding questions",
+            _candidates(),
+            [],
+            channel_name="How Does Logits Work?",
+        )
+
+    assert "How Does Logits Work?" in captured["prompt"]
+    assert "CHANNEL" in captured["system"]
+
+
+@pytest.mark.asyncio
+async def test_missing_channel_name_renders_no_channel_section():
+    captured: dict[str, object] = {}
+
+    def _echo(messages, info: AgentInfo):
+        captured["prompt"] = messages[-1].parts[-1].content
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="final_result", args={"allowed_message_ids": []})]
+        )
+
+    agent = message_gate.get_message_gate_agent()
+    with agent.override(model=FunctionModel(_echo)):
+        await filter_messages("only coding questions", _candidates(), [])
+
+    assert "CHANNEL:" not in captured["prompt"]
+
+
+@pytest.mark.asyncio
 async def test_grounding_is_rendered_but_never_returned():
     grounding = [GateMessage(message_id="g1", author_display="dan", content="earlier chatter")]
     captured: dict[str, object] = {}

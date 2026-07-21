@@ -589,6 +589,50 @@ async def test_response_filter_gate_error_runs_turn_unfiltered(
     agent_mock.run.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_gate_receives_channel_name(fake_redis):
+    """The gate must see the channel/thread name — for a forum post it is the
+    title, often the only statement of what the conversation is about."""
+    engine, _ = _make_engine(
+        _override("gpt-5-4", response_filter="only python questions"), fake_redis
+    )
+    gate = AsyncMock(return_value=[])
+
+    with patch(
+        "smarter_dev.bot.services.chat_engine.filter_messages", new=gate
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.fetch_channel_info",
+        new=AsyncMock(return_value={"channel_name": "How Does Logits Work?"}),
+    ), patch.object(
+        engine, "_fetch_gate_grounding", new=AsyncMock(return_value=[])
+    ):
+        await engine._gate_allows("only python questions", [_fake_message(700)])
+
+    assert gate.await_args.kwargs["channel_name"] == "How Does Logits Work?"
+
+
+@pytest.mark.asyncio
+async def test_gate_channel_name_lookup_failure_degrades_to_none(fake_redis):
+    """A channel-info failure must not break the gate — it judges without the
+    name rather than erroring the turn."""
+    engine, _ = _make_engine(
+        _override("gpt-5-4", response_filter="only python questions"), fake_redis
+    )
+    gate = AsyncMock(return_value=[])
+
+    with patch(
+        "smarter_dev.bot.services.chat_engine.filter_messages", new=gate
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.fetch_channel_info",
+        new=AsyncMock(side_effect=RuntimeError("discord hiccup")),
+    ), patch.object(
+        engine, "_fetch_gate_grounding", new=AsyncMock(return_value=[])
+    ):
+        await engine._gate_allows("only python questions", [_fake_message(700)])
+
+    assert gate.await_args.kwargs["channel_name"] is None
+
+
 # --------------------------------------------------------------------------- #
 # Feature 2 — fallback model on budget exhaustion
 # --------------------------------------------------------------------------- #
