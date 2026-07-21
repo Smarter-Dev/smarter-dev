@@ -240,11 +240,22 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         default_reasoning=ReasoningLevel.HIGH,
     ),
     CatalogModel(
-        key="gemini-3-5-flash",
-        label="Gemini 3.5 Flash",
+        key="gemini-3-5-flash-lite",
+        label="Gemini 3.5 Flash Lite",
         family="Gemini",
         provider=ModelProvider.GOOGLE,
-        model_id="gemini-3.5-flash",
+        model_id="gemini-3.5-flash-lite",
+        reasoning_levels=_GEMINI_THINKING,
+        default_reasoning=ReasoningLevel.MEDIUM,
+    ),
+    # Gemini 3.6 Flash replaced 3.5 Flash (2026-07-21); the old
+    # ``gemini-3-5-flash`` key was remapped to this entry by migration.
+    CatalogModel(
+        key="gemini-3-6-flash",
+        label="Gemini 3.6 Flash",
+        family="Gemini",
+        provider=ModelProvider.GOOGLE,
+        model_id="gemini-3.6-flash",
         reasoning_levels=_GEMINI_THINKING,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
