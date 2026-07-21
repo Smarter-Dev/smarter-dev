@@ -179,6 +179,10 @@ class CompactionEvent:
     summarizer_tokens_output: int
     summarizer_model_name: str
     summarizer_reasoning_level: str | None
+    # Prompt-cache split for the summarizer call. A SUBSET of
+    # summarizer_tokens_input. None when not captured.
+    summarizer_cache_read_tokens: int | None = None
+    summarizer_cache_write_tokens: int | None = None
 
 
 _collected: ContextVar[list[CompactionEvent] | None] = ContextVar(
@@ -272,6 +276,8 @@ class _SummariseResult:
     tokens_input: int
     tokens_output: int
     model_name: str
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 async def _summarise_conversation(transcript: str) -> _SummariseResult | None:
@@ -282,6 +288,8 @@ async def _summarise_conversation(transcript: str) -> _SummariseResult | None:
     """
     tokens_input = 0
     tokens_output = 0
+    cache_read_tokens = 0
+    cache_write_tokens = 0
     model_name = os.getenv(COMPACT_MODEL_ENV_VAR, DEFAULT_COMPACT_MODEL)
     try:
         result = await get_summarizer_agent().run(user_prompt=transcript)
@@ -297,6 +305,8 @@ async def _summarise_conversation(transcript: str) -> _SummariseResult | None:
         if usage is not None:
             tokens_input = int(usage.input_tokens or 0)
             tokens_output = int(usage.output_tokens or 0)
+            cache_read_tokens = int(getattr(usage, "cache_read_tokens", 0) or 0)
+            cache_write_tokens = int(getattr(usage, "cache_write_tokens", 0) or 0)
     except Exception:
         pass
     if len(summary) > MAX_SUMMARY_CHARS:
@@ -306,6 +316,8 @@ async def _summarise_conversation(transcript: str) -> _SummariseResult | None:
         tokens_input=tokens_input,
         tokens_output=tokens_output,
         model_name=model_name,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
     )
 
 
@@ -464,6 +476,8 @@ async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
             summarizer_tokens_output=summary.tokens_output,
             summarizer_model_name=summary.model_name,
             summarizer_reasoning_level=SUMMARIZER_REASONING_LEVEL.value,
+            summarizer_cache_read_tokens=summary.cache_read_tokens,
+            summarizer_cache_write_tokens=summary.cache_write_tokens,
         )
     )
 

@@ -126,6 +126,8 @@ async def test_persist_turn_serialises_compaction_events_and_delta():
         summarizer_tokens_output=7,
         summarizer_model_name="stub-model",
         summarizer_reasoning_level="low",
+        summarizer_cache_read_tokens=30,
+        summarizer_cache_write_tokens=0,
     )
     await ccp.persist_turn(
         bot=bot,
@@ -141,6 +143,8 @@ async def test_persist_turn_serialises_compaction_events_and_delta():
         chat_tokens_output=100,
         chat_model_name="gemini-3.1-flash-lite-preview",
         chat_reasoning_level="high",
+        chat_cache_read_tokens=120,
+        chat_cache_write_tokens=0,
         voice_tokens_input=80,
         voice_tokens_output=20,
         voice_model_name="gemini-2.5-flash-preview-tts",
@@ -157,6 +161,8 @@ async def test_persist_turn_serialises_compaction_events_and_delta():
     assert body["output_kind"] == "send_response"
     assert body["chat_tokens_input"] == 500
     assert body["chat_reasoning_level"] == "high"
+    assert body["chat_cache_read_tokens"] == 120
+    assert body["chat_cache_write_tokens"] == 0
     assert body["voice_tokens_input"] == 80
     assert body["voice_sent_ok"] is True
     assert body["model_messages_delta"] == []
@@ -166,6 +172,8 @@ async def test_persist_turn_serialises_compaction_events_and_delta():
     assert posted_event["original_chars"] == 12000
     assert posted_event["summarizer_tokens_input"] == 42
     assert posted_event["summarizer_reasoning_level"] == "low"
+    assert posted_event["summarizer_cache_read_tokens"] == 30
+    assert posted_event["summarizer_cache_write_tokens"] == 0
 
 
 @pytest.mark.asyncio
@@ -190,6 +198,8 @@ async def test_persist_turn_defaults_reasoning_level_to_none():
     _, kwargs = post.call_args
     # Field is always present so an unset value round-trips as an explicit None.
     assert kwargs["json_data"]["chat_reasoning_level"] is None
+    assert kwargs["json_data"]["chat_cache_read_tokens"] is None
+    assert kwargs["json_data"]["chat_cache_write_tokens"] is None
 
 
 @pytest.mark.asyncio
