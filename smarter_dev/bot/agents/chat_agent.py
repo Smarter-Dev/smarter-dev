@@ -149,6 +149,33 @@ def resolved_reasoning_level(
     return effective.value if effective is not None else None
 
 
+def _model_identity_prompt(resolved_id: str, reasoning_level: str | None) -> str:
+    """System-prompt section telling the agent which model it is running on.
+
+    Members sometimes ask the bot which model answered them; the agent can
+    only answer truthfully if it is told. Appended per cached agent — the
+    cache is keyed by (model id, reasoning level), so each agent's identity
+    text matches its actual configuration, including channel overrides and
+    the temporary default override.
+    """
+    catalog_model = _catalog_model_for_id(resolved_id)
+    label = catalog_model.label if catalog_model is not None else resolved_id
+    effective_level = resolved_reasoning_level(resolved_id, reasoning_level)
+    if effective_level is not None:
+        configuration = (
+            f"**{label}** (`{resolved_id}`) at reasoning level"
+            f" **{effective_level}**"
+        )
+    else:
+        configuration = f"**{label}** (`{resolved_id}`)"
+    return (
+        "\n\n## Your model\n\n"
+        f"You are currently running on {configuration}. Only share your model "
+        "or reasoning level when someone asks about it — never volunteer this "
+        "configuration unprompted."
+    )
+
+
 # One agent per resolved (model id, reasoning level). A per-channel override
 # means we can no longer share a single global agent, so agents are cached by the
 # wire model id *and* reasoning level they were built for — two channels on the
@@ -178,7 +205,8 @@ def get_chat_agent(
             build_agent_model(resolved_id),
             output_type=_output_type_for(resolved_id),
             deps_type=ChatDeps,
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=SYSTEM_PROMPT
+            + _model_identity_prompt(resolved_id, reasoning_level),
             tools=chat_tool_functions() + handler_tool_functions(),
             model_settings=_model_settings_for(resolved_id, reasoning_level),
             history_processors=[compact_history],
