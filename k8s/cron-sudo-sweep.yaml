@@ -37,9 +37,13 @@ spec:
                     containers:
                       - name: sweep
                         image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
-                        command:
-                          - /app/.venv/bin/python
-                          - /app/scripts/sudo_daily_sweep.py
+                        # Invoke via a shell wrapper with PYTHONPATH=/app + uv
+                        # run so /app (and thus the smarter_dev package) is on
+                        # sys.path — matches the proven migrate-job.yaml pattern.
+                        # Running python against a bare script path instead puts
+                        # only /app/scripts on sys.path[0], so the script's
+                        # `from smarter_dev...` import fails with ModuleNotFoundError.
+                        command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/sudo_daily_sweep.py"]
                         envFrom:
                           - configMapRef:
                               name: smarter-dev-config
