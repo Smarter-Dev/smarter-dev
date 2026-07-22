@@ -32,6 +32,7 @@ class ModelProvider(enum.Enum):
     OPENAI = "openai"
     DIGITALOCEAN = "digitalocean"
     ANTHROPIC = "anthropic"
+    OPENROUTER = "openrouter"
 
 
 class ReasoningLevel(enum.Enum):
@@ -127,6 +128,7 @@ MODEL_FAMILIES: tuple[str, ...] = (
     "Gemini",
     "GPT",
     "Claude",
+    "Poolside",
 )
 
 
@@ -330,6 +332,21 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         model_id="claude-sonnet-5",
         reasoning_levels=_CLAUDE_EFFORT,
         default_reasoning=ReasoningLevel.HIGH,
+    ),
+    # --- Poolside via OpenRouter ---
+    CatalogModel(
+        key="poolside-laguna-xs-2-1",
+        label="Laguna XS 2.1",
+        family="Poolside",
+        provider=ModelProvider.OPENROUTER,
+        model_id="poolside/laguna-xs-2.1",
+    ),
+    CatalogModel(
+        key="poolside-laguna-s-2-1",
+        label="Laguna S 2.1",
+        family="Poolside",
+        provider=ModelProvider.OPENROUTER,
+        model_id="poolside/laguna-s-2.1",
     ),
 )
 

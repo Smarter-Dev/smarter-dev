@@ -9,8 +9,10 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
-from genai_prices import calc_price, types
-from genai_prices.data_snapshot import find_provider_by_id, get_snapshot
+from genai_prices import calc_price
+from genai_prices import types
+from genai_prices.data_snapshot import find_provider_by_id
+from genai_prices.data_snapshot import get_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -195,23 +197,38 @@ _DIGITALOCEAN_PRICES: dict[str, types.ModelPrice] = {
     ),
 }
 
+# Poolside Laguna models served through OpenRouter. USD per million tokens;
+# cache is cached-input/read pricing. Cache writes bill at the input rate.
+_OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
+    "poolside/laguna-xs-2.1": types.ModelPrice(
+        input_mtok=Decimal("0.06"),
+        output_mtok=Decimal("0.12"),
+        cache_read_mtok=Decimal("0.03"),
+    ),
+    "poolside/laguna-s-2.1": types.ModelPrice(
+        input_mtok=Decimal("0.10"),
+        output_mtok=Decimal("0.20"),
+        cache_read_mtok=Decimal("0.01"),
+    ),
+}
+
 _TOKENS_PER_MTOK = Decimal("1000000")
 
 
-def _digitalocean_cost(
+def _direct_model_cost(
     input_tokens: int,
     output_tokens: int,
     cache_read_tokens: int,
     cache_write_tokens: int,
     price: types.ModelPrice,
 ) -> Decimal:
-    """Direct cost computation for a DO-served model.
+    """Direct cost computation for a locally priced model.
 
     Cache tokens follow the provider-reporting convention (same one
     genai-prices assumes): they are a SUBSET of ``input_tokens``. The
     uncached share bills at the input rate, cached reads at the model's
     prompt-caching rate when it has one (otherwise plain input), and cache
-    writes at plain input (DO has no separate write tier). The uncached
+    writes at plain input when no separate write tier was supplied. The uncached
     share is clamped at zero in case a provider reports cache tokens
     without folding them into ``input_tokens``.
     """
@@ -268,12 +285,23 @@ def calc_session_cost(
     if provider_id in (None, "digitalocean"):
         digitalocean_price = _DIGITALOCEAN_PRICES.get(model_ref)
         if digitalocean_price is not None:
-            return _digitalocean_cost(
+            return _direct_model_cost(
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cache_read_tokens=cache_read_tokens,
                 cache_write_tokens=cache_write_tokens,
                 price=digitalocean_price,
+            )
+
+    if provider_id in (None, "openrouter"):
+        openrouter_price = _OPENROUTER_PRICES.get(model_ref)
+        if openrouter_price is not None:
+            return _direct_model_cost(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                price=openrouter_price,
             )
 
     usage = types.Usage(

@@ -5,6 +5,7 @@ Routing by :class:`~smarter_dev.shared.model_catalog.ModelProvider`:
 - ``GOOGLE``       -> ``GoogleModel`` + ``GoogleProvider`` (Gemini keys).
 - ``OPENAI``       -> ``OpenAIResponsesModel`` + ``OpenAIProvider`` (OpenAI key).
 - ``ANTHROPIC``    -> ``AnthropicModel`` + ``AnthropicProvider`` (Anthropic key).
+- ``OPENROUTER``   -> ``OpenAIChatModel`` + ``OpenRouterProvider``.
 - ``DIGITALOCEAN`` -> ``OpenAIChatModel`` pointed at DO's OpenAI-compatible
   serverless-inference Chat Completions endpoint. DO exposes
   ``/v1/chat/completions`` (not OpenAI's Responses API), so the chat model —
@@ -21,29 +22,30 @@ from __future__ import annotations
 import os
 
 from pydantic_ai.models import Model
-from pydantic_ai.models.anthropic import AnthropicModel, AnthropicModelSettings
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
-from pydantic_ai.models.openai import (
-    OpenAIChatModel,
-    OpenAIChatModelSettings,
-    OpenAIResponsesModel,
-    OpenAIResponsesModelSettings,
-)
+from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models.anthropic import AnthropicModelSettings
+from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.models.google import GoogleModelSettings
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModelSettings
+from pydantic_ai.models.openai import OpenAIResponsesModel
+from pydantic_ai.models.openai import OpenAIResponsesModelSettings
 from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.settings import ModelSettings
 
-from smarter_dev.shared.model_catalog import (
-    CatalogModel,
-    ModelProvider,
-    ReasoningLevel,
-    resolve_reasoning_level,
-)
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.model_catalog import ModelProvider
+from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.model_catalog import resolve_reasoning_level
 
 DIGITALOCEAN_API_KEY_ENV_VAR = "DIGITALOCEAN_INFERENCE_API_KEY"
+OPENROUTER_API_KEY_ENV_VAR = "OPENROUTER_API_KEY"
+OPENROUTER_API_KEY_LEGACY_ENV_VAR = "OPEN_ROUTER"
 
 
 def build_model_for(model: CatalogModel) -> Model:
@@ -60,6 +62,14 @@ def build_model_for(model: CatalogModel) -> Model:
         return AnthropicModel(
             model.model_id,
             provider=AnthropicProvider(api_key=os.getenv("ANTHROPIC_API_KEY") or ""),
+        )
+    if model.provider is ModelProvider.OPENROUTER:
+        api_key = os.getenv(OPENROUTER_API_KEY_ENV_VAR) or os.getenv(
+            OPENROUTER_API_KEY_LEGACY_ENV_VAR
+        )
+        return OpenAIChatModel(
+            model.model_id,
+            provider=OpenRouterProvider(api_key=api_key or ""),
         )
     if model.provider is ModelProvider.DIGITALOCEAN:
         settings = get_settings()
