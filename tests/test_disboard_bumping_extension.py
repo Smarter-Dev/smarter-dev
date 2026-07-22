@@ -18,15 +18,16 @@ mid-edit).
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 
+import pytest
+
 from smarter_dev.extensions.catalog.disboard_bumping import MANIFEST
-from smarter_dev.extensions.rendering import (
-    extract_granted_role_literals,
-    render_bundle,
-)
-from smarter_dev.web.admin_actions import AdminActor
+from smarter_dev.extensions.rendering import RenderError
+from smarter_dev.extensions.rendering import extract_granted_role_literals
+from smarter_dev.extensions.rendering import render_bundle
 from smarter_dev.web.handler_budget import admin_budget
 from smarter_dev.web.handler_lint import lint_script
 from smarter_dev.web.handler_runtime import run_handler_script
@@ -36,6 +37,7 @@ _BUMP_CHANNEL = "111111111111111111"
 _CROWN_ROLE = "222222222222222222"
 _COMMANDS_CHANNEL = "333333333333333333"
 _PING_ROLE = "444444444444444444"
+_ANNOUNCEMENT_CHANNEL = "555555555555555555"
 
 _PACKAGE_DIR = Path(__file__).resolve().parents[1] / (
     "smarter_dev/extensions/catalog/disboard_bumping"
@@ -190,12 +192,11 @@ def test_commands_scoped_off_the_bump_channel():
     assert commands.channel_ids != [_BUMP_CHANNEL]
 
 
-def test_optional_ping_role_renders_empty_when_blank():
+def test_reminder_ping_role_is_required_and_typed():
     config = dict(MANIFEST.example_config)
     config["reminder_ping_role_id"] = ""
-    tracker = _rendered(config)["bump-tracker"]
-    assert 'REMINDER_PING_ROLE = ""' in tracker.script
-    assert lint_script(tracker.script) is None
+    with pytest.raises(RenderError, match="must be a Discord id"):
+        _rendered(config)
 
 
 # -- layer 2: tracker detection ------------------------------------------------
@@ -224,6 +225,10 @@ async def test_confirmed_bump_credits_ledger_crowns_and_arms_reminder():
     assert ("add_role", "USERA", _CROWN_ROLE) in actor.calls
     assert writes["disboard_king_id"] == "USERA"
     assert any("Bump King" in content for _, content in emitter.messages)
+    king_announcement = next(
+        message for message in emitter.messages if "Bump King" in message[1]
+    )
+    assert king_announcement[0] == _ANNOUNCEMENT_CHANNEL
     # No stray deletes (no prior reminder/confirmation), and the reminder armed.
     assert not any(call[0] == "delete" for call in actor.calls)
     assert len(timer.calls) == 1
@@ -363,25 +368,9 @@ async def test_timer_refire_posts_reminder_and_pings_role_when_configured():
     assert emitter.message_calls == [
         (_BUMP_CHANNEL, emitter.messages[0][1], _PING_ROLE)
     ]
+    assert f"<@&{_PING_ROLE}>" in emitter.messages[0][1]
     assert result.guild_memory_writes["disboard_reminded"] is True
     assert "disboard_reminder_message_id" in result.guild_memory_writes
-
-
-async def test_timer_refire_silent_reminder_when_no_ping_role():
-    now = int(time.time())
-    config = dict(MANIFEST.example_config)
-    config["reminder_ping_role_id"] = ""
-    seed = {"disboard_last_bump_at": now, "disboard_reminded": False}
-    context = {
-        "trigger_type": "timer",
-        "payload": {"bump_at": now},
-        "scheduled_at": "2026-07-21T00:00:00+00:00",
-    }
-    result, emitter, actor, timer = await _run_tracker(
-        context, guild_memory=seed, config=config
-    )
-    assert result.outcome == "ok", result.error
-    assert emitter.message_calls[0][2] is None  # no role pinged
 
 
 async def test_stale_timer_does_not_remind_when_a_newer_bump_arrived():
